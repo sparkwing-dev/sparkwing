@@ -606,8 +606,9 @@ The measurement is one paginated listing of the artifact store, which
 object stores bill per thousand keys, so an install that wants the
 ceiling without the listing sets `--bucket-reconcile 0` and accepts the
 drift. `--bucket-store` names the store the measurement reads; the
-controller reads it on the interval and serves none of it, and a
-controller pointed at no store, or at a backend that cannot total
+controller measures it on the interval whether or not a ceiling is set,
+so its totals are the bucket's rather than zeros, and serves none of it.
+A controller pointed at no store, or at a backend that cannot total
 itself, keeps the running count. The running count starts at zero on
 restart, so a controller with no measurement source sees only what it
 has written since it started.
@@ -630,15 +631,20 @@ reconciliation interval, whichever comes first.
 
 A measurement that stops at either bound is discarded rather than folded
 in, because a total short of the truth would thaw a store that is still
-full. The ceiling then reports `measurement_incomplete` on health and in
-`sparkwing_object_store_bucket_ceiling_measurement_incomplete`, and
-keeps counting writes until a measurement finishes. A bucket that keeps
+full. A measurement that fails, such as a listing the bucket's policy
+denies, is discarded the same way. The ceiling then reports
+`measurement_incomplete` on health, with a `problems` entry, and in
+`sparkwing_object_store_bucket_ceiling_measurement_incomplete`; the
+controller log and the breaker route's `measure_error` name the error.
+It keeps counting writes until a measurement finishes. A bucket that keeps
 reporting incomplete wants a higher `--bucket-measure-pages`, which is
 the bound that binds first, and then a narrower prefix or S3 Inventory
 in place of the listing.
 
-`GET /api/v1/health` reports `object_store.ceiling` as `frozen` and
-`warning` alone, because that route answers without a token; the totals
+`GET /api/v1/health` reports `object_store.ceiling` as `enforced`,
+`frozen`, `warning`, `measurement_incomplete` and `measured_at` alone,
+whenever a ceiling is set or a bucket is measured, because that route
+answers without a token; the totals
 and the ceilings sit behind the admin-scoped
 `GET /api/v1/object-store/breaker` and on `sparkwing cluster
 object-store status`, which also reports `counted_at` (when the running
@@ -690,11 +696,10 @@ measurement that finds the store back under its ceiling thaws it.
 warning on health without refusing anything. The chart carries all of
 these as `cache.limits.*` and `logs.limits.*`.
 
-Both services also export `sparkwing_free_storage_used_bytes{store="cache"}`
-and `{store="logs"}`: the bytes teams without credits hold there, writes in
-flight included, read from the same counts that hold each team to its share
-of the free allowance ([Tenant limits](limits.md)). The free-team slot count
-bounds that sum, so alert on it when `--free-team-slots` oversubscribes.
+A service with a bucket behind it counts only its volume here: the
+cache's `--blob-store` and the logs service's `--archive-store` are the
+controller's to measure, and what each team holds in them is counted by
+the controller ([Tenant limits](limits.md)).
 
 Neither service waits out the interval to recover. Deleting a run with
 `DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
@@ -738,8 +743,8 @@ unlimited until an operator sets one.
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 | `--egress-daily-cap-bytes` | yes | yes | yes | Bytes the process may send in a UTC day. Past it, every download it serves answers `429` until the day rolls, whoever asks. The per-principal budgets bound one caller; this bounds the month's bill at 31 times the cap however many principals share it. |
-| `--egress-team-daily-free-bytes` | no | no | yes | Bytes the cache serves one team without credits through its grants in a UTC day, 5 GiB by default (`SPARKWING_CACHE_EGRESS_TEAM_DAILY_FREE_BYTES`). Past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
-| `--egress-team-daily-funded-bytes` | no | no | yes | The same cap for a team with credits, 50 GiB by default (`SPARKWING_CACHE_EGRESS_TEAM_DAILY_FUNDED_BYTES`). `0` turns it off. |
+| `--team-daily-download-free-bytes` | yes | no | no | Bytes the cache may serve one team without credits through its grants in a UTC day, 5 GiB by default. The controller counts the day and the cache asks it before each download; past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
+| `--team-daily-download-funded-bytes` | yes | no | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
 
 The controller's two concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming
@@ -763,16 +768,21 @@ whoami, so their monthly and concurrency caps fall on the caller that
 spent the bytes.
 
 The cache tells one kind of caller apart: a cache grant names the team
-the controller minted it for. Every byte the cache serves a grant, from
+the controller minted it for. Every `GET` the cache serves a grant, from
 binaries, artifacts, dependency archives and git mirror fetches, is
-charged to that team for the UTC day, and a team past its daily cap is
+charged to that team's UTC day in the controller with
+`POST /internal/downloads/charge`, and a team past its daily cap is
 refused with `429` and a `Retry-After` naming the wait until midnight
-UTC. The cap is `--egress-team-daily-funded-bytes` for a team the
-controller answers is funded and `--egress-team-daily-free-bytes`
-otherwise; the cache asks the same storage-tier route its free-storage
-share uses, and a funded answer older than five minutes counts as free,
-so a controller outage never lifts the cap for long. The operator's own
-team and the operator token carry no per-team cap, because every
+UTC. A response that names its length is charged that length before its
+first byte, under a row lock, so two downloads racing for a team's last
+bytes cannot both start; one that streams, such as a tar of several
+artifacts or a git fetch, is checked for room when it starts and charged
+what it sent when it ends. The cap is the controller's
+`--team-daily-download-funded-bytes` for a funded team and
+`--team-daily-download-free-bytes` otherwise. While the controller cannot
+answer, a free team's download is refused with `503`, and a team the
+controller answered funded within five minutes proceeds. The operator's
+own team and the operator token carry no per-team cap, because every
 in-cluster runner shares them; a monthly cap on them would answer `429`
 to the whole fleet at once. The per-team monthly cap belongs to the
 controller, which knows who each bearer is.
@@ -781,11 +791,6 @@ The cache's other refusal is `--egress-daily-cap-bytes`, the process-wide
 backstop: past it every metered download answers `429` with a
 `Retry-After` naming the wait until the UTC day rolls. Its health reports
 `egress.enforced: true` and `daily_cap_bytes` while that cap is set.
-
-`sparkwing.cache.team_download_bytes{team}` reports each team's bytes
-today for the ten teams that downloaded most, with the rest summed under
-`team="(other)"`, so the series count does not grow with the number of
-teams.
 
 A service running with auth off resolves every request to `anonymous`,
 which is one shared budget for the same reason; that is the laptop-local
@@ -826,8 +831,8 @@ discards what the handler writes to one, and an error body charges
 nothing, because it is not the download the budget is for.
 
 A budget is checked before a response starts and again as its bytes are
-written. A write that would pass the principal's monthly budget, the team's
-daily cap or the process's daily cap sends only what is left, and the service aborts the
+written. A write that would pass the principal's monthly budget or the
+process's daily cap sends only what is left, and the service aborts the
 response, so the client sees a failed transfer rather than a body that
 ends cleanly with bytes missing. Bytes are charged before they reach the
 connection, so parallel downloads started just under a budget cannot
@@ -842,15 +847,14 @@ resumes the month rather than handing everyone a fresh budget and resumes
 the day rather than reopening the daily cap, and no response costs a
 store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. A cache with `--blob-store` keeps its own totals for the
-UTC day and the UTC month as one small object per month,
-`egress/<YYYY-MM>.json` in the bucket's operator namespace, written at most
-once a minute and at shutdown and read back at start, so a restart keeps
-the daily cap spent and `global_month_bytes` counting. The same object
-carries each team's bytes for the day under `Principals`, so a restart
-keeps a team's daily cap spent too. A cache without a
-bucket and the logs service count in memory alone: their counters are per
-process and start over on a restart.
+on every tick. A cache with `--controller` keeps its own totals for the
+UTC day and the UTC month in the controller's database with
+`POST /internal/egress/totals`, written at most once a minute and at
+shutdown and read back at start, so a restart keeps the daily cap spent
+and `global_month_bytes` counting. Each team's download day is the
+controller's own row and needs no saving. A cache without a controller and
+the logs service count in memory alone: their counters are per process and
+start over on a restart.
 
 Read the controller's meter, including the principals that have
 downloaded the most this month, with `GET /api/v1/egress` on an `admin`

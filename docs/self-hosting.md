@@ -282,20 +282,23 @@ nothing has expired, and a restored run written since its archive waits for
 the archiver to upload it again with the new date. The volume must still outlive a pod restart to keep the
 logs of runs in flight, but it holds only live runs and restored copies.
 
-Both services keep a running per-team byte and object count, adjusted by every
-write and every delete the bucket confirms, saved in the bucket every five minutes, and replaced by a
-listing of the prefix once per `--usage-reconcile` (daily by default;
-`SPARKWING_CACHE_USAGE_RECONCILE` on the cache and
-`SPARKWING_LOGS_USAGE_RECONCILE` on the logs service). The
-count feeds the store ceiling, so `--max-store-bytes` covers the bucket as well
-as the volume, and it is what holds a free team to its share of the storage
-allowance in the process that writes ([Tenant limits](limits.md)). On a
-multi-team deployment the cache asks the controller each team's tier: give it
-`--controller` (`SPARKWING_CONTROLLER_URL`) and its `--api-token`, the token the
-controller holds as `SPARKWING_CACHE_TOKEN`. The counts also answer:
-
-- `GET /admin/usage` on the cache (operator token; `?team=` narrows it)
-- `GET /api/v1/teams/{team}/logs/usage` on the logs service (`admin`)
+Neither service counts what each team holds in its bucket: the controller
+does, in its database, and each service asks it for room before a team's
+write and charges each team's download to its day there
+([Tenant limits](limits.md)). The store ceiling on each service covers its
+volume alone; the controller's `--bucket-store` measurement covers the
+bucket. On a multi-team deployment give the cache `--controller`
+(`SPARKWING_CONTROLLER_URL`) and its `--api-token`, the token the controller
+holds as `SPARKWING_CACHE_TOKEN`; a cache with `--grant-key` and
+`--blob-store` refuses to start without them. The logs service reaches the
+same controller through its `--controller` with the appending caller's own
+credential. Give the controller `--cache-blob-store` and
+`--logs-archive-store`, the same URLs the services use, and its hourly
+storage pass lists both to reconcile the counts and expires a team's cache
+objects 30 days after their last write. The controller's role then needs
+`s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and
+`s3:ListBucket` on the logs service's. `GET /api/v1/storage` shows a team
+what it holds.
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
 cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, which also
