@@ -141,6 +141,11 @@ func run(args []string) error {
 			"first one started instead of starting a second. GitHub deliveries "+
 			"are deduped by delivery id and body digest regardless. Zero dedupes "+
 			"no API submission.")
+	runnersPerToken := fs.Int("runners-per-token", controller.DefaultRunnersPerToken,
+		"most self-named runners one caller may hold at once on the claim routes, "+
+			"where the runner name is the caller's own word and each name gets its "+
+			"own request budget. A name counts until it goes unused for ten "+
+			"minutes, and a new name past the cap is answered 429.")
 	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the token prefix together with the runner the "+
@@ -274,6 +279,9 @@ func run(args []string) error {
 	}
 	if *triggerDedupeWindow < 0 {
 		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
+	}
+	if *runnersPerToken < 1 {
+		return fmt.Errorf("--runners-per-token must be at least 1")
 	}
 	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
 		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
@@ -417,6 +425,7 @@ func run(args []string) error {
 		WithRequestBudget(controller.RequestBudget{
 			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
 			HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
+			RunnersPerToken:     *runnersPerToken,
 		}).
 		WithTokenRequestBudget(controller.TokenRequestBudget{
 			PerTokenMinute: guards.RequestsPerTokenMinute,
