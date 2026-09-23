@@ -317,3 +317,42 @@ func TestDeletingATeamTreeRemovesOnlyThatTeamsBlobs(t *testing.T) {
 		t.Fatalf("repeating the delete = %d, want 204", code)
 	}
 }
+
+// Another team's grant reads a shared mirror only when the mirror could hold
+// nothing private: a credential-free https origin under the name that origin
+// derives.
+func TestGrantsReadOnlyPublicMirrorsUnderTheirDerivedName(t *testing.T) {
+	const public = "https://github.com/acme/widgets.git"
+	name := sourceurl.ClaimedRepoNameFromURL(public)
+	cases := []struct {
+		name, url string
+		want      bool
+	}{
+		{name, public, true},
+		{"widgets", public, false},
+		{sourceurl.ClaimedRepoNameFromURL("http://github.com/acme/widgets.git"), "http://github.com/acme/widgets.git", false},
+		{sourceurl.ClaimedRepoNameFromURL("https://x:tok@github.com/acme/widgets.git"), "https://x:tok@github.com/acme/widgets.git", false},
+	}
+	for _, c := range cases {
+		if got := grantMayUseMirror(c.name, c.url); got != c.want {
+			t.Errorf("grantMayUseMirror(%q, %q) = %v, want %v", c.name, c.url, got, c.want)
+		}
+	}
+
+	repoNamesMu.Lock()
+	saved := repoNames
+	repoNames = map[string]string{name: public}
+	repoNamesMu.Unlock()
+	t.Cleanup(func() {
+		repoNamesMu.Lock()
+		repoNames = saved
+		repoNamesMu.Unlock()
+	})
+	grant := cacheCaller{team: "team-a", run: "run-1"}
+	if !grant.mayReadMirror(name) {
+		t.Error("a team grant cannot read a registered public mirror")
+	}
+	if grant.mayReadMirror("repo-unregistered") {
+		t.Error("a team grant may read a mirror no URL is registered for")
+	}
+}

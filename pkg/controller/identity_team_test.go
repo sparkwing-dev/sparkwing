@@ -312,6 +312,11 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "eddie-box" || list[0].CreatedBy != editor.id {
 		t.Fatalf("list = %+v", list)
 	}
+	// Authenticating first puts the token in the auth cache, which the
+	// revocation has to clear.
+	if code := f.call("GET", "/api/v1/auth/whoami", "Bearer "+mine.Token, nil, nil); code != http.StatusOK {
+		t.Fatalf("live token = %d, want 200", code)
+	}
 	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+mine.Prefix, owner.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("owner revoking = %d", code)
 	}

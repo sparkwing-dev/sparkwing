@@ -142,6 +142,29 @@ func TestClaimFailsClosedForAnUnplaceableCredentialOnAMultiTeamDeployment(t *tes
 	}
 }
 
+// A token row whose team is blank names no team, and falling back to the
+// default team would hand that team's queue to whatever the row really was.
+func TestClaimFailsClosedForACredentialWhoseTeamIsBlank(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-home", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun(run-home): %v", err)
+	}
+	seedReadyNode(t, st, "run-home", "build")
+
+	claimant := mintClaimant(t, st, "agent:laptop")
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st,
+		`UPDATE tokens SET team = ' ' WHERE prefix = ?`), claimant.TokenPrefix); err != nil {
+		t.Fatalf("blank the token's team: %v", err)
+	}
+	claimed, err := st.ClaimNextReadyNode(ctx, claimant, "agent:laptop", time.Minute, nil)
+	if !errors.Is(err, store.ErrClaimantHasNoTeam) {
+		t.Fatalf("a credential with a blank team claimed %+v (err %v)", claimed, err)
+	}
+}
+
 func mintTeamClaimant(t *testing.T, tn *store.Tenant, principal string) store.ClaimIdentity {
 	t.Helper()
 	_, tok, err := tn.CreateToken(context.Background(), principal, store.TokenKindRunner,
