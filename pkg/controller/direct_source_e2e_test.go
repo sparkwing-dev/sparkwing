@@ -11,15 +11,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 // TestDirectSourceRunnerRunsATriggeredRun drives a real team runner, started
 // with the exact command the machines page shows, through a run whose source
 // it must fetch itself from a public GitHub repository.
 //
-//	go build -o /tmp/bin/sparkwing-runner ./cmd/sparkwing-runner
-//	SPARKWING_E2E_RUNNER_DIR=/tmp/bin go test -tags e2e_direct_source \
-//	  -run DirectSourceRunner -v ./pkg/controller/
+//	go build -o /tmp/bin/ ./cmd/sparkwing-runner ./cmd/sparkwing
+//	SPARKWING_E2E_RUNNER_DIR=/tmp/bin SPARKWING_E2E_SHA=<pushed sha> \
+//	  go test -tags e2e_direct_source -run DirectSource -v ./pkg/controller/
 //
 // SPARKWING_E2E_REPO and SPARKWING_E2E_SHA pick the commit (default: the
 // public sparkwing repository at SPARKWING_E2E_SHA, which must be pushed), and
@@ -45,6 +47,102 @@ func TestDirectSourceNodeExecutorFetchesTheSource(t *testing.T) {
 	nodeOnly = strings.Replace(nodeOnly, "--holder-prefix alice-laptop", "--holder-prefix alice-pool --metrics-addr=", 1)
 	e.startRunner("node-runner", nodeOnly)
 	e.awaitSuccess(runID)
+}
+
+// TestCLITokenTriggerRunsOnADirectSourceRunner is the path a team member
+// takes from a terminal: mint a CLI token in the dashboard, paste the setup
+// command it returns, and trigger a pipeline from a checkout of a pushed
+// commit. The trigger records the checkout's repository and commit, and a
+// team runner fetches that commit itself and runs it. SPARKWING_E2E_RUNNER_DIR
+// must also hold the sparkwing CLI.
+func TestCLITokenTriggerRunsOnADirectSourceRunner(t *testing.T) {
+	e := newDirectSourceE2E(t)
+	var minted struct {
+		Token   string `json:"token"`
+		Profile string `json:"profile"`
+		Setup   string `json:"setup"`
+		Run     string `json:"run"`
+	}
+	if code := e.f.call("POST", "/api/v1/team/cli-tokens", e.alice.auth, nil, &minted); code != http.StatusCreated {
+		t.Fatalf("mint CLI token = %d", code)
+	}
+	t.Logf("setup: %s", minted.Setup)
+	t.Logf("run:   %s", minted.Run)
+
+	home := t.TempDir()
+	checkout := filepath.Join(home, "checkout")
+	e.sh(home, home, "", "git clone -q --filter=blob:none --no-checkout "+e.repo+" "+checkout)
+	e.sh(home, checkout, "", "git checkout -q -B main "+e.sha)
+	e.sh(home, checkout, minted.Token, minted.Setup)
+
+	pipeline := envOr("SPARKWING_E2E_PIPELINE", "weather-report")
+	runCommand := strings.Replace(minted.Run, "<pipeline>", pipeline, 1) + " --detach"
+	runID := strings.TrimSpace(e.sh(home, checkout, "", runCommand))
+
+	var trig struct {
+		RepoURL string `json:"repo_url"`
+		GitSHA  string `json:"git_sha"`
+		Source  string `json:"trigger_source"`
+	}
+	if code := e.f.call("GET", "/api/v1/triggers/"+runID, e.alice.auth, nil, &trig); code != http.StatusOK {
+		t.Fatalf("read trigger %q = %d", runID, code)
+	}
+	t.Logf("trigger %s: repo_url=%s git_sha=%s source=%s", runID, trig.RepoURL, trig.GitSHA, trig.Source)
+	got, _ := sourceurl.Identity(trig.RepoURL)
+	want, _ := sourceurl.Identity(e.repo)
+	if trig.GitSHA != e.sha || got == "" || got != want {
+		t.Fatalf("trigger = %+v, want the checkout's repository at %s", trig, e.sha)
+	}
+
+	e.startRunner("runner", e.command)
+	e.awaitSuccess(runID)
+}
+
+// TestDashboardBranchTriggerRunsOnADirectSourceRunner sends the body the
+// dashboard's run form sends when teams are enabled: a repository and a
+// branch with no commit, which a direct runner resolves to the branch tip.
+// SPARKWING_E2E_BRANCH names the branch (default main).
+func TestDashboardBranchTriggerRunsOnADirectSourceRunner(t *testing.T) {
+	e := newDirectSourceE2E(t)
+	var triggered struct {
+		RunID string `json:"run_id"`
+	}
+	body := map[string]any{
+		"pipeline": envOr("SPARKWING_E2E_PIPELINE", "weather-report"),
+		"args":     map[string]string{},
+		"trigger":  map[string]any{"source": "dashboard"},
+		"git":      map[string]any{"repo_url": strings.TrimSuffix(e.repo, ".git"), "branch": envOr("SPARKWING_E2E_BRANCH", "main")},
+	}
+	if code := e.f.call("POST", "/api/v1/triggers", e.alice.auth, body, &triggered); code != http.StatusAccepted {
+		t.Fatalf("trigger = %d", code)
+	}
+	e.startRunner("runner", e.command)
+	e.awaitSuccess(triggered.RunID)
+}
+
+// sh runs command in dir the way a person runs it in a terminal, with home
+// as the private home directory, feeding it stdin, and returns stdout.
+func (e *directSourceE2E) sh(home, dir, stdin, command string) string {
+	t := e.t
+	t.Helper()
+	cmd := exec.CommandContext(e.ctx, "sh", "-c", command)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"PATH="+e.binDir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"HOME="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+		"SPARKWING_HOME="+filepath.Join(home, ".sparkwing"),
+		"SPARKWING_PROFILES="+filepath.Join(home, "profiles.yaml"),
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	cmd.Stdin = strings.NewReader(stdin)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%s: %v\nstdout:\n%s\nstderr:\n%s", command, err, stdout.String(), stderr.String())
+	}
+	t.Logf("$ %s\n%s%s", command, stdout.String(), stderr.String())
+	return stdout.String()
 }
 
 type directSourceE2E struct {
