@@ -1890,13 +1890,20 @@ func controllerLacksRoute(route string) error {
 
 func readHTTPError(resp *http.Response) error {
 	err := classifyHTTPError(resp)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if wait, ok := parseRetryAfter(resp); ok {
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
+		if wait := pollAdviceOfResponse(resp); wait > 0 {
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
+		return err
+	}
 	// safety: a server that named a Retry-After is asking to be polled again, which a claim loop must not log as a failure.
 	if wait, ok := parseRetryAfter(resp); ok {
 		switch resp.StatusCode {
 		case http.StatusServiceUnavailable:
 			return &UnavailableError{RetryAfter: wait, Err: err}
-		case http.StatusTooManyRequests:
-			return &RateLimitedError{RetryAfter: wait, Err: err}
 		}
 	}
 	return err

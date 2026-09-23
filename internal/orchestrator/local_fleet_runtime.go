@@ -152,6 +152,10 @@ func (c localStoreFleetCoordinator) GetNode(ctx context.Context, runID, nodeID s
 	return c.store.GetNode(ctx, runID, nodeID)
 }
 
+func (c localStoreFleetCoordinator) ListNodes(ctx context.Context, runID string) ([]*store.Node, error) {
+	return c.store.ListNodes(ctx, runID)
+}
+
 func (c localStoreFleetCoordinator) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error) {
 	return c.store.RevokeNodeReady(ctx, runID, nodeID)
 }

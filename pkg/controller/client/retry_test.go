@@ -206,3 +206,19 @@ func TestUnavailableWithoutRetryAfterStaysAPlainError(t *testing.T) {
 		t.Fatal("a 503 claim returned no error")
 	}
 }
+
+func TestListNodesHonorsPollAfterOn429(t *testing.T) {
+	for _, header := range []string{"Retry-After", store.ClaimPollAfterHeader} {
+		t.Run(header, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(header, "11")
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer srv.Close()
+			_, err := New(srv.URL, srv.Client()).ListNodes(context.Background(), "run-1")
+			if wait, ok := LoadSignal(err); !ok || wait != 11*time.Second {
+				t.Fatalf("429 %s = %s, %v; want 11s load signal", header, wait, ok)
+			}
+		})
+	}
+}
