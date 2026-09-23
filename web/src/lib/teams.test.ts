@@ -452,6 +452,17 @@ describe("deletion", () => {
     });
   });
 
+  it("asks for a fresh sign-in when the controller wants one", async () => {
+    respond = () =>
+      Response.json(
+        { error: "reauth_required", message: "sign in again" },
+        { status: 403 },
+      );
+    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
+      kind: "reauth",
+    });
+  });
+
   it("throws on any other refusal", async () => {
     respond = () =>
       Response.json({ error: "confirm_email does not match" }, { status: 400 });

@@ -444,7 +444,8 @@ export async function listTeamDeletions(): Promise<TeamDeletion[]> {
 
 export type AccountDeletionResult =
   | { kind: "deleted"; deletedTeams: string[] }
-  | { kind: "blocked"; teams: TeamRef[] };
+  | { kind: "blocked"; teams: TeamRef[] }
+  | { kind: "reauth" };
 
 // A 409 is an answer, not a failure: it names the teams that would be left
 // without an owner, which the page lists so the person can deal with each.
@@ -459,6 +460,17 @@ export async function deleteAccount(
   if (res.status === 409) {
     const body = (await res.json()) as { teams?: TeamRef[] };
     return { kind: "blocked", teams: body.teams ?? [] };
+  }
+  // The controller deletes an account only for a sign-in from the last few
+  // minutes; the page asks for a fresh one rather than showing an error.
+  if (res.status === 403) {
+    const body = (await res
+      .clone()
+      .json()
+      .catch(() => ({}))) as {
+      error?: string;
+    };
+    if (body.error === "reauth_required") return { kind: "reauth" };
   }
   if (!res.ok) throw await failure(res, "Delete account");
   const body = (await res.json()) as { deleted_teams?: string[] };

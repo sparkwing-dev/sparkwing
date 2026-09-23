@@ -94,6 +94,7 @@ function DeleteAccount({ me }: { me: Me }) {
   const [typed, setTyped] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [blocked, setBlocked] = useState<TeamRef[] | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
   const ready = confirmationMatches(typed, me.user.email);
 
   async function submit(e: React.FormEvent) {
@@ -104,6 +105,11 @@ function DeleteAccount({ me }: { me: Me }) {
       const res = await deleteAccount(me.user.email);
       if (res.kind === "blocked") {
         setBlocked(res.teams);
+        setDeleting(false);
+        return;
+      }
+      if (res.kind === "reauth") {
+        setNeedsSignIn(true);
         setDeleting(false);
         return;
       }
@@ -123,14 +129,22 @@ function DeleteAccount({ me }: { me: Me }) {
           sign-in, your membership in every team, and every runner and CLI token
           you created. Teams where you are the only member, your personal space
           included, are deleted with everything in them: runs, logs, secrets and
-          cached artifacts. Runs you started in teams you share stay with those
-          teams and show as started by &ldquo;deleted user&rdquo;. This cannot
-          be undone. Signing in again later creates a new, empty account.
+          cached artifacts. In teams you share, the runs, approvals, schedules
+          and secrets you created stay with the team and name &ldquo;deleted
+          user&rdquo; instead of you, and so do usage records. This cannot be
+          undone. Signing in again later creates a new, empty account.
         </p>
         <p className="text-[var(--muted)]">
           If you are the last owner of a team that has other members, make
-          someone else an owner or delete that team first.
+          someone else an owner or delete that team first. Deleting needs a
+          sign-in from the last 10 minutes.
         </p>
+        {needsSignIn ? (
+          <div className="rounded-[var(--radius-control)] border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
+            Your account was not deleted. Log out, sign in again, and delete it
+            within 10 minutes of signing in.
+          </div>
+        ) : null}
         {blocked && blocked.length > 0 ? (
           <div className="rounded-[var(--radius-control)] border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200">
             Your account was not deleted. You are the last owner of:

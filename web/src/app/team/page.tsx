@@ -286,8 +286,10 @@ function DeleteTeamPanel({ me }: { me: Me }) {
           Deleting {team.display_name} removes every member from it at once,
           revokes its runner and CLI tokens, and cancels its queued and running
           runs. Within a few minutes the controller then deletes its runs, logs,
-          secrets, schedules, cached artifacts and settings. This cannot be
-          undone, and the slug becomes free for anyone to take.
+          secrets, schedules, cached artifacts and settings, and clears its
+          cache once more a few hours later. This cannot be undone, and the slug{" "}
+          <span className="font-mono">{team.slug}</span> can never be used for a
+          team again.
         </p>
         {allowed ? (
           <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
