@@ -209,11 +209,16 @@ func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {
 		if page >= s.maxPages {
 			return out, ErrListTruncated
 		}
-		res, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(s.bucket),
-			Prefix:            aws.String(prefix),
-			Delimiter:         aws.String("/"),
-			ContinuationToken: token,
+		var res *s3.ListObjectsV2Output
+		err := s.guarded(ctx, func() error {
+			var lerr error
+			res, lerr = s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+				Bucket:            aws.String(s.bucket),
+				Prefix:            aws.String(prefix),
+				Delimiter:         aws.String("/"),
+				ContinuationToken: token,
+			})
+			return lerr
 		})
 		if err != nil {
 			return nil, fmt.Errorf("teamblob: list %s: %w", prefix, err)
@@ -249,12 +254,15 @@ func (s *Store) SaveUsage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:        aws.String(s.bucket),
-		Key:           aws.String(s.root() + usageRel),
-		Body:          bytes.NewReader(body),
-		ContentLength: aws.Int64(int64(len(body))),
-		ContentType:   aws.String("application/json"),
+	if err := s.guarded(ctx, func() error {
+		_, perr := s.client.PutObject(ctx, &s3.PutObjectInput{
+			Bucket:        aws.String(s.bucket),
+			Key:           aws.String(s.root() + usageRel),
+			Body:          bytes.NewReader(body),
+			ContentLength: aws.Int64(int64(len(body))),
+			ContentType:   aws.String("application/json"),
+		})
+		return perr
 	}); err != nil {
 		s.usage.mu.Lock()
 		s.usage.dirty = true
@@ -342,4 +350,23 @@ func (s *Store) Maintain(ctx context.Context, every, saveEvery time.Duration, re
 			}
 		}
 	}
+}
+
+// ListDirs returns the names of the prefixes directly under team's
+// relPrefix, one delimited LIST per thousand of them. An index keyed by
+// date uses it to find its days without listing their entries.
+func (s *Store) ListDirs(ctx context.Context, team, relPrefix string) ([]string, error) {
+	full, _, err := s.listPrefix(team, relPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(full, "/") {
+		full += "/"
+	}
+	prefixes, err := s.children(ctx, full)
+	names := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		names = append(names, strings.TrimSuffix(strings.TrimPrefix(p, full), "/"))
+	}
+	return names, err
 }

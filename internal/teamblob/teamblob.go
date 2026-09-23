@@ -121,6 +121,7 @@ type Store struct {
 	maxPages  int
 	now       func() time.Time
 	usage     *Usage
+	breaker   breaker
 }
 
 // New validates opts and returns a Store.
@@ -130,6 +131,12 @@ func New(opts Options) (*Store, error) {
 	}
 	if opts.Client == nil {
 		return nil, errors.New("teamblob: a client is required")
+	}
+	// safety: a store at the bucket root would list and write the whole
+	// bucket, which the per-service IAM policies deny and every other
+	// service's data sits in.
+	if strings.Trim(opts.Prefix, "/") == "" {
+		return nil, errors.New("teamblob: a prefix is required; name the service's own prefix, as in s3://bucket/logs")
 	}
 	s := &Store{
 		bucket:    opts.Bucket,
@@ -341,7 +348,10 @@ func (s *Store) putBytes(ctx context.Context, key string, data []byte, opts PutO
 	if opts.ContentType != "" {
 		in.ContentType = aws.String(opts.ContentType)
 	}
-	if _, err := s.client.PutObject(ctx, in); err != nil {
+	if err := s.guarded(ctx, func() error {
+		_, err := s.client.PutObject(ctx, in)
+		return err
+	}); err != nil {
 		return 0, fmt.Errorf("teamblob: put %s: %w", key, err)
 	}
 	return int64(len(data)), nil
@@ -370,7 +380,12 @@ func (s *Store) putMultipart(ctx context.Context, key string, first []byte, body
 	if opts.ContentType != "" {
 		in.ContentType = aws.String(opts.ContentType)
 	}
-	created, err := s.client.CreateMultipartUpload(ctx, in)
+	var created *s3.CreateMultipartUploadOutput
+	err = s.guarded(ctx, func() error {
+		var cerr error
+		created, cerr = s.client.CreateMultipartUpload(ctx, in)
+		return cerr
+	})
 	if err != nil {
 		return 0, fmt.Errorf("teamblob: start multipart %s: %w", key, err)
 	}
@@ -396,13 +411,18 @@ func (s *Store) putMultipart(ctx context.Context, key string, first []byte, body
 	var parts []types.CompletedPart
 	buf := first
 	for number := int32(1); len(buf) > 0; number++ {
-		out, perr := s.client.UploadPart(ctx, &s3.UploadPartInput{
-			Bucket:        aws.String(s.bucket),
-			Key:           aws.String(key),
-			UploadId:      uploadID,
-			PartNumber:    aws.Int32(number),
-			Body:          bytes.NewReader(buf),
-			ContentLength: aws.Int64(int64(len(buf))),
+		var out *s3.UploadPartOutput
+		perr := s.guarded(ctx, func() error {
+			var uerr error
+			out, uerr = s.client.UploadPart(ctx, &s3.UploadPartInput{
+				Bucket:        aws.String(s.bucket),
+				Key:           aws.String(key),
+				UploadId:      uploadID,
+				PartNumber:    aws.Int32(number),
+				Body:          bytes.NewReader(buf),
+				ContentLength: aws.Int64(int64(len(buf))),
+			})
+			return uerr
 		})
 		if perr != nil {
 			return 0, fmt.Errorf("teamblob: upload part %d of %s: %w", number, key, perr)
@@ -417,11 +437,14 @@ func (s *Store) putMultipart(ctx context.Context, key string, first []byte, body
 		}
 		buf = buf[:n]
 	}
-	if _, err := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-		Bucket:          aws.String(s.bucket),
-		Key:             aws.String(key),
-		UploadId:        uploadID,
-		MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+	if err := s.guarded(ctx, func() error {
+		_, cerr := s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+			Bucket:          aws.String(s.bucket),
+			Key:             aws.String(key),
+			UploadId:        uploadID,
+			MultipartUpload: &types.CompletedMultipartUpload{Parts: parts},
+		})
+		return cerr
 	}); err != nil {
 		return 0, fmt.Errorf("teamblob: complete multipart %s: %w", key, err)
 	}
@@ -600,10 +623,15 @@ func (s *Store) walk(ctx context.Context, prefix string, visit func(types.Object
 		if page >= s.maxPages {
 			return ErrListTruncated
 		}
-		out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(s.bucket),
-			Prefix:            aws.String(prefix),
-			ContinuationToken: token,
+		var out *s3.ListObjectsV2Output
+		err := s.guarded(ctx, func() error {
+			var lerr error
+			out, lerr = s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+				Bucket:            aws.String(s.bucket),
+				Prefix:            aws.String(prefix),
+				ContinuationToken: token,
+			})
+			return lerr
 		})
 		if err != nil {
 			return fmt.Errorf("teamblob: list %s: %w", prefix, err)

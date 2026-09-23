@@ -2,8 +2,8 @@ package cache
 
 import (
 	"context"
-	"log"
 	"crypto/subtle"
+	"log"
 	"net/http"
 	"net/url"
 	"os"

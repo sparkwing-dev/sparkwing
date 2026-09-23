@@ -65,9 +65,14 @@ func blobScratchDir() string { return filepath.Join(dataRoot, "tmp") }
 
 func blobError(w http.ResponseWriter, op string, err error) {
 	log.Printf("warning: blob store %s: %v", op, err)
+	var paused *teamblob.SuspendedError
 	switch {
 	case errors.Is(err, teamblob.ErrInvalidKey):
 		http.Error(w, "invalid key", http.StatusBadRequest)
+	case errors.As(err, &paused):
+		retry := max(int64(time.Until(paused.Until).Seconds()), 1)
+		w.Header().Set("Retry-After", strconv.FormatInt(retry, 10))
+		http.Error(w, "the cache's object store is paused: "+paused.Error(), http.StatusServiceUnavailable)
 	default:
 		http.Error(w, "blob store error", http.StatusBadGateway)
 	}
@@ -178,7 +183,9 @@ func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) 
 	defer func() {
 		_ = tmp.Close()
 		// #nosec G703 -- CreateTemp supplied the private staging path
-		_ = os.Remove(tmp.Name())
+		if err := os.Remove(tmp.Name()); err != nil && !os.IsNotExist(err) {
+			log.Printf("warning: remove staged binary: %v", err)
+		}
 	}()
 	sum := sha256.New()
 	n, err := io.Copy(io.MultiWriter(tmp, sum), r.Body)
@@ -443,9 +450,7 @@ func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID st
 	}
 	var matches []teamblob.Object
 	for _, o := range objs {
-		byBase, _ := path.Match(glob, path.Base(o.Rel))
-		byPath, _ := path.Match(glob, o.Rel)
-		if byBase || byPath {
+		if globMatches(glob, path.Base(o.Rel)) || globMatches(glob, o.Rel) {
 			matches = append(matches, o)
 		}
 	}
@@ -469,30 +474,47 @@ func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID st
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", attachmentDisposition(name))
 		w.Header().Set("Content-Length", strconv.FormatInt(o.Size, 10))
-		_, _ = io.Copy(w, rc)
+		if _, err := io.Copy(w, rc); err != nil {
+			// #nosec G706 -- the job ID is pattern-validated
+			log.Printf("warning: artifact copy for %s: %v", jobID, err)
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
 	tw := tar.NewWriter(w)
 	for _, m := range matches {
-		rc, o, err := blobStore.Get(r.Context(), team, prefix+m.Rel)
-		if err != nil {
+		if err := tarBlob(r.Context(), tw, team, prefix, m); err != nil {
 			// #nosec G706 -- the job ID is pattern-validated
 			log.Printf("warning: tar artifacts for %s: %v", jobID, err)
 			return
 		}
-		hdr := &tar.Header{Name: m.Rel, Mode: 0o644, Size: o.Size, ModTime: m.LastModified, Typeflag: tar.TypeReg}
-		if err := tw.WriteHeader(hdr); err == nil {
-			_, err = io.Copy(tw, rc)
-		}
-		rc.Close()
-		if err != nil {
-			log.Printf("warning: tar artifacts for %s: %v", jobID, err)
-			return
-		}
 	}
-	_ = tw.Close()
+	if err := tw.Close(); err != nil {
+		// #nosec G706 -- the job ID is pattern-validated
+		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
+	}
+}
+
+func tarBlob(ctx context.Context, tw *tar.Writer, team, prefix string, m teamblob.Object) error {
+	rc, o, err := blobStore.Get(ctx, team, prefix+m.Rel)
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	hdr := &tar.Header{Name: m.Rel, Mode: 0o644, Size: o.Size, ModTime: m.LastModified, Typeflag: tar.TypeReg}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err = io.Copy(tw, rc)
+	return err
+}
+
+// globMatches treats a malformed pattern as matching nothing, which is
+// what the volume's walk does with it.
+func globMatches(glob, name string) bool {
+	ok, err := path.Match(glob, name)
+	return err == nil && ok
 }
 
 func countCacheLookup(r *http.Request, hit bool) {
@@ -547,7 +569,10 @@ func handleBlobUsage(w http.ResponseWriter, r *http.Request) {
 			body["reconciled_at"] = at.UTC().Format(time.RFC3339)
 		}
 		body["bucket"] = blobStore.Bucket()
+		body["breaker"] = blobStore.Breaker()
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("warning: write usage: %v", err)
+	}
 }

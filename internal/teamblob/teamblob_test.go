@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
@@ -443,5 +444,93 @@ func TestFailingBucketCostsBoundedAttempts(t *testing.T) {
 	}
 	if got := hits.Load(); got < 2 || got > storeurl.SDKMaxAttempts {
 		t.Fatalf("one put cost %d requests, want 2..%d", got, storeurl.SDKMaxAttempts)
+	}
+}
+
+// The bucket's kill switch answers PUT and LIST with 403. The store must
+// stop sending both at once, keep reads and deletes working, and probe
+// with one request only when the pause ends.
+func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	f := newFixture(t, teamblob.Options{Now: clock})
+	ctx := context.Background()
+	put(t, f.store, "team-a", "bins/kept", "kept")
+
+	f.client.reset()
+	f.client.failOn["PutObject"] = &smithy.GenericAPIError{Code: "AccessDenied", Message: "explicit deny"}
+	f.client.failOn["ListObjectsV2"] = &smithy.GenericAPIError{Code: "AccessDenied", Message: "explicit deny"}
+	if _, err := f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true}); err == nil {
+		t.Fatal("a denied put succeeded")
+	}
+	for range 20 {
+		_, err := f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true})
+		if !errors.Is(err, teamblob.ErrSuspended) {
+			t.Fatalf("put during the pause = %v, want ErrSuspended", err)
+		}
+	}
+	if _, err := f.store.List(ctx, "team-a", "bins/"); !errors.Is(err, teamblob.ErrSuspended) {
+		t.Fatalf("list during the pause = %v, want ErrSuspended", err)
+	}
+	if got := f.client.count("PutObject") + f.client.count("ListObjectsV2"); got != 1 {
+		t.Fatalf("a denied bucket was sent %d PUT and LIST requests, want 1", got)
+	}
+	if st := f.store.Breaker(); !st.Open || st.Until.Sub(clock()) != time.Minute {
+		t.Fatalf("breaker = %+v", st)
+	}
+	if body, err := f.store.ReadAll(ctx, "team-a", "bins/kept"); err != nil || string(body) != "kept" {
+		t.Fatalf("a read during the pause = %q %v", body, err)
+	}
+	if err := f.store.Delete(ctx, "team-a", "bins/kept"); err != nil {
+		t.Fatalf("a delete during the pause = %v", err)
+	}
+
+	// The pause ends: one probe, still denied, pauses twice as long.
+	advance(time.Minute)
+	f.client.reset()
+	for range 5 {
+		_, _ = f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true})
+	}
+	if got := f.client.count("PutObject"); got != 1 {
+		t.Fatalf("the end of the pause let %d PUTs through, want 1 probe", got)
+	}
+	if st := f.store.Breaker(); st.Until.Sub(clock()) != 2*time.Minute {
+		t.Fatalf("second pause = %s", st.Until.Sub(clock()))
+	}
+	// The pause is capped at five minutes however long the deny lasts.
+	for range 6 {
+		advance(10 * time.Minute)
+		_, _ = f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true})
+	}
+	if st := f.store.Breaker(); st.Until.Sub(clock()) != 5*time.Minute {
+		t.Fatalf("capped pause = %s", st.Until.Sub(clock()))
+	}
+
+	// The deny lifts: the next probe succeeds and closes the breaker.
+	delete(f.client.failOn, "PutObject")
+	delete(f.client.failOn, "ListObjectsV2")
+	advance(5 * time.Minute)
+	put(t, f.store, "team-a", "bins/y", "y")
+	if st := f.store.Breaker(); st.Open {
+		t.Fatalf("breaker stayed open after a successful probe: %+v", st)
+	}
+	put(t, f.store, "team-a", "bins/z", "z")
+}
+
+// Failures other than a deny pause writes after a few in a row, so an
+// outage costs a bounded number of requests rather than one per caller.
+func TestRepeatedFailuresPauseWrites(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, teamblob.Options{})
+	ctx := context.Background()
+	f.client.failOn["PutObject"] = &smithy.GenericAPIError{Code: "SlowDown", Message: "slow down"}
+	for range 50 {
+		_, _ = f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true})
+	}
+	if got := f.client.count("PutObject"); got != 3 {
+		t.Fatalf("50 writes against a failing bucket sent %d PUTs, want 3", got)
 	}
 }

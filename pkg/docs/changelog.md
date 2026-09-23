@@ -22,6 +22,33 @@ unlock.
 
 ### Added
 
+- **cache:** `--blob-store s3://bucket/prefix` keeps the binary,
+  dependency-archive and artifact stores in S3, one `teams/<team>/` namespace
+  per team; git mirrors, uploads and the registry proxy stay on the volume.
+  Uploads above 64 MiB go multipart and abort on failure. `GET /admin/usage`
+  reports a per-team byte and object count kept by every write and delete and
+  replaced by a listing once per `--usage-reconcile`, and `DELETE
+  /admin/teams/{team}` removes the team's namespace from the bucket.
+  `--presign-min-bytes` redirects a large dependency-archive or artifact read to
+  a short-lived presigned URL for that one object. See
+  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+
+- **logs:** `--archive-store s3://bucket/prefix` moves a run nobody has written
+  for `--archive-idle` to S3 as one object per node log under
+  `teams/<team>/runs/<run>/`, and restores it on the next read or append. Live
+  appends and follows stay on the volume, so a running node sends the bucket
+  nothing. `--retention` deletes archived runs by day through a day index.
+  `DELETE /api/v1/teams/{team}/logs` and `GET /api/v1/teams/{team}/logs/usage`
+  (`admin`) delete and report one team's logs, and a run recorded for one team
+  is refused to every other. See
+  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+
+- **cache, logs:** a `403` from the bucket on a write or listing pauses both
+  for a minute, doubling to five, with one probe request as each pause ends;
+  three other failures in a row pause them for seconds to minutes. Reads and
+  deletes keep working, the cache answers a paused write with `503` and
+  `Retry-After`, and the logs service reports the pause on its health route.
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the

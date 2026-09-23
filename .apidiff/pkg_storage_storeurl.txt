@@ -5,6 +5,7 @@ func OpenArtifactStoreFromSpec(ctx context.Context, spec backends.Spec, lookup P
 func OpenLogStore(ctx context.Context, raw string) (storage.LogStore, error)
 func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.LogStore, error)
 func OpenMeasurementStore(ctx context.Context, raw string, maxPages int) (storage.ArtifactStore, error)
+func OpenS3(ctx context.Context, raw string) (client *awss3.Client, bucket, prefix string, err error)
 func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup ProfileLookup) (storage.StateStore, error)
 type ProfileLookup func(name string) (controllerURL, token string, err error)
 const SDKMaxAttempts = 4

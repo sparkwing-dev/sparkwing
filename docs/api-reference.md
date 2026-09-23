@@ -205,5 +205,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
 | `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
+| `DELETE` | `/api/v1/teams/{team}/logs` | `admin` |
+| `GET` | `/api/v1/teams/{team}/logs/usage` | `admin` |
 | `GET` | `/metrics` | `public` |
 

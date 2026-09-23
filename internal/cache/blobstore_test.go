@@ -202,26 +202,25 @@ func TestBlobStorePresignsLargeReadsForTheCallersTeamOnly(t *testing.T) {
 		t.Fatalf("put = %d %s", code, body)
 	}
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	get := func(path, bearer string) *http.Response {
+	get := func(path, bearer string) (int, string) {
 		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+path, nil)
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		resp, err := noFollow.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
-		return resp
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header.Get("Location")
 	}
-	resp := get("/cache/big", teamA)
-	loc := resp.Header.Get("Location")
-	if resp.StatusCode != http.StatusTemporaryRedirect || !strings.Contains(loc, "/cache/teams/team-a/cache/big.tar.gz") || !strings.Contains(loc, "X-Amz-Expires=300") {
-		t.Fatalf("large read = %d %s", resp.StatusCode, loc)
+	code, loc := get("/cache/big", teamA)
+	if code != http.StatusTemporaryRedirect || !strings.Contains(loc, "/cache/teams/team-a/cache/big.tar.gz") || !strings.Contains(loc, "X-Amz-Expires=300") {
+		t.Fatalf("large read = %d %s", code, loc)
 	}
-	if resp := get("/cache/tiny", teamA); resp.StatusCode != http.StatusOK {
-		t.Errorf("a read under the threshold = %d, want it served directly", resp.StatusCode)
+	if code, _ := get("/cache/tiny", teamA); code != http.StatusOK {
+		t.Errorf("a read under the threshold = %d, want it served directly", code)
 	}
-	if resp := get("/cache/big", teamB); resp.StatusCode != http.StatusNotFound || resp.Header.Get("Location") != "" {
-		t.Errorf("team B's read of team A's key = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	if code, loc := get("/cache/big", teamB); code != http.StatusNotFound || loc != "" {
+		t.Errorf("team B's read of team A's key = %d %s", code, loc)
 	}
 	// Followed, the redirect reads the object.
 	if code, body := send(t, srv, http.MethodGet, "/cache/big", teamA, ""); code != http.StatusOK || body != "0123456789" {
