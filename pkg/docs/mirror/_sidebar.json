@@ -40,6 +40,7 @@
         "security",
         "threat-model",
         "auth",
+        "oidc",
         "hooks",
         "crons",
         "api",
