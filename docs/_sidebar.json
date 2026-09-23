@@ -57,6 +57,7 @@
         "backends",
         "scheduling",
         "github-actions-runners",
+        "github-app",
         "warm-pool",
         "gitcache"
       ]

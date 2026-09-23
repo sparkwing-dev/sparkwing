@@ -218,7 +218,8 @@ what it always did.
 create in a rolling hour. An authenticated submission spends its own
 token's budget, or its team's for any team but the operator's; a webhook
 delivery carries no principal, so it spends the budget of the team whose
-binding signed it and the repository it names. Past the cap the controller answers
+binding signed it and the repository it names. A [GitHub App](github-app.md)
+delivery spends its team's budget once for every run it creates. Past the cap the controller answers
 `429` with a `Retry-After` naming the real refill delay, which lengthens
 while a caller keeps knocking at an empty budget. The budget lives in
 controller memory, so a restart or a rollout refills every principal;

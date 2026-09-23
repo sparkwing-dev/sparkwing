@@ -25,9 +25,9 @@ import (
 )
 
 type PoolLoopConfig struct {
-	ControllerURL     string
-	LogsURL           string
-	GitcacheURL       string
+	ControllerURL string
+	LogsURL       string
+	GitcacheURL   string
 	// AllowRepos binds every claimed node the way TriggerLoopOptions.AllowRepos
 	// binds a trigger.
 	AllowRepos        sourceurl.RepoAllowlist
@@ -342,6 +342,10 @@ func runRunnerCLI(args []string, version string) error {
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
 		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
 			"repository directly with this machine's own git credentials (env: SPARKWING_GITCACHE_URL)")
+	githubAppSource := fs.Bool("github-app-source", bincache.GitHubAppSourceEnabled(),
+		"before fetching a GitHub repository directly, ask the controller for a token that reads only that "+
+			"repository, minted from the team's GitHub App installation; for a cloud runner with no git "+
+			"credentials of its own (env: "+bincache.GitHubAppSourceEnv+")")
 	var allowRepos multiFlag
 	fs.Var(&allowRepos, "allow-repo",
 		"repository this machine may build, as host/path with '*' matching within one path segment "+
@@ -422,6 +426,11 @@ func runRunnerCLI(args []string, version string) error {
 	}
 	if *idleExit < 0 {
 		return errors.New("--idle-exit must not be negative")
+	}
+	if *githubAppSource {
+		if err := os.Setenv(bincache.GitHubAppSourceEnv, "1"); err != nil {
+			return err
+		}
 	}
 	allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
 	if err != nil {

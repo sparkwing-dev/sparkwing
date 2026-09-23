@@ -90,6 +90,34 @@ unlock.
 
 - **cache:** `DELETE /admin/teams/{team}` removes a team's artifact, binary
   and build-cache trees for the operator token.
+- **controller:** a GitHub App connects a team to the repositories it
+  controls. A team owner connects an installation through
+  `POST /api/v1/team/github-app/connect` and `.../connect/complete`, which bind
+  it only when the signed-in account's linked GitHub user administers the
+  installation's account; an installation belongs to one team (409 for a
+  second), and a connect state finishes one flow across replicas and restarts.
+  `POST /webhooks/github-app` verifies the App's signature, routes by
+  installation, and starts runs for the pipelines the team subscribed with
+  `PUT /api/v1/team/github-app/triggers`, once GitHub, asked on each delivery,
+  confirms the installation still covers the repository. Pull requests from
+  forks, and events with no readable time, are never run. A
+  delivery's signed body is remembered for every team, so a redelivery or a
+  replay after the installation moves teams starts nothing, and each run a
+  delivery creates spends one of the team's hourly runs; a redelivery spends
+  only on the runs it has not started.
+  `POST /api/v1/runs/{id}/source-token` gives a claim holder one live
+  `contents: read` installation token for the run's repository, and App runs
+  report commit statuses as the installation. Configure with
+  `--github-app-id`, `--github-app-slug`,
+  `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` and
+  `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`. Schema 54 adds the App's tables. See
+  [GitHub App](docs/github-app.md).
+
+- **runner:** `sparkwing-runner runner --github-app-source` asks the controller
+  for a run's source token before fetching a GitHub repository directly and
+  hands it to git on an inherited pipe, through a credential helper scoped to
+  github.com. A direct fetch now also drops `GIT_TRACE*` and
+  `GIT_CURL_VERBOSE` from its environment.
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for

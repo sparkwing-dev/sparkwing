@@ -4232,6 +4232,14 @@ paths:
                     required: [allow_repos]
                     properties:
                       allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
+                  github_app:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
+                    type: object
+                    description: Present only when the controller has a GitHub App configured.
+                    required: [slug, source_tokens]
+                    properties:
+                      slug: {type: string, description: "The App's name in https://github.com/apps/<slug>."}
+                      source_tokens: {type: boolean, description: "A runner holding a claim may ask POST /api/v1/runs/{id}/source-token for a fetch credential."}
 
   /api/v1/auth/oauth/google/start:
     post:
@@ -4963,6 +4971,302 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/github-app/installations/{installation_id}:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Unbind a GitHub App installation from whichever team holds it.
+      description: >-
+        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
+      responses:
+        "204": {description: Unbound.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/source-token:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Mint a short-lived GitHub token that reads the run's repository.
+      description: >-
+        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A claim gets one live token: asking again returns the same token until five minutes before it expires, and a claim that asks more than ten times a minute answers 429 with Retry-After. A runner hands the token to git through a credential helper reading an inherited pipe. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
+      responses:
+        "200":
+          description: Token minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.SourceTokenResponse
+                type: object
+                required: [token, expires_at, repository]
+                properties:
+                  token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
+                  repository: {type: string, description: owner/name.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the GitHub App installations the active team holds.
+      description: Any member. Answers 404 when the controller has no GitHub App.
+      responses:
+        "200":
+          description: The App and the team's installations.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppResp
+                type: object
+                required: [slug, installations]
+                properties:
+                  slug: {type: string}
+                  installations:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/connect:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Start connecting a GitHub App installation to the active team.
+      description: >-
+        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie, sends the browser to `install_url`, and on GitHub's return to the setup URL (with `installation_id`, `setup_action` and `state`) checks `state` and sends the browser to `authorize_url`. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppConnectReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Such as https://app.example.com/github/app/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppConnectResp
+                type: object
+                required: [install_url, authorize_url, state, verifier]
+                properties:
+                  install_url: {type: string}
+                  authorize_url: {type: string}
+                  state: {type: string, description: Signed; names the account and team and expires in ten minutes.}
+                  verifier: {type: string, description: PKCE verifier; the browser keeps it and returns it to connect/complete.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/connect/complete:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Finish connecting a GitHub App installation to the active team.
+      description: >-
+        Owner only. Binds the installation when the state is this controller's, unexpired, unused, and names the caller's account and active team; the verifier matches the state; the code redeems for the GitHub user linked to the caller's account; and that user administers the installation's account (is the account, or an active owner of the organization). Answers 403 for any of those failing, 404 when GitHub reports no such installation, 409 when another team holds it, and 502 when GitHub cannot be reached. Reconnecting an installation the team holds refreshes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppCompleteReq
+              type: object
+              required: [state, verifier, code, installation_id, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string, description: The code GitHub returned to the callback.}
+                installation_id: {type: integer, format: int64, description: From the setup redirect.}
+                redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Another team holds the installation.}
+
+  /api/v1/team/github-app/installations/{installation_id}:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Disconnect an installation from the active team.
+      description: Owner only. Drops the team's subscriptions to it. Does not uninstall the App from GitHub; `manage_url` is where the account's owner does that.
+      responses:
+        "204": {description: Disconnected.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/installations/{installation_id}/repositories:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the repositories an installation the team holds covers, as GitHub reports them now.
+      description: Any member. Up to 1000 repositories. Answers 404 for an installation the team does not hold and 502 when GitHub cannot be reached.
+      responses:
+        "200":
+          description: Repositories.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [repositories]
+                properties:
+                  repositories:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppRepositoryJSON
+                      type: object
+                      required: [repository_id, full_name, private]
+                      properties:
+                        repository_id: {type: integer, format: int64}
+                        full_name: {type: string}
+                        private: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/triggers:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Remove a pipeline's subscription to a repository.
+      description: Owner only.
+      parameters:
+        - {in: query, name: repository_id, required: true, schema: {type: integer, format: int64}}
+        - {in: query, name: pipeline, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Removed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's pipeline subscriptions to App repositories.
+      description: Any member.
+      responses:
+        "200":
+          description: Subscriptions.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [triggers]
+                properties:
+                  triggers:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppTrigger"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Subscribe a pipeline to a repository's pushes and pull requests.
+      description: >-
+        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppTriggerReq
+              type: object
+              required: [repository, pipeline]
+              properties:
+                repository: {type: string, description: owner/name.}
+                pipeline: {type: string}
+                push: {type: boolean}
+                pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
+      responses:
+        "200":
+          description: Written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppTrigger"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for source tokens too often; Retry-After says when to ask again.}
+
+  /webhooks/github-app:
+    post:
+      x-sparkwing-scope: public
+      tags: [webhooks]
+      summary: Receive a delivery from the deployment's GitHub App.
+      description: >-
+        Verifies X-Hub-Signature-256 with the App's webhook secret (401 on mismatch) and requires X-GitHub-Delivery. Routes by the payload's installation id to the team holding it. `push` and `pull_request` start one run per subscribed pipeline, after GitHub confirms, asked on each delivery, that the installation still covers the repository; a pull request from a fork, a push of no commit, an event with no readable time, and an event older than the team's binding start nothing. `installation` deleted unbinds and suspend or unsuspend marks the binding; anything else is acknowledged with 202 and starts nothing. A delivery whose signed body was processed before, for any team, answers 200 with status `duplicate` and spends nothing. Each run spends one of the team's hourly runs: once the cap is reached the first run answers 429 with Retry-After, and a later run of the same delivery is listed with status `shed`. A redelivery lists the runs it already started as `duplicate` without spending, and spends only on the runs that were shed.
+      security: []
+      responses:
+        "200": {description: "Ping answered, installation event applied, or a duplicate delivery answered with the runs it started (status duplicate)."}
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppWebhookResp
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [dispatched, ignored, duplicate]}
+                  reason: {type: string}
+                  runs:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppRun
+                      type: object
+                      required: [pipeline, run_id, status]
+                      properties:
+                        pipeline: {type: string}
+                        run_id: {type: string}
+                        status: {type: string, enum: [dispatched, duplicate, shed]}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: The team's hourly run cap is reached; Retry-After says when.}
+        "502": {description: GitHub could not be reached to confirm the repository's installation.}
+        "503": {description: The controller's queue is above its shed threshold; Retry-After says when.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -5044,6 +5348,33 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    GitHubAppInstallation:
+      x-sparkwing-go-type: pkg/controller.githubAppInstallationJSON
+      type: object
+      required: [installation_id, account_id, account_login, account_type, suspended, connected_by, created_at, updated_at, manage_url]
+      properties:
+        installation_id: {type: integer, format: int64}
+        account_id: {type: integer, format: int64}
+        account_login: {type: string}
+        account_type: {type: string, enum: [User, Organization]}
+        suspended: {type: boolean, description: GitHub suspended the installation; it starts no runs and mints no tokens.}
+        connected_by: {type: string, description: User id of the owner who connected it.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
+        manage_url: {type: string, description: The GitHub page where the account's owner changes the repositories it covers or uninstalls it.}
+    GitHubAppTrigger:
+      x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
+      type: object
+      required: [repository, repository_id, installation_id, pipeline, push, pull_request, created_by, created_at]
+      properties:
+        repository: {type: string, description: owner/name as GitHub spells it.}
+        repository_id: {type: integer, format: int64}
+        installation_id: {type: integer, format: int64}
+        pipeline: {type: string}
+        push: {type: boolean}
+        pull_request: {type: boolean}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
     IdentityUser:
       x-sparkwing-go-type: pkg/controller.userJSONBody
       type: object

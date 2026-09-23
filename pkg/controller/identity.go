@@ -83,9 +83,15 @@ type capabilitiesAuth struct {
 }
 
 type capabilitiesResp struct {
-	Teams  capabilitiesTeams  `json:"teams"`
-	Auth   capabilitiesAuth   `json:"auth"`
-	Claims capabilitiesClaims `json:"claims"`
+	Teams     capabilitiesTeams      `json:"teams"`
+	Auth      capabilitiesAuth       `json:"auth"`
+	Claims    capabilitiesClaims     `json:"claims"`
+	GitHubApp *capabilitiesGitHubApp `json:"github_app,omitempty"`
+}
+
+type capabilitiesGitHubApp struct {
+	Slug         string `json:"slug"`
+	SourceTokens bool   `json:"source_tokens"`
 }
 
 // capabilitiesClaims tells a runner which claim fields this controller reads,
@@ -102,6 +108,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp.Teams.Enabled = s.MultiTeam()
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
+	if s.githubApp != nil {
+		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug(), SourceTokens: true}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

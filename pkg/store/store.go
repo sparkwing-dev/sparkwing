@@ -2011,10 +2011,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTeamGrantReferenceMigration(ctx, tx)
 	case 53:
 		return ensureColumnsSQLite(ctx, tx, "triggers", triggersCreditCols)
-	// safety: v54 is assigned to the GitHub App installation tables, which
-	// land separately; this step keeps the ladder gapless until they do.
 	case 54:
-		return nil
+		return applyGitHubAppMigrationSQLite(ctx, tx)
 	case 55:
 		return applyDeletionMigrationSQLite(ctx, tx)
 	default:
@@ -2389,7 +2387,7 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 53:
 		return addColumnsTx(ctx, tx, "triggers", triggersCreditCols)
 	case 54:
-		return nil
+		return applyGitHubAppMigrationPostgres(ctx, tx)
 	case 55:
 		return applyDeletionMigrationPostgres(ctx, tx)
 	default:

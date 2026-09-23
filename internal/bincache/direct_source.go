@@ -113,8 +113,10 @@ func DirectRepoURLFromGitHub(fullName string) string {
 // .sparkwing directory. Fetched objects stay in a mirror under the Sparkwing
 // home keyed by the remote, so a later run of the same repository fetches only
 // what it lacks. An empty sha takes the tip of branch.
-func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string) (string, error) {
-	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, defaultDirectOptions())
+func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
+	opts := defaultDirectOptions()
+	opts.githubToken = cred.GitHubToken
+	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
 }
 
 // directOptions bound a direct fetch. A nil lookup skips the address check,
@@ -127,6 +129,7 @@ type directOptions struct {
 	fetchTimeout   time.Duration
 	maxMirrors     int
 	maxMirrorBytes int64
+	githubToken    string
 }
 
 func defaultDirectOptions() directOptions {
@@ -143,6 +146,13 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	remote, sha, err := ValidateDirectSource(repoURL, sha)
 	if err != nil {
 		return "", err
+	}
+	if opts.githubToken != "" {
+		tokenRemote := githubTokenRemote(remote)
+		if tokenRemote == "" {
+			return "", errors.New("direct source: a GitHub source token fetches only a github.com repository")
+		}
+		remote = tokenRemote
 	}
 	if sha == "" {
 		if branch == "" {
@@ -236,15 +246,25 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 
 	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
-	run := func(ctx context.Context, env []string, args ...string) (string, error) {
+	// safety: only the fetch sees the helper and the pipe; every command that
+	// touches the mirror or the checkout runs with localEnv, which reads no
+	// config from the environment at all.
+	if opts.githubToken != "" {
+		fetchEnv = withGitHubCredential(fetchEnv, githubTokenScope)
+	}
+	runWith := func(ctx context.Context, env []string, extra []*os.File, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = env
+		cmd.ExtraFiles = extra
 		killGroupOnCancel(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
 		return strings.TrimSpace(string(out)), nil
+	}
+	run := func(ctx context.Context, env []string, args ...string) (string, error) {
+		return runWith(ctx, env, nil, args...)
 	}
 	git := func(args ...string) (string, error) { return run(ctx, localEnv, args...) }
 	if _, statErr := os.Stat(filepath.Join(mirror, "HEAD")); statErr != nil {
@@ -279,7 +299,16 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 			fetchCtx, cancel = context.WithTimeout(ctx, opts.fetchTimeout)
 			defer cancel()
 		}
-		_, err := run(fetchCtx, fetchEnv, "-C", mirror, "-c", "http.followRedirects=false",
+		var extra []*os.File
+		if opts.githubToken != "" {
+			cred, err := credentialPipe(opts.githubToken)
+			if err != nil {
+				return fmt.Errorf("source token pipe: %w", err)
+			}
+			defer func() { _ = cred.Close() }()
+			extra = []*os.File{cred}
+		}
+		_, err := runWith(fetchCtx, fetchEnv, extra, "-C", mirror, "-c", "http.followRedirects=false",
 			"fetch", "--quiet", "--no-tags", "--depth", "1", "--", remote, ref)
 		if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("timed out after %s", opts.fetchTimeout)
@@ -324,14 +353,21 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 }
 
 // directGitEnv keeps the ambient git config and credentials but drops the
-// variables that would point every command at some other repository.
+// variables that would point every command at some other repository or trace
+// what it sends.
 func directGitEnv(base []string) []string {
 	out := make([]string, 0, len(base))
 	for _, item := range base {
 		name, _, _ := strings.Cut(item, "=")
 		switch name {
 		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-			"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_ALLOW_PROTOCOL":
+			"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_ALLOW_PROTOCOL",
+			"GIT_CURL_VERBOSE":
+			continue
+		}
+		// safety: git's traces write request headers and credential exchanges
+		// to wherever they point, which is how a source token would reach a log.
+		if strings.HasPrefix(name, "GIT_TRACE") {
 			continue
 		}
 		out = append(out, item)

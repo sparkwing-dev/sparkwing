@@ -98,6 +98,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// none, so an older binary keeps claiming and finishing triggers; it opens
 	// no reservation and the next claim overwrites one it left open.
 	53: {triggersCreditCols},
+	// safety: v54 adds the GitHub App tables and no column, and nothing older
+	// reads them, so an older binary keeps writing the migrated database.
 	54: nil,
 	// safety: v55 adds a nullable emailed_at to invitations and a defaulted
 	// teams_created to accounts, which an older binary leaves at their
