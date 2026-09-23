@@ -148,6 +148,7 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
+func (c *Client) OIDCToken(ctx context.Context, runID, audience string) (*OIDCToken, error)
 func (c *Client) ObjectStoreBreakerState(ctx context.Context) (*ObjectStoreBreaker, error)
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
 func (c *Client) OfferExecutorClaim(ctx context.Context, executor ExecutorClaim, runID, nodeID string) (ExecutorClaimOfferResult, error)
@@ -285,6 +286,10 @@ const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
 func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
+type OIDCToken struct {
+	Token     string
+	ExpiresAt time.Time
+}
 type ObjectStoreBreaker struct {
 	Enabled bool
 	Reset   string

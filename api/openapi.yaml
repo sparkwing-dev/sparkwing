@@ -5335,6 +5335,96 @@ paths:
         "502": {description: GitHub could not be reached to confirm the repository's installation.}
         "503": {description: The controller's queue is above its shed threshold; Retry-After says when.}
 
+  /.well-known/jwks.json:
+    get:
+      x-sparkwing-scope: public
+      summary: The OIDC issuer's public signing keys.
+      description: >-
+        The RS256 keys that verify the ID tokens this controller signs: the active key, then the previous one while a rotation is in progress. Each kid is the key's RFC 7638 thumbprint. Cacheable for one hour. See docs/oidc.md.
+      responses:
+        "200":
+          description: The key set.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: internal/oidcissuer.JWKS
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: internal/oidcissuer.JWK
+                      type: object
+                      properties:
+                        kty: {type: string}
+                        kid: {type: string}
+                        use: {type: string}
+                        alg: {type: string}
+                        n: {type: string}
+                        e: {type: string}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /.well-known/openid-configuration:
+    get:
+      x-sparkwing-scope: public
+      summary: The OIDC issuer's discovery document.
+      description: >-
+        OpenID provider metadata for the issuer, which is the controller's external URL. Cloud providers read jwks_uri from it to verify run ID tokens. Answers 404 when the controller holds no OIDC signing key. Cacheable for one hour.
+      responses:
+        "200":
+          description: The discovery document.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: internal/oidcissuer.Discovery
+                type: object
+                properties:
+                  issuer: {type: string}
+                  jwks_uri: {type: string}
+                  response_types_supported: {type: array, items: {type: string}}
+                  subject_types_supported: {type: array, items: {type: string}}
+                  id_token_signing_alg_values_supported: {type: array, items: {type: string}}
+                  claims_supported: {type: array, items: {type: string}}
+                  scopes_supported: {type: array, items: {type: string}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/oidc-token:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Sign an OIDC ID token for a run the caller holds a claim on.
+      description: >-
+        Returns an RS256 ID token whose sub is team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. See docs/oidc.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.OIDCTokenRequest
+              type: object
+              required: [audience]
+              properties:
+                audience: {type: string, maxLength: 256}
+      responses:
+        "200":
+          description: The signed token.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.OIDCTokenResponse
+                type: object
+                properties:
+                  token: {type: string}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {description: A run value cannot appear in the subject.}
+        "429": {description: The claim spent its token budget for this run; see Retry-After.}
+
 components:
   securitySchemes:
     bearerToken:

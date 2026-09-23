@@ -7,6 +7,8 @@ Every route the controller and logs service register, with the scope each requir
 
 | Method | Path | Scope |
 |---|---|---|
+| `GET` | `/.well-known/jwks.json` | `public` |
+| `GET` | `/.well-known/openid-configuration` | `public` |
 | `DELETE` | `/api/v1/accounts/{account}` | `admin` |
 | `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
@@ -144,6 +146,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/oidc-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/plan` | `runs.state` |

@@ -188,6 +188,14 @@ func RunNodeOnce(
 		secrets.NewCached(source, masker).AsResolver())
 
 	ctx = secrets.WithMasker(ctx, masker)
+	ctx = sparkwingruntime.WithOIDCTokenSource(ctx, func(ctx context.Context, audience string) (string, error) {
+		tok, oerr := stateClient.OIDCToken(ctx, runID, audience)
+		if oerr != nil {
+			return "", fmt.Errorf("oidc token for run %s: %w", runID, oerr)
+		}
+		masker.Register(tok.Token)
+		return tok.Token, nil
+	})
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)

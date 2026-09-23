@@ -132,6 +132,20 @@ unlock.
   editors and readers see the names and the variables' values. A secret is
   write-only: its value is never shown after it is saved, and **Update** opens
   an empty field. A variable is shown and edited in place.
+- **controller + sdk:** Sparkwing as an OIDC issuer, so a run assumes AWS,
+  Google Cloud, Azure or Vault roles with no stored cloud key. With
+  `--oidc-key-file` (or `SPARKWING_OIDC_KEY`) and an `https` `--external-url`,
+  the controller serves `/.well-known/openid-configuration` and
+  `/.well-known/jwks.json`, and `POST /api/v1/runs/{id}/oidc-token` signs an
+  RS256 ID token for the claim holder of that run only, with subject
+  `team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>`,
+  where the trigger is `push`, `pull_request`, `cron` or `manual`. A GitHub
+  push delivery now records `GITHUB_EVENT_NAME=push` in its trigger
+  environment, which is what the `push` trigger rests on. Pipeline code calls
+  `sparkwing.OIDCToken(ctx, audience)`. `--oidc-published-key-file` publishes a
+  second key that never signs, for a two-step rotation, and `--oidc-token-ttl`
+  sets the lifetime (default 10m, at most 1h). See
+  [OIDC tokens for cloud roles](docs/oidc.md).
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for

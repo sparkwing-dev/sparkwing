@@ -174,6 +174,9 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if tr.TriggerEnv["GITHUB_DELIVERY"] != "test-delivery-abc" {
 		t.Errorf("env[GITHUB_DELIVERY]=%q", tr.TriggerEnv["GITHUB_DELIVERY"])
 	}
+	if tr.TriggerEnv["GITHUB_EVENT_NAME"] != "push" {
+		t.Errorf("env[GITHUB_EVENT_NAME]=%q want push, the signed event an OIDC push subject rests on", tr.TriggerEnv["GITHUB_EVENT_NAME"])
+	}
 }
 
 func TestWebhookGitHub_BadSignature(t *testing.T) {
