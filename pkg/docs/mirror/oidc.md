@@ -62,7 +62,7 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `pipeline` | The pipeline name. |
 | `trigger` | `push`, `pull_request`, `cron` or `manual`, described below. |
 | `runner_kind` | `runner`, `github-actions`, `user` or `service`, described below. |
-| `ref` | `refs/pull/<number>/head` for a pull request; otherwise `refs/heads/<branch>` when the run names a branch; absent when it names none. |
+| `ref` | `refs/pull/<number>/head` for a pull request; `refs/tags/<tag>` for a tag push; otherwise `refs/heads/<branch>` when the run names a branch; absent when it names none. |
 | `sha` | The commit the run names; absent when it names none. |
 | `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when the run names a repository; absent otherwise. |
 | `run_id` | The run id. |
@@ -78,6 +78,8 @@ For example, a push to `main` delivered by the GitHub webhook and executed by a 
 ```
 team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main
 ```
+
+A tag push keeps `trigger:push` and uses its tag ref, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3`. A policy for a protected branch should match `refs/heads/<branch>` explicitly.
 
 The same pipeline run for pull request 42, even one opened from a branch named `main`:
 

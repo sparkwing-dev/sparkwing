@@ -76,6 +76,111 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	}
 }
 
+func TestGitHubAppTagSubscriptionRoundTrip(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	tr := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "release", Tags: []string{"v*"}}
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(subs) != 1 || len(subs[0].Tags) != 1 || subs[0].Tags[0] != "v*" || subs[0].Push || subs[0].PullRequest {
+		t.Fatalf("tag-only subscription = %+v, %v", subs, err)
+	}
+	tr.Tags, tr.Push = nil, true
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err = acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || len(subs[0].Tags) != 0 || !subs[0].Push {
+		t.Fatalf("replaced subscription = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppTagSubscriptionMigrationPreservesBranchSubscription(t *testing.T) {
+	target := storetest.New(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE github_app_triggers DROP COLUMN on_tags`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 65`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	acme = teamHandle(t, st, "acme")
+	subs, err := acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || !subs[0].Push || len(subs[0].Tags) != 0 {
+		t.Fatalf("subscription after v65 migration = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppTagPatternMigrationDisablesBooleanTags(t *testing.T) {
+	target := storetest.New(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`UPDATE github_app_triggers SET on_tags = 1`,
+		`ALTER TABLE github_app_triggers DROP COLUMN tag_patterns`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 66`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	acme = teamHandle(t, st, "acme")
+	subs, err := acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || !subs[0].Push || len(subs[0].Tags) != 0 {
+		t.Fatalf("subscription after v64 migration = %+v, %v", subs, err)
+	}
+}
+
 func TestGitHubAppConnectStateIsUsedOnce(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

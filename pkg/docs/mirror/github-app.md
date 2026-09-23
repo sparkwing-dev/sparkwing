@@ -59,16 +59,16 @@ An installation belongs to one team. Connecting one bound to another team answer
 
 An installation stops being bound when GitHub reports it deleted, when a team owner calls `DELETE /api/v1/team/github-app/installations/{installation_id}`, or when the operator calls `DELETE /api/v1/github-app/installations/{installation_id}`, which is how a binding moves to another team. Unbinding does not uninstall the App from GitHub.
 
-## Runs from pushes and pull requests
+## Runs from branch pushes, tag pushes and pull requests
 
-A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, pull_request}`. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block.
+A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, tags, pull_request}`. `push` selects branch pushes; `tags` is a list of tag name glob patterns, such as `["v*"]`; `pull_request` selects pull requests. An empty `tags` list selects no tags. At least one event must be selected. Patterns use Go `path.Match` semantics: `*` does not cross `/`, so `v*` matches `v1.2.3` but not `v1/nested`. A subscription accepts at most 10 patterns of up to 128 bytes each. GitHub does not protect tags by default. Configure GitHub tag protection rules for release tags before subscribing a release pipeline. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block.
 
-`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For `push` and for `pull_request` (`opened`, `synchronize`, `reopened`) it creates one trigger in that team per subscribed pipeline, recording the branch, commit, repository and the installation id.
+`POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For branch and matching tag `push` events and for `pull_request` (`opened`, `synchronize`, `reopened`) it creates one trigger in that team per subscribed pipeline, recording the branch or tag ref, commit, repository and installation id. Tag triggers carry `GITHUB_REF=refs/tags/<tag>`, `GITHUB_REF_TYPE=tag` and `GITHUB_TAG=<tag>` in their trigger and node environments. Branch triggers carry `GITHUB_REF=refs/heads/<branch>` and `GITHUB_REF_TYPE=branch`. A tag node also gets `GITHUB_REF_NAME=<tag>`. The operator webhook at `POST /webhooks/github/{pipeline}` acknowledges tag pushes without starting runs.
 
 A delivery starts nothing, and is acknowledged with the reason, when:
 
 - it is a pull request from a fork (see below);
-- it is a push of no commit: a deleted branch, or an `after` of all zeros;
+- it is a push of no commit: a deleted branch or tag, or an `after` of all zeros;
 - the event is older than the team's binding of the installation, going by the push's `repository.pushed_at` or the pull request's `updated_at`, so an event meant for the installation's previous team does not run in the next one;
 - the event carries no such time, or one the controller cannot read, since nothing then shows it is not older than the binding;
 - GitHub no longer reports the installation as covering the repository. The controller asks GitHub on every delivery that would start a run, never from a cached answer.

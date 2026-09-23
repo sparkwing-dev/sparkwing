@@ -56,6 +56,7 @@ unlock.
   and the controller derives machine, GitHub Actions, cloud, or cluster sites
   from the claim credential and holder when available. Unknown sites leave no
   badge.
+- **controller (Breaking):** GitHub App subscriptions select tag pushes with `tags: ["v*"]` or other explicit tag globs. Empty `tags` selects none; replace any `tags: true` subscription with a pattern list. Existing boolean tag subscriptions stop matching after schema v66 adds the default-off pattern column. Operator GitHub webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`.
 
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant

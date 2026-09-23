@@ -513,3 +513,30 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 		}
 	}
 }
+
+func TestOIDCTokenTagPushNamesTagRef(t *testing.T) {
+	ctx := context.Background()
+	f := newOIDCFixture(t)
+	f.run(t, f.acme, store.Trigger{
+		ID: "run-tag", Pipeline: "deploy", TriggerSource: "github", GitSHA: "0123456789abcdef0123456789abcdef01234567",
+		GithubOwner: "acme", GithubRepo: "api",
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3"},
+	})
+	raw := f.runner(t, f.acme, "agent:acme")
+	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
+	c := client.NewWithToken(srv.URL, nil, raw)
+	if _, err := c.ClaimSpecificTrigger(ctx, "run-tag", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	tok, err := c.OIDCToken(ctx, "run-tag", "sts.amazonaws.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := verifyAgainst(t, srv, tok.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.Sub != "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/tags/v1.2.3" || claims.Ref != "refs/tags/v1.2.3" {
+		t.Fatalf("tag sub/ref = %q/%q", claims.Sub, claims.Ref)
+	}
+}

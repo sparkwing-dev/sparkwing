@@ -439,27 +439,32 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 }
 
 type githubAppTriggerReq struct {
-	Repository  string `json:"repository"`
-	Pipeline    string `json:"pipeline"`
-	Push        bool   `json:"push"`
-	PullRequest bool   `json:"pull_request"`
+	Repository  string   `json:"repository"`
+	Pipeline    string   `json:"pipeline"`
+	Push        bool     `json:"push"`
+	Tags        []string `json:"tags"`
+	PullRequest bool     `json:"pull_request"`
 }
 
 type githubAppTriggerJSON struct {
-	Repository     string `json:"repository"`
-	RepositoryID   int64  `json:"repository_id"`
-	InstallationID int64  `json:"installation_id"`
-	Pipeline       string `json:"pipeline"`
-	Push           bool   `json:"push"`
-	PullRequest    bool   `json:"pull_request"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      int64  `json:"created_at"`
+	Repository     string   `json:"repository"`
+	RepositoryID   int64    `json:"repository_id"`
+	InstallationID int64    `json:"installation_id"`
+	Pipeline       string   `json:"pipeline"`
+	Push           bool     `json:"push"`
+	Tags           []string `json:"tags"`
+	PullRequest    bool     `json:"pull_request"`
+	CreatedBy      string   `json:"created_by"`
+	CreatedAt      int64    `json:"created_at"`
 }
 
 func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
+	if tr.Tags == nil {
+		tr.Tags = []string{}
+	}
 	return githubAppTriggerJSON{
 		Repository: tr.Repository, RepositoryID: tr.RepositoryID, InstallationID: tr.InstallationID,
-		Pipeline: tr.Pipeline, Push: tr.Push, PullRequest: tr.PullRequest,
+		Pipeline: tr.Pipeline, Push: tr.Push, Tags: tr.Tags, PullRequest: tr.PullRequest,
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
 }
@@ -505,8 +510,12 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !req.Push && !req.PullRequest {
-		writeError(w, http.StatusBadRequest, errors.New("subscribe to push, pull_request or both"))
+	if err := store.ValidateGitHubTagPatterns(req.Tags); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !req.Push && len(req.Tags) == 0 && !req.PullRequest {
+		writeError(w, http.StatusBadRequest, errors.New("subscribe to push, tags or pull_request"))
 		return
 	}
 	repo, _ := store.ParseGitHubRepo(slug)
@@ -537,7 +546,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	}
 	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
-		Pipeline: pipeline, Push: req.Push, PullRequest: req.PullRequest,
+		Pipeline: pipeline, Push: req.Push, Tags: req.Tags, PullRequest: req.PullRequest,
 		CreatedBy: p.AccountID,
 	}, time.Now())
 	if err != nil {
@@ -545,7 +554,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.logger.Info("github app trigger written", "team", string(p.Team), "repository", saved.Repository,
-		"pipeline", saved.Pipeline, "push", saved.Push, "pull_request", saved.PullRequest,
+		"pipeline", saved.Pipeline, "push", saved.Push, "tags", saved.Tags, "pull_request", saved.PullRequest,
 		"by", p.AccountID)
 	writeJSON(w, http.StatusOK, githubAppTriggerOut(saved))
 }

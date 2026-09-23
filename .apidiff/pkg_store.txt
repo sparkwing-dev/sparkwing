@@ -889,6 +889,7 @@ type GitHubAppTrigger struct {
 	InstallationID int64
 	Pipeline       string
 	Push           bool
+	Tags           []string
 	PullRequest    bool
 	CreatedBy      string
 	CreatedAt      time.Time
@@ -2389,6 +2390,7 @@ func ValidComputeLimit(name string) bool
 func ValidCreditGrantKind(kind string) bool
 func ValidStoragePrincipal(name string) bool
 func ValidateEventKind(kind string) error
+func ValidateGitHubTagPatterns(patterns []string) error
 func ValidateRawToken(raw, kind string) error
 func ValidateRunInvocation(r Run) error
 func ValidateSlug(slug string) error

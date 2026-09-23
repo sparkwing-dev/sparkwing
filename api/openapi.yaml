@@ -5781,7 +5781,7 @@ paths:
     put:
       x-sparkwing-scope: team.admin
       tags: [teams]
-      summary: Subscribe a pipeline to a repository's pushes and pull requests.
+      summary: Subscribe a pipeline to a repository's branch pushes, matching tag pushes and pull requests.
       description: >-
         Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
       requestBody:
@@ -5796,6 +5796,11 @@ paths:
                 repository: {type: string, description: owner/name.}
                 pipeline: {type: string}
                 push: {type: boolean}
+                tags:
+                  type: array
+                  maxItems: 10
+                  items: {type: string, maxLength: 128}
+                  description: Tag name globs matched with Go path.Match; empty selects no tags.
                 pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
       responses:
         "200":
@@ -6592,13 +6597,17 @@ components:
     GitHubAppTrigger:
       x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
       type: object
-      required: [repository, repository_id, installation_id, pipeline, push, pull_request, created_by, created_at]
+      required: [repository, repository_id, installation_id, pipeline, push, tags, pull_request, created_by, created_at]
       properties:
         repository: {type: string, description: owner/name as GitHub spells it.}
         repository_id: {type: integer, format: int64}
         installation_id: {type: integer, format: int64}
         pipeline: {type: string}
         push: {type: boolean}
+        tags:
+          type: array
+          maxItems: 10
+          items: {type: string, maxLength: 128}
         pull_request: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}

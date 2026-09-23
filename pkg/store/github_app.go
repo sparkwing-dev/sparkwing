@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -39,6 +41,7 @@ type GitHubAppTrigger struct {
 	InstallationID int64
 	Pipeline       string
 	Push           bool
+	Tags           []string
 	PullRequest    bool
 	CreatedBy      string
 	CreatedAt      time.Time
@@ -69,6 +72,8 @@ CREATE TABLE IF NOT EXISTS github_app_triggers (
     repository         TEXT NOT NULL,
     installation_id    INTEGER NOT NULL,
     on_push            INTEGER NOT NULL DEFAULT 0,
+    on_tags            INTEGER NOT NULL DEFAULT 0,
+    tag_patterns       TEXT NOT NULL DEFAULT '[]',
     on_pull_request    INTEGER NOT NULL DEFAULT 0,
     created_by         TEXT NOT NULL DEFAULT '',
     created_at         INTEGER NOT NULL,
@@ -87,6 +92,28 @@ CREATE TABLE IF NOT EXISTS github_app_deliveries (
 `
 
 var githubAppTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubAppTablesSQLite)
+
+var githubAppTriggerTagsCols = map[string]string{"on_tags": "INTEGER NOT NULL DEFAULT 0"}
+var githubAppTriggerPatternsCols = map[string]string{"tag_patterns": "TEXT NOT NULL DEFAULT '[]'"}
+
+const maxGitHubTagPatterns = 10
+const maxGitHubTagPatternLength = 128
+
+// ValidateGitHubTagPatterns checks the limits and glob syntax of a subscription's tag patterns.
+func ValidateGitHubTagPatterns(patterns []string) error {
+	if len(patterns) > maxGitHubTagPatterns {
+		return fmt.Errorf("%w: at most %d tag patterns are allowed", ErrInvalidInput, maxGitHubTagPatterns)
+	}
+	for _, pattern := range patterns {
+		if pattern == "" || len(pattern) > maxGitHubTagPatternLength {
+			return fmt.Errorf("%w: tag patterns must have 1 to %d bytes", ErrInvalidInput, maxGitHubTagPatternLength)
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("%w: invalid tag pattern %q: %v", ErrInvalidInput, pattern, err)
+		}
+	}
+	return nil
+}
 
 func applyGitHubAppMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	for _, stmt := range splitStatements(githubAppTablesSQLite) {
@@ -257,7 +284,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	return err
 }
 
-const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, on_pull_request,
+const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,
        created_by, created_at`
 
 func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
@@ -265,9 +292,13 @@ func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, erro
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
 		var push, pr int
+		var patterns string
 		var created int64
-		if err := rows.Scan(&tr.RepositoryID, &tr.Pipeline, &tr.Repository, &tr.InstallationID, &push, &pr,
+		if err := rows.Scan(&tr.RepositoryID, &tr.Pipeline, &tr.Repository, &tr.InstallationID, &push, &patterns, &pr,
 			&tr.CreatedBy, &created); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(patterns), &tr.Tags); err != nil {
 			return nil, err
 		}
 		tr.Push, tr.PullRequest = push != 0, pr != 0
@@ -281,27 +312,37 @@ func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, erro
 // same repository and pipeline. The installation must be one t holds.
 func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error) {
 	repo, ok := ParseGitHubRepo(tr.Repository)
-	if !ok || tr.RepositoryID <= 0 || strings.TrimSpace(tr.Pipeline) == "" || (!tr.Push && !tr.PullRequest) {
+	if !ok || tr.RepositoryID <= 0 || strings.TrimSpace(tr.Pipeline) == "" || (!tr.Push && len(tr.Tags) == 0 && !tr.PullRequest) {
 		return GitHubAppTrigger{}, fmt.Errorf("%w: a subscription needs a repository, a pipeline and at least one event", ErrInvalidInput)
+	}
+	if err := ValidateGitHubTagPatterns(tr.Tags); err != nil {
+		return GitHubAppTrigger{}, err
 	}
 	if _, err := t.GitHubAppInstallation(ctx, tr.InstallationID); err != nil {
 		return GitHubAppTrigger{}, err
 	}
 	tr.Team, tr.Repository, tr.CreatedAt = t.team, repo.Slug(), now.UTC().Truncate(time.Second)
+	if tr.Tags == nil {
+		tr.Tags = []string{}
+	}
+	patterns, err := json.Marshal(tr.Tags)
+	if err != nil {
+		return GitHubAppTrigger{}, err
+	}
 	flag := func(b bool) int {
 		if b {
 			return 1
 		}
 		return 0
 	}
-	_, err := t.s.exec(ctx, `
+	_, err = t.s.exec(ctx, `
 		INSERT INTO github_app_triggers (team, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
-		    on_push = excluded.on_push, on_pull_request = excluded.on_pull_request,
+		    on_push = excluded.on_push, tag_patterns = excluded.tag_patterns, on_pull_request = excluded.on_pull_request,
 		    created_by = excluded.created_by, created_at = excluded.created_at`,
-		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push),
+		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
 		flag(tr.PullRequest), tr.CreatedBy, tr.CreatedAt.Unix())
 	if err != nil {
 		return GitHubAppTrigger{}, err
