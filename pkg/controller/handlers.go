@@ -765,7 +765,9 @@ func validateSubmittedRepoSlug(env map[string]string) error {
 	return errors.New("trigger.env GITHUB_REPOSITORY must be an owner/name slug")
 }
 
-// safety: the commit-status reporter spends the controller's GitHub token on whatever these name.
+// safety: the commit-status reporter spends the controller's GitHub token on
+// whatever these name, and only a delivery signed by an operator's binding is
+// trusted to name them.
 func refuseForgedGitHubProvenance(ctx context.Context, source string, env map[string]string) error {
 	p, ok := PrincipalFromContext(ctx)
 	if !ok || p.HasScope(ScopeAdmin) {

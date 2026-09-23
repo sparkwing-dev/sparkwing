@@ -1080,8 +1080,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
-	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook), ScopeTeamAdmin))
-	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook), ScopeTeamAdmin))
+	// safety: nothing proves a team controls the repository it would bind, and a
+	// binding lets its secret sign for that repository, so binding is the operator's.
+	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
+	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)

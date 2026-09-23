@@ -186,8 +186,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/users` | `admin` |
 | `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
-| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` or `team.admin` |
-| `POST` | `/api/v1/webhooks/github/bindings` | `admin` or `team.admin` |
+| `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
+| `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
 

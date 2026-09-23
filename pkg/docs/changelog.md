@@ -530,6 +530,15 @@ unlock.
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
 
+- **controller:** only the operator binds a GitHub repository to a webhook (Breaking)
+  `POST` and `DELETE /api/v1/webhooks/github/bindings` admitted `team.admin`,
+  and nothing proved a team controlled the repository it named. A team that
+  bound another organization's repository with a secret it chose could sign
+  deliveries for it, have the controller post a commit status to that
+  repository with its own GitHub token, and read the operator's cached mirror
+  of it. The routes require `admin` again. A binding stored in any team other
+  than the operator's posts no commit status and opens no Git cache mirror.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

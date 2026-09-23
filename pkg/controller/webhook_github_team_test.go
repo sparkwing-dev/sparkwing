@@ -40,13 +40,12 @@ func TestGitHubWebhookBinding_ADeliveryRunsInTheTeamWhoseSecretSignedIt(t *testi
 	st := openSQLiteBindingStore(t)
 	f := newBindingFixture(t, st, nil)
 	tenantB := teamTenant(t, st, teamB)
-	adminB := teamToken(t, tenantB, controller.ScopeTeamAdmin)
 
 	const secretB = "team-b-webhook-secret-fixture"
-	if got := postBinding(t, f.server.URL, adminB, controller.GitHubWebhookBindingRequest{
+	if err := tenantB.PutGitHubWebhookBinding(context.Background(), store.GitHubWebhookBinding{
 		Pipeline: "build", Repo: "acme/widgets", Secret: secretB,
-	}); got != http.StatusCreated {
-		t.Fatalf("team B connect = %d, want 201", got)
+	}); err != nil {
+		t.Fatalf("team B binding: %v", err)
 	}
 	f.connect(t, controller.GitHubWebhookBindingRequest{
 		Pipeline: "build", Repo: "acme/widgets", Secret: bindingSecret,
@@ -105,5 +104,42 @@ func TestGitHubWebhookBinding_ADeliveryRunsInTheTeamWhoseSecretSignedIt(t *testi
 	defer func() { _ = bad.Body.Close() }()
 	if bad.StatusCode != http.StatusUnauthorized {
 		t.Errorf("delivery signed by neither team = %d, want 401", bad.StatusCode)
+	}
+}
+
+// Nothing proves a team controls the repository it names, and a binding makes
+// that team's secret sign for the repository, so connecting one is the
+// operator's alone.
+func TestGitHubWebhookBinding_ATeamAdminCannotConnectARepository(t *testing.T) {
+	st := openSQLiteBindingStore(t)
+	f := newBindingFixture(t, st, nil)
+	tenantB := teamTenant(t, st, teamB)
+	adminB := teamToken(t, tenantB, controller.ScopeTeamAdmin)
+
+	if got := postBinding(t, f.server.URL, adminB, controller.GitHubWebhookBindingRequest{
+		Pipeline: "build", Repo: "victim/app", Secret: "attacker-chosen",
+	}); got != http.StatusForbidden {
+		t.Fatalf("team admin connect = %d, want 403", got)
+	}
+	req, err := http.NewRequest(http.MethodDelete,
+		f.server.URL+"/api/v1/webhooks/github/bindings?pipeline=build&repo=victim/app", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+adminB)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("team admin disconnect = %d, want 403", resp.StatusCode)
+	}
+	bindings, err := tenantB.ListGitHubWebhookBindings(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 0 {
+		t.Fatalf("team B holds bindings %+v", bindings)
 	}
 }
