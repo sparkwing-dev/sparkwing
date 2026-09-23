@@ -165,8 +165,12 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 	}
 	now := time.Now().UTC()
 	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
-	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), principal,
+	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), binding, principal,
 		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA}, runnerTokenScopes, githubRunnerCredentialTTL, now)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: errNoGitHubBinding.Error()})
+		return
+	}
 	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
 		setRetryAfter(w, time.Minute)
 		writeError(w, http.StatusTooManyRequests, errors.New(
@@ -424,7 +428,7 @@ func (s *Server) handleRemoveGitHubRunnerBinding(w http.ResponseWriter, r *http.
 // pushes run the team's work for that repository on GitHub Actions minutes.
 func GitHubRunnerWorkflow(controllerURL, team string) string {
 	return `# Runs Sparkwing work for this repository on this repository's GitHub
-# Actions minutes. The controller hands the job only nodes of runs for this
+# Actions minutes. The controller hands the job only triggers and nodes for this
 # repository, and the job exits once the queue has been empty for --idle-exit.
 name: sparkwing
 on:

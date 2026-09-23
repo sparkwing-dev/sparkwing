@@ -26,6 +26,11 @@ unlock.
   per run with bounded backoff. Run and trigger heartbeats and node touch
   requests stay available when a token's request budget is exhausted, so
   polling cannot cause the controller to reap an active run.
+- **controller:** GitHub Actions runner credentials claim only signed GitHub
+  push deliveries for their repository, branch and commit. A retry, child run,
+  pull request or manually submitted trigger with matching Git fields is
+  refused. GitHub App pushes record their event name for this check. Unbinding
+  a repository during credential exchange now stops or revokes the credential.
 
 ### Added
 
@@ -872,6 +877,8 @@ unlock.
   closes. The queue status dot pulses when the daemon status changes, the
   overview reserves its card layout while loading, and tooltips appear at
   their measured position.
+- **runner:** GitHub Actions jobs claim and plan their own push's triggers in
+  process, so App-created pipelines start without a warm runner pool.
 
 - **controller:** the controller measures its `--bucket-store` whether or not
   a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0

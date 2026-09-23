@@ -7232,7 +7232,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery, team
+       idempotency_key, claim_seq, webhook_delivery, team, webhook_replay_key
   FROM triggers
  WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
    AND NOT EXISTS (
@@ -8612,7 +8612,7 @@ func scanTriggerCandidates(ctx context.Context, tx *storeTx, query string, args 
 			&c.t.ID, &c.t.Pipeline, &c.argsJSON, &c.t.TriggerSource, &c.t.TriggerUser,
 			&c.envJSON, &c.t.GitBranch, &c.t.GitSHA, &c.t.Status, &c.createdNS, &parent,
 			&c.t.Repo, &c.t.RepoURL, &c.t.GithubOwner, &c.t.GithubRepo, &repoInheritedInt, &c.t.RetryOf, &c.t.RetrySource, &c.t.ParentNodeID, &fullInt,
-			&c.t.IdempotencyKey, &c.t.ClaimSeq, &c.t.WebhookDelivery, &c.t.Team,
+			&c.t.IdempotencyKey, &c.t.ClaimSeq, &c.t.WebhookDelivery, &c.t.Team, &c.t.WebhookReplayKey,
 		); err != nil {
 			return nil, err
 		}

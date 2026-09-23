@@ -1,6 +1,6 @@
 # GitHub Actions runners
 
-A repository's own GitHub Actions minutes can run its Sparkwing work. A workflow in the repository starts `sparkwing-runner`, which proves which repository it runs in with the job's GitHub ID token, claims only that team's nodes for that repository, and exits when the queue stays empty.
+A repository's own GitHub Actions minutes can run its Sparkwing work. A workflow in the repository starts `sparkwing-runner`, which proves which repository it runs in with the job's GitHub ID token, claims that team's triggers and nodes for the job's repository and push, and exits when the queue stays empty.
 
 Placement order for a team's work:
 
@@ -11,7 +11,7 @@ Placement order for a team's work:
 
 GitHub's terms allow Actions to be used for the production, testing, deployment or publication of the software project in the repository where the workflow runs. The controller enforces that boundary: a job's credential claims a node, a trigger, or reads a run only when the run's trigger names the job's repository in every repository field it carries (`github_owner`/`github_repo`, `repo`, `repo_url`, and `GITHUB_REPOSITORY` in its environment). The comparison is case-insensitive and accepts the `https`, `ssh` and `git@github.com:` spellings of `github.com/<owner>/<name>`.
 
-A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit, so a workflow pushed to a feature branch cannot claim `main`'s runs or read the secrets those runs are given.
+A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit from a signed GitHub push delivery. A trigger must carry `trigger_source=github`, `GITHUB_EVENT_NAME=push`, a webhook delivery and replay key, with no retry or parent run. Pull requests, retries, child runs, manual submissions and scheduled triggers remain outside the credential even when they name the same repository, branch and commit.
 
 Only `push`, `workflow_dispatch` and `schedule` jobs on a branch (`refs/heads/...`) get a credential. The exchange answers 403 for any other event, including `pull_request`, which runs a contributor's code, and `pull_request_target` and `workflow_run`, which hand the base repository's privileges to input a fork controls, and for a tag or pull request ref or a token that names no commit.
 
@@ -46,7 +46,7 @@ The workflow stores no secret. The job requests an ID token with `permissions: i
 
 ```yaml
 # Runs Sparkwing work for this repository on this repository's GitHub
-# Actions minutes. The controller hands the job only nodes of runs for this
+# Actions minutes. The controller hands the job only triggers and nodes for this
 # repository, and the job exits once the queue has been empty for --idle-exit.
 name: sparkwing
 on:
@@ -77,7 +77,7 @@ jobs:
             --idle-exit 2m
 ```
 
-`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it.
+`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
 
 ## What the credential can do
 
@@ -89,14 +89,14 @@ Every request the credential makes passes a fence that lists the routes it may u
 
 | Route | Rule |
 | --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs for the repository at the job's branch and commit; executor offers are refused |
-| `POST /api/v1/triggers/claim` | the same filter on triggers |
-| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, and carry the job's branch and commit; the cache grant route answers 403 |
+| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit; executor offers are refused |
+| `POST /api/v1/triggers/claim` | the same repository, branch and commit filter, restricted to signed GitHub push deliveries with no retry or parent run |
+| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, carry the job's branch and commit, and come from a signed GitHub push delivery; the cache grant route answers 403 |
 | `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
 | anything else | 403 |
 
 ## Runner behavior
 
-`sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims nodes only. It stops taking new nodes ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.
+`sparkwing-runner runner --github-actions` reads `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, exchanges the token, adds the `github-actions` label, and claims both triggers and nodes. It plans claimed triggers in the job with the in-process node runner. It stops taking new work ten minutes before the credential expires. `--idle-exit` ends the job once no node has been held for that long, and a node in flight keeps the job alive whatever the flag says.
 
 A claimed node fetches its source through the controller's run-scoped Git cache, not from the job's `actions/checkout` directory.

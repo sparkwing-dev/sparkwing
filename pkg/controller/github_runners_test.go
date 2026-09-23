@@ -107,7 +107,9 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	owner, name, _ := strings.Cut(slug, "/")
 	now := time.Now()
 	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", Repo: slug, GithubOwner: owner, GithubRepo: name, CreatedAt: now,
+		ID: runID, Pipeline: "build", TriggerSource: "github", Repo: slug,
+		GithubOwner: owner, GithubRepo: name, TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"}, CreatedAt: now,
+		WebhookDelivery: runID, WebhookReplayKey: "signed-" + runID,
 		GitBranch: branch, GitSHA: sha,
 	}, store.Run{
 		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug, GithubOwner: owner, GithubRepo: name,
@@ -332,6 +334,10 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 	}
 
 	f.workAt(owner.team, "run-feature", "Acme/Widgets", "feature", featureSHA)
+	var trigger store.Trigger
+	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, &trigger); code != http.StatusOK || trigger.ID != "run-feature" {
+		t.Fatalf("claim own push's trigger = %d %+v, want run-feature", code, trigger)
+	}
 	var node struct {
 		RunID string `json:"run_id"`
 	}
