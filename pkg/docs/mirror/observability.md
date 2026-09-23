@@ -738,8 +738,8 @@ unlimited until an operator sets one.
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 | `--egress-daily-cap-bytes` | yes | yes | yes | Bytes the process may send in a UTC day. Past it, every download it serves answers `429` until the day rolls, whoever asks. The per-principal budgets bound one caller; this bounds the month's bill at 31 times the cap however many principals share it. |
-| `--egress-team-daily-free-bytes` | no | no | yes | Bytes the cache serves one team without credits through its grants in a UTC day, 5 GiB by default. Past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
-| `--egress-team-daily-funded-bytes` | no | no | yes | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
+| `--egress-team-daily-free-bytes` | no | no | yes | Bytes the cache serves one team without credits through its grants in a UTC day, 5 GiB by default (`SPARKWING_CACHE_EGRESS_TEAM_DAILY_FREE_BYTES`). Past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
+| `--egress-team-daily-funded-bytes` | no | no | yes | The same cap for a team with credits, 50 GiB by default (`SPARKWING_CACHE_EGRESS_TEAM_DAILY_FUNDED_BYTES`). `0` turns it off. |
 
 The controller's two concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming
