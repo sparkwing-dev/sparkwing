@@ -81,6 +81,10 @@ var reviewedUnscopedSQL = map[string]string{
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
+	"(*Store).expiredRetainedRuns": "the retention window is the deployment's, so the sweep finds every team's " +
+		"expired runs and releases each against the team read off its own row",
+	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
+		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 }

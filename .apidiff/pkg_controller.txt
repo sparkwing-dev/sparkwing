@@ -56,6 +56,7 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 const ClaimPollInterval = 500 * time.Millisecond
+const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5

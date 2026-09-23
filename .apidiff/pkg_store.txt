@@ -800,6 +800,12 @@ type GitHubWebhookBinding struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
+type IdentityPrune struct {
+	Invitations             int64
+	Tokens                  int64
+	Sessions                int64
+	GitHubRunnerCredentials int64
+}
 const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 type InsufficientCreditsError struct {
@@ -1356,6 +1362,7 @@ type SpawnedChild struct {
 	Pipeline     string
 	ChildRunID   string
 }
+const SpentIdentityRetention = 30 * 24 * time.Hour
 func SplitProfileKey(key string) (repo, pipeline string)
 const StepCancelled = "cancelled"
 const StepFailed = "failed"
@@ -1399,6 +1406,8 @@ type StorageQuotaError struct {
 	Used      int64
 	Allowed   int64
 	Requested int64
+
+	Remedy string
 }
 func (e *StorageQuotaError) Error() string
 func (e *StorageQuotaError) Unwrap() error
@@ -1537,6 +1546,7 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
+func (s *Store) ExpireRetainedRuns(ctx context.Context, now time.Time) ([]TeamRetentionExpiry, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FailNodeForUnpricedClass(
@@ -1644,6 +1654,7 @@ func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
+func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
@@ -1688,6 +1699,7 @@ func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.
 func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SeedStorageRetention(ctx context.Context, days int64) (bool, error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
 func (s *Store) SetComputeLimits(ctx context.Context, updates map[string]int64) (_ ComputeLimits, err error)
@@ -1771,6 +1783,11 @@ type TeamInfo struct {
 	CreatedBy   string
 }
 func (t TeamInfo) Label() string
+type TeamRetentionExpiry struct {
+	Team  Team
+	Runs  int64
+	Bytes int64
+}
 type TeamSecret struct {
 	Team   Team
 	Secret Secret

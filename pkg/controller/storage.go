@@ -76,6 +76,7 @@ func (s *Server) runStorageMaintenance(ctx context.Context, interval time.Durati
 }
 
 func (s *Server) maintainStorage(ctx context.Context) {
+	s.seedCloudRetention(ctx)
 	settings, err := s.store.StorageSettings(ctx)
 	if err != nil {
 		s.logger.Error("storage settings read failed", "err", err)
@@ -94,6 +95,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
+	s.maintainTeamStorage(ctx, now)
 	s.billRetainedStorage(ctx, now)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {

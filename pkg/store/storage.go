@@ -75,11 +75,17 @@ type StorageQuotaError struct {
 	Used      int64
 	Allowed   int64
 	Requested int64
+	// Remedy, when set, tells the caller what lifts the limit.
+	Remedy string
 }
 
 func (e *StorageQuotaError) Error() string {
-	return fmt.Sprintf("storage quota exceeded: %s for team %s: %d of %d %s used and this write adds %d",
+	msg := fmt.Sprintf("storage quota exceeded: %s for team %s: %d of %d %s used and this write adds %d",
 		e.Limit, e.Principal, e.Used, e.Allowed, e.Unit, e.Requested)
+	if e.Remedy != "" {
+		msg += "; " + e.Remedy
+	}
+	return msg
 }
 
 // Unwrap reports [ErrStorageQuota], so a caller matches the condition without
