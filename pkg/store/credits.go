@@ -798,11 +798,7 @@ func (s *Store) recordCreditGrant(
 	// leave a payment with no credits. Only an operator's free grant meets the
 	// cap at the ledger.
 	if req.Kind == CreditGrantFree {
-		before, err := creditBalanceTx(ctx, tx, team)
-		if err != nil {
-			return CreditGrantResult{}, err
-		}
-		if err := refuseAboveBalanceCap(before, req.AmountMicro); err != nil {
+		if err := refuseAboveBalanceCapTx(ctx, tx, team, req.AmountMicro, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err
 		}
 	}

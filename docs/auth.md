@@ -181,7 +181,7 @@ cannot both open one. The grant that follows a verified payment is never
 refused by the cap, because the money has already moved; the balance can pass
 the cap only by a payment settled after its session expired. A `paid` grant is
 at most one purchase, $500. The grant route still refuses an operator's `free`
-grant past the cap. A replay of a grant already written is answered as usual.
+grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
 
 Purchases are final, so a refund is the operator's decision and is made by
 hand. `sparkwing cluster credits refund --payment <pi_...>` takes back what the

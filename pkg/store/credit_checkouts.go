@@ -79,20 +79,8 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		`DELETE FROM credit_checkouts WHERE team = ? AND expires_at <= ?`, string(t.team), nowNS); err != nil {
 		return "", err
 	}
-	balance, err := creditBalanceTx(ctx, tx, t.team)
-	if err != nil {
+	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
 		return "", err
-	}
-	var open sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
-		string(t.team), nowNS).Scan(&open); err != nil {
-		return "", err
-	}
-	if balance+open.Int64+amountMicro > MaxTeamBalanceMicro {
-		return "", &CreditBalanceCapError{
-			BalanceMicro: balance, OpenMicro: open.Int64, AmountMicro: amountMicro, CapMicro: MaxTeamBalanceMicro,
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credit_checkouts (id, team, amount_micro, opened_at, expires_at)
@@ -100,6 +88,15 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", fmt.Errorf("credits: record the checkout: %w", err)
 	}
 	return id, tx.Commit()
+}
+
+// openCheckoutMicroTx is what the team's checkouts still open may add.
+func openCheckoutMicroTx(ctx context.Context, tx *storeTx, team Team, nowNS int64) (int64, error) {
+	var open sql.NullInt64
+	err := tx.QueryRowContext(ctx,
+		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
+		string(team), nowNS).Scan(&open)
+	return open.Int64, err
 }
 
 // AttachCreditCheckout names the payment session a checkout opened and the

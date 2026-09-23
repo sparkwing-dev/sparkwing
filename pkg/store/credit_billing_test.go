@@ -155,6 +155,35 @@ func TestOpenCheckoutsCountAgainstTheCap(t *testing.T) {
 	}
 }
 
+// An operator's free grant meets the same cap a checkout does, counting the
+// checkouts still open, so a gift cannot fill the room an open payment needs.
+func TestFreeGrantCountsOpenCheckoutsAgainstTheCap(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	dollars := func(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantFree, AmountMicro: dollars(4000), Reference: "gift", CreatedBy: "ops",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.OpenCreditCheckout(ctx, dollars(500), time.Now(), 31*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	_, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantFree, AmountMicro: dollars(1000), Reference: "gift_2", CreatedBy: "ops",
+	})
+	var capErr *store.CreditBalanceCapError
+	if !errors.As(err, &capErr) || capErr.OpenMicro != dollars(500) {
+		t.Fatalf("a $1,000 free grant beside a $500 open checkout on $4,000 = %v, want a refusal naming the checkout", err)
+	}
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantFree, AmountMicro: dollars(500), Reference: "gift_3", CreatedBy: "ops",
+	}); err != nil {
+		t.Fatalf("a free grant that fits beside the open checkout: %v", err)
+	}
+}
+
 // Two checkouts that each fit but together pass the cap race under the
 // ledger lock, so exactly one opens.
 func TestConcurrentCheckoutsCannotBothPassTheCap(t *testing.T) {

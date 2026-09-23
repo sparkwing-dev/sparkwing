@@ -369,8 +369,8 @@ unlock.
   `open_micro`. A checkout counts until its payment is granted or its session
   expires. A `paid` grant is never refused by the cap, because its payment
   already went through, and is at most one $500 purchase; it names its
-  Checkout Session in `checkout`. A new `free` grant past the cap is still
-  refused. A reversal may not take back more than its payment paid. Schema
+  Checkout Session in `checkout`. A new `free` grant is still refused when
+  it and the open checkouts would pass the cap. A reversal may not take back more than its payment paid. Schema
   v57 adds `credit_checkouts`.
 
 - **store:** a credit grant's reference is unique within its team rather than

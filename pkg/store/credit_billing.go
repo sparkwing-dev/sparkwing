@@ -62,14 +62,25 @@ func microDollars(micro int64) string {
 	return fmt.Sprintf("%s%d.%02d", sign, cents/100, cents%100)
 }
 
-// safety: the check runs with the balance the grant would add to, under the
-// ledger lock the grant holds, so two free grants racing for the last room
-// below the cap cannot both land.
-func refuseAboveBalanceCap(balance, amount int64) error {
-	if amount <= 0 || balance+amount <= MaxTeamBalanceMicro {
+// safety: the check runs under the ledger lock its caller holds, with the
+// balance and the checkouts still open, so two amounts racing for the last
+// room below the cap cannot both pass it and a free grant cannot fill the room
+// an open payment needs.
+func refuseAboveBalanceCapTx(ctx context.Context, tx *storeTx, team Team, amount, nowNS int64) error {
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	open, err := openCheckoutMicroTx(ctx, tx, team, nowNS)
+	if err != nil {
+		return err
+	}
+	if balance+open+amount <= MaxTeamBalanceMicro {
 		return nil
 	}
-	return &CreditBalanceCapError{BalanceMicro: balance, AmountMicro: amount, CapMicro: MaxTeamBalanceMicro}
+	return &CreditBalanceCapError{
+		BalanceMicro: balance, OpenMicro: open, AmountMicro: amount, CapMicro: MaxTeamBalanceMicro,
+	}
 }
 
 // RunCreditUsage is what one run cost a team in runner time: its nodes and
