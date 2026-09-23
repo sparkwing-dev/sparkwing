@@ -330,13 +330,18 @@ It also shows what admission is doing with the machine:
   view reports whether the controller considers headroom live, stale, or
   absent without fabricating a timestamp.
 
-The run node list and DAG mark execution location with both text and color.
+The run node list and DAG show a small location icon for known execution sites.
+Hover or focus the icon to see the runner or repository. Machine, Sparkwing
+Cloud, GitHub Actions, and cluster execution use distinct icons; unknown
+locations leave the space empty. Node names use the available row width and
+keep their full name in a tooltip.
 Selecting a node shows every durable execution attempt, including the executor
 kind and name, timestamps, outcome, and retry link when the controller recorded
 one. A recorded platform appears with its attempt; a missing platform remains
 unknown. The dashboard reads this history from explicit public execution
-attribution. It does not derive location from transient claim ownership; an
-older record with no attribution is shown as unknown.
+attribution. The controller derives the current claim's display site from its
+credential and holder without changing stored execution history. Older records
+without enough attribution show no location icon.
 
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the

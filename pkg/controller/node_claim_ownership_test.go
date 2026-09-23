@@ -438,6 +438,10 @@ VALUES (?, ?, ?, 1, ?, ?, ?, 'agent', 'desktop', ?, 'local', ?, ?, ?)`,
 			!strings.Contains(body, `"executor_location":"local"`) {
 			t.Errorf("GET %s omitted public execution attribution: %s", path, body)
 		}
+		if !strings.Contains(body, `"execution_site":"machine"`) ||
+			!strings.Contains(body, `"execution_site_name":"desktop"`) {
+			t.Errorf("GET %s omitted the derived machine site: %s", path, body)
+		}
 	}
 	for _, kind := range []string{"executor_selected", "execution_attempt_started", "execution_attempt_finished"} {
 		payload := []byte(`{"claim_generation":"private-generation-value","attempt":1,"executor_name":"desktop"}`)

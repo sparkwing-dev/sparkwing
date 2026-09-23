@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **dashboard + controller:** run node rows and DAG cards show small execution
+  site icons with runner details on hover or focus. Node names use the row width,
+  and the controller derives machine, GitHub Actions, cloud, or cluster sites
+  from the claim credential and holder when available. Unknown sites leave no
+  badge.
+
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
   and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the

@@ -4215,6 +4215,8 @@ type Node struct {
 	ExecutorName             string             `json:"executor_name,omitempty"`
 	ExecutorID               string             `json:"executor_id,omitempty"`
 	ExecutorLocation         string             `json:"executor_location,omitempty"`
+	ExecutionSite            string             `json:"execution_site,omitempty"`
+	ExecutionSiteName        string             `json:"execution_site_name,omitempty"`
 	RequiredCoordinatorID    string             `json:"required_coordinator_id,omitempty"`
 	RequiredExecutorLocation string             `json:"required_executor_location,omitempty"`
 	ExecutionStartedAt       *time.Time         `json:"execution_started_at,omitempty"`

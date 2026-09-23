@@ -668,23 +668,25 @@ type EventLimits struct {
 	MaxEventsPerRun  int64
 }
 type ExecutionAttempt struct {
-	RunID            string
-	NodeID           string
-	Attempt          int
-	ClaimGeneration  int64
-	CoordinatorID    string
-	MembershipID     string
-	ExecutorKind     string
-	ExecutorName     string
-	ExecutorID       string
-	ExecutorLocation string
-	HolderID         string
-	ReservationID    string
-	StartedAt        time.Time
-	FinishedAt       *time.Time
-	Outcome          string
-	FailureReason    string
-	RetryRunID       string
+	RunID             string
+	NodeID            string
+	Attempt           int
+	ClaimGeneration   int64
+	CoordinatorID     string
+	MembershipID      string
+	ExecutorKind      string
+	ExecutorName      string
+	ExecutorID        string
+	ExecutorLocation  string
+	ExecutionSite     string
+	ExecutionSiteName string
+	HolderID          string
+	ReservationID     string
+	StartedAt         time.Time
+	FinishedAt        *time.Time
+	Outcome           string
+	FailureReason     string
+	RetryRunID        string
 }
 type ExecutionAttemptFinish struct {
 	HolderID        string
@@ -1080,6 +1082,8 @@ type Node struct {
 	ExecutorName             string
 	ExecutorID               string
 	ExecutorLocation         string
+	ExecutionSite            string
+	ExecutionSiteName        string
 	RequiredCoordinatorID    string
 	RequiredExecutorLocation string
 	ExecutionStartedAt       *time.Time
@@ -1885,6 +1889,7 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
+func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)

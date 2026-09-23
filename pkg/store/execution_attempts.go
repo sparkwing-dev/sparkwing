@@ -38,23 +38,25 @@ type ExecutionAttemptFinish struct {
 }
 
 type ExecutionAttempt struct {
-	RunID            string     `json:"run_id"`
-	NodeID           string     `json:"node_id,omitempty"`
-	Attempt          int        `json:"attempt"`
-	ClaimGeneration  int64      `json:"claim_generation,omitempty"`
-	CoordinatorID    string     `json:"-"`
-	MembershipID     string     `json:"-"`
-	ExecutorKind     string     `json:"executor_kind,omitempty"`
-	ExecutorName     string     `json:"executor_name,omitempty"`
-	ExecutorID       string     `json:"-"`
-	ExecutorLocation string     `json:"location,omitempty"`
-	HolderID         string     `json:"-"`
-	ReservationID    string     `json:"-"`
-	StartedAt        time.Time  `json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at,omitempty"`
-	Outcome          string     `json:"outcome,omitempty"`
-	FailureReason    string     `json:"failure_reason,omitempty"`
-	RetryRunID       string     `json:"retry_run_id,omitempty"`
+	RunID             string     `json:"run_id"`
+	NodeID            string     `json:"node_id,omitempty"`
+	Attempt           int        `json:"attempt"`
+	ClaimGeneration   int64      `json:"claim_generation,omitempty"`
+	CoordinatorID     string     `json:"-"`
+	MembershipID      string     `json:"-"`
+	ExecutorKind      string     `json:"executor_kind,omitempty"`
+	ExecutorName      string     `json:"executor_name,omitempty"`
+	ExecutorID        string     `json:"-"`
+	ExecutorLocation  string     `json:"location,omitempty"`
+	ExecutionSite     string     `json:"execution_site,omitempty"`
+	ExecutionSiteName string     `json:"execution_site_name,omitempty"`
+	HolderID          string     `json:"-"`
+	ReservationID     string     `json:"-"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	Outcome           string     `json:"outcome,omitempty"`
+	FailureReason     string     `json:"failure_reason,omitempty"`
+	RetryRunID        string     `json:"retry_run_id,omitempty"`
 }
 
 func executionAttributionEventFields(kind, name, location string) map[string]any {
