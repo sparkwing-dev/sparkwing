@@ -2,7 +2,6 @@ package bincache
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,8 +65,8 @@ func RequestSourceToken(ctx context.Context, controllerURL, runnerToken, runID s
 	return body.Token, nil
 }
 
-// safety: the token becomes a git config value through the environment, so
-// anything but a token's own alphabet could smuggle in another setting.
+// safety: the token becomes a line of git's credential protocol, so anything
+// but a token's own alphabet could smuggle in another attribute.
 func plainToken(tok string) bool {
 	if tok == "" || len(tok) > 512 {
 		return false
@@ -84,9 +83,10 @@ func plainToken(tok string) bool {
 // value presents nothing, so the fetch uses this process's own git
 // credentials.
 type DirectCredential struct {
-	// GitHubToken reads a github.com repository over https. It reaches git
-	// as an http extraheader in the fetch's environment, never in the URL or
-	// on a command line.
+	// GitHubToken reads a github.com repository over https. Git reads it from
+	// a pipe the fetch inherits, through a credential helper scoped to
+	// github.com, so it is never in an environment, a URL, a command line or a
+	// file.
 	GitHubToken string
 }
 
@@ -100,10 +100,24 @@ func githubTokenRemote(remote string) string {
 	return ""
 }
 
-// safety: the key is scoped to https://github.com/, so git sends the token to no other host.
-func withGitHubToken(env []string, tok string) []string {
+// githubTokenScope is the only URL prefix git hands the source token to.
+const githubTokenScope = "https://github.com/"
+
+// credentialFD is the descriptor the fetch inherits the token on: the first
+// of exec.Cmd.ExtraFiles.
+const credentialFD = 3
+
+// safety: the helper answers only git's get, from the inherited pipe, so a
+// store or erase writes the token nowhere; the empty helper before it drops
+// every helper the ambient config names for the scope.
+const credentialHelper = `!f() { test "$1" != get || cat <&3; }; f`
+
+// withGitHubCredential scopes the pipe's credential to scope in git config
+// carried by the environment. The config names only the helper; the token
+// itself travels on [credentialFD].
+func withGitHubCredential(env []string, scope string) []string {
 	count := 0
-	out := make([]string, 0, len(env)+3)
+	out := make([]string, 0, len(env)+5)
 	for _, item := range env {
 		name, value, _ := strings.Cut(item, "=")
 		if name == "GIT_CONFIG_COUNT" {
@@ -114,13 +128,30 @@ func withGitHubToken(env []string, tok string) []string {
 		}
 		out = append(out, item)
 	}
-	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + tok))
-	idx := strconv.Itoa(count)
-	return append(out,
-		"GIT_CONFIG_KEY_"+idx+"=http.https://github.com/.extraheader",
-		"GIT_CONFIG_VALUE_"+idx+"=AUTHORIZATION: basic "+basic,
-		"GIT_CONFIG_COUNT="+strconv.Itoa(count+1),
-	)
+	key := "credential." + strings.TrimRight(scope, "/") + ".helper"
+	for _, value := range []string{"", credentialHelper} {
+		idx := strconv.Itoa(count)
+		out = append(out, "GIT_CONFIG_KEY_"+idx+"="+key, "GIT_CONFIG_VALUE_"+idx+"="+value)
+		count++
+	}
+	return append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(count))
+}
+
+// credentialPipe is the read end a fetch inherits as [credentialFD], already
+// holding the token's credential and closed for writing, so the helper reads
+// it once and then sees the end.
+func credentialPipe(tok string) (*os.File, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	_, werr := io.WriteString(w, "username=x-access-token\npassword="+tok+"\n")
+	cerr := w.Close()
+	if werr != nil || cerr != nil {
+		_ = r.Close()
+		return nil, errors.Join(werr, cerr)
+	}
+	return r, nil
 }
 
 // GitHubAppSourceEnabled reports whether this runner asks its controller for a
