@@ -105,7 +105,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// writing the migrated database; a node it claims bills from execution
 	// start, as it always did.
 	56: {nodesCreditBillingCols},
-	57: {teamsCreditFreezeCols},
+	57: nil,
 }
 
 func columnSpecMaps() []map[string]string {

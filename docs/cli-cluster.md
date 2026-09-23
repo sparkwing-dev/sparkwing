@@ -244,13 +244,14 @@ sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
 
 Hold or release a team's cloud usage
 
-A held team's metered claims are refused, so no new cloud work
+A hold is one per dispute, and a team is held while any of its
+holds stands: its metered claims are refused, so no new cloud work
 starts, while work already running finishes. The checkout service
-holds the team a disputed payment funded when the dispute opens and
-releases it when the dispute is won; a lost dispute reverses the
-purchase and leaves the team held for the operator to release.
-Name the team by slug or by a payment it made. Requires the admin
-scope.
+holds the team a disputed payment funded when the dispute opens or
+is lost, and never releases one; the operator decides, whatever the
+dispute's outcome. Release one dispute's hold with --dispute, or
+every hold on a team with --team. Name the team by slug or by a
+payment it made. Requires the admin scope.
 
 ### Flags
 
@@ -258,17 +259,21 @@ scope.
 |---|---|
 | `--team SLUG` | Team to hold or release |
 | `--payment ID` | Name the team by a payment it made instead of by slug |
-| `--reason TEXT` | Why the team is held, such as the dispute id; required when holding |
-| `--release` | Release the team instead of holding it |
+| `--dispute ID` | Dispute the hold is for; required when holding, and on a release names the one hold to lift |
+| `--reason TEXT` | Why the team is held |
+| `--release` | Release the dispute's hold, or every hold on the team |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
-# Hold a team while a dispute is investigated
-sparkwing cluster credits freeze --team acme --reason 'dispute dp_123' --profile prod
+# Hold a team by hand
+sparkwing cluster credits freeze --team acme --dispute ops-review-1 --reason 'suspected fraud' --profile prod
 
-# Release it
+# Release one dispute's hold
+sparkwing cluster credits freeze --dispute dp_123 --release --profile prod
+
+# Release every hold on a team
 sparkwing cluster credits freeze --team acme --release --profile prod
 ```
 

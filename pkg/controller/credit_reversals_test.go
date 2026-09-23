@@ -51,8 +51,12 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		}
 	}
 	if code := f.call("POST", "/api/v1/credits/freezes", grant,
-		map[string]any{"team": owner.team, "frozen": true}, nil); code != http.StatusForbidden {
+		map[string]any{"team": owner.team, "dispute_id": "dp_x"}, nil); code != http.StatusForbidden {
 		t.Errorf("freezing a named team with credits.grant = %d want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/credits/freezes", grant,
+		map[string]any{"payment_id": "pi_1", "release": true}, nil); code != http.StatusForbidden {
+		t.Errorf("releasing with credits.grant = %d want 403", code)
 	}
 	if code := f.call("GET", "/api/v1/credits/units", grant, nil, nil); code != http.StatusOK {
 		t.Errorf("units = %d want 200", code)
@@ -120,8 +124,8 @@ func TestCreditsGrantScopeIsTheOperatorsToMint(t *testing.T) {
 }
 
 // An operator's refund and a lost chargeback reverse what a payment still
-// has, in the team it funded; a freeze named by payment holds that team's
-// metered work until it is released.
+// has, in the team it funded. A hold named by payment holds that team per
+// dispute, replaying it changes nothing, and only the operator releases it.
 func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
@@ -134,18 +138,24 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 		t.Fatalf("grant = %d", code)
 	}
 
-	var frozen struct {
-		Team   string `json:"team"`
-		Frozen bool   `json:"frozen"`
+	type freezeResp struct {
+		Team     string   `json:"team"`
+		Frozen   bool     `json:"frozen"`
+		Disputes []string `json:"disputes"`
 	}
-	if code := f.call("POST", "/api/v1/credits/freezes", grant, map[string]any{
-		"payment_id": "pi_1", "frozen": true, "reason": "dispute dp_1 opened",
-	}, &frozen); code != http.StatusOK || frozen.Team != owner.team || !frozen.Frozen {
-		t.Fatalf("freeze by payment = %d %+v", code, frozen)
+	var frozen freezeResp
+	for _, dispute := range []string{"dp_1", "dp_2", "dp_1"} {
+		if code := f.call("POST", "/api/v1/credits/freezes", grant, map[string]any{
+			"payment_id": "pi_1", "dispute_id": dispute, "reason": "dispute opened",
+		}, &frozen); code != http.StatusOK || frozen.Team != owner.team || !frozen.Frozen {
+			t.Fatalf("hold %s by payment = %d %+v", dispute, code, frozen)
+		}
 	}
-	var b teamBilling
+	if len(frozen.Disputes) != 2 {
+		t.Fatalf("holds = %v, want one per dispute", frozen.Disputes)
+	}
+	var b, ob teamBilling
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
-	var ob teamBilling
 	f.call("GET", "/api/v1/team/billing", other.auth, nil, &ob)
 	if !b.Frozen || ob.Frozen {
 		t.Errorf("frozen: payer %v, other %v; want only the payer held", b.Frozen, ob.Frozen)
@@ -162,6 +172,11 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	}, &rev); code != http.StatusCreated || rev.Team != owner.team || rev.ReversedMicro != 400*cent || rev.BalanceMicro != 0 {
 		t.Fatalf("reversal = %d %+v", code, rev)
 	}
+	if code := f.call("POST", "/api/v1/credits/reversals", grant, map[string]any{
+		"payment_id": "pi_1", "reference": "dp_1",
+	}, &rev); code != http.StatusOK || rev.Created {
+		t.Errorf("a replayed reversal = %d %+v, want 200 with nothing written", code, rev)
+	}
 	if code := f.call("POST", "/api/v1/credits/reversals", "Bearer "+f.admin, map[string]any{
 		"payment_id": "pi_1", "reference": "refund:pi_1",
 	}, &rev); code != http.StatusOK || rev.Created {
@@ -174,9 +189,14 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	}
 
 	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
-		"team": owner.team, "frozen": false,
+		"dispute_id": "dp_1", "release": true,
+	}, &frozen); code != http.StatusOK || !frozen.Frozen || len(frozen.Disputes) != 1 {
+		t.Fatalf("release of one dispute = %d %+v, want dp_2 still holding the team", code, frozen)
+	}
+	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "release": true,
 	}, &frozen); code != http.StatusOK || frozen.Frozen {
-		t.Fatalf("release by team = %d %+v", code, frozen)
+		t.Fatalf("release of the team = %d %+v", code, frozen)
 	}
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
 	if b.Frozen {

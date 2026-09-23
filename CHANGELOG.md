@@ -39,12 +39,14 @@ unlock.
   `POST /api/v1/credits/reversals` and prints the Stripe dashboard page to
   issue the money back from; the controller never moves money. The whole
   purchase is reversed even when spent, so the balance may go negative. A team
-  can be held with `POST /api/v1/credits/freezes` or
-  `sparkwing cluster credits freeze`: its metered claims are refused with 402
-  and `"code": "credits_frozen"` until it is released, and Team -> Billing
+  is held per dispute with `POST /api/v1/credits/freezes` or
+  `sparkwing cluster credits freeze`: while any hold stands its metered claims
+  are refused with 402 and `"code": "credits_frozen"`, and Team -> Billing
   says it is paused. The checkout service holds a team when a dispute opens on
-  its purchase, reverses the purchase when the dispute is lost, and releases
-  the team when it is won. `GET /api/v1/team/billing` gains `frozen`. See
+  its purchase, and reverses the purchase and holds the team when the dispute
+  is lost; it never releases a hold, which is the operator's, by dispute or by
+  team. `GET /api/v1/team/billing` gains `frozen`. Schema v57 adds
+  `credit_freezes`. See
   [Buying credits](docs/auth.md#buying-credits).
 
 - **web:** Team -> Billing shows the team's balance against its $5,000 cap,
@@ -371,8 +373,8 @@ unlock.
   expires. A `paid` grant is never refused by the cap, because its payment
   already went through, and is at most one $500 purchase; it names its
   Checkout Session in `checkout`. A new `free` grant is still refused when
-  it and the open checkouts would pass the cap. A reversal may not take back more than its payment paid. Schema
-  v57 adds `credit_checkouts`.
+  it and the open checkouts would pass the cap. A reversal may not take back
+  more than its payment paid. Schema v57 adds `credit_checkouts`.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named

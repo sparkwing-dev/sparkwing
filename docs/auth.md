@@ -167,7 +167,7 @@ names through `POST /api/v1/credits/grants`, keyed on the payment id so a
 redelivered webhook grants once. The service holds a token carrying only
 `credits.grant`, which the operator mints with
 `sparkwing cluster tokens create --type service --principal checkout-service --scope credits.grant`; it records paid
-grants, reverses and holds by payment, and reads the ledger's units, and every
+grants, holds by payment, and reads the ledger's units, and every
 other route refuses it. A controller with no `--billing-url` sells no credits
 and answers the checkout route with `503` and
 `"code": "checkout_unavailable"`.
@@ -196,14 +196,20 @@ below zero and the team's metered claims stop until it is funded again. A
 reversal never takes back more than its payment paid, and running the refund
 twice reverses once.
 
-A chargeback holds the team. When Stripe reports a dispute opened on a
-purchase, the checkout service logs an alert and holds the team the payment
-funded through `POST /api/v1/credits/freezes`: its metered claims are refused
-with `402` and `"code": "credits_frozen"` while work already running finishes,
-and Team -> Billing says so. A dispute won releases the team. A dispute lost
-reverses the purchase the way a refund does and leaves the team held until the
-operator releases it with
-`sparkwing cluster credits freeze --team <slug> --release`.
+A chargeback holds the team. Holds are one per dispute, and a team is held
+while any of its holds stands: its metered claims are refused with `402` and
+`"code": "credits_frozen"` while work already running finishes, and
+Team -> Billing says so. When Stripe reports a dispute opened on a purchase,
+the checkout service logs an alert (`alert=chargeback_opened`) and holds the
+team the payment funded through `POST /api/v1/credits/freezes`. A dispute
+lost reverses the purchase the way a refund does and holds the team too, so a
+lost dispute holds it even when Stripe delivered the close before the open. A
+dispute won logs `alert=dispute_won` and changes nothing: the checkout service
+never releases a team, because one dispute's outcome says nothing about
+another's. The operator releases with
+`sparkwing cluster credits freeze --dispute <dp_...> --release` for one hold
+or `--team <slug> --release` for every hold on the team. Replaying any
+dispute event changes nothing, and a replayed hold never undoes a release.
 
 ## Retained storage
 

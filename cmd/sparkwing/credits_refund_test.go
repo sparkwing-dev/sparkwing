@@ -63,18 +63,25 @@ func TestCreditsRefundReversesOnceAndPointsAtStripe(t *testing.T) {
 	}
 }
 
-func TestCreditFreezeBodyNamesOneTeamAndAReason(t *testing.T) {
-	if _, err := creditFreezeBody("", "", "x", false); err == nil {
-		t.Error("neither --team nor --payment was accepted")
+func TestCreditFreezeBodyNamesTheTeamAndTheDispute(t *testing.T) {
+	if _, err := creditFreezeBody("acme", "", "", "x", false); err == nil {
+		t.Error("a hold without --dispute was accepted")
 	}
-	if _, err := creditFreezeBody("acme", "pi_1", "x", false); err == nil {
+	if _, err := creditFreezeBody("", "", "dp_1", "x", false); err == nil {
+		t.Error("a hold naming no team was accepted")
+	}
+	if _, err := creditFreezeBody("acme", "pi_1", "dp_1", "x", false); err == nil {
 		t.Error("both --team and --payment were accepted")
 	}
-	if _, err := creditFreezeBody("acme", "", "", false); err == nil {
-		t.Error("a hold without --reason was accepted")
+	if _, err := creditFreezeBody("", "", "", "", true); err == nil {
+		t.Error("a release naming nothing was accepted")
 	}
-	body, err := creditFreezeBody("", "pi_1", "", true)
-	if err != nil || body["payment_id"] != "pi_1" || body["frozen"] != false {
-		t.Errorf("release by payment = %v, %v", body, err)
+	body, err := creditFreezeBody("", "", "dp_1", "", true)
+	if err != nil || body["dispute_id"] != "dp_1" || body["release"] != true {
+		t.Errorf("release by dispute = %v, %v", body, err)
+	}
+	body, err = creditFreezeBody("acme", "", "dp_1", "hand hold", false)
+	if err != nil || body["team"] != "acme" || body["dispute_id"] != "dp_1" || body["release"] != nil {
+		t.Errorf("hold = %v, %v", body, err)
 	}
 }

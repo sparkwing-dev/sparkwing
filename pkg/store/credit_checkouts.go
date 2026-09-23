@@ -27,29 +27,36 @@ CREATE INDEX IF NOT EXISTS idx_credit_checkouts_session ON credit_checkouts(sess
 
 var creditCheckoutsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditCheckoutsTableSQLite)
 
-// safety: a frozen team's cloud usage is held while a payment dispute is
-// open; zero is not frozen, and the reason says which dispute froze it.
-var teamsCreditFreezeCols = map[string]string{
-	"credit_frozen_at":     "INTEGER NOT NULL DEFAULT 0",
-	"credit_frozen_reason": "TEXT NOT NULL DEFAULT ''",
-}
+// safety: a freeze is one row per dispute, so one dispute's outcome never
+// releases another's hold; a team is frozen while any row is unreleased.
+const creditFreezesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_freezes (
+    team        TEXT NOT NULL,
+    dispute_id  TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    released_at INTEGER,
+    PRIMARY KEY (team, dispute_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credit_freezes_dispute ON credit_freezes(dispute_id);`
+
+var creditFreezesTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditFreezesTableSQLite)
 
 func applyCreditCheckoutMigrationSQLite(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(creditCheckoutsTableSQLite) {
+	for _, stmt := range splitStatements(creditCheckoutsTableSQLite + "\n" + creditFreezesTableSQLite) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
-	return ensureColumnsSQLite(ctx, tx, "teams", teamsCreditFreezeCols)
+	return nil
 }
 
 func applyCreditCheckoutMigrationPostgres(ctx context.Context, tx *storeTx) error {
-	for _, stmt := range splitStatements(creditCheckoutsTablePostgres) {
+	for _, stmt := range splitStatements(creditCheckoutsTablePostgres + "\n" + creditFreezesTablePostgres) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
-	return addColumnsTx(ctx, tx, "teams", teamsCreditFreezeCols)
+	return nil
 }
 
 // OpenCreditCheckout records a checkout of amountMicro that stays open until

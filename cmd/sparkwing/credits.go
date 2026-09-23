@@ -835,9 +835,10 @@ func renderRefund(w io.Writer, r paymentReversalResp) error {
 }
 
 type creditFreezeResp struct {
-	Team   string `json:"team"`
-	Frozen bool   `json:"frozen"`
-	Reason string `json:"reason,omitempty"`
+	Team     string   `json:"team"`
+	Frozen   bool     `json:"frozen"`
+	Disputes []string `json:"disputes"`
+	Released int64    `json:"released,omitempty"`
 }
 
 func runCreditsFreeze(args []string) error {
@@ -845,15 +846,16 @@ func runCreditsFreeze(args []string) error {
 	on := addProfileFlag(fs)
 	team := fs.String("team", "", "slug of the team to hold or release")
 	payment := fs.String("payment", "", "name the team by a payment it made instead of by slug")
-	reason := fs.String("reason", "", "why the team is held, such as the dispute id")
-	release := fs.Bool("release", false, "release the team instead of holding it")
+	dispute := fs.String("dispute", "", "the dispute the hold is for, or the one hold to release")
+	reason := fs.String("reason", "", "why the team is held")
+	release := fs.Bool("release", false, "release the dispute's hold, or every hold on the team")
 	if err := parseAndCheck(cmdCreditsFreeze, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	body, err := creditFreezeBody(*team, *payment, *reason, *release)
+	body, err := creditFreezeBody(*team, *payment, *dispute, *reason, *release)
 	if err != nil {
 		return err
 	}
@@ -872,29 +874,44 @@ func runCreditsFreeze(args []string) error {
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
+	if *release {
+		fmt.Printf("released %d hold(s) on team %s\n", out.Released, out.Team)
+	}
 	if out.Frozen {
-		fmt.Printf("team %s is held: its metered claims are refused until it is released\n", out.Team)
+		fmt.Printf("team %s is held by %s: its metered claims are refused until every hold is released\n",
+			out.Team, strings.Join(out.Disputes, ", "))
 		return nil
 	}
-	fmt.Printf("team %s is released\n", out.Team)
+	fmt.Printf("team %s is not held\n", out.Team)
 	return nil
 }
 
-func creditFreezeBody(team, payment, reason string, release bool) (map[string]any, error) {
-	team, payment = strings.TrimSpace(team), strings.TrimSpace(payment)
-	if (team == "") == (payment == "") {
-		return nil, fmt.Errorf("credits freeze: name exactly one of --team or --payment")
+func creditFreezeBody(team, payment, dispute, reason string, release bool) (map[string]any, error) {
+	team, payment, dispute = strings.TrimSpace(team), strings.TrimSpace(payment), strings.TrimSpace(dispute)
+	if team != "" && payment != "" {
+		return nil, fmt.Errorf("credits freeze: name the team by --team or --payment, not both")
 	}
-	body := map[string]any{"frozen": !release}
+	body := map[string]any{}
 	if team != "" {
 		body["team"] = team
-	} else {
+	}
+	if payment != "" {
 		body["payment_id"] = payment
 	}
-	if !release {
-		if strings.TrimSpace(reason) == "" {
-			return nil, fmt.Errorf("credits freeze: --reason is required when holding a team")
+	if dispute != "" {
+		body["dispute_id"] = dispute
+	}
+	if release {
+		if team == "" && payment == "" && dispute == "" {
+			return nil, fmt.Errorf("credits freeze: --release needs --team, --payment or --dispute")
 		}
+		body["release"] = true
+		return body, nil
+	}
+	if (team == "" && payment == "") || dispute == "" {
+		return nil, fmt.Errorf("credits freeze: a hold needs --team or --payment, and --dispute")
+	}
+	if reason != "" {
 		body["reason"] = reason
 	}
 	return body, nil

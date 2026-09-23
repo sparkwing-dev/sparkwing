@@ -69,14 +69,15 @@ func TestReversePaymentMayTakeTheBalanceBelowZero(t *testing.T) {
 	}
 }
 
-// A frozen team's metered claims are refused however much it holds, until the
-// freeze is released; an unmetered claim is not affected.
+// A frozen team's metered claims are refused however much it holds, until
+// every freeze on it is released; an unmetered claim is not affected.
 func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant, _ := fundedMeteredNode(t, s, "run-frozen")
-	if err := s.SetTeamCreditFreeze(ctx, store.DefaultTeam, true, "dispute dp_1 opened", time.Now()); err != nil {
-		t.Fatalf("freeze: %v", err)
+	now := time.Now()
+	if _, err := s.HoldTeamForDispute(ctx, store.DefaultTeam, "dp_1", "dispute opened", now); err != nil {
+		t.Fatalf("hold: %v", err)
 	}
 	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
 	var refused *store.InsufficientCreditsError
@@ -93,13 +94,61 @@ func TestFrozenTeamsMeteredClaimsAreRefused(t *testing.T) {
 		t.Fatalf("an unmetered claim on a frozen team: %v", err)
 	}
 
-	if err := s.SetTeamCreditFreeze(ctx, store.DefaultTeam, false, "", time.Now()); err != nil {
+	if _, err := s.ReleaseCreditFreezes(ctx, store.DefaultTeam, "", now); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil || n == nil {
 		t.Fatalf("a claim after the release = %v, %v", n, err)
 	}
-	if err := s.SetTeamCreditFreeze(ctx, "nobody", true, "x", time.Now()); !errors.Is(err, store.ErrUnknownTeam) {
-		t.Fatalf("freezing an unknown team = %v, want ErrUnknownTeam", err)
+	if _, err := s.HoldTeamForDispute(ctx, "nobody", "dp_x", "", now); !errors.Is(err, store.ErrUnknownTeam) {
+		t.Fatalf("holding an unknown team = %v, want ErrUnknownTeam", err)
+	}
+}
+
+// A freeze is one row per dispute and the team stays frozen while any is
+// unreleased: releasing one dispute leaves the other's hold, and holding a
+// dispute again, however often it is replayed, never undoes a release.
+func TestATeamStaysFrozenWhileAnyDisputeHoldsIt(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	now := time.Now()
+	for _, dispute := range []string{"dp_1", "dp_2", "dp_1"} {
+		if _, err := s.HoldTeamForDispute(ctx, "acme", dispute, "dispute opened", now); err != nil {
+			t.Fatalf("hold %s: %v", dispute, err)
+		}
+	}
+	frozen := func() store.TeamCreditFreeze {
+		t.Helper()
+		f, err := acme.CreditFreeze(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	if f := frozen(); !f.Frozen || len(f.Disputes) != 2 {
+		t.Fatalf("freeze = %+v, want two disputes holding the team", f)
+	}
+	if n, err := s.ReleaseCreditFreezes(ctx, "acme", "dp_1", now); err != nil || n != 1 {
+		t.Fatalf("release dp_1 = %d, %v", n, err)
+	}
+	if f := frozen(); !f.Frozen || len(f.Disputes) != 1 || f.Disputes[0] != "dp_2" {
+		t.Fatalf("freeze after releasing one dispute = %+v, want dp_2 still holding it", f)
+	}
+	if created, err := s.HoldTeamForDispute(ctx, "acme", "dp_1", "replayed", now); err != nil || created {
+		t.Fatalf("a replayed hold of a released dispute = %v, %v; want nothing written", created, err)
+	}
+	if f := frozen(); len(f.Disputes) != 1 {
+		t.Fatalf("a replay re-held a released dispute: %+v", f)
+	}
+	team, found, err := s.DisputeTeam(ctx, "dp_2")
+	if err != nil || !found || team != "acme" {
+		t.Fatalf("dispute team = %q, %v, %v", team, found, err)
+	}
+	if n, err := s.ReleaseCreditFreezes(ctx, team, "dp_2", now); err != nil || n != 1 {
+		t.Fatalf("release dp_2 = %d, %v", n, err)
+	}
+	if f := frozen(); f.Frozen {
+		t.Fatalf("freeze after every release = %+v", f)
 	}
 }

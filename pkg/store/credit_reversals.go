@@ -112,73 +112,105 @@ func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 	return team, nil
 }
 
-// TeamCreditFreeze is whether a team's cloud usage is held, and why.
+// TeamCreditFreeze is whether a team's cloud usage is held, and by which
+// disputes.
 type TeamCreditFreeze struct {
 	Frozen   bool
-	FrozenAt time.Time
-	Reason   string
+	Disputes []string
 }
 
-// SetTeamCreditFreeze holds or releases a team's cloud usage. A frozen team's
-// metered claims are refused, so no new cloud work starts, until the operator
-// or the dispute's outcome releases it; work already running finishes. It
-// returns [ErrUnknownTeam] for a team that is not registered.
-func (s *Store) SetTeamCreditFreeze(ctx context.Context, team Team, frozen bool, reason string, now time.Time) error {
+// HoldTeamForDispute holds team's cloud usage for disputeID. A held team's
+// metered claims are refused, so no new cloud work starts, while work already
+// running finishes; the team stays held while any of its holds is
+// unreleased. Holding a dispute that already has a hold, released or not,
+// writes nothing, so a replayed event never undoes an operator's release. It
+// reports whether it wrote the hold, and returns [ErrUnknownTeam] for a team
+// that is not registered.
+func (s *Store) HoldTeamForDispute(ctx context.Context, team Team, disputeID, reason string, now time.Time) (bool, error) {
 	team = NormalizeTeam(team)
-	at := int64(0)
-	if frozen {
-		at = now.UnixNano()
-	} else {
-		reason = ""
+	disputeID = strings.TrimSpace(disputeID)
+	if disputeID == "" {
+		return false, errors.New("credits: a hold names the dispute it is for")
 	}
-	res, err := s.exec(ctx,
-		`UPDATE teams SET credit_frozen_at = ?, credit_frozen_reason = ? WHERE name = ?`,
-		at, truncate(reason, 500), string(team))
+	var registered int
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM teams WHERE name = ?`, string(team)).Scan(&registered); err != nil {
+		return false, err
+	}
+	if registered == 0 {
+		return false, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
+	}
+	res, err := s.exec(ctx, `
+		INSERT INTO credit_freezes (team, dispute_id, reason, created_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT (team, dispute_id) DO NOTHING`,
+		string(team), disputeID, truncate(reason, 500), now.UnixNano())
 	if err != nil {
-		return err
+		return false, err
 	}
 	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// ReleaseCreditFreezes releases holds on team and reports how many it
+// released: the one hold of disputeID, or every hold when disputeID is empty.
+// [Store.DisputeTeam] finds the team of a dispute named alone.
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error) {
+	team = NormalizeTeam(team)
+	if team == "" {
+		return 0, errors.New("credits: a release names the team")
+	}
+	query := `UPDATE credit_freezes SET released_at = ? WHERE team = ? AND released_at IS NULL`
+	args := []any{now.UnixNano(), string(team)}
+	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
+		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
+	}
+	res, err := s.exec(ctx, query, args...)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if n == 0 {
-		return fmt.Errorf("%w: %s", ErrUnknownTeam, team)
+	return res.RowsAffected()
+}
+
+// DisputeTeam returns the team a dispute's hold is on.
+func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error) {
+	var team string
+	err := s.queryRow(ctx, `SELECT team FROM credit_freezes WHERE dispute_id = ? LIMIT 1`,
+		strings.TrimSpace(disputeID)).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	return nil
+	return Team(team), err == nil, err
 }
 
 // CreditFreeze reports whether t's cloud usage is held.
-func (t *Tenant) CreditFreeze(ctx context.Context) (TeamCreditFreeze, error) {
-	var at int64
-	var reason string
-	err := t.s.queryRow(ctx,
-		`SELECT credit_frozen_at, credit_frozen_reason FROM teams WHERE name = ?`, string(t.team)).Scan(&at, &reason)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TeamCreditFreeze{}, nil
-	}
+func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error) {
+	rows, err := t.s.query(ctx, `SELECT dispute_id FROM credit_freezes
+	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(t.team))
 	if err != nil {
 		return TeamCreditFreeze{}, err
 	}
-	return creditFreeze(at, reason), nil
+	defer closeRowsInto(rows, &err)
+	return scanCreditFreeze(rows)
 }
 
-func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (TeamCreditFreeze, error) {
-	var at int64
-	var reason string
-	err := tx.QueryRowContext(ctx,
-		`SELECT credit_frozen_at, credit_frozen_reason FROM teams WHERE name = ?`, string(team)).Scan(&at, &reason)
-	if errors.Is(err, sql.ErrNoRows) {
-		return TeamCreditFreeze{}, nil
-	}
+func teamCreditFreezeTx(ctx context.Context, tx *storeTx, team Team) (_ TeamCreditFreeze, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT dispute_id FROM credit_freezes
+	  WHERE team = ? AND released_at IS NULL ORDER BY created_at, dispute_id`, string(team))
 	if err != nil {
 		return TeamCreditFreeze{}, err
 	}
-	return creditFreeze(at, reason), nil
+	defer closeRowsInto(rows, &err)
+	return scanCreditFreeze(rows)
 }
 
-func creditFreeze(at int64, reason string) TeamCreditFreeze {
-	if at == 0 {
-		return TeamCreditFreeze{}
+func scanCreditFreeze(rows *sql.Rows) (TeamCreditFreeze, error) {
+	var out TeamCreditFreeze
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return TeamCreditFreeze{}, err
+		}
+		out.Disputes = append(out.Disputes, id)
 	}
-	return TeamCreditFreeze{Frozen: true, FrozenAt: time.Unix(0, at).UTC(), Reason: reason}
+	out.Frozen = len(out.Disputes) > 0
+	return out, rows.Err()
 }

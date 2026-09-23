@@ -3765,14 +3765,17 @@ paths:
     post:
       x-sparkwing-scope: credits.grant
       tags: [credits]
-      summary: Hold or release a team's cloud usage.
+      summary: Hold a team's cloud usage for a dispute, or release holds.
       description: |
-        A held team's metered claims are refused with 402 and
-        `"code": "credits_frozen"`, so no new cloud work starts; work already
-        running finishes. Name the team by `payment_id`, a payment it made,
-        or by `team`, which only the operator may name. The checkout service holds the
-        team a disputed payment funded when the dispute opens and releases
-        it when the dispute is won.
+        A hold is one per dispute, and a team is held while any of its holds
+        stands: its metered claims are refused with 402 and
+        `"code": "credits_frozen"`, so no new cloud work starts, while work
+        already running finishes. A hold names the team by `payment_id`, a
+        payment it made, or by `team`, and names the `dispute_id`; holding a
+        dispute that already has a hold, released or not, writes nothing.
+        `release` lifts the hold of `dispute_id`, or every hold on the team
+        when no dispute is named. Naming a team and releasing are the
+        operator's; the checkout service holds by payment and never releases.
       requestBody:
         required: true
         content:
@@ -3780,28 +3783,29 @@ paths:
             schema:
               x-sparkwing-go-type: pkg/controller.creditFreezeReq
               type: object
-              required: [frozen]
               properties:
                 payment_id: {type: string}
                 team: {type: string}
-                frozen: {type: boolean, description: "True holds the team; false releases it."}
-                reason: {type: string, description: "Why the team is held, such as the dispute id."}
+                dispute_id: {type: string, description: The dispute the hold is for.}
+                reason: {type: string}
+                release: {type: boolean, description: "Lift the dispute's hold, or every hold on the team."}
       responses:
         "200":
-          description: The team's freeze as it now stands.
+          description: The team's holds as they now stand.
           content:
             application/json:
               schema:
                 x-sparkwing-go-type: pkg/controller.creditFreezeJSON
                 type: object
-                required: [team, frozen]
+                required: [team, frozen, disputes]
                 properties:
                   team: {type: string}
                   frozen: {type: boolean}
-                  reason: {type: string}
+                  disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
+                  released: {type: integer, format: int64, description: How many holds a release lifted.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: "No paid grant carries the payment id, or the team is not registered."}
+        "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
 
   /api/v1/credits/units:
     get:

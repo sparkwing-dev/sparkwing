@@ -1503,6 +1503,7 @@ func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
+func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
 func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Executor) error
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)
@@ -1555,6 +1556,7 @@ func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, n
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
+func (s *Store) HoldTeamForDispute(ctx context.Context, team Team, disputeID, reason string, now time.Time) (bool, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
@@ -1629,6 +1631,7 @@ func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
@@ -1685,7 +1688,6 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes int64) (StorageQuota, error)
 func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
-func (s *Store) SetTeamCreditFreeze(ctx context.Context, team Team, frozen bool, reason string, now time.Time) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
@@ -1726,8 +1728,7 @@ type TableSize struct {
 type Team string
 type TeamCreditFreeze struct {
 	Frozen   bool
-	FrozenAt time.Time
-	Reason   string
+	Disputes []string
 }
 type TeamInfo struct {
 	Slug        Team
@@ -1769,7 +1770,7 @@ func (t *Tenant) CreateTokenWith(
 func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
-func (t *Tenant) CreditFreeze(ctx context.Context) (TeamCreditFreeze, error)
+func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
