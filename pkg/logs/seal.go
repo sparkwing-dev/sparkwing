@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,8 +95,10 @@ type Gap struct {
 type StreamReport struct {
 	Stream string `json:"stream"`
 	// File is the stored log file the stream last wrote, relative to the
-	// run; a writer that spans execution attempts writes several.
+	// run; Files is every file it wrote, since a writer that spans
+	// execution attempts writes one per attempt.
 	File     string    `json:"file"`
+	Files    []string  `json:"files"`
 	OpenedAt time.Time `json:"opened_at"`
 	Sealed   bool      `json:"sealed"`
 	Seal     *Seal     `json:"seal,omitempty"`
@@ -115,6 +118,31 @@ type SealReport struct {
 	// UnconfirmedFiles counts stored log files that no numbering writer
 	// wrote, which is what a runner without seal support leaves.
 	UnconfirmedFiles int `json:"unconfirmed_files"`
+	// LatestFile is the node's newest execution attempt's log file, the
+	// one a verdict judges; LatestUnconfirmed says no numbering writer
+	// wrote it.
+	LatestFile        string `json:"latest_file,omitempty"`
+	LatestUnconfirmed bool   `json:"latest_unconfirmed,omitempty"`
+}
+
+// latest narrows the report to the node's newest execution attempt, so a
+// clean retry is not held to an attempt it replaced.
+func (r SealReport) latest() SealReport {
+	if r.LatestFile == "" {
+		return r
+	}
+	out := r
+	out.Streams = nil
+	for _, s := range r.Streams {
+		if slices.Contains(s.Files, r.LatestFile) {
+			out.Streams = append(out.Streams, s)
+		}
+	}
+	out.UnconfirmedFiles = 0
+	if r.LatestUnconfirmed {
+		out.UnconfirmedFiles = 1
+	}
+	return out
 }
 
 // NodeProgress is what a reader knows about the node from the controller.
@@ -135,9 +163,10 @@ type Completeness struct {
 }
 
 // Assess turns the service's report and the node's progress into one
-// verdict. A worse state wins: cut off, then incomplete, then
-// unconfirmed.
+// verdict on the node's newest execution attempt. A worse state wins:
+// cut off, then incomplete, then unconfirmed.
 func (r SealReport) Assess(node NodeProgress, now time.Time) Completeness {
+	r = r.latest()
 	c := Completeness{State: StateComplete, Lines: r.Lines}
 	if !node.Started && len(r.Streams) == 0 && r.UnconfirmedFiles == 0 {
 		return c
@@ -707,6 +736,9 @@ func (s *Server) sealReport(root *os.Root, runID, nodeID string) (SealReport, er
 			index[rec.Stream] = i
 			report.Streams = append(report.Streams, StreamReport{Stream: rec.Stream, File: rec.File, OpenedAt: rec.At})
 		}
+		if sr := &report.Streams[i]; !slices.Contains(sr.Files, rec.File) {
+			sr.Files = append(sr.Files, rec.File)
+		}
 		if rec.Kind == recordSeal {
 			sr := &report.Streams[i]
 			sr.File = rec.File
@@ -729,9 +761,13 @@ func (s *Server) sealReport(root *os.Root, runID, nodeID string) (SealReport, er
 			return report, err
 		}
 		report.Lines += lines
-		if size > 0 && !claimed[filepath.ToSlash(name)] {
+		unconfirmed := size > 0 && !claimed[filepath.ToSlash(name)]
+		if unconfirmed {
 			report.UnconfirmedFiles++
 		}
+		// safety: nodeLogNames orders the legacy file first and attempts by
+		// ordinal, so the last name is the newest attempt.
+		report.LatestFile, report.LatestUnconfirmed = filepath.ToSlash(name), unconfirmed
 	}
 	return report, nil
 }

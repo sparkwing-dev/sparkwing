@@ -130,7 +130,9 @@ finishes, sends one seal per stream naming how many it numbered and how
 many it failed to deliver. The seal sits beside the log, never in it, and
 moves to the object store with the run's logs when the run is archived.
 
-Readers judge each finished node's log from its seals:
+Readers judge each finished node's newest execution attempt from its
+seals, so a clean retry reads `complete` even when the attempt it
+replaced was cut off:
 
 | State | Meaning | The reader shows |
 |---|---|---|

@@ -264,3 +264,51 @@ func TestSealIsIdempotentAndValidated(t *testing.T) {
 		t.Errorf("seq 0 = %d, want 400", code)
 	}
 }
+
+func (f *archiveFixture) appendAttempt(t *testing.T, run, node string, ordinal int, stream string, seq int64) {
+	t.Helper()
+	code, body := f.send(t, http.MethodPost, "/api/v1/logs/"+run+"/"+node, "Bearer a", fmt.Sprintf("attempt %d line %d\n", ordinal, seq), map[string]string{
+		"X-Sparkwing-Claim-Holder":     "holder",
+		"X-Sparkwing-Claim-Generation": "1",
+		"X-Sparkwing-Attempt-Ordinal":  fmt.Sprint(ordinal),
+		LogStreamHeader:                stream,
+		LogSeqHeader:                   fmt.Sprint(seq),
+	})
+	if code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+}
+
+func (f *archiveFixture) sealAttempt(t *testing.T, run, node string, ordinal int, seal Seal) {
+	t.Helper()
+	raw, _ := json.Marshal(seal)
+	code, body := f.send(t, http.MethodPost, "/api/v1/logs/"+run+"/"+node+"/seal", "Bearer a", string(raw), map[string]string{
+		"X-Sparkwing-Claim-Holder":     "holder",
+		"X-Sparkwing-Claim-Generation": "1",
+		"X-Sparkwing-Attempt-Ordinal":  fmt.Sprint(ordinal),
+	})
+	if code != http.StatusNoContent {
+		t.Fatalf("seal = %d %s", code, body)
+	}
+}
+
+func TestVerdictJudgesTheLatestAttempt(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	// Attempt 1 is cut off; its retry seals cleanly.
+	f.appendAttempt(t, "run-a", "build", 1, "first", 1)
+	f.appendAttempt(t, "run-a", "build", 1, "first", 2)
+	f.appendAttempt(t, "run-a", "build", 2, "retry", 1)
+	f.appendAttempt(t, "run-a", "build", 2, "retry", 2)
+	f.sealAttempt(t, "run-a", "build", 2, Seal{Stream: "retry", FinalSeq: 2, Lines: 2})
+	if got := f.report(t, "Bearer a", "run-a", "build").Assess(done, late); got.State != StateComplete || got.Lines != 4 {
+		t.Fatalf("clean retry after a cut-off attempt = %+v, want complete", got)
+	}
+
+	// Negative control: a clean first attempt does not excuse a cut-off retry.
+	f.appendAttempt(t, "run-b", "build", 1, "first", 1)
+	f.sealAttempt(t, "run-b", "build", 1, Seal{Stream: "first", FinalSeq: 1, Lines: 1})
+	f.appendAttempt(t, "run-b", "build", 2, "retry", 1)
+	if got := f.report(t, "Bearer a", "run-b", "build").Assess(done, late); got.State != StateCutOff {
+		t.Fatalf("cut-off retry after a clean attempt = %+v, want cut_off", got)
+	}
+}

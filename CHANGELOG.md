@@ -31,8 +31,8 @@ unlock.
   survives the archive. `sparkwing runs logs` and the dashboard read it
   back as `complete`, `incomplete`, `cut_off` (no seal 60 seconds after
   the node finished), `unconfirmed` (a runner that never numbers its
-  lines) or `streaming`, and draw one line after the log when it is not
-  whole. The dashboard serves the verdict at
+  lines) or `streaming`, judged on the node's newest execution attempt,
+  and draw one line after the log when it is not whole. The dashboard serves the verdict at
   `GET /api/v1/runs/{id}/logs/{node}/completeness`. See
   [Log completeness](docs/observability.md#log-completeness).
 
