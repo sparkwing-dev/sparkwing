@@ -33,6 +33,12 @@ unlock.
   may omit `team` and lands in the team its payment funded. See
   [Buying credits](docs/auth.md#buying-credits).
 
+- **web:** Team -> Billing shows the team's balance against its $5,000 cap,
+  the price of each class in credits and dollars from the controller's rate
+  table, the minimum billable seconds, recent usage by run and the team's
+  purchases. An owner buys credits there and is sent to Stripe Checkout; the
+  page says that purchases are final and credits never expire.
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the
