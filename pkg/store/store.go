@@ -2000,7 +2000,13 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 51:
 		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
 	case 52:
-		return applyIdentityMigrationSQLite(ctx, tx)
+		if err := applyIdentityMigrationSQLite(ctx, tx); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		return backfillRunEventUsageTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2360,7 +2366,13 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 51:
 		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
 	case 52:
-		return applyIdentityMigrationPostgres(ctx, tx)
+		if err := applyIdentityMigrationPostgres(ctx, tx); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		return backfillRunEventUsageTx(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6381,12 +6393,24 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
 VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx,
+		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE id = ?`,
+		eventBytes(kind, raw), runID)
 	return seq, err
 }
 
+// safety: an append bumps the run row's event counters, so it takes the run's
+// row lock before the event-sequence lock, the order a claim round takes
+// them in; the other order deadlocks the two on PostgreSQL.
 func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
 	if tx.dialect != DialectPostgres {
 		return nil
+	}
+	if err := lockRunRow(ctx, tx, runID); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
 	return err

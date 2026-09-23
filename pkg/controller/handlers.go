@@ -651,8 +651,8 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if body.Kind == "" {
-		writeError(w, http.StatusBadRequest, errors.New("kind is required"))
+	if err := store.ValidateEventKind(body.Kind); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	p, authenticated := PrincipalFromContext(r.Context())

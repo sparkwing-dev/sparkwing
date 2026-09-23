@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -406,9 +405,10 @@ func TestChargedWriteAccumulatesUnderTheLimit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set quota: %v", err)
 	}
-	payload := make([]byte, 16)
+	// Each write is 16 bytes: a one-byte kind and a 15-byte payload.
+	payload := make([]byte, 15)
 	for i := range 2 {
-		if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", fmt.Sprintf("note%d", i), payload); err != nil {
+		if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "k", payload); err != nil {
 			t.Fatalf("charge %d: %v", i, err)
 		}
 	}
@@ -419,13 +419,13 @@ func TestChargedWriteAccumulatesUnderTheLimit(t *testing.T) {
 	if usage.RunBytes != 32 || usage.MonthBytes != 32 {
 		t.Fatalf("usage = %+v, want 32 bytes charged to the run and the month", usage)
 	}
-	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "third", payload); !errors.Is(err, store.ErrStorageQuota) {
+	if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "k", payload); !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("the third write on r1 returned %v, want a per-run refusal", err)
 	}
-	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "first", payload); err != nil {
+	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "k", payload); err != nil {
 		t.Fatalf("a second run under the month limit: %v", err)
 	}
-	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "second", payload); !errors.Is(err, store.ErrStorageQuota) {
+	if _, err := st.AppendEventCharged(ctx, "alice", "r2", "n1", "k", payload); !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("a write past the month limit returned %v, want a refusal", err)
 	}
 	top, err := st.TopStorageTeams(ctx, month, 5)
@@ -454,8 +454,8 @@ func TestChargedWriteIsBilledToTheMonthItIsWrittenIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usage: %v", err)
 	}
-	if thisMonth.MonthBytes != 16 {
-		t.Fatalf("this month = %d bytes, want 16", thisMonth.MonthBytes)
+	if thisMonth.MonthBytes != 20 {
+		t.Fatalf("this month = %d bytes, want 20, kind and payload", thisMonth.MonthBytes)
 	}
 	last, err := st.StorageUsageFor(ctx, "alice", "r1", store.StorageMonth(now.AddDate(0, -1, 0)))
 	if err != nil {
@@ -489,8 +489,8 @@ func TestChargedRunUsageCascadesWithItsRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("usage: %v", err)
 	}
-	if usage.MonthBytes != 32 {
-		t.Fatalf("the month total reads %d, want 32; a deleted run must not refund the month", usage.MonthBytes)
+	if usage.MonthBytes != 36 {
+		t.Fatalf("the month total reads %d, want 36; a deleted run must not refund the month", usage.MonthBytes)
 	}
 }
 

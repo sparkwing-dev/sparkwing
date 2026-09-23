@@ -143,8 +143,9 @@ func eventBody(payload string) string {
 	return string(buf)
 }
 
+// An event's bytes are its kind, "note", plus its payload.
 func TestEventAppendRefusedPastTheBytesPerRunQuota(t *testing.T) {
-	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 8})
+	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 12})
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team, eventBody("12345678"), true); code != http.StatusOK {
 		t.Fatalf("an event inside the quota = %d %s, want 200", code, body)
 	}
@@ -155,8 +156,8 @@ func TestEventAppendRefusedPastTheBytesPerRunQuota(t *testing.T) {
 	if !strings.Contains(body, store.StorageLimitBytesPerRun) || !strings.Contains(body, "acme") {
 		t.Fatalf("the refusal reads %q and names neither the limit nor the team", body)
 	}
-	if got := f.monthUsage(t, "acme").RunBytes; got != 8 {
-		t.Fatalf("charged bytes = %d, want 8; the refused event was charged", got)
+	if got := f.monthUsage(t, "acme").RunBytes; got != 12 {
+		t.Fatalf("charged bytes = %d, want 12; the refused event was charged", got)
 	}
 }
 
@@ -193,8 +194,8 @@ func TestStorageChargesTheCallersOwnTeamAndNoOther(t *testing.T) {
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team, eventBody("12345678"), true); code != http.StatusOK {
 		t.Fatalf("the team's own event = %d %s, want 200", code, body)
 	}
-	if got := f.monthUsage(t, "acme").RunBytes; got != 8 {
-		t.Fatalf("acme was charged %d bytes, want 8", got)
+	if got := f.monthUsage(t, "acme").RunBytes; got != 12 {
+		t.Fatalf("acme was charged %d bytes, want 12, its kind and payload", got)
 	}
 	if got := f.monthUsage(t, "other").RunBytes; got != 0 {
 		t.Fatalf("the other team was charged %d bytes for a write it did not make", got)
@@ -211,8 +212,8 @@ func TestStorageChargesTheCallersOwnTeamAndNoOther(t *testing.T) {
 	if got := f.monthUsage(t, "other").RunBytes; got != 0 {
 		t.Fatalf("a refused write charged the other team %d bytes", got)
 	}
-	if got := f.monthUsage(t, "acme").RunBytes; got != 8 {
-		t.Fatalf("another team's refused write moved acme to %d bytes, want 8", got)
+	if got := f.monthUsage(t, "acme").RunBytes; got != 12 {
+		t.Fatalf("another team's refused write moved acme to %d bytes, want 12", got)
 	}
 }
 
@@ -377,5 +378,21 @@ func TestHealthPublishesTheAlarmAndNoSizes(t *testing.T) {
 	}
 	if health.Status != "ok" {
 		t.Fatalf("health status = %q, want ok; the alarm must not degrade a working controller", health.Status)
+	}
+}
+
+func TestEventAppendRefusesAnUnboundedKind(t *testing.T) {
+	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	buf, err := json.Marshal(map[string]any{
+		"kind": strings.Repeat("k", store.MaxEventKindBytes+1), "node_id": "only", "payload": []byte("x"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team, string(buf), true); code != http.StatusBadRequest {
+		t.Fatalf("an event with a %d-byte kind = %d %s, want 400", store.MaxEventKindBytes+1, code, body)
+	}
+	if got := f.monthUsage(t, "acme").RunBytes; got != 0 {
+		t.Fatalf("a refused kind charged %d bytes", got)
 	}
 }

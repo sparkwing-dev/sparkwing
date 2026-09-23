@@ -253,10 +253,15 @@ unlock.
   offer and a claim round on one run no longer deadlock on PostgreSQL.
 - **store:** stored events are capped per event and per run whether or not a
   storage quota tier is configured: `DefaultEventLimits` allows 256 KiB per
-  event and 64 MiB per run, `Store.SetEventLimits` replaces them (zero lifts
-  a cap), and `AppendEventCharged` refuses an event past either with a
-  `StorageQuotaError` naming `event_bytes` or `event_bytes_per_run`, which the
-  controller answers with 413.
+  event, 64 MiB and 50,000 events per run, `Store.SetEventLimits` replaces
+  them (zero lifts a cap), and `AppendEventCharged` refuses an event past any
+  of them with a `StorageQuotaError` naming `event_bytes`,
+  `event_bytes_per_run` or `events_per_run`, which the controller answers
+  with 413. An event's bytes are its kind plus its payload. A kind is 1 to
+  128 bytes of `[A-Za-z0-9_.:-]`; any other is refused with
+  `ErrInvalidEventKind`, which the controller answers with 400. Runs keep
+  `event_bytes` and `event_count` counters, backfilled by the v52 migration,
+  so the per-run check reads one row.
 
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
