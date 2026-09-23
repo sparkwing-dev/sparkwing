@@ -117,14 +117,34 @@ func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (G
 }
 
 // AddGitHubRunnerBinding records b for t. Binding a repository id t already
-// binds is ErrAlreadyBound.
+// binds is ErrAlreadyBound, and a binding past [MaxGitHubRunnerBindings] is
+// ErrBindingLimit; the operator's team is not capped.
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error) {
 	repo, ok := ParseGitHubRepo(b.Repository)
 	if !ok || b.RepositoryID <= 0 || b.RepositoryOwnerID <= 0 {
 		return GitHubRunnerBinding{}, fmt.Errorf("%w: a binding needs owner/name, a repository id and an owner id", ErrInvalidInput)
 	}
 	b.Team, b.Repository, b.CreatedAt = t.team, repo.Slug(), now.UTC().Truncate(time.Second)
-	_, err := t.s.exec(ctx, `
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return GitHubRunnerBinding{}, err
+	}
+	defer rollbackOrLog(tx)
+	if holdsFreeAllowance(t.team) {
+		if err := t.lockTeamTx(ctx, tx); err != nil {
+			return GitHubRunnerBinding{}, err
+		}
+		var bound int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_runner_bindings WHERE team = ?`,
+			string(t.team)).Scan(&bound); err != nil {
+			return GitHubRunnerBinding{}, err
+		}
+		if bound >= MaxGitHubRunnerBindings {
+			return GitHubRunnerBinding{}, fmt.Errorf("%w: team %s binds %d repositories, the most a team may",
+				ErrBindingLimit, t.team, bound)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO github_runner_bindings (team, repository_id, repository_owner_id, repository, created_by, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		string(t.team), b.RepositoryID, b.RepositoryOwnerID, b.Repository, b.CreatedBy, b.CreatedAt.Unix())
@@ -134,8 +154,16 @@ func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBindi
 	if err != nil {
 		return GitHubRunnerBinding{}, err
 	}
-	return b, nil
+	return b, tx.Commit()
 }
+
+// MaxGitHubRunnerBindings bounds the repositories one team binds to GitHub
+// runners, funded or not.
+const MaxGitHubRunnerBindings = 20
+
+// ErrBindingLimit refuses a GitHub runner binding past
+// [MaxGitHubRunnerBindings].
+var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 
 // ErrAlreadyBound is returned when a team binds a repository it already binds.
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
