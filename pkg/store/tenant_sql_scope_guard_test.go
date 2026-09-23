@@ -16,10 +16,10 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"(*Store).ReleaseExpiredStorage": "the sweep finds which teams hold expired reservations; each release " +
+	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
-	"(*Store).StorageMarks":     "the storage pass reconciles every team's count of one store from one bucket listing",
-	"(*Store).ReconcileStorage": "the storage pass reconciles every team's count of one store from one bucket listing",
+	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
+	"lockCommittedTx":       "the storage pass reconciles every team's count of one store from one bucket listing",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
