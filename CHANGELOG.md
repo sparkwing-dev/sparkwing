@@ -61,8 +61,10 @@ unlock.
   back as `complete`, `incomplete`, `cut_off` (no seal 60 seconds after
   the node finished), `unconfirmed` (a runner that never numbers its
   lines) or `streaming`, judged on the node's newest execution attempt,
-  and draw one line after the log when it is not whole. The dashboard serves the verdict at
-  `GET /api/v1/runs/{id}/logs/{node}/completeness`. See
+  and draw one line after the log when it is not whole. A pooled agent or
+  Kubernetes Job numbers and seals the lines of a pipeline binary pinned to
+  an SDK without seals, and warns whenever it skips a seal. The dashboard
+  serves the verdict at `GET /api/v1/runs/{id}/logs/{node}/completeness`. See
   [Log completeness](docs/observability.md#log-completeness).
 
 - **controller:** a free tier bounded by counting teams. A team without

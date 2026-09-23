@@ -242,6 +242,7 @@ func runNodeChild(
 	cmd.Stderr = os.Stderr
 
 	outcome, startErr := runAssistedChildProcess(ctx, cmd, logger)
+	broker.sealChildLogs(ctx, outcome, startErr, logger)
 	if startErr != nil {
 		logger.Warn("runNodeRemote: child failed to start",
 			"run_id", runID, "node_id", nodeID, "err", startErr)
