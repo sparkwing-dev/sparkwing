@@ -75,7 +75,7 @@ func TestCreditsOneTeamsEmptyBalanceRefusesOnlyItsOwnNodes(t *testing.T) {
 	acmeRunner := meteredTeamClaimant(t, acme, "agent:acme-cloud")
 	globexRunner := meteredTeamClaimant(t, globex, "agent:globex-cloud")
 
-	floor := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
 	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, floor, "pay_acme", "admin"); err != nil {
 		t.Fatalf("grant acme one claim: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestCreditsFundedTeamDoesNotMaskAnotherTeamsExhaustion(t *testing.T) {
 	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
-	floor := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
 	if _, err := acme.GrantCredits(ctx, store.CreditGrantFree, floor, "", "admin"); err != nil {
 		t.Fatalf("grant acme one claim: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestCreditsLocalInstallReadsOneTeamWithoutNamingIt(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	floor := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
 	balance, err := s.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)

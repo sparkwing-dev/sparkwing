@@ -220,7 +220,7 @@ func TestMeteredClaimReservesAtTheNodesCPUClass(t *testing.T) {
 			t.Fatalf("%s reserved at class %d rate %d, want class %d rate %d",
 				tc.runID, charge.CPUClassCores, charge.RateMicroPerSecond, tc.class, tc.rate)
 		}
-		if want := tc.rate * store.CreditClaimFloorSeconds; charge.AmountMicro != want {
+		if want := tc.rate * store.MinBillableSeconds; charge.AmountMicro != want {
 			t.Fatalf("%s reserved %d, want %d", tc.runID, charge.AmountMicro, want)
 		}
 	}
@@ -412,7 +412,7 @@ func lastChargeFor(t *testing.T, s *store.Store, runID string) store.CreditCharg
 
 // A reservation is returned at the price it was taken at, so a table raised
 // mid-run cannot refund more than the claim took out.
-func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
+func TestAnEarlyFinishPaysTheMinimumAtTheRateTheClaimReserved(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -435,20 +435,15 @@ func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
 		t.Fatalf("reprice: %v", err)
 	}
 	res, err := s.FinalizeNodeCredits(ctx, "run-early", "build", claimant.TokenPrefix, time.Now())
-	if err != nil || res.Charge == nil {
-		t.Fatalf("finalize: %+v %v", res.Charge, err)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
 	}
-	if res.Charge.Kind != store.CreditChargeRefund {
-		t.Fatalf("finalize wrote %s, want a refund", res.Charge.Kind)
+	if res.Charge != nil {
+		t.Fatalf("finalize inside the minimum wrote %+v, want nothing: the reservation is consumed", res.Charge)
 	}
-	if res.Charge.RateMicroPerSecond != 36_667 {
-		t.Fatalf("refund priced at %d, want the reserved 36667", res.Charge.RateMicroPerSecond)
-	}
-	if want := res.Charge.Seconds * 36_667; res.Charge.AmountMicro != want {
-		t.Fatalf("refund = %d, want %d", res.Charge.AmountMicro, want)
-	}
-	if res.BalanceMicro > 10_000*store.MicroCreditsPerCent {
-		t.Fatalf("the refund lifted the balance above what was granted: %d", res.BalanceMicro)
+	want := int64(10_000*store.MicroCreditsPerCent) - 36_667*store.MinBillableSeconds
+	if res.BalanceMicro != want {
+		t.Fatalf("balance = %d, want the grant less the minimum at the reserved rate, %d", res.BalanceMicro, want)
 	}
 }
 

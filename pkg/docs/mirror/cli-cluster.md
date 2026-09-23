@@ -173,11 +173,12 @@ Inspect and top up the prepaid credit balance
 Cloud runner time is prepaid. One credit is one vCPU-second and
 20,000 credits is one dollar, so a ten dollar top-up is 200,000
 credits. The balance is
-grants minus charges: a claim reserves a minute of cloud runner
-time before it is granted, heartbeats charge the seconds they
-cover, and the finish refunds whatever of the reservation the
-node did not use. Runners the operator did not mark metered are
-never charged.
+grants minus charges: a claim reserves the 20-second minimum of
+cloud runner time before it is granted, heartbeats charge the
+seconds they cover, and the finish bills the tail. A node pays at
+least the minimum, so the reservation is consumed rather than
+refunded once the node starts. Runners the operator did not mark
+metered are never charged.
 
 ### Subcommands
 

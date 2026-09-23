@@ -312,6 +312,14 @@ unlock.
   `runner_scale_step_credits` by 200 so the step keeps its dollar value.
   `sparkwing cluster credits grant --amount` counts the new credit.
 
+- **credits (Breaking):** every metered node and trigger step bills at least
+  20 seconds on every class. `MinBillableSeconds` replaces
+  `CreditClaimFloorSeconds`: a claim reserves 20 seconds at its class rather
+  than 60, and once billing starts the reservation is consumed rather than
+  refunded, so a node that runs four seconds pays for twenty. A claim that
+  never starts is still refunded whole. `Store.CreditClaimFloorMicro` is
+  removed.
+
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
   `welcome`, and a repeat within a team still returns the grant already

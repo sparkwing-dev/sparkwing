@@ -256,7 +256,6 @@ type CreditChargeResult struct {
 }
 const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
-const CreditClaimFloorSeconds = 60
 type CreditGrant struct {
 	ID string
 
@@ -849,6 +848,7 @@ type MetricSample struct {
 func (m MetricSample) OneShot() bool
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 5_000
+const MinBillableSeconds = 20
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
@@ -1451,7 +1451,6 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
-func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)

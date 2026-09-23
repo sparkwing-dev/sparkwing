@@ -67,7 +67,7 @@ func unmeteredClaimant(t *testing.T, s *store.Store, principal string) store.Cla
 	return store.ClaimIdentity{Principal: principal, TokenPrefix: tok.Prefix}
 }
 
-// triggerFloor is the minute a metered trigger claim reserves, read off the
+// triggerFloor is the minimum a metered trigger claim reserves, read off the
 // refusal an empty balance answers with.
 func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64 {
 	t.Helper()
@@ -77,8 +77,8 @@ func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64
 	if !errors.As(err, &shortfall) {
 		t.Fatalf("claim on an empty balance = %v, want an insufficient-credits refusal", err)
 	}
-	if shortfall.RequiredMicro%store.CreditClaimFloorSeconds != 0 {
-		t.Fatalf("floor %d is not a whole minute of one rate", shortfall.RequiredMicro)
+	if shortfall.RequiredMicro%store.MinBillableSeconds != 0 {
+		t.Fatalf("floor %d is not a whole minimum of one rate", shortfall.RequiredMicro)
 	}
 	return shortfall.RequiredMicro
 }
@@ -188,13 +188,13 @@ func TestMeteredTriggerClaimsRaceForOneMinute(t *testing.T) {
 }
 
 // The trigger step is billed by the wall time its claim ran: a finish inside
-// the reserved minute returns the unused tail, and one past it bills the rest.
+// the reserved minimum pays the minimum, and one past it bills the rest.
 func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	rate := floor / store.CreditClaimFloorSeconds
+	rate := floor / store.MinBillableSeconds
 	grant := 10 * floor
 	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, grant, "", "operator"); err != nil {
 		t.Fatal(err)
@@ -204,13 +204,13 @@ func TestTriggerFinishSettlesItsReservation(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-short", pool, 0); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-short", time.Now().Add(-20*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-short", time.Now().Add(-5*time.Second), time.Time{})
 	if err := st.FinishTrigger(ctx, "run-short"); err != nil {
 		t.Fatal(err)
 	}
 	spent := grant - balance(t, st)
-	if spent < 20*rate || spent > 21*rate {
-		t.Fatalf("a 20s trigger step cost %d, want 20s at %d/s: the tail was not refunded", spent, rate)
+	if spent != floor {
+		t.Fatalf("a 5s trigger step cost %d, want the %ds minimum at %d/s, %d", spent, store.MinBillableSeconds, rate, floor)
 	}
 	if err := st.FinishTrigger(ctx, "run-short"); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestTriggerReapAndRequeueSettleTheReservation(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
-	rate := floor / store.CreditClaimFloorSeconds
+	rate := floor / store.MinBillableSeconds
 	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*floor, "", "operator"); err != nil {
 		t.Fatal(err)
 	}

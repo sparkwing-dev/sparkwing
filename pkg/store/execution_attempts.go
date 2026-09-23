@@ -152,7 +152,7 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		return err
 	}
 	startedAt := now.UnixNano()
-	paidThrough := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
+	paidThrough := now.Add(MinBillableSeconds * time.Second).UnixNano()
 	// safety: only the first exact fenced attempt may move the reservation to
 	// its execution boundary; a replay must preserve the original boundary.
 	res, err := tx.ExecContext(ctx, `UPDATE nodes

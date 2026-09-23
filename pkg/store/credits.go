@@ -38,11 +38,24 @@ const (
 	// balance reaches zero before the controller cancels it.
 	DefaultCreditGraceSeconds = 60
 
-	// CreditClaimFloorSeconds is the runway a claim reserves up front. The
-	// reservation is taken inside the claim transaction and refunded at
-	// finish, so it both guarantees a claimed node a minute of execution and
-	// bounds how far concurrent runners can drive the balance below zero.
-	CreditClaimFloorSeconds = 60
+	// MinBillableSeconds is the least one metered node or trigger step pays
+	// for, on every class. A cold start takes about half a minute of
+	// provisioning nobody is billed for, and a run earns what it costs to
+	// serve once it bills at least half of that, so the minimum is 20 seconds
+	// with margin over the measured 31-second start.
+	//
+	// A claim reserves this many seconds at its class's rate inside the claim
+	// transaction and refuses a balance that cannot cover them. Once billing
+	// starts the reservation is consumed rather than refunded, so a node that
+	// finishes sooner pays the minimum; only a claim that never started, or a
+	// setup the platform failed, gets it back. A claimed node is therefore
+	// guaranteed this long, plus the grace period, before an empty balance
+	// cancels it.
+	//
+	// safety: the reservation also bounds how far concurrent claims can drive
+	// one balance below zero, and a smaller one admits more of them at once;
+	// the per-principal runner caps bound that depth, not this constant.
+	MinBillableSeconds = 20
 
 	// MaxCreditGrantMicro caps the size of one grant at ten billion dollars.
 	// A ledger sums grants in SQL, so an amount near the integer limit turns a
@@ -59,7 +72,7 @@ const (
 	// MaxCreditRateMicro is the highest price an operator may put on a cloud
 	// runner second: ten thousand dollars. The ceiling is what keeps the
 	// arithmetic the ledger does with the rate inside int64: the largest
-	// reservation is the rate times CreditClaimFloorSeconds
+	// reservation is the rate times MinBillableSeconds
 	// and the largest single charge is the rate times MaxCreditMaxChargeSeconds,
 	// and both stay far below the int64 maximum. Without it a rate near that
 	// maximum wraps a reservation negative, and a claim the ledger must refuse
@@ -1006,28 +1019,20 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	}
 
 	// safety: counting a reservation whole would make the seconds total fall
-	// by its refund, so the part a finish right now would still return is held
-	// back. The database's clock measures that part, because a sampler's own
-	// clock lets a second controller or an NTP step pull the figure backwards.
+	// by its refund, so a reservation a finish could still return is held
+	// back: a node's until its execution starts, a trigger's until its claim
+	// settles. Past that point the minimum is consumed rather than refunded.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ?
-	                                         WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
-	                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
-	                                         ELSE 0 END), 0)
+		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ? ELSE 0 END), 0)
 	                   FROM nodes WHERE credit_charged_through != 0`,
-		int64(CreditClaimFloorSeconds)).Scan(&refundable); err != nil {
+		int64(MinBillableSeconds)).Scan(&refundable); err != nil {
 		return out, err
 	}
-	// safety: a trigger's reservation is consumed from its claim, so the part
-	// still ahead of the clock is what its finish would refund.
 	var triggerRefundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN credit_reserved_at / 1000000000 + ? > `+s.nowSeconds()+`
-	                                  THEN credit_reserved_at / 1000000000 + ? - `+s.nowSeconds()+`
-	                                  ELSE 0 END), 0)
-	                   FROM triggers WHERE credit_reserved_at != 0`,
-		int64(CreditClaimFloorSeconds), int64(CreditClaimFloorSeconds)).Scan(&triggerRefundable); err != nil {
+		`SELECT COALESCE(COUNT(*), 0) * ? FROM triggers WHERE credit_reserved_at != 0`,
+		int64(MinBillableSeconds)).Scan(&triggerRefundable); err != nil {
 		return out, err
 	}
 	out.SettledSeconds = charged - refundable - triggerRefundable
@@ -1617,17 +1622,6 @@ func creditLimit(limit int) int {
 	return limit
 }
 
-// CreditClaimFloorMicro is one minute of cloud runner time at the four-core
-// rate. A claim reserves this minute at the class of the node it takes, so a
-// claim on another class reserves the same minute at that class's price.
-func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
-	rate, err := s.CreditRateMicroPerSecond(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return rate * CreditClaimFloorSeconds, nil
-}
-
 // ErrMeteredInProcessNodes is returned when a metered credential claims a
 // trigger without naming a node runner that claims each node, such as k8s or
 // warm. Nodes a trigger holder runs in its own process hold no node claim,
@@ -1640,9 +1634,9 @@ var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigg
 const triggerCreditNodeID = ""
 
 // safety: the trigger step runs on the paid pool, so a metered claim reserves
-// its first minute here, inside the claim's transaction and under the ledger
-// lock, the way a node claim does; a check alone let every poller admit a run
-// against the same minute. The claim names no pool size, so the step is billed
+// its minimum here, inside the claim's transaction and under the ledger lock,
+// the way a node claim does; a check alone let every poller admit a run
+// against the same minimum. The claim names no pool size, so the step is billed
 // at the cheapest class. A refusal leaves the trigger pending, because it rolls
 // the claim back.
 func reserveTriggerCreditsTx(
@@ -1664,7 +1658,7 @@ func reserveTriggerCreditsTx(
 		return err
 	}
 	class := table.Sorted()[0]
-	required := class.MicroPerSecond * CreditClaimFloorSeconds
+	required := class.MicroPerSecond * MinBillableSeconds
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
 	}
@@ -1676,11 +1670,11 @@ func reserveTriggerCreditsTx(
 		Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
 		TokenPrefix: claimant.TokenPrefix, Principal: principal,
 		NowNS: now.UnixNano(), Rate: class.MicroPerSecond, Class: class.Cores,
-	}, CreditChargeReservation, CreditClaimFloorSeconds, required); err != nil {
+	}, CreditChargeReservation, MinBillableSeconds, required); err != nil {
 		return err
 	}
 	// safety: a window a previous claim left open is overwritten rather than
-	// settled, so that claim keeps the minute it reserved and no more; every
+	// settled, so that claim keeps the minimum it reserved and no more; every
 	// path that ends a claim settles it first, and only an older binary does not.
 	_, err = tx.ExecContext(ctx,
 		`UPDATE triggers SET credit_reserved_at = ? WHERE team = ? AND id = ?`,
@@ -1692,7 +1686,8 @@ func reserveTriggerCreditsTx(
 // write, in the same transaction, so a fence that refuses the write rolls the
 // settlement back with it. The step is billed through the lease's end when the
 // lease lapsed first, because a holder that stopped heartbeating is not
-// running, and a claim that never started its run is refunded whole.
+// running. A step shorter than the minimum pays the minimum, and a claim that
+// never started its run is refunded whole.
 func settleTriggerCreditsTx(ctx context.Context, tx *storeTx, triggerID string, now time.Time, refundAll bool) error {
 	var team string
 	var reservedAt int64
@@ -1743,10 +1738,6 @@ func settleTriggerWindowTx(
 		switch {
 		case refundAll:
 			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -seconds, -amount)
-		case elapsed < seconds:
-			// safety: the tail is returned at the price the reservation took it at.
-			unused := seconds - elapsed
-			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -unused, -rate*unused)
 		case elapsed > seconds:
 			table, tableErr := creditRateTableTx(ctx, tx)
 			if tableErr != nil {
@@ -1795,9 +1786,9 @@ func (s *Store) reserveNodeCreditsTx(
 	if classErr != nil && !errors.As(classErr, &unpriced) {
 		return classErr
 	}
-	required := class.MicroPerSecond * CreditClaimFloorSeconds
+	required := class.MicroPerSecond * MinBillableSeconds
 	if unpriced != nil {
-		required = table.BaseRate() * CreditClaimFloorSeconds
+		required = table.BaseRate() * MinBillableSeconds
 	}
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.
@@ -1827,11 +1818,11 @@ func (s *Store) reserveNodeCreditsTx(
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
 		string(team), id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
-		int64(CreditClaimFloorSeconds), required, class.Cores, class.MicroPerSecond,
+		int64(MinBillableSeconds), required, class.Cores, class.MicroPerSecond,
 		now.UnixNano()); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
 	}
-	through := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
+	through := now.Add(MinBillableSeconds * time.Second).UnixNano()
 	_, err = tx.ExecContext(ctx,
 		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?
 		  WHERE run_id = ? AND node_id = ?`,
@@ -1871,16 +1862,17 @@ type creditChargeTxResult struct {
 // charge and reports whether the balance can still pay for it. Charging is
 // idempotent within a second: a second call in the same second advances
 // nothing and writes no row. A node still inside its claim reservation is
-// charged nothing, because the reservation already paid for that minute.
+// charged nothing, because the reservation already paid for those seconds.
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
 	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, false)
 }
 
 // FinalizeNodeCredits settles a metered node when it stops running: it bills
-// the tail since the last charge, refunds whatever is left of the claim
-// reservation, and releases the node's charge window so a later attempt
-// starts its own. It is a no-op for a node that was never metered and for one
-// already settled.
+// the tail since the last charge and releases the node's charge window so a
+// later attempt starts its own. A node that finishes inside its reservation
+// pays the whole reservation, which is [MinBillableSeconds]; one whose
+// execution never started gets the reservation back. It is a no-op for a node
+// that was never metered and for one already settled.
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
 	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, true)
 }
@@ -1961,15 +1953,11 @@ func (s *Store) chargeNodeTx(
 			through = 0
 		}
 	} else {
-		refundRate, err := refundRateTx(ctx, tx, team, runID, nodeID, rate, final && nowNS <= anchor)
-		if err != nil {
-			return out, err
-		}
 		out.Charge, out.ForgivenSeconds, through, err = settleChargeWindow(
 			ctx, tx, chargeWindow{
 				Team:  team,
 				RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-				Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
+				Anchor: anchor, NowNS: nowNS, Rate: rate, Class: class,
 				MaxCharge: maxCharge, Final: final,
 			})
 		if err != nil {
@@ -2015,35 +2003,8 @@ type chargeWindow struct {
 	Team                                  Team
 	RunID, NodeID, TokenPrefix, Principal string
 	Anchor, NowNS                         int64
-	Rate, RefundRate, Class, MaxCharge    int64
+	Rate, Class, MaxCharge                int64
 	Final                                 bool
-}
-
-// safety: the tail of a reservation is returned at the price it was taken at,
-// because a table raised between the claim and the finish would otherwise
-// refund more than the reservation took out.
-func refundRateTx(
-	ctx context.Context, tx *storeTx, team Team, runID, nodeID string, fallback int64, refunding bool,
-) (int64, error) {
-	if !refunding {
-		return fallback, nil
-	}
-	var reserved int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT rate_micro_per_second FROM credit_charges
-		  WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
-		  ORDER BY charged_at DESC, id DESC LIMIT 1`,
-		string(team), runID, nodeID, CreditChargeReservation).Scan(&reserved)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fallback, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	if reserved <= 0 {
-		return fallback, nil
-	}
-	return reserved, nil
 }
 
 func refundUnstartedReservationTx(
@@ -2093,17 +2054,13 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		}
 		return nil, 0, w.NowNS, nil
 	}
+	// safety: the reservation paid through the anchor and is the minimum, so a
+	// finish inside it releases the window and returns nothing.
 	if w.NowNS <= w.Anchor {
 		if !w.Final {
 			return nil, 0, w.Anchor, nil
 		}
-		refund := (w.Anchor - w.NowNS) / int64(time.Second)
-		if refund <= 0 {
-			return nil, 0, 0, nil
-		}
-		charge, err := insertCreditChargeTx(ctx, tx, w.refunding(), CreditChargeRefund, -refund,
-			-w.RefundRate*refund)
-		return charge, 0, 0, err
+		return nil, 0, 0, nil
 	}
 
 	seconds := (w.NowNS - w.Anchor) / int64(time.Second)
@@ -2125,13 +2082,6 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 	}
 	charge, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, seconds, w.Rate*seconds)
 	return charge, forgiven, settled, err
-}
-
-// safety: the row records the price it moved credits at, which for a refund is
-// the reservation's price rather than the one in force now.
-func (w chargeWindow) refunding() chargeWindow {
-	w.Rate = w.RefundRate
-	return w
 }
 
 func insertCreditChargeTx(

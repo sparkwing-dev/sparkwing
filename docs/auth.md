@@ -26,11 +26,11 @@ is the only thing that decides whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
-A claim by a metered token reserves its first minute inside the claim's own
-transaction. The reservation is what makes the check safe when several runners
-poll at once: each one's spend is visible to the next before either claim
-commits, so a balance that covers one minute hands out one node, not one per
-runner. When the balance cannot cover the reservation,
+A claim by a metered token reserves the minimum billable time, 20 seconds at
+the node's class, inside the claim's own transaction. The reservation is what
+makes the check safe when several runners poll at once: each one's spend is
+visible to the next before either claim commits, so a balance that covers one
+minimum hands out one node, not one per runner. When the balance cannot cover the reservation,
 `POST /api/v1/nodes/claim` answers `402` with `"code": "insufficient_credits"`,
 the node stays ready, the run records a `credits_blocked` event, and the runner
 keeps polling.
@@ -47,13 +47,13 @@ in the runner-bundle chart.
 
 The trigger step itself, the planning and orchestration the holder runs on
 the claiming pool, is billed too. A metered `k8s` or `warm` claim reserves
-the cheapest class's first minute inside the claim's transaction, the same
-way a node claim does, so claims racing for a balance that covers one minute
-start one run; the rest answer `402` and their triggers stay pending. The
+the cheapest class's minimum inside the claim's transaction, the same way a
+node claim does, so claims racing for a balance that covers one minimum start
+one run; the rest answer `402` and their triggers stay pending. The
 claim does not say how large the pool is, so the step is billed at the
 cheapest class. When the claim ends, the step is billed for the wall time
-since the claim: a finish inside the minute refunds the unused tail, one past
-it bills the rest, and a lapsed lease is billed through the lease's end
+since the claim: a finish inside the minimum pays the minimum, one past it
+bills the rest, and a lapsed lease is billed through the lease's end
 rather than through the reap. A claim requeued before its run started is
 refunded whole. These ledger rows carry the run id and an empty node id.
 
@@ -61,9 +61,11 @@ The live claim's fenced execution acknowledgement starts billing immediately
 before the node body runs. Claiming, queueing, provisioning, image pulls and
 runner startup do not consume the reservation. A heartbeat after execution
 starts charges the seconds since the previous charge, and the finish charges
-the tail the last heartbeat missed and refunds whatever is left. A finish or
-expired claim before execution refunds the complete reservation, so a node
-that runs for four seconds pays for four seconds. Two bounds apply. No single
+the tail the last heartbeat missed. Every node that starts pays at least the
+minimum: the reservation is consumed rather than refunded, so a node that runs
+for four seconds pays for twenty, and one that runs for a minute pays for a
+minute. A finish or expired claim before execution refunds the complete
+reservation. Two bounds apply. No single
 charge bills more than the charge cap (30 seconds by default), so a controller
 outage or a stalled heartbeat loop does not bill the gap it left behind. A
 node that is requeued -- its lease reaped, its runner lost, or its attempt

@@ -231,7 +231,7 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 				t.Fatalf("ListCreditCharges: %v", err)
 			}
 			if len(charges) != 2 || charges[0].Kind != store.CreditChargeRefund ||
-				charges[0].Seconds != -int64(store.CreditClaimFloorSeconds) {
+				charges[0].Seconds != -int64(store.MinBillableSeconds) {
 				t.Fatalf("charges = %+v, want the reservation and its complete refund", charges)
 			}
 		})
