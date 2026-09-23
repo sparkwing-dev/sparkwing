@@ -6,6 +6,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -538,6 +539,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [selectedRun, topLevel, runs.length]);
 
   const run = activeDetail?.run || null;
+  const [paneExpanding, setPaneExpanding] = useState(false);
+  const hadOpenPane = useRef(!!run);
+  useLayoutEffect(() => {
+    if (hadOpenPane.current && !run && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setPaneExpanding(true);
+    }
+    hadOpenPane.current = !!run;
+  }, [run]);
   const nodes = activeDetail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
   const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
@@ -960,7 +969,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {
                                                             }
         <div
-          className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
+          className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all motion-reduce:transition-none`}
+          onTransitionEnd={(event) => {
+            if (event.target === event.currentTarget && event.propertyName === "flex-grow") {
+              setPaneExpanding(false);
+            }
+          }}
         >
           {showNewRun && (
             <div className="p-3 border-b border-[var(--border)] shrink-0">
@@ -1021,7 +1035,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     <FullRunRow
                       r={r}
                       ctx={filterCtx}
-                      compact={!!run}
+                      compact={!!run || paneExpanding}
                       progress={runProgress[r.id]}
                     />
                   </div>

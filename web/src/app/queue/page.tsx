@@ -47,6 +47,7 @@ export default function QueuePage() {
     HostPressureSample[]
   >([]);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousRunning = useRef<boolean | null>(null);
 
   useEffect(() => {
     const stop = startSerialPolling({
@@ -59,9 +60,13 @@ export default function QueuePage() {
           );
         }
         setLoaded(true);
-        setPulse(true);
-        if (pulseTimer.current) clearTimeout(pulseTimer.current);
-        pulseTimer.current = setTimeout(() => setPulse(false), 600);
+        const running = next != null && hasDaemon(next);
+        if (previousRunning.current !== null && previousRunning.current !== running) {
+          setPulse(true);
+          if (pulseTimer.current) clearTimeout(pulseTimer.current);
+          pulseTimer.current = setTimeout(() => setPulse(false), 600);
+        }
+        previousRunning.current = running;
       },
       intervalMS: POLL_MS,
       active: () => !document.hidden,
@@ -111,7 +116,7 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
             <span
               className={`inline-block w-2 h-2 rounded-full cursor-default ${
                 running
-                  ? `bg-[var(--success)] ${pulse ? "animate-ping-once" : ""}`
+                  ? `bg-[var(--success)] ${pulse ? "animate-ping-once motion-reduce:animate-none" : ""}`
                   : "bg-[var(--muted)]"
               }`}
             />

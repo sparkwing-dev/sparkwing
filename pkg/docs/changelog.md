@@ -805,6 +805,11 @@ unlock.
 
 ### Fixed
 
+- **dashboard:** activity rows keep their height while a run's detail pane
+  closes. The queue status dot pulses when the daemon status changes, the
+  overview reserves its card layout while loading, and tooltips appear at
+  their measured position.
+
 - **controller:** the controller measures its `--bucket-store` whether or not
   a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0
   objects and `measurement_incomplete: false` because it was never measured.
