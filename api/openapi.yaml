@@ -1214,6 +1214,11 @@ paths:
                   type: string
                   enum: [inprocess, k8s, warm]
                   description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
+                allow_repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
       responses:
         "200":
           description: Claimed trigger.
@@ -1828,6 +1833,11 @@ paths:
                   nullable: true
                   description: >-
                     The runner's own slot ceiling and in-flight claim count, which local-first placement reads to tell a saturated runner from an idle one. Omit it to advertise no ceiling, which counts as having room.
+                allow_repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
       responses:
         "200":
           description: Claimed node.
@@ -4140,7 +4150,7 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.capabilitiesResp
                 type: object
-                required: [teams, auth]
+                required: [teams, auth, claims]
                 properties:
                   teams:
                     x-sparkwing-go-type: pkg/controller.capabilitiesTeams
@@ -4156,6 +4166,12 @@ paths:
                       providers:
                         type: array
                         items: {type: string, enum: [google, github]}
+                  claims:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesClaims
+                    type: object
+                    required: [allow_repos]
+                    properties:
+                      allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
 
   /api/v1/auth/oauth/google/start:
     post:
@@ -4581,6 +4597,11 @@ paths:
               required: [name]
               properties:
                 name: {type: string, description: "1 to 63 letters, digits, '-', '_' or '.'."}
+                repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories the machine may build, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32.
       responses:
         "201":
           description: Minted.

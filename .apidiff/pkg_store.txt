@@ -1106,6 +1106,10 @@ func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
 func RedactedRuns(runs []*Run) []*Run
+type RepoFilter interface {
+	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
+}
+func RepoFilterFrom(ctx context.Context) (RepoFilter, bool)
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
 type RetentionSweep struct {
@@ -1216,6 +1220,8 @@ type RunnerPresence struct {
 	FreeSlots int
 
 	TokenPrefix string
+
+	AllowRepos RepoFilter
 }
 const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000
@@ -1944,6 +1950,7 @@ func WithCreatingPrincipal(ctx context.Context, principal string) context.Contex
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
+func WithRepoFilter(ctx context.Context, filter RepoFilter) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 
