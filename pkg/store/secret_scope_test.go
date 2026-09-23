@@ -407,3 +407,38 @@ func TestClaimedRunForNamesTheRunsTeam(t *testing.T) {
 		t.Errorf("ClaimedRunsFor = %+v, want [%+v]", all, want)
 	}
 }
+
+// A webhook writes its trigger without a run, and the runner that claims it
+// fetches the run's source before the run exists. That claim names the run,
+// in the trigger's team, until the run is created; after that the run decides.
+func TestClaimedRunFor_CountsATriggerClaimBeforeItsRunExists(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	runner := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}
+	stranger := store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"}
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-hook", Pipeline: "deploy-web"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("before any claim = %v, want ErrNotFound", err)
+	}
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-hook", runner, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now())
+	if err != nil || got.Pipeline != "deploy-web" || got.Team != store.DefaultTeam {
+		t.Fatalf("claimant before the run exists = %+v, %v; want the trigger's pipeline and team", got, err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", stranger, time.Now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another claimant = %v, want ErrNotFound", err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now().Add(time.Hour)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after the lease lapsed = %v, want ErrNotFound", err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "run-hook", Pipeline: "deploy-web", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now()); err != nil || got.Pipeline != "deploy-web" {
+		t.Fatalf("after the run exists = %+v, %v", got, err)
+	}
+}

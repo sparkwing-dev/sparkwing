@@ -266,9 +266,11 @@ type ClaimedRun struct {
 
 // ClaimedRunFor returns the team and pipeline of runID when claimant holds
 // live work on it: an unexpired claim on one of its nodes, or the
-// unexpired claim on the trigger that created it. ErrNotFound when the
-// claimant holds neither, so a caller cannot name a run it is not
-// executing.
+// unexpired claim on the trigger that created it. A trigger created without
+// its run, as a webhook's is, counts while its claimant is still fetching
+// the source that creates the run; the trigger then names the team and
+// pipeline. ErrNotFound when the claimant holds neither, so a caller cannot
+// name a run it is not executing.
 func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimIdentity, now time.Time) (ClaimedRun, error) {
 	if !claimant.bound() || runID == "" {
 		return ClaimedRun{}, ErrNotFound
@@ -290,6 +292,18 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 		runID,
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
+	if errors.Is(err, sql.ErrNoRows) {
+		// safety: only while no run row exists, so a run that does exist is
+		// always judged, and its team read, by the query above.
+		err = s.queryRow(ctx, `
+        SELECT triggers.team, triggers.pipeline
+          FROM triggers
+         WHERE triggers.id = ?
+           AND triggers.claim_principal = ? AND triggers.claim_token_prefix = ?
+           AND `+triggerClaimLiveSQL("triggers.")+`
+           AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.id = triggers.id)`,
+			runID, claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimedRun{}, ErrNotFound
 	}
