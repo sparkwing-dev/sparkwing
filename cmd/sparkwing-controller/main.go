@@ -18,6 +18,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -444,6 +446,10 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
+	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
+		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
+		return err
+	}
 	// The license decides whether an empty tokens table may serve
 	// unauthenticated, so auth is resolved after it is installed.
 	srv.EnableAuthFromStore()
@@ -668,6 +674,28 @@ func envTruthy(name string) bool {
 	default:
 		return false
 	}
+}
+
+// checkCacheGrantKey refuses to start a multi-team controller that has a cache
+// but no grant key of its own. The grant is the only boundary between teams
+// inside the cache, and without a usable key every run's grant request fails
+// at request time instead of when the operator deploys. A single-team install
+// keeps its request-time answer.
+func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey, cacheToken string) error {
+	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
+		return nil
+	}
+	if grantKey == "" {
+		return errors.New("the license allows more than one team and a cache is configured, so " +
+			authwire.CacheGrantKeyEnv + " must hold the key the controller signs cache grants with " +
+			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
+	}
+	if grantKey == cacheToken {
+		return errors.New(authwire.CacheGrantKeyEnv + " equals the cache's operator token " +
+			"(SPARKWING_CACHE_TOKEN); give the grant key a secret of its own, since any holder of " +
+			"the operator token could otherwise mint a grant for any team")
+	}
+	return nil
 }
 
 // safety: a multi-team controller holds other people's credentials, so it
