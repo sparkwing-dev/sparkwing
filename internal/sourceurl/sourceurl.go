@@ -1,9 +1,12 @@
 package sourceurl
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -165,10 +168,12 @@ var internalHostNames = map[string]bool{
 	"ip6-allrouters":  true,
 }
 
-var internalHostSuffixes = []string{".localhost", ".local", ".internal", ".localdomain", ".home.arpa"}
+// safety: ".svc" and "kubernetes.default" are the Kubernetes service
+// namespace, which a pod's resolver answers under any cluster domain.
+var internalHostSuffixes = []string{".localhost", ".local", ".internal", ".localdomain", ".home.arpa", ".svc"}
 
 func isInternalName(host string) bool {
-	if internalHostNames[host] {
+	if internalHostNames[host] || host == "kubernetes" || strings.HasPrefix(host, "kubernetes.default") {
 		return true
 	}
 	for _, suffix := range internalHostSuffixes {
@@ -182,16 +187,33 @@ func isInternalName(host string) bool {
 func routableIP(ip net.IP) bool {
 	switch {
 	case ip.IsLoopback(), ip.IsPrivate(), ip.IsUnspecified(),
-		ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast(), ip.IsInterfaceLocalMulticast(),
-		isCarrierGradeNAT(ip):
+		ip.IsLinkLocalUnicast(), ip.IsMulticast():
 		return false
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, block := range specialPurposeBlocks {
+		if block.Contains(addr) {
+			return false
+		}
 	}
 	return true
 }
 
-func isCarrierGradeNAT(ip net.IP) bool {
-	v4 := ip.To4()
-	return v4 != nil && v4[0] == 100 && v4[1]&0xc0 == 64
+// specialPurposeBlocks are the ranges the net.IP predicates miss that still
+// never name a public forge: this-network, CGNAT, IETF protocol assignments,
+// benchmarking, limited broadcast, and NAT64, whose translator reaches any
+// IPv4 address including the private ones.
+var specialPurposeBlocks = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("255.255.255.255/32"),
+	netip.MustParsePrefix("64:ff9b::/96"),
 }
 
 func parseHostIP(host string) net.IP {
@@ -266,4 +288,55 @@ func ClaimedRepoNameFromURL(repoURL string) string {
 	}
 	sum := sha256.Sum256([]byte(repoURL))
 	return fmt.Sprintf("repo-%x", sum)[:64]
+}
+
+// Lookup resolves a host name to its addresses; net.DefaultResolver.LookupIPAddr
+// is the production one.
+type Lookup func(ctx context.Context, host string) ([]net.IPAddr, error)
+
+// CheckResolvedHost resolves the host of remote, a URL ValidateCloneURL
+// accepted, and refuses it when any address it resolves to is one
+// ValidateCloneURL would refuse as a literal. A name the resolver does not know
+// passes, since only a client-side alias such as an ssh config Host can reach
+// it; any other lookup failure refuses. git resolves the name again when it
+// connects, so a name that changes its answer in between still gets through:
+// this narrows DNS rebinding rather than closing it.
+func CheckResolvedHost(ctx context.Context, remote string, lookup Lookup) error {
+	host := cloneHost(remote)
+	if host == "" {
+		return fmt.Errorf("repo URL has no host")
+	}
+	if err := validateHost(host); err != nil {
+		return err
+	}
+	host = strings.TrimRight(strings.ToLower(strings.Trim(host, "[]")), ".")
+	if parseHostIP(host) != nil {
+		return nil
+	}
+	addrs, err := lookup(ctx, host)
+	if err != nil {
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return nil
+		}
+		return fmt.Errorf("resolve repo URL host %q: %w", host, err)
+	}
+	for _, addr := range addrs {
+		if !routableIP(addr.IP) {
+			return fmt.Errorf("repo URL host %q resolves to %s, which is not allowed", host, addr.IP)
+		}
+	}
+	return nil
+}
+
+func cloneHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if match := scpLikeRE.FindStringSubmatch(raw); match != nil {
+		return match[1]
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
