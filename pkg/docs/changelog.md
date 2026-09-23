@@ -499,6 +499,9 @@ unlock.
   cap, when the reaper or agent-loss recovery clears its claim, whether or not
   execution had started. Those seconds used to go unbilled, and a lease lost
   before execution used to be refunded whole although its machine had run.
+  On Postgres the reaper now clears only the claims it selected and settled,
+  so a claim another transaction held during the pass keeps its claim for the
+  next pass rather than being cleared unsettled.
 
 - **runner:** a pooled runner whose node fails before it starts, for example
   a pipeline that does not compile, finishes the node as failed with that

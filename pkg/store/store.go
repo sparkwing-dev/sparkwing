@@ -6104,15 +6104,21 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 			return nil, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-		        credit_charged_through = 0
-		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND `+nodeNotDone,
-		now); err != nil {
-		return nil, err
+	// safety: only the rows this pass selected, locked and settled are
+	// cleared. On Postgres the select skips a row another transaction holds,
+	// and clearing every expired claim would clear that one too once its
+	// holder let go, dropping the tail nobody settled.
+	for _, pair := range pairs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+			        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+			        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+			        credit_charged_through = 0
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
+			    AND lease_expires_at < ? AND `+nodeNotDone,
+			pair[0], pair[1], now); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
