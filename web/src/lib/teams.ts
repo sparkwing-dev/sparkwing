@@ -201,6 +201,7 @@ export interface RunnerToken {
   name?: string;
   created_by?: string;
   created_at?: string;
+  expires_at?: number;
   last_used_at?: string;
 }
 

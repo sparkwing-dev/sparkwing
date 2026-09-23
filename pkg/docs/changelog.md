@@ -539,6 +539,18 @@ unlock.
   of it. The routes require `admin` again. A binding stored in any team other
   than the operator's posts no commit status and opens no Git cache mirror.
 
+- **controller:** a runner token goes with the membership that minted it
+  Removing a member left the runner tokens they minted working, and those
+  tokens never expired and carried `secrets.read` and `nodes.claim`, so a
+  removed editor's machine kept reading the team's pipeline secrets. Removing a
+  member now revokes every token they minted in that team, and demoting one to
+  `reader` revokes their runner tokens, in the same transaction as the role
+  change. A team runner token expires 90 days after it is minted, and
+  `GET /api/v1/team/runner-tokens` reports `expires_at`.
+  `store.Tenant.RemoveMember` and `SetMemberRole` take the time and return the
+  revoked prefixes. `docs/auth.md` now states that an editor can use the
+  secrets the team's pipelines read.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

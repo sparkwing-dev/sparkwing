@@ -75,10 +75,12 @@ func (s *Server) handleSetMemberRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := t.SetMemberRole(r.Context(), p.AccountID, r.PathValue("user_id"), store.Role(req.Role)); err != nil {
+	revoked, err := t.SetMemberRole(r.Context(), p.AccountID, r.PathValue("user_id"), store.Role(req.Role), time.Now())
+	if err != nil {
 		writeIdentityError(w, s, r, "set member role", err)
 		return
 	}
+	s.invalidateRevokedTokens(revoked)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -95,11 +97,19 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if err := t.RemoveMember(r.Context(), p.AccountID, subject); err != nil {
+	revoked, err := t.RemoveMember(r.Context(), p.AccountID, subject, time.Now())
+	if err != nil {
 		writeIdentityError(w, s, r, "remove member", err)
 		return
 	}
+	s.invalidateRevokedTokens(revoked)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) invalidateRevokedTokens(prefixes []string) {
+	for _, prefix := range prefixes {
+		s.auth.Invalidate(prefix)
+	}
 }
 
 type invitationJSON struct {
@@ -214,6 +224,7 @@ type runnerTokenJSON struct {
 	Name       string `json:"name"`
 	CreatedBy  string `json:"created_by"`
 	CreatedAt  int64  `json:"created_at"`
+	ExpiresAt  *int64 `json:"expires_at"`
 	LastUsedAt *int64 `json:"last_used_at"`
 }
 
@@ -284,6 +295,10 @@ func (s *Server) handleListRunnerTokens(w http.ResponseWriter, r *http.Request) 
 		row := runnerTokenJSON{
 			Prefix: tok.Prefix, Name: strings.TrimPrefix(tok.Principal, runnerPrincipalPrefix),
 			CreatedBy: tok.CreatedBy, CreatedAt: tok.CreatedAt.Unix(),
+		}
+		if tok.ExpiresAt != nil {
+			v := tok.ExpiresAt.Unix()
+			row.ExpiresAt = &v
 		}
 		if tok.LastUsedAt != nil {
 			v := tok.LastUsedAt.Unix()

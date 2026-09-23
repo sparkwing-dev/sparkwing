@@ -102,6 +102,11 @@ const (
 	MaxOpenInvitations     = 50
 )
 
+// RunnerTokenLifetime bounds a team runner token. The token reads the secrets
+// of whatever run it claims, so one a forgotten machine still holds stops
+// working on its own.
+const RunnerTokenLifetime = 90 * 24 * time.Hour
+
 // MaxCreatedTeams bounds how many teams one user can create, their personal
 // space included, because each team is a tenant the deployment pays to hold.
 const MaxCreatedTeams = 10
@@ -923,74 +928,128 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 // SetMemberRole changes subject's role. The actor may not grant a role above
 // their own, may not re-role someone who outranks them, and may not demote
 // the last owner, because a team without an owner cannot be administered and
-// nobody can put one back.
-func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role) error {
+// nobody can put one back. A demotion to reader revokes the runner tokens the
+// subject minted in t's team, since a reader may not mint one, and returns
+// their prefixes so a caller can drop them from any cache.
+func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error) {
 	if !role.Valid() {
-		return fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
+		return nil, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rollbackOrLog(tx)
 	actor, err := t.roleTx(ctx, tx, actorID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	current, err := t.roleTx(ctx, tx, subjectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !actor.AtLeast(role) || !actor.AtLeast(current) {
-		return ErrRoleAboveOwn
+		return nil, ErrRoleAboveOwn
 	}
 	if current == role {
-		return nil
+		return nil, nil
 	}
 	if current == RoleOwner {
 		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE memberships SET role = ? WHERE team = ? AND account_id = ?`,
 		string(role), string(t.team), subjectID); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	var revoked []string
+	if role == RoleReader {
+		if revoked, err = t.revokeTokensMintedByTx(ctx, tx, subjectID, now); err != nil {
+			return nil, err
+		}
+	}
+	return revoked, tx.Commit()
 }
 
-// RemoveMember takes subject out of t's team. Anyone may remove themselves;
-// removing someone else needs an actor who outranks or equals them. The last
-// owner stays.
-func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string) error {
+// RemoveMember takes subject out of t's team and revokes every token they
+// minted in it, returning the revoked prefixes so a caller can drop them from
+// any cache. Anyone may remove themselves; removing someone else needs an
+// actor who outranks or equals them. The last owner stays.
+func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rollbackOrLog(tx)
 	current, err := t.roleTx(ctx, tx, subjectID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if actorID != subjectID {
 		actor, err := t.roleTx(ctx, tx, actorID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !actor.AtLeast(current) {
-			return ErrRoleAboveOwn
+			return nil, ErrRoleAboveOwn
 		}
 	}
 	if current == RoleOwner {
 		if err := t.requireAnotherOwnerTx(ctx, tx, subjectID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM memberships WHERE team = ? AND account_id = ?`,
 		string(t.team), subjectID); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	revoked, err := t.revokeTokensMintedByTx(ctx, tx, subjectID, now)
+	if err != nil {
+		return nil, err
+	}
+	return revoked, tx.Commit()
+}
+
+// safety: a runner token outlives the membership that minted it and reads
+// the secrets of every run it claims, so it goes with its minter's access.
+func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (_ []string, err error) {
+	if accountID == "" {
+		return nil, nil
+	}
+	at := now.UTC().Unix()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT prefix FROM tokens
+		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		string(t.team), accountID, at)
+	if err != nil {
+		return nil, err
+	}
+	var prefixes []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(prefixes) == 0 {
+		return nil, nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE tokens SET revoked_at = ?
+		WHERE team = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		at, string(t.team), accountID, at); err != nil {
+		return nil, err
+	}
+	return prefixes, nil
 }
 
 // safety: counting and then inserting is a race unless the team row is locked first; Postgres
@@ -1046,7 +1105,7 @@ func (t *Tenant) createRunnerTokenOnce(
 	if live >= MaxRunnerTokensPerTeam {
 		return "", nil, ErrRunnerTokenLimit
 	}
-	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, 0, now,
+	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, RunnerTokenLifetime, now,
 		TokenOptions{CreatedBy: createdBy})
 	if err != nil {
 		return "", nil, err

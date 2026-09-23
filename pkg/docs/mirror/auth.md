@@ -601,10 +601,21 @@ session and never from the request, and an id belonging to another team
 answers 404.
 
 A runner token minted from team settings carries the runner scope set and
-belongs to the team that minted it. A team holds at most 10 live runner tokens,
-at most 50 open invitations, and creates at most 100 invitations a day;
+belongs to the team that minted it. It expires 90 days after it is minted, and
+the runner-token list shows when. Removing a member revokes every runner token
+they minted in that team, and demoting a member to `reader` revokes theirs,
+both in the same step as the role change. A team holds at most 10 live runner
+tokens, at most 50 open invitations, and creates at most 100 invitations a day;
 withdrawing an invitation still counts toward that day. No token minted into a
 team carries `admin`.
+
+Owning a secret means creating and deleting it, not keeping it from editors.
+Anyone who can run a team's pipelines -- an editor or above -- can use the
+secrets those pipelines read: they can change what a pipeline runs, and a
+runner token they mint reads the secrets of every run it claims. This is the
+same model as GitHub Actions, where anyone who can push a workflow can use the
+repository's secrets. Grant `editor` only to someone you would hand those
+secrets.
 
 ## Unauthenticated endpoints
 
