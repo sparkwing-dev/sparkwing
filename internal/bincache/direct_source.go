@@ -224,21 +224,30 @@ func directGitEnv(base []string) []string {
 }
 
 // TriggerRepoURL is the remote a runner fetches a trigger's source from, given
-// the trigger's GitHub "owner/repo" and the clone URL it recorded. The git
-// cache names a GitHub repository by the ssh form its webhook binding
-// registers, so the cache path prefers the GitHub name. A direct fetch uses the
-// recorded clone URL, the remote its author pushed to, and otherwise the GitHub
-// name's https form; either way DirectFetchURL then fits it to the identities
-// this process holds. An empty result means the trigger names no repository.
-func TriggerRepoURL(githubRepository, repoURL string, direct bool) (string, error) {
+// every name the trigger recorded for its repository: the clone URL,
+// GITHUB_REPOSITORY and github_owner/github_repo. They must all name one
+// repository (sourceurl.TriggerRepository), so the cache path and the direct
+// path fetch the same one and differ only in the form their transport needs:
+// the git cache names a GitHub repository by the ssh form its webhook binding
+// registers, and a direct fetch uses the recorded clone URL, else the GitHub
+// name's https form, fitted by DirectFetchURL to the identities this process
+// holds. An empty result means the trigger names no repository.
+func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, direct bool) (string, error) {
+	if _, err := sourceurl.TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo); err != nil {
+		return "", err
+	}
+	slug := githubRepository
+	if slug == "" && githubOwner != "" {
+		slug = githubOwner + "/" + githubRepo
+	}
 	var raw string
 	switch {
 	case direct && repoURL != "":
 		raw = repoURL
 	case direct:
-		raw = DirectRepoURLFromGitHub(githubRepository)
-	case githubRepository != "":
-		raw = RepoURLFromGitHub(githubRepository)
+		raw = DirectRepoURLFromGitHub(slug)
+	case slug != "":
+		raw = RepoURLFromGitHub(slug)
 	default:
 		raw = repoURL
 	}

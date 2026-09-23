@@ -759,7 +759,9 @@ var githubProvenanceEnvKeys = map[string]bool{
 
 var githubRepoSlug = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 
-// safety: this key wins over git.repo_url on the runner, so it stays a slug and never becomes a URL.
+// safety: the git cache path builds its clone URL from this key, so it stays a
+// slug and never becomes a URL; handleTrigger also holds it to the repository
+// git.repo_url names, since a direct runner fetches that one.
 func validateSubmittedRepoSlug(env map[string]string) error {
 	repo := env["GITHUB_REPOSITORY"]
 	if repo == "" || githubRepoSlug.MatchString(repo) {
@@ -925,6 +927,15 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 				body.Git.GithubRepo = parent.GithubRepo
 			}
 		}
+	}
+
+	// safety: the run page and commit status read GITHUB_REPOSITORY while a
+	// direct runner fetches git.repo_url, so a trigger that names two
+	// repositories would show one and run the other.
+	if _, err := sourceurl.TriggerRepository(body.Git.RepoURL, body.Trigger.Env["GITHUB_REPOSITORY"],
+		body.Git.GithubOwner, body.Git.GithubRepo); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 
 	// safety: a trigger creates the run it names, so the hourly guard measures

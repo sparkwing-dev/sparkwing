@@ -302,7 +302,8 @@ func TriggerSourceURL(trigger *store.Trigger, direct bool) (string, error) {
 	if trigger == nil {
 		return "", nil
 	}
-	return bincache.TriggerRepoURL(triggerGitHubRepository(trigger), trigger.RepoURL, direct)
+	return bincache.TriggerRepoURL(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo, direct)
 }
 
 func triggerGitHubRepository(trigger *store.Trigger) string {

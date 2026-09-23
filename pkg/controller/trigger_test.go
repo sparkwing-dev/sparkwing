@@ -839,3 +839,62 @@ func TestTriggerAndCreateRunRejectAGitSHAThatIsNotAnObjectID(t *testing.T) {
 		t.Errorf("object id run: status=%d want 201: %s", runResp.StatusCode, runBody)
 	}
 }
+
+// A run page reads GITHUB_REPOSITORY and a direct runner fetches
+// git.repo_url, so a trigger whose names disagree would show one repository
+// and run another.
+func TestTrigger_RefusesATriggerThatNamesTwoRepositories(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srvController := controller.New(st, nil)
+	srvController.WithDispatcher(&captureDispatcher{})
+	srv := httptest.NewServer(srvController.Handler())
+	t.Cleanup(srv.Close)
+
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		git  map[string]any
+		want int
+	}{
+		{
+			name: "repo_url against GITHUB_REPOSITORY",
+			env:  map[string]string{"GITHUB_REPOSITORY": "acme/app"},
+			git:  map[string]any{"repo_url": "https://github.com/evil/payload.git"},
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "repo_url against github_owner/github_repo",
+			git:  map[string]any{"repo_url": "https://github.com/acme/app.git", "github_owner": "evil", "github_repo": "payload"},
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "GITHUB_REPOSITORY against github_owner/github_repo",
+			env:  map[string]string{"GITHUB_REPOSITORY": "acme/app"},
+			git:  map[string]any{"github_owner": "evil", "github_repo": "payload"},
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "every name agrees",
+			env:  map[string]string{"GITHUB_REPOSITORY": "Acme/App"},
+			git:  map[string]any{"repo_url": "git@github.com:acme/app.git", "github_owner": "acme", "github_repo": "app"},
+			want: http.StatusAccepted,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := postJSON(t, srv.URL+"/api/v1/triggers", map[string]any{
+				"pipeline": "demo",
+				"trigger":  map[string]any{"source": "manual", "env": tc.env},
+				"git":      tc.git,
+			})
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != tc.want {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d, want %d (body: %s)", resp.StatusCode, tc.want, body)
+			}
+		})
+	}
+}
