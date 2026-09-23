@@ -56,6 +56,15 @@ func emitStartupProvenance(w io.Writer) {
 	fmt.Fprintln(w, "sparkwing-controller:", readProvenance().line())
 }
 
+// stampBinaryVersion tells the store which release is running, so the
+// migrations and requirements it records name this build rather than
+// "(devel)". An unstamped local build leaves the store's own fallback.
+func stampBinaryVersion() {
+	if v := readProvenance().Version; v != "" && v != "(devel)" {
+		store.SetBinaryVersion(v)
+	}
+}
+
 func skewRefusalMessage(e *store.SkewError) string {
 	if len(e.Requirements) > 0 {
 		return fmt.Sprintf(

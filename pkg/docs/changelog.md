@@ -421,6 +421,10 @@ unlock.
 
 ### Fixed
 
+- **controller:** the migrations and schema requirements a release controller
+  records carry its version. `min_binary_version` and each requirement's
+  `added_by_version` read `(devel)` even from a tagged build, because only the
+  CLI told the store which version was running.
 - **runner:** a pooled runner whose node fails before it starts, for example
   a pipeline that does not compile, finishes the node as failed with that
   error. The node used to stay claimed until its three-minute lease lapsed and

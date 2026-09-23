@@ -346,6 +346,7 @@ func run(args []string) error {
 	}
 
 	emitStartupProvenance(os.Stderr)
+	stampBinaryVersion()
 
 	p, perr := paths.DefaultPaths()
 	if perr != nil {
