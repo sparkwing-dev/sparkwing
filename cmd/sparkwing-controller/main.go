@@ -456,11 +456,13 @@ func run(args []string) error {
 	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
 		return err
 	}
-	// safety: the bootstrap admin token is the operator credential this
-	// process already holds, and the logs service deletes a run's logs only
-	// for an admin bearer; without it a team deletion waits and says why.
+	// safety: the log-deletion credential is a token carrying only
+	// logs.delete, which reads nothing; without one a team deletion with logs
+	// to remove waits and records why.
+	logsDeleteToken := strings.TrimSpace(os.Getenv("SPARKWING_LOGS_DELETE_TOKEN"))
+	clearEnv("SPARKWING_LOGS_DELETE_TOKEN")
 	srv.WithTeamStorage(controller.TeamStorage{
-		LogsURL: *logsURL, LogsToken: bootstrapToken,
+		LogsURL: *logsURL, LogsToken: logsDeleteToken,
 		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
 	})
 	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,

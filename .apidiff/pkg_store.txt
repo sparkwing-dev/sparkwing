@@ -511,7 +511,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin or logs.delete scope")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
@@ -522,6 +522,7 @@ var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
+var ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
@@ -808,6 +809,7 @@ type LegacyAgentClaim struct {
 	ClaimedBy string
 	LastSeen  time.Time
 }
+const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
@@ -1018,14 +1020,16 @@ func OpenPostgres(_ context.Context, dsn string) (*Store, error)
 func OpenReadOnly(path string) (*Store, error)
 func OpenReadOnlySnapshot(path string) (*Store, error)
 type Operator struct{}
+func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error)
 func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
+func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
 func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
-func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) error
+func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
 func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
@@ -1719,6 +1723,8 @@ type TeamDeletion struct {
 	FinishedAt  *time.Time
 	Attempts    int
 	LastError   string
+
+	RecheckAt *time.Time
 }
 const TeamDeletionDone = "done"
 const TeamDeletionPending = "pending"

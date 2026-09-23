@@ -179,7 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead)))))
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun)))))
-	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun))))
+	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun)), scopeLogsDelete))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream)))))
 
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
@@ -197,6 +197,9 @@ const (
 	scopeLogsRead  = "logs.read"
 	scopeLogsWrite = "logs.write"
 	scopeAdmin     = "admin"
+	// scopeLogsDelete deletes any run's logs and reads none; the controller
+	// holds it to delete a team's logs.
+	scopeLogsDelete = "logs.delete"
 )
 
 type logsPrincipal struct {
@@ -266,14 +269,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
+func (s *Server) requireScope(scope string, next http.Handler, also ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if p.hasScope(scopeAdmin) || p.hasScope(scope) {
+		if p.hasScope(scopeAdmin) || p.hasScope(scope) || slices.ContainsFunc(also, p.hasScope) {
 			next.ServeHTTP(w, r)
 			return
 		}

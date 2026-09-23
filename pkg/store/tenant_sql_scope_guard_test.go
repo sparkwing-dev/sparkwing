@@ -71,6 +71,12 @@ var reviewedUnscopedSQL = map[string]string{
 		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Store).DeleteAccount": "removes one account from every team it belongs to and relabels the rows it " +
 		"left in each, because an account is the deployment's and reaches teams only through memberships",
+	"lockOwnedTeamsTx": "lists the teams one account owns across every team, to lock each before the " +
+		"account deletion counts their owners",
+	"accountPrincipalNamesTx": "lists the principal names of the tokens one account minted in every team, " +
+		"which are what the account deletion relabels",
+	"relabelPrincipalTx": "replaces a deleted account's name in every team's rows, because the account " +
+		"belonged to the deployment and acted in each of its teams",
 	"(*Store).ClaimInvitationEmail": "counts the invitation emails one address received from every team, " +
 		"because the daily cap protects the inbox, not the team",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +

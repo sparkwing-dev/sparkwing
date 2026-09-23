@@ -349,6 +349,17 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	if status != runStatusRunning {
 		return "", nil, decisionsFor(items, "source_not_active"), nil
 	}
+	// safety: a retry of a run whose team is being deleted would write new
+	// rows under a slug the purge is emptying.
+	var deleting int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM team_deletions
+		WHERE state = ? AND slug = (SELECT team FROM runs WHERE id = ?)`, TeamDeletionPending, sourceRunID).Scan(&deleting); err != nil {
+		return "", nil, nil, err
+	}
+	if deleting > 0 {
+		return "", nil, decisionsFor(items, "source_not_active"), nil
+	}
 	if len(planJSON) == 0 {
 		return "", nil, decisionsFor(items, "missing_plan"), nil
 	}

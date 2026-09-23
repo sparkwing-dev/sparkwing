@@ -205,7 +205,7 @@ Every route the controller and logs service register, with the scope each requir
 |---|---|---|
 | `GET` | `/api/v1/health` | `public` |
 | `GET` | `/api/v1/logs/search` | `logs.read` |
-| `DELETE` | `/api/v1/logs/{runID}` | `logs.write` |
+| `DELETE` | `/api/v1/logs/{runID}` | `logs.write` or `logs.delete` |
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
 | `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |

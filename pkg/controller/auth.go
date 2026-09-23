@@ -44,7 +44,8 @@ type Principal struct {
 	// its scheduled revocation if that comes first. Zero never expires.
 	Expires time.Time
 
-	session string
+	session    string
+	signedInAt time.Time
 }
 
 // HasScope reports whether the principal carries the named scope.
@@ -94,6 +95,10 @@ const (
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
+	// ScopeLogsDelete lets the controller delete any run's logs from the logs
+	// service when it deletes a team. It reads nothing, and no team's token
+	// may carry it.
+	ScopeLogsDelete = "logs.delete"
 )
 
 var allScopes = []string{
@@ -110,6 +115,7 @@ var allScopes = []string{
 	ScopeApprovalsWrite,
 	ScopeTeamAdmin,
 	ScopeAdmin,
+	ScopeLogsDelete,
 }
 
 // safety: the table is the whole grant a membership carries, and ScopeAdmin

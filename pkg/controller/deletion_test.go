@@ -56,16 +56,23 @@ func newStorageFakes(t *testing.T) (logs, cache *storageFake, ts controller.Team
 	t.Cleanup(logSrv.Close)
 	t.Cleanup(cacheSrv.Close)
 	return logs, cache, controller.TeamStorage{
-		LogsURL: logSrv.URL, LogsToken: "logs-admin", CacheURL: cacheSrv.URL, CacheToken: "cache-op",
+		LogsURL: logSrv.URL, CacheURL: cacheSrv.URL, CacheToken: "cache-op",
 	}
 }
 
 func newDeletionFixture(t *testing.T, ts controller.TeamStorage) *identityFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
-	return newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
-		s.WithTeamStorage(ts)
-	}})
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
+	token, _, err := f.store.CreateToken("controller-logs", store.TokenKindService,
+		[]string{controller.ScopeLogsDelete}, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts.LogsToken = token
+	f.logsToken = token
+	f.srv.WithTeamStorage(ts)
+	return f
 }
 
 // createTeam makes a team owned by u and switches u's session to it.
@@ -93,7 +100,7 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 
 // afterCacheWindow is a pass time past the window in which another replica
 // may still write through a tenant handle it cached before the request.
-func afterCacheWindow() time.Time { return time.Now().Add(time.Minute) }
+func afterCacheWindow() time.Time { return time.Now().Add(5 * time.Minute) }
 
 func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 	logs, cache, ts := newStorageFakes(t)
@@ -151,7 +158,7 @@ func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
 		t.Fatalf("a pass inside the tenant-cache window deleted logs: %v", got)
 	}
 	f.srv.ProcessTeamDeletions(context.Background(), afterCacheWindow())
-	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/logs/run-acme Bearer logs-admin" {
+	if got := logs.seen(); len(got) != 1 || got[0] != "DELETE /api/v1/logs/run-acme Bearer "+f.logsToken {
 		t.Fatalf("logs service saw %v", got)
 	}
 	if got := cache.seen(); len(got) != 1 || got[0] != "DELETE /admin/teams/acme Bearer cache-op" {

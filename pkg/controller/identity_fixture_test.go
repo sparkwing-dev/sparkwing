@@ -35,6 +35,8 @@ type identityFixture struct {
 	github *githubtest.Server
 	admin  string
 	srv    *controller.Server
+	// logsToken is the log-deletion credential a deletion fixture minted.
+	logsToken string
 }
 
 type fixtureOpts struct {

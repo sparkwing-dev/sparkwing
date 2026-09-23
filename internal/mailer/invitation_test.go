@@ -69,3 +69,26 @@ func TestInvitationSubjectHasNoLineBreaks(t *testing.T) {
 		t.Fatalf("Subject carries a line break: %q", m.Subject)
 	}
 }
+
+// A display name reaches an inbox the inviter does not control, so bidi and
+// control characters that would disguise it are removed and its length is
+// capped, in the subject and both bodies.
+func TestInvitationMessageSanitizesNames(t *testing.T) {
+	inv := testInvitation()
+	inv.InviterName = "Ada\u202eevil\u0007" + strings.Repeat("x", 200)
+	inv.TeamName = "Ops\u2066\u200fTeam"
+	msg := mustInvitation(t, inv)
+	for part, text := range map[string]string{"subject": msg.Subject, "text": msg.Text, "html": msg.HTML} {
+		for _, r := range []string{"\u202e", "\u0007", "\u2066", "\u200f"} {
+			if strings.Contains(text, r) {
+				t.Errorf("%s carries %q", part, r)
+			}
+		}
+		if strings.Contains(text, strings.Repeat("x", 100)) {
+			t.Errorf("%s carries the whole 200-character name", part)
+		}
+	}
+	if !strings.Contains(msg.Subject, "OpsTeam") {
+		t.Errorf("subject = %q, want the team name with its bidi marks removed", msg.Subject)
+	}
+}

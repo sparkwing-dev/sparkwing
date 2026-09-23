@@ -4352,7 +4352,7 @@ paths:
       tags: [teams]
       summary: Delete the signed-in user's account.
       description: >-
-        Needs an identity-provider session and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Runs and other rows it left in teams it shared stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
+        Needs an identity-provider session signed in within the last 10 minutes, and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Rows that recorded the account in teams it shared (runs, triggers, approvals, schedules, bounces, pause releases, credit grants, node claims, secrets, egress usage, event payloads) stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
       requestBody:
         required: true
         content:
@@ -4380,6 +4380,7 @@ paths:
                     description: Teams the account was the only member of, now queued for deletion.
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
         "409":
           description: The account is the last owner of teams that have other members.
           content:
@@ -4438,7 +4439,7 @@ paths:
       tags: [teams]
       summary: Create a team with the caller as owner and switch to it.
       description: >-
-        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One user creates at most ten teams; the eleventh answers 403.
+        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One user creates at most ten teams over the account's life, the personal space included, and deleting one does not give it back; the eleventh answers 403. A slug that ever named a team, including a deleted one, answers 409.
       requestBody:
         required: true
         content:
@@ -4547,7 +4548,7 @@ paths:
       tags: [teams]
       summary: Delete the active team and everything it holds.
       description: >-
-        An owner confirms by sending the team's slug as `confirm_slug`. The request closes the team at once: members leave it, their sessions move to another team they belong to, every token the team holds is revoked, open invitations are withdrawn, queued runs are cancelled and running ones asked to stop. A background pass then removes the team's rows in every table, secrets included, and its logs and cached artifacts, retrying until it finishes; `GET /api/v1/me/team-deletions` shows its state. An owner whose only team this is answers 409 and deletes their account instead.
+        An owner confirms by sending the team's slug as `confirm_slug`. The request closes the team at once: members leave it, their sessions move to another team they belong to, every token the team holds is revoked, open invitations are withdrawn, queued runs are cancelled and running ones asked to stop. At least two minutes later a background pass removes the team's logs, cached artifacts and rows in every table, secrets included, retrying until it finishes, and seven hours after that deletes its cache tree and sweeps its rows once more; `GET /api/v1/me/team-deletions` shows its state. The slug is never registered again. An owner whose only team this is answers 409 and deletes their account instead.
       requestBody:
         required: true
         content:
@@ -4660,7 +4661,7 @@ paths:
       tags: [teams]
       summary: Invite an email address to the active team.
       description: >-
-        When the controller has a mail service (`--email-sender`) it emails the invitation, naming the inviter, the team, the role and the link, and `email_sent` is true. One address receives at most 5 invitation emails a day from every team together; past that, and without a mail service, nothing is mailed and `email_sent` is false. Either way the answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter can hand on. The role cannot exceed the inviter's own.
+        When the controller has a mail service (`--email-sender`) it emails the invitation, naming the inviter, the team, the role and the link, and `email_sent` is true. One address, compared without regard to case, receives at most 5 invitation emails in any 24 hours from every team together, counted in a log that deleting a team does not touch; past that, and without a mail service, nothing is mailed and `email_sent` is false. Either way the answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter can hand on. The role cannot exceed the inviter's own.
       requestBody:
         required: true
         content:
@@ -5059,7 +5060,7 @@ components:
         slug: {type: string}
         state: {type: string, enum: [pending, done]}
         requested_at: {type: integer, format: int64, description: Unix seconds.}
-        finished_at: {type: integer, format: int64, nullable: true, description: Unix seconds; null while pending.}
+        finished_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; null while pending. A done deletion sweeps its cache and rows once more seven hours later."}
         attempts: {type: integer, description: Passes that failed to finish the deletion.}
         last_error: {type: string, description: Why the last failed pass stopped; empty once one succeeds.}
     TeamRef:

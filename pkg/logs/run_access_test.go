@@ -141,4 +141,25 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 	if code, body := call("GET", "/api/v1/logs/"+runA+"/n1", readerA, ""); !strings.Contains(body, secret) {
 		t.Errorf("team B's delete removed team A's log: %d %s", code, body)
 	}
+
+	// The controller's log-deletion credential deletes any team's logs and
+	// reads none; a team cannot mint one.
+	if _, _, err := teamB.CreateToken(ctx, "b-deleter", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, now); err == nil {
+		t.Error("a team minted a logs.delete token")
+	}
+	rawDeleter, _, err := st.CreateToken("controller-logs", store.TokenKindService,
+		[]string{controller.ScopeLogsDelete}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleter := "Bearer " + rawDeleter
+	if code, body := call("GET", "/api/v1/logs/"+runA+"/n1", deleter, ""); code == http.StatusOK || strings.Contains(body, secret) {
+		t.Errorf("the log-deletion credential read a log: %d %s", code, body)
+	}
+	if code, body := call("DELETE", "/api/v1/logs/"+runA, deleter, ""); code != http.StatusNoContent {
+		t.Errorf("DELETE with the log-deletion credential = %d: %s", code, body)
+	}
+	if code, body := call("GET", "/api/v1/logs/"+runA+"/n1", readerA, ""); strings.Contains(body, secret) {
+		t.Errorf("the log survived its deletion: %d %s", code, body)
+	}
 }

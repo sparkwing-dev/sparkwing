@@ -278,6 +278,7 @@ var operatorTables = []string{
 	"identities",
 	"sparkwing_meta",
 	"sparkwing_requirements",
+	"invitation_email_log",
 	"sparkwing_schema_version",
 	"team_deletions",
 	"teams",

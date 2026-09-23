@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -27,6 +29,9 @@ var (
 	// ErrAmbiguousAccount reports an address held by more than one account
 	// and verified by none, so only an account id can name the one meant.
 	ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
+	// ErrDeletionLeaseLost reports a purge step taken by a purger that no
+	// longer holds the deletion's lease, because another replica took it.
+	ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
 )
 
 // LastOwnerError refuses an account deletion that would leave teams with
@@ -55,6 +60,9 @@ type TeamDeletion struct {
 	FinishedAt  *time.Time
 	Attempts    int
 	LastError   string
+	// RecheckAt is when a finished deletion sweeps once more for what a
+	// credential of the team wrote after the purge; nil once it has.
+	RecheckAt *time.Time
 }
 
 // AccountDeletion reports what deleting an account did.
@@ -78,9 +86,17 @@ const teamDeletionsTableSQLite = `CREATE TABLE IF NOT EXISTS team_deletions (
     state        TEXT NOT NULL CHECK (state IN ('pending', 'done')),
     attempts     INTEGER NOT NULL DEFAULT 0,
     last_error   TEXT NOT NULL DEFAULT '',
-    finished_at  INTEGER
+    finished_at  INTEGER,
+    recheck_at   INTEGER,
+    lease_holder TEXT NOT NULL DEFAULT '',
+    lease_until  INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_team_deletions_state ON team_deletions(state);`
+CREATE INDEX IF NOT EXISTS idx_team_deletions_state ON team_deletions(state);
+CREATE TABLE IF NOT EXISTS invitation_email_log (
+    address TEXT NOT NULL,
+    sent_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invitation_email_log_address ON invitation_email_log(address, sent_at);`
 
 var teamDeletionsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(teamDeletionsTableSQLite)
 
@@ -88,13 +104,26 @@ var teamDeletionsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replac
 // never mailed by the controller.
 var invitationEmailCols = map[string]string{"emailed_at": "INTEGER"}
 
+// safety: the count lives on the account rather than being counted from
+// teams, because a deleted team's row goes and the creation it cost must not.
+var accountTeamsCreatedCols = map[string]string{"teams_created": "INTEGER NOT NULL DEFAULT 0"}
+
+const backfillTeamsCreated = `UPDATE accounts SET teams_created = (SELECT COUNT(*) FROM teams WHERE created_by = accounts.id)`
+
 func applyDeletionMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	for _, stmt := range splitStatements(teamDeletionsTableSQLite) {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err
 		}
 	}
-	return ensureColumnsSQLite(ctx, tx, "invitations", invitationEmailCols)
+	if err := ensureColumnsSQLite(ctx, tx, "invitations", invitationEmailCols); err != nil {
+		return err
+	}
+	if err := ensureColumnsSQLite(ctx, tx, "accounts", accountTeamsCreatedCols); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, backfillTeamsCreated)
+	return err
 }
 
 func applyDeletionMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -103,7 +132,14 @@ func applyDeletionMigrationPostgres(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return addColumnsTx(ctx, tx, "invitations", invitationEmailCols)
+	if err := addColumnsTx(ctx, tx, "invitations", invitationEmailCols); err != nil {
+		return err
+	}
+	if err := addColumnsTx(ctx, tx, "accounts", accountTeamsCreatedCols); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, backfillTeamsCreated)
+	return err
 }
 
 // RequestDeletion queues t's team for deletion on behalf of an owner. The
@@ -288,15 +324,19 @@ func (t *Tenant) cancelActiveRunsTx(ctx context.Context, tx *storeTx, now time.T
 	return err
 }
 
-const teamDeletionSelect = `SELECT slug, state, requested_at, finished_at, attempts, last_error FROM team_deletions`
+const teamDeletionSelect = `SELECT slug, state, requested_at, finished_at, attempts, last_error, recheck_at FROM team_deletions`
 
 func scanTeamDeletion(scan func(...any) error) (TeamDeletion, error) {
 	var d TeamDeletion
 	var team string
 	var requested int64
-	var finished sql.NullInt64
-	if err := scan(&team, &d.State, &requested, &finished, &d.Attempts, &d.LastError); err != nil {
+	var finished, recheck sql.NullInt64
+	if err := scan(&team, &d.State, &requested, &finished, &d.Attempts, &d.LastError, &recheck); err != nil {
 		return TeamDeletion{}, err
+	}
+	if recheck.Valid {
+		ts := time.Unix(recheck.Int64, 0).UTC()
+		d.RecheckAt = &ts
 	}
 	d.Team = Team(team)
 	d.RequestedAt = time.Unix(requested, 0).UTC()
@@ -337,10 +377,61 @@ func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) 
 	return s.listTeamDeletions(ctx, `requested_by = ?`, accountID)
 }
 
-// PendingTeamDeletions lists every deletion the purge has not finished,
-// oldest first.
+// PendingTeamDeletions lists every deletion with work left: those the purge
+// has not finished, and finished ones still owed their recheck. Oldest first.
 func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error) {
-	return o.s.listTeamDeletions(ctx, `state = ?`, TeamDeletionPending)
+	return o.s.listTeamDeletions(ctx, `state = ? OR recheck_at IS NOT NULL`, TeamDeletionPending)
+}
+
+// ClaimTeamDeletion takes, or renews, holder's lease on a team deletion
+// that has work due at now, for lease. It reports false while another
+// holder's lease is live or nothing is due, so one replica purges a team at
+// a time; a purger calls it again before each step that reaches outside the
+// database, and stops when it reports false.
+func (o *Operator) ClaimTeamDeletion(ctx context.Context, team Team, holder string, now time.Time, lease time.Duration) (bool, error) {
+	if holder == "" {
+		return false, errors.New("store: a deletion lease needs a holder")
+	}
+	at := now.UTC().Unix()
+	res, err := o.s.exec(ctx, `
+		UPDATE team_deletions SET lease_holder = ?, lease_until = ?
+		WHERE slug = ?
+		  AND (state = ? OR (state = ? AND recheck_at IS NOT NULL AND recheck_at <= ?))
+		  AND (lease_until IS NULL OR lease_until < ? OR lease_holder = ?)`,
+		holder, now.Add(lease).UTC().Unix(), string(NormalizeTeam(team)),
+		TeamDeletionPending, TeamDeletionDone, at, at, holder)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+func (o *Operator) requireLease(ctx context.Context, team Team, holder, state string, now time.Time) error {
+	var n int
+	if err := o.s.queryRow(ctx, `
+		SELECT COUNT(*) FROM team_deletions
+		WHERE slug = ? AND state = ? AND lease_holder = ? AND lease_until >= ?`,
+		string(team), state, holder, now.UTC().Unix()).Scan(&n); err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team)
+	}
+	return nil
+}
+
+// safety: runs goes last so the rows that reference a run are removed by
+// their own statements rather than by a cascade from a very large delete.
+func (o *Operator) deleteTenantRows(ctx context.Context, team Team) error {
+	for _, table := range append(slices.DeleteFunc(slices.Clone(tenantTables), func(t string) bool { return t == "runs" }), "runs") {
+		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
+			return fmt.Errorf("purge %s: %w", table, err)
+		}
+	}
+	_, err := o.s.exec(ctx, `DELETE FROM sparkwing_meta WHERE key LIKE ?`,
+		metaKeyStorageChargedThroughPrefix+string(team)+"/%")
+	return err
 }
 
 // TeamRunIDs lists the ids of every run a team holds, so the caller can
@@ -364,27 +455,19 @@ func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err e
 }
 
 // PurgeTeam removes every row a team owns in every tenant-owned table, then
-// its registry row, and marks its deletion done. It refuses a team with no
-// pending deletion, so no caller can empty a live team. Each table is its
-// own statement rather than one transaction, because a large team's rows
-// may not fit one; a purge that stops part-way leaves the deletion pending
-// and the next call finishes it.
-func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) error {
+// its registry row, and marks its deletion done with a recheck due at
+// now+recheckAfter. holder must hold the deletion's lease; see
+// [Operator.ClaimTeamDeletion]. Each table is its own statement rather than
+// one transaction, because a large team's rows may not fit one; a purge
+// that stops part-way leaves the deletion pending and the next one finishes
+// it.
+func (o *Operator) PurgeTeam(ctx context.Context, team Team, holder string, now time.Time, recheckAfter time.Duration) error {
 	team = NormalizeTeam(team)
-	var state string
-	err := o.s.queryRow(ctx, `SELECT state FROM team_deletions WHERE slug = ?`, string(team)).Scan(&state)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && state != TeamDeletionPending) {
-		return fmt.Errorf("%w: team %s has no pending deletion", ErrNotFound, team)
-	}
-	if err != nil {
+	if err := o.requireLease(ctx, team, holder, TeamDeletionPending, now); err != nil {
 		return err
 	}
-	// safety: runs goes last so the rows that reference a run are removed by
-	// their own statements rather than by a cascade from a very large delete.
-	for _, table := range append(slices.DeleteFunc(slices.Clone(tenantTables), func(t string) bool { return t == "runs" }), "runs") {
-		if _, err := o.s.exec(ctx, `DELETE FROM `+table+` WHERE team = ?`, string(team)); err != nil {
-			return fmt.Errorf("purge %s: %w", table, err)
-		}
+	if err := o.deleteTenantRows(ctx, team); err != nil {
+		return err
 	}
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
@@ -392,6 +475,17 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) erro
 	}
 	defer rollbackOrLog(tx)
 	at := now.UTC().Unix()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE team_deletions SET state = ?, finished_at = ?, recheck_at = ?, last_error = '',
+		    lease_holder = '', lease_until = NULL
+		WHERE slug = ? AND state = ? AND lease_holder = ?`,
+		TeamDeletionDone, at, now.Add(recheckAfter).UTC().Unix(), string(team), TeamDeletionPending, holder)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM teams WHERE name = ?`, string(team)); err != nil {
 		return err
 	}
@@ -399,12 +493,32 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) erro
 		`UPDATE accounts SET active_team = '', updated_at = ? WHERE active_team = ?`, at, string(team)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE team_deletions SET state = ?, finished_at = ?, last_error = ''
-		WHERE slug = ? AND state = ?`, TeamDeletionDone, at, string(team), TeamDeletionPending); err != nil {
+	return tx.Commit()
+}
+
+// FinishTeamRecheck sweeps a finished deletion's team once more and closes
+// the deletion. A credential minted for the team before its deletion, such
+// as a cache grant, can still write under its slug until it expires, and
+// the recheck removes what it wrote. holder must hold the lease. The slug
+// is never registered again, so nothing the sweep finds belongs to anyone.
+func (o *Operator) FinishTeamRecheck(ctx context.Context, team Team, holder string, now time.Time) error {
+	team = NormalizeTeam(team)
+	if err := o.requireLease(ctx, team, holder, TeamDeletionDone, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := o.deleteTenantRows(ctx, team); err != nil {
+		return err
+	}
+	res, err := o.s.exec(ctx, `
+		UPDATE team_deletions SET recheck_at = NULL, lease_holder = '', lease_until = NULL, last_error = ''
+		WHERE slug = ? AND state = ? AND lease_holder = ?`, string(team), TeamDeletionDone, holder)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(fmt.Errorf("%w: %s", ErrDeletionLeaseLost, team), err)
+	}
+	return nil
 }
 
 // RecordTeamDeletionFailure notes a purge attempt that failed, so the
@@ -412,7 +526,7 @@ func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) erro
 func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error {
 	_, err := o.s.exec(ctx, `
 		UPDATE team_deletions SET attempts = attempts + 1, last_error = ?
-		WHERE slug = ? AND state = ?`, truncate(cause, 500), string(NormalizeTeam(team)), TeamDeletionPending)
+		WHERE slug = ? AND (state = ? OR recheck_at IS NOT NULL)`, truncate(cause, 500), string(NormalizeTeam(team)), TeamDeletionPending)
 	return err
 }
 
@@ -469,6 +583,9 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	if err != nil {
 		return AccountDeletion{}, err
 	}
+	if err := lockOwnedTeamsTx(ctx, tx, s, accountID); err != nil {
+		return AccountDeletion{}, err
+	}
 	sole, blocked, err := ownedTeamsTx(ctx, tx, accountID)
 	if err != nil {
 		return AccountDeletion{}, err
@@ -500,6 +617,15 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		return AccountDeletion{}, err
 	}
 	res.RevokedPrefixes = append(res.RevokedPrefixes, minted...)
+	names, err := accountPrincipalNamesTx(ctx, tx, acct)
+	if err != nil {
+		return AccountDeletion{}, err
+	}
+	for _, name := range names {
+		if err := relabelPrincipalTx(ctx, tx, name); err != nil {
+			return AccountDeletion{}, fmt.Errorf("delete account: %w", err)
+		}
+	}
 	label := DeletedUserLabel
 	for _, stmt := range []struct {
 		sql  string
@@ -513,9 +639,6 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
 		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
-		{`UPDATE runs SET created_principal = ? WHERE created_principal = ?`, []any{label, acct.Email}},
-		{`UPDATE triggers SET trigger_user = ? WHERE trigger_user = ?`, []any{label, acct.Email}},
-		{`UPDATE approvals SET approver = ? WHERE approver = ?`, []any{label, acct.Email}},
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE teams SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
@@ -560,6 +683,96 @@ func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Te
 	return sole, blocked, rows.Err()
 }
 
+// safety: two co-owners deleting their accounts at once would each count the
+// other as the owner who stays; locking every team the account owns first,
+// in one order, makes the second count see the first's departure without
+// two deletions deadlocking on each other's teams.
+func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID string) error {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT team FROM memberships WHERE account_id = ? AND role = ? ORDER BY team`, accountID, string(RoleOwner))
+	if err != nil {
+		return err
+	}
+	teams, err := scanPrefixes(rows)
+	if err != nil {
+		return err
+	}
+	for _, team := range teams {
+		if err := (&Tenant{s: s, team: Team(team)}).lockTeamTx(ctx, tx); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
+// accountPrincipalNamesTx lists the names a row may carry for this account:
+// its address now and every address an identity asserted for it, and the
+// principal of every token it minted. Principal columns hold a name rather
+// than an account id, so these are what the relabel matches.
+func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []string, err error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT email FROM identities WHERE account_id = ?
+		UNION SELECT principal FROM tokens WHERE created_by = ?`, acct.ID, acct.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	names := []string{acct.Email}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		if n != "" && n != DeletedUserLabel && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	return names, rows.Err()
+}
+
+// relabelPrincipalTx replaces name with [DeletedUserLabel] in every column
+// that records who acted, in every team. Amounts on usage and billing rows
+// stay; egress usage for the name merges into the label's row for the month.
+func relabelPrincipalTx(ctx context.Context, tx *storeTx, name string) error {
+	label := DeletedUserLabel
+	for _, col := range []struct{ table, column string }{
+		{"runs", "created_principal"},
+		{"triggers", "trigger_user"},
+		{"approvals", "approver"},
+		{"cron_schedules", "armed_by"},
+		{"node_bounces", "requested_by"},
+		{"debug_pauses", "released_by"},
+		{"credit_grants", "created_by"},
+		{"nodes", "claim_principal"},
+		{"secrets", "principal"},
+	} {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE `+col.table+` SET `+col.column+` = ? WHERE `+col.column+` = ?`, label, name); err != nil {
+			return fmt.Errorf("relabel %s.%s: %w", col.table, col.column, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO egress_usage (principal, month, bytes, updated_at)
+		SELECT ?, month, bytes, updated_at FROM egress_usage WHERE principal = ?
+		ON CONFLICT (principal, month) DO UPDATE SET
+		    bytes = egress_usage.bytes + excluded.bytes, updated_at = excluded.updated_at`, label, name); err != nil {
+		return fmt.Errorf("relabel egress usage: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM egress_usage WHERE principal = ?`, name); err != nil {
+		return err
+	}
+	eventsSQL := `UPDATE events SET payload = CAST(REPLACE(CAST(payload AS TEXT), ?, ?) AS BLOB)
+		WHERE payload IS NOT NULL AND instr(CAST(payload AS TEXT), ?) > 0`
+	if tx.dialect == DialectPostgres {
+		eventsSQL = `UPDATE events SET payload = convert_to(replace(convert_from(payload, 'UTF8'), ?, ?), 'UTF8')
+		WHERE payload IS NOT NULL AND strpos(convert_from(payload, 'UTF8'), ?) > 0`
+	}
+	if _, err := tx.ExecContext(ctx, eventsSQL, name, label, name); err != nil {
+		return fmt.Errorf("relabel event payloads: %w", err)
+	}
+	return nil
+}
+
 // MaxInvitationEmailsPerDay bounds how many invitation emails one address
 // receives in a day from every team together, so no set of teams can use the
 // deployment's sender to flood an inbox.
@@ -586,16 +799,21 @@ func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, n
 	// safety: two teams inviting one address at once would each count the
 	// other's send as not yet made; the lock orders them. SQLite already
 	// serializes every writer.
+	address := invitationEmailKey(email)
 	if tx.dialect == DialectPostgres {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/invitation-email/"+email); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/invitation-email/"+address); err != nil {
 			return false, err
 		}
 	}
 	at := now.UTC().Unix()
+	since := at - int64((24 * time.Hour).Seconds())
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM invitation_email_log WHERE address = ? AND sent_at <= ?`, address, since); err != nil {
+		return false, err
+	}
 	var sent int
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM invitations WHERE email = ? AND emailed_at > ?`,
-		email, at-int64((24*time.Hour).Seconds())).Scan(&sent); err != nil {
+		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&sent); err != nil {
 		return false, err
 	}
 	if sent >= MaxInvitationEmailsPerDay {
@@ -609,5 +827,18 @@ func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, n
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return false, err
 	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO invitation_email_log (address, sent_at) VALUES (?, ?)`, address, at); err != nil {
+		return false, err
+	}
 	return true, tx.Commit()
+}
+
+// safety: the log outlives the invitation and the team that sent it, so it
+// keeps a digest of the address rather than the address; the cap still
+// counts one inbox however its case was typed, because the address is
+// normalized before it is hashed.
+func invitationEmailKey(email string) string {
+	sum := sha256.Sum256([]byte(NormalizeEmail(email)))
+	return hex.EncodeToString(sum[:])
 }

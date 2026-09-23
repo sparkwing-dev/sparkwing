@@ -248,6 +248,7 @@ type RunRequest struct {
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"
+const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"

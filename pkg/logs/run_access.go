@@ -21,8 +21,9 @@ type runAccessKey struct{ credential, runID string }
 // run the caller loses access to stops being readable within that window.
 //
 // Admin is not exempt from reads, because the dashboard's own credential must
-// not become a way around a user's team. It is exempt from DELETE, which is
-// the operator's retention path over every team's runs.
+// not become a way around a user's team. Admin and logs.delete are exempt
+// from DELETE, which is the operator's retention path and the controller's
+// team-deletion path over every team's runs.
 func (s *Server) readableRun(runID func(*http.Request) string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())
@@ -30,7 +31,7 @@ func (s *Server) readableRun(runID func(*http.Request) string, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Method == http.MethodDelete && p.hasScope(scopeAdmin) {
+		if r.Method == http.MethodDelete && (p.hasScope(scopeAdmin) || p.hasScope(scopeLogsDelete)) {
 			next.ServeHTTP(w, r)
 			return
 		}

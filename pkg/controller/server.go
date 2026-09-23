@@ -86,8 +86,10 @@ type Server struct {
 	cacheURL   string
 	cacheToken string
 
-	teamStorage TeamStorage
-	mailer      mailer.Mailer
+	teamStorage        TeamStorage
+	mailer             mailer.Mailer
+	deletionHolderOnce sync.Once
+	deletionHolderID   string
 
 	metricsAddr string
 	metricsLn   net.Listener
@@ -778,8 +780,12 @@ func (s *Server) EnableAuthFromStore() *Server {
 	return s
 }
 
+// tokenCacheTTL is how long a replica keeps accepting a token it looked up,
+// so a revocation on another replica reaches it at most this late.
+const tokenCacheTTL = 60 * time.Second
+
 func (s *Server) storeAuthenticator() *Authenticator {
-	return NewAuthenticator(s.store, 60*time.Second).
+	return NewAuthenticator(s.store, tokenCacheTTL).
 		WithTrustedProxyCIDRs(s.loginLimit.trusted).
 		WithLogger(s.logger)
 }

@@ -123,9 +123,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 		t.Fatalf("TeamRunIDs = %v, %v", ids, err)
 	}
 
-	if err := st.AsOperator().PurgeTeam(ctx, "acme", now); err != nil {
-		t.Fatalf("PurgeTeam: %v", err)
-	}
+	purge(t, st, "acme", now)
 	for _, table := range store.AllTenantTablesForTest() {
 		if n := countWhere(t, st, table, "team = 'acme'"); n != 0 {
 			t.Errorf("%s still holds %d acme rows after the purge", table, n)
@@ -143,11 +141,8 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil || len(mine) != 1 || mine[0].State != store.TeamDeletionDone || mine[0].FinishedAt == nil {
 		t.Fatalf("requester's view = %+v, %v", mine, err)
 	}
-	if err := st.AsOperator().PurgeTeam(ctx, "acme", now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("purging a finished deletion = %v, want ErrNotFound", err)
-	}
-	if _, err := st.CreateTeam(ctx, member.Account.ID, "acme", "", now); err != nil {
-		t.Fatalf("a deleted slug is free again: %v", err)
+	if err := st.AsOperator().PurgeTeam(ctx, "acme", "p1", now, time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
+		t.Fatalf("purging a finished deletion = %v, want ErrDeletionLeaseLost", err)
 	}
 }
 
@@ -156,8 +151,11 @@ func TestTeamPurgeRefusesATeamNobodyAskedToDelete(t *testing.T) {
 	ctx := context.Background()
 	owner := signIn(t, st, "o", "owner@example.com")
 	seedTeam(t, st, tenant(t, st, owner.PersonalTeam), owner.Account.ID, "run-1")
-	if err := st.AsOperator().PurgeTeam(ctx, owner.PersonalTeam, time.Now()); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("PurgeTeam without a request = %v, want ErrNotFound", err)
+	if ok, err := st.AsOperator().ClaimTeamDeletion(ctx, owner.PersonalTeam, "p1", time.Now(), time.Minute); err != nil || ok {
+		t.Fatalf("claiming a team nobody asked to delete = %v, %v; want false", ok, err)
+	}
+	if err := st.AsOperator().PurgeTeam(ctx, owner.PersonalTeam, "p1", time.Now(), time.Hour); !errors.Is(err, store.ErrDeletionLeaseLost) {
+		t.Fatalf("PurgeTeam without a request = %v, want ErrDeletionLeaseLost", err)
 	}
 	if n := countWhere(t, st, "runs", fmt.Sprintf("team = '%s'", owner.PersonalTeam)); n != 1 {
 		t.Fatalf("a refused purge removed runs: %d left", n)

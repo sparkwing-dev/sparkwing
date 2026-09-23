@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Invitation carries the facts a team invitation email states.
@@ -35,9 +36,10 @@ var invitationHTML = template.Must(template.New("invitation").Parse(`<!DOCTYPE h
 
 // InvitationMessage renders the team invitation email addressed to to.
 func InvitationMessage(to string, inv Invitation) (Message, error) {
+	inv.InviterName, inv.TeamName = displayName(inv.InviterName), displayName(inv.TeamName)
 	expires := inv.ExpiresAt.UTC().Format(expiryLayout)
 	subject := fmt.Sprintf("%s invited you to %s on Sparkwing",
-		singleLine(inv.InviterName), singleLine(inv.TeamName))
+		inv.InviterName, inv.TeamName)
 
 	text := fmt.Sprintf(`%s invited you to join the team %s on Sparkwing as %s.
 
@@ -59,9 +61,26 @@ If you did not expect this invitation, you can ignore this email.
 	return Message{To: to, Subject: subject, Text: text, HTML: html.String()}, nil
 }
 
-// singleLine keeps a crafted display name from injecting mail headers.
-func singleLine(s string) string {
-	return strings.Join(strings.FieldsFunc(s, func(r rune) bool {
-		return r == '\r' || r == '\n'
-	}), " ")
+// maxNameRunes bounds a name an email repeats, so a long one cannot push the
+// rest of the subject out of view.
+const maxNameRunes = 80
+
+// displayName strips the control and bidirectional-formatting characters that
+// could reorder or hide what a recipient reads, line breaks included so a
+// crafted name cannot inject a mail header, and caps the length.
+func displayName(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Bidi_Control, r) || unicode.In(r, unicode.Cf) {
+			continue
+		}
+		if n == maxNameRunes {
+			b.WriteString("…")
+			break
+		}
+		b.WriteRune(r)
+		n++
+	}
+	return strings.TrimSpace(b.String())
 }
