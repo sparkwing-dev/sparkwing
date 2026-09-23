@@ -57,16 +57,31 @@ bills the rest, and a lapsed lease is billed through the lease's end
 rather than through the reap. A claim requeued before its run started is
 refunded whole. These ledger rows carry the run id and an empty node id.
 
-The live claim's fenced execution acknowledgement starts billing immediately
-before the node body runs. Claiming, queueing, provisioning, image pulls and
-runner startup do not consume the reservation. A heartbeat after execution
-starts charges the seconds since the previous charge, and the finish charges
-the tail the last heartbeat missed. Every node that starts pays at least the
-minimum: the reservation is consumed rather than refunded, so a node that runs
-for four seconds pays for twenty, and one that runs for a minute pays for a
-minute. A finish or expired claim before execution refunds the complete
-reservation. Two bounds apply. No single
-charge bills more than the charge cap (30 seconds by default), so a controller
+Billing runs from the moment the machine that executes a node starts work on
+it to the node's finish, so fetching the source and compiling the pipeline are
+billed; queueing and provisioning are not. A runner that claims work from the
+queue or accepts an offer is that machine, so its node bills from the claim.
+A dispatcher that claims a node and then creates a Kubernetes Job for it
+claims before the pod exists, so that node bills from the pod's first claim
+renewal, which the pod sends as it starts, or from its execution start if that
+comes first. A heartbeat charges the seconds since the previous charge, and
+the finish charges the tail the last heartbeat missed. Every node that starts
+pays at least the minimum: the reservation is consumed rather than refunded,
+so a node that runs for four seconds pays for twenty, and one that runs for a
+minute pays for a minute.
+
+A node whose machine never started gets its reservation back: a pod that never
+came up, a claim reaped before its pod renewed it. A node the platform stops
+before its execution starts gets back everything its claim billed, setup
+included. That covers a lost runner (`agent_lost`), an expired runner lease
+(`runner_lease_expired`), a claim reaped before execution, no machine of the
+class coming free (`queue_timeout`), and a log service that refused or dropped
+the node's writes (`logs_auth`, `logs_dropped`). Any other end before
+execution is the pipeline's own and keeps its setup billed: a compile error, a
+source fetch the repository refused, a cancellation, an out-of-memory kill. A
+platform failure after execution starts is billed like any other finish.
+
+Two bounds apply. No single charge bills more than the charge cap (30 seconds by default), so a controller
 outage or a stalled heartbeat loop does not bill the gap it left behind. A
 node that is requeued -- its lease reaped, its runner lost, or its attempt
 reset for a retry -- releases its charge window, so the next attempt starts a

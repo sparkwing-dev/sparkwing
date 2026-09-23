@@ -1032,7 +1032,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	if changed != 1 {
 		return nil, ErrLockHeld
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, item.Claimant, runID, nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, item.Claimant, runID, nodeID, now, true); err != nil {
 		return nil, err
 	}
 	n.ClaimedBy = item.HolderID

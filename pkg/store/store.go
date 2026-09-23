@@ -2016,6 +2016,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 54, 55:
 		return nil
 	case 56:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
 		return applyCreditUnitMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2391,6 +2394,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 54, 55:
 		return nil
 	case 56:
+		if err := addColumnsTx(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
 		return applyCreditUnitMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -5769,7 +5775,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, queued); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -6099,7 +6105,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 			if err != nil {
 				return nil, err
 			}
-			if _, err := refundUnstartedReservationTx(ctx, tx, team, pair[0], pair[1], now); err != nil {
+			if _, err := refundClaimTx(ctx, tx, team, pair[0], pair[1], now); err != nil {
 				return nil, err
 			}
 		}

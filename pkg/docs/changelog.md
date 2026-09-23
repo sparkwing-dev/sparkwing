@@ -320,6 +320,18 @@ unlock.
   never starts is still refunded whole. `Store.CreditClaimFloorMicro` is
   removed.
 
+- **credits:** a metered node bills from the moment the machine that runs it
+  starts work to its finish, so fetching the source and compiling the
+  pipeline are billed; queueing and provisioning are not. A runner claiming
+  from the queue or accepting an offer bills from its claim, and a node a
+  dispatcher claims before creating its Job bills from the pod's first claim
+  renewal, which `run-node` now sends as the pod starts, or its execution
+  start. A node the platform stops before its execution starts (`agent_lost`,
+  `runner_lease_expired`, `queue_timeout`, `logs_auth`, `logs_dropped`, or a
+  reaped claim) gets back everything its claim billed; any other end before
+  execution keeps its setup billed. Schema v56 adds
+  `nodes.credit_billing_from`.
+
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
   `welcome`, and a repeat within a team still returns the grant already

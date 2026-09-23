@@ -374,6 +374,28 @@ var nodesCreditCols = map[string]string{
 	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
 }
 
+// safety: zero means the machine that runs the node has not started on it, so
+// a claim a dispatcher took before its pod exists bills nothing until the pod
+// renews the claim or starts execution, and a setup that never began is
+// refunded whole.
+var nodesCreditBillingCols = map[string]string{
+	"credit_billing_from": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// platformSetupFailures are the failure reasons that mean the platform, not
+// the customer's pipeline, stopped a node before its execution started: the
+// runner vanished or lost its lease, no machine of the class came free, or
+// the log service refused or dropped the node's writes. A node that fails
+// this way before execution gets back everything its claim billed; any other
+// failure before execution, such as a compile error, keeps its setup billed.
+var platformSetupFailures = map[string]bool{
+	FailureAgentLost:          true,
+	FailureRunnerLeaseExpired: true,
+	FailureQueueTimeout:       true,
+	FailureLogsAuth:           true,
+	FailureLogsDropped:        true,
+}
+
 // safety: a metered trigger claim reserves from this instant, and zero means
 // no reservation is open, so a settle that finds it zero bills nothing twice.
 var triggersCreditCols = map[string]string{
@@ -1020,11 +1042,14 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 
 	// safety: counting a reservation whole would make the seconds total fall
 	// by its refund, so a reservation a finish could still return is held
-	// back: a node's until its execution starts, a trigger's until its claim
-	// settles. Past that point the minimum is consumed rather than refunded.
+	// back: a node's until its machine starts on it, a trigger's until its
+	// claim settles. Past that point the minimum is consumed rather than
+	// refunded; only a setup the platform fails returns billed seconds, and
+	// that is the one refund that lowers this total.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ? ELSE 0 END), 0)
+		`SELECT COALESCE(SUM(CASE WHEN credit_billing_from = 0 AND execution_started_at IS NULL
+	                                  THEN ? ELSE 0 END), 0)
 	                   FROM nodes WHERE credit_charged_through != 0`,
 		int64(MinBillableSeconds)).Scan(&refundable); err != nil {
 		return out, err
@@ -1759,8 +1784,15 @@ func settleTriggerWindowTx(
 
 // safety: reserving inside the claim's own transaction is what keeps concurrent
 // runners from each reading the same balance and claiming against it.
+//
+// executing reports that the claimant is the machine that runs the node, as a
+// runner polling the queue or accepting an offer is, so billing starts at the
+// claim and covers its fetch and compile. A dispatcher that claims a node
+// before creating the pod that runs it passes false, and billing starts when
+// that pod first renews the claim or starts execution.
 func (s *Store) reserveNodeCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
+	executing bool,
 ) error {
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
 	if err != nil || !metered {
@@ -1823,10 +1855,14 @@ func (s *Store) reserveNodeCreditsTx(
 		return fmt.Errorf("credits: reserve: %w", err)
 	}
 	through := now.Add(MinBillableSeconds * time.Second).UnixNano()
+	billingFrom := int64(0)
+	if executing {
+		billingFrom = now.UnixNano()
+	}
 	_, err = tx.ExecContext(ctx,
-		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?
+		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?, credit_billing_from = ?
 		  WHERE run_id = ? AND node_id = ?`,
-		through, class.Cores, runID, nodeID)
+		through, class.Cores, billingFrom, runID, nodeID)
 	return err
 }
 
@@ -1899,12 +1935,14 @@ func (s *Store) chargeNodeTx(
 	ctx context.Context, tx *storeTx, runID, nodeID, tokenPrefix string, now time.Time, final bool,
 ) (creditChargeTxResult, error) {
 	var out creditChargeTxResult
-	var anchor, class int64
+	var anchor, class, billingFrom int64
 	var startedAt sql.NullInt64
+	var failureReason string
 	err := tx.QueryRowContext(ctx,
-		`SELECT credit_charged_through, credit_cpu_class, execution_started_at FROM nodes
+		`SELECT credit_charged_through, credit_cpu_class, execution_started_at,
+		        credit_billing_from, failure_reason FROM nodes
 		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class, &startedAt)
+		runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
@@ -1935,24 +1973,44 @@ func (s *Store) chargeNodeTx(
 		return out, err
 	}
 
+	// safety: a node claimed by an older binary has no billing start, and its
+	// execution start is where that binary began billing.
+	if billingFrom == 0 && startedAt.Valid {
+		billingFrom = startedAt.Int64
+	}
 	nowNS := now.UnixNano()
-	// safety: cancellation can wait on transaction locks while a fenced attempt
-	// starts. A stale caller timestamp must not refund time before that boundary.
+	// safety: cancellation can wait on transaction locks while billing or a
+	// fenced attempt starts. A stale caller timestamp must neither refund time
+	// before that boundary nor finish a node before its execution began.
+	if billingFrom != 0 && nowNS < billingFrom {
+		nowNS = billingFrom
+	}
 	if startedAt.Valid && nowNS < startedAt.Int64 {
 		nowNS = startedAt.Int64
 	}
 	out.settledAt = time.Unix(0, nowNS)
 	rate := chargeRate(table, class)
 	through := anchor
-	if !startedAt.Valid {
+	switch {
+	case anchor != 0 && billingFrom == 0 && !final:
+		// safety: only the machine running the node renews its claim, so the
+		// first renewal is where its work began; the reservation covers the
+		// minimum from here rather than from a claim the pod never saw.
+		through = nowNS + MinBillableSeconds*int64(time.Second)
+		_, err := tx.ExecContext(ctx,
+			`UPDATE nodes SET credit_billing_from = ?, credit_charged_through = ?
+			  WHERE run_id = ? AND node_id = ?`,
+			nowNS, through, runID, nodeID)
+		return out, err
+	case billingFrom == 0 || (!startedAt.Valid && platformSetupFailures[failureReason]):
 		if final && anchor != 0 {
-			out.Charge, err = refundUnstartedReservationTx(ctx, tx, team, runID, nodeID, nowNS)
+			out.Charge, err = refundClaimTx(ctx, tx, team, runID, nodeID, nowNS)
 			if err != nil {
 				return out, err
 			}
 			through = 0
 		}
-	} else {
+	default:
 		out.Charge, out.ForgivenSeconds, through, err = settleChargeWindow(
 			ctx, tx, chargeWindow{
 				Team:  team,
@@ -1980,7 +2038,7 @@ func (s *Store) chargeNodeTx(
 		return out, err
 	}
 	out.BalanceMicro = balance
-	if !startedAt.Valid && !final {
+	if billingFrom == 0 && !final {
 		return out, nil
 	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
@@ -2007,30 +2065,46 @@ type chargeWindow struct {
 	Final                                 bool
 }
 
-func refundUnstartedReservationTx(
+// refundClaimTx returns everything the node's current claim billed: its
+// reservation and any usage charged since. It serves a claim whose machine
+// never started and a setup the platform failed, which are the two ways a
+// customer pays nothing for a node.
+//
+// safety: the refund carries the reservation's terms, and the claim is
+// bounded by its reservation row, so an earlier attempt of the same node
+// keeps what it paid.
+func refundClaimTx(
 	ctx context.Context, tx *storeTx, team Team, runID, nodeID string, nowNS int64,
 ) (*CreditCharge, error) {
-	// safety: use the reservation's stored terms so a later rate-table change
-	// cannot return more or less than the claim took.
 	var tokenPrefix, principal string
-	var seconds, amount, class, rate int64
+	var class, rate, reservedAt int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at
 		  FROM credit_charges
 		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
 		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
 		string(team), runID, nodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &seconds, &amount, &class, &rate)
+		&tokenPrefix, &principal, &class, &rate, &reservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	var seconds, amount sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT SUM(seconds), SUM(amount_micro) FROM credit_charges
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND charged_at >= ?`,
+		string(team), runID, nodeID, reservedAt).Scan(&seconds, &amount); err != nil {
+		return nil, err
+	}
+	if amount.Int64 <= 0 {
+		return nil, nil
+	}
 	return insertCreditChargeTx(ctx, tx, chargeWindow{
 		Team: team, RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
 		NowNS: nowNS, Rate: rate, Class: class,
-	}, CreditChargeRefund, -seconds, -amount)
+	}, CreditChargeRefund, -seconds.Int64, -amount.Int64)
 }
 
 // safety: a node claimed before the rate table carries no class, so it keeps

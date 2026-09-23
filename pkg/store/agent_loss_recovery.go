@@ -209,7 +209,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 				if err != nil {
 					return nil, err
 				}
-				if _, err := refundUnstartedReservationTx(
+				if _, err := refundClaimTx(
 					ctx, tx, team, item.runID, item.nodeID, now.UnixNano()); err != nil {
 					return nil, err
 				}

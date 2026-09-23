@@ -100,9 +100,11 @@ var additiveColumnSources = map[int][]map[string]string{
 	53: {triggersCreditCols},
 	54: nil,
 	55: nil,
-	// safety: v56 rewrites one setting's value in place and adds no column,
-	// so an older binary keeps writing the migrated database.
-	56: nil,
+	// safety: v56 adds one defaulted node column an older binary never names
+	// and rewrites one setting's value in place, so an older binary keeps
+	// writing the migrated database; a node it claims bills from execution
+	// start, as it always did.
+	56: {nodesCreditBillingCols},
 }
 
 func columnSpecMaps() []map[string]string {

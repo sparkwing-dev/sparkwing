@@ -165,33 +165,45 @@ func heartbeatDispatchedClaim(
 	logger *slog.Logger,
 ) {
 	ctx = store.WithNodeClaimFence(ctx, fence)
+	lastOK := time.Now()
+	renew := func() (stop bool) {
+		err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, fence.HolderID, lease, nil)
+		switch {
+		case err == nil:
+			lastOK = time.Now()
+		case ctx.Err() != nil:
+			return true
+		case errors.Is(err, store.ErrLockHeld):
+			logger.Error("run-node: the controller refused the claim renewal; stopping the node",
+				"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID)
+			abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
+			return true
+		case time.Since(lastOK) >= lease:
+			logger.Error("run-node: the controller was unreachable for the whole claim lease; stopping the node",
+				"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
+			abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
+			return true
+		default:
+			logger.Warn("run-node: claim heartbeat failed",
+				"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
+		}
+		return false
+	}
+	// safety: the pod's first renewal is where the controller starts billing a
+	// dispatched node, so it goes out as the pod starts rather than one
+	// interval later; the fetch and compile after it are the customer's work.
+	if renew() {
+		return
+	}
 	t := time.NewTicker(store.DispatchedHeartbeatInterval)
 	defer t.Stop()
-	lastOK := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			err := ctrl.HeartbeatNodeClaim(ctx, runID, nodeID, fence.HolderID, lease, nil)
-			switch {
-			case err == nil:
-				lastOK = time.Now()
-			case ctx.Err() != nil:
+			if renew() {
 				return
-			case errors.Is(err, store.ErrLockHeld):
-				logger.Error("run-node: the controller refused the claim renewal; stopping the node",
-					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID)
-				abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
-				return
-			case time.Since(lastOK) >= lease:
-				logger.Error("run-node: the controller was unreachable for the whole claim lease; stopping the node",
-					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
-				abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))
-				return
-			default:
-				logger.Warn("run-node: claim heartbeat failed",
-					"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID, "err", err)
 			}
 		}
 	}

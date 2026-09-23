@@ -269,84 +269,6 @@ func TestClaimReservationLetsOnlyOneRunnerClaimTheLastMinute(t *testing.T) {
 	}
 }
 
-func TestMeteredBillingStartsAtTheExactExecutionAttempt(t *testing.T) {
-	s := storetest.Open(t)
-	ctx := context.Background()
-	claimant := meteredClaimant(t, s, "agent:cloud")
-	readyNode(t, s, "run-delayed", "build")
-	granted := int64(100 * store.MicroCreditsPerCent)
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_1", "admin"); err != nil {
-		t.Fatalf("grant: %v", err)
-	}
-	n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
-	if err != nil || n == nil {
-		t.Fatalf("claim: %v", err)
-	}
-
-	wrong := store.ExecutionStart{
-		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration + 1,
-		AttemptOrdinal: n.AttemptsConsumed + 1,
-	}
-	if err := s.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, claimant, wrong); !errors.Is(err, store.ErrLockHeld) {
-		t.Fatalf("wrong execution attempt = %v, want ErrLockHeld", err)
-	}
-
-	setChargeWindowWithoutExecution(t, s, n.RunID, n.NodeID, time.Now().Add(-5*time.Minute))
-	beforeStart, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, time.Now())
-	if err != nil {
-		t.Fatalf("charge before execution: %v", err)
-	}
-	if beforeStart.Charge != nil || beforeStart.Cancel {
-		t.Fatalf("charge before execution = %+v, want no billed work", beforeStart)
-	}
-	if totals, err := s.CreditLedgerTotals(ctx); err != nil {
-		t.Fatalf("totals before execution: %v", err)
-	} else if totals.SettledSeconds != 0 {
-		t.Fatalf("settled seconds before execution = %d, want 0", totals.SettledSeconds)
-	}
-
-	startedAt := acknowledgeClaimedExecution(t, s, claimant, n)
-	firstAnchor := chargeWindowAnchor(t, s, n.RunID, n.NodeID)
-	if want := startedAt.Add(store.MinBillableSeconds * time.Second).UnixNano(); firstAnchor != want {
-		t.Fatalf("execution charge window = %d, want %d", firstAnchor, want)
-	}
-	if err := s.AcknowledgeNodeExecutionStart(ctx, n.RunID, n.NodeID, claimant,
-		store.ExecutionStart{
-			HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
-			ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-			AttemptOrdinal: n.AttemptsConsumed + 1,
-		}); err != nil {
-		t.Fatalf("duplicate execution start: %v", err)
-	}
-	if duplicateAnchor := chargeWindowAnchor(t, s, n.RunID, n.NodeID); duplicateAnchor != firstAnchor {
-		t.Fatalf("duplicate execution start moved the charge window from %d to %d", firstAnchor, duplicateAnchor)
-	}
-
-	res, err := s.FinalizeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix,
-		startedAt.Add(4*time.Second))
-	if err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-	if res.Charge != nil {
-		t.Fatalf("finalize charge = %+v, want none: four seconds pay the minimum", res.Charge)
-	}
-	balance, err := s.CreditBalanceMicro(ctx)
-	if err != nil {
-		t.Fatalf("balance: %v", err)
-	}
-	if want := granted - store.MinBillableSeconds*unpinnedNodeRateMicro; balance != want {
-		t.Fatalf("balance = %d, want %d after four execution seconds billed at the minimum", balance, want)
-	}
-	totals, err := s.CreditLedgerTotals(ctx)
-	if err != nil {
-		t.Fatalf("settled totals: %v", err)
-	}
-	if totals.SettledSeconds != store.MinBillableSeconds {
-		t.Fatalf("settled seconds = %d, want the %d-second minimum", totals.SettledSeconds, store.MinBillableSeconds)
-	}
-}
-
 func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -356,7 +278,10 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
+	// safety: a dispatcher's claim whose pod never renewed it is a machine that
+	// never started, which is the claim a finish refunds whole.
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-never-started", "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true}); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 
@@ -563,9 +488,9 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	}
 }
 
-// A node still inside the minute its claim reserved is charged nothing more,
-// because that minute is already paid for.
-func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinute(t *testing.T) {
+// A node still inside the minimum its claim reserved is charged nothing more,
+// because those seconds are already paid for.
+func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinimum(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -576,13 +501,13 @@ func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinute(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	for _, after := range []time.Duration{time.Second, 5 * time.Second, 30 * time.Second} {
+	for _, after := range []time.Duration{time.Second, 5 * time.Second, 19 * time.Second} {
 		res, err := s.ChargeNodeCredits(ctx, "run-reserved", "build", claimant.TokenPrefix, time.Now().Add(after))
 		if err != nil {
 			t.Fatalf("charge at %s: %v", after, err)
 		}
 		if res.Charge != nil {
-			t.Fatalf("charge at %s wrote %+v inside the reserved minute", after, res.Charge)
+			t.Fatalf("charge at %s wrote %+v inside the reserved minimum", after, res.Charge)
 		}
 	}
 	charges, err := s.ListCreditCharges(ctx, 10)
@@ -1251,7 +1176,10 @@ func exhaustedReservedNode(t *testing.T, s *store.Store, runID string, grace int
 	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
-	n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	// safety: a dispatched claim bills from its execution start, which is the
+	// instant these tests measure the reservation and the grace period from.
+	n, err := s.ClaimNamedNode(ctx, claimant, runID, "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -1365,7 +1293,8 @@ func TestChargeNodeCreditsNeverCancelsInsideTheClaimReservation(t *testing.T) {
 	if _, err := s.SetCreditSettings(ctx, store.CreditSettingsUpdate{GraceSeconds: &grace}); err != nil {
 		t.Fatalf("set grace: %v", err)
 	}
-	n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	n, err := s.ClaimNamedNode(ctx, claimant, "run-reserved", "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
