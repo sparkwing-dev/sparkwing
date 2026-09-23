@@ -587,3 +587,49 @@ func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 		t.Fatalf("a refused batch moved the count: %+v", u)
 	}
 }
+
+// A store with a maximum age deletes a team's old objects in the reconcile's
+// own listing, and the count drops with them; the operator's objects stay.
+func TestReconcileExpiresOldTeamObjects(t *testing.T) {
+	ctx := context.Background()
+	clock := time.Now()
+	f := newFixture(t, teamblob.Options{
+		TeamObjectMaxAge: func(team string) time.Duration {
+			if team == "keeper" {
+				return 0
+			}
+			return time.Hour
+		},
+		Now: func() time.Time { return clock },
+	})
+	put(t, f.store, "team-a", "artifacts/run-1/old.txt", "old!")
+	put(t, f.store, "keeper", "artifacts/run-1/old.txt", "kept")
+	put(t, f.store, "", "bins/operator", "kept")
+
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 4 || got.Objects != 1 {
+		t.Fatalf("a fresh object after reconcile = %+v, want it kept", got)
+	}
+	clock = clock.Add(2 * time.Hour)
+	f.client.reset()
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 0 || got.Objects != 0 {
+		t.Fatalf("team-a after its object aged out = %+v, want nothing", got)
+	}
+	if objs, err := f.store.List(ctx, "team-a", "artifacts/"); err != nil || len(objs) != 0 {
+		t.Fatalf("team-a still lists %v, %v", objs, err)
+	}
+	if _, err := f.store.Head(ctx, "", "bins/operator"); err != nil {
+		t.Fatalf("the operator's object was expired: %v", err)
+	}
+	if got := f.store.Usage().Team("keeper"); got.Objects != 1 {
+		t.Fatalf("a team with no maximum age = %+v, want its object kept", got)
+	}
+	if n := f.client.count("DeleteObjects"); n != 1 {
+		t.Fatalf("expiry sent %d batch deletes, want one", n)
+	}
+}

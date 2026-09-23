@@ -28,6 +28,14 @@ const blobTestBucket = "cache-blobs"
 // itself rather than trusting the service's own answers.
 func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 	t.Helper()
+	srv, raw, _ := newBlobServerWith(t, token, nil)
+	return srv, raw
+}
+
+// newBlobServerWith lets configure change the config before New, and also
+// returns the handler so a test can serve a request it built itself.
+func newBlobServerWith(t *testing.T, token string, configure func(*Config)) (*httptest.Server, *s3.Client, http.Handler) {
+	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
@@ -39,8 +47,8 @@ func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(blobTestBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	savedOpen, savedStore := openBlobStore, blobStore
-	t.Cleanup(func() { openBlobStore, blobStore = savedOpen, savedStore })
+	savedOpen, savedStore, savedQuota := openBlobStore, blobStore, blobQuota
+	t.Cleanup(func() { openBlobStore, blobStore, blobQuota = savedOpen, savedStore, savedQuota })
 	openBlobStore = func(_ context.Context, raw2 string) (*teamblob.Store, error) {
 		if raw2 != "s3://"+blobTestBucket+"/cache" {
 			t.Fatalf("opened %q", raw2)
@@ -72,13 +80,16 @@ func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 	c.APIToken = token
 	c.GrantKey = testGrantKey(token)
 	c.BlobStore = "s3://" + blobTestBucket + "/cache"
+	if configure != nil {
+		configure(&c)
+	}
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	srv := httptest.NewServer(s.handler)
 	t.Cleanup(srv.Close)
-	return srv, raw
+	return srv, raw, s.handler
 }
 
 func bucketKeys(t *testing.T, raw *s3.Client) []string {

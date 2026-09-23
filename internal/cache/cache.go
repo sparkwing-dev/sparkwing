@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
 type Config struct {
@@ -79,9 +80,16 @@ type Config struct {
 	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
 	// the volume. Credentials and region come from the AWS default chain.
 	BlobStore string
+	// ControllerURL is where the cache asks, with APIToken, what each
+	// team may store in BlobStore. Empty holds every team a grant names to
+	// the default free share.
+	ControllerURL string
 	// UsageReconcile is how often the per-team count of the bucket is
 	// replaced by a listing. Writes and deletes keep it between listings.
 	UsageReconcile time.Duration
+	// ProxyMaxBytes caps the registry proxy's directory; past it the least
+	// recently served entries are evicted. Zero leaves it unbounded.
+	ProxyMaxBytes int64
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
 	// refuses nothing. Zero is off.
@@ -111,8 +119,15 @@ func DefaultConfig() Config {
 		UsageReconcile:       24 * time.Hour,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
+		ProxyMaxBytes:       DefaultProxyMaxBytes,
 	}
 }
+
+// DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
+// verifies grants starts with when the operator named none: what one pod may
+// send in a UTC day before every metered download is refused until the day
+// rolls.
+const DefaultMultiTeamEgressDailyCapBytes int64 = 200 << 30
 
 const serverReadTimeout = 30 * time.Second
 
@@ -212,6 +227,10 @@ func New(cfg Config) (*Server, error) {
 	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
 	maxArtifactBytes = cfg.MaxArtifactBytes
 	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
+	if cfg.ProxyMaxBytes < 0 {
+		return nil, fmt.Errorf("cache: --proxy-max-bytes must not be negative; pass 0 to leave the proxy unbounded")
+	}
+	proxyMaxBytes = cfg.ProxyMaxBytes
 	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 		Limit: objectguard.CeilingLimit{
 			MaxBytes:    cfg.MaxStoreBytes,
@@ -224,7 +243,7 @@ func New(cfg Config) (*Server, error) {
 		Remedy:    storeCeilingRemedy,
 	})
 
-	blobStore = nil
+	blobStore, blobQuota = nil, nil
 	if cfg.BlobStore != "" {
 		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		store, err := openBlobStore(octx, cfg.BlobStore)
@@ -235,6 +254,7 @@ func New(cfg Config) (*Server, error) {
 		blobStore = store
 		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
 			store.Bucket(), store.Prefix())
+		blobQuota = newBlobQuota(store, cfg)
 	}
 
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
@@ -269,6 +289,11 @@ func New(cfg Config) (*Server, error) {
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
+	if blobQuota != nil {
+		if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-cache"), "cache", blobQuota); err != nil {
+			log.Printf("warning: free storage metric: %v", err)
+		}
+	}
 	if err := setupSSH(); err != nil {
 		return nil, err
 	}
@@ -297,7 +322,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
 	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 
-	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
+	s.mux.HandleFunc("/proxy/", requireCaller(metered(egress.ClassGit, handleProxy)))
 	s.mux.HandleFunc("/stats", handleProxyStats)
 
 	s.mux.Handle("/metrics", s.tel.PromHandler)

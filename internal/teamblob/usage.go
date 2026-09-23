@@ -154,7 +154,7 @@ func (s *Store) Reconcile(ctx context.Context) error {
 					continue
 				}
 				seen[team] = true
-				t, err := s.measure(ctx, tp)
+				t, err := s.measureTeam(ctx, team, tp)
 				if err != nil {
 					errs = append(errs, err)
 					continue
@@ -199,6 +199,34 @@ func (s *Store) measure(ctx context.Context, prefix string) (TeamUsage, error) {
 	}
 	t.ReconciledAt = s.now().UTC()
 	return t, nil
+}
+
+// measureTeam measures one team's namespace and, with a maximum age set,
+// deletes the objects older than it in the same listing. What the store
+// confirmed deleted leaves the count; an object it refused stays counted.
+func (s *Store) measureTeam(ctx context.Context, team, prefix string) (TeamUsage, error) {
+	var t TeamUsage
+	var expired []sizedKey
+	var age time.Duration
+	if s.maxAge != nil {
+		age = s.maxAge(team)
+	}
+	cutoff := s.now().Add(-age)
+	err := s.walk(ctx, prefix, func(o types.Object) {
+		t.Bytes += aws.ToInt64(o.Size)
+		t.Objects++
+		if age > 0 && aws.ToTime(o.LastModified).Before(cutoff) {
+			expired = append(expired, sizedKey{key: aws.ToString(o.Key), size: aws.ToInt64(o.Size)})
+		}
+	})
+	if err != nil {
+		return TeamUsage{}, err
+	}
+	d, err := s.deleteKeys(ctx, expired)
+	t.Bytes -= d.Bytes
+	t.Objects -= d.Objects
+	t.ReconciledAt = s.now().UTC()
+	return t, err
 }
 
 // children lists the next level of prefixes under prefix.

@@ -39,7 +39,7 @@ func callerFrom(r *http.Request) cacheCaller {
 var grantKey string
 
 // requireCaller admits the operator token or a grant the controller signed with
-// the grant key. It fronts the blob stores and the clone routes a runner needs; seeding,
+// the grant key. It fronts the blob stores, the registry proxy and the clone routes a runner needs; seeding,
 // refresh, archives, uploads and the admin routes stay behind requireToken,
 // because the mirrors are shared and a seed lands one team's source in them.
 // Registration answers another team's grant with 403 itself.

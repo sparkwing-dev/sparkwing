@@ -107,23 +107,32 @@ func run(args []string) error {
 			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
 			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors, uploads and the registry proxy stay "+
 			"on --data-dir. Empty keeps everything on the volume. Falls back to $SPARKWING_CACHE_BLOB_STORE.")
+	fs.StringVar(&cfg.ControllerURL, "controller",
+		envOr("SPARKWING_CONTROLLER_URL", cfg.ControllerURL),
+		"controller URL the cache asks, with --api-token, what each team a grant names may store in --blob-store: "+
+			"funded, free up to three quarters of the free allowance, or nothing. Without it every team a grant "+
+			"names is held to the default free share. Falls back to $SPARKWING_CONTROLLER_URL.")
 	fs.DurationVar(&cfg.UsageReconcile, "usage-reconcile",
 		envDuration("SPARKWING_CACHE_USAGE_RECONCILE", cfg.UsageReconcile),
 		"with --blob-store, how often the per-team count of the bucket is replaced by a listing of it. Writes and "+
 			"deletes keep the count between listings, and it is saved to the bucket every five minutes, so a restart "+
 			"does not list. 0 lists only when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
+	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
+		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
+		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+
+			"which costs one upstream fetch each. 0 leaves the proxy unbounded. Falls back to $SPARKWING_CACHE_PROXY_MAX_BYTES.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 
-	egressCfg, _, err := readEgress()
+	egressCfg, named, err := readEgress()
 	if err != nil {
 		return err
 	}
 	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
-	cfg.EgressDailyCapBytes = egressCfg.GlobalDailyCapBytes
+	cfg.EgressDailyCapBytes = egressDailyCap(cfg, egressCfg, named)
 
 	srv, err := cache.New(cfg)
 	if err != nil {
@@ -133,6 +142,16 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return srv.Run(ctx)
+}
+
+// safety: a cache that verifies grants serves more than one team, and its
+// proxy and blob downloads are what an abusive team churns, so it starts
+// with a finite daily cap unless the operator named one, zero included.
+func egressDailyCap(cfg cache.Config, egressCfg egress.Config, named egress.Named) int64 {
+	if cfg.GrantKey != "" && !named.DailyCapBytes {
+		return cache.DefaultMultiTeamEgressDailyCapBytes
+	}
+	return egressCfg.GlobalDailyCapBytes
 }
 
 func envOr(name, fallback string) string {

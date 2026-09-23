@@ -1011,7 +1011,7 @@ func TestMuxGuardsEveryWriteRoute(t *testing.T) {
 		{method: http.MethodGet, path: "/health", guarded: false},
 		{method: http.MethodGet, path: "/stats", guarded: false},
 		{method: http.MethodGet, path: "/metrics", guarded: false},
-		{method: http.MethodGet, path: "/proxy/npm/left-pad", guarded: false},
+		{method: http.MethodGet, path: "/proxy/npm/left-pad", guarded: true},
 	}
 
 	withTestProxy(t, map[string]Registry{
