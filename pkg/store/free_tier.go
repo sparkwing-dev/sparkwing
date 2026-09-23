@@ -132,24 +132,35 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 		return StorageStanding{}, err
 	}
 	out.EventBytes = events.Int64
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil {
-		return StorageStanding{}, err
-	}
-	// safety: a team held over a disputed payment may not keep what that
-	// payment bought, so it stores as an unfunded team does.
-	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	funded, err := teamFundedTx(ctx, tx, team)
 	if err != nil {
 		return StorageStanding{}, err
 	}
 	switch {
-	case balance > 0 && !freeze.Frozen:
+	case funded:
 	case events.Valid:
 		out.Tier = TeamTierFree
 	default:
 		out.Tier = TeamTierNone
 	}
 	return out, nil
+}
+
+// teamFundedTx reports whether team stores and runs as a funded team: it holds
+// credits and no dispute hold. The tier lookup and every admission read this
+// one predicate, so none of them lets a team through that another refuses.
+func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil || balance <= 0 {
+		return false, err
+	}
+	// safety: a team held over a disputed payment may not keep what that
+	// payment bought, so it stores and runs as an unfunded team does.
+	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	if err != nil {
+		return false, err
+	}
+	return !freeze.Frozen, nil
 }
 
 // safety: Postgres runs concurrent triggers in their own transactions, so
@@ -195,8 +206,8 @@ func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Ti
 	if !holdsFreeAllowance(team) {
 		return nil
 	}
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil || balance > 0 {
+	funded, err := teamFundedTx(ctx, tx, team)
+	if err != nil || funded {
 		return err
 	}
 	if err := lockFreeTierTx(ctx, tx); err != nil {
@@ -229,8 +240,8 @@ func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal st
 	if bytes <= 0 {
 		return nil
 	}
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil || balance > 0 {
+	funded, err := teamFundedTx(ctx, tx, team)
+	if err != nil || funded {
 		return err
 	}
 	slotted, err := rowPresentTx(ctx, tx, `SELECT 1 FROM free_slots WHERE team = ?`, string(team))

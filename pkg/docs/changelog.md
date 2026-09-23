@@ -688,6 +688,12 @@ unlock.
 
 ### Fixed
 
+- **controller:** a checkout cannot open for a team whose deletion has begun.
+  `POST /api/v1/team/billing/checkout` answers 409, because the payment would
+  land after the team is purged. A team held over a disputed payment is held
+  to the free tier everywhere: its run and event admissions now read the same
+  funded predicate as its storage tier, so a hold no longer lets its events
+  past the free share.
 - **cache:** the store ceiling counts git mirrors from the moment a clone or
   fetch finishes, by re-measuring the store then, instead of at the next
   scheduled measurement.

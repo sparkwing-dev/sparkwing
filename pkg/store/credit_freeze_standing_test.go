@@ -53,3 +53,28 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 		t.Fatalf("a member after the hold is released = %v", err)
 	}
 }
+
+// A frozen team's events are held to the free share as its tier says: the
+// admission of an append and the tier lookup read one funded predicate.
+func TestAFrozenTeamsEventsAreHeldToTheFreeShare(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	setFreeAllowance(t, st, 1600)
+	acme := teamHandle(t, st, "acme")
+	teamRun(t, acme, "r1")
+	fund(t, acme)
+	if err := appendBytes(st, "team:acme", "r1", 500); err != nil {
+		t.Fatalf("a funded team's write past the share: %v", err)
+	}
+	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_ev", "", "dispute opened", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := standing(t, st, "acme"); got.Tier == store.TeamTierFunded {
+		t.Fatalf("a frozen team's tier = %+v, want not funded", got)
+	}
+	err := appendBytes(st, "team:acme", "r1", 200)
+	var quota *store.StorageQuotaError
+	if !errors.As(err, &quota) || quota.Limit != store.StorageLimitFreeEvents {
+		t.Fatalf("a frozen team's write past the share = %v, want a free event share refusal", err)
+	}
+}
