@@ -669,6 +669,9 @@ unlock.
   Self-hosted controllers without either feature run claims and storage tiers
   without credit limits, and the dashboard hides Billing. See
   [Metering needs a signed license](docs/migrations/_unreleased.md#metering-needs-a-signed-license).
+- **dashboard:** the selected node's execution history now sits below the run
+  summary in the Summary tab. Single attempts use one compact row, and selecting
+  nodes leaves the tab bar in place.
 
 - **cli + controller:** on a multi-team controller, `sparkwing run --on`
   and `sparkwing crons install` no longer call the cache's `/git/refresh`

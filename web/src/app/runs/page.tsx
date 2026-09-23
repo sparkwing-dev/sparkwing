@@ -2755,7 +2755,6 @@ function RunDetailPane({
           nodes={nodes}
           onSelectNode={onSelectNode}
         />
-        {selected && <ExecutionAttributionPanel node={selected} />}
       </div>
 
       {showTrigger && (
@@ -2962,6 +2961,7 @@ function RunDetailPane({
               findMatchedErrors={findMatchedErrorNodes}
               findActiveKey={findActiveKey}
             />
+            {selected && <ExecutionAttributionPanel node={selected} />}
             <RunAnnotationsList
               nodes={nodes}
               onSelectNode={onSelectNode}

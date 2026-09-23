@@ -47,37 +47,33 @@ export function ExecutionAttributionPanel({ node }: { node: RunNode }) {
 
   return (
     <section
-      className="border-b border-[var(--border)] bg-[var(--surface)] px-4 py-2"
+      className="rounded border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
       aria-label={`Execution history for ${node.id}`}
     >
-      <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
+      <div className="mb-1 text-xs font-semibold text-[var(--foreground)]">
         Execution history
       </div>
-        <ol className="flex flex-wrap gap-2">
+        <ol className="space-y-1">
           {newestFirst.map((attempt, index) => {
             const display = executionDisplay(attempt);
             const ordinal = executionAttemptOrdinal(attempt);
             return (
               <li
                 key={`${attempt.run_id || "unknown-run"}:${attempt.node_id || node.id}:${ordinal ?? "unknown"}:${attempt.executor_name || ""}:${attempt.started_at || ""}:${index}`}
-                className={`min-w-56 rounded border px-2.5 py-2 text-xs ${display.className}`}
+                className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded px-2 py-1 text-xs ${display.className}`}
               >
-                <div className="flex items-center gap-1.5">
-                  <ExecutionLocationIcon display={display} />
-                  <span className="ml-auto font-mono text-[10px] opacity-80">
-                    {ordinal == null ? "Attempt unsequenced" : `Attempt ${ordinal}`}
-                  </span>
-                </div>
-                <div className="mt-1 font-mono text-[11px]">
-                  {display.executorLabel}
-                </div>
+                <ExecutionLocationIcon display={display} />
+                <span className="font-mono text-[10px] opacity-80">
+                  {ordinal == null ? "Attempt unsequenced" : `Attempt ${ordinal}`}
+                </span>
+                <span className="font-mono">{display.executorLabel}</span>
                 {display.platformLabel && (
-                  <div className="mt-1 text-[10px] opacity-80">
+                  <span className="text-[10px] opacity-80">
                     Platform {display.platformLabel}
-                  </div>
+                  </span>
                 )}
                 {attempt.run_id && (
-                  <div className="mt-1 text-[10px]">
+                  <span className="text-[10px]">
                     Run{" "}
                     <Link
                       href={`/runs?run=${encodeURIComponent(attempt.run_id)}`}
@@ -86,22 +82,14 @@ export function ExecutionAttributionPanel({ node }: { node: RunNode }) {
                     >
                       {attempt.run_id}
                     </Link>
-                  </div>
+                  </span>
                 )}
-                <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] opacity-80">
-                  {attempt.started_at && (
-                    <span>started {fmtDateTime(attempt.started_at)}</span>
-                  )}
-                  {attempt.finished_at && (
-                    <span>ended {fmtDateTime(attempt.finished_at)}</span>
-                  )}
-                  {attempt.outcome && <span>outcome {attempt.outcome}</span>}
-                  {attempt.failure_reason && (
-                    <span>failure {attempt.failure_reason}</span>
-                  )}
-                </div>
+                {attempt.started_at && <span className="text-[10px] opacity-80">started {fmtDateTime(attempt.started_at)}</span>}
+                {attempt.finished_at && <span className="text-[10px] opacity-80">ended {fmtDateTime(attempt.finished_at)}</span>}
+                {attempt.outcome && <span className="text-[10px]">outcome {attempt.outcome}</span>}
+                {attempt.failure_reason && <span className="text-[10px]">failure {attempt.failure_reason}</span>}
                 {attempt.retry_run_id && (
-                  <div className="mt-1 text-[10px]">
+                  <span className="text-[10px]">
                     Retry continued in{" "}
                     <Link
                       href={`/runs?run=${encodeURIComponent(attempt.retry_run_id)}`}
@@ -110,7 +98,7 @@ export function ExecutionAttributionPanel({ node }: { node: RunNode }) {
                     >
                       {attempt.retry_run_id}
                     </Link>
-                  </div>
+                  </span>
                 )}
               </li>
             );
