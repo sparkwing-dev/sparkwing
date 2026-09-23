@@ -1,5 +1,24 @@
 # Migrating to the next release
 
+## Upgrading a controller from v0.60.0
+
+v0.60.0 runs schema v47. This release migrates the database to v53 when the
+controller first starts, and a v0.60.0 binary cannot open it afterwards, so
+the backup is the only way back.
+
+1. Read the sections below for anything your deployment configures.
+2. Stop the controller and back up its database: the Postgres database, or
+   the SQLite `state.db` under the controller's `SPARKWING_HOME`.
+3. Upgrade the controller and the CLI, in either order. A released CLI still
+   works against the new controller.
+4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
+   first start migrates the schema and reseals stored secrets, and logs how
+   many it resealed.
+5. Verify: the startup line reads `runs-store schema 53`,
+   `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
+
+To roll back, stop the controller, restore the backup, and start v0.60.0.
+
 ## Dashboard session and CSRF cookies carry the `__Host-` prefix
 
 On a dashboard that keeps `Secure` cookies, the session and CSRF cookies are
