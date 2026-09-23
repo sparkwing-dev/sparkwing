@@ -502,7 +502,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const activeDetail = detail?.run.id === selectedRun ? detail : null;
+  const activeDetail = selectedRun ? detail : null;
   const detailRun = activeDetail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =
@@ -539,14 +539,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [selectedRun, topLevel, runs.length]);
 
   const run = activeDetail?.run || null;
+  const paneOpen = !!selectedRun;
   const [paneExpanding, setPaneExpanding] = useState(false);
-  const hadOpenPane = useRef(!!run);
+  const hadOpenPane = useRef(paneOpen);
   useLayoutEffect(() => {
-    if (hadOpenPane.current && !run && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (
+      hadOpenPane.current &&
+      !paneOpen &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       setPaneExpanding(true);
     }
-    hadOpenPane.current = !!run;
-  }, [run]);
+    hadOpenPane.current = paneOpen;
+  }, [paneOpen]);
   const nodes = activeDetail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
   const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
@@ -969,7 +974,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {
                                                             }
         <div
-          className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all motion-reduce:transition-none`}
+          className={`${paneOpen ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all motion-reduce:transition-none`}
           onTransitionEnd={(event) => {
             if (event.target === event.currentTarget && event.propertyName === "flex-grow") {
               setPaneExpanding(false);
@@ -1016,7 +1021,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         : ""
                   }`}
                 >
-                  {!run && (
+                  {!paneOpen && (
                     <label
                       onClick={(e) => e.stopPropagation()}
                       className="-m-2 p-2 shrink-0 cursor-pointer flex items-start"
@@ -1035,7 +1040,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     <FullRunRow
                       r={r}
                       ctx={filterCtx}
-                      compact={!!run || paneExpanding}
+                      compact={paneOpen || paneExpanding}
                       progress={runProgress[r.id]}
                     />
                   </div>

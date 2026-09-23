@@ -867,6 +867,8 @@ unlock.
   `sparkwing` instead of removing the runner. Without `pnpm`, it embeds an
   existing dashboard export when available, or completes with a warning that
   the dashboard is unavailable.
+- **dashboard:** Switching between selected runs keeps the compact runs list
+  and detail panes in place while the next run loads.
 
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names

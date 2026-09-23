@@ -400,6 +400,10 @@ takes a pipeline name, a repository such as `https://github.com/acme/app`,
 and a branch (`main` unless you change it). The runner that claims it fetches
 the branch tip.
 
+Selecting a run opens its detail beside the compact runs list. Switching to
+another run keeps both panes in place while its detail loads; clearing the
+selection closes the detail.
+
 **From a terminal.** Under **Team > Machines > CLI access**, **Create CLI
 token** mints a personal token and shows it once with two commands:
 
