@@ -270,7 +270,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team, verified := s.verifiedGitHubTeam(resolved, r.Header.Get("X-Hub-Signature-256"), body, pipeline)
+	signer, verified := s.verifiedGitHubCandidate(resolved, r.Header.Get("X-Hub-Signature-256"), body, pipeline)
 	if !verified {
 		writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
 		return
@@ -284,7 +284,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// safety: 404 rather than 403 so the status cannot be walked to enumerate the binding table.
-	if !resolved.bound && !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
+	if !signer.bound && !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
 		s.logger.Warn("github webhook rejected",
 			"pipeline", pipeline, "repo", claimedRepo, "reason", "repository not bound to pipeline")
 		writeError(w, http.StatusNotFound, errGitHubWebhookUnbound)
@@ -304,7 +304,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "pong"})
 		return
 	case "push", "pull_request":
-		tenant, err := s.tenantForTeam(r.Context(), team)
+		tenant, err := s.tenantForTeam(r.Context(), signer.team)
 		if err != nil {
 			s.writeInternalError(w, r, "github webhook team handle", err)
 			return

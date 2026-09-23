@@ -557,6 +557,14 @@ unlock.
   for the same repository. The key now carries the team whose binding signed
   the delivery.
 
+- **controller:** another team's webhook binding leaves the operator's document alone
+  A binding in any team for a pipeline and repository shut out the
+  `GITHUB_WEBHOOK_BINDINGS` document's secret for that repository, and let a
+  delivery signed by the document's secret skip the document's allow-list.
+  Only the operator's own binding now replaces the document's secret, and a
+  delivery skips the allow-list only when the binding whose secret signed it
+  names the repository.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

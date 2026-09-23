@@ -183,3 +183,61 @@ func TestGitHubWebhookFlood_OneTeamCannotShedAnotherTeamsDeliveries(t *testing.T
 		}
 	}
 }
+
+// Another team's binding for a repository leaves the operator's document
+// secret for it standing, so the operator's deliveries keep verifying.
+func TestGitHubWebhookBinding_AnotherTeamsBindingLeavesTheDocumentSecret(t *testing.T) {
+	st := openSQLiteBindingStore(t)
+	const documentSecret = "operator-document-secret"
+	f := newBindingFixture(t, st, func(s *controller.Server) *controller.Server {
+		return s.WithGitHubWebhookSecret(documentSecret)
+	})
+	tenantB := teamTenant(t, st, teamB)
+	if err := tenantB.PutGitHubWebhookBinding(context.Background(), store.GitHubWebhookBinding{
+		Pipeline: "build", Repo: "acme/widgets", Secret: "team-b-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := pushBody("acme/widgets", "ccc111")
+	resp := postWebhookDelivery(t, f.server.URL+"/webhooks/github/build", "push", "doc-1", body, signWebhook(documentSecret, body))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("the operator's document-signed delivery = %d, want 202", resp.StatusCode)
+	}
+	other := pushBody("acme/gadgets", "ddd111")
+	resp = postWebhookDelivery(t, f.server.URL+"/webhooks/github/build", "push", "doc-2", other, signWebhook(documentSecret, other))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("a document-signed delivery for an unbound repository = %d, want 202", resp.StatusCode)
+	}
+}
+
+// Another team's binding for a repository allows only that team's deliveries,
+// so the operator's document still refuses the repository its allow-list
+// leaves out when the operator's own secret signs the delivery.
+func TestGitHubWebhookBinding_AnotherTeamsBindingLeavesTheDocumentAllowList(t *testing.T) {
+	st := openSQLiteBindingStore(t)
+	const documentSecret = "operator-document-secret"
+	f := newBindingFixture(t, st, func(s *controller.Server) *controller.Server {
+		return s.WithGitHubWebhookSecret(documentSecret).WithGitHubWebhookConfig(controller.GitHubWebhookConfig{
+			Pipelines: map[string]controller.GitHubWebhookBinding{"build": {Repos: []string{"acme/gadgets"}}},
+		})
+	})
+	tenantB := teamTenant(t, st, teamB)
+	if err := tenantB.PutGitHubWebhookBinding(context.Background(), store.GitHubWebhookBinding{
+		Pipeline: "build", Repo: "acme/widgets", Secret: "team-b-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := pushBody("acme/widgets", "eee111")
+	resp := postWebhookDelivery(t, f.server.URL+"/webhooks/github/build", "push", "doc-3", body, signWebhook(documentSecret, body))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("an operator delivery for a repository its allow-list leaves out = %d, want 404", resp.StatusCode)
+	}
+	resp = postWebhookDelivery(t, f.server.URL+"/webhooks/github/build", "push", "b-3", body, signWebhook("team-b-secret", body))
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("team B's own bound delivery = %d, want 202", resp.StatusCode)
+	}
+}
