@@ -163,6 +163,8 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/team/runner-tokens",
 	"DELETE /api/v1/team/runner-tokens/{prefix}",
 	"POST /api/v1/teams",
+	"PUT /api/v1/storage/teams/{team}/free-slot",
+	"GET /internal/teams/{team}/storage-tier",
 	"GET /api/v1/signups",
 	"PUT /api/v1/signups",
 	"GET /api/v1/signups/waitlist",
