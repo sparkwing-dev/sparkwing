@@ -1,8 +1,6 @@
 package cache
 
 import (
-	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,46 +9,22 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 )
 
-// tierController answers the cache's storage tier route for each team, as
-// the controller does, and checks the cache asks with its operator token.
-func tierController(t *testing.T, token string, standings map[string]storagequota.Standing) string {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		team := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/internal/teams/"), "/storage-tier")
-		s, ok := standings[team]
-		if !ok {
-			http.Error(w, "unknown team", http.StatusNotFound)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(s)
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL
-}
-
-// A free team's allowance of 4096 bytes leaves the cache a 3072-byte share.
-func newQuotaServer(t *testing.T) (*httptest.Server, *s3.Client, http.Handler, string) {
+// newQuotaServer is a cache in front of a controller that holds a free team
+// to a 3072-byte cache share.
+func newQuotaServer(t *testing.T) (*httptest.Server, *s3.Client, http.Handler, *storagequotatest.Controller, string) {
 	t.Helper()
 	const token = "operator-token"
-	controller := tierController(t, token, map[string]storagequota.Standing{
-		"free":   {Tier: storagequota.TierFree, AllowanceBytes: 4096},
-		"paying": {Tier: storagequota.TierFunded, AllowanceBytes: 4096},
-		"none":   {Tier: storagequota.TierNone, AllowanceBytes: 4096},
-	})
-	srv, raw, h := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) { c.ControllerURL = controller })
-	return srv, raw, h, token
+	ctl, url := fakeController(t, token, 3072, 0)
+	ctl.Tiers["paying"] = storagequota.TierFunded
+	ctl.Tiers["none"] = storagequota.TierNone
+	srv, raw, h := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) { c.ControllerURL = url })
+	return srv, raw, h, ctl, token
 }
 
 type countingBody struct {
@@ -69,7 +43,7 @@ func (c *countingBody) Close() error { return nil }
 // A write whose declared length passes the team's room is refused before one
 // byte of it is read, and a binary is refused before it is staged.
 func TestAWriteOverTheShareIsRefusedBeforeItsBodyIsRead(t *testing.T) {
-	_, raw, h, token := newQuotaServer(t)
+	_, raw, h, _, token := newQuotaServer(t)
 	grant := grantFor(t, token, "free")
 	for _, path := range []string{"/cache/go-mod-abc", "/bin/deadbeef"} {
 		body := &countingBody{r: strings.NewReader(strings.Repeat("x", 3073))}
@@ -93,11 +67,10 @@ func TestAWriteOverTheShareIsRefusedBeforeItsBodyIsRead(t *testing.T) {
 	}
 }
 
-// The cache counts its own bucket and nothing else: a free team stores up to
-// exactly its share, then the next byte is refused whatever the controller
-// knows of its events and logs.
+// A free team stores up to exactly its share as the controller counts it,
+// then the next byte is refused; the cache asks with its own token.
 func TestAFreeTeamStoresUpToItsCacheShare(t *testing.T) {
-	srv, _, _, token := newQuotaServer(t)
+	srv, _, _, ctl, token := newQuotaServer(t)
 	grant := grantFor(t, token, "free")
 	if code, body := send(t, srv, http.MethodPut, "/cache/first", grant, strings.Repeat("a", 3000)); code != http.StatusCreated {
 		t.Fatalf("3000 of 3072 = %d: %s", code, body)
@@ -108,8 +81,29 @@ func TestAFreeTeamStoresUpToItsCacheShare(t *testing.T) {
 	if code, body := send(t, srv, http.MethodPost, "/artifacts/run-1?path=fits.txt", grant, strings.Repeat("b", 72)); code/100 != 2 {
 		t.Fatalf("the last 72 bytes = %d: %s", code, body)
 	}
-	if got := blobQuota.FreeUsedBytes(); got != 3072 {
-		t.Fatalf("free bytes the cache answers for = %d, want 3072", got)
+	if used, reserved := ctl.Held("free", storagequota.KindCache); used != 3072 || reserved != 0 {
+		t.Fatalf("the controller counts %d used, %d reserved; want 3072 and nothing held", used, reserved)
+	}
+	for _, auth := range ctl.Auths() {
+		if auth != "Bearer "+token {
+			t.Fatalf("a counter call carried %q, want the cache's own token", auth)
+		}
+	}
+}
+
+// An overwrite commits what it changed, so a smaller rewrite of a key gives
+// the difference back.
+func TestAnOverwriteCommitsTheDifference(t *testing.T) {
+	srv, _, _, ctl, token := newQuotaServer(t)
+	grant := grantFor(t, token, "free")
+	if code, body := send(t, srv, http.MethodPut, "/cache/key", grant, strings.Repeat("a", 3000)); code != http.StatusCreated {
+		t.Fatalf("first write = %d: %s", code, body)
+	}
+	if code, body := send(t, srv, http.MethodPut, "/cache/key", grant, strings.Repeat("a", 72)); code != http.StatusCreated {
+		t.Fatalf("a rewrite that fits = %d: %s", code, body)
+	}
+	if used, _ := ctl.Held("free", storagequota.KindCache); used != 72 {
+		t.Fatalf("after a shrinking rewrite the controller counts %d, want 72", used)
 	}
 }
 
@@ -117,7 +111,7 @@ func TestAFreeTeamStoresUpToItsCacheShare(t *testing.T) {
 // cut fails the upload, so the bucket holds nothing of it and the
 // reservation is given back.
 func TestAnUploadOfUnknownLengthIsCutAtTheRoomLeft(t *testing.T) {
-	srv, raw, _, token := newQuotaServer(t)
+	srv, raw, _, ctl, token := newQuotaServer(t)
 	grant := grantFor(t, token, "free")
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/artifacts/run-1?path=big.bin",
 		strings.NewReader(strings.Repeat("z", 5000)))
@@ -134,6 +128,9 @@ func TestAnUploadOfUnknownLengthIsCutAtTheRoomLeft(t *testing.T) {
 	if keys := bucketKeys(t, raw); len(keys) != 0 {
 		t.Fatalf("a cut upload left %v", keys)
 	}
+	if used, reserved := ctl.Held("free", storagequota.KindCache); used != 0 || reserved != 0 {
+		t.Fatalf("a cut upload left %d used, %d reserved", used, reserved)
+	}
 	if code, body := send(t, srv, http.MethodPut, "/cache/after", grant, strings.Repeat("a", 3072)); code != http.StatusCreated {
 		t.Fatalf("the whole share after a cut upload = %d: %s", code, body)
 	}
@@ -142,7 +139,7 @@ func TestAnUploadOfUnknownLengthIsCutAtTheRoomLeft(t *testing.T) {
 // Negative controls: a funded team and the operator store past the share,
 // and a team with no slot stores nothing.
 func TestTheCacheShareBindsOnlyFreeTeams(t *testing.T) {
-	srv, _, _, token := newQuotaServer(t)
+	srv, _, _, _, token := newQuotaServer(t)
 	big := strings.Repeat("p", 5000)
 	if code, body := send(t, srv, http.MethodPut, "/cache/big", grantFor(t, token, "paying"), big); code != http.StatusCreated {
 		t.Fatalf("a funded team past the share = %d: %s", code, body)
@@ -156,50 +153,45 @@ func TestTheCacheShareBindsOnlyFreeTeams(t *testing.T) {
 	}
 }
 
-// A cache that holds teams to a share lists its bucket before it serves, so
-// the first upload after a start is judged against what the bucket holds
-// rather than an empty count.
-func TestACacheCountsItsBucketBeforeItServes(t *testing.T) {
-	const token = "operator-token"
-	controller := tierController(t, token, map[string]storagequota.Standing{
-		"free": {Tier: storagequota.TierFree, AllowanceBytes: 4096},
-	})
-	srv, _, _ := newBlobServerWith(t, token, func(c *Config, raw *s3.Client) {
-		c.ControllerURL = controller
-		if _, err := raw.PutObject(context.Background(), &s3.PutObjectInput{
-			Bucket: aws.String(blobTestBucket), Key: aws.String("cache/teams/free/cache/old.tar.gz"),
-			Body: strings.NewReader(strings.Repeat("o", 3000)),
-		}); err != nil {
-			t.Fatal(err)
+// While the controller cannot count, a free team's write is refused with
+// 503 and stores nothing; the operator writes on, and so does a team the
+// controller answered funded for moments before.
+func TestWritesFailClosedWhileTheControllerCannotCount(t *testing.T) {
+	srv, raw, _, ctl, token := newQuotaServer(t)
+	paying := grantFor(t, token, "paying")
+	if code, body := send(t, srv, http.MethodPut, "/cache/before", paying, "p"); code != http.StatusCreated {
+		t.Fatalf("a funded write with the controller up = %d: %s", code, body)
+	}
+	ctl.SetDown(true)
+	if code, body := send(t, srv, http.MethodPut, "/cache/down", grantFor(t, token, "free"), "f"); code != http.StatusServiceUnavailable {
+		t.Fatalf("a free team's write with the controller down = %d %q, want 503", code, body)
+	}
+	for _, k := range bucketKeys(t, raw) {
+		if strings.Contains(k, "/free/") {
+			t.Fatalf("a refused write left %s", k)
 		}
-	})
-	if code, _ := send(t, srv, http.MethodPut, "/cache/new", grantFor(t, token, "free"), strings.Repeat("n", 100)); code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("100 bytes past what the bucket already holds, right after start = %d, want 413", code)
+	}
+	if code, body := send(t, srv, http.MethodPut, "/cache/down", token, "o"); code != http.StatusCreated {
+		t.Fatalf("the operator's write with the controller down = %d: %s", code, body)
+	}
+	if code, body := send(t, srv, http.MethodPut, "/cache/down", paying, "p"); code != http.StatusCreated {
+		t.Fatalf("a recently funded team's write with the controller down = %d: %s", code, body)
+	}
+	ctl.SetDown(false)
+	if code, body := send(t, srv, http.MethodPut, "/cache/up", grantFor(t, token, "free"), "f"); code != http.StatusCreated {
+		t.Fatalf("a free team's write with the controller back = %d: %s", code, body)
 	}
 }
 
-// A cache that holds teams to a share and cannot count its bucket refuses to
-// start rather than serve with an empty count.
-func TestACacheThatCannotCountItsBucketRefusesToStart(t *testing.T) {
-	const token = "operator-token"
-	fake := httptest.NewServer(http.NotFoundHandler())
-	t.Cleanup(fake.Close)
-	savedOpen, savedStore, savedQuota := openBlobStore, blobStore, blobQuota
-	t.Cleanup(func() { openBlobStore, blobStore, blobQuota = savedOpen, savedStore, savedQuota })
-	openBlobStore = func(context.Context, string) (*teamblob.Store, error) {
-		return teamblob.New(teamblob.Options{
-			Bucket: blobTestBucket, Prefix: "cache", ReconcileAtStart: true,
-			Client: s3.New(s3.Options{
-				Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
-				Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
-			}),
-		})
-	}
+// A cache that verifies grants and keeps a bucket cannot count its teams'
+// bytes without a controller, so it refuses to start.
+func TestACacheWithGrantsAndABucketNeedsAController(t *testing.T) {
 	root := t.TempDir()
+	saveCounter(t)
 	c := DefaultConfig()
 	c.DataDir, c.ProxyDir, c.SSHKeyDir = root, root+"/proxy", root+"/no-ssh-key"
-	c.APIToken, c.GrantKey, c.BlobStore = token, testGrantKey(token), "s3://"+blobTestBucket+"/cache"
-	if _, err := New(c); err == nil || !strings.Contains(err.Error(), "count") {
-		t.Fatalf("New with an unlistable bucket = %v, want a refusal to start naming the count", err)
+	c.APIToken, c.GrantKey, c.BlobStore = "t", testGrantKey("t"), "s3://"+blobTestBucket+"/cache"
+	if _, err := New(c); err == nil || !strings.Contains(err.Error(), "--controller") {
+		t.Fatalf("New without a controller = %v, want a refusal naming --controller", err)
 	}
 }

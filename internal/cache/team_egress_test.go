@@ -1,38 +1,27 @@
 package cache
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 )
 
-// newTeamEgressServer caps a free team at two 60-byte downloads a day and a
-// funded team at twenty, with every team's tier answered by a controller.
-func newTeamEgressServer(t *testing.T) (*httptest.Server, Config, string) {
+// newTeamEgressServer is a cache in front of a controller that caps a free
+// team at two 60-byte downloads a day.
+func newTeamEgressServer(t *testing.T) (*httptest.Server, *storagequotatest.Controller, string) {
 	t.Helper()
 	const token = "operator-token"
-	controller := tierController(t, token, map[string]storagequota.Standing{
-		"free":   {Tier: storagequota.TierFree, AllowanceBytes: 1 << 20},
-		"other":  {Tier: storagequota.TierFree, AllowanceBytes: 1 << 20},
-		"paying": {Tier: storagequota.TierFunded, AllowanceBytes: 1 << 20},
-	})
-	var cfg Config
-	srv, _, _ := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) {
-		c.ControllerURL = controller
-		c.TeamDailyDownloadFreeBytes = 120
-		c.TeamDailyDownloadFundedBytes = 1200
-		cfg = *c
-	})
-	return srv, cfg, token
+	ctl, url := fakeController(t, token, 1<<20, 120)
+	ctl.Tiers["paying"] = storagequota.TierFunded
+	srv, _, _ := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) { c.ControllerURL = url })
+	return srv, ctl, token
 }
 
 func putBin(t *testing.T, srv *httptest.Server, bearer string) {
@@ -47,12 +36,12 @@ func downloadBin(t *testing.T, srv *httptest.Server, bearer string) fetched {
 	return get(t, srv, "/bin/deadbeef", bearer)
 }
 
-// Every byte the cache serves a grant is charged to the grant's team for the
-// UTC day. A free team past its cap is refused with 429 until midnight UTC,
-// while a funded team, another free team, the operator's own team and the
-// operator token keep downloading.
-func TestAFreeTeamPastItsDailyDownloadCapIsRefusedUntilMidnight(t *testing.T) {
-	srv, _, token := newTeamEgressServer(t)
+// A download by a grant is charged to its team in the controller before the
+// first byte. A free team past its cap is refused with 429 and the
+// controller's Retry-After, while a funded team, another free team, the
+// operator's own team and the operator token keep downloading.
+func TestAFreeTeamPastItsDailyDownloadCapIsRefused(t *testing.T) {
+	srv, ctl, token := newTeamEgressServer(t)
 	free := grantFor(t, token, "free")
 	putBin(t, srv, free)
 	for i := range 2 {
@@ -61,19 +50,14 @@ func TestAFreeTeamPastItsDailyDownloadCapIsRefusedUntilMidnight(t *testing.T) {
 		}
 	}
 	refused := downloadBin(t, srv, free)
-	if refused.status != http.StatusTooManyRequests {
-		t.Fatalf("a download past the free team's daily cap = %d, want 429", refused.status)
+	if refused.status != http.StatusTooManyRequests || len(refused.body) == 60 {
+		t.Fatalf("a download past the free team's daily cap = %d, want 429 and no binary", refused.status)
 	}
-	retry, err := strconv.Atoi(refused.header.Get("Retry-After"))
-	now := time.Now().UTC()
-	midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC)
-	if want := int(midnight.Sub(now).Seconds()); err != nil || retry < want-5 || retry > want+5 {
-		t.Fatalf("Retry-After = %q, want the %d seconds until midnight UTC", refused.header.Get("Retry-After"), want)
+	if refused.header.Get("Retry-After") != "3600" || !strings.Contains(string(refused.body), "daily download cap") {
+		t.Fatalf("refusal = Retry-After %q, body %q; want the controller's", refused.header.Get("Retry-After"), refused.body)
 	}
-	for _, want := range []string{"free", "daily download cap", "credits"} {
-		if !strings.Contains(string(refused.body), want) {
-			t.Errorf("refusal %q does not name %q", refused.body, want)
-		}
+	if got := ctl.Downloaded("free"); got != 120 {
+		t.Fatalf("the controller charged the free team %d bytes, want the 120 it was sent", got)
 	}
 
 	for team, downloads := range map[string]int{"other": 2, "paying": 3, authwire.OperatorTeam: 3} {
@@ -85,6 +69,9 @@ func TestAFreeTeamPastItsDailyDownloadCapIsRefusedUntilMidnight(t *testing.T) {
 			}
 		}
 	}
+	if got := ctl.Downloaded(authwire.OperatorTeam); got != 0 {
+		t.Fatalf("the operator's team was charged %d bytes, want none", got)
+	}
 	putBin(t, srv, token)
 	for i := range 3 {
 		if got := downloadBin(t, srv, token); got.status != http.StatusOK {
@@ -93,71 +80,49 @@ func TestAFreeTeamPastItsDailyDownloadCapIsRefusedUntilMidnight(t *testing.T) {
 	}
 }
 
-// A team's day is saved with the process's, so a restart does not hand a
-// capped team a fresh day.
-func TestATeamsDailyDownloadsSurviveARestart(t *testing.T) {
-	srv, cfg, token := newTeamEgressServer(t)
+// A response of unknown length is checked for room when it starts and
+// charged what it sent when it ends.
+func TestAStreamedDownloadIsChargedWhatItSent(t *testing.T) {
+	srv, ctl, token := newTeamEgressServer(t)
 	free := grantFor(t, token, "free")
-	putBin(t, srv, free)
-	for range 2 {
-		if got := downloadBin(t, srv, free); got.status != http.StatusOK {
-			t.Fatalf("download under the cap = %d", got.status)
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if code, body := send(t, srv, http.MethodPost, "/artifacts/job-1?path="+name, free, strings.Repeat("a", 20)); code/100 != 2 {
+			t.Fatalf("upload = %d %s", code, body)
 		}
 	}
-	if err := flushEgressDay(t.Context()); err != nil {
-		t.Fatalf("flush: %v", err)
+	got := get(t, srv, "/artifacts/job-1?glob=*", free)
+	if got.status != http.StatusOK || got.header.Get("Content-Length") != "" {
+		t.Fatalf("artifact tar = %d, Content-Length %q; want a 200 stream", got.status, got.header.Get("Content-Length"))
 	}
-	egressMeter = nil
-	s, err := New(cfg)
-	if err != nil {
-		t.Fatalf("restart: %v", err)
-	}
-	restarted := httptest.NewServer(s.handler)
-	defer restarted.Close()
-	if got := downloadBin(t, restarted, free); got.status != http.StatusTooManyRequests {
-		t.Fatalf("a capped team's download after a restart = %d, want 429", got.status)
-	}
-	other := grantFor(t, token, "other")
-	putBin(t, restarted, other)
-	if got := downloadBin(t, restarted, other); got.status != http.StatusOK {
-		t.Fatalf("another team after the restart = %d, want 200", got.status)
+	if charged := ctl.Downloaded("free"); charged != int64(len(got.body)) {
+		t.Fatalf("the controller charged %d bytes for a %d-byte stream", charged, len(got.body))
 	}
 }
 
-// A zero cap turns the per-team cap off, leaving the process-wide cap as the
-// only refusal.
-func TestAZeroTeamCapRefusesNothing(t *testing.T) {
-	const token = "operator-token"
-	srv, _, _ := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) {
-		c.TeamDailyDownloadFreeBytes = 0
-	})
-	free := grantFor(t, token, "free")
+// While the controller cannot count, a free team's download is refused with
+// 503 before any byte; the operator and a team answered funded moments
+// before download on.
+func TestDownloadsFailClosedWhileTheControllerCannotCount(t *testing.T) {
+	srv, ctl, token := newTeamEgressServer(t)
+	free, paying := grantFor(t, token, "free"), grantFor(t, token, "paying")
 	putBin(t, srv, free)
-	for i := range 4 {
-		if got := downloadBin(t, srv, free); got.status != http.StatusOK {
-			t.Fatalf("download %d with the cap off = %d, want 200", i, got.status)
-		}
+	putBin(t, srv, paying)
+	putBin(t, srv, token)
+	if got := downloadBin(t, srv, paying); got.status != http.StatusOK {
+		t.Fatalf("a funded download with the controller up = %d", got.status)
 	}
-}
-
-// The per-team metric names the ten teams that downloaded most today and
-// folds the rest into one series, so a thousand teams cost eleven series.
-func TestTeamDownloadSeriesAreBounded(t *testing.T) {
-	day := map[string]int64{BearerPrincipal: 1 << 30, "anonymous": 1 << 30}
-	for i := range 12 {
-		day[teamPrincipal(fmt.Sprintf("team-%02d", i))] = int64(100 + i)
+	ctl.SetDown(true)
+	if got := downloadBin(t, srv, free); got.status != http.StatusServiceUnavailable || len(got.body) == 60 {
+		t.Fatalf("a free team's download with the controller down = %d, want 503 and no binary", got.status)
 	}
-	series := teamDownloadSeries(day)
-	if len(series) != 11 {
-		t.Fatalf("series = %v, want ten teams and one fold", series)
+	if got := downloadBin(t, srv, token); got.status != http.StatusOK {
+		t.Fatalf("the operator's download with the controller down = %d, want 200", got.status)
 	}
-	if series["team-11"] != 111 || series["team-02"] != 102 {
-		t.Fatalf("series = %v, want the ten largest teams by name", series)
+	if got := downloadBin(t, srv, paying); got.status != http.StatusOK {
+		t.Fatalf("a recently funded team's download with the controller down = %d, want 200", got.status)
 	}
-	if _, ok := series["team-01"]; ok {
-		t.Fatalf("series = %v, named a team outside the ten largest", series)
-	}
-	if series[teamDownloadOther] != 100+101 {
-		t.Fatalf("fold = %d, want the 201 bytes of the two smallest teams", series[teamDownloadOther])
+	ctl.SetDown(false)
+	if got := downloadBin(t, srv, free); got.status != http.StatusOK {
+		t.Fatalf("a free team's download with the controller back = %d, want 200", got.status)
 	}
 }

@@ -45,12 +45,8 @@ func storeDirs() []string {
 
 func measureStore(ctx context.Context) {
 	err := storeCeiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {
+		// The bucket behind --blob-store is the controller's to measure.
 		usage := objectguard.Usage{ObservedAt: time.Now().UTC()}
-		// perf: the bucket's share is the running count its writes keep and
-		// a daily listing replaces, so this measurement lists nothing.
-		if blobStore != nil {
-			usage.Bytes, usage.Objects = blobStore.Usage().Total()
-		}
 		for _, dir := range storeDirs() {
 			bytes, files, partial, err := treeUsage(ctx, dir)
 			usage.Bytes += bytes

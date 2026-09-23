@@ -242,6 +242,12 @@ func run(args []string) error {
 			"one when it first starts a run and keeps it until the team is deleted, so free storage never "+
 			"passes this many allowances; a team with neither credits nor a slot is refused. Lowering it "+
 			"takes no slot back")
+	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
+		"bytes one team without credits may download through the cache in a UTC day: binaries, artifacts, "+
+			"dependency archives and git fetches. Past it the cache refuses the team's downloads with 429 until "+
+			"midnight UTC. The operator's team is exempt, and 0 turns the cap off")
+	teamDownloadFunded := fs.Int64("team-daily-download-funded-bytes", controller.DefaultTeamDailyDownloadFundedBytes,
+		"the same daily cap for a team with credits; 0 turns it off")
 	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
 		"listings one bucket measurement may spend before it stops and reports itself "+
 			"incomplete. Each listing covers a thousand objects, so the default bounds a "+
@@ -459,6 +465,7 @@ func run(args []string) error {
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
 		WithCachePodURL(*cachePodURL).
+		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
@@ -526,6 +533,9 @@ func run(args []string) error {
 	}
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
+	}
+	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
+		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
 	}
 	if *freeTeamSlots < 0 {
 		return fmt.Errorf("--free-team-slots must not be negative; pass 0 to admit no team without credits")

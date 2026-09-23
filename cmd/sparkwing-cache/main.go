@@ -109,15 +109,10 @@ func run(args []string) error {
 			"on --data-dir. Empty keeps everything on the volume. Falls back to $SPARKWING_CACHE_BLOB_STORE.")
 	fs.StringVar(&cfg.ControllerURL, "controller",
 		envOr("SPARKWING_CONTROLLER_URL", cfg.ControllerURL),
-		"controller URL the cache asks, with --api-token, what each team a grant names may store in --blob-store: "+
-			"funded, free up to three quarters of the free allowance, or nothing. Without it every team a grant "+
-			"names is held to the default free share. Falls back to $SPARKWING_CONTROLLER_URL.")
-	fs.DurationVar(&cfg.UsageReconcile, "usage-reconcile",
-		envDuration("SPARKWING_CACHE_USAGE_RECONCILE", cfg.UsageReconcile),
-		"with --blob-store, how often the per-team count of the bucket is replaced by a listing of it. Writes and "+
-			"deletes keep the count between listings, and it is saved to the bucket every five minutes, so a restart "+
-			"does not list unless --grant-key is set, when the count holds teams to their free share and every start "+
-			"lists. 0 lists only at such a start or when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
+		"controller URL the cache asks, with --api-token, to count what each team a grant names stores in "+
+			"--blob-store and downloads in a UTC day, and where it keeps its egress totals. When the controller cannot "+
+			"answer, a team without credits is refused with 503. Required with --grant-key and --blob-store. Falls "+
+			"back to $SPARKWING_CONTROLLER_URL.")
 	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
 		"serve no registry proxy (/proxy/ and /stats). The proxy takes no credential, so a cache reachable "+
 			"from outside the cluster sets this.")
@@ -133,15 +128,6 @@ func run(args []string) error {
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
-	fs.Int64Var(&cfg.TeamDailyDownloadFreeBytes, "egress-team-daily-free-bytes",
-		envInt64("SPARKWING_CACHE_EGRESS_TEAM_DAILY_FREE_BYTES", cfg.TeamDailyDownloadFreeBytes),
-		"bytes the cache serves one team without credits through its grants in a UTC day: binaries, artifacts, "+
-			"dependency archives and git fetches. Past it that team's downloads are refused with 429 until midnight UTC. "+
-			"The operator's team and token are exempt, and 0 turns the cap off. Falls back to $SPARKWING_CACHE_EGRESS_TEAM_DAILY_FREE_BYTES.")
-	fs.Int64Var(&cfg.TeamDailyDownloadFundedBytes, "egress-team-daily-funded-bytes",
-		envInt64("SPARKWING_CACHE_EGRESS_TEAM_DAILY_FUNDED_BYTES", cfg.TeamDailyDownloadFundedBytes),
-		"the same daily cap for a team with credits, as --controller answers; a funded answer older than five "+
-			"minutes counts as free. 0 turns the cap off. Falls back to $SPARKWING_CACHE_EGRESS_TEAM_DAILY_FUNDED_BYTES.")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 

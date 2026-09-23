@@ -129,9 +129,10 @@ func (s *Server) WithStoreCeiling(cfg objectguard.CeilingConfig) *Server {
 // counted against it.
 func (s *Server) StoreCeiling() objectguard.CeilingState { return s.ceiling.State() }
 
-// MeasureStore walks the log store and folds the total into the
+// MeasureStore walks the log volume and folds the total into the
 // ceiling, which is what the sweeper does on the reconciliation
-// interval. It is a no-op while no ceiling is set.
+// interval. It is a no-op while no ceiling is set. The archive's bucket
+// is the controller's to measure.
 func (s *Server) MeasureStore(ctx context.Context) error {
 	return s.ceiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {
 		root, err := s.openRunsRoot()
@@ -139,15 +140,7 @@ func (s *Server) MeasureStore(ctx context.Context) error {
 			return objectguard.Usage{}, err
 		}
 		defer s.closeRoot(root, "measure store")
-		usage, err := storeUsage(ctx, root)
-		// perf: the archive's share is the running count its writes keep and
-		// a daily listing replaces, so the measurement lists nothing.
-		if err == nil && s.archive != nil {
-			b, o := s.archive.store.Usage().Total()
-			usage.Bytes += b
-			usage.Objects += o
-		}
-		return usage, err
+		return storeUsage(ctx, root)
 	})
 }
 

@@ -115,15 +115,6 @@ func run(args []string) error {
 	}
 	archiveIdle := fs.Duration("archive-idle", archiveIdleDefault,
 		"how long a run goes unwritten before it moves to --archive-store (env: SPARKWING_LOGS_ARCHIVE_IDLE)")
-	usageReconcileDefault, err := envDuration("SPARKWING_LOGS_USAGE_RECONCILE", 24*time.Hour)
-	if err != nil {
-		return err
-	}
-	usageReconcile := fs.Duration("usage-reconcile", usageReconcileDefault,
-		"with --archive-store, how often the per-team count of archived logs is replaced by a listing of the "+
-			"store. Uploads and deletes keep it between listings and it is saved to the store every five minutes. "+
-			"With --controller the count holds teams to their free log share, so every start lists; 0 lists only "+
-			"at such a start or when no saved count exists (env: SPARKWING_LOGS_USAGE_RECONCILE)")
 	_ = fs.Parse(args)
 	*retention = archiveRetention(*retention, fs.Changed("retention") || os.Getenv("SPARKWING_LOGS_RETENTION") != "", *archiveStore)
 
@@ -143,7 +134,6 @@ func run(args []string) error {
 		flagValue{"--sweep-interval", int64(*sweepInterval)},
 		flagValue{"--search-timeout", int64(*searchTimeout)},
 		flagValue{"--archive-idle", int64(*archiveIdle)},
-		flagValue{"--usage-reconcile", int64(*usageReconcile)},
 	); err != nil {
 		return err
 	}
@@ -205,11 +195,11 @@ func run(args []string) error {
 	defer stop()
 	var archive *logs.ArchiveOptions
 	if *archiveStore != "" {
-		store, err := openArchive(ctx, *archiveStore, *controllerURL != "")
+		store, err := openArchive(ctx, *archiveStore)
 		if err != nil {
 			return fmt.Errorf("--archive-store: %w", err)
 		}
-		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle, UsageReconcile: *usageReconcile}
+		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle}
 	}
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
@@ -377,13 +367,10 @@ func envTruthy(name string) bool {
 	}
 }
 
-// safety: a logs service that authenticates teams holds each to its log
-// share over the archive's count, so it lists the archive at start rather
-// than trust a saved count a crash left behind.
-func openArchive(ctx context.Context, raw string, reconcileAtStart bool) (*teamblob.Store, error) {
+func openArchive(ctx context.Context, raw string) (*teamblob.Store, error) {
 	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
 	if err != nil {
 		return nil, err
 	}
-	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client, ReconcileAtStart: reconcileAtStart})
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
 }

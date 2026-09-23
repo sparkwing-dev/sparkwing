@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +20,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -41,30 +39,7 @@ var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, erro
 	if err != nil {
 		return nil, err
 	}
-	return teamblob.New(teamblob.Options{
-		Bucket:           bucket,
-		Prefix:           prefix,
-		Client:           client,
-		TeamObjectMaxAge: teamBlobMaxAge,
-		// safety: a cache that verifies grants holds teams to their share
-		// over the count, so it lists the bucket at start rather than trust
-		// a saved count a crash left behind.
-		ReconcileAtStart: grantKey != "",
-	})
-}
-
-// TeamBlobMaxAge is how long a team's binary, dependency archive or
-// artifact lasts after it was last written. The daily reconcile deletes it
-// in the listing it already makes, so the running count stays exact.
-const TeamBlobMaxAge = 30 * 24 * time.Hour
-
-// safety: the operator's own runs write under its team's namespace too, and a
-// self-hosted install keeps them as long as it keeps its volume trees.
-func teamBlobMaxAge(team string) time.Duration {
-	if team == authwire.OperatorTeam {
-		return 0
-	}
-	return TeamBlobMaxAge
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
 }
 
 // blobScratchDir stages a binary upload whose digest must be known
@@ -84,14 +59,6 @@ func blobError(w http.ResponseWriter, op string, err error) {
 	default:
 		http.Error(w, "blob store error", http.StatusBadGateway)
 	}
-}
-
-// recordBlobWrite moves the store ceiling by what a write added. Every
-// object in the bucket counts, the operator's binaries included, because
-// the measurement that replaces this running count is the bucket's own
-// total; the operator's binaries are still never refused.
-func recordBlobWrite(bytesDelta, objects int64) {
-	storeCeiling.Record(bytesDelta, objects)
 }
 
 func serveBinBlob(w http.ResponseWriter, r *http.Request) {
@@ -186,11 +153,11 @@ const maxBinBytes = 100 << 20
 // from one request.
 func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBinBytes)
-	release, body, ok := reserveBlobWrite(w, r, team, r.ContentLength, maxBinBytes)
+	counted, body, ok := reserveBlobWrite(w, r, team, r.ContentLength, maxBinBytes)
 	if !ok {
 		return
 	}
-	defer release()
+	defer counted.finish(r.Context())
 	if err := os.MkdirAll(blobScratchDir(), 0o700); err != nil {
 		http.Error(w, "write error", http.StatusInternalServerError)
 		return
@@ -234,7 +201,7 @@ func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) 
 		blobError(w, "put bin", err)
 		return
 	}
-	recordBlobWrite(wr.AddedBytes, wr.AddedObjects)
+	counted.stored(wr.AddedBytes)
 	// #nosec G706 -- the blob hash is pattern-validated
 	log.Printf("bin cache: stored %s (%d bytes) sha256=%s principal=%s", hash, n, digest, principal)
 	if err := setBinDigestHeaders(w, digest); err != nil {
@@ -321,11 +288,11 @@ func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, siz
 		blobError(w, "put "+what, err)
 		return 0, false
 	}
-	release, body, ok := reserveBlobWrite(w, r, team, size, limit)
+	counted, body, ok := reserveBlobWrite(w, r, team, size, limit)
 	if !ok {
 		return 0, false
 	}
-	defer release()
+	defer counted.finish(r.Context())
 	wr, err := blobStore.Put(r.Context(), team, rel, body, teamblob.PutOptions{Size: size, ContentType: contentType})
 	if err != nil {
 		if quotaCut(w, err, what) {
@@ -343,7 +310,7 @@ func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, siz
 		blobError(w, "put "+what, err)
 		return 0, false
 	}
-	recordBlobWrite(wr.AddedBytes, wr.AddedObjects)
+	counted.stored(wr.AddedBytes)
 	return wr.Bytes, true
 }
 
@@ -541,40 +508,4 @@ func deleteTeamBlobs(ctx context.Context, team string) error {
 		log.Printf("blob store: deleted team %s (%d objects, %d bytes)", team, d.Objects, d.Bytes)
 	}
 	return err
-}
-
-// handleBlobUsage reports the running per-team count of what the bucket
-// holds, which the controller's storage allowance reads. It lists
-// nothing: the count is kept by writes and deletes and replaced by a
-// listing once per --usage-reconcile. ?team= narrows it to one team.
-func handleBlobUsage(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "GET only", http.StatusMethodNotAllowed)
-		return
-	}
-	body := map[string]any{"enabled": blobStore != nil}
-	if blobStore != nil {
-		usage := blobStore.Usage()
-		if team := r.URL.Query().Get("team"); team != "" {
-			if !isTeamSlug(team) {
-				http.Error(w, "not a team slug", http.StatusBadRequest)
-				return
-			}
-			body["teams"] = map[string]teamblob.TeamUsage{team: usage.Team(team)}
-		} else {
-			teams := usage.Snapshot()
-			delete(teams, "")
-			body["teams"] = teams
-			body["operator"] = usage.Team("")
-		}
-		if at := usage.ReconciledAt(); !at.IsZero() {
-			body["reconciled_at"] = at.UTC().Format(time.RFC3339)
-		}
-		body["bucket"] = blobStore.Bucket()
-		body["breaker"] = blobStore.Breaker()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(body); err != nil {
-		log.Printf("warning: write usage: %v", err)
-	}
 }

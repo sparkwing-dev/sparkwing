@@ -2055,10 +2055,6 @@ func (s *Server) handleValidateNodeLogClaim(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
-	if err := s.setStorageTierHeaders(w, r, r.PathValue("id")); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
