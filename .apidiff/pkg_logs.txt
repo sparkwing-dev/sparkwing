@@ -6,8 +6,6 @@ type ArchiveOptions struct {
 	Idle          time.Duration
 	Interval      time.Duration
 	PruneInterval time.Duration
-
-	UsageReconcile time.Duration
 }
 type AuthError struct {
 	Status  int
@@ -88,8 +86,11 @@ type Limits struct {
 	BinaryRatio float64
 }
 const LineTruncationMarker = "[sparkwing-logs] truncated: line byte cap reached\n"
+const LogBlockBytes int64 = 1 << 20
+const LogBlockSettleEvery = time.Minute
 const LogSeqHeader = "X-Sparkwing-Log-Seq"
 const LogStreamHeader = "X-Sparkwing-Log-Stream"
+const MaxClaimCacheTTL = 30 * time.Second
 var MinLineBytes = int64(len(LineTruncationMarker)) + 1
 func New(root string, logger *slog.Logger) (*Server, error)
 func NewClient(baseURL string, httpClient *http.Client) *Client
@@ -170,10 +171,8 @@ type Server struct {
 func (s *Server) ArchiveOnce(ctx context.Context, now time.Time) (int, error)
 func (s *Server) Handler() http.Handler
 func (s *Server) MeasureStore(ctx context.Context) error
-func (s *Server) MeasureVolumeUsage(ctx context.Context) error
 func (s *Server) MeasuringStore() bool
 func (s *Server) PruneArchive(ctx context.Context, now time.Time) (int, error)
-func (s *Server) RestoreArchive(ctx context.Context) error
 func (s *Server) StartSweeper(ctx context.Context)
 func (s *Server) StoreCeiling() objectguard.CeilingState
 func (s *Server) SweepOnce(now time.Time) (int, error)
@@ -206,12 +205,6 @@ type StreamReport struct {
 	Received int64
 	Missing  int64
 	Gaps     []Gap
-}
-type TeamLogsUsage struct {
-	Team         string
-	Bytes        int64
-	Objects      int64
-	ReconciledAt string
 }
 const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
 func WithAppendSequence(ctx context.Context, stream string, seq int64) context.Context

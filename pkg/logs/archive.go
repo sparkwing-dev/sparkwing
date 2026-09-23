@@ -20,8 +20,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
-	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -79,9 +77,6 @@ type ArchiveOptions struct {
 	Idle          time.Duration
 	Interval      time.Duration
 	PruneInterval time.Duration
-	// UsageReconcile is how often the per-team count is replaced by a
-	// listing of the store. Zero lists only when no saved count exists.
-	UsageReconcile time.Duration
 }
 
 type archive struct {
@@ -89,13 +84,7 @@ type archive struct {
 	opts  ArchiveOptions
 	locks sync.Map // runID -> *runLock
 
-	volume *volumeUsage
-	// quota holds each team's appends to its log share, counted over the
-	// store and the volume.
-	quota *storagequota.Quota
-
 	mu        sync.Mutex
-	restored  bool
 	absent    map[string]time.Time
 	failures  int
 	retryAt   time.Time
@@ -153,14 +142,11 @@ func (s *Server) WithArchive(opts ArchiveOptions) *Server {
 	if opts.PruneInterval <= 0 {
 		opts.PruneInterval = DefaultPruneInterval
 	}
-	volume := &volumeUsage{teams: map[string]int64{}}
 	s.archive = &archive{
 		store:   opts.Store,
 		opts:    opts,
 		absent:  map[string]time.Time{},
 		backoff: objectguard.Backoff{Base: 30 * time.Second, Max: maxArchiveBackoff},
-		volume:  volume,
-		quota:   newLogQuota(opts.Store, volume),
 	}
 	return s
 }
@@ -816,29 +802,13 @@ func (s *Server) localWrittenSinceArchive(root *os.Root, runID string) (bool, er
 	return writtenSinceArchive(readRunMeta(root, runID), files), nil
 }
 
-// startArchive runs the archiver, retention over the archive, and the
-// per-team count's upkeep for the life of ctx.
 func (s *Server) startArchive(ctx context.Context) {
 	a := s.archive
 	if a == nil {
 		return
 	}
-	report := func(op string, err error) { s.logger.Error("logs archive", "op", op, "err", err) }
-	a.mu.Lock()
-	restored := a.restored
-	a.mu.Unlock()
-	if restored {
-		go a.store.Keep(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
-	} else {
-		go a.store.Maintain(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
-	}
-	if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-logs"), "logs", a.quota); err != nil {
-		s.logger.Error("logs archive", "op", "register free storage metric", "err", err)
-	}
+	s.startLogBlockSettle(ctx)
 	go func() {
-		if err := s.MeasureVolumeUsage(ctx); err != nil {
-			s.logger.Error("logs archive", "op", "measure volume usage", "err", err)
-		}
 		t := time.NewTicker(a.opts.Interval)
 		defer t.Stop()
 		for {
@@ -848,9 +818,6 @@ func (s *Server) startArchive(ctx context.Context) {
 			case now := <-t.C:
 				if n, err := s.ArchiveOnce(ctx, now); err != nil {
 					s.logger.Error("logs archive", "op", "archive", "archived", n, "err", err)
-				}
-				if err := s.MeasureVolumeUsage(ctx); err != nil {
-					s.logger.Error("logs archive", "op", "measure volume usage", "err", err)
 				}
 				a.mu.Lock()
 				due := now.Sub(a.lastPrune) >= a.opts.PruneInterval
@@ -965,35 +932,6 @@ func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 		)
 	}
 	return store.DeleteMany(ctx, "", operator)
-}
-
-// TeamLogsUsage is what one team's archived logs hold.
-type TeamLogsUsage struct {
-	Team         string `json:"team"`
-	Bytes        int64  `json:"bytes"`
-	Objects      int64  `json:"objects"`
-	ReconciledAt string `json:"reconciled_at,omitempty"`
-}
-
-// handleTeamLogsUsage reports the running count of a team's archived logs,
-// which the controller's storage allowance reads. It sends no request to
-// the object store.
-func (s *Server) handleTeamLogsUsage(w http.ResponseWriter, r *http.Request) {
-	team := r.PathValue("team")
-	if !teamblob.ValidTeam(team) {
-		writeLogsErr(w, http.StatusBadRequest, "not a team slug")
-		return
-	}
-	if s.archive == nil {
-		writeLogsErr(w, http.StatusNotFound, "this logs service keeps no per-team count; start it with --archive-store")
-		return
-	}
-	u := s.archive.store.Usage().Team(team)
-	out := TeamLogsUsage{Team: team, Bytes: u.Bytes, Objects: u.Objects}
-	if !u.ReconciledAt.IsZero() {
-		out.ReconciledAt = u.ReconciledAt.UTC().Format(time.RFC3339)
-	}
-	writeJSONResponse(w, http.StatusOK, out)
 }
 
 // mayDeleteArchivedRun deletes the run's archived objects after checking

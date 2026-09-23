@@ -352,22 +352,3 @@ UPDATE free_slots SET event_bytes = COALESCE((
          WHERE r.team = free_slots.team), 0)`)
 	return err
 }
-
-// StorageStandingForRun reports the standing of the team that owns runID. A
-// run the store does not hold reads as the operator's, which is funded.
-func (s *Store) StorageStandingForRun(ctx context.Context, runID string) (_ StorageStanding, err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return StorageStanding{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return StorageStanding{}, err
-	}
-	out, err := storageStandingTx(ctx, tx, team)
-	if err != nil {
-		return StorageStanding{}, err
-	}
-	return out, tx.Commit()
-}

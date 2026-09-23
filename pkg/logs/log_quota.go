@@ -3,181 +3,245 @@ package logs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
-	"os"
-	"strconv"
 	"sync"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
-// A free team's logs are held to their share of the allowance where they
-// are written. What a team holds is its archived objects, counted by the
-// archive's store, plus what its runs on the volume hold beyond what the
-// archive already has. The volume part is measured by walking the live runs
-// after every archive pass and grows with every append in between, so it
-// falls only when files are deleted and a byte is never released while it
-// still exists.
+// LogBlockBytes is how much of a team's log share the logs service
+// reserves for one run at a time. Appends draw from the block without
+// asking the controller, so a run costs about one controller call per
+// block, and a team holds at most one block per live run beyond what it
+// stores.
+const LogBlockBytes int64 = 1 << 20
 
-// volumeUsage is each team's unarchived bytes on the volume.
-type volumeUsage struct {
-	mu    sync.Mutex
-	teams map[string]int64
-	// pending counts appends made while a measurement walks, which the
-	// walk may have missed; nil when no walk runs.
-	pending map[string]int64
+// LogBlockSettleEvery is how often the logs service commits what each run
+// drew from its block. A run with no append for a whole interval gives the
+// rest of its block back.
+const LogBlockSettleEvery = time.Minute
+
+type logBlockKey struct{ team, run string }
+
+type logBlock struct {
+	mu     sync.Mutex
+	key    logBlockKey
+	auth   string
+	res    storagequota.Reservation
+	left   int64
+	used   int64
+	active bool
+	closed bool
 }
 
-func (v *volumeUsage) add(team string, n int64) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.teams[team] += n
-	if v.pending != nil {
-		v.pending[team] += n
+func (b *logBlock) held() bool { return b.res.ID != "" || b.res.Unlimited }
+
+func (b *logBlock) take(n int64) bool {
+	if !b.held() || (!b.res.Unlimited && b.left < n) {
+		return false
+	}
+	b.left -= n
+	b.used += n
+	b.active = true
+	return true
+}
+
+func (b *logBlock) adopt(res storagequota.Reservation) {
+	b.res, b.left, b.used = res, res.Granted, 0
+}
+
+type logBlocks struct {
+	mu     sync.Mutex
+	blocks map[logBlockKey]*logBlock
+}
+
+func (l *logBlocks) get(key logBlockKey) *logBlock {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.blocks == nil {
+		l.blocks = map[logBlockKey]*logBlock{}
+	}
+	b, ok := l.blocks[key]
+	if !ok {
+		b = &logBlock{key: key}
+		l.blocks[key] = b
+	}
+	return b
+}
+
+func (l *logBlocks) drop(b *logBlock) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.blocks[b.key] == b {
+		delete(l.blocks, b.key)
 	}
 }
 
-func (v *volumeUsage) team(team string) int64 {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.teams[team]
-}
-
-// safety: an append that lands during the walk may or may not be in what
-// the walk read, so it is added again; the next walk takes the double count
-// back, and until then the team is held to less, never more.
-func (v *volumeUsage) begin() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.pending = map[string]int64{}
-}
-
-func (v *volumeUsage) finish(walked map[string]int64) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for team, n := range v.pending {
-		walked[team] += n
+func (l *logBlocks) all() []*logBlock {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]*logBlock, 0, len(l.blocks))
+	for _, b := range l.blocks {
+		out = append(out, b)
 	}
-	v.teams, v.pending = walked, nil
+	return out
 }
 
-func (v *volumeUsage) abort() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.pending = nil
+type logDraw struct {
+	block  *logBlock
+	n      int64
+	stored int64
 }
 
-func newLogQuota(store *teamblob.Store, volume *volumeUsage) *storagequota.Quota {
-	return storagequota.New(storagequota.Options{
-		Share: storagequota.LogShare,
-		Used: func(team string) int64 {
-			return volume.team(team) + store.Usage().Team(team).Bytes
-		},
-		Exempt: func(team string) bool { return team == "" || team == authwire.OperatorTeam },
-	})
+// safety: a draw the append did not write goes back to the block, so a
+// refused or failed write costs the team nothing.
+func (d *logDraw) finish() {
+	if d.block == nil || d.stored >= d.n {
+		return
+	}
+	back := d.n - d.stored
+	d.block.mu.Lock()
+	defer d.block.mu.Unlock()
+	back = min(back, d.block.used)
+	d.block.used -= back
+	if !d.block.res.Unlimited {
+		d.block.left += back
+	}
 }
 
-// unarchivedBytes is what a run's files on the volume hold past the sizes
-// its last finished archive stored. A restored run matches the archive and
-// holds none.
-func unarchivedBytes(root *os.Root, runID string) (string, int64, error) {
-	meta := readRunMeta(root, runID)
-	files, err := runFiles(root, runID)
+// safety: the operator's team is never counted, and neither is a service
+// without an archive, which has no free tier; a controller that cannot
+// count answers 503.
+func (s *Server) reserveLogBytes(w http.ResponseWriter, r *http.Request, team, runID string, n int64) (*logDraw, bool) {
+	if s.archive == nil || s.counter == nil || storagequota.Exempt(team) {
+		return &logDraw{}, true
+	}
+	auth, err := extractCredential(r)
 	if err != nil {
-		return meta.Team, 0, err
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return nil, false
 	}
-	committed := meta.committedSizes()
-	var n int64
-	for _, f := range files {
-		n += max(f.size-committed[f.rel], 0)
-	}
-	return meta.Team, n, nil
-}
-
-// MeasureVolumeUsage walks the runs on the volume and replaces each team's
-// unarchived byte count. The archiver calls it after every pass.
-func (s *Server) MeasureVolumeUsage(ctx context.Context) error {
-	if s.archive == nil {
-		return nil
-	}
-	root, err := s.openRunsRoot()
-	if err != nil {
-		return err
-	}
-	defer s.closeRoot(root, "measure volume usage")
-	d, err := root.Open(".")
-	if err != nil {
-		return err
-	}
-	entries, err := d.ReadDir(-1)
-	_ = d.Close()
-	if err != nil {
-		return err
-	}
-	v := s.archive.volume
-	v.begin()
-	walked := map[string]int64{}
-	for _, e := range entries {
-		if ctx.Err() != nil {
-			v.abort()
-			return ctx.Err()
-		}
-		if !e.IsDir() || validateID(e.Name()) != nil {
+	for {
+		b := s.logBlocks.get(logBlockKey{team: team, run: runID})
+		b.mu.Lock()
+		if b.closed {
+			b.mu.Unlock()
 			continue
 		}
-		team, n, err := unarchivedBytes(root, e.Name())
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			v.abort()
+		draw, err := s.drawLocked(r.Context(), b, auth, n)
+		b.mu.Unlock()
+		if err != nil {
+			s.writeQuotaRefusal(w, err)
+			return nil, false
+		}
+		return draw, true
+	}
+}
+
+func (s *Server) drawLocked(ctx context.Context, b *logBlock, auth string, n int64) (*logDraw, error) {
+	b.auth = auth
+	if b.take(n) {
+		return &logDraw{block: b, n: n}, nil
+	}
+	want := max(n, LogBlockBytes)
+	var next storagequota.Reservation
+	var err error
+	if b.held() {
+		next, err = s.counter.Renew(ctx, auth, b.res, b.used, want)
+		if err == nil || !errors.Is(err, storagequota.ErrUnavailable) {
+			b.adopt(storagequota.Reservation{})
+		}
+	} else {
+		next, err = s.counter.Reserve(ctx, auth, b.key.team, storagequota.KindLogs, want, true)
+	}
+	if err != nil {
+		return nil, err
+	}
+	b.adopt(next)
+	if b.take(n) {
+		return &logDraw{block: b, n: n}, nil
+	}
+	return nil, &storagequota.QuotaError{Message: fmt.Sprintf(
+		"free storage allowance exceeded: team %s has %d bytes of its log share left and this append stores %d; "+
+			"add credits to store more", b.key.team, b.left, n)}
+}
+
+// safety: a run that drew nothing since the last settle, or every run when
+// final is set, commits and gives the rest of its block back, so an ended run
+// holds no block for more than two intervals.
+func (s *Server) settleLogBlocks(ctx context.Context, final bool) {
+	for _, b := range s.logBlocks.all() {
+		b.mu.Lock()
+		if err := s.settleLocked(ctx, b, final); err != nil {
+			s.logger.Error("logs storage count", "team", b.key.team, "run", b.key.run, "err", err)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (s *Server) settleLocked(ctx context.Context, b *logBlock, final bool) error {
+	defer func() { b.active = false }()
+	// safety: a block granted while the controller could not answer carries
+	// no reservation, so it is dropped at the next settle and the run asks again.
+	if final || !b.active || b.res.ID == "" {
+		if err := s.counter.Commit(ctx, b.auth, b.res, b.used); err != nil {
 			return err
 		}
-		walked[team] += n
-	}
-	v.finish(walked)
-	return nil
-}
-
-// standingFromClaim reads the tier the controller answered a claim check
-// with. An answer that names none leaves the standing the quota already
-// holds, which for a team never answered for is the default free share.
-func standingFromClaim(h http.Header) (storagequota.Standing, bool) {
-	tier := storagequota.Tier(h.Get(storagequota.TierHeader))
-	if tier == "" {
-		return storagequota.Standing{}, false
-	}
-	allowance, err := strconv.ParseInt(h.Get(storagequota.AllowanceHeader), 10, 64)
-	if err != nil || allowance < 0 {
-		allowance = storagequota.DefaultAllowanceBytes
-	}
-	return storagequota.Standing{Tier: tier, AllowanceBytes: allowance}, true
-}
-
-func writeQuotaRefusal(w http.ResponseWriter, err error) {
-	status := http.StatusRequestEntityTooLarge
-	if errors.Is(err, storagequota.ErrPaused) {
-		status = http.StatusPaymentRequired
-	}
-	http.Error(w, err.Error(), status)
-}
-
-// RestoreArchive restores the archive's per-team count and measures the
-// volume, so the log share is judged against what the service already holds.
-// ServeWith calls it before listening whenever the service authenticates
-// teams, and refuses to start when it fails.
-func (s *Server) RestoreArchive(ctx context.Context) error {
-	a := s.archive
-	if a == nil {
+		b.closed = true
+		s.logBlocks.drop(b)
 		return nil
 	}
-	if err := a.store.Restore(ctx, a.opts.UsageReconcile); err != nil {
+	if b.used == 0 {
+		return nil
+	}
+	next, err := s.counter.Renew(ctx, b.auth, b.res, b.used, LogBlockBytes)
+	if err != nil && errors.Is(err, storagequota.ErrUnavailable) {
 		return err
 	}
-	if err := s.MeasureVolumeUsage(ctx); err != nil {
-		return err
+	b.adopt(next)
+	var quota *storagequota.QuotaError
+	if errors.As(err, &quota) {
+		return nil
 	}
-	a.mu.Lock()
-	a.restored = true
-	a.mu.Unlock()
-	return nil
+	return err
+}
+
+func (s *Server) startLogBlockSettle(ctx context.Context) {
+	if s.archive == nil || s.counter == nil {
+		return
+	}
+	go func() {
+		t := time.NewTicker(LogBlockSettleEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				s.settleLogBlocks(sctx, true)
+				cancel()
+				return
+			case <-t.C:
+				s.settleLogBlocks(ctx, false)
+			}
+		}
+	}()
+}
+
+func (s *Server) writeQuotaRefusal(w http.ResponseWriter, err error) {
+	var quota *storagequota.QuotaError
+	switch {
+	case errors.As(err, &quota) && quota.Paused:
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+	case errors.As(err, &quota):
+		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+	case errors.Is(err, storagequota.ErrUnavailable):
+		s.logger.Error("logs storage count", "err", err)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "log storage cannot be counted right now; retry shortly", http.StatusServiceUnavailable)
+	default:
+		s.logger.Error("logs storage count", "err", err)
+		http.Error(w, "count log storage", http.StatusBadGateway)
+	}
 }

@@ -146,6 +146,8 @@ type CeilingState struct {
 	// Incomplete is true when the last measurement stopped early and
 	// was discarded, which leaves the counters as the only total.
 	Incomplete bool `json:"measurement_incomplete"`
+	// MeasureError is why the last measurement was discarded.
+	MeasureError string `json:"measure_error,omitempty"`
 }
 
 // Ceiling holds a bucket to a total size and a total object count.
@@ -178,6 +180,7 @@ type Ceiling struct {
 	frozenOn     int64
 	thawed       bool
 	incomplete   bool
+	measureErr   string
 	freezes      uint64
 	refused      uint64
 
@@ -266,6 +269,7 @@ func (c *Ceiling) Observe(u Usage) {
 	c.reconciled = c.counted
 	c.thawed = false
 	c.incomplete = false
+	c.measureErr = ""
 	c.evaluateLocked()
 }
 
@@ -393,6 +397,7 @@ func (c *Ceiling) State() CeilingState {
 		Freezes:      c.freezes,
 		Refused:      c.refused,
 		Incomplete:   c.incomplete,
+		MeasureError: c.measureErr,
 	}
 	if c.reconcile > 0 {
 		st.Reconcile = c.reconcile.String()
@@ -414,26 +419,38 @@ type UsageSource func(context.Context) (Usage, error)
 // still over its ceiling. The ceiling then reports itself incomplete
 // and keeps counting writes.
 func (c *Ceiling) ReconcileWith(ctx context.Context, src UsageSource) error {
-	if src == nil || !c.Enforced() {
+	if !c.Enforced() {
+		return nil
+	}
+	return c.Measure(ctx, src)
+}
+
+// Measure is [Ceiling.ReconcileWith] whether or not a ceiling is set, for
+// an owner that reports the store's totals even when it holds it to none.
+func (c *Ceiling) Measure(ctx context.Context, src UsageSource) error {
+	if src == nil {
 		return nil
 	}
 	u, err := src(ctx)
 	if err != nil {
-		c.markIncomplete()
-		return fmt.Errorf("measure store usage: %w", err)
+		err = fmt.Errorf("measure store usage: %w", err)
+		c.markIncomplete(err)
+		return err
 	}
 	if u.Partial {
-		c.markIncomplete()
-		return fmt.Errorf("measure store usage: %w after %d bytes in %d objects",
+		err := fmt.Errorf("measure store usage: %w after %d bytes in %d objects",
 			ErrMeasurementPartial, u.Bytes, u.Objects)
+		c.markIncomplete(err)
+		return err
 	}
 	c.Observe(u)
 	return nil
 }
 
-func (c *Ceiling) markIncomplete() {
+func (c *Ceiling) markIncomplete(err error) {
 	c.mu.Lock()
 	c.incomplete = true
+	c.measureErr = err.Error()
 	c.mu.Unlock()
 }
 

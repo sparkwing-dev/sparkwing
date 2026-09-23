@@ -12,11 +12,9 @@
 // first segment is "teams" or "_meta" is refused so the operator
 // namespace cannot reach into either.
 //
-// The store keeps a running per-team byte and object count, adjusted on
-// every write and delete it performs, so a quota check never lists the
-// bucket. [Store.Reconcile] replaces the counts with a measurement and
-// is meant to run rarely (daily); [Store.SaveUsage] and [Store.LoadUsage]
-// carry the counts across restarts in one small object.
+// The store counts nothing itself: the controller counts what each team
+// stores, and [Store.Measure] is the listing its storage pass reconciles
+// that count from.
 //
 // Requests go through the client the caller hands in. Built by
 // storeurl.OpenS3, that client caps the SDK's own retries and spends a
@@ -77,7 +75,6 @@ const (
 
 	teamsSegment = "teams"
 	metaSegment  = "_meta"
-	usageRel     = metaSegment + "/usage.json"
 	deleteBatch  = 1000
 	abortTimeout = 30 * time.Second
 )
@@ -96,15 +93,11 @@ type Options struct {
 	MultipartThreshold int64
 	// MaxListPages defaults to DefaultMaxListPages.
 	MaxListPages int
-	// TeamObjectMaxAge, when set, makes [Store.Reconcile] delete every
+	// TeamObjectMaxAge, when set, makes [Store.Measure] delete every
 	// object of a team last written longer ago than the age it answers for
 	// that team, in the listing it already makes. Zero keeps the team's
 	// objects; the operator's own namespace is never expired.
 	TeamObjectMaxAge func(team string) time.Duration
-	// ReconcileAtStart makes [Store.Restore] list the store rather than
-	// trust the saved count, which lags a crash by up to one save. A
-	// service that holds teams to a quota over the count sets it.
-	ReconcileAtStart bool
 	// Now defaults to time.Now.
 	Now func() time.Time
 }
@@ -118,9 +111,7 @@ type Store struct {
 	threshold int64
 	maxPages  int
 	maxAge    func(team string) time.Duration
-	fresh     bool
 	now       func() time.Time
-	usage     *Usage
 	breaker   breaker
 }
 
@@ -146,9 +137,7 @@ func New(opts Options) (*Store, error) {
 		threshold: opts.MultipartThreshold,
 		maxPages:  opts.MaxListPages,
 		maxAge:    opts.TeamObjectMaxAge,
-		fresh:     opts.ReconcileAtStart,
 		now:       opts.Now,
-		usage:     newUsage(),
 	}
 	if s.partSize <= 0 {
 		s.partSize = DefaultPartSize
@@ -279,13 +268,13 @@ type PutOptions struct {
 	ContentType string
 	Metadata    map[string]string
 	// Fresh skips the HEAD that learns what an overwrite replaces. A
-	// caller that knows the key is new saves the request; the running
-	// count then treats the write as a new object.
+	// caller that knows the key is new saves the request; the write then
+	// reports itself as a new object.
 	Fresh bool
 }
 
-// Written is what one Put stored and how it moved the team's count: an
-// overwrite adds the size difference and no object.
+// Written is what one Put stored and what it added to the team's
+// namespace: an overwrite adds the size difference and no object.
 type Written struct {
 	Bytes        int64
 	AddedBytes   int64
@@ -324,7 +313,6 @@ func (s *Store) Put(ctx context.Context, team, rel string, body io.Reader, opts 
 	if prior >= 0 {
 		w.AddedBytes, w.AddedObjects = n-prior, 0
 	}
-	s.usage.add(team, w.AddedBytes, w.AddedObjects)
 	return w, nil
 }
 
@@ -518,33 +506,20 @@ func (s *Store) Delete(ctx context.Context, team, rel string) error {
 	if err != nil {
 		return err
 	}
-	h, err := s.headKey(ctx, key)
-	if errors.Is(err, ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
 	if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}); err != nil && !isNotFound(err) {
 		return fmt.Errorf("teamblob: delete %s: %w", key, err)
 	}
-	s.usage.add(team, -h.Size, -1)
 	return nil
 }
 
-// Sized names an object and the size the caller knows it has, for a
-// batch delete that must keep the running count right without a HEAD
-// per object.
+// Sized names an object and the size the caller knows it has.
 type Sized struct {
 	Rel  string
 	Size int64
 }
 
 // DeleteMany removes the named objects of team in batches of a thousand
-// per request. The running count drops by the sizes the caller supplies,
-// for the keys the store confirmed deleted; a key it refused stays
-// counted, and one that was already gone is corrected at the next
-// reconcile.
+// per request.
 func (s *Store) DeleteMany(ctx context.Context, team string, objs []Sized) error {
 	keys := make([]sizedKey, 0, len(objs))
 	for _, o := range objs {
@@ -554,8 +529,7 @@ func (s *Store) DeleteMany(ctx context.Context, team string, objs []Sized) error
 		}
 		keys = append(keys, sizedKey{key: k, size: o.Size})
 	}
-	d, err := s.deleteKeys(ctx, keys)
-	s.usage.add(team, -d.Bytes, -d.Objects)
+	_, err := s.deleteKeys(ctx, keys)
 	return err
 }
 
@@ -677,8 +651,8 @@ type Deleted struct {
 
 // DeletePrefix removes every object of team under relPrefix: one LIST
 // per thousand objects and one DeleteObjects per thousand. An empty
-// relPrefix on a team deletes the team's whole namespace. The running
-// count and the result carry only deletions the store confirmed.
+// relPrefix on a team deletes the team's whole namespace. The result
+// carries only deletions the store confirmed.
 func (s *Store) DeletePrefix(ctx context.Context, team, relPrefix string) (Deleted, error) {
 	full, _, err := s.listPrefix(team, relPrefix)
 	if err != nil {
@@ -709,22 +683,16 @@ func (s *Store) DeletePrefix(ctx context.Context, team, relPrefix string) (Delet
 	if walkErr == nil {
 		flush()
 	}
-	s.usage.add(team, -d.Bytes, -d.Objects)
 	return d, errors.Join(walkErr, derr)
 }
 
-// DeleteTeam removes team's whole namespace and zeroes its count. It is
-// idempotent, so a purge that stopped part way is finished by calling it
-// again.
+// DeleteTeam removes team's whole namespace. It is idempotent, so a purge
+// that stopped part way is finished by calling it again.
 func (s *Store) DeleteTeam(ctx context.Context, team string) (Deleted, error) {
 	if team == "" {
 		return Deleted{}, fmt.Errorf("%w: DeleteTeam needs a team", ErrInvalidKey)
 	}
-	d, err := s.DeletePrefix(ctx, team, "")
-	if err == nil {
-		s.usage.forget(team)
-	}
-	return d, err
+	return s.DeletePrefix(ctx, team, "")
 }
 
 func isNotFound(err error) bool {

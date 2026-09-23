@@ -29,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -40,10 +41,13 @@ const maxAppendRequestBytes = 4 << 20
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
-	root     string
-	logger   *slog.Logger
-	dirMode  os.FileMode
-	fileMode os.FileMode
+	root      string
+	logger    *slog.Logger
+	counter   *storagequota.Client
+	logBlocks logBlocks
+	claims    claimCache
+	dirMode   os.FileMode
+	fileMode  os.FileMode
 
 	limits    Limits
 	ceiling   *objectguard.Ceiling
@@ -161,6 +165,10 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 	s.controllerURL = controllerURL
 	s.authCacheTTL = cacheTTL
 	s.authHTTP = &http.Client{Timeout: 5 * time.Second}
+	s.counter = nil
+	if controllerURL != "" {
+		s.counter = storagequota.New(controllerURL, s.authHTTP)
+	}
 	return s
 }
 
@@ -190,7 +198,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.withRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))))
 
 	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs), scopeLogsDelete))
-	mux.Handle("GET /api/v1/teams/{team}/logs/usage", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleTeamLogsUsage)))
 
 	authed := s.authMiddleware(mux)
 
@@ -483,17 +490,6 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	if opts.Archive != nil {
 		s.WithArchive(*opts.Archive)
 	}
-	// safety: with teams to hold to their log share, the count is restored
-	// before the listener opens, and a service that cannot count its archive
-	// does not start rather than admit appends against an empty count.
-	if opts.Archive != nil && opts.ControllerURL != "" {
-		rctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		err := s.RestoreArchive(rctx)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("logs: count the archive before serving: %w", err)
-		}
-	}
 	s.StartSweeper(ctx)
 	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
 	srv := &http.Server{
@@ -692,7 +688,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	// safety: every refusal from here on gives back what planAppend
 	// reserved against the run, so a refused append costs the run nothing.
 	refuse := func() { rt.unreserve(int64(len(plan.write))) }
-	claim, status, err := s.validateAppendClaim(r, runID, nodeID)
+	_, status, err := s.validateAppendClaim(r, runID, nodeID)
 	if err != nil {
 		refuse()
 		http.Error(w, err.Error(), status)
@@ -725,21 +721,15 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	team := principalTeam(r)
-	if s.archive != nil {
-		if standing, ok := standingFromClaim(claim); ok {
-			s.archive.quota.Observe(team, standing)
-		}
-		// safety: the reservation is taken after the node and run caps
-		// cut the append, so a team is held to what this append stores
-		// rather than to what it was sent.
-		release, err := s.archive.quota.Reserve(r.Context(), team, plan.storedBytes())
-		if err != nil {
-			refuse()
-			writeQuotaRefusal(w, err)
-			return
-		}
-		defer release()
+	// safety: the reservation is taken after the node and run caps cut the
+	// append, so a team is held to what this append stores rather than to
+	// what it was sent.
+	counted, ok := s.reserveLogBytes(w, r, team, runID, plan.storedBytes())
+	if !ok {
+		refuse()
+		return
 	}
+	defer counted.finish()
 	if err := s.ensureRunDir(root, runID); err != nil {
 		refuse()
 		s.storeError(w, "create run dir", err)
@@ -790,9 +780,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		objects = 1
 	}
 	s.ceiling.Record(stored, objects)
-	if s.archive != nil {
-		s.archive.volume.add(team, stored)
-	}
+	counted.stored = stored
 	if err := observe(); err != nil {
 		s.storeError(w, "record log sequence", err)
 		return
@@ -819,6 +807,10 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	if err != nil {
 		return nil, http.StatusUnauthorized, err
 	}
+	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
+	if cacheable && s.claims.valid(key, time.Now()) {
+		return nil, 0, nil
+	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
 	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
@@ -827,14 +819,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 		return nil, http.StatusBadGateway, err
 	}
 	req.Header.Set("Authorization", credential)
-	for _, name := range []string{
-		"X-Sparkwing-Claim-Holder",
-		"X-Sparkwing-Claim-Membership",
-		"X-Sparkwing-Claim-Reservation",
-		"X-Sparkwing-Claim-Generation",
-		"X-Sparkwing-Attempt-Ordinal",
-		"X-Sparkwing-Trigger-Generation",
-	} {
+	for _, name := range claimHeaders {
 		req.Header.Set(name, r.Header.Get(name))
 	}
 	// #nosec G704 -- the validated request retains the same operator-configured origin
@@ -844,6 +829,9 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		if cacheable && s.claimCacheTTL() > 0 {
+			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
+		}
 		return resp.Header, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))

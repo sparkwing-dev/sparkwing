@@ -80,13 +80,11 @@ type Config struct {
 	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
 	// the volume. Credentials and region come from the AWS default chain.
 	BlobStore string
-	// ControllerURL is where the cache asks, with APIToken, what each
-	// team may store in BlobStore. Empty holds every team a grant names to
-	// the default free share.
+	// ControllerURL is where the cache asks, with APIToken, to count what
+	// each team a grant names stores in BlobStore and downloads, and where
+	// it keeps its egress totals. Empty counts nothing, which a cache with
+	// both GrantKey and BlobStore refuses.
 	ControllerURL string
-	// UsageReconcile is how often the per-team count of the bucket is
-	// replaced by a listing. Writes and deletes keep it between listings.
-	UsageReconcile time.Duration
 	// DisableProxy serves no registry proxy. The proxy takes no
 	// credential, so a cache published outside the cluster sets it.
 	DisableProxy bool
@@ -106,12 +104,6 @@ type Config struct {
 	// rolls. It bounds the pod's bill whoever the callers are. Zero is
 	// off.
 	EgressDailyCapBytes int64
-	// TeamDailyDownloadFreeBytes and TeamDailyDownloadFundedBytes cap what
-	// the cache serves one team's grants in a UTC day, by whether the team
-	// pays; past it the team's downloads are refused with 429 until the day
-	// rolls. The operator's team and token are exempt. Zero is off.
-	TeamDailyDownloadFreeBytes   int64
-	TeamDailyDownloadFundedBytes int64
 }
 
 func DefaultConfig() Config {
@@ -129,23 +121,11 @@ func DefaultConfig() Config {
 		MaxArtifactBytes:     DefaultMaxArtifactBytes,
 		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
 		StoreReconcile:       objectguard.DefaultCeilingReconcile,
-		UsageReconcile:       24 * time.Hour,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 		ProxyMaxBytes:       DefaultProxyMaxBytes,
-
-		TeamDailyDownloadFreeBytes:   DefaultTeamDailyDownloadFreeBytes,
-		TeamDailyDownloadFundedBytes: DefaultTeamDailyDownloadFundedBytes,
 	}
 }
-
-// DefaultTeamDailyDownloadFreeBytes and DefaultTeamDailyDownloadFundedBytes
-// are what the cache serves one team's grants in a UTC day, by whether the
-// team pays, when the operator named no cap.
-const (
-	DefaultTeamDailyDownloadFreeBytes   int64 = 5 << 30
-	DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
-)
 
 // DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
 // verifies grants starts with when the operator named none: what one pod may
@@ -226,8 +206,11 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
 		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
 	}
-	if cfg.TeamDailyDownloadFreeBytes < 0 || cfg.TeamDailyDownloadFundedBytes < 0 {
-		return nil, fmt.Errorf("cache: a team daily download cap must not be negative; pass 0 to turn it off")
+	// safety: with grants the bucket holds many teams' bytes, and only the
+	// controller can count them, so a cache that could not ask it does not
+	// start rather than store every team's bytes uncounted.
+	if cfg.GrantKey != "" && cfg.BlobStore != "" && cfg.ControllerURL == "" {
+		return nil, fmt.Errorf("cache: --grant-key with --blob-store needs --controller, which counts what each team stores")
 	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
@@ -273,7 +256,11 @@ func New(cfg Config) (*Server, error) {
 		Remedy:    storeCeilingRemedy,
 	})
 
-	blobStore, blobQuota = nil, nil
+	blobStore, counter, counterAuth = nil, nil, ""
+	if cfg.ControllerURL != "" {
+		counter = storagequota.New(cfg.ControllerURL, nil)
+		counterAuth = "Bearer " + cfg.APIToken
+	}
 	if cfg.BlobStore != "" {
 		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		store, err := openBlobStore(octx, cfg.BlobStore)
@@ -284,18 +271,6 @@ func New(cfg Config) (*Server, error) {
 		blobStore = store
 		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
 			store.Bucket(), store.Prefix())
-		blobQuota = newBlobQuota(store, cfg)
-		// safety: the count holds teams to their share, so it is restored
-		// before the handler exists; a cache that cannot count its bucket
-		// does not start, rather than admit uploads against an empty count.
-		if cfg.GrantKey != "" {
-			rctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			err := store.Restore(rctx, cfg.UsageReconcile)
-			cancel()
-			if err != nil {
-				return nil, fmt.Errorf("cache: count the blob store before serving: %w", err)
-			}
-		}
 	}
 
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
@@ -320,8 +295,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
-	setTeamDownloadCaps(cfg)
-	if blobStore != nil {
+	if counter != nil {
 		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := restoreEgressDay(rctx); err != nil {
 			log.Printf("warning: read the day's saved egress total: %v", err)
@@ -338,14 +312,6 @@ func New(cfg Config) (*Server, error) {
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
-	if err := registerTeamDownloadMetric(otelutil.Meter("sparkwing-cache")); err != nil {
-		log.Printf("warning: team download metric: %v", err)
-	}
-	if blobQuota != nil {
-		if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-cache"), "cache", blobQuota); err != nil {
-			log.Printf("warning: free storage metric: %v", err)
-		}
-	}
 	if err := setupSSH(); err != nil {
 		return nil, err
 	}
@@ -366,7 +332,6 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
 	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
-	s.mux.HandleFunc("/admin/usage", requireToken(handleBlobUsage))
 	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
@@ -419,20 +384,8 @@ func (s *Server) MetricsHandler() http.Handler { return s.metrics }
 
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
-	if blobStore != nil {
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			report := func(op string, err error) { log.Printf("warning: blob store %s: %v", op, err) }
-			if s.cfg.GrantKey != "" {
-				blobStore.Keep(ctx, s.cfg.UsageReconcile, 5*time.Minute, report)
-				return
-			}
-			blobStore.Maintain(ctx, s.cfg.UsageReconcile, 5*time.Minute, report)
-		}()
-	}
 	measureStore(ctx)
-	if blobStore != nil {
+	if counter != nil {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()

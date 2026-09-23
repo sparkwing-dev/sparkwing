@@ -2,7 +2,6 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -47,8 +47,9 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(blobTestBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	savedOpen, savedStore, savedQuota := openBlobStore, blobStore, blobQuota
-	t.Cleanup(func() { openBlobStore, blobStore, blobQuota = savedOpen, savedStore, savedQuota })
+	saveCounter(t)
+	savedOpen, savedStore := openBlobStore, blobStore
+	t.Cleanup(func() { openBlobStore, blobStore = savedOpen, savedStore })
 	openBlobStore = func(_ context.Context, raw2 string) (*teamblob.Store, error) {
 		if raw2 != "s3://"+blobTestBucket+"/cache" {
 			t.Fatalf("opened %q", raw2)
@@ -80,6 +81,7 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	c.APIToken = token
 	c.GrantKey = testGrantKey(token)
 	c.BlobStore = "s3://" + blobTestBucket + "/cache"
+	_, c.ControllerURL = fakeController(t, token, 1<<40, 0)
 	if configure != nil {
 		configure(&c, raw)
 	}
@@ -90,6 +92,21 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	srv := httptest.NewServer(s.handler)
 	t.Cleanup(srv.Close)
 	return srv, raw, s.handler
+}
+
+func fakeController(t *testing.T, token string, share, downloadCap int64) (*storagequotatest.Controller, string) {
+	t.Helper()
+	ctl := storagequotatest.New(share, downloadCap)
+	ctl.Token = token
+	srv := httptest.NewServer(ctl)
+	t.Cleanup(srv.Close)
+	return ctl, srv.URL
+}
+
+func saveCounter(t *testing.T) {
+	t.Helper()
+	saved, savedAuth := counter, counterAuth
+	t.Cleanup(func() { counter, counterAuth = saved, savedAuth })
 }
 
 func bucketKeys(t *testing.T, raw *s3.Client) []string {
@@ -163,23 +180,6 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(teamsDir); len(entries) != 0 {
 		t.Errorf("a blob-store cache wrote team trees to the volume: %d entries", len(entries))
-	}
-
-	code, body := send(t, srv, http.MethodGet, "/admin/usage?team=team-a", token, "")
-	if code != http.StatusOK {
-		t.Fatalf("usage = %d %s", code, body)
-	}
-	var usage struct {
-		Teams map[string]teamblob.TeamUsage `json:"teams"`
-	}
-	if err := json.Unmarshal([]byte(body), &usage); err != nil {
-		t.Fatal(err)
-	}
-	if u := usage.Teams["team-a"]; u.Objects != 3 || u.Bytes != 3*int64(len("team-a secret")) {
-		t.Errorf("team-a usage = %+v", u)
-	}
-	if code, _ := send(t, srv, http.MethodGet, "/admin/usage", teamA, ""); code != http.StatusUnauthorized {
-		t.Errorf("a grant read the usage route: %d", code)
 	}
 
 	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", teamA, ""); code != http.StatusUnauthorized {

@@ -28,36 +28,53 @@ const (
 // survives a caller that dies mid-measurement. The claim is released
 // even when fn panics or ctx is already done.
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
+	return s.runLeased(ctx, "bucket measurement", metaKeyBucketMeasureAt, metaKeyBucketMeasureClaim, holder, window, ttl, fn)
+}
+
+const (
+	metaKeyStoragePassAt    = "storage.pass"
+	metaKeyStoragePassClaim = "storage.pass.claim"
+)
+
+// RunStoragePassLeased runs the storage pass under its own store-wide lease,
+// the same way [Store.RunBucketMeasureLeased] runs a measurement: one
+// replica per window lists the bucket, reconciles every team's count and
+// expires old objects.
+func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
+	return s.runLeased(ctx, "storage pass", metaKeyStoragePassAt, metaKeyStoragePassClaim, holder, window, ttl, fn)
+}
+
+func (s *Store) runLeased(ctx context.Context, what, atKey, claimKey, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error) {
 	if fn == nil {
-		return false, fmt.Errorf("RunBucketMeasureLeased: a measurement function is required")
+		return false, fmt.Errorf("run the %s: a function is required", what)
 	}
 	if window <= 0 {
-		return false, fmt.Errorf("RunBucketMeasureLeased: a positive window is required")
+		return false, fmt.Errorf("run the %s: a positive window is required", what)
 	}
 	if ttl <= 0 {
 		ttl = window
 	}
-	claimed, token, err := s.claimSweepWindow(ctx, metaKeyBucketMeasureAt, metaKeyBucketMeasureClaim, window, ttl)
+	claimed, token, err := s.claimSweepWindow(ctx, atKey, claimKey, window, ttl)
 	if err != nil {
-		return false, fmt.Errorf("claim the bucket measurement for %s: %w", holder, err)
+		return false, fmt.Errorf("claim the %s for %s: %w", what, holder, err)
 	}
 	if !claimed {
 		return false, nil
 	}
 	ran = true
-	// safety: the release outlives ctx, because a measurement cut short by its
-	// own deadline still has to hand the window back rather than sit on the
+	// safety: the release outlives ctx, because a run cut short by its own
+	// deadline still has to hand the window back rather than sit on the
 	// claim until the ttl runs out.
 	defer func() {
 		if p := recover(); p != nil {
-			err = fmt.Errorf("bucket measurement for %s panicked: %v", holder, p)
+			err = fmt.Errorf("%s for %s panicked: %v", what, holder, p)
 		}
-		if cerr := s.clearSweepClaim(context.WithoutCancel(ctx), metaKeyBucketMeasureClaim, token); err == nil {
+		if cerr := s.clearSweepClaim(context.WithoutCancel(ctx), claimKey, token); err == nil {
 			err = cerr
 		}
 	}()
 	if err = fn(ctx); err == nil {
-		err = s.stampSweepWindow(ctx, metaKeyBucketMeasureAt)
+		err = s.stampSweepWindow(ctx, atKey)
 	}
 	return ran, err
 }

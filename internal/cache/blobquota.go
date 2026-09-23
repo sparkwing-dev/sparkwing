@@ -1,46 +1,24 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
-// blobQuota holds each team to its cache share of the free allowance,
-// against the bucket's running count, whenever blobStore is set. The
-// volume-backed stores carry no allowance: a deployment with more than one
-// team keeps its blobs in a bucket.
-var blobQuota *storagequota.Quota
+// safety: nil without --controller, which leaves every team uncounted.
+var (
+	counter     *storagequota.Client
+	counterAuth string
+)
 
-func newBlobQuota(store *teamblob.Store, cfg Config) *storagequota.Quota {
-	return storagequota.New(storagequota.Options{
-		Share:  storagequota.CacheShare,
-		Used:   func(team string) int64 { return store.Usage().Team(team).Bytes },
-		Lookup: standingLookup(cfg),
-		Exempt: operatorTeam,
-	})
-}
-
-func operatorTeam(team string) bool { return team == "" || team == authwire.OperatorTeam }
-
-// standingLookup asks the controller what each team pays for. Without one,
-// every team a grant names is answered for as free.
-func standingLookup(cfg Config) storagequota.Lookup {
-	switch {
-	case cfg.ControllerURL != "":
-		return storagequota.HTTPLookup(cfg.ControllerURL, cfg.APIToken, nil)
-	case cfg.GrantKey != "":
-		log.Printf("warning: sparkwing-cache has grants but no --controller, so every team a grant names " +
-			"is held to the free share and the free daily download cap whatever it pays")
-	}
-	return nil
-}
+func operatorTeam(team string) bool { return storagequota.Exempt(team) }
 
 var errBeyondShare = errors.New("the upload passed the room the team's free share left it; add credits to store more")
 
@@ -67,36 +45,80 @@ func (s *shareReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+type blobReservation struct {
+	res     storagequota.Reservation
+	counted bool
+	wrote   bool
+	added   int64
+}
+
+func (b *blobReservation) stored(added int64) {
+	b.wrote, b.added = true, added
+}
+
+// safety: the commit outlives the request, because an upload whose client hung up after
+// the object landed still holds its bytes.
+func (b *blobReservation) finish(ctx context.Context) {
+	if !b.counted {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var err error
+	if b.wrote {
+		err = counter.Commit(ctx, counterAuth, b.res, b.added)
+	} else {
+		err = counter.Release(ctx, counterAuth, b.res)
+	}
+	if err != nil {
+		// #nosec G706 -- the team is a checked slug
+		log.Printf("warning: count team %s's cache write: %v", b.res.Team, err)
+	}
+}
+
 // reserveBlobWrite holds room for a team's upload before one byte of it is
 // read. A known length is admitted whole or refused with 413; an unknown one
 // gets the room left, up to limit, and its body fails past it, which aborts
-// the upload before anything is readable. The caller calls release once the
+// the upload before anything is readable. The caller calls finish once the
 // write is done, whatever it did.
-func reserveBlobWrite(w http.ResponseWriter, r *http.Request, team string, size, limit int64) (func(), io.Reader, bool) {
-	if size >= 0 {
-		release, err := blobQuota.Reserve(r.Context(), team, size)
-		if err != nil {
-			writeQuotaRefusal(w, err)
-			return nil, nil, false
-		}
-		return release, r.Body, true
+func reserveBlobWrite(w http.ResponseWriter, r *http.Request, team string, size, limit int64) (*blobReservation, io.Reader, bool) {
+	if counter == nil || operatorTeam(team) {
+		return &blobReservation{}, r.Body, true
 	}
-	granted, release, err := blobQuota.ReserveUpTo(r.Context(), team, limit)
+	upTo := size < 0
+	want := size
+	if upTo {
+		want = limit
+	}
+	res, err := counter.Reserve(r.Context(), counterAuth, team, storagequota.KindCache, want, upTo)
 	if err != nil {
 		writeQuotaRefusal(w, err)
 		return nil, nil, false
 	}
-	return release, &shareReader{r: r.Body, left: granted}, true
+	b := &blobReservation{res: res, counted: true}
+	if !upTo || res.Unlimited {
+		return b, r.Body, true
+	}
+	return b, &shareReader{r: r.Body, left: res.Granted}, true
 }
 
 func writeQuotaRefusal(w http.ResponseWriter, err error) {
-	status := http.StatusRequestEntityTooLarge
-	if errors.Is(err, storagequota.ErrPaused) {
-		status = http.StatusPaymentRequired
+	var quota *storagequota.QuotaError
+	switch {
+	case errors.As(err, &quota) && quota.Paused:
+		http.Error(w, err.Error(), http.StatusPaymentRequired)
+	case errors.As(err, &quota):
+		// #nosec G706 -- the refusal names a checked team slug and byte counts
+		log.Printf("free storage refused a write: %v", err)
+		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+	case errors.Is(err, storagequota.ErrUnavailable):
+		log.Printf("warning: team storage cannot be counted: %v", err)
+		w.Header().Set("Retry-After", "30")
+		http.Error(w, "team storage cannot be counted right now; retry shortly", http.StatusServiceUnavailable)
+	default:
+		log.Printf("warning: count team storage: %v", err)
+		http.Error(w, "count team storage", http.StatusBadGateway)
 	}
-	// #nosec G706 -- the refusal names a checked team slug and byte counts
-	log.Printf("free storage refused a write: %v", err)
-	http.Error(w, err.Error(), status)
 }
 
 func quotaCut(w http.ResponseWriter, err error, what string) bool {

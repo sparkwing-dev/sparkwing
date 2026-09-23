@@ -5794,18 +5794,193 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
-  /internal/teams/{team}/storage-tier:
-    parameters:
-      - in: path
-        name: team
-        required: true
-        schema: {type: string}
-    get:
+  /internal/storage/reserve:
+    post:
       x-sparkwing-scope: public
-      summary: Registered route awaiting a description.
-      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      tags: [storage]
+      summary: Reserve room in a team's cache or log store before a write.
+      description: |
+        The cache calls it with its operator token for any team; the logs
+        service forwards the appending caller's credential, which must be
+        allowed to write logs and names only its own team's `logs` store. A free
+        team is held to its share of the allowance, three quarters for the
+        cache and three sixteenths for logs, counting what it stores and
+        every reservation still held; a funded team is counted without a
+        limit. `up_to` grants as much of `bytes` as the team has room for,
+        zero or less asking for all of it. A reservation expires after an
+        hour unless it is committed or released.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageReserveReq
+              required: [team, store, bytes]
+              properties:
+                team: {type: string}
+                store: {type: string, enum: [cache, logs]}
+                bytes: {type: integer, format: int64}
+                up_to: {type: boolean}
       responses:
-        default: {description: Undescribed.}
+        "200":
+          description: The reservation. A single-team controller answers funded with no id.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.StorageReservation
+                properties:
+                  reservation: {type: string}
+                  tier: {type: string, enum: [funded, free]}
+                  granted_bytes: {type: integer, format: int64}
+                  unlimited: {type: boolean}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "402": {description: The team has neither credits nor a free-tier slot.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: The write would pass the team's free share of this store.}
+
+  /internal/storage/commit:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Count what a write stored and drop its reservation.
+      description: |
+        `bytes` is what the write added to the store: its size, or for an
+        overwrite the difference from what it replaced, which may be
+        negative. A reservation that already expired, or that is not the
+        named team's, drops nothing and the bytes still count. Callers are
+        authorized as for the reserve route. `next_bytes` above zero also
+        reserves up to that many bytes more in the same transaction and
+        answers the new reservation, for a writer that draws many small
+        writes from one block; the commit lands even when the next block is
+        refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageCommitReq
+              required: [team, store, bytes]
+              properties:
+                team: {type: string}
+                store: {type: string, enum: [cache, logs]}
+                reservation: {type: string}
+                bytes: {type: integer, format: int64}
+                next_bytes: {type: integer, format: int64}
+      responses:
+        "200":
+          description: Counted, and the next block when `next_bytes` asked for one.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.StorageReservation
+                properties:
+                  reservation: {type: string}
+                  tier: {type: string, enum: [funded, free]}
+                  granted_bytes: {type: integer, format: int64}
+                  unlimited: {type: boolean}
+                  expires_at: {type: string, format: date-time}
+        "204": {description: Counted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "402": {description: "The next block was refused: the team has neither credits nor a free-tier slot. The commit landed."}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: "The next block was refused: the team's share is spent. The commit landed."}
+
+  /internal/storage/release:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Give back a reservation whose write stored nothing.
+      description: A reservation already committed, released or expired is not an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageReleaseReq
+              required: [team, reservation]
+              properties:
+                team: {type: string}
+                reservation: {type: string}
+      responses:
+        "204": {description: Released.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /internal/downloads/charge:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Charge a download to its team's UTC day.
+      description: |
+        Only the cache's operator token reaches it. A download whose size is
+        known is charged whole before its first byte and refused when it
+        would pass the team's daily cap, `--team-daily-download-free-bytes`
+        or `--team-daily-download-funded-bytes` by whether the team pays.
+        Zero `bytes` checks that room is left. `record` charges a finished
+        stream whatever the cap says. The operator's team has no cap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.downloadChargeReq
+              required: [team, bytes]
+              properties:
+                team: {type: string}
+                bytes: {type: integer, format: int64}
+                record: {type: boolean}
+      responses:
+        "200":
+          description: The team's day after the charge.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.DownloadCharged
+                properties:
+                  tier: {type: string, enum: [funded, free]}
+                  day_bytes: {type: integer, format: int64}
+                  cap_bytes: {type: integer, format: int64, description: The cap the charge was held to; zero is none.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
+
+  /internal/egress/totals:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Keep a service's day and month egress totals.
+      description: |
+        Only the cache's operator token reaches it. Each stored total keeps
+        the larger of itself and what the call reports, and the answer is
+        the stored totals, so a restarted cache reports zeros to read back
+        where its day and month stood.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EgressTotals"
+      responses:
+        "200":
+          description: The stored totals.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EgressTotals"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/team/billing:
     get:
@@ -6645,6 +6820,19 @@ components:
         log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the logs service holds a free team to."}
         event_share_bytes: {type: integer, format: int64, description: "One sixteenth of the allowance, what the team's run events are held to."}
         event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
+        cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
+        log_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the logs service, as the controller counts it."}
+    EgressTotals:
+      x-sparkwing-go-type: pkg/store.EgressTotals
+      type: object
+      description: What one service sent in a UTC day and in that day's month.
+      required: [service, day, month]
+      properties:
+        service: {type: string}
+        day: {type: string, description: "2006-01-02"}
+        day_bytes: {type: integer, format: int64}
+        month: {type: string, description: "2006-01"}
+        month_bytes: {type: integer, format: int64}
     ComputeLimits:
       x-sparkwing-go-type: pkg/controller.computeLimitsJSON
       type: object
@@ -7510,6 +7698,7 @@ components:
         freezes_total: {type: integer}
         refused_total: {type: integer}
         measurement_incomplete: {type: boolean}
+        measure_error: {type: string, description: Why the last measurement was discarded.}
     ObjectStoreBreakerClass:
       x-sparkwing-go-type: internal/objectguard.ClassState
       type: object

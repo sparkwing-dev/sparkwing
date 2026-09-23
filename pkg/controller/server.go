@@ -73,6 +73,7 @@ type Server struct {
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
+	storagePass      *storagePass
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
@@ -84,8 +85,9 @@ type Server struct {
 	externalURL  string
 	oidc         oidcState
 
-	cacheURL   string
-	cacheToken string
+	cacheURL                     string
+	cacheToken                   string
+	downloadFree, downloadFunded int64
 
 	teamStorage        TeamStorage
 	mailer             mailer.Mailer
@@ -232,6 +234,8 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		cronHolder:          defaultCronHolder(),
 		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
+		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
+		downloadFunded:      DefaultTeamDailyDownloadFundedBytes,
 	}
 	srv.recordQueueActivity(time.Now())
 	return srv
@@ -1133,8 +1137,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
-	// safety: the cache proves itself with its operator token, which this handler checks itself.
-	router.HandleFunc("GET /internal/teams/{team}/storage-tier", s.handleStorageTier)
+	// safety: the cache proves itself with its operator token and the logs
+	// service with the caller's forwarded credential, which these handlers check.
+	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
+	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
+	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
+	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
+	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
@@ -1302,6 +1311,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
+	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 
 	if s.pool != nil {

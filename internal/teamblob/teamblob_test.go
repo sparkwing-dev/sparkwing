@@ -245,66 +245,60 @@ func TestTeamsCannotReachEachOthersObjects(t *testing.T) {
 	}
 }
 
-func TestRunningCountFollowsWritesAndDeletes(t *testing.T) {
+// An overwrite reports the size difference and no new object, and a
+// measurement lists each namespace once.
+func TestPutReportsWhatItAddsAndMeasureListsEachNamespaceOnce(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, teamblob.Options{})
 	ctx := context.Background()
 	put(t, f.store, "team-a", "bins/one", "12345")
 	put(t, f.store, "team-a", "bins/two", "123")
-	put(t, f.store, "team-a", "bins/one", "12")
-	put(t, f.store, "team-b", "bins/one", "1234567")
-	if got := f.store.Usage().Team("team-a"); got.Bytes != 5 || got.Objects != 2 {
-		t.Fatalf("team-a after overwrite = %+v, want 5 bytes in 2 objects", got)
+	w, err := f.store.Put(ctx, "team-a", "bins/one", strings.NewReader("12"), teamblob.PutOptions{Size: 2})
+	if err != nil || w.Bytes != 2 || w.AddedBytes != -3 || w.AddedObjects != 0 {
+		t.Fatalf("overwrite = %+v, %v; want 2 bytes stored, 3 fewer and no new object", w, err)
 	}
+	put(t, f.store, "team-b", "bins/one", "1234567")
+	put(t, f.store, "", "bins/operator", "1")
 	if err := f.store.Delete(ctx, "team-a", "bins/two"); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.Delete(ctx, "team-a", "bins/missing"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.Usage().Team("team-a"); got.Bytes != 2 || got.Objects != 1 {
-		t.Fatalf("team-a after delete = %+v", got)
-	}
 
 	f.client.reset()
-	if err := f.store.Reconcile(ctx); err != nil {
+	m, err := f.store.Measure(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Root, teams/, team-a and team-b: four listings for a store this size.
-	if n := f.client.count("ListObjectsV2"); n != 4 {
-		t.Fatalf("reconcile listed %d times, want 4", n)
+	if n := f.client.count("ListObjectsV2"); n != 5 {
+		t.Fatalf("measure listed %d times, want 5", n)
 	}
-	if got := f.store.Usage().Team("team-b"); got.Bytes != 7 || got.Objects != 1 || got.ReconciledAt.IsZero() {
-		t.Fatalf("team-b after reconcile = %+v", got)
+	if m.Teams["team-a"] != (teamblob.Tally{Bytes: 2, Objects: 1}) || m.Teams["team-b"] != (teamblob.Tally{Bytes: 7, Objects: 1}) {
+		t.Fatalf("teams = %+v", m.Teams)
 	}
-
-	if err := f.store.SaveUsage(ctx); err != nil {
-		t.Fatal(err)
-	}
-	f.client.reset()
-	if err := f.store.SaveUsage(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if n := f.client.count("PutObject"); n != 0 {
-		t.Fatalf("an unchanged count was saved again: %d PUTs", n)
-	}
-	fresh, _ := teamblob.New(teamblob.Options{Bucket: bucket, Prefix: "svc", Client: f.client})
-	if _, ok, err := fresh.LoadUsage(ctx); err != nil || !ok {
-		t.Fatalf("load: ok=%v err=%v", ok, err)
-	}
-	if got := fresh.Usage().Team("team-a"); got.Bytes != 2 || got.Objects != 1 {
-		t.Fatalf("restored team-a = %+v", got)
-	}
-	if fresh.Usage().ReconciledAt().IsZero() {
-		t.Fatal("restored count lost its reconcile time")
+	if m.Operator != (teamblob.Tally{Bytes: 1, Objects: 1}) {
+		t.Fatalf("operator = %+v", m.Operator)
 	}
 
 	d, err := f.store.DeleteTeam(ctx, "team-b")
 	if err != nil || d.Objects != 1 || d.Bytes != 7 {
 		t.Fatalf("delete team-b = %+v %v", d, err)
 	}
-	if got := f.store.Usage().Team("team-b"); got != (teamblob.TeamUsage{}) {
-		t.Fatalf("team-b after purge = %+v", got)
+	if m, err := f.store.Measure(ctx); err != nil || len(m.Teams) != 1 {
+		t.Fatalf("after purge = %+v, %v; want only team-a", m.Teams, err)
+	}
+}
+
+// A listing that fails leaves its namespace out and reports the error, so a
+// caller never takes a partial measurement for the whole.
+func TestMeasureReportsAFailedListing(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, teamblob.Options{})
+	put(t, f.store, "team-a", "bins/one", "12345")
+	f.client.failOn["ListObjectsV2"] = errors.New("503 SlowDown")
+	if _, err := f.store.Measure(context.Background()); err == nil {
+		t.Fatal("a measurement whose listing failed reported success")
 	}
 }
 
@@ -403,9 +397,6 @@ func TestMultipartUploadRoundTripsAndAbortsOnFailure(t *testing.T) {
 	}
 	if len(uploads.Uploads) != 0 {
 		t.Fatalf("%d multipart uploads left open", len(uploads.Uploads))
-	}
-	if u := f.store.Usage().Team("team-a"); u.Bytes != int64(len(body)) || u.Objects != 1 {
-		t.Fatalf("usage counted the torn upload: %+v", u)
 	}
 
 	f.client.reset()
@@ -554,9 +545,9 @@ func TestRepeatedFailuresPauseWrites(t *testing.T) {
 	}
 }
 
-// The running count drops only by deletions the store confirmed: a key a
-// batch delete reports as failed, or a listing that fails, leaves the
-// count holding what is still stored.
+// A prefix delete reports only deletions the store confirmed: a key a
+// batch delete reports as failed, or a listing that fails, is not reported
+// as gone.
 func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, teamblob.Options{})
@@ -565,11 +556,12 @@ func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 		put(t, f.store, "team-a", fmt.Sprintf("artifacts/job/%02d", i), "12345")
 	}
 	f.client.keepKey = func(key string) bool { return strings.HasSuffix(key, "/03") || strings.HasSuffix(key, "/07") }
-	if _, err := f.store.DeletePrefix(ctx, "team-a", "artifacts/job/"); err == nil {
+	d, err := f.store.DeletePrefix(ctx, "team-a", "artifacts/job/")
+	if err == nil {
 		t.Fatal("a delete with refused keys reported success")
 	}
-	if u := f.store.Usage().Team("team-a"); u.Objects != 2 || u.Bytes != 10 {
-		t.Fatalf("count after a partly refused delete = %+v, want the 2 objects still stored", u)
+	if d.Objects != 8 || d.Bytes != 40 {
+		t.Fatalf("a partly refused delete reported %+v, want the 8 objects it removed", d)
 	}
 	objs, err := f.store.List(ctx, "team-a", "artifacts/job/")
 	if err != nil || len(objs) != 2 {
@@ -578,25 +570,21 @@ func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 
 	f.client.keepKey = nil
 	f.client.failOn["ListObjectsV2"] = errors.New("503 SlowDown")
-	if _, err := f.store.DeletePrefix(ctx, "team-a", "artifacts/job/"); err == nil {
-		t.Fatal("a delete whose listing failed reported success")
-	}
-	if u := f.store.Usage().Team("team-a"); u.Objects != 2 {
-		t.Fatalf("a failed listing moved the count: %+v", u)
+	d, err = f.store.DeletePrefix(ctx, "team-a", "artifacts/job/")
+	if err == nil || d.Objects != 0 {
+		t.Fatalf("a delete whose listing failed = %+v, %v; want nothing removed and an error", d, err)
 	}
 	delete(f.client.failOn, "ListObjectsV2")
 	f.client.failOn["DeleteObjects"] = errors.New("503 SlowDown")
 	if err := f.store.DeleteMany(ctx, "team-a", []teamblob.Sized{{Rel: "artifacts/job/03", Size: 5}}); err == nil {
 		t.Fatal("a refused batch delete reported success")
 	}
-	if u := f.store.Usage().Team("team-a"); u.Objects != 2 {
-		t.Fatalf("a refused batch moved the count: %+v", u)
-	}
 }
 
-// A store with a maximum age deletes a team's old objects in the reconcile's
-// own listing, and the count drops with them; the operator's objects stay.
-func TestReconcileExpiresOldTeamObjects(t *testing.T) {
+// A store with a maximum age deletes a team's old objects in the
+// measurement's own listing, and leaves them out of the tally; the
+// operator's objects stay.
+func TestMeasureExpiresOldTeamObjects(t *testing.T) {
 	ctx := context.Background()
 	clock := time.Now()
 	f := newFixture(t, teamblob.Options{
@@ -612,19 +600,23 @@ func TestReconcileExpiresOldTeamObjects(t *testing.T) {
 	put(t, f.store, "keeper", "artifacts/run-1/old.txt", "kept")
 	put(t, f.store, "", "bins/operator", "kept")
 
-	if err := f.store.Reconcile(ctx); err != nil {
+	m, err := f.store.Measure(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.Usage().Team("team-a"); got.Bytes != 4 || got.Objects != 1 {
-		t.Fatalf("a fresh object after reconcile = %+v, want it kept", got)
+	if got := m.Teams["team-a"]; got.Bytes != 4 || got.Objects != 1 {
+		t.Fatalf("a fresh object = %+v, want it kept", got)
 	}
 	clock = clock.Add(2 * time.Hour)
 	f.client.reset()
-	if err := f.store.Reconcile(ctx); err != nil {
+	if m, err = f.store.Measure(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.store.Usage().Team("team-a"); got.Bytes != 0 || got.Objects != 0 {
+	if got := m.Teams["team-a"]; got.Bytes != 0 || got.Objects != 0 {
 		t.Fatalf("team-a after its object aged out = %+v, want nothing", got)
+	}
+	if m.Expired != (teamblob.Tally{Bytes: 4, Objects: 1}) {
+		t.Fatalf("expired = %+v, want team-a's one object", m.Expired)
 	}
 	if objs, err := f.store.List(ctx, "team-a", "artifacts/"); err != nil || len(objs) != 0 {
 		t.Fatalf("team-a still lists %v, %v", objs, err)
@@ -632,70 +624,10 @@ func TestReconcileExpiresOldTeamObjects(t *testing.T) {
 	if _, err := f.store.Head(ctx, "", "bins/operator"); err != nil {
 		t.Fatalf("the operator's object was expired: %v", err)
 	}
-	if got := f.store.Usage().Team("keeper"); got.Objects != 1 {
+	if got := m.Teams["keeper"]; got.Objects != 1 {
 		t.Fatalf("a team with no maximum age = %+v, want its object kept", got)
 	}
 	if n := f.client.count("DeleteObjects"); n != 1 {
 		t.Fatalf("expiry sent %d batch deletes, want one", n)
-	}
-}
-
-// A process that crashed between saves leaves a saved count behind its
-// writes. With ReconcileAtStart the next process lists the store at start
-// and counts them; without it the saved count stands until the next
-// scheduled reconcile.
-func TestRestoreReconcilesAtStartWhenAsked(t *testing.T) {
-	ctx := context.Background()
-	f := newFixture(t, teamblob.Options{})
-	put(t, f.store, "team-a", "cache/saved", "12345")
-	if err := f.store.Reconcile(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.SaveUsage(ctx); err != nil {
-		t.Fatal(err)
-	}
-	put(t, f.store, "team-a", "cache/unsaved", "1234567890")
-
-	for _, c := range []struct {
-		atStart bool
-		want    int64
-	}{{false, 5}, {true, 15}} {
-		next, err := teamblob.New(teamblob.Options{Bucket: bucket, Prefix: "svc", Client: f.client, ReconcileAtStart: c.atStart})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := next.Restore(ctx, 24*time.Hour); err != nil {
-			t.Fatal(err)
-		}
-		if got := next.Usage().Team("team-a").Bytes; got != c.want {
-			t.Errorf("reconcile at start %v: team-a = %d bytes, want %d", c.atStart, got, c.want)
-		}
-	}
-}
-
-// A write that lands after the reconcile listed its team but before the
-// reconcile replaced the count must survive the replacement.
-func TestAPutDuringTheReconcileListingIsNeverLost(t *testing.T) {
-	ctx := context.Background()
-	f := newFixture(t, teamblob.Options{})
-	put(t, f.store, "team-a", "cache/listed", "12345")
-	var once sync.Once
-	f.client.afterList = func(in *s3.ListObjectsV2Input) {
-		if in.Delimiter == nil && strings.Contains(aws.ToString(in.Prefix), "teams/team-a/") {
-			once.Do(func() { put(t, f.store, "team-a", "cache/late", "1234567890") })
-		}
-	}
-	if err := f.store.Reconcile(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.Usage().Team("team-a"); got.Bytes < 15 || got.Objects < 2 {
-		t.Fatalf("team-a after a put during the listing = %+v, want both objects counted", got)
-	}
-	f.client.afterList = nil
-	if err := f.store.Reconcile(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.store.Usage().Team("team-a"); got.Bytes != 15 || got.Objects != 2 {
-		t.Fatalf("team-a after a quiet reconcile = %+v, want exactly 15 bytes in 2 objects", got)
 	}
 }

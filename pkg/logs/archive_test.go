@@ -21,7 +21,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -129,6 +129,30 @@ type archiveFixture struct {
 	raw    *s3.Client
 	client *billed
 	root   string
+	calls  *controllerCalls
+}
+
+type controllerCalls struct {
+	mu     sync.Mutex
+	byPath map[string]int
+}
+
+func (c *controllerCalls) note(path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.byPath[path]++
+}
+
+func (c *controllerCalls) matching(part string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for path, k := range c.byPath {
+		if strings.Contains(path, part) {
+			n += k
+		}
+	}
+	return n
 }
 
 func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
@@ -136,9 +160,7 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 	return newArchiveFixtureWith(t, retention, nil)
 }
 
-// newArchiveFixtureWith has the fake controller answer each team's claim
-// checks with the storage tier standings names for it.
-func newArchiveFixtureWith(t *testing.T, retention time.Duration, standings map[string]storagequota.Standing) *archiveFixture {
+func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.Handler) *archiveFixture {
 	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
@@ -163,7 +185,16 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, standings map[
 		"Bearer admin":   {Principal: "admin", Kind: "user", Scopes: []string{scopeAdmin}, Team: "default"},
 		"Bearer deleter": {Principal: "controller-logs", Kind: "service", Scopes: []string{scopeLogsDelete}, Team: "default"},
 	}
+	if counter == nil {
+		counter = storagequotatest.New(1<<40, 0)
+	}
+	calls := &controllerCalls{byPath: map[string]int{}}
 	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.note(r.URL.Path)
+		if strings.HasPrefix(r.URL.Path, "/internal/storage/") {
+			counter.ServeHTTP(w, r)
+			return
+		}
 		p, ok := principals[r.Header.Get("Authorization")]
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -172,10 +203,6 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, standings map[
 		if r.URL.Path == "/api/v1/auth/whoami" {
 			_ = json.NewEncoder(w).Encode(p)
 			return
-		}
-		if s, ok := standings[p.Team]; ok {
-			w.Header().Set(storagequota.TierHeader, string(s.Tier))
-			w.Header().Set(storagequota.AllowanceHeader, fmt.Sprint(s.AllowanceBytes))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -193,7 +220,7 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, standings map[
 	srv.WithArchive(ArchiveOptions{Store: store})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root}
+	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls}
 }
 
 func (f *archiveFixture) do(t *testing.T, method, path, bearer, body string) (int, string) {
@@ -352,14 +379,8 @@ func TestArchivedRunsStayInsideTheirTeam(t *testing.T) {
 		if code, _ := f.do(t, http.MethodDelete, "/api/v1/logs/run-a", "Bearer b", ""); code/100 == 2 {
 			t.Errorf("%s: team B deleted team A's run: %d", stage, code)
 		}
-		for _, path := range []string{"/api/v1/teams/team-a/logs", "/api/v1/teams/team-a/logs/usage"} {
-			method := http.MethodDelete
-			if strings.HasSuffix(path, "usage") {
-				method = http.MethodGet
-			}
-			if code, _ := f.do(t, method, path, "Bearer a", ""); code != http.StatusForbidden {
-				t.Errorf("%s: %s %s without admin = %d, want 403", stage, method, path, code)
-			}
+		if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer a", ""); code != http.StatusForbidden {
+			t.Errorf("%s: DELETE /api/v1/teams/team-a/logs without admin = %d, want 403", stage, code)
 		}
 	}
 	check("on the volume")
@@ -391,13 +412,7 @@ func TestTeamPurgeDeletesOnlyThatTeamsLogs(t *testing.T) {
 		t.Fatal("archiver did not take exactly the idle runs")
 	}
 
-	code, body := f.do(t, http.MethodGet, "/api/v1/teams/team-a/logs/usage", "Bearer admin", "")
-	var u TeamLogsUsage
-	if err := json.Unmarshal([]byte(body), &u); code != http.StatusOK || err != nil || u.Objects != 1 || u.Bytes != int64(len("run-a1\n")) {
-		t.Fatalf("usage = %d %s", code, body)
-	}
-
-	code, body = f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer admin", "")
+	code, body := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer admin", "")
 	if code != http.StatusOK {
 		t.Fatalf("purge = %d %s", code, body)
 	}
@@ -424,12 +439,12 @@ func TestTeamPurgeDeletesOnlyThatTeamsLogs(t *testing.T) {
 		t.Error("the purge took team B's run index")
 	}
 	// The controller purges with its log-deletion credential, which may delete
-	// a team's logs and read nothing, not even the team's usage.
+	// a team's logs and read nothing.
 	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer deleter", ""); code != http.StatusOK {
 		t.Errorf("a repeated purge with the log-deletion credential = %d, want it to succeed", code)
 	}
-	if code, _ := f.do(t, http.MethodGet, "/api/v1/teams/team-a/logs/usage", "Bearer deleter", ""); code/100 == 2 {
-		t.Errorf("the log-deletion credential read a team's usage: %d", code)
+	if code, _ := f.do(t, http.MethodGet, "/api/v1/logs/run-b1/build", "Bearer deleter", ""); code/100 == 2 {
+		t.Errorf("the log-deletion credential read a run: %d", code)
 	}
 	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/Team..A/logs", "Bearer admin", ""); code != http.StatusBadRequest {
 		t.Errorf("a purge of a non-slug = %d, want 400", code)

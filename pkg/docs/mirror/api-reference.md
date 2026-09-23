@@ -221,7 +221,11 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
 | `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
-| `GET` | `/internal/teams/{team}/storage-tier` | `public` |
+| `POST` | `/internal/downloads/charge` | `public` |
+| `POST` | `/internal/egress/totals` | `public` |
+| `POST` | `/internal/storage/commit` | `public` |
+| `POST` | `/internal/storage/release` | `public` |
+| `POST` | `/internal/storage/reserve` | `public` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github-app` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
@@ -240,6 +244,5 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
 | `DELETE` | `/api/v1/teams/{team}/logs` | `admin` or `logs.delete` |
-| `GET` | `/api/v1/teams/{team}/logs/usage` | `admin` |
 | `GET` | `/metrics` | `public` |
 

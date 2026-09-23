@@ -37,19 +37,20 @@ unlock.
   so a cache published through an ingress with `--disable-proxy` answers only
   `/health` and its credentialed routes. Empty keeps both on `--addr`.
 
-- **cache:** a per-team daily download cap. Every byte the cache serves a
-  grant (binaries, artifacts, dependency archives and git mirror fetches) is
-  charged to the grant's team for the UTC day; past
-  `--egress-team-daily-free-bytes` (5 GiB) for a free team, or
-  `--egress-team-daily-funded-bytes` (50 GiB) for a funded one, the team's
+- **cache + controller:** a per-team daily download cap. Every `GET` the
+  cache serves a grant (binaries, artifacts, dependency archives and git
+  mirror fetches) is charged to the grant's team for the UTC day in the
+  controller's database, through `POST /internal/downloads/charge`; past the
+  controller's `--team-daily-download-free-bytes` (5 GiB) for a free team, or
+  `--team-daily-download-funded-bytes` (50 GiB) for a funded one, the team's
   downloads answer `429` with a `Retry-After` naming the wait until midnight
-  UTC. The tier comes from the controller's storage-tier route, a funded
-  answer older than five minutes counts as free, and the operator's team and
-  token are exempt. With `--blob-store` each team's day is saved in
-  `egress/<YYYY-MM>.json` with the process's, so a restart keeps it spent.
-  `sparkwing.cache.team_download_bytes{team}` reports the ten largest teams
-  and the rest as `(other)`. `0` turns either cap off; the process-wide
-  `--egress-daily-cap-bytes` stays the backstop. See
+  UTC. A download of known length is charged whole under a row lock before
+  its first byte, so two downloads racing for a team's last bytes cannot both
+  start; a stream is checked for room when it starts and charged what it sent.
+  While the controller cannot answer, a free team's download is refused with
+  `503`, and a team answered funded within five minutes proceeds. The
+  operator's team and token are exempt. `0` turns either cap off; the
+  process-wide `--egress-daily-cap-bytes` stays the backstop. See
   [Egress budgets](docs/observability.md#egress-budgets).
 - **logs + runner:** a node's log says whether it is whole. The runner
   numbers every line it appends (`X-Sparkwing-Log-Stream`,
@@ -78,16 +79,32 @@ unlock.
   [Tenant limits](docs/limits.md).
 
 - **storage:** a team without credits is held to its free allowance
-  (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares,
-  each enforced where the bytes are written: the cache keeps 768 MiB, checked
-  before an upload's body is read and cut at the room left when the length is
-  unknown; the logs service keeps 192 MiB, checked after the node and run caps
-  and before the append is written; run events keep 64 MiB, checked in the
-  append's transaction. A refused or failed write holds nothing. The cache asks
-  `GET /internal/teams/{team}/storage-tier` with its operator token
-  (`--controller`), the logs service reads the tier off its claim check, and a
-  failed lookup never lifts a limit. Each service exports
-  `sparkwing_free_storage_used_bytes{store=...}`.
+  (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares:
+  the cache keeps 768 MiB, checked before an upload's body is read and cut at
+  the room left when the length is unknown; the logs service keeps 192 MiB,
+  checked after the node and run caps and before the append is written; run
+  events keep 64 MiB, checked in the append's transaction. The controller
+  counts every team's cache and log bytes in its database (schema v61,
+  `team_storage`): a write reserves its size with
+  `POST /internal/storage/reserve`, then commits what it stored or releases
+  the room, under a row lock, so writers on any number of replicas see each
+  other and two racing for a share's last bytes cannot both win. The cache
+  calls these routes with its operator token, once per object, and the logs
+  service forwards the appending caller's credential, which counts only its
+  own team's logs, and draws appends from a 1 MiB block per team and run that
+  it settles in one call when the block runs out and every minute, so a run
+  costs about one controller call per MiB or per minute. The logs service
+  also confirms an append's claim at most once every 30 seconds per run,
+  node, credential and claim. A
+  refused or failed write holds nothing, and while the controller cannot
+  answer a free team's write is refused with `503`. `GET /api/v1/storage`
+  reports what a team holds in each store. See [Tenant limits](docs/limits.md).
+
+- **controller:** an hourly storage pass, run by one replica under a lease,
+  lists the cache's and the logs service's buckets (`--cache-blob-store`,
+  `--logs-archive-store`) and replaces each team's count with what it found
+  plus what was committed while it listed. A store whose listing fails keeps
+  its counts, and `/api/v1/health` reports the failed pass.
 
 - **controller:** a team without credits starts at most 200 runs in any 24
   hours (`429`), a team binds at most 20 repositories to GitHub runners
@@ -101,20 +118,16 @@ unlock.
   operator set none.
 
 - **cache:** team binaries, dependency archives and artifacts written more
-  than 30 days ago are deleted in the daily reconcile listing, which keeps the
-  per-team count exact, and a cache that verifies grants lists its bucket at
-  every start so a crash cannot leave the count short. The registry proxy
-  directory is capped at 2 GiB
-  (`--proxy-max-bytes`), evicting the least recently served entries first.
+  than 30 days ago are deleted in the controller's hourly storage pass, in the
+  listing that reconciles each team's count. The registry proxy directory is
+  capped at 2 GiB (`--proxy-max-bytes`), evicting the least recently served
+  entries first.
 
 - **cache:** `--blob-store s3://bucket/prefix` keeps the binary,
   dependency-archive and artifact stores in S3, one `teams/<team>/` namespace
   per team; git mirrors, uploads and the registry proxy stay on the volume.
-  Uploads above 64 MiB go multipart and abort on failure. `GET /admin/usage`
-  reports a per-team byte and object count kept by every write and every delete
-  the bucket confirms, and replaced by a listing once per `--usage-reconcile`,
-  and `DELETE /admin/teams/{team}` removes the team's namespace from the
-  bucket. Every read goes through the service, so the egress meter and request
+  Uploads above 64 MiB go multipart and abort on failure, and
+  `DELETE /admin/teams/{team}` removes the team's namespace from the bucket. Every read goes through the service, so the egress meter and request
   budget cover it. See
   [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
@@ -125,9 +138,8 @@ unlock.
   nothing. A retried archive sends only the objects that have not landed.
   `--retention` deletes archived runs by day through a day index, and keeps a
   run restored and written since its archive. `DELETE
-  /api/v1/teams/{team}/logs` and `GET /api/v1/teams/{team}/logs/usage`
-  (`admin`) delete and report one team's logs, index entries included, and a
-  run recorded for one team is refused to every other. See
+  /api/v1/teams/{team}/logs` (`admin`) deletes one team's logs, index entries
+  included, and a run recorded for one team is refused to every other. See
   [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **cache, logs:** a `403` from the bucket on a write or listing pauses both
@@ -574,14 +586,14 @@ unlock.
   cap unless `--egress-daily-cap-bytes` names another value. It bounds what
   any caller churns through the registry proxy, which takes no credential and
   belongs inside the cluster only.
-  With `--blob-store` the day's and the month's egress totals survive a
-  restart, in one `egress/<YYYY-MM>.json` object. `--disable-proxy`
+  With `--controller` the day's and the month's egress totals survive a
+  restart, kept in the controller's database. `--disable-proxy`
   serves no registry proxy, and the runner bundle refuses a cache Service
   other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which
   sets it.
 
-- **cache, logs:** a service that holds teams to a free share counts its
-  bucket before it serves and refuses to start when it cannot.
+- **cache:** a cache that verifies grants and keeps a `--blob-store` refuses
+  to start without `--controller`, which counts what each team stores there.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 30 days.
 - **credits (Breaking):** one credit is one vCPU-second and a dollar buys
@@ -739,6 +751,13 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **controller:** the controller measures its `--bucket-store` whether or not
+  a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0
+  objects and `measurement_incomplete: false` because it was never measured.
+  A measurement that fails now sets `measurement_incomplete`, names the error
+  in the object-store breaker route's `measure_error`, and adds a `problems`
+  entry to `/api/v1/health`.
 
 - **controller:** a checkout cannot open for a team whose deletion has begun.
   `POST /api/v1/team/billing/checkout` answers 409, because the payment would

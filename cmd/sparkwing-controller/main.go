@@ -28,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -242,6 +243,20 @@ func run(args []string) error {
 			"one when it first starts a run and keeps it until the team is deleted, so free storage never "+
 			"passes this many allowances; a team with neither credits nor a slot is refused. Lowering it "+
 			"takes no slot back")
+	cacheBlobStore := fs.String("cache-blob-store", os.Getenv("SPARKWING_CACHE_BLOB_STORE"),
+		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
+			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
+			"team keeps its own. Empty leaves the cache's counts to its writes alone (env: SPARKWING_CACHE_BLOB_STORE)")
+	logsArchiveStore := fs.String("logs-archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
+		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+
+			"what each team's archived logs hold; the logs service keeps its own retention "+
+			"(env: SPARKWING_LOGS_ARCHIVE_STORE)")
+	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
+		"bytes one team without credits may download through the cache in a UTC day: binaries, artifacts, "+
+			"dependency archives and git fetches. Past it the cache refuses the team's downloads with 429 until "+
+			"midnight UTC. The operator's team is exempt, and 0 turns the cap off")
+	teamDownloadFunded := fs.Int64("team-daily-download-funded-bytes", controller.DefaultTeamDailyDownloadFundedBytes,
+		"the same daily cap for a team with credits; 0 turns it off")
 	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
 		"listings one bucket measurement may spend before it stops and reports itself "+
 			"incomplete. Each listing covers a thousand objects, so the default bounds a "+
@@ -459,6 +474,7 @@ func run(args []string) error {
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
 		WithCachePodURL(*cachePodURL).
+		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
@@ -527,6 +543,9 @@ func run(args []string) error {
 	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
 		return err
 	}
+	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
+		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
+	}
 	if *freeTeamSlots < 0 {
 		return fmt.Errorf("--free-team-slots must not be negative; pass 0 to admit no team without credits")
 	}
@@ -548,6 +567,17 @@ func run(args []string) error {
 			return fmt.Errorf("--bucket-store: %w", berr)
 		}
 		srv = srv.WithBucketUsage(bucketStore)
+	}
+	if *cacheBlobStore != "" || *logsArchiveStore != "" {
+		cache, err := openTeamStore(ctx, *cacheBlobStore, controller.CacheObjectMaxAge)
+		if err != nil {
+			return fmt.Errorf("--cache-blob-store: %w", err)
+		}
+		logsStore, err := openTeamStore(ctx, *logsArchiveStore, nil)
+		if err != nil {
+			return fmt.Errorf("--logs-archive-store: %w", err)
+		}
+		srv = srv.WithStoragePass(cache, logsStore)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err
@@ -932,6 +962,17 @@ func envMeasurePages() int {
 		return s3store.DefaultMaxUsagePages
 	}
 	return n
+}
+
+func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Duration) (*teamblob.Store, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client, TeamObjectMaxAge: maxAge})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.
