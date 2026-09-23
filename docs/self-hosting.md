@@ -278,11 +278,12 @@ a running node costs the bucket nothing. A run nobody has written for
 plus two small index objects and leaves the volume; a read or an append of an
 archived run restores it first. `--retention` then deletes archived runs by the
 day of their last write: each pass is one listing of the day index while
-nothing has expired. The volume must still outlive a pod restart to keep the
+nothing has expired, and a restored run written since its archive waits for
+the archiver to upload it again with the new date. The volume must still outlive a pod restart to keep the
 logs of runs in flight, but it holds only live runs and restored copies.
 
 Both services keep a running per-team byte and object count, adjusted by every
-write and delete, saved in the bucket every five minutes, and replaced by a
+write and every delete the bucket confirms, saved in the bucket every five minutes, and replaced by a
 listing of the prefix once per `--usage-reconcile` (daily by default). The
 count feeds the store ceiling, so `--max-store-bytes` covers the bucket as well
 as the volume, and it is what the storage allowance reads:
@@ -291,8 +292,8 @@ as the volume, and it is what the storage allowance reads:
 - `GET /api/v1/teams/{team}/logs/usage` on the logs service (`admin`)
 
 Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
-cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, both
-idempotent. A team's credential never reaches another team's namespace: the
+cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, which also
+removes the team's runs from the index, both idempotent. A team's credential never reaches another team's namespace: the
 cache takes the team from the controller-signed grant, and the logs service
 records a run's team from the first team credential that writes to it and
 refuses every other team the run even when the controller would answer.

@@ -32,6 +32,9 @@ type billed struct {
 	mu     sync.Mutex
 	calls  map[string]int
 	refuse map[string]bool
+	// refuseKey fails a PUT of a matching key; keys counts every PUT by key.
+	refuseKey func(key string) bool
+	keys      map[string]int
 }
 
 func (b *billed) note(op string) error {
@@ -76,6 +79,14 @@ func (b *billed) GetObject(ctx context.Context, in *s3.GetObjectInput, o ...func
 func (b *billed) PutObject(ctx context.Context, in *s3.PutObjectInput, o ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	if err := b.note("PutObject"); err != nil {
 		return nil, err
+	}
+	b.mu.Lock()
+	key := aws.ToString(in.Key)
+	b.keys[key]++
+	refuse := b.refuseKey != nil && b.refuseKey(key)
+	b.mu.Unlock()
+	if refuse {
+		return nil, errors.New("503 SlowDown")
 	}
 	return b.Client.PutObject(ctx, in, o...)
 }
@@ -132,7 +143,7 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(archiveBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	client := &billed{Client: raw, calls: map[string]int{}, refuse: map[string]bool{}}
+	client := &billed{Client: raw, calls: map[string]int{}, refuse: map[string]bool{}, keys: map[string]int{}}
 	store, err := teamblob.New(teamblob.Options{Bucket: archiveBucket, Prefix: "logs", Client: client})
 	if err != nil {
 		t.Fatal(err)
@@ -391,6 +402,14 @@ func TestTeamPurgeDeletesOnlyThatTeamsLogs(t *testing.T) {
 	if code, body := f.do(t, http.MethodGet, "/api/v1/logs/run-a1/build", "Bearer a", ""); body != "" {
 		t.Errorf("a purged run still reads: %d %q", code, body)
 	}
+	for k := range f.keys(t) {
+		if strings.HasPrefix(k, "logs/index/") && strings.Contains(k, "run-a1") {
+			t.Errorf("the purge left team A's index entry %s", k)
+		}
+	}
+	if keys := f.keys(t); !keys["logs/index/runs/run-b1.json"] {
+		t.Error("the purge took team B's run index")
+	}
 	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer admin", ""); code != http.StatusOK {
 		t.Errorf("a repeated purge = %d, want it to succeed", code)
 	}
@@ -612,5 +631,92 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 	}
 	if got := f.client.total(); got != 0 {
 		t.Fatalf("following a live node cost %d object-store requests", got)
+	}
+}
+
+// A run past retention that was restored and written again keeps its new
+// logs: retention judges it by its latest write, not by the archive's.
+func TestRetentionKeepsAnExpiredRunThatWasWrittenAgain(t *testing.T) {
+	const retention = 7 * 24 * time.Hour
+	f := newArchiveFixture(t, retention)
+	now := time.Now()
+	for _, run := range []string{"revived", "stale"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", "Bearer a", "old\n"); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+		f.age(t, run, now.Add(-10*24*time.Hour))
+	}
+	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 2 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	// Both are restored by a read; only one is written again.
+	for _, run := range []string{"revived", "stale"} {
+		if _, body := f.do(t, http.MethodGet, "/api/v1/logs/"+run+"/build", "Bearer a", ""); body != "old\n" {
+			t.Fatalf("restore of %s = %q", run, body)
+		}
+	}
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/revived/build", "Bearer a", "new\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	pruned, err := f.srv.PruneArchive(context.Background(), now)
+	if err != nil || pruned != 1 {
+		t.Fatalf("prune = %d, %v; want only the unwritten run", pruned, err)
+	}
+	if _, body := f.do(t, http.MethodGet, "/api/v1/logs/revived/build", "Bearer a", ""); body != "old\nnew\n" {
+		t.Fatalf("the rewritten run lost logs to retention: %q", body)
+	}
+	if f.onVolume("stale") {
+		t.Error("the expired, unwritten copy stayed on the volume")
+	}
+	if !f.keys(t)["logs/index/runs/revived.json"] {
+		t.Error("retention deleted the rewritten run's index")
+	}
+	// Archived again, the run carries its new write date and survives.
+	if _, err := f.srv.ArchiveOnce(context.Background(), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.srv.PruneArchive(context.Background(), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, body := f.do(t, http.MethodGet, "/api/v1/logs/revived/build", "Bearer a", ""); body != "old\nnew\n" {
+		t.Fatalf("after re-archiving: %q", body)
+	}
+}
+
+// A run whose last PUT keeps failing is retried without sending again the
+// objects that already landed, and each retry is one request, so the
+// breaker sees an unbroken run of failures and pauses.
+func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	for _, node := range []string{"build", "test"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/stuck/"+node, "Bearer a", node+"\n"); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+	}
+	f.client.refuseKey = func(key string) bool { return strings.HasPrefix(key, "logs/index/days/") }
+	now := time.Now().Add(time.Hour)
+	const retries = 6
+	for i := range retries {
+		at := now.Add(time.Duration(i) * (minArchiveBackoff + maxArchiveBackoff + time.Second))
+		if _, err := f.srv.ArchiveOnce(context.Background(), at); err == nil {
+			t.Fatalf("retry %d succeeded against a refused day marker", i)
+		}
+	}
+	for _, k := range []string{"logs/teams/team-a/runs/stuck/build.log", "logs/teams/team-a/runs/stuck/test.log", "logs/index/runs/stuck.json"} {
+		if got := f.client.keys[k]; got != 1 {
+			t.Errorf("%s was sent %d times over %d retries, want 1", k, got, retries)
+		}
+	}
+	day := 0
+	for k, n := range f.client.keys {
+		if strings.HasPrefix(k, "logs/index/days/") {
+			day += n
+		}
+	}
+	if day != 3 {
+		t.Errorf("the refused day marker was sent %d times, want 3 before the breaker paused writes", day)
+	}
+	if !f.onVolume("stuck") {
+		t.Fatal("a run whose archive never finished left the volume")
 	}
 }

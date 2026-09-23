@@ -26,21 +26,23 @@ unlock.
   dependency-archive and artifact stores in S3, one `teams/<team>/` namespace
   per team; git mirrors, uploads and the registry proxy stay on the volume.
   Uploads above 64 MiB go multipart and abort on failure. `GET /admin/usage`
-  reports a per-team byte and object count kept by every write and delete and
-  replaced by a listing once per `--usage-reconcile`, and `DELETE
-  /admin/teams/{team}` removes the team's namespace from the bucket.
-  Every read goes through the service, so the egress meter and request budget
-  cover it. See
+  reports a per-team byte and object count kept by every write and every delete
+  the bucket confirms, and replaced by a listing once per `--usage-reconcile`,
+  and `DELETE /admin/teams/{team}` removes the team's namespace from the
+  bucket. Every read goes through the service, so the egress meter and request
+  budget cover it. See
   [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **logs:** `--archive-store s3://bucket/prefix` moves a run nobody has written
   for `--archive-idle` to S3 as one object per node log under
   `teams/<team>/runs/<run>/`, and restores it on the next read or append. Live
   appends and follows stay on the volume, so a running node sends the bucket
-  nothing. `--retention` deletes archived runs by day through a day index.
-  `DELETE /api/v1/teams/{team}/logs` and `GET /api/v1/teams/{team}/logs/usage`
-  (`admin`) delete and report one team's logs, and a run recorded for one team
-  is refused to every other. See
+  nothing. A retried archive sends only the objects that have not landed.
+  `--retention` deletes archived runs by day through a day index, and keeps a
+  run restored and written since its archive. `DELETE
+  /api/v1/teams/{team}/logs` and `GET /api/v1/teams/{team}/logs/usage`
+  (`admin`) delete and report one team's logs, index entries included, and a
+  run recorded for one team is refused to every other. See
   [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **cache, logs:** a `403` from the bucket on a write or listing pauses both

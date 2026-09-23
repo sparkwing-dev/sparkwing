@@ -3,10 +3,13 @@ package logs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"path"
@@ -105,6 +108,11 @@ type runMeta struct {
 	// modified after it has to be uploaded again.
 	ArchivedAt time.Time      `json:"archived_at,omitzero"`
 	Files      []archivedFile `json:"files,omitempty"`
+	// Uploaded and IndexDigest record an archive in progress: the objects
+	// that already landed, by size, and the index body already written,
+	// so a retry sends only what is missing.
+	Uploaded    map[string]int64 `json:"uploaded,omitempty"`
+	IndexDigest string           `json:"index_digest,omitempty"`
 }
 
 type archivedFile struct {
@@ -528,21 +536,31 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 		return nil
 	}
 	store := s.archive.store
-	sizes := map[string]int64{}
-	for _, f := range meta.Files {
-		sizes[f.Rel] = f.Size
+	committed := meta.committedSizes()
+	if meta.Uploaded == nil {
+		meta.Uploaded = map[string]int64{}
 	}
+	sizes := maps.Clone(committed)
 	var lastWrite time.Time
 	changed := false
 	for _, f := range files {
 		lastWrite = maxTime(lastWrite, f.modTime)
-		// safety: file times tick coarser than appends arrive, so a file is
-		// unchanged only when its size also matches what was uploaded; an
-		// append only ever grows a file.
-		if prior, ok := sizes[f.rel]; ok && prior == f.size && !meta.ArchivedAt.IsZero() && !f.modTime.After(meta.ArchivedAt) {
+		sizes[f.rel] = f.size
+		// safety: an append only ever grows a file, so a size that matches
+		// what the store holds means the object is current, whatever the
+		// coarse file clock says.
+		if prior, ok := committed[f.rel]; ok && prior == f.size {
 			continue
 		}
 		changed = true
+		// perf: a retry after a later PUT failed resends nothing that
+		// already landed, so it costs one request, and the breaker sees an
+		// unbroken run of failures instead of successes resetting it.
+		if meta.Uploaded[f.rel] == f.size {
+			continue
+		}
+		_, known := committed[f.rel]
+		_, tried := meta.Uploaded[f.rel]
 		fh, err := root.Open(filepath.Join(runID, filepath.FromSlash(f.rel)))
 		if err != nil {
 			return err
@@ -550,13 +568,16 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 		_, err = store.Put(ctx, meta.Team, runObjectRel(runID, f.rel), fh, teamblob.PutOptions{
 			Size:        f.size,
 			ContentType: "text/plain; charset=utf-8",
-			Fresh:       meta.ArchivedAt.IsZero(),
+			Fresh:       !known && !tried,
 		})
 		_ = fh.Close()
 		if err != nil {
 			return err
 		}
-		sizes[f.rel] = f.size
+		meta.Uploaded[f.rel] = f.size
+		if err := s.writeRunMeta(root, runID, meta); err != nil {
+			return err
+		}
 	}
 	if !changed {
 		return nil
@@ -570,14 +591,46 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 	if err != nil {
 		return err
 	}
-	if _, err := store.Put(ctx, "", indexRunRel(runID), bytes.NewReader(body), teamblob.PutOptions{
-		Size: int64(len(body)), ContentType: "application/json", Fresh: meta.ArchivedAt.IsZero(),
-	}); err != nil {
-		return err
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	if meta.IndexDigest != digest {
+		if _, err := store.Put(ctx, "", indexRunRel(runID), bytes.NewReader(body), teamblob.PutOptions{
+			Size: int64(len(body)), ContentType: "application/json",
+		}); err != nil {
+			return err
+		}
+		meta.IndexDigest = digest
+		if err := s.writeRunMeta(root, runID, meta); err != nil {
+			return err
+		}
 	}
 	day := indexDaysRel + lastWrite.UTC().Format(dayLayout) + "/" + runID
-	_, err = store.Put(ctx, "", day, bytes.NewReader(nil), teamblob.PutOptions{Size: 0, Fresh: true})
+	_, err = store.Put(ctx, "", day, bytes.NewReader(nil), teamblob.PutOptions{Size: 0})
 	return err
+}
+
+// committedSizes is what the store holds for the run as of its last
+// finished archive.
+func (m runMeta) committedSizes() map[string]int64 {
+	sizes := map[string]int64{}
+	for _, f := range m.Files {
+		sizes[f.Rel] = f.Size
+	}
+	return sizes
+}
+
+// writtenSinceArchive reports whether any local file differs from what
+// the last finished archive stored. A restore rewrites every file, so the
+// file clock cannot tell a restored copy from a written one; the sizes can,
+// because an append only ever grows a file.
+func writtenSinceArchive(meta runMeta, files []localFile) bool {
+	committed := meta.committedSizes()
+	for _, f := range files {
+		if prior, ok := committed[f.rel]; !ok || prior != f.size {
+			return true
+		}
+	}
+	return false
 }
 
 func maxTime(a, b time.Time) time.Time {
@@ -656,29 +709,60 @@ func (s *Server) pruneDay(ctx context.Context, day string, cutoff time.Time) (in
 	if err != nil {
 		return 0, err
 	}
+	root, err := s.openRunsRoot()
+	if err != nil {
+		return 0, err
+	}
+	defer s.closeRoot(root, "prune archive")
+	// safety: an expired run is held exclusively from the decision to its
+	// deletion, so no request restores it or writes to it in between.
+	var held, expired []string
+	defer func() {
+		for _, runID := range held {
+			s.archive.lock(runID).rw.Unlock()
+		}
+	}()
 	byTeam := map[string][]teamblob.Sized{}
 	var operator []teamblob.Sized
-	pruned := 0
 	for _, e := range entries {
 		runID := path.Base(e.Rel)
-		operator = append(operator, teamblob.Sized{Rel: e.Rel, Size: e.Size})
+		entry := teamblob.Sized{Rel: e.Rel, Size: e.Size}
 		if validateID(runID) != nil {
+			operator = append(operator, entry)
 			continue
 		}
 		body, err := store.ReadAll(ctx, "", indexRunRel(runID))
 		if errors.Is(err, teamblob.ErrNotFound) {
+			operator = append(operator, entry)
 			continue
 		}
 		if err != nil {
-			return pruned, err
+			return 0, err
 		}
 		var idx runIndex
 		if err := json.Unmarshal(body, &idx); err != nil || (idx.Team != "" && !teamblob.ValidTeam(idx.Team)) {
+			operator = append(operator, entry)
 			continue
 		}
 		// The run was written again after this day; its newer day entry
 		// carries it, and this one only goes.
 		if idx.LastWrite.After(cutoff) {
+			operator = append(operator, entry)
+			continue
+		}
+		// A run in use, or restored and written since its archive, is not
+		// expired: its latest write is on the volume, and the archiver
+		// uploads it with a new day entry. This entry stays so the run is
+		// judged again if that never happens.
+		l := s.archive.lock(runID)
+		if !l.rw.TryLock() {
+			continue
+		}
+		held = append(held, runID)
+		if written, err := s.localWrittenSinceArchive(root, runID); err != nil || written {
+			if err != nil {
+				s.logger.Error("logs archive", "op", "prune read local copy", "run", runID, "err", err)
+			}
 			continue
 		}
 		for _, f := range idx.Files {
@@ -686,35 +770,36 @@ func (s *Server) pruneDay(ctx context.Context, day string, cutoff time.Time) (in
 				byTeam[idx.Team] = append(byTeam[idx.Team], teamblob.Sized{Rel: runObjectRel(runID, f.Rel), Size: f.Size})
 			}
 		}
-		operator = append(operator, teamblob.Sized{Rel: indexRunRel(runID), Size: int64(len(body))})
-		s.dropLocalCopy(runID)
-		pruned++
+		operator = append(operator, entry, teamblob.Sized{Rel: indexRunRel(runID), Size: int64(len(body))})
+		expired = append(expired, runID)
 	}
 	for team, objs := range byTeam {
 		if err := store.DeleteMany(ctx, team, objs); err != nil {
-			return pruned, err
+			return 0, err
 		}
 	}
-	return pruned, store.DeleteMany(ctx, "", operator)
+	for _, runID := range expired {
+		if err := root.RemoveAll(runID); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			s.logger.Error("logs archive", "op", "prune local copy", "run", runID, "err", err)
+		}
+		s.runTotals.forget(runID)
+	}
+	return len(expired), store.DeleteMany(ctx, "", operator)
 }
 
-// dropLocalCopy removes a restored copy of a run retention just expired,
-// unless a request holds it.
-func (s *Server) dropLocalCopy(runID string) {
-	l := s.archive.lock(runID)
-	if !l.rw.TryLock() {
-		return
+// localWrittenSinceArchive reports whether the volume holds a copy of the
+// run that was written after its last archive.
+func (s *Server) localWrittenSinceArchive(root *os.Root, runID string) (bool, error) {
+	if _, err := root.Stat(runID); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
 	}
-	defer l.rw.Unlock()
-	root, err := s.openRunsRoot()
+	files, err := runFiles(root, runID)
 	if err != nil {
-		return
+		return false, err
 	}
-	defer s.closeRoot(root, "prune local copy")
-	if err := root.RemoveAll(runID); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		s.logger.Error("logs archive", "op", "prune local copy", "run", runID, "err", err)
-	}
-	s.runTotals.forget(runID)
+	return writtenSinceArchive(readRunMeta(root, runID), files), nil
 }
 
 // startArchive runs the archiver, retention over the archive, and the
@@ -798,6 +883,13 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		s.runTotals.forget(e.Name())
 	}
+	// Indexes go first: once the team's objects are gone, nothing names the
+	// runs whose indexes a retried purge would still have to find.
+	if err := s.deleteTeamIndexes(r.Context(), team); err != nil {
+		s.logger.Error("logs archive", "op", "delete team indexes", "team", team, "err", err)
+		writeLogsErr(w, http.StatusBadGateway, "delete the team's archived logs: the object store refused; retry")
+		return
+	}
 	deleted, err := s.archive.store.DeleteTeam(r.Context(), team)
 	if err != nil {
 		s.logger.Error("logs archive", "op", "delete team", "team", team, "err", err)
@@ -807,6 +899,43 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	//nolint:contextcheck // the walk must outlive the delete that triggered it; the sweeper's context bounds it.
 	s.remeasureAfterDelete()
 	writeJSONResponse(w, http.StatusOK, deleted)
+}
+
+// deleteTeamIndexes removes the run and day index entries of every run
+// team has archived. It lists the team's runs, one delimited LIST per
+// thousand, and reads each run's index to confirm the team and find its
+// day entry; an older day entry of a run archived more than once is left
+// for retention, which drops an entry whose run is gone.
+func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
+	store := s.archive.store
+	runs, err := store.ListDirs(ctx, team, "runs/")
+	if err != nil {
+		return err
+	}
+	var operator []teamblob.Sized
+	for _, runID := range runs {
+		if validateID(runID) != nil {
+			continue
+		}
+		body, err := store.ReadAll(ctx, "", indexRunRel(runID))
+		if errors.Is(err, teamblob.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		// safety: an index this purge cannot read as the team's is left
+		// alone; retention or a run delete owns it.
+		var idx runIndex
+		if json.Unmarshal(body, &idx) != nil || idx.Team != team {
+			continue
+		}
+		operator = append(operator,
+			teamblob.Sized{Rel: indexDaysRel + idx.LastWrite.UTC().Format(dayLayout) + "/" + runID},
+			teamblob.Sized{Rel: indexRunRel(runID), Size: int64(len(body))},
+		)
+	}
+	return store.DeleteMany(ctx, "", operator)
 }
 
 // TeamLogsUsage is what one team's archived logs hold.

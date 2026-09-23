@@ -205,8 +205,8 @@ const (
 )
 
 type logsPrincipal struct {
-	Name        string
-	Kind        string
+	Name string
+	Kind string
 	// Team is the team a non-admin credential acts for, as whoami names
 	// it; the archive keys a run's objects by it.
 	Team        string
