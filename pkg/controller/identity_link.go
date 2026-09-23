@@ -133,6 +133,7 @@ func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request)
 			"this account already has a "+providerLabels[name]+" sign-in; unlink it before linking another")
 		return
 	}
+	//nolint:contextcheck // the session key reader predates contexts on the session surface, as LookupSession does
 	key, err := s.store.IdentityLinkStateKey()
 	if err != nil {
 		s.writeInternalError(w, r, "link start", err)
@@ -216,6 +217,7 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
 		return
 	}
+	//nolint:contextcheck // the session key reader predates contexts on the session surface, as LookupSession does
 	key, err := s.store.IdentityLinkStateKey()
 	if err != nil {
 		s.writeInternalError(w, r, "link complete", err)

@@ -259,14 +259,22 @@ func TestIdentityLinkCompleteCarriesTheRefusal(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{http.StatusConflict, `{"error":"identity_linked_elsewhere","message":"that GitHub sign-in is already linked to another Sparkwing account"}`,
-			"/account/sign-ins?provider=github&refused=identity_linked_elsewhere"},
-		{http.StatusForbidden, `{"error":"link_state_invalid","message":"this link expired"}`,
-			"/account/sign-ins?provider=github&refused=link_state_invalid"},
-		{http.StatusConflict, `{"error":"a code this page does not know","message":"<b>hi</b>"}`,
-			"/account/sign-ins?provider=github&refused=link_failed"},
-		{http.StatusBadGateway, `{"error":"internal server error"}`,
-			"/account/sign-ins?provider=github&refused=link_failed"},
+		{
+			http.StatusConflict, `{"error":"identity_linked_elsewhere","message":"that GitHub sign-in is already linked to another Sparkwing account"}`,
+			"/account/sign-ins?provider=github&refused=identity_linked_elsewhere",
+		},
+		{
+			http.StatusForbidden, `{"error":"link_state_invalid","message":"this link expired"}`,
+			"/account/sign-ins?provider=github&refused=link_state_invalid",
+		},
+		{
+			http.StatusConflict, `{"error":"a code this page does not know","message":"<b>hi</b>"}`,
+			"/account/sign-ins?provider=github&refused=link_failed",
+		},
+		{
+			http.StatusBadGateway, `{"error":"internal server error"}`,
+			"/account/sign-ins?provider=github&refused=link_failed",
+		},
 	} {
 		handler, ctrl := linkDashboard(t)
 		ctrl.refuseCompleteWith(test.status, test.body)

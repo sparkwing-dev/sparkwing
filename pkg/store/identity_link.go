@@ -209,8 +209,10 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 	}{
 		{`DELETE FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
 		{`DELETE FROM identity_unlinks WHERE provider = ? AND subject = ? AND account_id = ?`, []any{id.Provider, id.Subject, accountID}},
-		{`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
-			[]any{id.Provider, id.Subject, accountID, at}},
+		{
+			`INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at) VALUES (?, ?, ?, ?)`,
+			[]any{id.Provider, id.Subject, accountID, at},
+		},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {
 			return Identity{}, 0, err
