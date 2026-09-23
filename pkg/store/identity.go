@@ -460,6 +460,8 @@ func personalDisplayName(p SignInProfile) string {
 	return truncate(name+"'s space", maxDisplayNameLen)
 }
 
+var errSignInIdentityChanged = errors.New("store: sign-in identity changed during resolution")
+
 // ResolveSignIn turns an authenticated provider profile into an account and
 // makes sure the account has a team to land in.
 //
@@ -492,13 +494,12 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 	case !p.EmailVerified || !LooksLikeEmail(p.Email):
 		return SignInResult{}, ErrUnverifiedEmail
 	}
-	// safety: concurrent first sign-ins race on the verified-email index and on a personal slug; the
-	// loser rolls back and its retry re-reads what the winner wrote, rather than failing a person
-	// who did nothing wrong.
+	// safety: the retry re-reads email claims, personal slugs, and identities
+	// after a concurrent sign-in or unlink changes the first decision.
 	var last error
 	for range 5 {
 		res, err := s.resolveSignInOnce(ctx, p, c, now)
-		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
+		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken) && !errors.Is(err, errSignInIdentityChanged)) {
 			return res, err
 		}
 		last = err
@@ -522,6 +523,18 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		p.Provider, p.Subject).Scan(&accountID, &linked)
 	switch {
 	case err == nil:
+		if err := lockAccountTx(ctx, tx, accountID); err != nil {
+			return SignInResult{}, err
+		}
+		err = tx.QueryRowContext(ctx,
+			`SELECT linked FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
+			p.Provider, p.Subject, accountID).Scan(&linked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return SignInResult{}, errSignInIdentityChanged
+		}
+		if err != nil {
+			return SignInResult{}, err
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE identities SET email = ?, email_verified = ? WHERE provider = ? AND subject = ?`,
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
@@ -1018,6 +1031,56 @@ func (s *Store) CreateAccountSession(
 		VALUES (?, ?, ?, '', ?, ?, ?)`,
 		sessionDigest(rawSession), string(team), acct.Email, acct.ID, now.UTC().Unix(), expires.Unix()); err != nil {
 		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	}
+	return rawSession, csrfToken, &Session{
+		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
+		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
+	}, nil
+}
+
+// CreateIdentityAccountSession opens a session only while the named provider
+// identity still belongs to acct. It serializes with unlink's session
+// revocation on the account row.
+func (s *Store) CreateIdentityAccountSession(
+	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
+) (rawSession, csrfToken string, sess *Session, err error) {
+	if acct.ID == "" || provider == "" || subject == "" || ttl <= 0 {
+		return "", "", nil, fmt.Errorf("%w: account, provider, subject, and positive ttl required", ErrInvalidInput)
+	}
+	rawSession, err = newSessionID()
+	if err != nil {
+		return "", "", nil, err
+	}
+	//nolint:contextcheck // the CSRF key is read or minted once per store under its own transaction
+	csrfToken, err = s.deriveCSRFToken(rawSession)
+	if err != nil {
+		return "", "", nil, err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
+		return "", "", nil, err
+	}
+	var linked string
+	err = tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
+		provider, subject, acct.ID).Scan(&linked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil, ErrIdentityUnlinked
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	expires := now.Add(ttl).UTC()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
+		VALUES (?, ?, ?, '', ?, ?, ?)`, sessionDigest(rawSession), string(team), acct.Email, acct.ID,
+		now.UTC().Unix(), expires.Unix()); err != nil {
+		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", nil, err
 	}
 	return rawSession, csrfToken, &Session{
 		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,

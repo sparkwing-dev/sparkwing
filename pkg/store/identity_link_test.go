@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,6 +128,338 @@ func TestUnlinkIdentityKeepsTheLastSignInMethod(t *testing.T) {
 	// Control: with a second method in place, the same unlink succeeds.
 	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now()); err != nil {
 		t.Fatalf("unlinking google beside github = %v", err)
+	}
+}
+
+func TestConcurrentUnlinksKeepOneMethodPostgres(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "g-owner", "owner@example.com")
+	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE FUNCTION wait_identity_delete() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN PERFORM pg_advisory_xact_lock(74120912); RETURN OLD; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER wait_identity_delete BEFORE DELETE ON identities
+		FOR EACH ROW EXECUTE FUNCTION wait_identity_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	gate, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	if _, err := gate.ExecContext(ctx, `SELECT pg_advisory_xact_lock(74120912)`); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, provider := range []string{store.ProviderGoogle, store.ProviderGitHub} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, provider, "", time.Now())
+			results <- err
+		}()
+	}
+	close(start)
+	for {
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND (query LIKE '%DELETE FROM identities%'
+			OR query LIKE '%accounts WHERE id%') AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= 2 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for concurrent unlinks")
+		}
+	}
+	if err := gate.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	close(results)
+	var succeeded, last int
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, store.ErrLastSignInMethod):
+			last++
+		default:
+			t.Fatalf("concurrent unlink: %v", err)
+		}
+	}
+	if succeeded != 1 || last != 1 || len(identitiesOf(t, st, owner.Account.ID)) != 1 {
+		t.Fatalf("unlinks: %d succeeded, %d refused, identities = %+v", succeeded, last, identitiesOf(t, st, owner.Account.ID))
+	}
+}
+
+func TestUnlinkBeforeIdentitySessionCreationRefusesStaleResolution(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "g-owner", "owner@example.com")
+	profile := gh("gh-1", "gh@example.com")
+	if _, err := st.LinkIdentity(ctx, owner.Account.ID, profile, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	resolved := resolve(t, st, profile)
+	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
+		profile.Provider, profile.Subject, time.Hour, time.Now())
+	if !errors.Is(err, store.ErrIdentityUnlinked) || raw != "" {
+		t.Fatalf("session from stale identity resolution = %q, %v; want ErrIdentityUnlinked", raw, err)
+	}
+}
+
+func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	owner := signIn(t, st, "g-owner", "owner@example.com")
+	profile := gh("gh-1", "gh@example.com")
+	if _, err := st.LinkIdentity(ctx, owner.Account.ID, profile, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	resolved := resolve(t, st, profile)
+	if _, err := st.DB().Exec(`CREATE FUNCTION wait_session_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN PERFORM pg_advisory_xact_lock(74120911); RETURN NEW; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER wait_session_insert BEFORE INSERT ON sessions
+		FOR EACH ROW EXECUTE FUNCTION wait_session_insert()`); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	if _, err := gate.ExecContext(ctx, `SELECT pg_advisory_xact_lock(74120911)`); err != nil {
+		t.Fatal(err)
+	}
+	type sessionResult struct {
+		raw string
+		err error
+	}
+	sessionDone := make(chan sessionResult, 1)
+	go func() {
+		raw, _, _, err := st.CreateIdentityAccountSession(ctx, resolved.Account, resolved.Account.ActiveTeam,
+			profile.Provider, profile.Subject, time.Hour, time.Now())
+		sessionDone <- sessionResult{raw, err}
+	}()
+	waitForDBLock := func(query string) {
+		t.Helper()
+		for {
+			var waiting int
+			err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+				WHERE wait_event_type = 'Lock' AND query LIKE $1 AND pid <> pg_backend_pid()`, query).Scan(&waiting)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if waiting > 0 {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for database lock")
+			default:
+			}
+		}
+	}
+	waitForDBLock("%INSERT INTO sessions%")
+	unlinkDone := make(chan error, 1)
+	go func() {
+		_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now())
+		unlinkDone <- err
+	}()
+	// With the account lock, unlink waits for the session transaction. Without
+	// it, unlink can finish while session insertion is held at the trigger.
+	unlinked := false
+	for !unlinked {
+		select {
+		case err := <-unlinkDone:
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlinked = true
+		default:
+		}
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%accounts WHERE id%'
+			AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for unlink")
+		}
+	}
+	if err := gate.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	session := <-sessionDone
+	if !unlinked {
+		if err := <-unlinkDone; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if session.err != nil {
+		t.Fatalf("session creation: %v", session.err)
+	}
+	if _, err := st.LookupSession(session.raw, time.Now()); err == nil {
+		t.Fatal("session created during unlink survived revocation")
+	}
+}
+
+func TestSignInAndUnlinkUseTheSameLockOrderPostgres(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	profile := googleProfile("g-owner", "owner@example.com")
+	owner := signIn(t, st, profile.Subject, profile.Email)
+	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE FUNCTION wait_identity_update() RETURNS trigger LANGUAGE plpgsql AS $$
+	BEGIN PERFORM pg_advisory_xact_lock(74120913); RETURN NEW; END $$`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER wait_identity_update AFTER UPDATE ON identities
+		FOR EACH ROW EXECUTE FUNCTION wait_identity_update()`); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	if _, err := gate.ExecContext(ctx, `SELECT pg_advisory_xact_lock(74120913)`); err != nil {
+		t.Fatal(err)
+	}
+	resolveDone := make(chan error, 1)
+	go func() {
+		_, err := st.ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		resolveDone <- err
+	}()
+	for {
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%UPDATE identities SET email%'
+			AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for identity update")
+		}
+	}
+	unlinkDone := make(chan error, 1)
+	go func() {
+		_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now())
+		unlinkDone <- err
+	}()
+	for {
+		select {
+		case err := <-unlinkDone:
+			t.Fatalf("unlink finished before identity update resumed: %v", err)
+		default:
+		}
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND (query LIKE '%DELETE FROM identities%'
+			OR query LIKE '%accounts WHERE id%') AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for unlink")
+		}
+	}
+	if err := gate.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-resolveDone; err != nil {
+		t.Fatalf("sign-in: %v", err)
+	}
+	if err := <-unlinkDone; err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+}
+
+func TestSignInRetriesWhenIdentityWasUnlinkedWhileWaitingPostgres(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	profile := googleProfile("g-owner", "owner@example.com")
+	owner := signIn(t, st, profile.Subject, profile.Email)
+	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gate.Rollback()
+	var id string
+	if err := gate.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = $1 FOR UPDATE`, owner.Account.ID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		accountID string
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resolved, err := st.ResolveSignIn(ctx, profile, store.SignUpConditions{}, time.Now())
+		done <- result{resolved.Account.ID, err}
+	}()
+	for {
+		var waiting int
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%SELECT id FROM accounts WHERE id%'
+			AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if ctx.Err() != nil {
+			t.Fatal("timed out waiting for sign-in account lock")
+		}
+	}
+	if _, err := gate.ExecContext(ctx, `DELETE FROM identities WHERE provider = $1 AND subject = $2 AND account_id = $3`,
+		profile.Provider, profile.Subject, owner.Account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gate.ExecContext(ctx, `INSERT INTO identity_unlinks (provider, subject, account_id, unlinked_at)
+		VALUES ($1, $2, $3, $4)`, profile.Provider, profile.Subject, owner.Account.ID, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if err := gate.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	resolved := <-done
+	if resolved.err != nil || resolved.accountID == owner.Account.ID || resolved.accountID == "" {
+		t.Fatalf("sign-in after unlink = %q, %v; want a new account", resolved.accountID, resolved.err)
 	}
 }
 

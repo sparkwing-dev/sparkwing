@@ -243,6 +243,24 @@ func TestLinkAndUnlinkNeedARecentSignIn(t *testing.T) {
 	}
 }
 
+func TestLinkCompletionNeedsARecentSignIn(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.user("g-owner", "owner@example.com")
+	start := f.linkStart(owner.auth, "github")
+	if _, err := f.store.DB().Exec(`UPDATE sessions SET created_at = created_at - 3600`); err != nil {
+		t.Fatal(err)
+	}
+	var refused refusalBody
+	code := f.linkComplete(owner.auth, "github", start,
+		f.github.Code(ghPerson(1201, "octo", "octo@example.com"), start.Verifier, dashRedirect), &refused)
+	if code != http.StatusForbidden || refused.Code != "reauth_required" {
+		t.Fatalf("link completion after sign-in expired = %d %+v, want 403 reauth_required", code, refused)
+	}
+	if ids := f.identities(owner.auth); len(ids.Identities) != 1 {
+		t.Fatalf("identities after refused completion = %+v", ids)
+	}
+}
+
 func TestLinkAttemptsAreRateLimitedPerAccount(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("g-owner", "owner@example.com")

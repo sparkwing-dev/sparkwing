@@ -201,7 +201,7 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 	}
 	name := r.PathValue("provider")
 	provider, ok := s.offered(w, name)
-	if !ok || !s.linkAttemptAllowed(w, p, name) {
+	if !ok || !s.linkAttemptAllowed(w, p, name) || !s.recentSignIn(w, p, name) {
 		return
 	}
 	var req identityLinkCompleteReq
@@ -258,6 +258,9 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 			Code: "provider_unreachable", Principal: p.label(),
 			Message: label + " could not be reached to finish linking",
 		})
+		return
+	}
+	if !s.recentSignIn(w, p, name) {
 		return
 	}
 	linked, err := s.store.LinkIdentity(r.Context(), p.AccountID, profile, now)

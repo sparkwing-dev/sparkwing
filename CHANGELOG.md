@@ -30,9 +30,11 @@ unlock.
   by the provider's stable subject. A provider account already attached to any
   account is refused with `409 identity_linked_elsewhere` and nothing changes;
   accounts are never combined. Linking never changes the account's email.
-  Linking and unlinking need a sign-in from the last 10 minutes, link attempts
-  are limited to ten a minute per account, and unlinking ends the account's
-  other sessions. New routes: `GET /api/v1/me/identities`,
+  Link start, link completion and unlinking need a sign-in from the last 10
+  minutes. Link attempts are limited to ten a minute per account per controller
+  replica. Unlinking keeps one sign-in method and ends the account's other
+  sessions, including sessions created by a concurrent sign-in. New routes:
+  `GET /api/v1/me/identities`,
   `POST /api/v1/me/identities/{provider}/link`, `.../link/complete` and
   `DELETE /api/v1/me/identities/{provider}`. Schema 63 adds
   `identities.linked`, `identity_link_states` and `identity_unlinks`. See

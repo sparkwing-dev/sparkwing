@@ -387,8 +387,13 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 	}
 	s.observeSignUp(r.Context(), name, res, now)
 	acct := res.Account
-	raw, csrf, sess, err := s.store.CreateAccountSession(r.Context(), acct, acct.ActiveTeam, sessionTTL, now)
+	raw, csrf, sess, err := s.store.CreateIdentityAccountSession(r.Context(), acct, acct.ActiveTeam,
+		profile.Provider, profile.Subject, sessionTTL, now)
 	if err != nil {
+		if errors.Is(err, store.ErrIdentityUnlinked) {
+			writeError(w, http.StatusUnauthorized, errors.New("that sign-in changed while it was being verified; start again"))
+			return
+		}
 		s.writeInternalError(w, r, "session create", err)
 		return
 	}

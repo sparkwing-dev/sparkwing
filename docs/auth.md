@@ -858,9 +858,10 @@ as a new account, even when it asserts the account's own address. Unlinking
 GitHub leaves each GitHub App installation the user connected bound to its
 team; connecting another installation needs a linked GitHub sign-in again.
 
-Linking and unlinking need a session signed in within the last 10 minutes
-(`403 reauth_required`), and an account makes at most ten link attempts a
-minute (`429 rate_limited`). The controller logs `identity.linked`,
+Link start, link completion and unlinking need a session signed in within the
+last 10 minutes (`403 reauth_required`). An account makes at most ten link
+attempts a minute (`429 rate_limited`); the limit is per controller replica.
+The controller logs `identity.linked`,
 `identity.unlinked` and `identity.change_refused` with the account, the provider
 and, for a change, the provider's subject. `GET /api/v1/me/identities` lists
 the account's sign-in methods and the providers it can link.

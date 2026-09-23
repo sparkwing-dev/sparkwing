@@ -25,12 +25,13 @@ type Identity struct {
 	CreatedAt time.Time
 }
 
-// Identity linking errors. Callers map these onto status codes.
+// Identity linking and sign-in errors. Callers map these onto status codes.
 var (
 	ErrIdentityLinkedElsewhere = errors.New("store: that sign-in belongs to another account")
 	ErrIdentityAlreadyLinked   = errors.New("store: that sign-in is already linked to this account")
 	ErrProviderAlreadyLinked   = errors.New("store: this account already has a sign-in from that provider")
 	ErrLastSignInMethod        = errors.New("store: an account keeps at least one sign-in method")
+	ErrIdentityUnlinked        = errors.New("store: sign-in method is no longer linked to this account")
 )
 
 // safety: an older binary reads a linked identity as one that signed in, and
@@ -181,6 +182,9 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 		return Identity{}, 0, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockAccountTx(ctx, tx, accountID); err != nil {
+		return Identity{}, 0, err
+	}
 	var id Identity
 	var linked int
 	var created int64
@@ -228,6 +232,31 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 		return Identity{}, 0, err
 	}
 	return id, ended, tx.Commit()
+}
+
+// lockAccountTx serializes changes to an account's sign-in methods and the
+// sessions opened through them. SQLite takes its write lock at the same point.
+func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
+	if tx.dialect == DialectSQLite {
+		res, err := tx.ExecContext(ctx, `UPDATE accounts SET id = id WHERE id = ?`, accountID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotFound
+		}
+		return nil
+	}
+	var id string
+	err := tx.QueryRowContext(ctx, `SELECT id FROM accounts WHERE id = ? FOR UPDATE`, accountID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
 }
 
 // ConsumeIdentityLinkState records that the link flow named by nonce
