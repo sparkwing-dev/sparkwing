@@ -77,10 +77,8 @@ func githubHTTPS(repoURL string) string {
 }
 
 func sshIdentityAvailable() bool {
-	for _, name := range []string{"SSH_AUTH_SOCK", "GIT_SSH_COMMAND", "GIT_SSH"} {
-		if os.Getenv(name) != "" {
-			return true
-		}
+	if os.Getenv("SSH_AUTH_SOCK") != "" || os.Getenv("GIT_SSH_COMMAND") != "" || os.Getenv("GIT_SSH") != "" {
+		return true
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
