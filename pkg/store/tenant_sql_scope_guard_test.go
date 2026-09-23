@@ -73,6 +73,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"binding of the pipeline is a candidate until its secret verifies the signature",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
+	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
+		"another team is refused; a dispute id is unique across teams",
 	"(*Store).DisputeTeam": "asks which team a dispute's hold is on, so an operator's release that names only the " +
 		"dispute answers with that team; a dispute id is unique across teams",
 }

@@ -58,7 +58,7 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 	// safety: a lost dispute reverses under its dispute id, so a reference
 	// that names a dispute held for another payment is that dispute misapplied
 	// and must not take this payment back.
-	if err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
+	if _, err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
 		return CreditReversal{}, err
 	}
 	out := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
@@ -164,40 +164,43 @@ func (s *Store) HoldTeamForDispute(
 	if registered == 0 {
 		return false, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
 	}
-	if err := refuseBoundDisputeTx(ctx, tx, disputeID, team, paymentID); err != nil {
+	bound, err := refuseBoundDisputeTx(ctx, tx, disputeID, team, paymentID)
+	if err != nil || bound {
 		return false, err
 	}
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, created_at) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (dispute_id) DO NOTHING`,
-		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano())
-	if err != nil {
+	// safety: the ledger lock serializes holds, and the dispute has no row
+	// yet, so the insert cannot meet a row another hold wrote.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, created_at) VALUES (?, ?, ?, ?, ?)`,
+		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano()); err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n == 1, tx.Commit()
+	return true, tx.Commit()
 }
 
-// refuseBoundDisputeTx refuses a dispute already held for another payment or
-// team. A dispute with no hold yet is free to bind.
-func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) error {
-	var heldTeam, heldPayment string
-	err := tx.QueryRowContext(ctx, `SELECT team, payment_id FROM credit_freezes WHERE dispute_id = ?`,
-		disputeID).Scan(&heldTeam, &heldPayment)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+// refuseBoundDisputeTx reports whether disputeID already has a hold, and
+// refuses one held for another payment or team with [ErrDisputeConflict].
+func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) (bool, error) {
+	heldTeam, heldPayment, found, err := disputeHoldTx(ctx, tx, disputeID)
+	if err != nil || !found {
+		return false, err
 	}
-	if err != nil {
-		return err
-	}
-	if Team(heldTeam) != team || heldPayment != paymentID {
-		return fmt.Errorf("%w: %s is held for payment %q of team %s, not payment %q of team %s",
+	if heldTeam != team || heldPayment != paymentID {
+		return true, fmt.Errorf("%w: %s is held for payment %q of team %s, not payment %q of team %s",
 			ErrDisputeConflict, disputeID, heldPayment, heldTeam, paymentID, team)
 	}
-	return nil
+	return true, nil
+}
+
+// disputeHoldTx finds the team and payment a dispute's hold names.
+func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, string, bool, error) {
+	var team, payment string
+	err := tx.QueryRowContext(ctx, `SELECT team, payment_id FROM credit_freezes WHERE dispute_id = ?`,
+		disputeID).Scan(&team, &payment)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return Team(team), payment, err == nil, err
 }
 
 // ReleaseCreditFreezes releases holds on team and reports how many it
