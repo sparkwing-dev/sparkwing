@@ -40,6 +40,7 @@
         "security",
         "threat-model",
         "auth",
+        "limits",
         "hooks",
         "crons",
         "api",

@@ -22,6 +22,44 @@ unlock.
 
 ### Added
 
+- **controller:** a free tier bounded by counting teams. A team without
+  credits takes one of `--free-team-slots` (200) the first time it starts a
+  run, in the trigger's transaction, and keeps it until the team is deleted,
+  so free storage never passes slots times the allowance. A team with neither
+  a slot nor credits is refused its runs with `402` "free storage is paused;
+  buy credits or join the waitlist". `PUT /api/v1/storage/teams/{team}/free-slot`
+  (`admin`) grants a slot past the cap, and `Server.SignUpFreeTier` reports the
+  tier closed once every slot is taken. Schema v56 adds `free_slots`. See
+  [Tenant limits](docs/limits.md).
+
+- **storage:** a team without credits is held to its free allowance
+  (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares,
+  each enforced where the bytes are written: the cache keeps 768 MiB, checked
+  before an upload's body is read and cut at the room left when the length is
+  unknown; the logs service keeps 192 MiB, checked after the node and run caps
+  and before the append is written; run events keep 64 MiB, checked in the
+  append's transaction. A refused or failed write holds nothing. The cache asks
+  `GET /internal/teams/{team}/storage-tier` with its operator token
+  (`--controller`), the logs service reads the tier off its claim check, and a
+  failed lookup never lifts a limit. Each service exports
+  `sparkwing_free_storage_used_bytes{store=...}`.
+
+- **controller:** a team without credits starts at most 200 runs in any 24
+  hours (`429`), a team binds at most 20 repositories to GitHub runners
+  (`403`), and a signed-up team holds at most 100 secrets of 128 KiB each
+  (`413`).
+
+- **controller:** the hourly storage pass releases runs that finished before
+  the event retention window, keyed on `finished_at`, and deletes invitations
+  and tokens 30 days after they stopped admitting anyone. A multi-team
+  controller writes a 30-day event and node-metric retention window where the
+  operator set none.
+
+- **cache:** team binaries, dependency archives and artifacts written more
+  than 30 days ago are deleted in the daily reconcile listing, which keeps the
+  per-team count exact. The registry proxy directory is capped at 2 GiB
+  (`--proxy-max-bytes`), evicting the least recently served entries first.
+
 - **cache:** `--blob-store s3://bucket/prefix` keeps the binary,
   dependency-archive and artifact stores in S3, one `teams/<team>/` namespace
   per team; git mirrors, uploads and the registry proxy stay on the volume.
@@ -401,6 +439,16 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **controller:** a multi-team controller refuses to start without
+  `--bucket-store`, because free-tier shares are enforced only over the object
+  store the cache and logs service keep their objects in.
+
+- **cache:** `/proxy/` answers only the operator token or a cache grant,
+  like the blob stores. A cache that verifies grants starts with a 200 GiB
+  daily egress cap unless `--egress-daily-cap-bytes` names another value.
+
+- **logs:** with `--archive-store`, `--retention` defaults to 30 days.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named

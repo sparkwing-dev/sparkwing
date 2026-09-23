@@ -288,7 +288,11 @@ listing of the prefix once per `--usage-reconcile` (daily by default;
 `SPARKWING_CACHE_USAGE_RECONCILE` on the cache and
 `SPARKWING_LOGS_USAGE_RECONCILE` on the logs service). The
 count feeds the store ceiling, so `--max-store-bytes` covers the bucket as well
-as the volume, and it is what the storage allowance reads:
+as the volume, and it is what holds a free team to its share of the storage
+allowance in the process that writes ([Tenant limits](limits.md)). On a
+multi-team deployment the cache asks the controller each team's tier: give it
+`--controller` (`SPARKWING_CONTROLLER_URL`) and its `--api-token`, the token the
+controller holds as `SPARKWING_CACHE_TOKEN`. The counts also answer:
 
 - `GET /admin/usage` on the cache (operator token; `?team=` narrows it)
 - `GET /api/v1/teams/{team}/logs/usage` on the logs service (`admin`)

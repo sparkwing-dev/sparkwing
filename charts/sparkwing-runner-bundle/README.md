@@ -255,8 +255,10 @@ not a `helm upgrade`.
 ## Storage
 
 Both `sparkwing-cache` and `sparkwing-logs` use `ReadWriteOnce`
-PVCs. That bounds them to 1 replica each (`replicas: 1`,
-`strategy: Recreate`). For an HA log store, point your runners at
+PVCs, and each keeps the per-team counts that hold free teams to
+their storage shares in memory. That bounds them to 1 replica each
+(`replicas: 1`, `strategy: Recreate`); see
+[Tenant limits](../../docs/limits.md). For an HA log store, point your runners at
 an external S3-backed log service (out of scope for this chart;
 see the full self-host docs).
 

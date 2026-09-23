@@ -686,6 +686,12 @@ measurement that finds the store back under its ceiling thaws it.
 warning on health without refusing anything. The chart carries all of
 these as `cache.limits.*` and `logs.limits.*`.
 
+Both services also export `sparkwing_free_storage_used_bytes{store="cache"}`
+and `{store="logs"}`: the bytes teams without credits hold there, writes in
+flight included, read from the same counts that hold each team to its share
+of the free allowance ([Tenant limits](limits.md)). The free-team slot count
+bounds that sum, so alert on it when `--free-team-slots` oversubscribes.
+
 Neither service waits out the interval to recover. Deleting a run with
 `DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
 `--retention`, starts a fresh measurement of the log store, so appends
