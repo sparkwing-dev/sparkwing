@@ -11,7 +11,7 @@ Placement order for a team's work:
 
 GitHub's terms allow Actions to be used for the production, testing, deployment or publication of the software project in the repository where the workflow runs. The controller enforces that boundary: a job's credential claims a node, a trigger, or reads a run only when the run's trigger names the job's repository in every repository field it carries (`github_owner`/`github_repo`, `repo`, `repo_url`, and `GITHUB_REPOSITORY` in its environment). The comparison is case-insensitive and accepts the `https`, `ssh` and `git@github.com:` spellings of `github.com/<owner>/<name>`.
 
-A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit, so a workflow pushed to a feature branch cannot claim `main`'s runs or read the secrets those runs are given.
+A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit from a signed GitHub push delivery. A trigger must carry `trigger_source=github`, `GITHUB_EVENT_NAME=push`, a webhook delivery and replay key, with no retry or parent run. Pull requests, retries, child runs, manual submissions and scheduled triggers remain outside the credential even when they name the same repository, branch and commit.
 
 Only `push`, `workflow_dispatch` and `schedule` jobs on a branch (`refs/heads/...`) get a credential. The exchange answers 403 for any other event, including `pull_request`, which runs a contributor's code, and `pull_request_target` and `workflow_run`, which hand the base repository's privileges to input a fork controls, and for a tag or pull request ref or a token that names no commit.
 
@@ -77,7 +77,7 @@ jobs:
             --idle-exit 2m
 ```
 
-`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it.
+`DELETE /api/v1/team/github-runners/{repository_id}` removes a binding and revokes every live credential minted under it. Credential exchange checks the binding again while minting, so an unbind racing with an exchange either stops the mint or revokes the credential.
 
 ## What the credential can do
 
@@ -89,9 +89,9 @@ Every request the credential makes passes a fence that lists the routes it may u
 
 | Route | Rule |
 | --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs for the repository at the job's branch and commit; executor offers are refused |
-| `POST /api/v1/triggers/claim` | the same filter on triggers |
-| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, and carry the job's branch and commit; the cache grant route answers 403 |
+| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs from signed GitHub push deliveries for the repository at the job's branch and commit; executor offers are refused |
+| `POST /api/v1/triggers/claim` | the same repository, branch and commit filter, restricted to signed GitHub push deliveries with no retry or parent run |
+| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, carry the job's branch and commit, and come from a signed GitHub push delivery; the cache grant route answers 403 |
 | `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
 | anything else | 403 |
 

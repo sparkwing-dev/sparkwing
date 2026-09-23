@@ -209,6 +209,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 			return githubAppIntake{}, "not a branch push", nil
 		}
 		base["GITHUB_BEFORE"], base["GITHUB_AFTER"] = p.Before, p.After
+		base[sparkwing.EnvGitHubEventName] = githubEventPush
 		return githubAppIntake{
 			user: p.Pusher.Name, branch: branch, sha: p.After, env: base, at: githubPushedAt(p.Repository.PushedAt),
 		}, "", nil

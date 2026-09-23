@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **controller:** GitHub Actions runner credentials claim only signed GitHub
+  push deliveries for their repository, branch and commit. A retry, child run,
+  pull request or manually submitted trigger with matching Git fields is
+  refused. GitHub App pushes record their event name for this check. Unbinding
+  a repository during credential exchange now stops or revokes the credential.
+
 ### Added
 
 - **runner:** an off-cluster agent reads the cache the controller announces

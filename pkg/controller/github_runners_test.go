@@ -108,7 +108,8 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	now := time.Now()
 	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: runID, Pipeline: "build", TriggerSource: "github", Repo: slug,
-		GithubOwner: owner, GithubRepo: name, CreatedAt: now,
+		GithubOwner: owner, GithubRepo: name, TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"}, CreatedAt: now,
+		WebhookDelivery: runID, WebhookReplayKey: "signed-" + runID,
 		GitBranch: branch, GitSHA: sha,
 	}, store.Run{
 		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug, GithubOwner: owner, GithubRepo: name,

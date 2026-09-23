@@ -165,8 +165,12 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 	}
 	now := time.Now().UTC()
 	principal := store.GitHubRunnerPrincipalPrefix + strconv.FormatInt(claims.RepositoryID, 10) + ":" + repo.Slug()
-	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), principal,
+	raw, tok, err := t.MintGitHubRunnerCredential(r.Context(), binding, principal,
 		store.GitHubRunnerPush{Branch: branch, SHA: claims.SHA}, runnerTokenScopes, githubRunnerCredentialTTL, now)
+	if errors.Is(err, store.ErrNotFound) {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "forbidden", Message: errNoGitHubBinding.Error()})
+		return
+	}
 	if errors.Is(err, store.ErrGitHubRunnerCredentialLimit) {
 		setRetryAfter(w, time.Minute)
 		writeError(w, http.StatusTooManyRequests, errors.New(

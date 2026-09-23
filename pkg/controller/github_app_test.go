@@ -416,6 +416,9 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].GithubRepo != "widgets" {
 		t.Fatalf("olga's triggers = %+v", got)
 	}
+	if got[0].TriggerEnv["GITHUB_EVENT_NAME"] != "push" {
+		t.Fatalf("app push event = %q, want push", got[0].TriggerEnv["GITHUB_EVENT_NAME"])
+	}
 	if n := len(f.triggers(bob.team)); n != 0 {
 		t.Fatalf("a push through olga's installation started %d runs in bob's team", n)
 	}

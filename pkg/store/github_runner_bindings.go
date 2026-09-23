@@ -240,22 +240,26 @@ type GitHubRunnerPush struct {
 }
 
 // MintGitHubRunnerCredential mints a runner credential for principal bound to
-// push, valid for ttl, refusing with [ErrGitHubRunnerCredentialLimit] once
+// push and the live binding, valid for ttl. It refuses with
+// [ErrGitHubRunnerCredentialLimit] once
 // the team holds [MaxGitHubRunnerCredentials] live ones. The count and the
-// mint share a transaction under the team's lock, so concurrent exchanges
-// cannot pass the limit together. It drops the team's expired and revoked
-// GitHub Actions credentials first.
+// mint share a transaction under the team's lock, and the binding row is
+// locked before minting, so concurrent exchanges cannot pass the limit and
+// an unbind cannot leave a usable credential behind. It drops the team's
+// expired and revoked GitHub Actions credentials first.
 func (t *Tenant) MintGitHubRunnerCredential(
-	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error) {
-	if !strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) || push.Branch == "" || push.SHA == "" || ttl <= 0 {
+	if binding.Team != t.team || binding.RepositoryID <= 0 || binding.RepositoryOwnerID <= 0 ||
+		!strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix+fmt.Sprint(binding.RepositoryID)+":") ||
+		push.Branch == "" || push.SHA == "" || ttl <= 0 {
 		return "", nil, ErrInvalidInput
 	}
 	if err := refuseAdminScope(scopes); err != nil {
 		return "", nil, err
 	}
 	for attempt := 1; ; attempt++ {
-		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, principal, push, scopes, ttl, now)
+		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, binding, principal, push, scopes, ttl, now)
 		if err == nil {
 			return raw, tok, nil
 		}
@@ -267,7 +271,7 @@ func (t *Tenant) MintGitHubRunnerCredential(
 }
 
 func (t *Tenant) mintGitHubRunnerCredentialOnce(
-	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -275,6 +279,15 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 	}
 	defer rollbackOrLog(tx)
 	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", nil, err
+	}
+	var ownerID int64
+	err = tx.QueryRowContext(ctx, `SELECT repository_owner_id FROM github_runner_bindings
+		WHERE team = ? AND repository_id = ?`+tx.forUpdate(), string(t.team), binding.RepositoryID).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && ownerID != binding.RepositoryOwnerID) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
 		return "", nil, err
 	}
 	at := now.UTC().Unix()
@@ -424,6 +437,9 @@ type GitHubRunnerScope struct {
 // the scope's push. tr's team is checked by the caller's query.
 func (g GitHubRunnerScope) admits(tr *Trigger) bool {
 	return g.Push.Branch != "" && g.Push.SHA != "" &&
+		tr.TriggerSource == "github" && tr.TriggerEnv["GITHUB_EVENT_NAME"] == "push" &&
+		tr.WebhookDelivery != "" && tr.WebhookReplayKey != "" &&
+		tr.RetryOf == "" && tr.ParentRunID == "" && tr.ParentNodeID == "" &&
 		tr.GitBranch == g.Push.Branch && tr.GitSHA == g.Push.SHA && TriggerNamesGitHubRepo(tr, g.Repo)
 }
 
@@ -454,6 +470,9 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 	spellings := g.Repo.spellings()
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(spellings)), ",")
 	clause := ` AND ` + col("team") + ` = ?` +
+		` AND ` + col("trigger_source") + ` = 'github'` +
+		` AND ` + col("webhook_delivery") + ` != '' AND ` + col("webhook_replay_key") + ` != ''` +
+		` AND ` + col("retry_of") + ` = '' AND COALESCE(` + col("parent_run_id") + `, '') = '' AND ` + col("parent_node_id") + ` = ''` +
 		` AND LOWER(` + col("github_owner") + `) = ? AND LOWER(` + col("github_repo") + `) = ?` +
 		` AND (` + col("repo") + ` = '' OR LOWER(` + col("repo") + `) IN (` + ph + `))` +
 		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))` +
@@ -483,9 +502,12 @@ func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope,
 	var tr Trigger
 	var envJSON []byte
 	err := s.queryRow(ctx, `
-		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha
+		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha,
+		       trigger_source, retry_of, COALESCE(parent_run_id, ''), parent_node_id,
+		       webhook_delivery, webhook_replay_key
 		FROM triggers WHERE team = ? AND id = ?`, string(scope.Team), runID).
-		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA)
+		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA,
+			&tr.TriggerSource, &tr.RetryOf, &tr.ParentRunID, &tr.ParentNodeID, &tr.WebhookDelivery, &tr.WebhookReplayKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
