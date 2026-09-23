@@ -55,6 +55,12 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 	if !found {
 		return CreditReversal{}, fmt.Errorf("%w: %q", ErrUnknownPayment, paymentID)
 	}
+	// safety: a lost dispute reverses under its dispute id, so a reference
+	// that names a dispute held for another payment is that dispute misapplied
+	// and must not take this payment back.
+	if err := refuseBoundDisputeTx(ctx, tx, reference, paid.Team, paymentID); err != nil {
+		return CreditReversal{}, err
+	}
 	out := CreditReversal{Team: paid.Team, PaidMicro: paid.AmountMicro}
 	existing, found, err := creditGrantByReferenceTx(ctx, tx, paid.Team, CreditGrantReversal, reference)
 	if err != nil {
@@ -119,35 +125,79 @@ type TeamCreditFreeze struct {
 	Disputes []string
 }
 
-// HoldTeamForDispute holds team's cloud usage for disputeID. A held team's
-// metered claims are refused, so no new cloud work starts, while work already
-// running finishes; the team stays held while any of its holds is
-// unreleased. Holding a dispute that already has a hold, released or not,
-// writes nothing, so a replayed event never undoes an operator's release. It
-// reports whether it wrote the hold, and returns [ErrUnknownTeam] for a team
-// that is not registered.
-func (s *Store) HoldTeamForDispute(ctx context.Context, team Team, disputeID, reason string, now time.Time) (bool, error) {
+// ErrDisputeConflict is returned when a hold or a reversal names a dispute
+// already held for another payment or team: a dispute disputes one payment.
+var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
+
+// HoldTeamForDispute holds team's cloud usage for disputeID, which disputes
+// paymentID; an operator's hold by hand names no payment. A held team's
+// metered claims are refused, so no new cloud work starts, while work
+// already running finishes; the team stays held while any of its holds is
+// unreleased. Holding a dispute that already has a hold for the same payment
+// and team, released or not, writes nothing, so a replayed event never undoes
+// an operator's release; one held for another payment or team is refused
+// with [ErrDisputeConflict]. It reports whether it wrote the hold, and
+// returns [ErrUnknownTeam] for a team that is not registered.
+func (s *Store) HoldTeamForDispute(
+	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
+) (_ bool, err error) {
 	team = NormalizeTeam(team)
-	disputeID = strings.TrimSpace(disputeID)
+	disputeID, paymentID = strings.TrimSpace(disputeID), strings.TrimSpace(paymentID)
 	if disputeID == "" {
 		return false, errors.New("credits: a hold names the dispute it is for")
 	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	// safety: a metered claim reads the freeze under the ledger lock, so the
+	// hold takes the same lock; a claim that read the team as not frozen then
+	// commits before the hold does, and none can commit after it.
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return false, err
+	}
 	var registered int
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM teams WHERE name = ?`, string(team)).Scan(&registered); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE name = ?`, string(team)).Scan(&registered); err != nil {
 		return false, err
 	}
 	if registered == 0 {
 		return false, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
 	}
-	res, err := s.exec(ctx, `
-		INSERT INTO credit_freezes (team, dispute_id, reason, created_at) VALUES (?, ?, ?, ?)
-		ON CONFLICT (team, dispute_id) DO NOTHING`,
-		string(team), disputeID, truncate(reason, 500), now.UnixNano())
+	if err := refuseBoundDisputeTx(ctx, tx, disputeID, team, paymentID); err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO credit_freezes (dispute_id, team, payment_id, reason, created_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (dispute_id) DO NOTHING`,
+		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano())
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n == 1, err
+	if err != nil {
+		return false, err
+	}
+	return n == 1, tx.Commit()
+}
+
+// refuseBoundDisputeTx refuses a dispute already held for another payment or
+// team. A dispute with no hold yet is free to bind.
+func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) error {
+	var heldTeam, heldPayment string
+	err := tx.QueryRowContext(ctx, `SELECT team, payment_id FROM credit_freezes WHERE dispute_id = ?`,
+		disputeID).Scan(&heldTeam, &heldPayment)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if Team(heldTeam) != team || heldPayment != paymentID {
+		return fmt.Errorf("%w: %s is held for payment %q of team %s, not payment %q of team %s",
+			ErrDisputeConflict, disputeID, heldPayment, heldTeam, paymentID, team)
+	}
+	return nil
 }
 
 // ReleaseCreditFreezes releases holds on team and reports how many it

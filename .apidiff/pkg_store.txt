@@ -534,6 +534,7 @@ var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
+var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
@@ -1556,7 +1557,9 @@ func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, n
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
-func (s *Store) HoldTeamForDispute(ctx context.Context, team Team, disputeID, reason string, now time.Time) (bool, error)
+func (s *Store) HoldTeamForDispute(
+	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
+) (_ bool, err error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)

@@ -154,6 +154,24 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	if len(frozen.Disputes) != 2 {
 		t.Fatalf("holds = %v, want one per dispute", frozen.Disputes)
 	}
+	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
+		"kind": "paid", "amount_micro": 100 * cent, "reference": "pi_other", "team": other.team,
+	}, nil); code != http.StatusCreated {
+		t.Fatalf("other grant = %d", code)
+	}
+	var conflict struct {
+		Code string `json:"code"`
+	}
+	if code := f.call("POST", "/api/v1/credits/freezes", grant, map[string]any{
+		"payment_id": "pi_other", "dispute_id": "dp_1",
+	}, &conflict); code != http.StatusConflict || conflict.Code != "dispute_conflict" {
+		t.Fatalf("holding dp_1 for another team's payment = %d %+v, want 409 dispute_conflict", code, conflict)
+	}
+	if code := f.call("POST", "/api/v1/credits/reversals", grant, map[string]any{
+		"payment_id": "pi_other", "reference": "dp_1",
+	}, &conflict); code != http.StatusConflict || conflict.Code != "dispute_conflict" {
+		t.Fatalf("reversing another payment under dp_1 = %d %+v, want 409 dispute_conflict", code, conflict)
+	}
 	var b, ob teamBilling
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
 	f.call("GET", "/api/v1/team/billing", other.auth, nil, &ob)

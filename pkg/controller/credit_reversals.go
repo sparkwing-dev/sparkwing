@@ -65,6 +65,8 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrUnknownPayment):
 		writeError(w, http.StatusNotFound, err)
 		return
+	case s.writeDisputeConflict(w, r, err, req.Reference, req.PaymentID):
+		return
 	case errors.Is(err, store.ErrCreditGrantConflict):
 		writeError(w, http.StatusConflict, err)
 		return
@@ -176,7 +178,10 @@ func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("a hold names the team, by payment_id or team, and the dispute_id"))
 			return
 		}
-		if _, err := s.store.HoldTeamForDispute(r.Context(), team, req.DisputeID, req.Reason, now); err != nil {
+		if _, err := s.store.HoldTeamForDispute(r.Context(), team, req.DisputeID, req.PaymentID, req.Reason, now); err != nil {
+			if s.writeDisputeConflict(w, r, err, req.DisputeID, req.PaymentID) {
+				return
+			}
 			if errors.Is(err, store.ErrUnknownTeam) {
 				writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", team))
 				return
@@ -202,6 +207,24 @@ func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 		"dispute_id", req.DisputeID, "payment_id", req.PaymentID, "frozen", out.Frozen,
 		"released", out.Released, "by", principalName(r))
 	writeJSON(w, http.StatusOK, out)
+}
+
+// DisputeConflictCode is the code on a 409 refusing a hold or a reversal
+// that names a dispute already held for another payment.
+const DisputeConflictCode = "dispute_conflict"
+
+// safety: a dispute disputes one payment, so the same id naming another
+// payment is a misrouted or forged event; it is refused and alerted on,
+// never applied to a second team.
+func (s *Server) writeDisputeConflict(w http.ResponseWriter, r *http.Request, err error, disputeID, paymentID string) bool {
+	if !errors.Is(err, store.ErrDisputeConflict) {
+		return false
+	}
+	s.logger.Error("billing alert: a dispute id arrived for a payment it does not dispute; refused",
+		"alert", DisputeConflictCode, "dispute_id", disputeID, "payment_id", paymentID,
+		"by", principalName(r), "err", err)
+	writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: DisputeConflictCode})
+	return true
 }
 
 func principalName(r *http.Request) string {

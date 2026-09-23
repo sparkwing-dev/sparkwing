@@ -28,16 +28,18 @@ CREATE INDEX IF NOT EXISTS idx_credit_checkouts_session ON credit_checkouts(sess
 var creditCheckoutsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditCheckoutsTableSQLite)
 
 // safety: a freeze is one row per dispute, so one dispute's outcome never
-// releases another's hold; a team is frozen while any row is unreleased.
+// releases another's hold; a team is frozen while any row is unreleased. The
+// dispute id is the key and the row names the payment it disputes, so a
+// dispute is bound to one payment and one team.
 const creditFreezesTableSQLite = `CREATE TABLE IF NOT EXISTS credit_freezes (
+    dispute_id  TEXT PRIMARY KEY,
     team        TEXT NOT NULL,
-    dispute_id  TEXT NOT NULL,
+    payment_id  TEXT NOT NULL DEFAULT '',
     reason      TEXT NOT NULL DEFAULT '',
     created_at  INTEGER NOT NULL,
-    released_at INTEGER,
-    PRIMARY KEY (team, dispute_id)
+    released_at INTEGER
 );
-CREATE INDEX IF NOT EXISTS idx_credit_freezes_dispute ON credit_freezes(dispute_id);`
+CREATE INDEX IF NOT EXISTS idx_credit_freezes_team ON credit_freezes(team, released_at);`
 
 var creditFreezesTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditFreezesTableSQLite)
 

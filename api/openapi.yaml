@@ -3759,7 +3759,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: No paid grant carries the payment id.}
-        "409": {description: The reference already names a reversal of another payment.}
+        "409": {description: "The reference already names a reversal of another payment, or a dispute held for another payment (`dispute_conflict`)."}
 
   /api/v1/credits/freezes:
     post:
@@ -3771,8 +3771,10 @@ paths:
         stands: its metered claims are refused with 402 and
         `"code": "credits_frozen"`, so no new cloud work starts, while work
         already running finishes. A hold names the team by `payment_id`, a
-        payment it made, or by `team`, and names the `dispute_id`; holding a
-        dispute that already has a hold, released or not, writes nothing.
+        payment it made, or by `team`, and names the `dispute_id`. A dispute
+        is bound to the payment and team its first hold named: holding it
+        again for them, released or not, writes nothing, and holding it for
+        another payment is refused with 409.
         `release` lifts the hold of `dispute_id`, or every hold on the team
         when no dispute is named. Naming a team and releasing are the
         operator's; the checkout service holds by payment and never releases.
@@ -3806,6 +3808,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
+        "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
 
   /api/v1/credits/units:
     get:

@@ -45,7 +45,9 @@ unlock.
   says it is paused. The checkout service holds a team when a dispute opens on
   its purchase, and reverses the purchase and holds the team when the dispute
   is lost; it never releases a hold, which is the operator's, by dispute or by
-  team. `GET /api/v1/team/billing` gains `frozen`. Schema v57 adds
+  team. A dispute is bound to the payment its first hold names, and a hold or
+  reversal naming it for another payment answers 409 `dispute_conflict`.
+  `GET /api/v1/team/billing` gains `frozen`. Schema v57 adds
   `credit_freezes`. See
   [Buying credits](docs/auth.md#buying-credits).
 

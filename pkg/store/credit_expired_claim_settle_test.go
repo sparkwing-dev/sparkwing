@@ -200,3 +200,46 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 		t.Fatal("the next pass did not settle and clear the skipped claim")
 	}
 }
+
+// A hold takes the ledger lock a metered claim takes, so a claim that read
+// the team as not frozen commits before the hold does and none can commit
+// after it. The test holds the ledger lock and shows the hold waits for it.
+func TestAHoldWaitsForTheLedgerLock(t *testing.T) {
+	s := storetest.OpenPostgres(t)
+	ctx := context.Background()
+	holder, err := s.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext('sparkwing/credit-ledger'))`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.HoldTeamForDispute(ctx, store.DefaultTeam, "dp_lock", "", "opened", time.Now())
+		done <- err
+	}()
+	waited := false
+	for !waited {
+		select {
+		case err := <-done:
+			_ = holder.Rollback()
+			t.Fatalf("the hold finished (%v) while another transaction held the ledger lock", err)
+		default:
+		}
+		var waiting int
+		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		waited = waiting > 0
+		runtime.Gosched()
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("hold: %v", err)
+	}
+}

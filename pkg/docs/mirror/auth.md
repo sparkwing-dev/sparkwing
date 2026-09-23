@@ -209,7 +209,12 @@ never releases a team, because one dispute's outcome says nothing about
 another's. The operator releases with
 `sparkwing cluster credits freeze --dispute <dp_...> --release` for one hold
 or `--team <slug> --release` for every hold on the team. Replaying any
-dispute event changes nothing, and a replayed hold never undoes a release.
+dispute event changes nothing, and a replayed hold never undoes a release. A
+dispute is bound to the one payment and team its first hold named: a hold or
+a lost-dispute reversal that names the same dispute for another payment is
+refused with `409` and `"code": "dispute_conflict"` and logged as
+`alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
+so no claim that read the team as not held commits after the hold.
 
 ## Retained storage
 
