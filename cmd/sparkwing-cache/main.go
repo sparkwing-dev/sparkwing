@@ -79,7 +79,7 @@ func run(args []string) error {
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
 		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
-		"stored bytes across the artifact, dependency-archive and upload trees at or above which every "+
+		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which every "+
 			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
 			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",

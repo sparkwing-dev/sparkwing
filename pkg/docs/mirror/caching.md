@@ -170,8 +170,8 @@ client's own, and the service's cap is what actually holds.
 
 `--max-store-bytes` and `--max-store-objects`
 (`SPARKWING_CACHE_MAX_STORE_BYTES`, `SPARKWING_CACHE_MAX_STORE_OBJECTS`)
-bound the artifact, dependency-archive and upload trees together rather
-than one object. At or above either one the service refuses every upload
+bound the artifact, dependency-archive, upload, team and git mirror trees
+together rather than one object. At or above either one the service refuses every upload
 with `507` naming the ceiling, while reads and deletes keep working, and
 a later measurement that finds the store back under the ceiling thaws
 it. `--warn-store-bytes` and `--warn-store-objects`

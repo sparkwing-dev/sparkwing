@@ -396,10 +396,15 @@ the controller and confines the request to that team:
   tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
   see or replace each other's bytes. A team's bins count toward the store
   ceiling.
-- `/git/register` and `/git/<name>/...` reach only an `https` repository
+- `/git/<name>/...` reads only an `https` repository the operator
   registered under the name `repo-<sha256 of the URL>`, the name runners
-  already derive. The mirrors are shared, so a grant never clones through the
-  cache's SSH key and cannot squat a name another team's runner will clone.
+  already derive. The mirrors are shared, so a grant never reads a mirror
+  cloned through the cache's SSH key.
+- `/git/register` refuses a grant with 403. A registration clones a
+  repository onto the cache volume, so the operator, or the controller's
+  run-scoped proxy holding the operator token, registers mirrors, and a run
+  holding a grant fetches from a mirror already registered without asking.
+  The mirrors count toward the store ceiling.
 - Every other route (`/sync/...`, `/git/refresh`, `/archive`, `/file`,
   `/tree-hash`, `/branch-contains`, `/repos`, `/upload`, `/uploads/...`,
   `/admin/...`) refuses a grant with 401.

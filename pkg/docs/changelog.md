@@ -32,10 +32,11 @@ unlock.
   controller signs with the cache token it already holds, so a runner need not
   hold the cache's token. A grant names one run's team, lasts six hours, and is
   verified offline. A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
-  only public `https` mirrors under their URL-derived name, and is refused on
-  seeding, refresh, archive, upload and admin routes. A team's bins count
-  toward the store ceiling. The operator token is unchanged.
+  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
+  only public `https` mirrors registered under their URL-derived name, and is
+  refused on registration (403), seeding, refresh, archive, upload and admin
+  routes. A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
 
 - **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
   the cache refuses every download a process serves once it has sent that many
@@ -142,10 +143,11 @@ unlock.
   controller signs with the cache token it already holds, so a runner need not
   hold the cache's token. A grant names one run's team, lasts six hours, and is
   verified offline. A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, clones
-  only public `https` mirrors under their URL-derived name, and is refused on
-  seeding, refresh, archive, upload and admin routes. A team's bins count
-  toward the store ceiling. The operator token is unchanged.
+  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
+  only public `https` mirrors registered under their URL-derived name, and is
+  refused on registration (403), seeding, refresh, archive, upload and admin
+  routes. A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
 - **web:** Sign in with Google on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
   provider, the sign-in page offers Google. `GET /auth/google/start` and

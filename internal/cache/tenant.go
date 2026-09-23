@@ -36,6 +36,7 @@ func callerFrom(r *http.Request) cacheCaller {
 // it. It fronts the blob stores and the clone routes a runner needs; seeding,
 // refresh, archives, uploads and the admin routes stay behind requireToken,
 // because the mirrors are shared and a seed lands one team's source in them.
+// Registration answers a grant with 403 itself.
 func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -100,10 +101,9 @@ func withBlobDirs(next func(http.ResponseWriter, *http.Request, blobDirs)) http.
 	}
 }
 
-// safety: the mirrors are shared by every team, so a grant reaches only a
+// safety: the mirrors are shared by every team, so a grant reads only a
 // mirror that holds nothing private: an https origin the cache clones with no
-// credential, under the one name derived from that URL. The derived name stops
-// one team squatting a name another team's runner will clone from.
+// credential, registered under the one name derived from that URL.
 func grantMayUseMirror(name, repoURL string) bool {
 	u, err := url.Parse(repoURL)
 	if err != nil || u.Scheme != "https" || u.User != nil {

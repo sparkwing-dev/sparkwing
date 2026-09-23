@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -138,26 +139,13 @@ func TestTeamBinWritesStopAtTheStoreCeiling(t *testing.T) {
 	}
 }
 
-// The mirrors are shared, so a grant clones only a public https origin, under
-// the name derived from its URL, and never a mirror the operator registered
-// from a private origin.
-func TestGrantsCloneOnlyPublicMirrorsUnderTheirDerivedName(t *testing.T) {
+// The mirrors are shared, so a grant never reads a mirror the operator
+// registered from a private origin.
+func TestGrantsReadOnlyPublicMirrors(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	grant := grantFor(t, token, "team-a")
-
 	private := "ssh://git@github.com/acme/private.git"
-	public := "https://github.com/acme/public.git"
-	refused := []struct{ name, repo string }{
-		{sourceurl.ClaimedRepoNameFromURL(private), private},
-		{"public", public},
-	}
-	for _, c := range refused {
-		path := "/git/register?name=" + url.QueryEscape(c.name) + "&repo=" + url.QueryEscape(c.repo)
-		if code, body := send(t, srv, http.MethodPost, path, grant, ""); code != http.StatusForbidden {
-			t.Errorf("grant registering %s as %q = %d, want 403: %s", c.repo, c.name, code, body)
-		}
-	}
 
 	repoNamesMu.Lock()
 	saved := repoNames
@@ -177,5 +165,52 @@ func TestGrantsCloneOnlyPublicMirrorsUnderTheirDerivedName(t *testing.T) {
 	}
 	if code, body := send(t, srv, http.MethodGet, "/git/operator-private/info/refs?service=git-upload-pack", grant, ""); code != http.StatusNotFound {
 		t.Errorf("grant reading the operator's private mirror = %d, want 404: %s", code, body)
+	}
+}
+
+// Registering a mirror clones a repository onto the cache volume, so it stays
+// with the operator: a grant cannot add mirrors, even of a public origin under
+// its derived name.
+func TestGrantsCannotRegisterMirrors(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	grant := grantFor(t, token, "team-a")
+	public := "https://git.example.invalid/acme/public.git"
+	name := sourceurl.ClaimedRepoNameFromURL(public)
+	path := "/git/register?name=" + url.QueryEscape(name) + "&repo=" + url.QueryEscape(public)
+	if code, body := send(t, srv, http.MethodPost, path, grant, ""); code != http.StatusForbidden {
+		t.Errorf("grant registering a public mirror under its derived name = %d, want 403: %s", code, body)
+	}
+	repoNamesMu.RLock()
+	_, registered := repoNames[name]
+	repoNamesMu.RUnlock()
+	if registered {
+		t.Errorf("a refused grant registration left %q registered", name)
+	}
+	if code, body := send(t, srv, http.MethodPost, path, token, ""); code != http.StatusOK {
+		t.Errorf("operator registering the same mirror = %d, want 200: %s", code, body)
+	}
+}
+
+// The mirrors sit on the same volume as the blob stores, so the store ceiling
+// counts them.
+func TestStoreCeilingCountsTheMirrors(t *testing.T) {
+	newBudgetedServer(t, "operator-token", egress.Config{})
+	previous := storeCeiling
+	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
+		Limit:   objectguard.CeilingLimit{MaxBytes: 1 << 40},
+		Subject: storeCeilingSubject, Remedy: storeCeilingRemedy,
+	})
+	t.Cleanup(func() { storeCeiling = previous })
+	mirror := filepath.Join(repoDir, "0123.git", "objects", "pack")
+	if err := os.MkdirAll(mirror, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirror, "pack-1.pack"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	measureStore(t.Context())
+	if got := storeCeiling.State().Bytes; got < 4096 {
+		t.Fatalf("store ceiling measured %d bytes, want the 4096-byte mirror pack counted", got)
 	}
 }
