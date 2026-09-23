@@ -350,8 +350,6 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 			sourceurl.ClaimedRepoNameFromURL("git@github.com:other/widgets.git") +
 			"&repo=git@github.com:other/widgets.git",
 		"foreign cache name": base + "/other/info/refs?service=git-upload-pack",
-		"a run no signed delivery created": "/api/v1/runs/run-typed/gitcache/git/" +
-			cacheName + "/info/refs?service=git-upload-pack",
 	} {
 		t.Run(name, func(t *testing.T) {
 			resp := request(http.MethodPost, path, owner, "")
@@ -361,7 +359,15 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 			}
 		})
 	}
-	resp := request(http.MethodGet, base+"/"+cacheName+"/info/refs?service=git-upload-pack", stranger, "")
+	// The operator's CLI runs have no webhook delivery, and an agent built
+	// before cache grants reads their source here.
+	resp := request(http.MethodGet, "/api/v1/runs/run-typed/gitcache/git/"+
+		cacheName+"/info/refs?service=git-upload-pack", owner, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the operator's CLI run reading its own source = %d, want 200", resp.StatusCode)
+	}
+	resp = request(http.MethodGet, base+"/"+cacheName+"/info/refs?service=git-upload-pack", stranger, "")
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("unclaimed runner status = %d, want 403", resp.StatusCode)
@@ -371,8 +377,8 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("unscoped proxy status = %d, want 403", resp.StatusCode)
 	}
-	if len(cacheRequests) != 3 {
-		t.Fatalf("cache requests = %v, want only the three claimed-source reads", cacheRequests)
+	if len(cacheRequests) != 4 {
+		t.Fatalf("cache requests = %v, want only the four claimed-source reads", cacheRequests)
 	}
 }
 

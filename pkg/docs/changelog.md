@@ -528,6 +528,13 @@ unlock.
 
 ### Fixed
 
+- **controller:** an agent built before cache grants fetches an operator run's
+  source through `/api/v1/runs/{id}/gitcache` again when no webhook delivery
+  created the run, such as one `sparkwing run` submitted. The proxy answered
+  its register with 403 and the node's claim expired unstarted. A runner token
+  of the `default` team with a live claim on the run now reaches the run's own
+  source, as its cache grant already does; another team's token, a token with
+  no claim, and a repository that is not the run's source are still refused.
 - **runner:** a Kubernetes Job's `run-node` asks the controller for its run's
   cache grant with the Job's runner token, as the trigger launcher and a pooled
   runner already do. A Job whose dispatcher handed it no grant failed to fetch
