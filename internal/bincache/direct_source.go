@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -115,14 +116,20 @@ func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 }
 
 // directOptions bound a direct fetch. A nil lookup skips the address check,
-// which only a test serving from loopback wants.
+// which only a test serving from loopback wants, and a zero fetchTimeout
+// leaves the fetch to ctx.
 type directOptions struct {
-	protocols string
-	lookup    sourceurl.Lookup
+	protocols    string
+	lookup       sourceurl.Lookup
+	fetchTimeout time.Duration
 }
 
 func defaultDirectOptions() directOptions {
-	return directOptions{protocols: directProtocols, lookup: net.DefaultResolver.LookupIPAddr}
+	return directOptions{
+		protocols:    directProtocols,
+		lookup:       net.DefaultResolver.LookupIPAddr,
+		fetchTimeout: 10 * time.Minute,
+	}
 }
 
 func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
@@ -202,17 +209,17 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 
 	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
-	run := func(env []string, args ...string) (string, error) {
+	run := func(ctx context.Context, env []string, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = env
+		killGroupOnCancel(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w: %s", args[0], err, strings.TrimSpace(string(out)))
 		}
 		return strings.TrimSpace(string(out)), nil
 	}
-	git := func(args ...string) (string, error) { return run(localEnv, args...) }
-	fetch := func(args ...string) (string, error) { return run(fetchEnv, args...) }
+	git := func(args ...string) (string, error) { return run(ctx, localEnv, args...) }
 	if _, statErr := os.Stat(filepath.Join(mirror, "HEAD")); statErr != nil {
 		if err := os.RemoveAll(mirror); err != nil {
 			return fmt.Errorf("direct source: clear mirror: %w", err)
@@ -225,7 +232,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		return fmt.Errorf("direct source: %w", err)
 	}
 
-	configured, err := fetch("-C", mirror, "config", "--get", "core.sshCommand")
+	configured, err := run(ctx, fetchEnv, "-C", mirror, "config", "--get", "core.sshCommand")
 	// safety: git exits 1 when the key is unset; any other failure is a config the fetch cannot read either.
 	var exitErr *exec.ExitError
 	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
@@ -235,8 +242,17 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 	// safety: a redirect would carry the fetch, and any credential a helper
 	// hands it, to a host nothing here checked.
 	fetchRef := func(ref string) error {
-		_, err := fetch("-C", mirror, "-c", "http.followRedirects=false",
+		fetchCtx := ctx
+		if opts.fetchTimeout > 0 {
+			var cancel context.CancelFunc
+			fetchCtx, cancel = context.WithTimeout(ctx, opts.fetchTimeout)
+			defer cancel()
+		}
+		_, err := run(fetchCtx, fetchEnv, "-C", mirror, "-c", "http.followRedirects=false",
 			"fetch", "--quiet", "--no-tags", "--depth", "1", "--", remote, ref)
+		if err != nil && ctx.Err() == nil && errors.Is(fetchCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("timed out after %s", opts.fetchTimeout)
+		}
 		return err
 	}
 

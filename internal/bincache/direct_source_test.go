@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const testSHA1 = "0123456789abcdef0123456789abcdef01234567"
@@ -439,5 +440,25 @@ func TestDirectMirrorPathSharesOneMirrorAcrossSpellings(t *testing.T) {
 			t.Errorf("%q and %q share mirror %s", remote, other, path)
 		}
 		seen[path] = remote
+	}
+}
+
+func TestDirectCheckoutGivesUpOnAFetchThatHangs(t *testing.T) {
+	release := make(chan struct{})
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(hang.Close)
+	t.Cleanup(func() { close(release) })
+
+	opts := httpOnly
+	opts.fetchTimeout = 300 * time.Millisecond
+	err := directCheckout(context.Background(), t.TempDir(), hang.URL+"/o/r.git", "main", testSHA1,
+		filepath.Join(t.TempDir(), "run"), opts)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a fetch timeout", err)
 	}
 }
