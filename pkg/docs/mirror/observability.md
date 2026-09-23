@@ -807,9 +807,11 @@ together carry the total past it.
 ### Persistence and history
 
 Counting is in memory, and only the controller persists it. It writes
-each principal's month total to its store on the maintenance sweep and
-reloads it at startup, so a restart resumes the month rather than handing
-everyone a fresh budget, and no response costs a store write; that sweep
+each principal's month total and its own total for the UTC day to its
+store on the maintenance sweep and reloads both at startup, so a restart
+resumes the month rather than handing everyone a fresh budget and resumes
+the day rather than reopening the daily cap, and no response costs a
+store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
 on every tick. The logs service and the cache count in memory alone: they
 park nothing for a flush that will never come, and their counters start

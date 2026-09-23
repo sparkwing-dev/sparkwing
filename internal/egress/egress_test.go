@@ -830,3 +830,42 @@ func TestHandleAbortsAResponseTheBudgetCut(t *testing.T) {
 		t.Fatalf("the client received %d bytes past a 64-byte cap", len(body))
 	}
 }
+
+func TestFlushDayHandsOverTodaysTotalAndRestoreDayResumesIt(t *testing.T) {
+	m, clock := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T10:00:00Z")
+	m.Record("alice", egress.ClassArtifact, 600)
+	m.Record("bob", egress.ClassLog, 400)
+	var got []egress.DayUsage
+	persist := func(u egress.DayUsage) error { got = append(got, u); return nil }
+	if err := m.FlushDay(persist); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.FlushDay(persist); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != (egress.DayUsage{Day: "2026-09-13", Bytes: 1000}) {
+		t.Fatalf("FlushDay = %+v, want one 2026-09-13 total of 1000", got)
+	}
+
+	restarted, _ := meterAt(t, egress.Config{GlobalDailyCapBytes: 1000}, "2026-09-13T11:00:00Z")
+	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-12", Bytes: 5000})
+	if err := restarted.Check("carol"); err != nil {
+		t.Fatalf("yesterday's total closed today's cap: %v", err)
+	}
+	restarted.RestoreDay(got[0])
+	restarted.RestoreDay(egress.DayUsage{Day: "2026-09-13", Bytes: 10})
+	if state := restarted.State(); state.GlobalDayBytes != 1000 {
+		t.Fatalf("GlobalDayBytes after RestoreDay = %d, want 1000 and never lowered", state.GlobalDayBytes)
+	}
+	if err := restarted.Check("carol"); !errors.Is(err, egress.ErrBudgetExceeded) {
+		t.Fatalf("Check after restoring a spent day = %v, want the cap's refusal", err)
+	}
+
+	*clock = at(t, "2026-09-14T00:00:01Z")
+	if err := m.FlushDay(func(u egress.DayUsage) error {
+		t.Fatalf("FlushDay after the day rolled with nothing sent = %+v, want no write", u)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

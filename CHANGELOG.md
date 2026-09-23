@@ -159,6 +159,11 @@ unlock.
 
 ### Fixed
 
+- **controller:** a restart no longer reopens the egress daily cap. Only the
+  per-principal month totals were persisted, so a controller restarted after
+  reaching `--egress-daily-cap-bytes` served the whole cap again that day. The
+  day's process total is now written on the maintenance sweep beside the
+  month totals and restored before the listener binds.
 - **egress:** the daily cap and the monthly budget are hard byte caps. They
   were checked once before a response started, so parallel downloads begun
   just under a cap each finished past it. Bytes are now charged as they are

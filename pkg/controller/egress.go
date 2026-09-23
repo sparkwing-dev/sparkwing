@@ -191,15 +191,20 @@ func (s *Server) egressHealth() (map[string]any, []string) {
 		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
 }
 
-// safety: a restarted controller that started the month over would hand
-// every principal a fresh budget, so this month's totals come back from
-// the store before the listener binds.
+// egressDayPrincipal names the row holding this controller's total for one
+// UTC day. Its month column carries the day, "2006-01-02", which no
+// principal's month row can share.
+const egressDayPrincipal = "(day)"
+
+// safety: a restarted controller that started the month or the day over
+// would hand every principal a fresh budget and reopen the daily cap, so
+// both come back from the store before the listener binds.
 func (s *Server) loadEgressUsage(ctx context.Context) {
 	if s.egress == nil || s.store == nil {
 		return
 	}
-	month := time.Now().UTC().Format("2006-01")
-	rows, err := s.store.ListEgressUsage(ctx, month)
+	now := time.Now().UTC()
+	rows, err := s.store.ListEgressUsage(ctx, now.Format("2006-01"))
 	if err != nil {
 		s.logger.Warn("egress usage reload failed", "err", err)
 		return
@@ -209,6 +214,18 @@ func (s *Server) loadEgressUsage(ctx context.Context) {
 		usages = append(usages, egress.Usage{Principal: row.Principal, Month: row.Month, Bytes: row.Bytes})
 	}
 	s.egress.Restore(usages)
+
+	day := now.Format("2006-01-02")
+	rows, err = s.store.ListEgressUsage(ctx, day)
+	if err != nil {
+		s.logger.Warn("egress daily usage reload failed", "err", err)
+		return
+	}
+	for _, row := range rows {
+		if row.Principal == egressDayPrincipal {
+			s.egress.RestoreDay(egress.DayUsage{Day: day, Bytes: row.Bytes})
+		}
+	}
 }
 
 // perf: the reaper calls this on its own tick, so metering costs one
@@ -238,6 +255,16 @@ func (s *Server) flushEgressUsage(ctx context.Context) {
 	})
 	if err != nil {
 		s.logger.Warn("egress usage flush failed", "err", err, "principals", principals)
+	}
+	err = s.egress.FlushDay(func(usage egress.DayUsage) error {
+		return s.store.RecordEgressUsage(ctx, []store.EgressUsage{{
+			Principal: egressDayPrincipal,
+			Month:     usage.Day,
+			Bytes:     usage.Bytes,
+		}})
+	})
+	if err != nil {
+		s.logger.Warn("egress daily usage flush failed", "err", err)
 	}
 }
 

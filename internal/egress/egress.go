@@ -27,10 +27,10 @@
 // service sets only the daily alarm and leaves refusals to the services
 // that know who is asking.
 //
-// Counting is in memory. [Meter.Flush] hands moved totals to a caller's
-// persistence operation and acknowledges them only after that operation
-// succeeds. [Meter.Restore] loads them back at startup; nothing here
-// writes one row per response.
+// Counting is in memory. [Meter.Flush] and [Meter.FlushDay] hand moved
+// totals to a caller's persistence operation and acknowledge them only
+// after that operation succeeds. [Meter.Restore] and [Meter.RestoreDay]
+// load them back at startup; nothing here writes one row per response.
 package egress
 
 import (
@@ -341,6 +341,7 @@ type Meter struct {
 	monthBytes     int64
 	day            string
 	dayBytes       int64
+	dayDirty       bool
 	alarm          bool
 	alarmSince     time.Time
 	refused        uint64
@@ -469,6 +470,7 @@ func (m *Meter) charge(principal string, class Class, n int64, bounded bool) (in
 	st.dirty = st.dirty || allowed > 0
 	m.monthBytes += allowed
 	m.dayBytes += allowed
+	m.dayDirty = m.dayDirty || allowed > 0
 	raised := m.raiseAlarmLocked(now)
 	capped := allowed > 0 && m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes &&
 		m.dayBytes-allowed < m.cfg.GlobalDailyCapBytes
@@ -706,6 +708,59 @@ func (m *Meter) Restore(usages []Usage) {
 	}
 }
 
+// DayUsage is the process's total for one UTC day, as a service persists
+// and reloads it so a restart does not reopen the daily cap.
+type DayUsage struct {
+	// Day is the UTC day the bytes fell in, as "2006-01-02".
+	Day   string
+	Bytes int64
+}
+
+// FlushDay gives persist today's process total when it moved since the
+// last successful FlushDay, and acknowledges it only when persist
+// succeeds and nothing was charged meanwhile.
+func (m *Meter) FlushDay(persist func(DayUsage) error) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	m.rollGlobal(m.now().UTC())
+	if !m.dayDirty {
+		m.mu.Unlock()
+		return nil
+	}
+	usage := DayUsage{Day: m.day, Bytes: m.dayBytes}
+	m.mu.Unlock()
+	if err := persist(usage); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.day == usage.Day && m.dayBytes == usage.Bytes {
+		m.dayDirty = false
+	}
+	return nil
+}
+
+// RestoreDay loads a persisted process total, so a restarted service
+// resumes the day where it left off rather than reopening the daily cap.
+// A total for another day is ignored, and one below what this process has
+// already counted never lowers it.
+func (m *Meter) RestoreDay(u DayUsage) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now().UTC()
+	m.rollGlobal(now)
+	if u.Day != m.day || u.Bytes <= m.dayBytes {
+		return
+	}
+	m.dayBytes = u.Bytes
+	m.raiseAlarmLocked(now)
+}
+
 // State snapshots the meter for the health route and the top-consumers
 // view.
 func (m *Meter) State() State {
@@ -847,6 +902,7 @@ func (m *Meter) rollGlobal(now time.Time) {
 	if m.day != day {
 		m.day = day
 		m.dayBytes = 0
+		m.dayDirty = false
 		m.alarm = false
 		m.alarmSince = time.Time{}
 	}
