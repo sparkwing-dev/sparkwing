@@ -180,6 +180,9 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) cronTickOnce(ctx context.Context) {
+	if !s.Metering() {
+		ctx = store.WithoutCreditMetering(ctx)
+	}
 	var report crons.TickReport
 	ran, err := s.store.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
 		// safety: a tick that outlives the lease is a tick running beside

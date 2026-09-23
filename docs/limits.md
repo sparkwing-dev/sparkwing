@@ -1,5 +1,11 @@
 # Tenant limits
 
+These free-tier shares, funded tiers, credit checks, and storage charges apply
+to controllers with a signed metering license. A signed `multi-team` license
+also grants metering. On an unlicensed self-hosted controller, teams have no
+credit balance and storage counter routes report unlimited room. Ordinary
+storage quotas set by its operator still apply.
+
 A multi-team controller hosts teams that pay nothing. This page lists what such
 a team can consume that costs the operator money or grows with time, and what
 bounds each one. A team with no credits runs its work on its own machines, so

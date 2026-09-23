@@ -871,8 +871,21 @@ func (s *Server) Handler() http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.Metering() {
+			path := r.URL.Path
+			if strings.HasPrefix(path, "/api/v1/credits") ||
+				strings.HasPrefix(path, "/api/v1/team/billing") ||
+				(strings.HasPrefix(path, "/api/v1/tokens/") && strings.HasSuffix(path, "/metered")) {
+				http.NotFound(w, r)
+				return
+			}
+			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // safety: neither mux is wired to the other and no handler runs, so a caller
@@ -1520,13 +1533,17 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"run_id", p[0], "node_id", p[1])
 				}
 			}
-			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, ctx)
+			reapCtx := ctx
+			if !s.Metering() {
+				reapCtx = store.WithoutCreditMetering(ctx)
+			}
+			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
 			if err != nil {
 				s.logger.Error("reap failed", "err", err)
 				continue
 			}
 			for _, id := range ids {
-				s.settleExpiredTriggerClaim(ctx, id)
+				s.settleExpiredTriggerClaim(reapCtx, id)
 			}
 			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
 				5*store.DefaultLeaseDuration,
@@ -1611,6 +1628,10 @@ func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) sampleCreditLedger(ctx context.Context) {
+	if !s.Metering() {
+		ledgerSnapshot.set(store.CreditLedgerTotals{})
+		return
+	}
 	totals, err := s.store.CreditLedgerTotals(ctx)
 	if err != nil {
 		if ctx.Err() == nil {

@@ -36,6 +36,7 @@ func dashboardCapabilitiesHandler(opts HandlerOptions) http.HandlerFunc {
 			// safety: an unreachable controller leaves the identity fields out, which renders the single-team dashboard.
 			if identity, err := controllerIdentityCapabilities(r.Context(), controllerURL, sessionIDFromContext(r.Context())); err == nil {
 				caps.Teams = identity.Teams
+				caps.Billing = identity.Billing
 				caps.Auth = identity.Auth
 				caps.GitHubApp = identity.GitHubApp
 			}
@@ -46,6 +47,7 @@ func dashboardCapabilitiesHandler(opts HandlerOptions) http.HandlerFunc {
 
 type identityCapabilities struct {
 	Teams     *backend.CapabilitiesTeams     `json:"teams"`
+	Billing   *backend.CapabilitiesBilling   `json:"billing"`
 	Auth      *backend.CapabilitiesAuth      `json:"auth"`
 	GitHubApp *backend.CapabilitiesGitHubApp `json:"github_app"`
 }

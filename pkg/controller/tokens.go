@@ -66,6 +66,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if req.Metered && !s.Metering() {
+		http.NotFound(w, r)
+		return
+	}
 	if req.Principal == "" {
 		writeError(w, http.StatusBadRequest, errors.New("principal required"))
 		return

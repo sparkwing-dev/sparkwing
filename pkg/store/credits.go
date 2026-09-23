@@ -1711,6 +1711,18 @@ func creditLimit(limit int) int {
 // so no credit is ever charged for them.
 var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
 
+type creditMeteringDisabledKey struct{}
+
+// WithoutCreditMetering keeps claims, trigger settlement and storage writes
+// out of the credit ledger while preserving token-bound claim ownership.
+func WithoutCreditMetering(ctx context.Context) context.Context {
+	return context.WithValue(ctx, creditMeteringDisabledKey{}, true)
+}
+
+func creditMeteringDisabled(ctx context.Context) bool {
+	return ctx.Value(creditMeteringDisabledKey{}) == true
+}
+
 // triggerCreditNodeID is the node id on the ledger rows that bill a trigger's
 // own step, the planning and orchestration its holder runs on the claiming
 // pool, which is no node of the run.
@@ -1725,6 +1737,9 @@ const triggerCreditNodeID = ""
 func reserveTriggerCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, triggerID string, now time.Time,
 ) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
 	if err != nil || !metered {
 		return err
@@ -1789,6 +1804,9 @@ func refuseFrozenTeamTx(
 // running. A step shorter than the minimum pays the minimum, and a claim that
 // never started its run is refunded whole.
 func settleTriggerCreditsTx(ctx context.Context, tx *storeTx, triggerID string, now time.Time, refundAll bool) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	var team string
 	var reservedAt int64
 	var lease sql.NullInt64
@@ -1869,6 +1887,9 @@ func (s *Store) reserveNodeCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
 	executing bool,
 ) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
 	if err != nil || !metered {
 		return err

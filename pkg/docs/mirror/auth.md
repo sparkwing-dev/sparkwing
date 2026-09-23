@@ -97,10 +97,18 @@ the balance and how long it had been spent. Both the balance and the instant it
 ran out are the team's own, so one team spending its grants refuses and cancels
 that team's nodes and leaves every other team on the controller running.
 
-A token with no marker is neither checked nor charged, so a deployment that
-marks none bills nothing.
+A token with no marker is neither checked nor charged. A controller without a
+signed metering license ignores even a previously marked token when it claims
+work, and refuses requests to mint or mark a metered token.
 
 ## Credits
+
+Credits are a Sparkwing Cloud and enterprise feature. The controller requires
+the `metering` feature in its signed license. A signed `multi-team` license
+includes metering, including licenses issued before `metering` was named.
+Without either feature, credit and team billing routes return `404`, claims
+never check a balance or write charges, and the dashboard omits Billing.
+Customers who need metering can contact Korey for help running sparkwing-ops.
 
 Cloud runner time is prepaid. One credit is one second of one vCPU, and
 20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
@@ -652,7 +660,7 @@ not no authentication.
 A controller holds one team, `default`, unless it runs with a signed
 multi-team license. The license is one line,
 `base64url(payload).base64url(signature)`, where the payload is JSON naming
-`features` (`multi-team`), `issued_to`, `issued_at` and `expires_at` (RFC
+`features` (`multi-team`, `metering`), `issued_to`, `issued_at` and `expires_at` (RFC
 3339), and the signature is Ed25519 over those payload bytes. The controller
 verifies it against a public key compiled into the binary and reads it from
 `--license-file` or from `SPARKWING_LICENSE`. A missing, malformed, expired or

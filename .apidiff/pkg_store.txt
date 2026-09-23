@@ -2440,6 +2440,7 @@ func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Conte
 func WithRepoFilter(ctx context.Context, filter RepoFilter) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
+func WithoutCreditMetering(ctx context.Context) context.Context
 
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

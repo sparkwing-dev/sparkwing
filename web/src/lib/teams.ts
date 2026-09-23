@@ -5,6 +5,7 @@ export type Role = "owner" | "editor" | "reader";
 export interface Capabilities {
   mode: string;
   teams?: { enabled: boolean };
+  billing?: { enabled: boolean };
   auth?: { providers: string[] };
   github_app?: { slug: string; source_tokens: boolean };
 }
@@ -37,6 +38,10 @@ export type WaitlistedMe = Omit<Me, "active_team">;
 
 export function teamsEnabled(caps: Capabilities | null): boolean {
   return caps?.teams?.enabled === true;
+}
+
+export function billingEnabled(caps: Capabilities | null): boolean {
+  return caps?.billing?.enabled === true;
 }
 
 const roleRank: Record<Role, number> = { reader: 0, editor: 1, owner: 2 };

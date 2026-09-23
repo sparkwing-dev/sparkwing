@@ -4433,9 +4433,9 @@ paths:
     get:
       x-sparkwing-scope: public
       tags: [teams]
-      summary: Report whether this controller hosts teams and which sign-in providers it offers.
+      summary: Report which licensed team and billing features this controller offers.
       description: >-
-        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only when the controller holds a valid multi-team license. `auth.providers` lists `google` only when that license is present and a Google client is configured.
+        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only with a valid multi-team license. `billing.enabled` is true with a valid metering or multi-team license. `auth.providers` lists `google` only when a multi-team license is present and a Google client is configured.
       security: []
       responses:
         "200":
@@ -4445,10 +4445,16 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.capabilitiesResp
                 type: object
-                required: [teams, auth, claims]
+                required: [teams, billing, auth, claims]
                 properties:
                   teams:
                     x-sparkwing-go-type: pkg/controller.capabilitiesTeams
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  billing:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesBilling
                     type: object
                     required: [enabled]
                     properties:

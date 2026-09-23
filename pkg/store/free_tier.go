@@ -118,6 +118,9 @@ func (s *Store) StorageStandingFor(ctx context.Context, team Team) (_ StorageSta
 }
 
 func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStanding, error) {
+	if creditMeteringDisabled(ctx) {
+		return StorageStanding{Tier: TeamTierFunded}, nil
+	}
 	allowance, err := creditSettingTx(ctx, tx, metaKeyStorageFreeAllowanceBytes, DefaultFreeAllowanceBytes)
 	if err != nil {
 		return StorageStanding{}, err
@@ -203,6 +206,9 @@ func freeStoragePaused(team Team) error {
 // holds no slot and cannot take one, or that already started
 // [MaxFreeRunsPerDay] runs in the last 24 hours.
 func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	if !holdsFreeAllowance(team) {
 		return nil
 	}
@@ -237,6 +243,9 @@ func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Ti
 // started with. The slot row is locked until the caller's transaction ends,
 // so two appends cannot both count the same room.
 func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal string, bytes int64, now time.Time) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	if bytes <= 0 {
 		return nil
 	}

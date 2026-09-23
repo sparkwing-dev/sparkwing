@@ -19,6 +19,20 @@ the backup is the only way back.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.
 
+## Metering needs a signed license
+
+A controller without a signed `metering` or `multi-team` feature no longer
+serves credit or team billing routes, accepts metered token changes, checks
+balances at claim time, or writes credit charges. Its dashboard hides Billing,
+and its storage-tier checks give every team unlimited room. Operator-set
+storage quotas still apply.
+
+An existing signed `multi-team` license includes metering without re-issuance.
+For a deployment that used credits without a multi-team license, contact Korey
+for a metering license and help running sparkwing-ops before upgrading. An
+unlicensed deployment can upgrade without a data migration; stored credit
+rows and token markers remain dormant.
+
 ## Dashboard session and CSRF cookies carry the `__Host-` prefix
 
 On a dashboard that keeps `Secure` cookies, the session and CSRF cookies are

@@ -10,6 +10,7 @@ import {
   type WaitlistedMe,
   acceptInvitation,
   renameTeam,
+  billingEnabled,
 } from "@/lib/teams";
 import { githubAppEnabled } from "@/lib/githubApp";
 import { refreshTeamState, useTeamState } from "@/lib/useTeam";
@@ -30,7 +31,9 @@ export function teamTabs(caps: Capabilities | null) {
     ...(githubAppEnabled(caps)
       ? [{ href: "/team/github", label: "GitHub" }]
       : []),
-    { href: "/team/billing", label: "Billing" },
+    ...(billingEnabled(caps)
+      ? [{ href: "/team/billing", label: "Billing" }]
+      : []),
   ];
 }
 

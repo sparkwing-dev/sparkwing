@@ -38,6 +38,14 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+The self-hosted controller runs without credit metering unless a signed license
+grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
+no credit or team billing routes, and gives teams unlimited room in the
+controller's storage-tier checks. Operator-set storage quotas still apply.
+The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
+metering can contact Korey for help running sparkwing-ops. See
+[Credits](auth.md#credits) for the licensed behavior.
+
 ### Storage class
 
 When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
@@ -426,7 +434,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
 `GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
 the team still has stored and what the storage charge and the sweep both
 measure. The quota route does not take the allowance: rewriting a quota leaves
-it where it stands, so the two cannot overwrite each other. What a team retains
-is charged against the credit ledger once an operator prices storage;
-[Credits](auth.md) describes the rate, the free allowance, which bytes count,
-and what a spent balance does.
+it where it stands, so the two cannot overwrite each other. A licensed
+metering controller charges retained bytes against the credit ledger when
+the operator prices storage. [Credits](auth.md) describes the rate, the free
+allowance, which bytes count, and what a spent balance does.

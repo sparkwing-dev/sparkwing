@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -34,6 +36,10 @@ type creditsFixture struct {
 }
 
 func newCreditsFixture(t *testing.T, metered bool) creditsFixture {
+	return newCreditsFixtureWithLicense(t, metered, license.FeatureMetering)
+}
+
+func newCreditsFixtureWithLicense(t *testing.T, metered bool, feature string) creditsFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -56,7 +62,16 @@ func newCreditsFixture(t *testing.T, metered bool) creditsFixture {
 	if err != nil {
 		t.Fatalf("reader token: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	ctrl := controller.New(st, nil).EnableAuthFromStore()
+	if feature != "" {
+		pub, priv := licensetest.NewKey(t)
+		raw := licensetest.Sign(t, priv, licensetest.Terms{
+			Features: []string{feature}, IssuedTo: "test",
+			IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+		})
+		ctrl.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+	}
+	srv := httptest.NewServer(ctrl.Handler())
 	t.Cleanup(srv.Close)
 	return creditsFixture{
 		url: srv.URL, store: st,
