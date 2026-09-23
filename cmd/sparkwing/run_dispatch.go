@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -533,11 +532,6 @@ func triggerSource(prefix string) string {
 
 func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source string, flags runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
-	var userName string
-	if u, err := user.Current(); err == nil {
-		userName = u.Username
-	}
-
 	branch, sha, repositorySlug, repoURL := detectRemoteGit()
 	if repoURL == "" {
 		return nil, fmt.Errorf("pipeline trigger %q: no git origin detected from cwd. "+
@@ -606,7 +600,6 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		Args:     args,
 		Trigger: client.TriggerMeta{
 			Source: source,
-			User:   userName,
 			Env:    environmentValues,
 		},
 		Git: client.GitMeta{

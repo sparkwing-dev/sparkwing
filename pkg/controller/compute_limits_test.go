@@ -442,7 +442,7 @@ func TestComputeLimits_TriggeredRunsCountAgainstTheTriggeringPrincipal(t *testin
 
 	body := map[string]any{
 		"pipeline": "demo",
-		"trigger":  map[string]any{"source": "manual", "user": "operator"},
+		"trigger":  map[string]any{"source": "manual"},
 	}
 	status, first := creditsRequest(t, http.MethodPost, f.url+"/api/v1/triggers", writer, body)
 	if status != http.StatusAccepted {

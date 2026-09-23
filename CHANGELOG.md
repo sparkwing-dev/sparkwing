@@ -266,6 +266,15 @@ unlock.
 
 ### Changed
 
+- **controller (Breaking):** a run is attributed to the credential that
+  submitted it. `POST /api/v1/triggers` took the run's user from
+  `trigger.user` in the body, so any caller could put a run under another
+  person's name. The controller now records the authenticated principal and
+  refuses a body that carries
+  `components.schemas.TriggerRequest.properties.trigger.properties.user`; the
+  CLI no longer sends it. See
+  [migration guide](docs/migrations/_unreleased.md#trigger-user-comes-from-the-credential).
+
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
