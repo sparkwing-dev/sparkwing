@@ -121,6 +121,36 @@ code as top-level fields:
 Logs are not part of this payload; fetch them separately with
 `sparkwing runs logs --run <id>` or from the logs service.
 
+## Log completeness
+
+A node's log can lose lines between the runner and the logs service: an
+append that fails past its retries, a runner killed mid-stream, and
+similar. The runner numbers every line it writes and, when the node
+finishes, sends one seal per stream naming how many it numbered and how
+many it failed to deliver. The seal sits beside the log, never in it, and
+moves to the object store with the run's logs when the run is archived.
+
+Readers judge each finished node's newest execution attempt from its
+seals, so a clean retry reads `complete` even when the attempt it
+replaced was cut off:
+
+| State | Meaning | The reader shows |
+|---|---|---|
+| `complete` | Every stream was sealed, no numbers are missing, and the runner dropped nothing. | Nothing. |
+| `incomplete` | Sealed, but the service never received some numbered lines or the runner reported drops. | `— logs incomplete: N lines missing —` |
+| `cut_off` | A stream that numbered its lines sent no seal within 60 seconds of the node finishing: the runner died or lost its connection mid-stream. | `— logs cut off: the log stream ended without the runner's confirmation after line N —` |
+| `unconfirmed` | The runner never numbered its lines, which is how a runner released before seals writes. Nothing says whether the log is whole. | `— logs unconfirmed: this runner does not report whether its log is complete (N lines stored) —` |
+| `streaming` | The node is running, or finished less than 60 seconds ago and its seal has not arrived. | Nothing yet. |
+| `unknown` | The log store keeps no seals: a filesystem, S3 or stdout logs surface. | Nothing. |
+
+`sparkwing runs logs` prints the line after the node's log and the
+dashboard draws it below the log. Neither stores it, counts it, or puts it
+in a download. `N lines missing` counts, per stream, the larger of the
+numbers the service never received and the lines the runner reported
+dropping. The service tracks received numbers in memory, so a logs
+service that restarts mid-stream trusts every number the stream sent
+before the restart.
+
 ## Failure excerpts
 
 A node that fails while running a command records a bounded excerpt of

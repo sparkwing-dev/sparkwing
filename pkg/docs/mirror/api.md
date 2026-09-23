@@ -41,6 +41,20 @@ Logs live in a separate service keyed by run and node
 stream for live tail. The routes and their scopes are in
 [api-reference.md](api-reference.md).
 
+A runner numbers its appends: each carries `X-Sparkwing-Log-Stream`, a
+name for the writer, and `X-Sparkwing-Log-Seq`, the line's position in
+that stream from 1. When the node finishes, the runner seals each stream
+with `POST /api/v1/logs/{runID}/{nodeID}/seal`, a JSON body naming the
+stream, its `final_seq`, the `lines` and `bytes` it numbered, the lines
+it `dropped` without delivering, and the `sha256` of everything it
+numbered. A seal carries the same claim headers as an append, so only
+the node's current claim holder can send one, and a seal into another
+team's run answers `403`. Sealing a stream twice is a no-op.
+`GET` on the same path returns what the service holds for the node's
+streams; the dashboard's `GET /api/v1/runs/{id}/logs/{node}/completeness`
+turns that into one verdict. See
+[Log completeness](observability.md#log-completeness).
+
 ## Run coordination
 
 A pipeline binary needs more than node state from whatever holds its

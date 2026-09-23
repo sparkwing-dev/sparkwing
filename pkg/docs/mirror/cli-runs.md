@@ -735,6 +735,12 @@ concurrency_wait, cache_hit, ...) -- a different record shape. That is
 any profile whose state is a shared database, an object store or a
 controller, and any profile that declares its own logs surface.
 
+When a node's logs live in a logs service, a line framed by em dashes
+follows its log when the log is not known to be whole: lines missing
+after the runner sealed it, a stream that ended without the runner's
+seal, or a runner that does not seal. The line is the reader's, never
+part of the stored log, and JSON output omits it.
+
 ### Flags
 
 | Flag | Description |

@@ -46,13 +46,30 @@ func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, t
 			if err := renderJSONLStream(bytes.NewReader(data), opts, out); err != nil {
 				return err
 			}
+		} else if _, err := out.Write(data); err != nil {
+			return err
+		}
+		if jsonOut {
 			continue
 		}
-		if _, err := out.Write(data); err != nil {
-			return err
+		if line := completenessLine(ctx, b, runID, n); line != "" {
+			if _, err := fmt.Fprintln(out, line); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// completenessLine is what a reader prints after a node's log when the log
+// is not known to be whole. It is the reader's line, never part of the log,
+// and a store that cannot answer leaves the log as it is.
+func completenessLine(ctx context.Context, b backend.Backend, runID string, n *store.Node) string {
+	c, err := backend.NodeLogCompleteness(ctx, b, runID, n, time.Now())
+	if err != nil {
+		return ""
+	}
+	return c.SyntheticLine()
 }
 
 func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string, opts LogsOpts, out io.Writer) error {

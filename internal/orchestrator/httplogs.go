@@ -2,9 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"log/slog"
 	"math"
 	"net/http"
@@ -98,6 +102,8 @@ func (h *HTTPLogs) OpenNodeLog(ctx context.Context, runID, nodeID string, delega
 		delegate:        delegate,
 		requiresAttempt: requiresAttempt,
 		attempt:         attempt,
+		stream:          rand.Text(),
+		digest:          sha256.New(),
 	}
 	if h.live != nil {
 		l.live = logbatch.New(
@@ -125,8 +131,16 @@ type httpNodeLog struct {
 	closed          bool
 	requiresAttempt bool
 	attempt         int
-	pending         [][]byte
+	pending         []numberedLine
 	pendingBytes    int
+
+	// stream names this writer's numbered appends; seq, sentBytes and
+	// digest cover every line it numbered, delivered or not, and go into
+	// the seal Close sends.
+	stream    string
+	seq       int64
+	sentBytes int64
+	digest    hash.Hash
 
 	fatal      error
 	dropCount  int
@@ -149,6 +163,17 @@ var httpNodeLogDropCooldown = 5 * time.Second
 const httpNodeLogFinishTimeout = 10 * time.Second
 
 const httpNodeLogPendingLimit = 4 << 20
+
+type numberedLine struct {
+	seq     int64
+	payload []byte
+}
+
+// logSealer is the capability a log store has when it can record the end
+// of a numbered stream; only the logs service has it.
+type logSealer interface {
+	Seal(ctx context.Context, runID, nodeID string, seal logs.Seal) error
+}
 
 func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS int) {
 	oldA, oldB := httpNodeLogRetryAttempts, httpNodeLogRetryBackoff
@@ -191,9 +216,12 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	}
 
 	payload, err := json.Marshal(&rec)
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
 	if err != nil {
 		// safety: a record no encoder will take never reaches the store, the same
-		// loss as an append that never lands.
+		// loss as an append that never lands, so it still takes a number.
+		l.number(nil)
 		l.mu.Lock()
 		l.dropCount++
 		if l.dropReason == "" {
@@ -209,11 +237,17 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 		return
 	}
 	payload = append(payload, '\n')
-
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	l.appendWithRetry(payload)
+	l.appendWithRetry(numberedLine{seq: l.number(payload), payload: payload})
 	l.appendLive(payload)
+}
+
+// number gives the next line its place in this writer's stream. The
+// caller holds writeMu.
+func (l *httpNodeLog) number(payload []byte) int64 {
+	l.seq++
+	l.sentBytes += int64(len(payload))
+	_, _ = l.digest.Write(payload)
+	return l.seq
 }
 
 // safety: a live view that cannot be written is reported once and then
@@ -258,27 +292,27 @@ func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
 func (l *httpNodeLog) FlushExecutionAttempt() error {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.appendWithRetry(nil)
+	l.appendWithRetry(numberedLine{})
 	return l.Fatal()
 }
 
-func (l *httpNodeLog) appendWithRetry(payload []byte) {
+func (l *httpNodeLog) appendWithRetry(line numberedLine) {
 	l.mu.Lock()
 	ordinal := l.attempt
 	if l.requiresAttempt && ordinal == 0 {
-		if len(payload) == 0 {
+		if len(line.payload) == 0 {
 			l.mu.Unlock()
 			return
 		}
-		if l.pendingBytes+len(payload) > httpNodeLogPendingLimit {
+		if l.pendingBytes+len(line.payload) > httpNodeLogPendingLimit {
 			if l.fatal == nil {
 				l.fatal = errors.New("pre-execution log buffer exceeded 4 MiB")
 			}
 			l.mu.Unlock()
 			return
 		}
-		l.pending = append(l.pending, slices.Clone(payload))
-		l.pendingBytes += len(payload)
+		l.pending = append(l.pending, numberedLine{seq: line.seq, payload: slices.Clone(line.payload)})
+		l.pendingBytes += len(line.payload)
 		l.mu.Unlock()
 		return
 	}
@@ -292,15 +326,15 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 			return
 		}
 	}
-	if len(payload) == 0 {
+	if len(line.payload) == 0 {
 		l.collectFlushLosses()
 		return
 	}
-	l.appendBoundWithRetry(ordinal, payload)
+	l.appendBoundWithRetry(ordinal, line)
 	l.collectFlushLosses()
 }
 
-func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
+func (l *httpNodeLog) appendBoundWithRetry(ordinal int, line numberedLine) {
 	if l.dropSuppressed() {
 		return
 	}
@@ -310,12 +344,9 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 			backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
 			time.Sleep(backoff.Delay(retry - 1))
 		}
-		attemptCtx := l.ctx
-		if ordinal > 0 {
-			attemptCtx = store.WithExecutionAttemptOrdinal(attemptCtx, ordinal)
-		}
+		attemptCtx := logs.WithAppendSequence(withAttempt(l.ctx, ordinal), l.stream, line.seq)
 		ctx, cancel := context.WithTimeout(attemptCtx, 5*time.Second)
-		err := l.client.Append(ctx, l.runID, l.nodeID, payload)
+		err := l.client.Append(ctx, l.runID, l.nodeID, line.payload)
 		cancel()
 		if err == nil {
 			return
@@ -352,6 +383,13 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, payload []byte) {
 		"err", lastErr,
 		"dropped_total", count,
 	)
+}
+
+func withAttempt(ctx context.Context, ordinal int) context.Context {
+	if ordinal > 0 {
+		return store.WithExecutionAttemptOrdinal(ctx, ordinal)
+	}
+	return ctx
 }
 
 func (l *httpNodeLog) dropSuppressed() bool {
@@ -394,7 +432,56 @@ func (l *httpNodeLog) Close() error {
 	}
 	err := storage.FlushNode(ctx, l.client, l.runID, l.nodeID)
 	l.collectFlushLosses()
+	l.seal(ctx)
 	return err
+}
+
+// seal tells the logs service this writer is done, with what it numbered
+// and what it lost, so a reader can tell a whole log from one cut short.
+// It retries until ctx, the node's finish budget, runs out. A writer whose
+// claim was refused, or that never learned its attempt, sent nothing the
+// service could file and seals nothing.
+func (l *httpNodeLog) seal(ctx context.Context) {
+	sealer, ok := l.client.(logSealer)
+	if !ok {
+		return
+	}
+	l.mu.Lock()
+	ordinal, fatal, dropped := l.attempt, l.fatal, int64(l.dropCount)
+	l.mu.Unlock()
+	if fatal != nil || (l.requiresAttempt && ordinal == 0) {
+		return
+	}
+	seal := logs.Seal{
+		Stream:   l.stream,
+		FinalSeq: l.seq,
+		Lines:    l.seq,
+		Bytes:    l.sentBytes,
+		Dropped:  dropped,
+		SHA256:   hex.EncodeToString(l.digest.Sum(nil)),
+	}
+	backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
+	for retry := 0; ; retry++ {
+		err := sealer.Seal(withAttempt(ctx, ordinal), l.runID, l.nodeID, seal)
+		if err == nil {
+			return
+		}
+		var authErr *logs.AuthError
+		permanent := errors.As(err, &authErr) || errors.Is(err, logs.ErrClaimConflict) || errors.Is(err, logs.ErrSealRefused)
+		if permanent || ctx.Err() != nil {
+			l.logger.Warn(
+				"log seal not recorded; readers will see this node's log as cut off",
+				"run_id", l.runID,
+				"node_id", l.nodeID,
+				"err", err,
+			)
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(backoff.Delay(retry)):
+		}
+	}
 }
 
 // safety: a buffering store writes many lines per request, so one failed

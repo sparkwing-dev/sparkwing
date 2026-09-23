@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -275,8 +274,9 @@ func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token,
 	var logc storage.LogStore = sparkwinglogs.New(logsURL, nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 
+	b := backend.NewClientBackend(ctrl, logc)
 	if opts.EventsOnly {
-		return writeEventsViaBackend(ctx, backend.NewClientBackend(ctrl, logc), runID, opts, out)
+		return writeEventsViaBackend(ctx, b, runID, opts, out)
 	}
 	if !opts.Follow {
 		nodes, err := ctrl.ListNodes(ctx, runID)
@@ -288,7 +288,7 @@ func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token,
 			return err
 		}
 		target = filterNodesBySince(target, opts.Since)
-		return writeLogsTextRemote(ctx, logc, runID, target, opts, out)
+		return writeLogsViaBackend(ctx, b, runID, target, opts, out)
 	}
 	return followLogsRemote(ctx, ctrl, logc, runID, opts.Node, out)
 }
@@ -303,44 +303,6 @@ func filterTarget(nodes []*store.Node, want, runID string) ([]*store.Node, error
 		}
 	}
 	return nil, fmt.Errorf("node %q not found in run %s", want, runID)
-}
-
-func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {
-	filter := storage.ReadOpts{
-		Tail:  opts.Tail,
-		Head:  opts.Head,
-		Lines: opts.Lines,
-		Grep:  opts.Grep,
-	}
-	jsonOut := opts.JSON || opts.Format == "json"
-	for i, n := range target {
-		if len(target) > 1 && !jsonOut {
-			if i > 0 {
-				fmt.Fprintln(out)
-			}
-			fmt.Fprintf(out, "=== %s (%s) ===\n", n.NodeID, orDash(n.Outcome))
-		}
-		if n.StartedAt == nil {
-			if len(target) > 1 && !jsonOut {
-				fmt.Fprintln(out, "(did not execute)")
-			}
-			continue
-		}
-		data, err := logc.Read(ctx, runID, n.NodeID, filter)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", n.NodeID, err)
-		}
-		if len(data) > 0 && data[0] == '{' {
-			if err := renderJSONLStream(bytes.NewReader(data), opts, out); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err := out.Write(data); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 var (

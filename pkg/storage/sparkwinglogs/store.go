@@ -62,3 +62,15 @@ func (s *Store) Stream(ctx context.Context, runID, nodeID string) (io.ReadCloser
 func (s *Store) DeleteRun(ctx context.Context, runID string) error {
 	return s.client.DeleteRun(ctx, runID)
 }
+
+// Seal records the end of one numbered stream of a node's log; see
+// [logs.Client.Seal].
+func (s *Store) Seal(ctx context.Context, runID, nodeID string, seal logs.Seal) error {
+	return s.client.Seal(ctx, runID, nodeID, seal)
+}
+
+// ReadSeals returns the logs service's account of a node's log streams,
+// which [logs.SealReport.Assess] turns into a completeness verdict.
+func (s *Store) ReadSeals(ctx context.Context, runID, nodeID string) (logs.SealReport, error) {
+	return s.client.ReadSeals(ctx, runID, nodeID)
+}

@@ -236,6 +236,8 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
 | `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |
+| `GET` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.read` |
+| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
 | `DELETE` | `/api/v1/teams/{team}/logs` | `admin` or `logs.delete` |
 | `GET` | `/api/v1/teams/{team}/logs/usage` | `admin` |
