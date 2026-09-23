@@ -136,6 +136,7 @@ type SearchResponse struct {
 	Results   []SearchResult
 	Total     int
 	Truncated bool
+	Reason    string
 }
 type SearchResult struct {
 	RunID   string
