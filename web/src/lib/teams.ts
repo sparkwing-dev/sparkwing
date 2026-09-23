@@ -355,3 +355,47 @@ export function runnerConnectCommand(
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }
+
+export interface CLIToken {
+  prefix: string;
+  scopes?: string[];
+  // Unix seconds, as the controller reports them.
+  created_at?: number;
+  expires_at?: number | null;
+  last_used_at?: number | null;
+}
+
+export interface MintedCLIToken {
+  token: string;
+  prefix: string;
+  scopes: string[];
+  expires_at: number;
+  profile: string;
+  setup: string;
+  run: string;
+}
+
+export async function listCLITokens(): Promise<CLIToken[]> {
+  const res = await send("GET", "/api/v1/team/cli-tokens", "List CLI tokens");
+  return asList<CLIToken>(await res.json(), "tokens");
+}
+
+export async function mintCLIToken(): Promise<MintedCLIToken> {
+  const res = await send("POST", "/api/v1/team/cli-tokens", "Create CLI token");
+  return (await res.json()) as MintedCLIToken;
+}
+
+export async function revokeCLIToken(prefix: string): Promise<void> {
+  await send(
+    "DELETE",
+    `/api/v1/team/cli-tokens/${seg(prefix)}`,
+    "Revoke CLI token",
+  );
+}
+
+// A CLI token without runs.write reads runs but cannot start one, which is
+// what a reader's token is; the page says so rather than letting the first
+// trigger find out.
+export function cliTokenStartsRuns(scopes: string[] | undefined): boolean {
+  return (scopes ?? []).includes("runs.write");
+}

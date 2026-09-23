@@ -346,3 +346,35 @@ describe("unixSecondsISO", () => {
     assert.equal(teams.unixSecondsISO(0), "");
   });
 });
+
+describe("CLI tokens", () => {
+  it("mints with the session's CSRF token and returns the setup commands", async () => {
+    const minted = {
+      token: "swu_x",
+      prefix: "swu_x",
+      scopes: ["runs.read", "runs.write"],
+      expires_at: 1,
+      profile: "acme",
+      setup:
+        "sparkwing cloud connect --controller https://c.example --name acme --token-stdin",
+      run: "sparkwing pipeline trigger <pipeline> --profile acme",
+    };
+    respond = () => new Response(JSON.stringify(minted), { status: 201 });
+    assert.deepEqual(await teams.mintCLIToken(), minted);
+    assert.equal(calls[0].url, "/api/v1/team/cli-tokens");
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+  });
+
+  it("revokes by escaped prefix", async () => {
+    await teams.revokeCLIToken("swu_a/../tokens");
+    assert.equal(calls[0].method, "DELETE");
+    assert.equal(calls[0].url, "/api/v1/team/cli-tokens/swu_a%2F..%2Ftokens");
+  });
+
+  it("tells a read-only token from one that starts runs", () => {
+    assert.equal(teams.cliTokenStartsRuns(["runs.read", "runs.write"]), true);
+    assert.equal(teams.cliTokenStartsRuns(["runs.read"]), false);
+    assert.equal(teams.cliTokenStartsRuns(undefined), false);
+  });
+});
