@@ -855,6 +855,11 @@ unlock.
   pull request or manually submitted trigger with matching Git fields is
   refused. GitHub App pushes record their event name for this check. Unbinding
   a repository during credential exchange now stops or revokes the credential.
+- **source installer:** `bin/install.sh` updates `sparkwing-runner` alongside
+  `sparkwing` instead of removing the runner. Without `pnpm`, it embeds an
+  existing dashboard export when available, or completes with a warning that
+  the dashboard is unavailable.
+
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
   the defined pipelines and, when known, the repository revision. It appears

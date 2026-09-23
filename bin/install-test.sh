@@ -142,6 +142,8 @@ grep -qF "$gp1:$gp2/bin" "$CASE_ROOT/out5" \
 
 argvlog="$CASE_ROOT/argv.log"
 dest6="$CASE_ROOT/dest6"
+mkdir -p "$dest6"
+printf 'old runner\n' >"$dest6/sparkwing-runner"
 if ! run_install SPARKWING_INSTALL_BIN="$dest6" FAKE_GOPATH="$CASE_ROOT/gopath" \
   ARGV_LOG="$argvlog" >"$CASE_ROOT/out6" 2>&1; then
   fail "install for the build-flag check failed" "$CASE_ROOT/out6"
@@ -154,5 +156,34 @@ for want in "-trimpath" "-s -w -X main.Version="; do
     *) fail "install build argv is missing $want: $buildargv" ;;
   esac
 done
+[ -x "$dest6/sparkwing-runner" ] \
+  || fail "install removed the runner instead of updating it" "$CASE_ROOT/out6"
+grep -qF './cmd/sparkwing-runner' "$argvlog" \
+  || fail "install did not build the runner from this tree" "$argvlog"
+
+mkdir -p "$REPO/web/out"
+printf 'prebuilt dashboard\n' >"$REPO/web/out/index.html"
+dest7="$CASE_ROOT/dest7"
+if ! env -u HOME -u GOBIN -u SKIP_WEB_BUILD \
+  PATH="$STUB:/usr/bin:/bin" SPARKWING_INSTALL_BIN="$dest7" \
+  FAKE_GOPATH="$CASE_ROOT/gopath" bash "$REPO/bin/install.sh" \
+  >"$CASE_ROOT/out7" 2>&1; then
+  fail "install without pnpm failed despite a prebuilt web/out" "$CASE_ROOT/out7"
+fi
+cmp "$REPO/web/out/index.html" "$REPO/internal/web/next-out/index.html" \
+  || fail "install did not embed the prebuilt dashboard" "$CASE_ROOT/out7"
+grep -q 'pnpm.*unavailable' "$CASE_ROOT/out7" \
+  || fail "install did not explain the web build fallback" "$CASE_ROOT/out7"
+
+rm -rf "$REPO/web/out" "$REPO/internal/web/next-out"
+dest8="$CASE_ROOT/dest8"
+if ! env -u HOME -u GOBIN -u SKIP_WEB_BUILD \
+  PATH="$STUB:/usr/bin:/bin" SPARKWING_INSTALL_BIN="$dest8" \
+  FAKE_GOPATH="$CASE_ROOT/gopath" bash "$REPO/bin/install.sh" \
+  >"$CASE_ROOT/out8" 2>&1; then
+  fail "install without pnpm or web assets failed" "$CASE_ROOT/out8"
+fi
+grep -q 'dashboard.*unavailable' "$CASE_ROOT/out8" \
+  || fail "install did not warn that its dashboard is unavailable" "$CASE_ROOT/out8"
 
 echo "install-test: ok"
