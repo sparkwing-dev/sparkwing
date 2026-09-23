@@ -22,7 +22,7 @@ func TestAFrozenTeamIsNeitherFundedNorExemptFromTheMemberLimit(t *testing.T) {
 	team := owner.Account.ActiveTeam
 	join := func(sub, email string) error {
 		acct := signIn(t, st, sub, email)
-		_, err := st.AcceptInvitation(ctx, acct.Account.ID, invite(t, st, owner, email).ID, time.Now())
+		_, err := st.AcceptInvitation(context.Background(), acct.Account.ID, invite(t, st, owner, email).ID, time.Now())
 		return err
 	}
 	fund(t, tenant(t, st, team))
