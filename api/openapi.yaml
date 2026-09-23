@@ -2687,14 +2687,17 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the cache, logs, and dashboard URLs a client should use.
+      summary: Announce the data download, cache, logs, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
-        started without the matching flag; a co-located laptop deployment
-        announces none of them, because there the controller URL is already
-        the right answer. `multi_team` is true on a controller that may hold
-        more than one team, which answers 200 even with no URL announced.
+        started without the matching configuration; `data_download_url` is
+        absent when the controller cannot sign downloads on the request's path;
+        a public-ingress request needs CloudFront signing configured. A co-located laptop
+        deployment announces no service URLs, because there the controller
+        URL is already the right answer. `multi_team` is true on a controller
+        that may hold more than one team, which answers 200 even with no URL
+        announced.
       responses:
         "200":
           description: The announced URLs.
@@ -2704,6 +2707,7 @@ paths:
                 x-sparkwing-go-type: pkg/controller.ServicesResponse
                 type: object
                 properties:
+                  data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
                   cache_pod: {type: string}
                   logs: {type: string}
                   dashboard: {type: string}
@@ -6478,6 +6482,50 @@ paths:
                   amount_micro: {type: integer, format: int64}
         "502": {description: The checkout service or Stripe did not open a session.}
         "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
+
+  /api/v1/data/download:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Sign a short-lived URL for one team object.
+      description: >-
+        Accepts a cache grant for its live run, or a regular bearer principal authorized to read the team's run data. The object key is resolved under the credential's team. `binary` keys must start with `bins/`; `artifact` and `log` select the cache and logs stores. The response includes the stored object's SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataDownloadRequest
+              type: object
+              required: [kind, key]
+              properties:
+                kind: {type: string, enum: [binary, artifact, log]}
+                key: {type: string, description: Team-relative object key.}
+      responses:
+        "200":
+          description: The signed URL and the object metadata.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.DataDownloadResponse
+                type: object
+                required: [url, sha256, size, expires]
+                properties:
+                  url: {type: string, format: uri}
+                  sha256: {type: string, description: Stored object digest; binary downloads always include a valid SHA-256 digest.}
+                  size: {type: integer, format: int64}
+                  expires: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429":
+          description: The team's daily download cap was reached; `Retry-After` gives the delay before retrying.
+          headers:
+            Retry-After:
+              schema: {type: integer}
+              description: Seconds until the cap resets.
+        "503": {description: No signer is configured for the selected request path.}
 
 components:
   securitySchemes:

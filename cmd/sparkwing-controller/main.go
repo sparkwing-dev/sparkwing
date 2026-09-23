@@ -578,6 +578,27 @@ func run(args []string) error {
 			return fmt.Errorf("--logs-archive-store: %w", err)
 		}
 		srv = srv.WithStoragePass(cache, logsStore)
+		privateKey := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY")
+		if keyFile := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE"); keyFile != "" {
+			if privateKey != "" {
+				return errors.New("set only one of SPARKWING_CLOUDFRONT_PRIVATE_KEY and SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE")
+			}
+			keyBytes, err := os.ReadFile(keyFile)
+			if err != nil {
+				return fmt.Errorf("CloudFront private key file: %w", err)
+			}
+			privateKey = string(keyBytes)
+		}
+		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
+		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
+		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
+		client, _, _, err := storeurl.OpenS3(ctx, rawStore)
+		if err != nil {
+			return fmt.Errorf("download signer S3: %w", err)
+		}
+		if err := srv.WithSignedDownloads(cache, logsStore, client, domain, keyPairID, privateKey); err != nil {
+			return err
+		}
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err

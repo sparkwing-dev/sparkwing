@@ -16,6 +16,32 @@ needs; `admin` satisfies any check. Token kinds, the scope set, the
 unauthenticated endpoints, and first-visit admin bootstrap are in
 [auth.md](auth.md).
 
+## Data downloads
+
+`POST /api/v1/data/download` signs a short-lived download for an object. Send
+`{ "kind": "binary", "key": "bins/<hash>" }` with a bearer token or a
+run-scoped cache grant. The controller checks the grant, its live run, the
+team-owned key, the stored object, and the team's daily download allowance
+before it returns `{ "url": "...", "sha256": "...", "size": 123,
+"expires": "..." }`. It charges the recorded object size when it signs the
+URL.
+
+The URL expires after 60 seconds and names one exact object. A request that
+reaches the controller through the in-cluster Service gets a regional S3
+presigned URL; a request through the public ingress gets a CloudFront signed
+URL. The controller selects the path from the presence of `X-Forwarded-For`
+or `X-Forwarded-Host`. Configure the ingress to overwrite these headers. A
+local filesystem store continues serving bytes directly through its existing
+artifact route. Treat the returned URL as a temporary
+bearer credential.
+
+Binary clients discover this route through `GET /api/v1/services` and use it when the
+controller announces it. The controller omits it on public ingress if CloudFront
+signing is unavailable. Older controllers also omit it, so those clients
+continue through the cache download route when it is absent. Uploads still go
+to the cache. See [Tenant limits](limits.md) for the daily team allowance and
+[Self-hosting](self-hosting.md) for CloudFront configuration.
+
 ## Webhooks
 
 `POST /webhooks/github/{pipeline}` ingests GitHub deliveries. It is

@@ -22,6 +22,17 @@ unlock.
 
 ### Added
 
+- **controller + runner:** `POST /api/v1/data/download` returns a signed URL,
+  object SHA-256 when stored, size and expiry for one team-owned object. In-cluster
+  requests receive a regional S3 URL; public-ingress requests receive a
+  CloudFront URL with a 60-second lifetime. Filesystem-backed installs
+  keep serving bytes directly. The controller charges the object's size
+  against the team's daily download allowance when it signs the URL. Clients
+  discover the route through `GET /api/v1/services`; binary fetches retain the
+  cache path when an older controller does not announce it. Uploads still use the cache.
+  See [Data downloads](docs/api.md#data-downloads) and
+  [Tenant limits](docs/limits.md).
+
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the

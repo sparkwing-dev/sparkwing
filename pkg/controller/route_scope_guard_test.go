@@ -42,6 +42,7 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /internal/storage/commit":   true,
 		"POST /internal/storage/release":  true,
 		"POST /internal/downloads/charge": true,
+		"POST /api/v1/data/download": true,
 		"POST /internal/egress/totals":    true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")

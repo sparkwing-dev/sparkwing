@@ -567,8 +567,8 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 		binaryCacheURL = ""
 	}
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if binaryCacheURL != "" {
-			if fetchErr := bincache.TryBinary(ctx, binaryCacheURL, cacheGrant, key, tempPath); fetchErr == nil {
+		if binaryCacheURL != "" || cacheGrant != "" {
+			if fetchErr := bincache.TryBinaryPreferSigned(ctx, opts.ControllerURL, opts.Token, cacheGrant, binaryCacheURL, key, tempPath); fetchErr == nil {
 				fetched = true
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {

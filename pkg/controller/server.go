@@ -16,10 +16,13 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -85,6 +88,10 @@ type Server struct {
 
 	bucketUsageStore storage.ArtifactStore
 	storagePass      *storagePass
+	downloadStores   map[store.StorageKind]*teamblob.Store
+	downloadS3       *s3.PresignClient
+	downloadCDN      *sign.URLSigner
+	downloadDomain   string
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
@@ -1167,6 +1174,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
+	router.HandleFunc("POST /api/v1/data/download", s.handleDataDownload)
 	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))

@@ -128,7 +128,7 @@ func runNodeRemote(
 	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, binaryCacheURL, cacheGrant, logger)
+	binary, err := resolveRemoteBinary(ctx, sparkwingDir, controllerURL, token, binaryCacheURL, cacheGrant, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -389,7 +389,7 @@ func (b remoteBinary) release() {
 	}
 }
 
-func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, gcURL, cacheGrant string, logger *slog.Logger) (remoteBinary, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
@@ -404,8 +404,8 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string,
 	}
 	compiled := false
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if gcURL != "" {
-			if fetchErr := bincache.TryBinary(ctx, gcURL, token, key, tempPath); fetchErr == nil {
+		if gcURL != "" || cacheGrant != "" {
+			if fetchErr := bincache.TryBinaryPreferSigned(ctx, controllerURL, controllerToken, cacheGrant, gcURL, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -418,7 +418,7 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string,
 		return remoteBinary{}, err
 	}
 	if published && compiled && gcURL != "" {
-		if err := bincache.UploadBinary(ctx, gcURL, token, key, lease.Path()); err != nil {
+		if err := bincache.UploadBinary(ctx, gcURL, cacheGrant, key, lease.Path()); err != nil {
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

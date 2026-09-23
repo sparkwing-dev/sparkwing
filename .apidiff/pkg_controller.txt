@@ -67,6 +67,12 @@ const ComputeLimitRetryAfterSeconds = 5
 const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+type DataDownloadResponse struct {
+	URL     string
+	SHA256  string
+	Size    int64
+	Expires time.Time
+}
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
@@ -384,12 +390,15 @@ func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
 func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
 func (s *Server) WithSignUpWaitlist(on bool) *Server
+func (s *Server) WithSignedDownloads(cache, logs *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
 func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
+	DataDownloadURL string
+
 	CachePod string
 
 	Logs string
