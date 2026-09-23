@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -27,6 +28,9 @@ type PoolLoopConfig struct {
 	ControllerURL     string
 	LogsURL           string
 	GitcacheURL       string
+	// AllowRepos binds every claimed node the way TriggerLoopOptions.AllowRepos
+	// binds a trigger.
+	AllowRepos        sourceurl.RepoAllowlist
 	Token             string
 	HolderPrefix      string
 	Labels            []string
@@ -106,7 +110,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	}
 
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token,
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
@@ -331,6 +335,11 @@ func runRunnerCLI(args []string, version string) error {
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
 		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
 			"repository directly with this machine's own git credentials (env: SPARKWING_GITCACHE_URL)")
+	var allowRepos multiFlag
+	fs.Var(&allowRepos, "allow-repo",
+		"repository this machine may build, as host/path with '*' matching within one path segment "+
+			"(repeatable, e.g. --allow-repo 'github.com/acme/*'); required without --gitcache, since the runner "+
+			"then fetches, compiles and runs each run's pipeline code as the user running it")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
@@ -407,6 +416,10 @@ func runRunnerCLI(args []string, version string) error {
 	if *idleExit < 0 {
 		return errors.New("--idle-exit must not be negative")
 	}
+	allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
+	if err != nil {
+		return fmt.Errorf("--allow-repo: %w", err)
+	}
 	var claimUntil time.Time
 	if *githubActions {
 		if *alsoClaimTriggers || !*claimNodes {
@@ -433,10 +446,24 @@ func runRunnerCLI(args []string, version string) error {
 		if !explicit["metrics-addr"] {
 			*metricsAddr = ""
 		}
+		// safety: the credential claims only this repository's work, so a job
+		// given no list builds exactly the repository that started it.
+		if allow.Empty() {
+			if allow, err = sourceurl.ParseRepoAllowlist([]string{"github.com/" + cred.Repository}); err != nil {
+				return fmt.Errorf("--github-actions: %w", err)
+			}
+		}
 		slog.Default().Info("github actions runner credential issued",
 			"team", cred.Team, "repository", cred.Repository,
 			"expires_at", time.Unix(cred.ExpiresAt, 0).UTC(), "claim_until", claimUntil.UTC())
 	}
+
+	if *gitcacheURL == "" && allow.Empty() {
+		return errors.New("--allow-repo is required without --gitcache: this runner fetches, compiles and runs " +
+			"pipeline code as the user running it, from whatever repository a run names, so name the repositories " +
+			"you trust, e.g. --allow-repo 'github.com/acme/*'")
+	}
+	slog.Default().Info("runner repository allowlist", "allow_repo", allow.String(), "direct_source", *gitcacheURL == "")
 
 	identity := buildinfo.Read("sparkwing-runner", version)
 	warmList, err := parseWarmModules(*warmModules, identity.Version)
@@ -485,6 +512,7 @@ func runRunnerCLI(args []string, version string) error {
 				ControllerURL:   *controllerURL,
 				LogsURL:         *logsURL,
 				GitcacheURL:     *gitcacheURL,
+				AllowRepos:      allow,
 				Token:           *token,
 				RunnerKind:      *triggerRunnerKind,
 				K8sNamespace:    *triggerRunnerNamespace,
@@ -521,6 +549,7 @@ func runRunnerCLI(args []string, version string) error {
 		ControllerURL:     *controllerURL,
 		LogsURL:           *logsURL,
 		GitcacheURL:       *gitcacheURL,
+		AllowRepos:        allow,
 		Token:             *token,
 		HolderPrefix:      *holderPrefix,
 		Labels:            []string(labels),
@@ -547,7 +576,9 @@ func currentCapacity(ctx context.Context, provider headroomProvider) capacityRep
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, logsURL, gitcacheURL, token string,
+	controllerURL, logsURL, gitcacheURL string,
+	allow sourceurl.RepoAllowlist,
+	token string,
 	n *store.Node,
 	holderID string,
 	lease, hbInterval time.Duration,
@@ -579,7 +610,8 @@ func executePooledNode(
 
 	grant := requestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
 	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.ClaimedNodeAttempt(n))
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
+		orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 

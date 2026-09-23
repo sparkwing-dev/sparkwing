@@ -98,7 +98,7 @@ func RunNodeOnce(
 					runID, nodeID)
 			}
 			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
-				runID, nodeID, token, logger)
+				runID, nodeID, token, cfg.repoAllowlist, logger)
 		}
 		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
@@ -109,7 +109,7 @@ func RunNodeOnce(
 				runID, nodeID)
 		}
 		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
-			runID, nodeID, token, logger)
+			runID, nodeID, token, cfg.repoAllowlist, logger)
 	}
 
 	var art storage.ArtifactStore

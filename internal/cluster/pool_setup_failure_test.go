@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -56,7 +58,7 @@ func TestPooledNodeSetupFailureFinishesTheNodeWithTheError(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	executePooledNode(ctx, ctrl, srv.URL, "", "", "", claimed, claimed.ClaimedBy,
+	executePooledNode(ctx, ctrl, srv.URL, "", "", sourceurl.RepoAllowlist{}, "", claimed, claimed.ClaimedBy,
 		3*time.Minute, time.Hour, "pool runner", logger, nil, nil)
 
 	got, err := st.GetNode(ctx, "r1", "n1")
@@ -65,5 +67,60 @@ func TestPooledNodeSetupFailureFinishesTheNodeWithTheError(t *testing.T) {
 	}
 	if got.Outcome != string(sparkwing.Failed) || !strings.Contains(got.Error, "compile pipeline: exit status 1") {
 		t.Fatalf("node after a setup failure = outcome %q error %q, want failed with the setup error", got.Outcome, got.Error)
+	}
+}
+
+// A pool runner that fetches with its own credentials claims nodes of every
+// run in its team, so a node whose run names a repository its owner did not
+// allow fails with the list named, and nothing is fetched.
+func TestPooledNodeFromARepositoryOutsideTheAllowlistFailsNamingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_CACHE_URL", "")
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	t.Cleanup(srv.Close)
+	ctrl := client.New(srv.URL, nil)
+	ctx := context.Background()
+
+	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: "r1", Pipeline: "p", TriggerSource: "manual",
+		RepoURL: "https://git.invalid/evil/payload.git", GitSHA: "0123456789abcdef0123456789abcdef01234567",
+	}, store.Run{ID: "r1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "n1", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "r1", "n1"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := ctrl.ClaimNode(ctx, "pool:1", nil, 3*time.Minute, nil)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim node: %+v, %v", claimed, err)
+	}
+	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	executePooledNode(ctx, ctrl, srv.URL, "", "", allow, "", claimed, claimed.ClaimedBy,
+		3*time.Minute, time.Hour, "pool runner", logger, nil, nil)
+
+	got, err := st.GetNode(ctx, "r1", "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != string(sparkwing.Failed) || !strings.Contains(got.Error, "github.com/acme/*") ||
+		!strings.Contains(got.Error, "git.invalid/evil/payload") {
+		t.Fatalf("node = outcome %q error %q, want failed naming the repository and the allowlist", got.Outcome, got.Error)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "source-direct")); !os.IsNotExist(statErr) {
+		t.Fatalf("a refused node still reached the fetch: %v", statErr)
 	}
 }
