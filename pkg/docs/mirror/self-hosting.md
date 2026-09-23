@@ -274,7 +274,7 @@ byte.
 the bucket. An append still lands in a file that grows in place and a follower
 still tails that file, so streaming is exactly what it is without a bucket and
 a running node costs the bucket nothing. A run nobody has written for
-`--archive-idle` (10 minutes by default) is uploaded as one object per node log
+`--archive-idle` (`SPARKWING_LOGS_ARCHIVE_IDLE`, 10 minutes by default) is uploaded as one object per node log
 plus two small index objects and leaves the volume; a read or an append of an
 archived run restores it first. `--retention` then deletes archived runs by the
 day of their last write: each pass is one listing of the day index while
@@ -284,7 +284,9 @@ logs of runs in flight, but it holds only live runs and restored copies.
 
 Both services keep a running per-team byte and object count, adjusted by every
 write and every delete the bucket confirms, saved in the bucket every five minutes, and replaced by a
-listing of the prefix once per `--usage-reconcile` (daily by default). The
+listing of the prefix once per `--usage-reconcile` (daily by default;
+`SPARKWING_CACHE_USAGE_RECONCILE` on the cache and
+`SPARKWING_LOGS_USAGE_RECONCILE` on the logs service). The
 count feeds the store ceiling, so `--max-store-bytes` covers the bucket as well
 as the volume, and it is what the storage allowance reads:
 
