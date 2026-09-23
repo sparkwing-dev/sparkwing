@@ -105,6 +105,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// teams_created to accounts, which an older binary leaves at their
 	// defaults, and tables it never reads.
 	55: {invitationEmailCols, accountTeamsCreatedCols},
+	// safety: v56 adds the free_slots table and an index, and nothing older
+	// reads them, so an older binary keeps writing the migrated database.
+	56: nil,
 }
 
 func columnSpecMaps() []map[string]string {

@@ -649,11 +649,17 @@ func (s *Store) chargeStorageTx(
 	if err != nil {
 		return err
 	}
-	if rate > 0 && bytes > 0 {
-		team, err := creditTeamForRunTx(ctx, tx, runID)
-		if err != nil {
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	free := holdsFreeAllowance(team)
+	if free {
+		if err := admitFreeEventsTx(ctx, tx, team, principal, bytes, now); err != nil {
 			return err
 		}
+	}
+	if rate > 0 && bytes > 0 {
 		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, team, principal, bytes); err != nil {
 			return err
 		}
@@ -662,9 +668,10 @@ func (s *Store) chargeStorageTx(
 	if err != nil {
 		return err
 	}
-	// safety: priced storage bills every team's bytes, so the total is kept
-	// for all of them; unpriced storage keeps it only where a limit reads it.
-	if rate <= 0 && quota.Unlimited() && quota.AllowanceBytes <= 0 {
+	// safety: priced storage bills every team's bytes and a signed-up team's
+	// event share is counted from them, so the total is kept for all of
+	// those; otherwise it is kept only where a limit reads it.
+	if !free && rate <= 0 && quota.Unlimited() && quota.AllowanceBytes <= 0 {
 		return nil
 	}
 	if err := lockStorageUsageTx(ctx, tx, principal); err != nil {
@@ -699,15 +706,17 @@ ON CONFLICT (principal, run_id) DO UPDATE SET
 		principal, runID, bytes, objects, now.UnixNano()); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO storage_month_usage (principal, month, bytes, objects, updated_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (principal, month) DO UPDATE SET
         bytes = storage_month_usage.bytes + excluded.bytes,
         objects = storage_month_usage.objects + excluded.objects,
         updated_at = excluded.updated_at`,
-		principal, month, bytes, objects, now.UnixNano())
-	return err
+		principal, month, bytes, objects, now.UnixNano()); err != nil {
+		return err
+	}
+	return addFreeEventBytesTx(ctx, tx, team, bytes)
 }
 
 func storageQuotaForTx(ctx context.Context, tx *storeTx, principal string) (StorageQuota, error) {

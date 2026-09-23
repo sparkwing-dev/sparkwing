@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 55
+const expectedSchemaVersion = 56
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2015,6 +2015,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyGitHubAppMigrationSQLite(ctx, tx)
 	case 55:
 		return applyDeletionMigrationSQLite(ctx, tx)
+	case 56:
+		return applyFreeSlotsMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2390,6 +2392,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyGitHubAppMigrationPostgres(ctx, tx)
 	case 55:
 		return applyDeletionMigrationPostgres(ctx, tx)
+	case 56:
+		return applyFreeSlotsMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6689,6 +6693,9 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 }
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
+	if err := admitFreeTeamRunTx(ctx, tx, team, time.Now()); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status

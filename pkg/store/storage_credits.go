@@ -639,9 +639,18 @@ func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (
 	if err != nil {
 		return 0, err
 	}
+	var held sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT bytes FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
+		principal, runID).Scan(&held); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
 		principal, runID); err != nil {
+		return 0, err
+	}
+	if err := addFreeEventBytesTx(ctx, tx, team, -held.Int64); err != nil {
 		return 0, err
 	}
 	if err := dropSpentStorageWatermarkTx(ctx, tx, team, principal); err != nil {

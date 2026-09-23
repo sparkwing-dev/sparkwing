@@ -46,4 +46,10 @@ func (s *Server) maintainTeamStorage(ctx context.Context, now time.Time) {
 			"invitations", pruned.Invitations, "tokens", pruned.Tokens,
 			"sessions", pruned.Sessions, "github_runner_credentials", pruned.GitHubRunnerCredentials)
 	}
+	if !s.MultiTeam() {
+		return
+	}
+	if err := s.store.ReconcileFreeEventBytes(ctx); err != nil {
+		s.logger.Error("recounting free event bytes failed", "err", err)
+	}
 }

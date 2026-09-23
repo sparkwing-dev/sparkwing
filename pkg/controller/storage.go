@@ -247,6 +247,7 @@ type storageStateJSON struct {
 	Alarm    bool                `json:"alarm"`
 	Quotas   []storageQuotaJSON  `json:"quotas,omitempty"`
 	Teams    []storageTeamJSON   `json:"largest_teams,omitempty"`
+	Team     *teamStandingJSON   `json:"team,omitempty"`
 }
 
 func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
@@ -286,6 +287,10 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 			RetainedBytes: retained,
 		},
 		Alarm: alarm,
+	}
+	if out.Team, err = s.callerStorageStanding(r); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if admin {
 		if sampled {

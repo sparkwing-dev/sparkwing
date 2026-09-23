@@ -236,6 +236,7 @@ var tenantTables = []string{
 	"debug_pauses",
 	"egress_usage",
 	"events",
+	"free_slots",
 	"github_app_installations",
 	"github_app_triggers",
 	"github_runner_bindings",
@@ -267,7 +268,7 @@ var tenantTables = []string{
 // in their schema, so the v49 ladder step that adds the column to every
 // tenant-owned table runs before they exist and skips them.
 var keyedAtCreation = []string{
-	"github_app_installations", "github_app_triggers",
+	"free_slots", "github_app_installations", "github_app_triggers",
 	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
 }
 

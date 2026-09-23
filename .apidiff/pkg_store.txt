@@ -492,6 +492,8 @@ const DefaultCreditMaxChargeSeconds = 30
 const DefaultCreditRateMicro = 20_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
+const DefaultFreeAllowanceBytes int64 = 1 << 30
+const DefaultFreeTeamSlots = 200
 const DefaultLeaseDuration = 3 * time.Minute
 const DefaultTeam Team = "default"
 const DefaultWarmCPUClassCores = 2
@@ -515,6 +517,7 @@ var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry th
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
+var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
@@ -528,6 +531,8 @@ var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already ac
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrFreeRunLimit = errors.New("free run limit reached")
+var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
@@ -729,6 +734,7 @@ const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
 func FormatCredits(micro int64) string
+func FreeEventShare(allowance int64) int64
 var FreeTierQuota = StorageQuota{
 	Tier:             StorageTierFree,
 	MaxBytesPerRun:   10 << 20,
@@ -871,6 +877,8 @@ const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxEventKindBytes = 128
+const MaxFreeRunsPerDay = 200
+const MaxGitHubRunnerBindings = 20
 const MaxGitHubRunnerCredentials = 20
 const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
@@ -1386,6 +1394,7 @@ const StorageLimitBytesPerRun = "bytes_per_run"
 const StorageLimitEventBytes = "event_bytes"
 const StorageLimitEventBytesPerRun = "event_bytes_per_run"
 const StorageLimitEventsPerRun = "events_per_run"
+const StorageLimitFreeEvents = "free_event_share"
 const StorageLimitObjectsPerRun = "objects_per_run"
 func StorageMonth(t time.Time) string
 const StoragePrincipalMaxLen = 256
@@ -1419,6 +1428,13 @@ type StorageSettings struct {
 	DefaultTier string
 }
 func (s StorageSettings) RetentionOn() bool
+type StorageStanding struct {
+	Tier TeamStorageTier
+
+	AllowanceBytes int64
+
+	EventBytes int64
+}
 type StorageTeamUsage struct {
 	Principal string
 	Month     string
@@ -1569,6 +1585,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
+func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
 func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
@@ -1591,6 +1608,7 @@ func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope,
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error)
+func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -1658,6 +1676,7 @@ func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (Identity
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
+func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
@@ -1711,6 +1730,7 @@ func (s *Store) SetCronScheduleLock(ctx context.Context, id string, lock CronLoc
 func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
+func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,
@@ -1735,6 +1755,8 @@ func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQ
 func (s *Store) StorageRateMicroPerGBDay(ctx context.Context) (int64, error)
 func (s *Store) StorageRetainedBytes(ctx context.Context, principal string) (int64, error)
 func (s *Store) StorageSettings(ctx context.Context) (StorageSettings, error)
+func (s *Store) StorageStandingFor(ctx context.Context, team Team) (_ StorageStanding, err error)
+func (s *Store) StorageStandingForRun(ctx context.Context, runID string) (_ StorageStanding, err error)
 func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month string) (StorageUsage, error)
 func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error)
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error)
@@ -1792,6 +1814,10 @@ type TeamSecret struct {
 	Team   Team
 	Secret Secret
 }
+type TeamStorageTier string
+const TeamTierFree TeamStorageTier = "free"
+const TeamTierFunded TeamStorageTier = "funded"
+const TeamTierNone TeamStorageTier = "none"
 type Tenant struct {
 }
 func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)

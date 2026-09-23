@@ -33,6 +33,8 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /api/v1/runners/github/exchange": true,
 		// safety: a GitHub App delivery proves itself with its signature; it answers 404 without an App.
 		"POST /webhooks/github-app": true,
+		// safety: the cache proves itself with its operator token, which the handler checks itself.
+		"GET /internal/teams/{team}/storage-tier": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {
