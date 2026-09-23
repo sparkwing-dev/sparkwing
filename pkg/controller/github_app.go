@@ -65,7 +65,7 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	}
 	app.statuses = newGitHubCommitStatusReporter("", s.dashboardURL, apiURL, httpClient)
 	app.statuses.tokenFor = func(ctx context.Context, st githubCommitStatus) (string, error) {
-		tok, err := client.InstallationToken(ctx, st.Installation, st.Repo, map[string]string{"statuses": "write"})
+		tok, err := client.InstallationToken(ctx, st.Installation, []string{st.Repo}, map[string]string{"statuses": "write"})
 		return tok.Token, err
 	}
 	s.githubApp = app

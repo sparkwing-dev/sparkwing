@@ -84,7 +84,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).
 		WithRunnerIdentity(holderRunnerIdentity(cfg.HolderPrefix))
-	if cfg.GitcacheURL == "" || !cfg.AllowRepos.Empty() {
+	if !cfg.AllowRepos.Empty() {
 		ctrl.WithAllowRepos(cfg.AllowRepos.Patterns())
 	}
 
@@ -342,18 +342,16 @@ func runRunnerCLI(args []string, version string) error {
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
 		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
-			"repository directly with this machine's own git credentials. A node holding its run's cache grant "+
-			"reads the cache the controller announces instead, when this is empty or the controller's own "+
+			"repository directly with the credential the controller releases for the run: the team's GitHub "+
+			"App token, else the git credential the team stored for the host. A node holding its run's cache "+
+			"grant reads the cache the controller announces instead, when this is empty or the controller's own "+
 			"gitcache proxy (env: SPARKWING_GITCACHE_URL)")
-	githubAppSource := fs.Bool("github-app-source", bincache.GitHubAppSourceEnabled(),
-		"before fetching a GitHub repository directly, ask the controller for a token that reads only that "+
-			"repository, minted from the team's GitHub App installation; for a cloud runner with no git "+
-			"credentials of its own (env: "+bincache.GitHubAppSourceEnv+")")
 	var allowRepos multiFlag
 	fs.Var(&allowRepos, "allow-repo",
 		"repository this machine may build, as host/path with '*' matching within one path segment "+
-			"(repeatable, e.g. --allow-repo 'github.com/acme/*'); required without --gitcache, since the runner "+
-			"then fetches, compiles and runs each run's pipeline code as the user running it")
+			"(repeatable, e.g. --allow-repo 'github.com/acme/*'); without --gitcache it also lets the runner fetch "+
+			"with this machine's own git credentials when the controller releases none, so name only the "+
+			"repositories you trust: the runner compiles and runs their pipeline code as the user running it")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
@@ -430,11 +428,6 @@ func runRunnerCLI(args []string, version string) error {
 	if *idleExit < 0 {
 		return errors.New("--idle-exit must not be negative")
 	}
-	if *githubAppSource {
-		if err := os.Setenv(bincache.GitHubAppSourceEnv, "1"); err != nil {
-			return err
-		}
-	}
 	allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
 	if err != nil {
 		return fmt.Errorf("--allow-repo: %w", err)
@@ -477,12 +470,8 @@ func runRunnerCLI(args []string, version string) error {
 			"expires_at", time.Unix(cred.ExpiresAt, 0).UTC(), "claim_until", claimUntil.UTC())
 	}
 
-	if *gitcacheURL == "" && allow.Empty() {
-		return errors.New("--allow-repo is required without --gitcache: this runner fetches, compiles and runs " +
-			"pipeline code as the user running it, from whatever repository a run names, so name the repositories " +
-			"you trust, e.g. --allow-repo 'github.com/acme/*'")
-	}
-	slog.Default().Info("runner repository allowlist", "allow_repo", allow.String(), "direct_source", *gitcacheURL == "")
+	slog.Default().Info("runner repository allowlist", "allow_repo", allow.String(), "direct_source", *gitcacheURL == "",
+		"owner_credentials", *gitcacheURL == "" && !allow.Empty())
 
 	identity := buildinfo.Read("sparkwing-runner", version)
 	warmList, err := parseWarmModules(*warmModules, identity.Version)

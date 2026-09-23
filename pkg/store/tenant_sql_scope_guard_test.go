@@ -64,6 +64,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).sweepOrphanedConcurrencyCache": "drops memos whose origin run is gone anywhere on the deployment",
 	"rewriteLegacyInheritedHolderMarkers":    "a v27 migration, and the team column arrives in v49",
 	"selectSecretsTx":                        "reads every team's secret so one key rotation reseals the whole table, and rewrites each row under its own team",
+	"selectGitCredentialsTx":                 "reads every team's git credential so one key rotation reseals the whole table, and rewrites each row under its own team",
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",

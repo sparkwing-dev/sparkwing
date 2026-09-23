@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -29,6 +31,13 @@ type Server struct {
 	store      *store.Store
 	dispatcher Dispatcher
 	logger     *slog.Logger
+
+	// hostKeyScan reads a host's ssh key for a new git credential; nil
+	// dials the host.
+	hostKeyScan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
+	// gitCredentialLimit holds a claim to a few credential releases a
+	// minute, so a looping pipeline cannot flood the audit trail.
+	gitCredentialLimit claimRateLimiter
 
 	pool *poolBinding
 
@@ -911,6 +920,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/git-credential", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunGitCredential), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/source-declaration", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceDeclaration), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
@@ -1071,6 +1082,12 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
 	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
 	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
+	mux.Handle("PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetRunnerGitCredentials)))
+	mux.Handle("GET /api/v1/team/git-credentials", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitCredentials)))
+	mux.Handle("POST /api/v1/team/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitCredential)))
+	mux.Handle("POST /api/v1/team/git-credentials/{host}/confirm", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleConfirmGitCredential)))
+	mux.Handle("DELETE /api/v1/team/git-credentials/{host}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitCredential)))
+	mux.Handle("GET /api/v1/team/git-credentials/releases", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListGitCredentialReleases)))
 	mux.Handle("POST /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateCLIToken)))
 	mux.Handle("GET /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCLITokens)))
 	mux.Handle("DELETE /api/v1/team/cli-tokens/{prefix}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRevokeCLIToken)))

@@ -46,6 +46,7 @@ func main() {
 	section(&b, "`defaults`", structFields(cf, "Defaults"))
 	section(&b, "Pipeline entry (a `pipelines:` list item)", structFields(pf, "Pipeline"))
 	section(&b, "`guards`", structFields(pf, "Guards"))
+	section(&b, "`source`", structFields(pf, "Source"))
 	section(&b, "Triggers (`on:`)", structFields(pf, "Triggers"))
 	section(&b, "`on.push`", structFields(pf, "PushTrigger"))
 	section(&b, "`on.pull_request`", structFields(pf, "PullRequestTrigger"))

@@ -1399,13 +1399,22 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 	}
 }
 
-func TestTriggerClaimingWithoutGitcacheFailsAtRender(t *testing.T) {
+// A runner with no gitcache claims triggers and fetches each run's source
+// directly with the credential the controller releases, so the chart renders
+// trigger claiming without one.
+func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.enabled=false")
-	if !strings.Contains(out, "runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL") {
-		t.Fatalf("render error does not identify the missing gitcache URL:\n%s", out)
+	rendered := renderRunner(t, "cache.enabled=false")
+	args := runnerContainer(t, rendered).Args
+	if !containsArg(args, "--also-claim-triggers") {
+		t.Errorf("runner args = %v, want trigger claiming", args)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--gitcache") || strings.HasPrefix(arg, "--allow-repo") {
+			t.Errorf("runner args carry %q; a direct runner fetches only with what the controller releases", arg)
+		}
 	}
 }
 

@@ -17,6 +17,7 @@ import {
   type MintedRunnerToken,
   type RunnerToken,
   canConnectMachines,
+  canManageTeam,
   cliTokenStartsRuns,
   controllerURLPlaceholder,
   listCLITokens,
@@ -29,6 +30,7 @@ import {
   runnerConnectCommand,
   unixSecondsISO,
 } from "@/lib/teams";
+import { setMachineGitCredentials } from "@/lib/gitCredentials";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 export default function MachinesPage() {
@@ -75,6 +77,27 @@ function Machines({ me }: { me: Me }) {
     }
   }
 
+  async function setGitCredentials(t: RunnerToken, enabled: boolean) {
+    const label = t.name || t.prefix;
+    setBusy(t.prefix);
+    try {
+      await setMachineGitCredentials(t.prefix, enabled);
+      toast(
+        enabled
+          ? `${label} now receives git credentials`
+          : `${label} no longer receives git credentials`,
+        "success",
+      );
+      await load();
+    } catch (err) {
+      toast(errorText(err), "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const owner = canManageTeam(role);
+
   // An editor may revoke only the tokens they minted; the controller decides,
   // so the button is offered to editors and a refusal is shown as it comes back.
   const mayRevoke = canConnectMachines(role);
@@ -90,7 +113,7 @@ function Machines({ me }: { me: Me }) {
       )}
       <Panel
         title="Machine tokens"
-        hint="Each token lets one machine claim this team's work. Revoke a token to disconnect its machine."
+        hint="Each token lets one machine claim this team's work. Revoke a token to disconnect its machine. A machine gets the team's git credentials only when an owner turns them on for it."
       >
         {loadError ? (
           <div className="p-4 text-sm text-red-300">{loadError}</div>
@@ -123,6 +146,21 @@ function Machines({ me }: { me: Me }) {
                 {t.last_used_at ? (
                   <span className="text-xs text-[var(--muted)]">
                     last seen {fmtDateTime(unixSecondsISO(t.last_used_at))}
+                  </span>
+                ) : null}
+                {owner ? (
+                  <label className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                    <input
+                      type="checkbox"
+                      checked={t.git_credentials === true}
+                      disabled={busy !== null}
+                      onChange={(e) => setGitCredentials(t, e.target.checked)}
+                    />
+                    Receives git credentials
+                  </label>
+                ) : t.git_credentials ? (
+                  <span className="text-xs text-[var(--muted)]">
+                    receives git credentials
                   </span>
                 ) : null}
                 {mayRevoke ? (

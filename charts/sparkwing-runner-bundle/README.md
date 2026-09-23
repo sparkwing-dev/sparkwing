@@ -241,11 +241,13 @@ open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
 Service read, forge, and delete every run's logs, which is again a bootstrap
 setting to turn back off with the token upgrade.
 
-Trigger claiming always needs a gitcache because it clones and compiles the
-repository before creating a run. If `cache.enabled=false` while
-`runner.alsoClaimTriggers=true`, add a non-empty `SPARKWING_GITCACHE_URL` to
-`runner.extraEnv`; the chart rejects the incomplete combination at render
-time. A node-only pool can instead set `runner.alsoClaimTriggers=false`.
+With `cache.enabled=false` and no `SPARKWING_GITCACHE_URL` in
+`runner.extraEnv`, runners fetch each run's source straight from its host.
+The controller releases the credential for each run: the team's GitHub App
+token when an installation covers the repository, else the git credential
+the team stored for the host. A run with neither fails with a message naming
+both, and a runner never falls back to credentials of its own. Working-tree
+runs (`sparkwing pipeline trigger --working-tree`) still need a gitcache.
 
 The chart does NOT create the Secret -- bring your own. This means
 rotating the token is `kubectl create secret ... --dry-run=client -o

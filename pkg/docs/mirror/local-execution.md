@@ -518,9 +518,13 @@ when testing deterministic placement.
 The git cache and its controller proxy belong to the operator, so a runner that
 holds a team's runner token starts without `--gitcache`. Such a runner fetches
 each claimed run's source directly: it fetches the commit the trigger recorded
-from the remote the trigger recorded, using the machine's own git config and
-credentials. The dashboard's machines page asks which repositories the machine
-may build and prints this command:
+from the remote the trigger recorded. It asks the controller for the run's
+credential first: the team's GitHub App token when an installation covers the
+repository, else the git credential the team stored for the host and opted
+this machine into (see [Team git credentials](git-credentials.md)). When the
+controller releases none, a runner given `--allow-repo` fetches with the
+machine's own git config and credentials. The dashboard's machines page asks
+which repositories the machine may build and prints this command:
 
 ```bash
 SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
@@ -545,8 +549,11 @@ team, decides what the machine builds:
   `github.com/acme/app` but not `github.com/acme/app/sub` or
   `github.com/other/app`. Quote a pattern that holds `*`, since the shell
   expands it.
-- Without `--gitcache` the runner refuses to start with no `--allow-repo`.
-  With `--gitcache` a list binds only when given. A `--github-actions` runner
+- Without `--gitcache` and without `--allow-repo`, the runner fetches only
+  with the credential the controller releases for each run, and a run it
+  releases none for fails. That is how a cloud runner holds no credential of
+  its own. `--allow-repo` is what lets the runner fall back to the machine's
+  own credentials. A list binds only when given. A `--github-actions` runner
   given no list builds only the repository whose job started it.
 - The runner sends its list with every trigger and node claim to a controller
   that advertises `claims.allow_repos` in `GET /api/v1/capabilities`, and the
@@ -575,15 +582,18 @@ Nodes the run dispatches to a pool runner fetch the same commit the same way,
 and a pool runner holds each node to its own `--allow-repo` list. A Kubernetes
 Job that the run's trigger runner created builds that runner's repository and
 carries no list of its own. A cloud pod holds no git credential, so it fetches
-only public repositories, and it converts a GitHub ssh remote to https. The
+only with the one the controller releases, fitting the remote to it: a GitHub
+App token or an HTTPS token fetches the https form of an ssh remote, and an SSH
+deploy key the ssh form of an https remote. The
 runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
 and checks out each run in its own worktree. It refuses any remote that is not
 https or ssh, a remote that carries a credential, and a commit that is not a
 full hex object id. `sparkwing pipeline trigger` therefore needs a commit that
 is already pushed, and `--working-tree` needs the operator's cache.
 
-Only the fetch reads the machine's git config, for its credential helpers,
-`insteadOf` rules and ssh command. Every other git step, the checkout
+Only a fetch with the machine's own credentials reads the machine's git
+config, for its credential helpers, `insteadOf` rules and ssh command; a fetch
+with a released credential reads none of it. Every other git step, the checkout
 included, runs with no system or global config and with LFS smudging off, so a
 filter driver, hook or fsmonitor that the fetched tree's `.gitattributes`
 names cannot run. The fetch refuses http redirects, and ssh runs with
@@ -598,6 +608,27 @@ minutes. The runner keeps at most 20 mirrors and 10 GiB of them, evicting the
 least recently used, and deletes a mirror that alone exceeds the size cap
 after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
 resolves outside the checkout, is refused.
+
+### An agent that fetches source itself
+
+`sparkwing-runner agent` fetches source through the controller's gitcache
+proxy unless its `agent.yaml` names `allow_repos` and no `gitcache`, or it
+starts with `--allow-repo`, which replaces the file's list:
+
+```yaml
+controller: https://sparkwing.example.com
+token: swr_...
+allow_repos:
+  - github.com/acme/*
+```
+
+Such an agent claims only runs of those repositories, sending the list with
+every claim, and fetches each one's source directly: with the credential the
+controller releases for the run, else with the machine owner's own git
+credentials. The list follows the rules in
+[What a laptop runner trusts](#what-a-laptop-runner-trusts).
+`sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
+An `agent.yaml` without `allow_repos` keeps the proxy, as before.
 
 ### Remote machine capacity
 

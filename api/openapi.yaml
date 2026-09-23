@@ -3674,11 +3674,14 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.secretsRotateResponse
                 type: object
-                required: [rotated, skipped]
+                required: [rotated, skipped, git_credentials]
                 properties:
                   rotated:
                     type: integer
                     description: Secret rows rewritten under the current key.
+                  git_credentials:
+                    type: integer
+                    description: Team git credentials resealed under the current key. One that opens under no configured key fails the rotation with 500.
                   skipped:
                     type: array
                     description: Rows left as they were because they opened under no configured key.
@@ -5034,7 +5037,7 @@ paths:
                 items:
                   x-sparkwing-go-type: pkg/controller.runnerTokenJSON
                   type: object
-                  required: [prefix, name, created_by, created_at, expires_at, last_used_at]
+                  required: [prefix, name, created_by, created_at, expires_at, last_used_at, git_credentials]
                   properties:
                     prefix: {type: string}
                     name: {type: string}
@@ -5042,6 +5045,7 @@ paths:
                     created_at: {type: integer, format: int64, description: Unix seconds.}
                     expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds; a runner token minted here lapses after 90 days.}
                     last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+                    git_credentials: {type: boolean, description: "A team owner opted this machine in to receiving the team's git credentials."}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
@@ -5096,6 +5100,169 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/runner-tokens/{prefix}/git-credentials:
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
+      description: An owner. A cloud runner receives the team's git credentials without this; any other runner token of the team receives them only once opted in. Answers 404 for a prefix that is no live runner token of the team.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+      responses:
+        "200":
+          description: The machine's setting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/git-credentials:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's git credentials, without their values.
+      description: Any member. No route returns a credential's value; only a release to a runner does.
+      responses:
+        "200":
+          description: The team's credentials by host.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: none
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitCredential"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Store, or replace, the team's git credential for a host.
+      description: >-
+        An owner. Kind ssh takes an unencrypted private_key; the controller reads the host's ssh host key now (on port, default 22, refusing an address inside its own network) and pins it, and the credential is released only after an owner confirms its fingerprint. Replacing an ssh key keeps a confirmation only while the host key is unchanged. Kind https takes a token and an optional username (default x-access-token) and is usable at once. The value is sealed under the controller's secrets key, and 409 secrets_key_required answers a controller without one. A team stores at most 50 credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialPutReq
+              type: object
+              required: [host, kind]
+              properties:
+                host: {type: string, description: "A hostname such as gitlab.com, with no scheme, port or path."}
+                kind: {type: string, enum: [ssh, https]}
+                port: {type: integer, description: "The ssh port the host key is read from; 22 when absent."}
+                private_key: {type: string, description: "An unencrypted PEM or OpenSSH private key, for kind ssh."}
+                username: {type: string, description: "The https username, for kind https."}
+                token: {type: string, description: "The https token, for kind https."}
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitCredential"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "The controller has no secrets key, or the team holds 50 credentials."}
+        "502": {description: "The host's ssh host key could not be read."}
+
+  /api/v1/team/git-credentials/{host}/confirm:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Confirm the host key an ssh git credential pinned.
+      description: An owner, naming the SHA256 fingerprint the credential showed when stored. Answers 409 for any other fingerprint, and 404 when the team holds no credential for the host.
+      parameters:
+        - {name: host, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialConfirmReq
+              type: object
+              required: [fingerprint]
+              properties:
+                fingerprint: {type: string, description: "SHA256:..."}
+      responses:
+        "200":
+          description: Confirmed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitCredential"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The fingerprint is not the host key the credential pinned."}
+
+  /api/v1/team/git-credentials/{host}:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Delete the team's git credential for a host.
+      description: An owner. Every release after the delete fails.
+      parameters:
+        - {name: host, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/git-credentials/releases:
+    get:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List the most recent releases of the team's git credentials.
+      description: An owner. Each release to a runner writes one row, newest first, at most 200.
+      responses:
+        "200":
+          description: Recent releases.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: none
+                required: [releases]
+                properties:
+                  releases:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.GitCredentialReleaseJSON
+                      type: object
+                      required: [host, run_id, runner, token_prefix, released_at]
+                      properties:
+                        host: {type: string}
+                        run_id: {type: string}
+                        runner: {type: string, description: "The runner principal the credential went to."}
+                        token_prefix: {type: string}
+                        released_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/auth/oauth/github/start:
     post:
@@ -5257,9 +5424,110 @@ paths:
                   token: {type: string}
                   expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
                   repository: {type: string, description: owner/name.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: Never set on this route; the git-credential route fills it.
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/source-declaration:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Declare the run pipeline's source.extra_repos, binding the run to them.
+      description: >-
+        For a runner holding a live node or trigger claim on the run, right after it fetches the run's source and before it compiles anything. The first declaration binds the run; a later one that names a different set answers 409, so pipeline code holding the same runner token cannot widen what the App token reads. The repositories are owner/name, at most 10, all of the run's GitHub repository's owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.SourceDeclaration
+              type: object
+              required: [extra_repos]
+              properties:
+                extra_repos:
+                  type: array
+                  maxItems: 10
+                  items: {type: string}
+      responses:
+        "200":
+          description: The list the run holds, folded to lower case and sorted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.SourceDeclaration
+                type: object
+                required: [extra_repos]
+                properties:
+                  extra_repos:
+                    type: array
+                    items: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The run already declared a different set.}
+
+  /api/v1/runs/{id}/git-credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Release the one credential a runner fetches the run's source with.
+      description: >-
+        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialReq
+              type: object
+              properties:
+                extra_repos:
+                  type: array
+                  maxItems: 10
+                  items: {type: string}
+                  description: Repositories of the run's declared source.extra_repos, as owner/name, that the App token also reads; each must be declared and covered by the installation that covers the run's repository, or the route answers 403.
+      responses:
+        "200":
+          description: Credential released.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.GitCredentialResponse
+                type: object
+                required: [kind, host]
+                properties:
+                  kind: {type: string, enum: [github_app, ssh, https]}
+                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
+                  token: {type: string, description: "The App token, for kind github_app."}
+                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
+                  repository: {type: string, description: owner/name the App token reads.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: Further owner/name repositories the App token reads.
+                  username: {type: string, description: "The https username, for kind https."}
+                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
+                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for App tokens more than ten times in a minute; Retry-After says when to ask again.}
+        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/team/github-app:
     get:
@@ -6179,6 +6447,21 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    GitCredential:
+      x-sparkwing-go-type: pkg/controller.GitCredentialJSON
+      type: object
+      required: [host, kind, confirmed, created_by, created_at, updated_at]
+      properties:
+        host: {type: string}
+        kind: {type: string, enum: [ssh, https]}
+        username: {type: string, description: "The https username."}
+        fingerprint: {type: string, description: "SHA256 fingerprint of the ssh host key the credential pins."}
+        host_key: {type: string, description: "The known_hosts entry the credential pins."}
+        public_key: {type: string, description: "The deploy key's public half, returned when the key is stored, to add to the forge."}
+        confirmed: {type: boolean, description: "An owner confirmed the pinned host key; https credentials are confirmed when stored."}
+        created_by: {type: string, description: User id of the owner who stored it.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
     GitHubAppInstallation:
       x-sparkwing-go-type: pkg/controller.githubAppInstallationJSON
       type: object

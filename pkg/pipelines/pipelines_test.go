@@ -231,3 +231,25 @@ pipelines:
 		t.Fatal("unexpected match")
 	}
 }
+
+func TestSourceExtraReposAreBoundedGitHubSlugs(t *testing.T) {
+	ok := pipelines.Config{Pipelines: []pipelines.Pipeline{{
+		Name: "build", Entrypoint: "Build",
+		Source: pipelines.Source{ExtraRepos: []string{"acme/lib", "acme/proto.go"}},
+	}}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid extra repos refused: %v", err)
+	}
+	for name, repos := range map[string][]string{
+		"url":       {"https://github.com/acme/lib"},
+		"no owner":  {"lib"},
+		"dot dot":   {"acme/.."},
+		"too many":  {"a/1", "a/2", "a/3", "a/4", "a/5", "a/6", "a/7", "a/8", "a/9", "a/10", "a/11"},
+		"three seg": {"acme/lib/sub"},
+	} {
+		cfg := pipelines.Config{Pipelines: []pipelines.Pipeline{{Name: "build", Entrypoint: "Build", Source: pipelines.Source{ExtraRepos: repos}}}}
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: %v accepted", name, repos)
+		}
+	}
+}

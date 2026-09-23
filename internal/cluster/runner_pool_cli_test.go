@@ -275,21 +275,6 @@ func TestPoolLoop_AdvertisesItsSlotsWithEachClaim(t *testing.T) {
 	}
 }
 
-// Without the operator's cache a runner fetches and runs pipeline code as the
-// user who started it, so it refuses to start until its owner names the
-// repositories they trust.
-func TestRunRunnerCLI_DirectSourceRequiresAnAllowlist(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
-	err := runRunnerCLI([]string{
-		"--controller=http://controller",
-		"--metrics-addr=",
-		"--also-claim-triggers",
-	}, "")
-	if err == nil || !strings.Contains(err.Error(), "--allow-repo is required without --gitcache") {
-		t.Fatalf("runRunnerCLI() error = %v, want the allowlist requirement", err)
-	}
-}
-
 func TestRunRunnerCLI_RefusesABadAllowRepoPattern(t *testing.T) {
 	err := runRunnerCLI([]string{
 		"--controller=http://controller",

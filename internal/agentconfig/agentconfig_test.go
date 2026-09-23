@@ -205,3 +205,38 @@ func TestConfig_RefusesACacheToken(t *testing.T) {
 		t.Fatalf("Load error = %v, want one naming cache_token", err)
 	}
 }
+
+// An allow list without a gitcache is the direct mode: the agent fetches each
+// run's source itself instead of through the controller's proxy. With no list
+// the agent keeps the proxy, which is what an old agent.yaml gets.
+func TestConfig_AllowReposSelectsDirectSource(t *testing.T) {
+	norm, err := Validate(Config{Controller: "http://x", AllowRepos: []string{"GitHub.com/Acme/*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if norm.Gitcache != "" {
+		t.Fatalf("gitcache = %q, want none so the agent fetches directly", norm.Gitcache)
+	}
+	if len(norm.AllowRepos) != 1 || norm.AllowRepos[0] != "github.com/acme/*" {
+		t.Fatalf("allow_repos = %v, want the canonical pattern", norm.AllowRepos)
+	}
+	explicit, err := Validate(Config{Controller: "http://x", Gitcache: "http://cache", AllowRepos: []string{"github.com/acme/*"}})
+	if err != nil || explicit.Gitcache != "http://cache" {
+		t.Fatalf("an explicit gitcache with a list = %q, %v; want the gitcache kept", explicit.Gitcache, err)
+	}
+	if _, err := Validate(Config{Controller: "http://x", AllowRepos: []string{"https://github.com/acme/*"}}); err == nil ||
+		!strings.Contains(err.Error(), "allow_repos") {
+		t.Fatalf("a pattern with a scheme = %v, want allow_repos refused", err)
+	}
+}
+
+func TestLoad_ReadsAllowRepos(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte("controller: http://x\nallow_repos:\n  - github.com/acme/*\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || len(cfg.AllowRepos) != 1 || cfg.AllowRepos[0] != "github.com/acme/*" {
+		t.Fatalf("load = %+v, %v", cfg, err)
+	}
+}

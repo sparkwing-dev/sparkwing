@@ -108,14 +108,17 @@ func DirectRepoURLFromGitHub(fullName string) string {
 	return "https://github.com/" + fullName + ".git"
 }
 
-// FetchPipelineSourceDirect checks out repoURL at sha under workDir with this
-// process's own git config and credentials, and returns the checkout's
-// .sparkwing directory. Fetched objects stay in a mirror under the Sparkwing
-// home keyed by the remote, so a later run of the same repository fetches only
-// what it lacks. An empty sha takes the tip of branch.
+// FetchPipelineSourceDirect checks out repoURL at sha under workDir and
+// returns the checkout's .sparkwing directory. With a credential the fetch
+// presents only that credential and reads none of this machine's git config,
+// ssh agent or keys; the zero credential fetches with this process's own git
+// config and credentials, which only an owner-fenced runner may do. Fetched
+// objects stay in a mirror under the Sparkwing home keyed by the remote, so a
+// later run of the same repository fetches only what it lacks. An empty sha
+// takes the tip of branch.
 func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
 	opts := defaultDirectOptions()
-	opts.githubToken = cred.GitHubToken
+	opts.cred = cred
 	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
 }
 
@@ -129,7 +132,7 @@ type directOptions struct {
 	fetchTimeout   time.Duration
 	maxMirrors     int
 	maxMirrorBytes int64
-	githubToken    string
+	cred           DirectCredential
 }
 
 func defaultDirectOptions() directOptions {
@@ -147,12 +150,8 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	if err != nil {
 		return "", err
 	}
-	if opts.githubToken != "" {
-		tokenRemote := githubTokenRemote(remote)
-		if tokenRemote == "" {
-			return "", errors.New("direct source: a GitHub source token fetches only a github.com repository")
-		}
-		remote = tokenRemote
+	if remote, err = credentialRemote(remote, opts.cred); err != nil {
+		return "", err
 	}
 	if sha == "" {
 		if branch == "" {
@@ -231,7 +230,8 @@ func directMirrorKey(remote string) string {
 	return user + "@" + strings.ToLower(host) + ":" + trimPath(path)
 }
 
-func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) error {
+func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) (err error) {
+	defer func() { err = redactCredential(err, opts.cred) }()
 	mirror := directMirrorPath(root, remote)
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -246,11 +246,19 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 
 	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
+	if !opts.cred.Empty() {
+		fetchEnv = credentialFetchEnv(localEnv)
+	}
 	// safety: only the fetch sees the helper and the pipe; every command that
 	// touches the mirror or the checkout runs with localEnv, which reads no
 	// config from the environment at all.
-	if opts.githubToken != "" {
-		fetchEnv = withGitHubCredential(fetchEnv, githubTokenScope)
+	pipeCred := opts.cred.Kind == CredentialGitHubApp || opts.cred.Kind == CredentialHTTPS
+	if pipeCred {
+		scope, err := credentialScope(remote)
+		if err != nil {
+			return fmt.Errorf("direct source: %w", err)
+		}
+		fetchEnv = withPipeCredential(fetchEnv, scope)
 	}
 	runWith := func(ctx context.Context, env []string, extra []*os.File, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
@@ -283,13 +291,34 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		return fmt.Errorf("direct source: mark mirror used: %w", err)
 	}
 
-	configured, err := run(ctx, fetchEnv, "-C", mirror, "config", "--get", "core.sshCommand")
-	// safety: git exits 1 when the key is unset; any other failure is a config the fetch cannot read either.
-	var exitErr *exec.ExitError
-	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
-		return fmt.Errorf("direct source: %w", err)
+	var sshCommand string
+	switch {
+	case opts.cred.Kind == CredentialSSH:
+		keyDir, command, err := writeSSHCredential(opts.cred)
+		if err != nil {
+			return fmt.Errorf("direct source: %w", err)
+		}
+		// safety: the key leaves the disk when the checkout returns, before
+		// the runner compiles or runs anything the fetched tree names; a key
+		// that cannot be removed fails the checkout.
+		defer func() {
+			if rmErr := os.RemoveAll(keyDir); rmErr != nil {
+				err = errors.Join(err, fmt.Errorf("direct source: remove the deploy key: %w", rmErr))
+			}
+		}()
+		sshCommand = command
+	case !opts.cred.Empty():
+		sshCommand = "ssh" + directSSHOptions
+	default:
+		configured, err := run(ctx, fetchEnv, "-C", mirror, "config", "--get", "core.sshCommand")
+		// safety: git exits 1 when the key is unset; any other failure is a config the fetch cannot read either.
+		var exitErr *exec.ExitError
+		if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
+			return fmt.Errorf("direct source: %w", err)
+		}
+		sshCommand = directSSHCommand(fetchEnv, configured)
 	}
-	fetchEnv = append(fetchEnv, "GIT_SSH_COMMAND="+directSSHCommand(fetchEnv, configured))
+	fetchEnv = append(fetchEnv, "GIT_SSH_COMMAND="+sshCommand)
 	// safety: a redirect would carry the fetch, and any credential a helper
 	// hands it, to a host nothing here checked.
 	fetchRef := func(ref string) error {
@@ -300,10 +329,10 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 			defer cancel()
 		}
 		var extra []*os.File
-		if opts.githubToken != "" {
-			cred, err := credentialPipe(opts.githubToken)
+		if pipeCred {
+			cred, err := credentialPipe(opts.cred.Username, opts.cred.Secret, fetchCredentialAsks)
 			if err != nil {
-				return fmt.Errorf("source token pipe: %w", err)
+				return fmt.Errorf("source credential pipe: %w", err)
 			}
 			defer func() { _ = cred.Close() }()
 			extra = []*os.File{cred}

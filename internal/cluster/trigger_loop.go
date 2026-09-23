@@ -28,12 +28,13 @@ type TriggerLoopOptions struct {
 	ControllerURL string
 	LogsURL       string
 	// GitcacheURL is the operator's git cache. Empty means direct source: the
-	// runner fetches each trigger's repository itself with its own git
-	// credentials, and so do the node executors it starts.
+	// runner fetches each trigger's repository itself with the credential the
+	// controller releases for the run, and so do the node executors it starts.
 	GitcacheURL string
 	// AllowRepos is the machine owner's list of repositories this runner may
-	// build. A direct-source runner refuses every run outside it, an empty list
-	// included; with a git cache it binds only when given.
+	// build. It binds only when given; a direct-source runner given one may
+	// also fetch with the machine's own git credentials when the controller
+	// releases none.
 	AllowRepos      sourceurl.RepoAllowlist
 	Token           string
 	RunnerKind      string
@@ -90,7 +91,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
 		WithRunnerIdentity(processRunnerIdentity("trigger-loop")).
 		WithTriggerNodeRunner(nodeRunner)
-	if opts.GitcacheURL == "" || !opts.AllowRepos.Empty() {
+	if !opts.AllowRepos.Empty() {
 		cli.WithAllowRepos(opts.AllowRepos.Patterns())
 	}
 	logger.Info(
@@ -205,7 +206,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	direct := opts.GitcacheURL == ""
 	repoURL, sourceErr := orchestrator.TriggerSourceURL(trigger, direct)
-	if sourceErr == nil && (direct || !opts.AllowRepos.Empty()) {
+	if sourceErr == nil && !opts.AllowRepos.Empty() {
 		if sourceErr = orchestrator.AdmitTriggerSource(opts.AllowRepos, trigger, repoURL); sourceErr != nil {
 			logger.Warn("trigger loop: refused a run from a repository this machine does not allow",
 				"run_id", trigger.ID, "allow_repo", opts.AllowRepos.String(), "err", sourceErr)
@@ -260,12 +261,12 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	case direct && workspaceSource:
 		fetchErr = bincache.ErrWorkspaceNeedsCache
 	case direct:
-		cred, credErr := bincache.DirectCredentialFor(ctx, opts.ControllerURL, opts.Token, trigger.ID, repoURL)
-		if credErr != nil {
-			logger.Warn("trigger loop: no source token; fetching with this machine's credentials",
-				"run_id", trigger.ID, "err", credErr)
-		}
-		sparkwingDir, fetchErr = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, cred)
+		sparkwingDir, fetchErr = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
+			ControllerURL: opts.ControllerURL, RunnerToken: opts.Token, RunID: trigger.ID,
+			RepoURL: repoURL, Branch: branch, SHA: sha, WorkDir: workDir,
+			OwnerCredentials: !opts.AllowRepos.Empty(),
+			ExtraRepos:       orchestrator.PipelineExtraRepos(trigger.Pipeline),
+		}, logger)
 	case workspaceSource:
 		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)

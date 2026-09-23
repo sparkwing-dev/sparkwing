@@ -2,7 +2,7 @@
 
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v60 when the
+v0.60.0 runs schema v47. This release migrates the database to v62 when the
 controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
@@ -14,7 +14,7 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 60`,
+5. Verify: the startup line reads `runs-store schema 62`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.
@@ -134,16 +134,28 @@ A self-hosted controller using the built-in cipher needs no change. Its first
 start reseals every row in place and logs how many it resealed; keep the same
 `SPARKWING_SECRETS_KEY` across the upgrade.
 
-## A runner without the git cache names the repositories it may build
+## A runner without the git cache fetches with the credential the controller releases
 
-`sparkwing-runner runner` started without `--gitcache` refuses to start until it
-has at least one `--allow-repo`. Such a runner fetches, compiles and runs each
-run's pipeline code as the user who started it, and any team member who can
-trigger a run chose the repository, so the machine's owner now names what it
-may build.
+`sparkwing-runner runner` started without `--gitcache` fetches each run's
+source straight from its host, with the credential the controller releases for
+the run on `POST /api/v1/runs/{id}/git-credential`: the team's GitHub App
+token when an installation the team holds covers the repository, else the git
+credential the team stored for the host. A run with neither fails before
+anything is fetched, with a message naming both remedies. Such a runner never
+falls back to the machine's own git credentials.
 
-- **Before:** `sparkwing-runner runner --controller https://c --also-claim-triggers ...`
-- **After:** `sparkwing-runner runner --controller https://c --allow-repo 'github.com/acme/*' --also-claim-triggers ...`
+A runner its owner fences with `--allow-repo` is the exception: it uses the
+controller's credential when one is released and otherwise the machine's own,
+which is how a laptop runner builds what its owner can read.
+
+- **Before:** `sparkwing-runner runner --controller https://c --allow-repo 'github.com/acme/*' --github-app-source --also-claim-triggers ...`
+- **After, a cloud runner:** `sparkwing-runner runner --controller https://c --also-claim-triggers ...`
+- **After, a laptop runner:** `sparkwing-runner runner --controller https://c --allow-repo 'github.com/acme/*' --also-claim-triggers ...`
+
+`--github-app-source` and `SPARKWING_GITHUB_APP_SOURCE` are removed; the App
+token is the first choice for every direct runner. A runner that relied on the
+machine's own credentials without `--allow-repo` must either gain the list or
+have the team connect the GitHub App or store a git credential for the host.
 
 A pattern is a host and path with no scheme; `*` matches within one path
 segment, and matching ignores case. Quote a pattern that holds `*`. The runner
@@ -152,15 +164,19 @@ controller whose `GET /api/v1/capabilities` advertises `claims.allow_repos`,
 and that controller hands it only runs from those repositories. The runner and
 controller upgrade in either order: against an older controller the runner
 claims without the field, may claim a run outside its list, and fails that run
-before fetching anything, with a reason naming the repository and the list. A
-runner that sends no list claims as before. A `--github-actions` runner
-given no list builds only its own repository, and a runner with `--gitcache` is
-unaffected unless given a list.
+before fetching anything, with a reason naming the repository and the list.
+Against a controller without the git-credential route, a runner asks for the
+run's App source token instead. A `--github-actions` runner given no list
+builds only its own repository, and a runner with `--gitcache` is unaffected
+unless given a list.
 
 `POST /api/v1/team/runner-tokens` now requires `repos`, a list of the same
 patterns, and the `command` it returns carries one `--allow-repo` per pattern.
 A client that sends only `name` gets 400. See
 [local-execution.md](../local-execution.md#what-a-laptop-runner-trusts).
+
+The sparkwing-runner-bundle chart no longer refuses
+`runner.alsoClaimTriggers=true` without a gitcache.
 
 ## A trigger names one repository
 

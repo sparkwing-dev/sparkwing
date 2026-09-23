@@ -298,6 +298,9 @@ type runnerTokenJSON struct {
 	CreatedAt  int64  `json:"created_at"`
 	ExpiresAt  *int64 `json:"expires_at"`
 	LastUsedAt *int64 `json:"last_used_at"`
+	// GitCredentials reports that a team owner opted this machine in to
+	// receiving the team's git credentials.
+	GitCredentials bool `json:"git_credentials"`
 }
 
 func validRunnerName(name string) bool {
@@ -397,11 +400,16 @@ func (s *Server) handleListRunnerTokens(w http.ResponseWriter, r *http.Request) 
 		s.writeInternalError(w, r, "list runner tokens", err)
 		return
 	}
+	optedIn, err := t.GitCredentialMachines(r.Context())
+	if err != nil {
+		s.writeInternalError(w, r, "list git credential machines", err)
+		return
+	}
 	out := make([]runnerTokenJSON, 0, len(toks))
 	for _, tok := range toks {
 		row := runnerTokenJSON{
 			Prefix: tok.Prefix, Name: strings.TrimPrefix(tok.Principal, runnerPrincipalPrefix),
-			CreatedBy: tok.CreatedBy, CreatedAt: tok.CreatedAt.Unix(),
+			CreatedBy: tok.CreatedBy, CreatedAt: tok.CreatedAt.Unix(), GitCredentials: optedIn[tok.Prefix],
 		}
 		if tok.ExpiresAt != nil {
 			v := tok.ExpiresAt.Unix()

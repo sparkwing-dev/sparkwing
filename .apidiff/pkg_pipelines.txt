@@ -48,6 +48,7 @@ const KindProfileController
 const KindProfileLocal
 const KindProfileName
 const KindUnknown GuardKind = iota
+const MaxExtraRepos = 10
 const MaxScheduleNameLen = 40
 func Parse(r io.Reader) (*Config, error)
 func ParseGuardToken(raw string) (GuardToken, error)
@@ -69,6 +70,8 @@ type Pipeline struct {
 	Profile string
 
 	Requires []string
+
+	Source Source
 }
 func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PostCommitHookTrigger struct{}
@@ -122,6 +125,11 @@ type SecretEntry struct {
 }
 func (e SecretEntry) IsRequired() bool
 type SecretsField []SecretEntry
+type Source struct {
+	ExtraRepos []string
+}
+func (s *Source) UnmarshalYAML(node *yaml.Node) error
+func (s Source) Validate(pipeline string) error
 type Triggers struct {
 	Push *PushTrigger
 

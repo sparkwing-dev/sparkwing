@@ -36,7 +36,7 @@ type appFixture struct {
 	replica func() (*controller.Server, string)
 }
 
-func newAppFixture(t *testing.T) *appFixture {
+func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Server) *appFixture {
 	t.Helper()
 	raw, pub := multiTeamLicense(t)
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -64,6 +64,9 @@ func newAppFixture(t *testing.T) *appFixture {
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect, appCallback}).
 			WithDashboardURL("https://dash.example.com").
 			WithGitHubApp(app.Config())
+		for _, opt := range opts {
+			srv = opt(srv)
+		}
 		ts := httptest.NewServer(srv.Handler())
 		t.Cleanup(ts.Close)
 		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

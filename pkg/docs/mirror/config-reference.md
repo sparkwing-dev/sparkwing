@@ -35,6 +35,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than schema Default and Computed; lower than an explicit operator CLI flag. Keyed by CLI flag name (kebab-case, matching what the SDK's WithArgs[T] field tags resolve to). |
 | `profile` | `string` | no | Profile names the project profile (from sparkwing.yaml's profiles map) this pipeline uses. Empty means "fall back to the project's defaults.profile selector". The CLI's --profile flag (which targets ~/.config/sparkwing/profiles.yaml) overrides this when present. |
 | `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" keeps fleet helpers from claiming the node; --sw-local-only instead selects local storage backends. |
+| `source` | `Source` | no | Source shapes how a runner fetches this pipeline's source. |
 
 ## `guards`
 
@@ -42,6 +43,12 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 |---|---|---|---|
 | `require` | `[]string` | no |  |
 | `reject` | `[]string` | no |  |
+
+## `source`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `extra_repos` | `[]string` | no | ExtraRepos names further GitHub repositories, as owner/name, that the run's GitHub App token also reads when the installation covering the run's repository covers them: private submodules or dependencies. Declaring them makes a runner check out the run's submodules. At most [MaxExtraRepos], all of the run repository's owner. |
 
 ## Triggers (`on:`)
 

@@ -471,3 +471,43 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 		t.Errorf("a refused remove still drove the service manager: %v", *f.calls)
 	}
 }
+
+func TestRunnersAddWritesTheAllowList(t *testing.T) {
+	f := newRunnersFixture(t)
+	captureStdout(t, func() {
+		if err := runRunners([]string{
+			"add", "--profile", "prod", "--name", "dev-laptop", "--config", f.config,
+			"--allow-repo", "github.com/acme/*", "--allow-repo", "gitlab.example.com/acme/tools",
+		}); err != nil {
+			t.Fatalf("runners add: %v", err)
+		}
+	})
+	raw, err := agentconfig.Load(f.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(raw.AllowRepos, []string{"github.com/acme/*", "gitlab.example.com/acme/tools"}) {
+		t.Fatalf("allow_repos = %v", raw.AllowRepos)
+	}
+	cfg, err := agentconfig.Validate(*raw)
+	if err != nil || cfg.Gitcache != "" {
+		t.Fatalf("the written config = gitcache %q, %v; want direct source", cfg.Gitcache, err)
+	}
+	if len(f.runnerTokens(t)) != 1 {
+		t.Fatal("runners add minted no token")
+	}
+}
+
+func TestRunnersAddRefusesABadAllowPatternBeforeMinting(t *testing.T) {
+	f := newRunnersFixture(t)
+	err := runRunners([]string{
+		"add", "--profile", "prod", "--name", "dev-laptop", "--config", f.config,
+		"--allow-repo", "https://github.com/acme/*",
+	})
+	if err == nil || !strings.Contains(err.Error(), "allow_repos") {
+		t.Fatalf("runners add = %v, want the pattern refused", err)
+	}
+	if n := len(f.runnerTokens(t)); n != 0 {
+		t.Fatalf("minted %d tokens for a config that cannot run", n)
+	}
+}

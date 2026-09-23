@@ -190,10 +190,12 @@ runner:
 #    means runners never egress for a clone.
 # -----------------------------------------------------------------------
 cache:
-  # Set to false for a node-only pool or when runner.extraEnv supplies
-  # SPARKWING_GITCACHE_URL for an external gitcache. Trigger claiming
-  # requires a gitcache and the chart rejects a missing URL instead of
-  # starting a runner that exits immediately.
+  # Set to false to run without the cache. With no gitcache (this one,
+  # or SPARKWING_GITCACHE_URL in runner.extraEnv for an external one),
+  # runners fetch each run's source straight from its host with the
+  # credential the controller releases for the run: the team's GitHub
+  # App token, else the git credential the team stored for the host.
+  # Working-tree runs still need a gitcache.
   enabled: true
 
   # Serve the cache's blob and sync endpoints to anyone who can reach

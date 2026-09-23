@@ -29,7 +29,7 @@ func fixture(t *testing.T) (*githubapptest.GitHub, *githubapp.Client) {
 
 func TestInstallationToken_CoversOnlyTheNamedRepository(t *testing.T) {
 	gh, c := fixture(t)
-	tok, err := c.InstallationToken(context.Background(), 7, "widgets", map[string]string{"contents": "read"})
+	tok, err := c.InstallationToken(context.Background(), 7, []string{"widgets"}, map[string]string{"contents": "read"})
 	if err != nil {
 		t.Fatalf("InstallationToken: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestInstallationToken_CoversOnlyTheNamedRepository(t *testing.T) {
 
 func TestInstallationToken_RepositoryOutsideTheInstallationIsNotInstalled(t *testing.T) {
 	_, c := fixture(t)
-	_, err := c.InstallationToken(context.Background(), 7, "elsewhere", map[string]string{"contents": "read"})
+	_, err := c.InstallationToken(context.Background(), 7, []string{"elsewhere"}, map[string]string{"contents": "read"})
 	if !errors.Is(err, githubapp.ErrNotInstalled) {
 		t.Fatalf("err = %v, want ErrNotInstalled", err)
 	}

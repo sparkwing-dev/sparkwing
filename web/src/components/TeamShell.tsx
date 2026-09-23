@@ -21,6 +21,7 @@ const baseTabs = [
   { href: "/team", label: "Members" },
   { href: "/team/machines", label: "Machines" },
   { href: "/team/secrets", label: "Secrets" },
+  { href: "/team/git-credentials", label: "Git credentials" },
 ];
 
 export function teamTabs(caps: Capabilities | null) {
