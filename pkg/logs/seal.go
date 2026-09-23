@@ -692,6 +692,9 @@ func (s *Server) handleSeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.seals.drop(key)
+	// safety: a sealed node wrote its last line, so its run's block is
+	// committed now rather than held until two idle settles pass.
+	s.settleRunLogBlocks(r.Context(), runID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

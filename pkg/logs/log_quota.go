@@ -181,6 +181,24 @@ func (s *Server) settleLogBlocks(ctx context.Context, final bool) {
 	}
 }
 
+// settleRunLogBlocks commits runID's blocks and gives the rest back, for a
+// node that sealed its log; a later append of the run reserves a new block.
+func (s *Server) settleRunLogBlocks(ctx context.Context, runID string) {
+	if s.archive == nil || s.counter == nil {
+		return
+	}
+	for _, b := range s.logBlocks.all() {
+		if b.key.run != runID {
+			continue
+		}
+		b.mu.Lock()
+		if err := s.settleLocked(ctx, b, true); err != nil {
+			s.logger.Error("logs storage count", "team", b.key.team, "run", b.key.run, "err", err)
+		}
+		b.mu.Unlock()
+	}
+}
+
 func (s *Server) settleLocked(ctx context.Context, b *logBlock, final bool) error {
 	defer func() { b.active = false }()
 	// safety: a block granted while the controller could not answer carries

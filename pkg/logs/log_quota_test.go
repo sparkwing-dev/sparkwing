@@ -197,3 +197,21 @@ func TestAConfirmedClaimCoversOnlyItsOwnAttempt(t *testing.T) {
 		t.Fatalf("two appends naming no generation = %d claim checks in all, want each checked", got)
 	}
 }
+
+// A sealed node commits its run's block at once rather than holding it until
+// an idle settle, so a finished run's bytes reach the controller's count and
+// its unused reservation goes back without waiting two intervals.
+func TestASealSettlesTheRunsLogBlock(t *testing.T) {
+	counter := storagequotatest.New(1<<20, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	f.appendLine(t, "Bearer a", "run-a", "build", "s1", 1)
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != 0 || reserved == 0 {
+		t.Fatalf("before the seal the controller counts %d used, %d reserved; want a block reserved", used, reserved)
+	}
+	if code := f.seal(t, "Bearer a", "run-a", "build", Seal{Stream: "s1", FinalSeq: 1, Lines: 1, Bytes: int64(len("line 1\n"))}); code != http.StatusNoContent {
+		t.Fatalf("seal = %d", code)
+	}
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != int64(len("line 1\n")) || reserved != 0 {
+		t.Fatalf("after the seal the controller counts %d used, %d reserved; want the line committed and nothing held", used, reserved)
+	}
+}
