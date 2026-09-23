@@ -689,6 +689,13 @@ dashboard button reports `delete needs the admin scope` and nothing is removed.
 
 ### Google and GitHub sign-in
 
+Account sign-in needs a dashboard started with `--controller`, which forwards
+every read with the signed-in user's own session. A dashboard started with
+`--profile` or `--state` reads the operator's store directly, so it offers no
+provider, answers `/auth/<provider>/...` with `404`, and treats any account
+session, or any session acting for a team other than the operator's, as signed
+out.
+
 When the controller's `GET /api/v1/capabilities` reports `teams.enabled`, the
 sign-in page offers "Sign in with Google" when `auth.providers` lists `google`
 and "Sign in with GitHub" when it lists `github`, above the password form. Each

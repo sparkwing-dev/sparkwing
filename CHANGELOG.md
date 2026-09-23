@@ -583,6 +583,17 @@ unlock.
   any team but the operator's is now charged to `team:<slug>`; the operator's
   team keeps one account per principal.
 
+- **dashboard:** account sessions need a dashboard that forwards every read
+  A dashboard started with `--profile` or `--state` checked only that the
+  controller knew a session and then served the operator's own store, and it
+  offered Google and GitHub sign-in whenever the controller was multi-team, so
+  any self-signup could read the operator's runs. Such a dashboard now treats
+  an account session as signed out, hides the provider buttons and answers the
+  sign-in routes `404`; account sign-in needs `--controller`. Also:
+  `/api/v1/health/services` refuses a session holding no role, OAuth start
+  sends the browser's address so the controller budgets each browser, and an
+  OAuth sign-in ends the session the browser held before.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

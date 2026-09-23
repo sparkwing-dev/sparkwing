@@ -136,7 +136,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
 		if c, err := r.Cookie(cookieName(sessionCookieName, cookiesSecure(opts))); err == nil && c.Value != "" {
-			if _, err := controllerResolveSession(r.Context(), controllerURL, c.Value); err == nil {
+			if _, err := resolveDashboardSession(r.Context(), opts, c.Value); err == nil {
 				http.Redirect(w, r, data.Next, http.StatusSeeOther)
 				return
 			} else if !errors.Is(err, errInvalidControllerSession) {
@@ -146,7 +146,7 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 			clearSessionCookies(w, cookiesSecure(opts))
 		}
 		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
-		data = withSignInProviders(r.Context(), controllerURL, data)
+		data = withSignInProviders(r.Context(), opts, data)
 		renderLoginPage(w, r, data, http.StatusOK, cookiesSecure(opts))
 	}
 }
@@ -165,7 +165,7 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 
 		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			data := withSignInProviders(r.Context(), controllerURL,
+			data := withSignInProviders(r.Context(), opts,
 				loginPageData{Error: "Invalid username or password.", Next: next})
 			renderLoginPage(w, r, data, http.StatusUnauthorized, cookiesSecure(opts))
 			return
@@ -276,6 +276,35 @@ type sessionResp struct {
 	Scopes    []string `json:"scopes"`
 	CSRFToken string   `json:"csrf_token"`
 	ExpiresAt int64    `json:"expires_at"`
+	Team      string   `json:"team,omitempty"`
+	UserID    string   `json:"user_id,omitempty"`
+}
+
+// accountBound reports a session a signed-up account holds, or one acting for
+// any team but the operator's.
+func (s *sessionResp) accountBound() bool {
+	return s.UserID != "" || (s.Team != "" && s.Team != "default")
+}
+
+// safety: without --controller the dashboard reads the operator's own store for
+// every request, so only a session that is the operator's may use it. An
+// account session would read every team's runs.
+func accountSessionsServed(opts HandlerOptions) bool {
+	return opts.ControllerURL != ""
+}
+
+// resolveDashboardSession is [controllerResolveSession] for a session this
+// dashboard will serve: an account session on a dashboard that does not
+// forward reads as the session reads as invalid.
+func resolveDashboardSession(ctx context.Context, opts HandlerOptions, sessionID string) (*sessionResp, error) {
+	sess, err := controllerResolveSession(ctx, authControllerURL(opts), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.accountBound() && !accountSessionsServed(opts) {
+		return nil, fmt.Errorf("%w: an account session needs a dashboard running with --controller", errInvalidControllerSession)
+	}
+	return sess, nil
 }
 
 func controllerLogin(ctx context.Context, controllerURL, user, pass, clientIP string) (*loginResp, error) {

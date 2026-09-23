@@ -59,8 +59,8 @@ func oauthProviderFrom(w http.ResponseWriter, r *http.Request, opts HandlerOptio
 		return oauthProvider{}, "", false
 	}
 	controllerURL := authControllerURL(opts)
-	if controllerURL == "" {
-		http.Error(w, "sign-in needs a controller session backend", http.StatusNotFound)
+	if controllerURL == "" || !accountSessionsServed(opts) {
+		http.Error(w, "account sign-in needs a dashboard running with --controller", http.StatusNotFound)
 		return oauthProvider{}, "", false
 	}
 	return provider, controllerURL, true
@@ -73,9 +73,10 @@ func oauthStartHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		next := safeNext(r.URL.Query().Get("next"))
-		start, err := controllerOAuthStart(r.Context(), controllerURL, provider.Name, oauthRedirectURI(r, provider.Name))
+		start, err := controllerOAuthStart(r.Context(), controllerURL, provider.Name, oauthRedirectURI(r, provider.Name),
+			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			renderLoginPage(w, r, withSignInProviders(r.Context(), controllerURL, loginPageData{
+			renderLoginPage(w, r, withSignInProviders(r.Context(), opts, loginPageData{
 				Next: next, Error: provider.Label + " sign-in is unavailable right now.",
 			}), http.StatusBadGateway, cookiesSecure(opts))
 			return
@@ -99,44 +100,50 @@ func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 		secure := cookiesSecure(opts)
 		query := r.URL.Query()
 		if query.Get("error") != "" {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusUnauthorized, provider.Label+" sign-in was not completed.")
+			refuseOAuth(w, r, opts, secure, http.StatusUnauthorized, provider.Label+" sign-in was not completed.")
 			return
 		}
 		flow, ok := readOAuthFlow(r, secure)
 		if !ok {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, "This sign-in was not started in this browser. Start again.")
+			refuseOAuth(w, r, opts, secure, http.StatusBadRequest, "This sign-in was not started in this browser. Start again.")
 			return
 		}
 		// safety: the cookie survives a mismatch, so one forged callback cannot discard a sign-in this browser has in
 		// flight. The provider is part of the match, so a code from one provider never meets another's verifier.
 		if !constantTimeEqual(query.Get("state"), flow.State) || flow.Provider != provider.Name {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, "This sign-in could not be verified. Start again.")
+			refuseOAuth(w, r, opts, secure, http.StatusBadRequest, "This sign-in could not be verified. Start again.")
 			return
 		}
 		setOAuthFlowCookie(w, "", -1, secure)
 		code := query.Get("code")
 		if code == "" {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusBadRequest, provider.Label+" sign-in was not completed.")
+			refuseOAuth(w, r, opts, secure, http.StatusBadRequest, provider.Label+" sign-in was not completed.")
 			return
 		}
 		exchanged, err := controllerOAuthExchange(r.Context(), controllerURL, provider.Name, code, flow.Verifier,
 			oauthRedirectURI(r, provider.Name), ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
 		if err != nil {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
+			refuseOAuth(w, r, opts, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
 		}
 		sess, err := controllerResolveSession(r.Context(), controllerURL, exchanged.SessionID)
 		if err != nil {
-			refuseOAuth(w, r, controllerURL, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
+			refuseOAuth(w, r, opts, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
+		}
+		// safety: the browser's earlier session would otherwise stay live on the
+		// controller after its cookie is overwritten, with nothing left to end it.
+		if prior, err := r.Cookie(cookieName(sessionCookieName, secure)); err == nil &&
+			prior.Value != "" && prior.Value != exchanged.SessionID {
+			_ = controllerLogout(r.Context(), controllerURL, prior.Value)
 		}
 		setSessionCookies(w, &loginResp{SessionID: exchanged.SessionID, CSRFToken: sess.CSRFToken}, secure)
 		renderSignedIn(w, safeNext(flow.Next))
 	}
 }
 
-func refuseOAuth(w http.ResponseWriter, r *http.Request, controllerURL string, secure bool, status int, message string) {
-	renderLoginPage(w, r, withSignInProviders(r.Context(), controllerURL,
+func refuseOAuth(w http.ResponseWriter, r *http.Request, opts HandlerOptions, secure bool, status int, message string) {
+	renderLoginPage(w, r, withSignInProviders(r.Context(), opts,
 		loginPageData{Next: "/", Error: message}), status, secure)
 }
 
@@ -179,9 +186,11 @@ func readOAuthFlow(r *http.Request, secure bool) (oauthFlow, bool) {
 	return flow, true
 }
 
-func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirectURI string) (*oauthStartResp, error) {
+// safety: the client IP keys the controller's start budget, so without it every
+// browser behind this dashboard shares one bucket.
+func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirectURI, clientIP string) (*oauthStartResp, error) {
 	var out oauthStartResp
-	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/start", "",
+	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/start", clientIP,
 		map[string]string{"redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}

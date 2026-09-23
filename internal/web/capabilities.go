@@ -73,9 +73,12 @@ func controllerIdentityCapabilities(ctx context.Context, controllerURL, sessionI
 	return out, nil
 }
 
-// safety: a single-team controller offers no provider, so its sign-in page stays password-only.
-func withSignInProviders(ctx context.Context, controllerURL string, data loginPageData) loginPageData {
-	if controllerURL == "" {
+// safety: a single-team controller offers no provider, so its sign-in page stays
+// password-only, and so does a dashboard that would not serve the account
+// session a provider signs in.
+func withSignInProviders(ctx context.Context, opts HandlerOptions, data loginPageData) loginPageData {
+	controllerURL := authControllerURL(opts)
+	if controllerURL == "" || !accountSessionsServed(opts) {
 		return data
 	}
 	caps, err := controllerIdentityCapabilities(ctx, controllerURL, "")

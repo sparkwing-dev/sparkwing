@@ -29,6 +29,12 @@ type serviceStatus struct {
 
 func healthServicesHandler(services []HealthService, token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// safety: the answer names internal service URLs, so a signed-in session
+		// that holds no role in any team reads none of them.
+		if p, ok := WebPrincipalFromContext(r.Context()); ok && len(p.Scopes) == 0 {
+			http.Error(w, "a role is required to read service health", http.StatusForbidden)
+			return
+		}
 		if len(services) == 0 {
 			writeJSON(w, http.StatusOK, map[string]any{"services": []serviceStatus{}})
 			return
