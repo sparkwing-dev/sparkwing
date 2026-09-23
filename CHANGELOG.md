@@ -363,6 +363,12 @@ unlock.
 
 ### Fixed
 
+- **controller:** a member removed from a team lands in a team they still
+  belong to. Their session stayed on the team they had left, so every request
+  answered `403 missing_scope` and `/me` showed no active team. Removal now
+  moves the account's sessions to its personal team, or its oldest remaining
+  membership, and an account with no team left is refused with `403 no_team`.
+
 - **web:** a password-signed-in operator no longer reloads the dashboard forever
   The controller refuses `GET /api/v1/me` for an operator session, which holds
   no team identity, and the dashboard read that `401` as its own session ending

@@ -607,6 +607,14 @@ func requireScope(scope string, next http.Handler, alternatives ...string) http.
 			next.ServeHTTP(w, r)
 			return
 		}
+		if p.AccountID != "" && p.Role == "" {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{
+				Code:      "no_team",
+				Principal: p.label(),
+				Message:   "this account belongs to no team; accept an invitation or create a team",
+			})
+			return
+		}
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:         "missing_scope",
 			MissingScope: scope,

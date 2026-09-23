@@ -1037,11 +1037,37 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, no
 		string(t.team), subjectID); err != nil {
 		return nil, err
 	}
+	if err := t.moveSessionsOffTeamTx(ctx, tx, subjectID, now); err != nil {
+		return nil, err
+	}
 	revoked, err := t.revokeTokensMintedByTx(ctx, tx, subjectID, now)
 	if err != nil {
 		return nil, err
 	}
 	return revoked, tx.Commit()
+}
+
+// moveSessionsOffTeamTx settles an account that just left t's team on a team
+// it still belongs to, and moves its sessions there, so a browser that was
+// working in the team lands in the account's own space rather than in a team
+// that grants it nothing. An account left with no team keeps its sessions,
+// which then authenticate with no scope.
+func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) error {
+	if err := settleActiveTeamTx(ctx, tx, accountID, now.UTC().Unix()); err != nil {
+		return err
+	}
+	var active string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT active_team FROM accounts WHERE id = ?`, accountID).Scan(&active); err != nil {
+		return err
+	}
+	if active == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx,
+		`UPDATE sessions SET team = ? WHERE account_id = ? AND team = ?`,
+		active, accountID, string(t.team))
+	return err
 }
 
 // safety: a runner token outlives the membership that minted it and reads
