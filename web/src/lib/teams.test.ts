@@ -256,6 +256,56 @@ describe("team administration calls", () => {
   });
 });
 
+describe("mintRunnerToken", () => {
+  it("sends the name and repo patterns", async () => {
+    respond = () =>
+      new Response(
+        JSON.stringify({ token: "swr_x", prefix: "swr_x", command: "" }),
+        { status: 201 },
+      );
+    await teams.mintRunnerToken("build-box", [
+      "github.com/acme/*",
+      "github.com/acme/app",
+    ]);
+    assert.equal(calls[0].url, "/api/v1/team/runner-tokens");
+    assert.equal(calls[0].method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      name: "build-box",
+      repos: ["github.com/acme/*", "github.com/acme/app"],
+    });
+  });
+
+  it("surfaces the controller's pattern validation error", async () => {
+    respond = () =>
+      new Response(JSON.stringify({ error: "bad repo pattern" }), {
+        status: 400,
+      });
+    await assert.rejects(
+      teams.mintRunnerToken("build-box", ["not a pattern"]),
+      (err: Error) => {
+        assert.match(err.message, /bad repo pattern/);
+        return true;
+      },
+    );
+  });
+});
+
+describe("parseRepoPatterns", () => {
+  it("splits on commas, whitespace and newlines and drops empties", () => {
+    assert.deepEqual(
+      teams.parseRepoPatterns(
+        "github.com/acme/*, github.com/acme/app\n  github.com/other/*  ,,\t",
+      ),
+      ["github.com/acme/*", "github.com/acme/app", "github.com/other/*"],
+    );
+  });
+
+  it("reads an empty or whitespace-only field as no patterns", () => {
+    assert.deepEqual(teams.parseRepoPatterns(""), []);
+    assert.deepEqual(teams.parseRepoPatterns("   \n  "), []);
+  });
+});
+
 describe("runnerConnectCommand", () => {
   const minted = { token: "swr_secret", prefix: "swr_sec", command: "" };
 
@@ -267,23 +317,29 @@ describe("runnerConnectCommand", () => {
           command: "sparkwing-runner runner --controller https://c",
         },
         "box",
+        ["github.com/acme/*"],
       ),
       "sparkwing-runner runner --controller https://c",
     );
   });
 
   it("falls back to the runner command with the token in the environment", () => {
-    const cmd = teams.runnerConnectCommand(minted, "Korey's laptop");
+    const cmd = teams.runnerConnectCommand(minted, "Korey's laptop", [
+      "github.com/acme/*",
+    ]);
     assert.equal(
       cmd,
-      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --also-claim-triggers --max-claims-before-restart 0 --holder-prefix 'Korey'\\''s laptop'`,
+      `SPARKWING_AGENT_TOKEN=swr_secret sparkwing-runner runner --controller ${teams.controllerURLPlaceholder} --allow-repo 'github.com/acme/*' --also-claim-triggers --max-claims-before-restart 0 --holder-prefix 'Korey'\\''s laptop'`,
     );
   });
 });
 
 describe("unixSecondsISO", () => {
   it("reads the controller's unix seconds as a date in its own year, not 1970", () => {
-    assert.equal(teams.unixSecondsISO(1_790_000_000), "2026-09-21T14:13:20.000Z");
+    assert.equal(
+      teams.unixSecondsISO(1_790_000_000),
+      "2026-09-21T14:13:20.000Z",
+    );
   });
   it("leaves an absent stamp empty", () => {
     assert.equal(teams.unixSecondsISO(undefined), "");

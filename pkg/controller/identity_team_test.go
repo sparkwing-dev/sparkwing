@@ -200,11 +200,11 @@ func TestLastOwnerCannotLeaveOrBeDemoted(t *testing.T) {
 func TestDemotionTakesEffectOnTheNextRequest(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner, editor, _ := teamOf(f)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]string{"name": "laptop"}, nil); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "laptop", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
 		t.Fatalf("editor minting = %d", code)
 	}
 	f.call("PATCH", "/api/v1/team/members/"+editor.id, owner.auth, map[string]string{"role": "reader"}, nil)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]string{"name": "laptop2"}, nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "laptop2", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
 		t.Fatalf("demoted editor minting = %d, want 403", code)
 	}
 }
@@ -219,7 +219,7 @@ func TestTeamRoutesNeverReachAnotherTeam(t *testing.T) {
 	f.join(b, bReader, "bread@example.com", "reader")
 	bInvite := f.invite(b, "pending@example.com", "reader")
 	var minted struct{ Prefix string }
-	f.call("POST", "/api/v1/team/runner-tokens", b.auth, map[string]string{"name": "b-box"}, &minted)
+	f.call("POST", "/api/v1/team/runner-tokens", b.auth, map[string]any{"name": "b-box", "repos": []string{"github.com/acme/*"}}, &minted)
 
 	q := "?team=" + b.team
 	if code := f.call("DELETE", "/api/v1/team/members/"+bReader.id+q, a.auth, nil, nil); code != http.StatusNotFound {
@@ -260,7 +260,7 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 		Prefix  string `json:"prefix"`
 		Command string `json:"command"`
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", a.auth, map[string]string{"name": "a-box"}, &minted); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", a.auth, map[string]any{"name": "a-box", "repos": []string{"github.com/acme/*"}}, &minted); code != http.StatusCreated {
 		t.Fatalf("mint = %d", code)
 	}
 	if !strings.HasPrefix(minted.Command, "SPARKWING_AGENT_TOKEN="+minted.Token+" sparkwing-runner runner --controller ") ||
@@ -299,7 +299,7 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 	other := f.user("e2", "ernie@example.com")
 	f.join(owner, other, "ernie@example.com", "editor")
 	var mine struct{ Token, Prefix string }
-	f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]string{"name": "eddie-box"}, &mine)
+	f.call("POST", "/api/v1/team/runner-tokens", editor.auth, map[string]any{"name": "eddie-box", "repos": []string{"github.com/acme/*"}}, &mine)
 	if code := f.call("DELETE", "/api/v1/team/runner-tokens/"+mine.Prefix, other.auth, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("another editor revoking = %d, want 403", code)
 	}
@@ -323,11 +323,11 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 func TestReaderCannotMintRunnerTokens(t *testing.T) {
 	f := newIdentityFixture(t)
 	_, _, reader := teamOf(f)
-	if code := f.call("POST", "/api/v1/team/runner-tokens", reader.auth, map[string]string{"name": "r"}, nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", reader.auth, map[string]any{"name": "r", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusForbidden {
 		t.Fatalf("reader minting = %d, want 403", code)
 	}
 	owner := f.user("o2", "owen@example.com")
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": "x; rm -rf /"}, nil); code != http.StatusBadRequest {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": "x; rm -rf /", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusBadRequest {
 		t.Fatalf("shell-unsafe runner name = %d, want 400", code)
 	}
 }
@@ -336,11 +336,11 @@ func TestRunnerTokensAreCappedPerTeam(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
 	for i := range store.MaxRunnerTokensPerTeam {
-		if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": fmt.Sprintf("box%d", i)}, nil); code != http.StatusCreated {
+		if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": fmt.Sprintf("box%d", i), "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusCreated {
 			t.Fatalf("mint %d = %d", i, code)
 		}
 	}
-	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": "box-extra"}, nil); code != http.StatusConflict {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]any{"name": "box-extra", "repos": []string{"github.com/acme/*"}}, nil); code != http.StatusConflict {
 		t.Fatalf("mint past the cap = %d, want 409", code)
 	}
 }

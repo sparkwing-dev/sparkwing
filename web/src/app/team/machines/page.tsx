@@ -18,6 +18,7 @@ import {
   controllerURLPlaceholder,
   listRunnerTokens,
   mintRunnerToken,
+  parseRepoPatterns,
   revokeRunnerToken,
   runnerConnectCommand,
   unixSecondsISO,
@@ -105,7 +106,9 @@ function Machines({ me }: { me: Me }) {
                   <div className="text-xs text-[var(--muted)] font-mono truncate">
                     {t.prefix}
                     {t.created_by ? ` · by ${t.created_by}` : ""}
-                    {t.created_at ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}` : ""}
+                    {t.created_at
+                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                      : ""}
                     {t.expires_at
                       ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
                       : ""}
@@ -143,20 +146,24 @@ function ConnectForm({
   onMinted: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
+  const [repos, setRepos] = useState("");
   const [minting, setMinting] = useState(false);
   const [minted, setMinted] = useState<
-    (MintedRunnerToken & { name: string }) | null
+    (MintedRunnerToken & { name: string; repos: string[] }) | null
   >(null);
+
+  const repoPatterns = parseRepoPatterns(repos);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const n = name.trim();
-    if (!n) return;
+    if (!n || repoPatterns.length === 0) return;
     setMinting(true);
     try {
-      const out = await mintRunnerToken(n);
-      setMinted({ ...out, name: n });
+      const out = await mintRunnerToken(n, repoPatterns);
+      setMinted({ ...out, name: n, repos: repoPatterns });
       setName("");
+      setRepos("");
       await onMinted();
     } catch (err) {
       toast(errorText(err), "error");
@@ -165,32 +172,61 @@ function ConnectForm({
     }
   }
 
-  const command = minted ? runnerConnectCommand(minted, minted.name) : "";
+  const command = minted
+    ? runnerConnectCommand(minted, minted.name, minted.repos)
+    : "";
 
   return (
     <Panel
       title="Connect a machine"
       hint={`Run sparkwing-runner on a laptop or server so it picks up ${team}'s work.`}
     >
-      <form onSubmit={submit} className="flex flex-wrap items-center gap-2 p-4">
-        <input
-          required
-          maxLength={64}
-          placeholder="machine name, e.g. build-box"
-          aria-label="Machine name"
-          className={`${inputClass} flex-1 min-w-[14rem]`}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button type="submit" className={buttonClass} disabled={minting}>
-          {minting ? "Creating token…" : "Create token"}
-        </button>
+      <form onSubmit={submit} className="flex flex-col gap-2 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            required
+            maxLength={64}
+            placeholder="machine name, e.g. build-box"
+            aria-label="Machine name"
+            className={`${inputClass} flex-1 min-w-[14rem]`}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button
+            type="submit"
+            className={buttonClass}
+            disabled={minting || repoPatterns.length === 0}
+          >
+            {minting ? "Creating token…" : "Create token"}
+          </button>
+        </div>
+        <div>
+          <label
+            htmlFor="machine-repos"
+            className="block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1"
+          >
+            Repositories this machine may build
+          </label>
+          <textarea
+            id="machine-repos"
+            required
+            rows={2}
+            placeholder="github.com/acme/*"
+            className={`${inputClass} w-full font-mono`}
+            value={repos}
+            onChange={(e) => setRepos(e.target.value)}
+          />
+          <p className="text-xs text-[var(--muted)] mt-1">
+            This machine will run pipeline code from these repositories as your
+            user.
+          </p>
+        </div>
       </form>
       {minted ? (
         <div className="px-4 pb-4 space-y-3">
           <div className="rounded-[var(--radius-control)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            This token is shown once. Copy the command now; Sparkwing keeps
-            only its prefix, <span className="font-mono">{minted.prefix}</span>.
+            This token is shown once. Copy the command now; Sparkwing keeps only
+            its prefix, <span className="font-mono">{minted.prefix}</span>.
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">

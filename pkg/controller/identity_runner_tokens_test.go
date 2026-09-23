@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +15,7 @@ type mintedRunner struct {
 func mintRunner(f *identityFixture, auth, name string) mintedRunner {
 	f.t.Helper()
 	var m mintedRunner
-	if code := f.call("POST", "/api/v1/team/runner-tokens", auth, map[string]string{"name": name}, &m); code != http.StatusCreated {
+	if code := f.call("POST", "/api/v1/team/runner-tokens", auth, map[string]any{"name": name, "repos": []string{"github.com/acme/*"}}, &m); code != http.StatusCreated {
 		f.t.Fatalf("mint %s = %d", name, code)
 	}
 	return m
@@ -96,5 +97,47 @@ func TestRunnerTokensExpireAndTheListShowsWhen(t *testing.T) {
 	want := before.Add(90 * 24 * time.Hour)
 	if got.Before(want.Add(-time.Minute)) || got.After(want.Add(time.Minute)) {
 		t.Errorf("expires_at = %s, want about %s", got, want)
+	}
+}
+
+// The advertised command is what a person pastes into a shell, so it carries
+// the repositories the machine may build: a runner started from it refuses
+// every other one.
+func TestMintedRunnerCommandCarriesTheRepositoryAllowlist(t *testing.T) {
+	f := newIdentityFixture(t)
+	alice := f.user("alice", "alice@example.com")
+	var minted struct {
+		Command string `json:"command"`
+	}
+	if code := f.call("POST", "/api/v1/team/runner-tokens", alice.auth, map[string]any{
+		"name": "alice-laptop", "repos": []string{"GitHub.com/acme/*", "github.com/other/app"},
+	}, &minted); code != http.StatusCreated {
+		t.Fatalf("mint = %d", code)
+	}
+	for _, want := range []string{" --allow-repo 'github.com/acme/*'", " --allow-repo 'github.com/other/app'"} {
+		if !strings.Contains(minted.Command, want) {
+			t.Fatalf("command %q lacks %q", minted.Command, want)
+		}
+	}
+}
+
+func TestMintingARunnerTokenRequiresValidRepositories(t *testing.T) {
+	f := newIdentityFixture(t)
+	alice := f.user("alice", "alice@example.com")
+	for name, repos := range map[string]any{
+		"absent":    nil,
+		"empty":     []string{},
+		"scheme":    []string{"https://github.com/acme/*"},
+		"host only": []string{"github.com"},
+		"shell":     []string{"github.com/acme/app';id;'"},
+		"wild host": []string{"*/acme/app"},
+	} {
+		body := map[string]any{"name": "box"}
+		if repos != nil {
+			body["repos"] = repos
+		}
+		if code := f.call("POST", "/api/v1/team/runner-tokens", alice.auth, body, nil); code != http.StatusBadRequest {
+			t.Errorf("%s: mint = %d, want 400", name, code)
+		}
 	}
 }
