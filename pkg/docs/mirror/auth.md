@@ -145,6 +145,36 @@ cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
 
+## Buying credits
+
+A team owner buys credits from the dashboard's Team -> Billing page, and any
+member reads the balance, the price table, usage by run and the team's
+purchases there, from `GET /api/v1/team/billing`. A purchase is between $5 and
+$500. Purchases are final and credits never expire.
+
+The Stripe Checkout Session is created on the server, never in the browser,
+so no caller chooses the team a payment funds. The dashboard posts only the
+amount to `POST /api/v1/team/billing/checkout`, which needs an owner of the
+active team. The controller takes the team from that session, refuses an
+amount outside the range, and asks the hosted checkout service at
+`--billing-url` (`SPARKWING_BILLING_URL`), authenticated with
+`SPARKWING_BILLING_TOKEN`, to open a session for that team. The browser is
+sent to the page it returns. When Stripe confirms the payment, the checkout
+service verifies the webhook and grants the credits to the team the session
+names through `POST /api/v1/credits/grants` with the operator credential only
+it holds, keyed on the payment id so a redelivered webhook grants once. A
+controller with no `--billing-url` sells no credits and answers the checkout
+route with `503` and `"code": "checkout_unavailable"`.
+
+A team's balance holds at most $5,000. A purchase that would lift it past the
+cap is refused before any session opens, with `409` and
+`"code": "balance_cap"` naming the balance, the amount and the cap, and the
+grant route refuses a `free` or `paid` grant past the cap the same way, so two
+checkouts left open together cannot both land. A replay of a grant already
+written is answered as usual. A refund is issued from the Stripe dashboard and
+arrives as a `reversal` that names only the payment, which lands in the team
+the payment funded.
+
 ## Retained storage
 
 Runner time stops costing when a node ends; retained bytes keep costing while

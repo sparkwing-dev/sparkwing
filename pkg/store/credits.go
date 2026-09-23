@@ -689,7 +689,8 @@ func grantCredits(
 // RecordCreditGrant writes req against the default team's balance and reports
 // whether it wrote a new row. It refuses a reversal whose Reverses names no
 // paid grant of that team, so a refund can only take back a payment the
-// team's ledger recorded. A reversal may take the balance below zero; the
+// team's ledger recorded, and a grant that would lift the balance above
+// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]. A reversal may take the balance below zero; the
 // claim path then refuses that team's new metered work.
 func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
@@ -761,6 +762,18 @@ func (s *Store) recordCreditGrant(
 		if !found || reversed.Team != team {
 			return CreditGrantResult{}, fmt.Errorf(
 				"credits: no %s grant carries the reference %q", CreditGrantPaid, req.Reverses)
+		}
+	}
+	// safety: a replay already answered above, so a payment redelivered after
+	// the balance reached the cap still returns its grant; only new credit is
+	// held to the cap.
+	if req.AmountMicro > 0 {
+		before, err := creditBalanceTx(ctx, tx, team)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if err := refuseAboveBalanceCap(before, req.AmountMicro); err != nil {
+			return CreditGrantResult{}, err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `

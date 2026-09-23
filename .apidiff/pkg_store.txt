@@ -221,6 +221,13 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
+type CreditBalanceCapError struct {
+	BalanceMicro int64
+	AmountMicro  int64
+	CapMicro     int64
+}
+func (e *CreditBalanceCapError) Error() string
+func (e *CreditBalanceCapError) Unwrap() error
 type CreditCharge struct {
 	ID string
 
@@ -301,6 +308,8 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
+const CreditPurchaseMaxCents = 50_000
+const CreditPurchaseMinCents = 500
 type CreditRate struct {
 	Cores          int64
 	MicroPerSecond int64
@@ -510,6 +519,7 @@ var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens a
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
@@ -827,6 +837,7 @@ const MaxOpenInvitations = 50
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 10
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
+const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -1182,6 +1193,12 @@ type Run struct {
 }
 func (r Run) RedactedForDisplay() Run
 func (r Run) SecretArgNames() []string
+type RunCreditUsage struct {
+	RunID         string
+	Seconds       int64
+	AmountMicro   int64
+	LastChargedAt time.Time
+}
 type RunFilter struct {
 	Pipelines      []string
 	Statuses       []string
@@ -1567,6 +1584,7 @@ func (s *Store) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
+func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -1705,6 +1723,7 @@ func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBindi
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
+func (t *Tenant) CheckCreditPurchase(ctx context.Context, amountMicro int64) error
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
@@ -1727,6 +1746,7 @@ func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
+func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)

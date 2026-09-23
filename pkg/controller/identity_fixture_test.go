@@ -39,6 +39,8 @@ type identityFixture struct {
 type fixtureOpts struct {
 	license string
 	key     ed25519.PublicKey
+
+	checkoutURL, checkoutToken string
 }
 
 func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
@@ -77,7 +79,8 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	srv := controller.New(st, nil).EnableAuthFromStore().
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
-		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
+		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect}).
+		WithBillingCheckout(o.checkoutURL, o.checkoutToken)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })

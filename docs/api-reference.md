@@ -155,6 +155,8 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
+| `GET` | `/api/v1/team/billing` | `runs.read` |
+| `POST` | `/api/v1/team/billing/checkout` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `DELETE` | `/api/v1/team/cli-tokens/{prefix}` | `runs.read` |

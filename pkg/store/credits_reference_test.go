@@ -280,13 +280,19 @@ func TestCreditReversalMayTakeTheBalanceBelowZero(t *testing.T) {
 }
 
 // A ledger sums grants in SQL, so an amount near the integer limit would turn
-// every later balance read into an overflow error.
+// every later balance read into an overflow error. The balance cap refuses a
+// positive grant long before the ceiling, and the ceiling still bounds a
+// reversal.
 func TestCreditGrantAmountIsBounded(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		store.MaxCreditGrantMicro, "pi_cap", "billing"); err != nil {
-		t.Fatalf("a grant at the ceiling was refused: %v", err)
+		store.MaxCreditGrantMicro, "pi_ceiling", "billing"); !errors.Is(err, store.ErrCreditBalanceCap) {
+		t.Fatalf("a grant at the ceiling = %v, want the balance cap to refuse it", err)
+	}
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
+		store.MaxTeamBalanceMicro, "pi_cap", "billing"); err != nil {
+		t.Fatalf("a grant at the balance cap was refused: %v", err)
 	}
 	for name, req := range map[string]store.CreditGrantRequest{
 		"a paid grant over the ceiling": {
@@ -315,8 +321,9 @@ func TestCreditGrantAmountIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state over the ceiling amounts: %v", err)
 	}
-	if state.BalanceMicro != 0 || state.ReversedMicro != store.MaxCreditGrantMicro {
-		t.Fatalf("state = %+v, want a zero balance and the reversal at the ceiling", state)
+	if state.BalanceMicro != store.MaxTeamBalanceMicro-store.MaxCreditGrantMicro ||
+		state.ReversedMicro != store.MaxCreditGrantMicro {
+		t.Fatalf("state = %+v, want the cap less the reversal at the ceiling", state)
 	}
 	if _, err := s.CreditLedgerTotals(ctx); err != nil {
 		t.Fatalf("totals over the ceiling amounts: %v", err)

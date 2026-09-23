@@ -17,6 +17,8 @@ import (
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
+		"the payment reverses it in that team; a payment id is unique across teams",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +

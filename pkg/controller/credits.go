@@ -228,7 +228,8 @@ type createGrantReq struct {
 	Reverses    string `json:"reverses,omitempty"`
 	// Team names the team whose balance the grant funds. The operator names
 	// it because the grant route is the operator's, so the caller's own team
-	// is never the one a payment was for.
+	// is never the one a payment was for. A reversal may leave it empty: the
+	// payment it reverses belongs to exactly one team, and that is the team.
 	Team string `json:"team,omitempty"`
 }
 
@@ -368,6 +369,19 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if req.Team == "" && req.Kind == store.CreditGrantReversal && req.Reverses != "" {
+		team, found, err := s.store.PaidGrantTeam(r.Context(), req.Reverses)
+		if err != nil {
+			s.writeInternalError(w, r, "reversal team", err)
+			return
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest,
+				fmt.Errorf("no paid grant carries the reference %q", req.Reverses))
+			return
+		}
+		req.Team = string(team)
+	}
 	// safety: on a controller serving several teams an unnamed grant would fund
 	// whichever team the operator's token acts for, which is never the team a
 	// payment was for, so the team is required there.
@@ -392,6 +406,11 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, store.ErrCreditGrantConflict) {
 		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if s.writeBalanceCapRefusal(w, err) {
+		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
+			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
 		return
 	}
 	if err != nil {

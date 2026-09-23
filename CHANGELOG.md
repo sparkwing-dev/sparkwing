@@ -22,6 +22,17 @@ unlock.
 
 ### Added
 
+- **controller:** team billing. `GET /api/v1/team/billing` gives any member of
+  the active team its balance, the price table, recent usage grouped by run,
+  and its purchases and grants. `POST /api/v1/team/billing/checkout` lets an
+  owner buy $5 to $500 of credits: the controller takes the team from the
+  owner's session and asks the hosted checkout service at `--billing-url`
+  (`SPARKWING_BILLING_URL`, authenticated with `SPARKWING_BILLING_TOKEN`) to
+  open a Stripe Checkout Session, and answers with the page to send the owner
+  to. A controller with no billing URL sells no credits. A `reversal` grant
+  may omit `team` and lands in the team its payment funded. See
+  [Buying credits](docs/auth.md#buying-credits).
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the
@@ -331,6 +342,11 @@ unlock.
   reaped claim) gets back everything its claim billed; any other end before
   execution keeps its setup billed. Schema v56 adds
   `nodes.credit_billing_from`.
+
+- **credits:** a team's balance holds at most $5,000. A checkout that would
+  lift it past the cap is refused before any session opens, and a new `free`
+  or `paid` grant past it is refused with 409 and `"code": "balance_cap"`; a
+  replay of a grant already written still succeeds.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
