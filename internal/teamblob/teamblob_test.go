@@ -633,3 +633,36 @@ func TestReconcileExpiresOldTeamObjects(t *testing.T) {
 		t.Fatalf("expiry sent %d batch deletes, want one", n)
 	}
 }
+
+// A process that crashed between saves leaves a saved count behind its
+// writes. With ReconcileAtStart the next process lists the store at start
+// and counts them; without it the saved count stands until the next
+// scheduled reconcile.
+func TestRestoreReconcilesAtStartWhenAsked(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, teamblob.Options{})
+	put(t, f.store, "team-a", "cache/saved", "12345")
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SaveUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	put(t, f.store, "team-a", "cache/unsaved", "1234567890")
+
+	for _, c := range []struct {
+		atStart bool
+		want    int64
+	}{{false, 5}, {true, 15}} {
+		next, err := teamblob.New(teamblob.Options{Bucket: bucket, Prefix: "svc", Client: f.client, ReconcileAtStart: c.atStart})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := next.Restore(ctx, 24*time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if got := next.Usage().Team("team-a").Bytes; got != c.want {
+			t.Errorf("reconcile at start %v: team-a = %d bytes, want %d", c.atStart, got, c.want)
+		}
+	}
+}

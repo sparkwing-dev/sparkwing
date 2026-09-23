@@ -332,6 +332,17 @@ func (s *Store) LoadUsage(ctx context.Context) (time.Time, bool, error) {
 	return f.SavedAt, true, nil
 }
 
+// Restore loads the count a previous process saved, and lists the store
+// instead when nothing was saved, the last reconcile is older than every,
+// or the store was opened with ReconcileAtStart.
+func (s *Store) Restore(ctx context.Context, every time.Duration) error {
+	_, loaded, loadErr := s.LoadUsage(ctx)
+	if loaded && !s.fresh && (every <= 0 || s.now().Sub(s.usage.ReconciledAt()) < every) {
+		return loadErr
+	}
+	return errors.Join(loadErr, s.Reconcile(ctx))
+}
+
 // Maintain restores the saved count at start, reconciles when nothing
 // was saved or the last reconcile is older than every, saves the count
 // every saveEvery while it changes, and reconciles every every. It
@@ -341,15 +352,11 @@ func (s *Store) Maintain(ctx context.Context, every, saveEvery time.Duration, re
 	if report == nil {
 		report = func(string, error) {}
 	}
-	_, loaded, err := s.LoadUsage(ctx)
-	if err != nil {
-		report("load usage", err)
+	if err := s.Restore(ctx, every); err != nil {
+		report("restore usage", err)
 	}
 	last := s.usage.ReconciledAt()
-	if !loaded || (every > 0 && s.now().Sub(last) >= every) {
-		if err := s.Reconcile(ctx); err != nil {
-			report("reconcile usage", err)
-		}
+	if last.IsZero() {
 		last = s.now()
 	}
 	if saveEvery <= 0 {

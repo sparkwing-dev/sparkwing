@@ -57,7 +57,9 @@ unlock.
 
 - **cache:** team binaries, dependency archives and artifacts written more
   than 30 days ago are deleted in the daily reconcile listing, which keeps the
-  per-team count exact. The registry proxy directory is capped at 2 GiB
+  per-team count exact, and a cache that verifies grants lists its bucket at
+  every start so a crash cannot leave the count short. The registry proxy
+  directory is capped at 2 GiB
   (`--proxy-max-bytes`), evicting the least recently served entries first.
 
 - **cache:** `--blob-store s3://bucket/prefix` keeps the binary,

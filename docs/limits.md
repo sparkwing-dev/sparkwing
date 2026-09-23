@@ -79,6 +79,9 @@ counters that hold free teams to their shares live over the object store: the
 cache's `--blob-store` and the logs service's `--archive-store`. The
 volume-backed cache and log trees enforce no allowance. The cache and the logs
 service each keep their counts in process memory, so each runs as one replica.
+The count is saved to the bucket every five minutes, and a service holding
+teams to their shares lists the bucket at every start rather than trust a
+saved count a crash may have left behind: one listing per restart.
 
 ## What prunes automatically
 

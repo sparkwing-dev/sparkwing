@@ -101,6 +101,10 @@ type Options struct {
 	// that team, in the listing it already makes. Zero keeps the team's
 	// objects; the operator's own namespace is never expired.
 	TeamObjectMaxAge func(team string) time.Duration
+	// ReconcileAtStart makes [Store.Restore] list the store rather than
+	// trust the saved count, which lags a crash by up to one save. A
+	// service that holds teams to a quota over the count sets it.
+	ReconcileAtStart bool
 	// Now defaults to time.Now.
 	Now func() time.Time
 }
@@ -114,6 +118,7 @@ type Store struct {
 	threshold int64
 	maxPages  int
 	maxAge    func(team string) time.Duration
+	fresh     bool
 	now       func() time.Time
 	usage     *Usage
 	breaker   breaker
@@ -141,6 +146,7 @@ func New(opts Options) (*Store, error) {
 		threshold: opts.MultipartThreshold,
 		maxPages:  opts.MaxListPages,
 		maxAge:    opts.TeamObjectMaxAge,
+		fresh:     opts.ReconcileAtStart,
 		now:       opts.Now,
 		usage:     newUsage(),
 	}

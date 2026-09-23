@@ -116,7 +116,8 @@ func run(args []string) error {
 		envDuration("SPARKWING_CACHE_USAGE_RECONCILE", cfg.UsageReconcile),
 		"with --blob-store, how often the per-team count of the bucket is replaced by a listing of it. Writes and "+
 			"deletes keep the count between listings, and it is saved to the bucket every five minutes, so a restart "+
-			"does not list. 0 lists only when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
+			"does not list unless --grant-key is set, when the count holds teams to their free share and every start "+
+			"lists. 0 lists only at such a start or when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
 	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
 		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
 		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+

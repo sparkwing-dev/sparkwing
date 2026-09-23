@@ -46,6 +46,10 @@ var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, erro
 		Prefix:           prefix,
 		Client:           client,
 		TeamObjectMaxAge: teamBlobMaxAge,
+		// safety: a cache that verifies grants holds teams to their share
+		// over the count, so it lists the bucket at start rather than trust
+		// a saved count a crash left behind.
+		ReconcileAtStart: grantKey != "",
 	})
 }
 
