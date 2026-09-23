@@ -77,7 +77,7 @@ func TestMultiTeamAuth_AnEmptyTokenTableStillRefusesAnonymousCallers(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), "GET", url+"/api/v1/runs", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url+"/api/v1/runs", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

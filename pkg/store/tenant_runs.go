@@ -185,27 +185,16 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 	for len(frontier) > 0 {
 		var below []string
 		for _, id := range frontier {
-			rows, err := t.s.query(ctx,
-				`SELECT `+runColumns+` FROM runs WHERE team = ? AND retry_of = ?`, string(t.team), id)
+			children, err := t.retriesOf(ctx, id)
 			if err != nil {
 				return nil, err
 			}
-			for rows.Next() {
-				r, scanErr := scanRun(rows)
-				if scanErr != nil {
-					_ = rows.Close()
-					return nil, scanErr
-				}
+			for _, r := range children {
 				if _, dup := collected[r.ID]; dup {
 					continue
 				}
 				collected[r.ID] = r
 				below = append(below, r.ID)
-			}
-			err = rows.Err()
-			_ = rows.Close()
-			if err != nil {
-				return nil, err
 			}
 		}
 		frontier = below
@@ -218,4 +207,22 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 		return out[i].CreatedAt.Before(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+func (t *Tenant) retriesOf(ctx context.Context, id string) (_ []*Run, err error) {
+	rows, err := t.s.query(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE team = ? AND retry_of = ?`, string(t.team), id)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
