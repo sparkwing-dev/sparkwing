@@ -526,7 +526,8 @@ may build and prints this command:
 SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
   --controller https://sparkwing.example.com --logs https://logs.example.com \
   --allow-repo 'github.com/acme/*' \
-  --also-claim-triggers --max-claims-before-restart 0 --holder-prefix my-laptop
+  --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
+  --holder-prefix my-laptop
 ```
 
 #### What a laptop runner trusts
@@ -547,12 +548,18 @@ team, decides what the machine builds:
 - Without `--gitcache` the runner refuses to start with no `--allow-repo`.
   With `--gitcache` a list binds only when given. A `--github-actions` runner
   given no list builds only the repository whose job started it.
-- The runner checks the remote it would fetch, after it rewrites a GitHub ssh
-  remote to https, and the repository the trigger's GitHub fields name. A run
-  that names any repository outside the list fails before anything is fetched,
-  and the failure names the repository and the list. The controller has no way
-  to hand a claimed run back, so another runner does not pick that run up.
-  Trigger it again once a runner that allows the repository is connected.
+- The runner sends its list with every trigger and node claim, and the
+  controller hands it only runs whose repository the list admits, passing over
+  the rest so another runner can take them. A trigger that names no repository
+  is never handed to a runner with a list; a node whose run names none is,
+  since it fetches nothing. A runner whose list refuses a node's repository
+  does not count toward the local-first hold, so the cloud is not kept waiting
+  for a runner that could never take the node.
+- The runner checks again before fetching: the remote it would fetch, after it
+  rewrites a GitHub ssh remote to https, and the repository the trigger's GitHub
+  fields name. A run outside the list that reaches it anyway, from a controller
+  older than the claim filter, fails before anything is fetched, and the
+  failure names the repository and the list.
 - The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
   and `github_owner`/`github_repo` name different repositories, so the run page
   always shows the repository the runner fetched.

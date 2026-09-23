@@ -546,8 +546,12 @@ unlock.
   from whatever repository a run named, as the user who started it, so any
   team editor could run code with a laptop owner's ssh keys and cloud
   credentials. `--allow-repo` (host/path, `*` within one segment) is now
-  required without `--gitcache`, and a claimed trigger or pooled node outside
-  it fails before anything is fetched, naming the repository and the list.
+  required without `--gitcache`. The runner sends the list as `allow_repos`
+  with each trigger and node claim and the controller hands it only runs from
+  those repositories, leaving the rest for other runners; a runner whose list
+  refuses a node's repository no longer holds that node back from the cloud
+  under local-first placement. A run outside the list that still reaches the
+  runner fails before anything is fetched, naming the repository and the list.
   `POST /api/v1/team/runner-tokens` requires `repos`, and the machines page
   asks for them. See
   [migration guide](migrations/_unreleased.md#a-runner-without-the-git-cache-names-the-repositories-it-may-build).
@@ -564,6 +568,12 @@ unlock.
   repositories is refused with 400, and a runner refuses such a stored
   trigger, so a run can no longer show one repository and fetch another. See
   [migration guide](migrations/_unreleased.md#a-trigger-names-one-repository).
+- **runner:** `sparkwing-runner runner` serves `/metrics` on
+  `127.0.0.1:9090` by default instead of every interface, and the command the
+  machines page prints passes `--metrics-addr=` so a laptop runner opens no
+  listener and a second runner on the machine does not collide. The runner
+  chart passes `:9090` itself and now turns the listener off when
+  `runner.metricsPort` is 0.
 - **controller:** a multi-team controller configured with a cache refuses to
   start without `SPARKWING_CACHE_GRANT_KEY`, or with it equal to
   `SPARKWING_CACHE_TOKEN`, instead of failing each grant request at run time.

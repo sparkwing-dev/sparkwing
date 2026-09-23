@@ -120,10 +120,13 @@ may build.
 - **After:** `sparkwing-runner runner --controller https://c --allow-repo 'github.com/acme/*' --also-claim-triggers ...`
 
 A pattern is a host and path with no scheme; `*` matches within one path
-segment, and matching ignores case. Quote a pattern that holds `*`. A run whose
-repository falls outside the list fails with a reason naming the repository and
-the list; the controller has no way to hand it to another runner, so trigger it
-again once a runner that allows it is connected. A `--github-actions` runner
+segment, and matching ignores case. Quote a pattern that holds `*`. The runner
+sends the list as `allow_repos` with every trigger and node claim, and the
+controller hands it only runs from those repositories. Upgrade the controller
+before its runners: a controller older than the field refuses such a claim with
+400. A runner that sends no list claims as before. If an older controller hands
+a runner a run outside its list, the runner fails it with a reason naming the
+repository and the list. A `--github-actions` runner
 given no list builds only its own repository, and a runner with `--gitcache` is
 unaffected unless given a list.
 
