@@ -844,6 +844,9 @@ unlock.
 
 ### Fixed
 
+- **dashboard:** Switching between selected runs keeps the compact runs list
+  and detail panes in place while the next run loads.
+
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
   the defined pipelines and, when known, the repository revision. It appears

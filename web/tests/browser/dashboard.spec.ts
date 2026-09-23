@@ -704,6 +704,91 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("keeps run panes the same size while switching selected runs", async ({ page }) => {
+  const nextRun = {
+    ...finishedRun,
+    id: "run-20260827-next",
+    pipeline: "verify-next",
+  };
+  const nextDetail = {
+    ...finishedDetail,
+    run: nextRun,
+    nodes: [{ ...finishedDetail.nodes[0], id: "next-node" }],
+  };
+  const nextStarted = deferred();
+  const releaseNext = deferred();
+  await installMockAPI(page, {
+    runs: [finishedRun, nextRun],
+    details: { [finishedRun.id]: finishedDetail },
+    onDetail: async (route, runID) => {
+      if (runID !== nextRun.id) return false;
+      nextStarted.resolve();
+      await releaseNext.promise;
+      await route.fulfill({ json: nextDetail });
+      return true;
+    },
+  });
+  await page.goto("/runs");
+  await page.locator(`[data-run-id="${finishedRun.id}"]`).click();
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let frames = 20;
+    const tick = () => --frames ? requestAnimationFrame(tick) : resolve();
+    requestAnimationFrame(tick);
+  }));
+
+  await page.evaluate((firstRunID) => {
+    const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
+    const sidebar = row?.parentElement?.parentElement;
+    const panes = sidebar?.parentElement;
+    if (!sidebar || !panes) throw new Error("run panes missing");
+    const samples: { sidebar: number; detail: number; row: number }[] = [];
+    const state = window as typeof window & {
+      __runPaneSamples?: typeof samples;
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__runPaneSamples = samples;
+    state.__stopRunPaneSamples = false;
+    const sample = () => {
+      const detail = panes.lastElementChild;
+      samples.push({
+        sidebar: sidebar.getBoundingClientRect().width,
+        detail: detail === sidebar ? 0 : detail?.getBoundingClientRect().width ?? 0,
+        row: row.getBoundingClientRect().height,
+      });
+      if (!state.__stopRunPaneSamples) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, finishedRun.id);
+
+  await page.locator(`[data-run-id="${nextRun.id}"]`).click();
+  await nextStarted.promise;
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(12);
+  releaseNext.resolve();
+  await expect(page.getByText("verify-next", { exact: true }).last()).toBeVisible();
+  await expect(page.locator('[data-node-id="next-node"]').first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(24);
+  const samples = await page.evaluate(() => {
+    const state = window as typeof window & {
+      __runPaneSamples?: { sidebar: number; detail: number; row: number }[];
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__stopRunPaneSamples = true;
+    return state.__runPaneSamples ?? [];
+  });
+  const first = samples[0];
+  expect(first.detail).toBeGreaterThan(0);
+  for (const sample of samples) {
+    expect(sample.sidebar).toBeCloseTo(first.sidebar, 1);
+    expect(sample.detail).toBeCloseTo(first.detail, 1);
+    expect(sample.row).toBeCloseTo(first.row, 1);
+  }
+});
+
 test("keeps interval, command, and process resource evidence distinct", async ({
   page,
 }) => {
