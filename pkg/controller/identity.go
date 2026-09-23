@@ -141,7 +141,7 @@ func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time
 	}
 	p := &Principal{
 		Name: sess.Principal, Kind: store.TokenKindUser, Team: sess.Team,
-		Authed: now, session: raw,
+		Authed: now, session: raw, signedInAt: sess.CreatedAt,
 	}
 	if sess.AccountID == "" {
 		p.Scopes = sess.Scopes

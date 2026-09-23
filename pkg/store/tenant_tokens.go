@@ -13,14 +13,21 @@ import (
 // operator's own tokens are minted through *Store.
 const OperatorScope = "admin"
 
-// ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope],
-// which no team's token may carry.
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
+// LogsDeleteScope lets a bearer delete any team's logs. It is the operator's
+// like [OperatorScope], so no token minted through a [Tenant] carries it.
+const LogsDeleteScope = "logs.delete"
+
+// ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope] or
+// [LogsDeleteScope], which no team's token may carry.
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin or logs.delete scope")
 
 // safety: admin is the deployment operator's scope, and a membership never grants it, so no path that
 // mints into a team may either, the default team included; the operator's own tokens are minted through *Store.
 func refuseAdminScope(scopes []string) error {
-	if slices.ContainsFunc(scopes, func(s string) bool { return strings.TrimSpace(s) == OperatorScope }) {
+	if slices.ContainsFunc(scopes, func(s string) bool {
+		s = strings.TrimSpace(s)
+		return s == OperatorScope || s == LogsDeleteScope
+	}) {
 		return ErrAdminScopeOnTeamToken
 	}
 	return nil

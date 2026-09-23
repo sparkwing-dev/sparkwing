@@ -50,6 +50,46 @@ unlock.
   three other failures in a row pause them for seconds to minutes. Reads and
   deletes keep working, the cache answers a paused write with `503` and
   `Retry-After`, and the logs service reports the pause on its health route.
+- **controller:** team and account deletion. `DELETE /api/v1/team`, confirmed
+  with the team's slug, lets an owner delete a team other than their only one:
+  the team closes at once (members leave, tokens are revoked, runs are
+  cancelled) and, two minutes later, a background pass removes its logs,
+  cached artifacts and every row, secrets included, retrying until it
+  finishes, then deletes its cache tree and sweeps its rows again seven hours
+  later. One replica works on a deletion at a time under a lease;
+  `GET /api/v1/me/team-deletions` shows its state. A deleted team's slug is
+  never registered again. `DELETE /api/v1/me`, confirmed with the account's
+  email from a sign-in in the last 10 minutes, deletes the account, its
+  identities, memberships, sessions and minted tokens, and the teams it was
+  the only member of; rows it left in shared teams name `deleted user`. It
+  answers 409 with the list of teams the account is the last owner of while
+  they have other members. The operator deletes an account with
+  `DELETE /api/v1/accounts/{account}` and a team with
+  `DELETE /api/v1/teams/{team}`. The controller deletes logs with the token
+  in `SPARKWING_LOGS_DELETE_TOKEN`, which carries the new `logs.delete` scope
+  and nothing else; no team token may carry it. Schema v55. See
+  [Authentication](docs/auth.md).
+
+- **controller:** one user creates at most ten teams over the account's life,
+  the personal space included; deleting a team no longer gives a creation
+  back.
+
+- **controller:** invitation email. With `--email-sender` set the controller
+  mails each invitation through Amazon SES with the inviter's name, the team,
+  the role, the accept link and its seven-day expiry, at most 5 in any 24
+  hours to one address across every team, counted in a log team deletion does
+  not touch; the response gains `email_sent`.
+  `--email-configuration-set` names the SES configuration set. Without a
+  sender nothing is mailed, as before.
+
+- **web:** team settings gain a **Delete team** panel for owners, confirmed by
+  typing the slug, and the team menu links to a new **Your account** page that
+  shows the progress of team deletions and deletes the account, confirmed by
+  typing the email and listing the teams that block it. The invite form says
+  whether the invitation was emailed.
+
+- **cache:** `DELETE /admin/teams/{team}` removes a team's artifact, binary
+  and build-cache trees for the operator token.
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for

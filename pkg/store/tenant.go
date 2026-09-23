@@ -124,7 +124,8 @@ func NormalizeTeam(team Team) Team {
 }
 
 // ForTeam returns the handle through which tenant-owned rows are read
-// and written. It rejects a team that is not registered, because nothing
+// and written. It rejects a team that is not registered, or whose
+// deletion is pending, because nothing
 // has a foreign key to teams: SQLite cannot add one to an existing table
 // without rewriting all 34 of them, so the registry is enforced at the
 // one place a handle is minted rather than 34 times in the schema. The
@@ -137,7 +138,10 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
 		return nil, ErrNoTeam
 	}
 	var name string
-	err := s.queryRow(ctx, `SELECT name FROM teams WHERE name = ?`, string(team)).Scan(&name)
+	err := s.queryRow(ctx, `
+		SELECT name FROM teams WHERE name = ?
+		AND NOT EXISTS (SELECT 1 FROM team_deletions d WHERE d.slug = teams.name AND d.state = ?)`,
+		string(team), TeamDeletionPending).Scan(&name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownTeam, team)
 	}
@@ -274,7 +278,9 @@ var operatorTables = []string{
 	"identities",
 	"sparkwing_meta",
 	"sparkwing_requirements",
+	"invitation_email_log",
 	"sparkwing_schema_version",
+	"team_deletions",
 	"teams",
 }
 

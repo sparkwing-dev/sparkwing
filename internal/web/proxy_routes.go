@@ -46,9 +46,12 @@ var proxyRoutes = []proxyRoute{
 // session's active team, decides these routes, so the dashboard adds no scope of its own.
 var identityProxyRoutes = []proxyRoute{
 	{"GET /api/v1/me", ""},
+	{"DELETE /api/v1/me", ""},
+	{"GET /api/v1/me/team-deletions", ""},
 	{"POST /api/v1/me/active-team", ""},
 	{"POST /api/v1/teams", ""},
 	{"PATCH /api/v1/team", ""},
+	{"DELETE /api/v1/team", ""},
 	{"GET /api/v1/team/members", ""},
 	{"PATCH /api/v1/team/members/{userID}", ""},
 	{"DELETE /api/v1/team/members/{userID}", ""},

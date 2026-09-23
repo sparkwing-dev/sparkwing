@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import TeamShell, {
@@ -20,8 +21,11 @@ import {
   type Role,
   type TeamInvitation,
   assignableRoles,
+  canDeleteTeam,
   canManageTeam,
   changeMemberRole,
+  confirmationMatches,
+  deleteTeam,
   inviteMember,
   isLastOwner,
   lastOwnerNote,
@@ -246,9 +250,81 @@ function Members({ me }: { me: Me }) {
               </ul>
             )}
           </Panel>
+          <DeleteTeamPanel me={me} />
         </>
       ) : null}
     </>
+  );
+}
+
+function DeleteTeamPanel({ me }: { me: Me }) {
+  const team = me.active_team;
+  const router = useRouter();
+  const [typed, setTyped] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const allowed = canDeleteTeam(me);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!confirmationMatches(typed, team.slug)) return;
+    setDeleting(true);
+    try {
+      await deleteTeam(team.slug);
+      toast(`Deleting ${team.display_name}`, "success");
+      await refreshTeamState();
+      router.push("/account");
+    } catch (err) {
+      setDeleting(false);
+      toast(errorText(err), "error");
+    }
+  }
+
+  return (
+    <Panel title="Delete team">
+      <div className="p-4 space-y-3 text-sm">
+        <p className="text-[var(--muted)]">
+          Deleting {team.display_name} removes every member from it at once,
+          revokes its runner and CLI tokens, and cancels its queued and running
+          runs. Within a few minutes the controller then deletes its runs, logs,
+          secrets, schedules, cached artifacts and settings, and clears its
+          cache once more a few hours later. This cannot be undone, and the slug{" "}
+          <span className="font-mono">{team.slug}</span> can never be used for a
+          team again.
+        </p>
+        {allowed ? (
+          <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+            <input
+              aria-label="Type the team slug to confirm"
+              placeholder={team.slug}
+              className={`${inputClass} font-mono flex-1 min-w-[14rem]`}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+            <button
+              type="submit"
+              className={dangerButtonClass}
+              disabled={deleting || !confirmationMatches(typed, team.slug)}
+            >
+              {deleting ? "Deleting…" : "Delete this team"}
+            </button>
+          </form>
+        ) : (
+          <p className="text-xs text-[var(--muted)]">
+            This is your only team, so it can be deleted only with your account.
+            Deleting your account is on your{" "}
+            <Link href="/account" className="underline">
+              account page
+            </Link>
+            .
+          </p>
+        )}
+        {allowed ? (
+          <p className="text-xs text-[var(--muted)]">
+            Type <span className="font-mono">{team.slug}</span> to confirm.
+          </p>
+        ) : null}
+      </div>
+    </Panel>
   );
 }
 
@@ -326,9 +402,13 @@ function InviteForm({
       {created ? (
         <div className="px-4 pb-4 space-y-2">
           <div className="text-xs text-[var(--muted)]">
-            Invitation email is not sent yet. Send this link to{" "}
-            <span className="text-[var(--foreground)]">{created.email}</span>;
-            it works only when they sign in with that address.
+            {created.email_sent
+              ? "Emailed an invitation to "
+              : "No email was sent. Send this link to "}
+            <span className="text-[var(--foreground)]">{created.email}</span>
+            {created.email_sent ? ". You can also send them this link" : ""}; it
+            works only when they sign in with that address and expires in 7
+            days.
           </div>
           <CopyField value={created.accept_url} label="Invitation link" />
         </div>

@@ -378,3 +378,94 @@ describe("CLI tokens", () => {
     assert.equal(teams.cliTokenStartsRuns(undefined), false);
   });
 });
+
+describe("deletion", () => {
+  const me = (role: "owner" | "editor", teamCount: number) => ({
+    user: { id: "u", email: "ada@example.com", name: "Ada" },
+    active_team: { slug: "acme", display_name: "Acme", role },
+    memberships: Array.from({ length: teamCount }, (_, i) => ({
+      slug: `t${i}`,
+      display_name: `T${i}`,
+      role,
+    })),
+    invitations: [],
+  });
+
+  it("offers deleting a team only to an owner who keeps another team", () => {
+    assert.equal(teams.canDeleteTeam(me("owner", 2)), true);
+    assert.equal(teams.canDeleteTeam(me("owner", 1)), false);
+    assert.equal(teams.canDeleteTeam(me("editor", 2)), false);
+  });
+
+  it("matches a typed confirmation the way the controller compares it", () => {
+    assert.equal(teams.confirmationMatches(" Acme ", "acme"), true);
+    assert.equal(teams.confirmationMatches("acm", "acme"), false);
+    assert.equal(teams.confirmationMatches("", ""), false);
+  });
+
+  it("sends the typed slug when deleting the team", async () => {
+    respond = () =>
+      Response.json(
+        {
+          slug: "acme",
+          state: "pending",
+          requested_at: 1,
+          finished_at: null,
+          attempts: 0,
+          last_error: "",
+        },
+        { status: 202 },
+      );
+    const del = await teams.deleteTeam("acme");
+    assert.equal(calls[0].method, "DELETE");
+    assert.equal(calls[0].url, "/api/v1/team");
+    assert.deepEqual(JSON.parse(calls[0].body), { confirm_slug: "acme" });
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.equal(del.state, "pending");
+  });
+
+  it("reads a 409 on account deletion as the list of teams to deal with", async () => {
+    respond = () =>
+      Response.json(
+        {
+          error: "hand ownership on",
+          teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
+        },
+        { status: 409 },
+      );
+    const res = await teams.deleteAccount("ada@example.com");
+    assert.deepEqual(res, {
+      kind: "blocked",
+      teams: [{ slug: "acme", display_name: "Acme", role: "owner" }],
+    });
+    assert.deepEqual(JSON.parse(calls[0].body), {
+      confirm_email: "ada@example.com",
+    });
+  });
+
+  it("reports the teams an account deletion took with it", async () => {
+    respond = () =>
+      Response.json({ account_id: "u", deleted_teams: ["ada-space"] });
+    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
+      kind: "deleted",
+      deletedTeams: ["ada-space"],
+    });
+  });
+
+  it("asks for a fresh sign-in when the controller wants one", async () => {
+    respond = () =>
+      Response.json(
+        { error: "reauth_required", message: "sign in again" },
+        { status: 403 },
+      );
+    assert.deepEqual(await teams.deleteAccount("ada@example.com"), {
+      kind: "reauth",
+    });
+  });
+
+  it("throws on any other refusal", async () => {
+    respond = () =>
+      Response.json({ error: "confirm_email does not match" }, { status: 400 });
+    await assert.rejects(teams.deleteAccount("x@example.com"), /confirm_email/);
+  });
+});

@@ -45,6 +45,8 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 		// safety: these act on the caller's own memberships, so accountPrincipal inside each handler
 		// is the gate, and it refuses every caller that is not a signed-in account.
 		"GET /api/v1/me":                       true,
+		"DELETE /api/v1/me":                    true,
+		"GET /api/v1/me/team-deletions":        true,
 		"POST /api/v1/me/active-team":          true,
 		"POST /api/v1/teams":                   true,
 		"POST /api/v1/invitations/{id}/accept": true,

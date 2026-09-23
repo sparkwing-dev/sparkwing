@@ -107,8 +107,10 @@ const (
 // working on its own.
 const RunnerTokenLifetime = 90 * 24 * time.Hour
 
-// MaxCreatedTeams bounds how many teams one user can create, their personal
-// space included, because each team is a tenant the deployment pays to hold.
+// MaxCreatedTeams bounds how many teams one user creates over the account's
+// life, their personal space included, because each team is a tenant the
+// deployment pays to hold and a deleted team's slug is never reused.
+// Deleting a team does not give the creation back.
 const MaxCreatedTeams = 10
 
 // Identity errors. Callers map these onto status codes.
@@ -662,7 +664,10 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 	}
 	defer rollbackOrLog(tx)
 	var created int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams WHERE created_by = ?`, accountID).Scan(&created); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT teams_created FROM accounts WHERE id = ?`+tx.forUpdate(), accountID).Scan(&created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return TeamInfo{}, ErrNotFound
+		}
 		return TeamInfo{}, err
 	}
 	if created >= MaxCreatedTeams {
@@ -681,7 +686,18 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
 }
 
+// safety: a slug that ever named a team is never registered again, because a
+// credential minted for the deleted team, such as a cache grant verified by
+// its signature alone, can write under the slug after the purge, and a new
+// team holding it would inherit what that credential wrote.
 func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, now time.Time) error {
+	var deleted int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM team_deletions WHERE slug = ?`, string(slug)).Scan(&deleted); err != nil {
+		return err
+	}
+	if deleted > 0 {
+		return ErrSlugTaken
+	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO teams (name, display_name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO NOTHING`,
@@ -697,7 +713,8 @@ func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team,
 		string(slug), accountID, string(RoleOwner), now.UTC().Unix()); err != nil {
 		return fmt.Errorf("identity: add owner: %w", err)
 	}
-	return nil
+	_, err = tx.ExecContext(ctx, `UPDATE accounts SET teams_created = teams_created + 1 WHERE id = ?`, accountID)
+	return err
 }
 
 // TeamInfo reads a team's registry row.
@@ -975,6 +992,9 @@ func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, r
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	actor, err := t.roleTx(ctx, tx, actorID)
 	if err != nil {
 		return nil, err
@@ -1017,6 +1037,9 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, no
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	current, err := t.roleTx(ctx, tx, subjectID)
 	if err != nil {
 		return nil, err

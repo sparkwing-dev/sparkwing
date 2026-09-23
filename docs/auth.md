@@ -362,6 +362,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
+| `logs.delete`     | DELETE of any team's run logs on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
@@ -600,7 +601,9 @@ sign-in. A user with no team gets a personal space: a team
 whose only member is its owner, slugged from the email's local part, with the
 smallest free integer appended on a collision. The user's active team is
 stored on the user, so the next sign-in returns to it. One user creates at
-most ten teams, the personal space included, and slugs such as `default`,
+most ten teams over the account's life, the personal space included, and
+deleting a team does not give one back. A slug that ever named a team is
+never registered again, and slugs such as `default`,
 `app`, `api`, `auth`, `login`, `admin` and anything starting `demo-` are
 reserved. Without the license, sessions opened by a Google sign-in stop
 authenticating as well as new sign-ins.
@@ -639,6 +642,69 @@ after it is minted. Removing the member, or demoting them to `reader`, revokes
 it with their runner tokens; an owner demoted to `editor` keeps it, since it
 already carried only the editor's scopes. The member lists and revokes their
 own CLI tokens and no one else's, and holds at most 10 live ones in a team.
+
+With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
+emails each invitation through Amazon SES, taking credentials and region from
+the AWS default chain; `--email-configuration-set`
+(`SPARKWING_EMAIL_CONFIGURATION_SET`) names the SES configuration set every
+message carries. The email names the inviter by display name, the team, the
+role and the accept link, and says the invitation expires in seven days; it
+strips control and bidirectional-formatting characters from names and caps
+each at 80 characters. One address, compared without regard to case, receives
+at most 5 invitation emails in any 24 hours from every team together. The
+count lives in a log of address digests that deleting a team does not touch.
+Past the cap the invitation is still created and the response says
+`email_sent: false`. Without a sender the controller logs each invitation
+instead of mailing it. Either way the response carries `accept_url` for the
+owner to hand on.
+
+An owner deletes the active team with `DELETE /api/v1/team`, typing its slug
+back as `confirm_slug`. The request closes the team in one transaction: its
+members leave it and their sessions move to another team they belong to, every
+token the team holds is revoked, open invitations are withdrawn, queued runs are
+cancelled and running ones asked to stop, and the team no longer resolves for
+any request. Another replica may accept a revoked token from its cache for up to
+a minute, so a background pass, once a minute and at least two minutes after the
+request, then deletes the team's logs through the logs service, its artifacts
+and build cache through the cache service, and its rows in every team-owned
+table, secrets and storage watermarks included. A cache grant minted before
+the deletion stays valid for up to six hours, so seven hours after the purge a
+second pass deletes the cache tree and sweeps the team-owned tables once more.
+One replica works on a deletion at a time, under a five-minute lease it renews
+before each step. A pass that fails leaves the deletion where it was with the
+error recorded and the next pass starts that step again;
+`GET /api/v1/me/team-deletions` shows the requester its state. The slug is
+never registered again. The controller deletes logs with the token in
+`SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
+scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
+configured and no such token, or one carrying any other scope, a deletion
+stays pending and records why. An owner cannot delete their only team;
+deleting their account does that. Logs of runs deleted before their team was,
+for instance by `DELETE /api/v1/runs/{id}`, are not tracked by any row the
+purge reads and stay in the logs service until its retention removes them.
+
+A user deletes their account with `DELETE /api/v1/me`, typing their email back
+as `confirm_email`, from a session signed in within the last 10 minutes; an
+older session answers `403` with `reauth_required`. The account, its sign-in
+identities, memberships and sessions go, and every token it minted in any team
+is revoked. Teams the user is the only member of, their personal space
+included, are deleted as above. In teams the user shares, rows that recorded
+the user stay with the team and name `deleted user` instead: runs, triggers,
+approvals, cron schedules armed, node bounces, debug-pause releases, credit
+grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
+month) and the text of event payloads. The match is on the account's email and
+every email its identities asserted, in every team, and on the principal of
+every token it minted, only in that token's team, because another team may
+use the same principal name for its own token; egress usage carries no team,
+so it is relabeled for the emails alone. Credit
+charges name the team, not a person, and are left as they are. A replica's
+in-memory egress counter for the address can write it back once until that
+month's rows are pruned. While the user is the last owner of a team that has
+other members the request answers `409` and lists those teams, so they hand
+ownership on or delete each first. The operator carries out a request that
+arrived by mail with `DELETE /api/v1/accounts/{account}`, naming the account by
+id or email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
+`admin`.
 
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the

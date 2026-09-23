@@ -7,6 +7,7 @@ Every route the controller and logs service register, with the scope each requir
 
 | Method | Path | Scope |
 |---|---|---|
+| `DELETE` | `/api/v1/accounts/{account}` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
@@ -58,8 +59,10 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
+| `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
 | `POST` | `/api/v1/me/active-team` | `authenticated` |
+| `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
@@ -154,6 +157,7 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
+| `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
@@ -171,6 +175,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/team/runner-tokens` | `runs.write` |
 | `DELETE` | `/api/v1/team/runner-tokens/{prefix}` | `runs.write` |
 | `POST` | `/api/v1/teams` | `authenticated` |
+| `DELETE` | `/api/v1/teams/{team}` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |
@@ -200,7 +205,7 @@ Every route the controller and logs service register, with the scope each requir
 |---|---|---|
 | `GET` | `/api/v1/health` | `public` |
 | `GET` | `/api/v1/logs/search` | `logs.read` |
-| `DELETE` | `/api/v1/logs/{runID}` | `logs.write` |
+| `DELETE` | `/api/v1/logs/{runID}` | `logs.write` or `logs.delete` |
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
 | `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |

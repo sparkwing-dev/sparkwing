@@ -194,6 +194,9 @@ export interface TeamInvitation {
 export interface CreatedInvitation {
   id: string;
   accept_url: string;
+  // False when the controller mailed nothing: no mail service, or the
+  // address reached its daily limit. The link still works either way.
+  email_sent?: boolean;
 }
 
 export interface RunnerToken {
@@ -398,4 +401,78 @@ export async function revokeCLIToken(prefix: string): Promise<void> {
 // trigger find out.
 export function cliTokenStartsRuns(scopes: string[] | undefined): boolean {
   return (scopes ?? []).includes("runs.write");
+}
+
+export interface TeamDeletion {
+  slug: string;
+  state: "pending" | "done";
+  // Unix seconds, as the controller reports them.
+  requested_at: number;
+  finished_at: number | null;
+  attempts: number;
+  last_error: string;
+}
+
+// An account holds at least one team, so the last one goes with the account
+// rather than on its own; the controller refuses it with 409 either way.
+export function canDeleteTeam(me: Me): boolean {
+  return canManageTeam(me.active_team.role) && me.memberships.length > 1;
+}
+
+// The typed confirmation matches the way the controller compares it: slugs
+// and addresses are lowercased and trimmed there too.
+export function confirmationMatches(typed: string, expected: string): boolean {
+  const norm = (v: string) => v.trim().toLowerCase();
+  return norm(typed) !== "" && norm(typed) === norm(expected);
+}
+
+export async function deleteTeam(confirmSlug: string): Promise<TeamDeletion> {
+  const res = await send("DELETE", "/api/v1/team", "Delete team", {
+    confirm_slug: confirmSlug,
+  });
+  return (await res.json()) as TeamDeletion;
+}
+
+export async function listTeamDeletions(): Promise<TeamDeletion[]> {
+  const res = await send(
+    "GET",
+    "/api/v1/me/team-deletions",
+    "List team deletions",
+  );
+  return asList<TeamDeletion>(await res.json(), "deletions");
+}
+
+export type AccountDeletionResult =
+  | { kind: "deleted"; deletedTeams: string[] }
+  | { kind: "blocked"; teams: TeamRef[] }
+  | { kind: "reauth" };
+
+// A 409 is an answer, not a failure: it names the teams that would be left
+// without an owner, which the page lists so the person can deal with each.
+export async function deleteAccount(
+  confirmEmail: string,
+): Promise<AccountDeletionResult> {
+  const res = await authFetch("/api/v1/me", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm_email: confirmEmail }),
+  });
+  if (res.status === 409) {
+    const body = (await res.json()) as { teams?: TeamRef[] };
+    return { kind: "blocked", teams: body.teams ?? [] };
+  }
+  // The controller deletes an account only for a sign-in from the last few
+  // minutes; the page asks for a fresh one rather than showing an error.
+  if (res.status === 403) {
+    const body = (await res
+      .clone()
+      .json()
+      .catch(() => ({}))) as {
+      error?: string;
+    };
+    if (body.error === "reauth_required") return { kind: "reauth" };
+  }
+  if (!res.ok) throw await failure(res, "Delete account");
+  const body = (await res.json()) as { deleted_teams?: string[] };
+  return { kind: "deleted", deletedTeams: body.deleted_teams ?? [] };
 }

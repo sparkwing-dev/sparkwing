@@ -246,3 +246,37 @@ func TestCacheRefusesAGrantKeyThatIsItsToken(t *testing.T) {
 		t.Fatal("New accepted a grant key equal to the operator token")
 	}
 }
+
+// Deleting a team removes every blob its grants wrote and nothing another
+// team wrote, and only the operator token may ask.
+func TestDeletingATeamTreeRemovesOnlyThatTeamsBlobs(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	teamA, teamB := grantFor(t, token, "team-a"), grantFor(t, token, "team-b")
+	for _, g := range []string{teamA, teamB} {
+		if code, body := send(t, srv, http.MethodPut, "/cache/key-1", g, "bytes"); code/100 != 2 {
+			t.Fatalf("seed = %d: %s", code, body)
+		}
+	}
+
+	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", teamA, ""); code != http.StatusUnauthorized {
+		t.Fatalf("a team grant deleting a tree = %d, want 401", code)
+	}
+	for _, bad := range []string{"/admin/teams/team-a/artifacts", "/admin/teams/%2E%2E", "/admin/teams/"} {
+		if code, _ := send(t, srv, http.MethodDelete, bad, token, ""); code != http.StatusBadRequest {
+			t.Fatalf("DELETE %s = %d, want 400", bad, code)
+		}
+	}
+	if code, body := send(t, srv, http.MethodDelete, "/admin/teams/team-a", token, ""); code != http.StatusNoContent {
+		t.Fatalf("operator delete = %d: %s", code, body)
+	}
+	if code, _ := send(t, srv, http.MethodGet, "/cache/key-1", teamA, ""); code == http.StatusOK {
+		t.Fatal("team A's blob survived its tree's deletion")
+	}
+	if code, body := send(t, srv, http.MethodGet, "/cache/key-1", teamB, ""); code != http.StatusOK || body != "bytes" {
+		t.Fatalf("team B's blob after deleting team A = %d %q", code, body)
+	}
+	if code, _ := send(t, srv, http.MethodDelete, "/admin/teams/team-a", token, ""); code != http.StatusNoContent {
+		t.Fatalf("repeating the delete = %d, want 204", code)
+	}
+}
