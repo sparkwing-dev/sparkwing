@@ -807,6 +807,7 @@ func (s *Server) startArchive(ctx context.Context) {
 	if a == nil {
 		return
 	}
+	s.startLogBlockSettle(ctx)
 	go func() {
 		t := time.NewTicker(a.opts.Interval)
 		defer t.Stop()

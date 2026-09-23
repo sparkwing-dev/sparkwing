@@ -174,6 +174,26 @@ func (c *Client) Commit(ctx context.Context, auth string, r Reservation, stored 
 	}, nil)
 }
 
+// Renew commits stored bytes against r and reserves up to next bytes more
+// in the same round trip, for a writer that draws many small writes from
+// one block. The commit lands even when the next block is refused, which
+// returns the refusal. A controller that cannot answer leaves r uncommitted.
+func (c *Client) Renew(ctx context.Context, auth string, r Reservation, stored, next int64) (Reservation, error) {
+	if r.ID == "" {
+		return c.Reserve(ctx, auth, r.Team, r.Kind, next, true)
+	}
+	var out Reservation
+	err := c.post(ctx, auth, "/internal/storage/commit", map[string]any{
+		"team": r.Team, "store": r.Kind, "reservation": r.ID, "bytes": stored, "next_bytes": next,
+	}, &out)
+	if err != nil {
+		return Reservation{}, err
+	}
+	out.Team, out.Kind = r.Team, r.Kind
+	c.observe(r.Team, out.Tier)
+	return out, nil
+}
+
 // Release gives back r's room after a write that stored nothing.
 func (c *Client) Release(ctx context.Context, auth string, r Reservation) error {
 	if r.ID == "" {

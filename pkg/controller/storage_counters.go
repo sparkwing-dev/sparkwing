@@ -110,19 +110,7 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
 		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now(),
 	})
-	var quota *store.StorageQuotaError
-	switch {
-	case errors.As(err, &quota):
-		writeError(w, http.StatusRequestEntityTooLarge, err)
-	case errors.Is(err, store.ErrFreeStoragePaused):
-		writeError(w, http.StatusPaymentRequired, err)
-	case errors.Is(err, store.ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err)
-	case err != nil:
-		s.writeInternalError(w, r, "reserve team storage", err)
-	default:
-		writeJSON(w, http.StatusOK, res)
-	}
+	s.writeReservation(w, r, res, err)
 }
 
 type storageCommitReq struct {
@@ -130,6 +118,7 @@ type storageCommitReq struct {
 	Store       store.StorageKind `json:"store"`
 	Reservation string            `json:"reservation"`
 	Bytes       int64             `json:"bytes"`
+	NextBytes   int64             `json:"next_bytes,omitempty"`
 }
 
 func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
@@ -146,19 +135,47 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.MultiTeam() {
+		if req.NextBytes > 0 {
+			writeJSON(w, http.StatusOK, store.StorageReservation{Tier: store.TeamTierFunded, Granted: req.NextBytes, Unlimited: true})
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	err := s.store.CommitStorage(r.Context(), store.StorageCommit{
+	commit := store.StorageCommit{
 		ID: req.Reservation, Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, Now: time.Now(),
+	}
+	if req.NextBytes <= 0 {
+		err := s.store.CommitStorage(r.Context(), commit)
+		switch {
+		case errors.Is(err, store.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, err)
+		case err != nil:
+			s.writeInternalError(w, r, "commit team storage", err)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+		return
+	}
+	next, err := s.store.RenewStorage(r.Context(), commit, store.StorageReserve{
+		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.NextBytes, UpTo: true, Now: commit.Now,
 	})
+	s.writeReservation(w, r, next, err)
+}
+
+func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, res store.StorageReservation, err error) {
+	var quota *store.StorageQuotaError
 	switch {
+	case errors.As(err, &quota):
+		writeError(w, http.StatusRequestEntityTooLarge, err)
+	case errors.Is(err, store.ErrFreeStoragePaused):
+		writeError(w, http.StatusPaymentRequired, err)
 	case errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
 	case err != nil:
-		s.writeInternalError(w, r, "commit team storage", err)
+		s.writeInternalError(w, r, "reserve team storage", err)
 	default:
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusOK, res)
 	}
 }
 

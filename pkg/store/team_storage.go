@@ -152,6 +152,45 @@ func newReservationID() (string, error) {
 // [ErrFreeStoragePaused] for a team with neither credits nor a slot. A
 // funded team is granted what it asks for and counted all the same.
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return StorageReservation{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	out, err := reserveStorageTx(ctx, tx, req)
+	if err != nil {
+		return StorageReservation{}, err
+	}
+	return out, tx.Commit()
+}
+
+// RenewStorage commits c and reserves next in one transaction, for a writer
+// that settles one block of bytes as it takes the next. The commit lands
+// whether or not next fits: a refusal of next returns its error after the
+// commit is kept.
+func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return StorageReservation{}, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := commitStorageTx(ctx, tx, c); err != nil {
+		return StorageReservation{}, err
+	}
+	out, rerr := reserveStorageTx(ctx, tx, next)
+	var quota *StorageQuotaError
+	if rerr != nil && !errors.As(rerr, &quota) && !errors.Is(rerr, ErrFreeStoragePaused) {
+		return StorageReservation{}, rerr
+	}
+	if err := tx.Commit(); err != nil {
+		return StorageReservation{}, err
+	}
+	return out, rerr
+}
+
+// safety: a refusal returns before the first write, so a caller that keeps
+// the transaction after one commits nothing of the reservation.
+func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (StorageReservation, error) {
 	team := NormalizeTeam(req.Team)
 	if err := checkStorageTeam(team, req.Kind); err != nil {
 		return StorageReservation{}, err
@@ -171,11 +210,6 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 	if err != nil {
 		return StorageReservation{}, err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return StorageReservation{}, err
-	}
-	defer rollbackUnlessDone(tx, &err)
 	standing, err := storageStandingTx(ctx, tx, team)
 	if err != nil {
 		return StorageReservation{}, err
@@ -215,7 +249,7 @@ UPDATE team_storage SET reserved_bytes = reserved_bytes + ?, updated_at = ? WHER
 		out.Granted, now.UnixNano(), string(team), string(req.Kind)); err != nil {
 		return StorageReservation{}, err
 	}
-	return out, tx.Commit()
+	return out, nil
 }
 
 // safety: every change to a team_storage row locks it here first, so the lock orders them.
@@ -301,6 +335,18 @@ type StorageCommit struct {
 // reservation is dropped and c.Bytes added. A reservation of another store
 // is refused.
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := commitStorageTx(ctx, tx, c); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func commitStorageTx(ctx context.Context, tx *storeTx, c StorageCommit) (err error) {
 	team := NormalizeTeam(c.Team)
 	if err := checkStorageTeam(team, c.Kind); err != nil {
 		return err
@@ -309,11 +355,6 @@ func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) 
 	if now.IsZero() {
 		now = time.Now()
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
 	var r reservationRow
 	var found bool
 	if c.ID != "" {
@@ -332,13 +373,11 @@ func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) 
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 UPDATE team_storage SET used_bytes = CASE WHEN used_bytes + ? > 0 THEN used_bytes + ? ELSE 0 END,
        committed_bytes = committed_bytes + ?, updated_at = ?
- WHERE team = ? AND store = ?`, c.Bytes, c.Bytes, c.Bytes, now.UnixNano(), string(team), string(c.Kind)); err != nil {
-		return err
-	}
-	return tx.Commit()
+ WHERE team = ? AND store = ?`, c.Bytes, c.Bytes, c.Bytes, now.UnixNano(), string(team), string(c.Kind))
+	return err
 }
 
 // ReleaseStorage gives back team's reservation id, whose write stored

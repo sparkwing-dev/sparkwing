@@ -72,6 +72,9 @@ type Limits struct {
 	BinaryRatio float64
 }
 const LineTruncationMarker = "[sparkwing-logs] truncated: line byte cap reached\n"
+const LogBlockBytes int64 = 1 << 20
+const LogBlockSettleEvery = time.Minute
+const MaxClaimCacheTTL = 30 * time.Second
 var MinLineBytes = int64(len(LineTruncationMarker)) + 1
 func New(root string, logger *slog.Logger) (*Server, error)
 func NewClient(baseURL string, httpClient *http.Client) *Client

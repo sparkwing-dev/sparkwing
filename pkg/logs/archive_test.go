@@ -21,6 +21,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -128,6 +129,30 @@ type archiveFixture struct {
 	raw    *s3.Client
 	client *billed
 	root   string
+	calls  *controllerCalls
+}
+
+type controllerCalls struct {
+	mu     sync.Mutex
+	byPath map[string]int
+}
+
+func (c *controllerCalls) note(path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.byPath[path]++
+}
+
+func (c *controllerCalls) matching(part string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for path, k := range c.byPath {
+		if strings.Contains(path, part) {
+			n += k
+		}
+	}
+	return n
 }
 
 func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
@@ -160,8 +185,13 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.H
 		"Bearer admin":   {Principal: "admin", Kind: "user", Scopes: []string{scopeAdmin}, Team: "default"},
 		"Bearer deleter": {Principal: "controller-logs", Kind: "service", Scopes: []string{scopeLogsDelete}, Team: "default"},
 	}
+	if counter == nil {
+		counter = storagequotatest.New(1<<40, 0)
+	}
+	calls := &controllerCalls{byPath: map[string]int{}}
 	ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if counter != nil && strings.HasPrefix(r.URL.Path, "/internal/storage/") {
+		calls.note(r.URL.Path)
+		if strings.HasPrefix(r.URL.Path, "/internal/storage/") {
 			counter.ServeHTTP(w, r)
 			return
 		}
@@ -190,7 +220,7 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.H
 	srv.WithArchive(ArchiveOptions{Store: store})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root}
+	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls}
 }
 
 func (f *archiveFixture) do(t *testing.T, method, path, bearer, body string) (int, string) {

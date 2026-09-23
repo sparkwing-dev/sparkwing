@@ -115,9 +115,25 @@ func TestTheCounterRoutesHoldAFreeTeamToItsShare(t *testing.T) {
 	}, nil); code != http.StatusNoContent {
 		t.Fatalf("release = %d", code)
 	}
-	if code, _ := f.reserve(cache, "first", "cache", 72); code != http.StatusOK {
+	code, res = f.reserve(cache, "first", "cache", 72)
+	if code != http.StatusOK {
 		t.Fatalf("the 72 bytes a release gave back = %d", code)
 	}
+	var next store.StorageReservation
+	if code := f.call("POST", "/internal/storage/commit", cache, map[string]any{
+		"team": "first", "store": "cache", "reservation": res.ID, "bytes": 40, "next_bytes": 100,
+	}, &next); code != http.StatusOK || next.ID == "" || next.Granted != 32 {
+		t.Fatalf("commit 40 and take up to 100 more = %d %+v, want the 32 bytes left as the next block", code, next)
+	}
+	if code := f.call("POST", "/internal/storage/release", cache, map[string]any{
+		"team": "first", "reservation": next.ID,
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("release the next block = %d", code)
+	}
+	if code, res = f.reserve(cache, "first", "cache", 32); code != http.StatusOK {
+		t.Fatalf("the 32 bytes left after the renew = %d", code)
+	}
+	_ = res
 	if code, _ := f.reserve(cache, "second", "cache", 1); code != http.StatusPaymentRequired {
 		t.Fatalf("a team with no slot = %d, want 402", code)
 	}

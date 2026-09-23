@@ -74,8 +74,13 @@ unlock.
   `POST /internal/storage/reserve`, then commits what it stored or releases
   the room, under a row lock, so writers on any number of replicas see each
   other and two racing for a share's last bytes cannot both win. The cache
-  calls these routes with its operator token, and the logs service forwards
-  the appending caller's credential, which counts only its own team's logs. A
+  calls these routes with its operator token, once per object, and the logs
+  service forwards the appending caller's credential, which counts only its
+  own team's logs, and draws appends from a 1 MiB block per team and run that
+  it settles in one call when the block runs out and every minute, so a run
+  costs about one controller call per MiB or per minute. The logs service
+  also confirms an append's claim at most once every 30 seconds per run,
+  node, credential and claim. A
   refused or failed write holds nothing, and while the controller cannot
   answer a free team's write is refused with `503`. `GET /api/v1/storage`
   reports what a team holds in each store. See [Tenant limits](docs/limits.md).

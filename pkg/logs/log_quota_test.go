@@ -1,14 +1,17 @@
 package logs
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func (f *archiveFixture) logSize(t *testing.T, runID, nodeID string) int64 {
@@ -26,8 +29,9 @@ func (f *archiveFixture) logSize(t *testing.T, runID, nodeID string) int64 {
 func line(n int) string { return strings.Repeat("x", n-1) + "\n" }
 
 // The logs service holds a free team to the share the controller counts,
-// with the appending caller's own credential, and an append the controller
-// refuses writes nothing.
+// drawing appends from a block it reserved with the appending caller's own
+// credential; an append past the share writes nothing, and a settle commits
+// what was written and gives the rest of the block back.
 func TestAFreeTeamsLogsStopAtTheirShare(t *testing.T) {
 	counter := storagequotatest.New(300, 0)
 	f := newArchiveFixtureWith(t, 0, counter)
@@ -44,6 +48,7 @@ func TestAFreeTeamsLogsStopAtTheirShare(t *testing.T) {
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(100)); code != http.StatusNoContent {
 		t.Fatalf("the last 100 bytes = %d %s", code, body)
 	}
+	f.srv.settleLogBlocks(context.Background(), true)
 	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != 300 || reserved != 0 {
 		t.Fatalf("the controller counts %d used, %d reserved; want 300 and nothing held", used, reserved)
 	}
@@ -77,6 +82,7 @@ func TestAFailedAppendHoldsNothing(t *testing.T) {
 	if code != http.StatusInternalServerError {
 		t.Fatalf("an append the volume refused = %d, want 500", code)
 	}
+	f.srv.settleLogBlocks(context.Background(), true)
 	if used, reserved := counter.Held("team-b", storagequota.KindLogs); used != 10 || reserved != 0 {
 		t.Fatalf("after a failed append the controller counts %d used, %d reserved; want 10 and nothing held", used, reserved)
 	}
@@ -104,5 +110,90 @@ func TestAppendsFailClosedWhileTheControllerCannotCount(t *testing.T) {
 	counter.SetDown(false)
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(10)); code != http.StatusNoContent {
 		t.Fatalf("a free team's append with the counter back = %d %s", code, body)
+	}
+}
+
+func (f *archiveFixture) appendAs(t *testing.T, bearer, runID, nodeID string, gen int, body string) int {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.http.URL+"/api/v1/logs/"+runID+"/"+nodeID, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", bearer)
+	if gen > 0 {
+		req.Header.Set(store.ClaimHolderHeader, "agent:a")
+		req.Header.Set(store.ClaimMembershipHeader, "membership-a")
+		req.Header.Set(store.ClaimReservationHeader, "reservation-a")
+		req.Header.Set(store.ClaimGenerationHeader, strconv.Itoa(gen))
+		req.Header.Set(store.AttemptOrdinalHeader, "1")
+	}
+	resp, err := f.http.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// Ten thousand one-line appends of one attempt cost the controller one claim
+// check and one storage call per mebibyte, not three calls a line, and a
+// settle commits every byte they stored.
+func TestTenThousandLinesCostAHandfulOfControllerCalls(t *testing.T) {
+	counter := storagequotatest.New(1<<30, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	const lines, width = 10000, 200
+	for i := range lines {
+		if code := f.appendAs(t, "Bearer a", "run-a", "build", 1, line(width)); code != http.StatusNoContent {
+			t.Fatalf("append %d = %d", i, code)
+		}
+	}
+	total := int64(lines * width)
+	storage := f.calls.matching("/internal/storage/")
+	claims := f.calls.matching("/claim/validate")
+	if want := int(total/(1<<20)) + 1; storage > want {
+		t.Errorf("%d lines made %d storage calls, want at most %d: one per MiB", lines, storage, want)
+	}
+	if claims > 1 {
+		t.Errorf("%d lines of one attempt made %d claim checks, want 1 inside the cache window", lines, claims)
+	}
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used+reserved < total {
+		t.Fatalf("the controller holds %d used and %d reserved for %d stored bytes", used, reserved, total)
+	}
+
+	f.srv.settleLogBlocks(context.Background(), false)
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != total || reserved != LogBlockBytes {
+		t.Fatalf("after a settle of an active run = %d used, %d reserved; want %d and a fresh block", used, reserved, total)
+	}
+	f.srv.settleLogBlocks(context.Background(), false)
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != total || reserved != 0 {
+		t.Fatalf("after a settle of an idle run = %d used, %d reserved; want %d and the block given back", used, reserved, total)
+	}
+}
+
+// A confirmed claim is reused only for the exact claim it confirmed: another
+// generation, and an append that names none, is checked again every time.
+func TestAConfirmedClaimCoversOnlyItsOwnAttempt(t *testing.T) {
+	f := newArchiveFixtureWith(t, 0, storagequotatest.New(1<<30, 0))
+	for range 3 {
+		if code := f.appendAs(t, "Bearer a", "run-a", "build", 1, line(10)); code != http.StatusNoContent {
+			t.Fatal(code)
+		}
+	}
+	if got := f.calls.matching("/claim/validate"); got != 1 {
+		t.Fatalf("three appends of one attempt = %d claim checks, want 1", got)
+	}
+	if code := f.appendAs(t, "Bearer a", "run-a", "build", 2, line(10)); code != http.StatusNoContent {
+		t.Fatal(code)
+	}
+	if got := f.calls.matching("/claim/validate"); got != 2 {
+		t.Fatalf("a new generation = %d claim checks in all, want it checked again", got)
+	}
+	for range 2 {
+		if code := f.appendAs(t, "Bearer a", "run-a", "build", 0, line(10)); code != http.StatusNoContent {
+			t.Fatal(code)
+		}
+	}
+	if got := f.calls.matching("/claim/validate"); got != 4 {
+		t.Fatalf("two appends naming no generation = %d claim checks in all, want each checked", got)
 	}
 }

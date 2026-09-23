@@ -1898,6 +1898,7 @@ func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID s
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
+func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
@@ -1966,7 +1967,7 @@ func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) 
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error)
-func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (map[Team]int64, error)
+func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error)
 func (s *Store) StorageQuotaFor(ctx context.Context, principal string) (StorageQuota, error)
 func (s *Store) StorageRateMicroPerGBDay(ctx context.Context) (int64, error)
 func (s *Store) StorageRetainedBytes(ctx context.Context, principal string) (int64, error)
@@ -1978,7 +1979,7 @@ func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (Stora
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
-func (s *Store) TeamStorage(ctx context.Context, team Team) (map[StorageKind]TeamStorageUsage, error)
+func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error

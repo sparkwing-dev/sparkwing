@@ -5852,7 +5852,11 @@ paths:
         overwrite the difference from what it replaced, which may be
         negative. A reservation that already expired, or that is not the
         named team's, drops nothing and the bytes still count. Callers are
-        authorized as for the reserve route.
+        authorized as for the reserve route. `next_bytes` above zero also
+        reserves up to that many bytes more in the same transaction and
+        answers the new reservation, for a writer that draws many small
+        writes from one block; the commit lands even when the next block is
+        refused.
       requestBody:
         required: true
         content:
@@ -5866,11 +5870,27 @@ paths:
                 store: {type: string, enum: [cache, logs]}
                 reservation: {type: string}
                 bytes: {type: integer, format: int64}
+                next_bytes: {type: integer, format: int64}
       responses:
+        "200":
+          description: Counted, and the next block when `next_bytes` asked for one.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.StorageReservation
+                properties:
+                  reservation: {type: string}
+                  tier: {type: string, enum: [funded, free]}
+                  granted_bytes: {type: integer, format: int64}
+                  unlimited: {type: boolean}
+                  expires_at: {type: string, format: date-time}
         "204": {description: Counted.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "402": {description: "The next block was refused: the team has neither credits nor a free-tier slot. The commit landed."}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: "The next block was refused: the team's share is spent. The commit landed."}
 
   /internal/storage/release:
     post:

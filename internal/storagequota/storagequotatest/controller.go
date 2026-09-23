@@ -114,6 +114,14 @@ func refuse(w http.ResponseWriter, status int, format string, args ...any) {
 	writeJSON(w, map[string]string{"error": fmt.Sprintf(format, args...)})
 }
 
+func (c *Controller) commit(k key, team, reservation string, n int64) {
+	if h, ok := c.holds[reservation]; ok && h.key.team == team {
+		c.reserved[h.key] -= h.bytes
+		delete(c.holds, reservation)
+	}
+	c.used[k] = max(c.used[k]+n, 0)
+}
+
 func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -133,6 +141,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		UpTo        bool              `json:"up_to"`
 		Reservation string            `json:"reservation"`
 		Record      bool              `json:"record"`
+		NextBytes   int64             `json:"next_bytes"`
 		storagequota.EgressTotals
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -140,7 +149,12 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := key{req.Team, req.Store}
-	switch r.URL.Path {
+	path := r.URL.Path
+	if path == "/internal/storage/commit" && req.NextBytes > 0 {
+		c.commit(k, req.Team, req.Reservation, req.Bytes)
+		req.Bytes, req.UpTo, path = req.NextBytes, true, "/internal/storage/reserve"
+	}
+	switch path {
 	case "/internal/storage/reserve":
 		tier := c.tier(req.Team)
 		granted := req.Bytes
@@ -169,11 +183,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"unlimited": tier == storagequota.TierFunded && req.UpTo && req.Bytes <= 0,
 		})
 	case "/internal/storage/commit":
-		if h, ok := c.holds[req.Reservation]; ok && h.key.team == req.Team {
-			c.reserved[h.key] -= h.bytes
-			delete(c.holds, req.Reservation)
-		}
-		c.used[k] = max(c.used[k]+req.Bytes, 0)
+		c.commit(k, req.Team, req.Reservation, req.Bytes)
 		w.WriteHeader(http.StatusNoContent)
 	case "/internal/storage/release":
 		if h, ok := c.holds[req.Reservation]; ok && h.key.team == req.Team {

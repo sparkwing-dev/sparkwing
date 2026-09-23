@@ -441,3 +441,37 @@ func TestEgressTotalsKeepTheLargerValue(t *testing.T) {
 		t.Fatalf("another service = %+v, %v; want its own totals", other, err)
 	}
 }
+
+// A writer settling one block while it takes the next pays one round trip:
+// the commit and the next reservation share a transaction, and the commit
+// lands even when the next block does not fit.
+func TestRenewCommitsTheBlockAndReservesTheNext(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 16<<10)
+	freeTeam(t, st, "team-a")
+	ctx := context.Background()
+	now := time.Now()
+	block, err := st.ReserveStorage(ctx, store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	if err != nil || block.Granted != 2<<10 {
+		t.Fatalf("first block = %+v, %v", block, err)
+	}
+	next, err := st.RenewStorage(ctx,
+		store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	if err != nil || next.ID == "" || next.Granted != 1<<10 {
+		t.Fatalf("renew with 1 KiB of the 3 KiB log share left = %+v, %v; want a 1 KiB block", next, err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 2<<10 || got.ReservedBytes != 1<<10 {
+		t.Fatalf("after renew = %+v, want 2 KiB used and the 1 KiB block held", got)
+	}
+	_, err = st.RenewStorage(ctx,
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	var quota *store.StorageQuotaError
+	if !errors.As(err, &quota) {
+		t.Fatalf("renew with the share spent = %v, want a quota error", err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
+		t.Fatalf("after a refused renew = %+v, want the commit kept: 3 KiB used, nothing held", got)
+	}
+}

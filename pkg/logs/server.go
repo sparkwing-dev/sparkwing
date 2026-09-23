@@ -41,11 +41,13 @@ const maxAppendRequestBytes = 4 << 20
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
-	root     string
-	logger   *slog.Logger
-	counter  *storagequota.Client
-	dirMode  os.FileMode
-	fileMode os.FileMode
+	root      string
+	logger    *slog.Logger
+	counter   *storagequota.Client
+	logBlocks logBlocks
+	claims    claimCache
+	dirMode   os.FileMode
+	fileMode  os.FileMode
 
 	limits    Limits
 	ceiling   *objectguard.Ceiling
@@ -702,12 +704,12 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	// safety: the reservation is taken after the node and run caps cut the
 	// append, so a team is held to what this append stores rather than to
 	// what it was sent.
-	counted, ok := s.reserveLogBytes(w, r, team, plan.storedBytes())
+	counted, ok := s.reserveLogBytes(w, r, team, runID, plan.storedBytes())
 	if !ok {
 		refuse()
 		return
 	}
-	defer counted.finish(r.Context(), s.logger)
+	defer counted.finish()
 	if err := s.ensureRunDir(root, runID); err != nil {
 		refuse()
 		s.storeError(w, "create run dir", err)
@@ -781,6 +783,10 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	if err != nil {
 		return nil, http.StatusUnauthorized, err
 	}
+	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
+	if cacheable && s.claims.valid(key, time.Now()) {
+		return nil, 0, nil
+	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
 	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
@@ -789,14 +795,7 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 		return nil, http.StatusBadGateway, err
 	}
 	req.Header.Set("Authorization", credential)
-	for _, name := range []string{
-		"X-Sparkwing-Claim-Holder",
-		"X-Sparkwing-Claim-Membership",
-		"X-Sparkwing-Claim-Reservation",
-		"X-Sparkwing-Claim-Generation",
-		"X-Sparkwing-Attempt-Ordinal",
-		"X-Sparkwing-Trigger-Generation",
-	} {
+	for _, name := range claimHeaders {
 		req.Header.Set(name, r.Header.Get(name))
 	}
 	// #nosec G704 -- the validated request retains the same operator-configured origin
@@ -806,6 +805,9 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		if cacheable && s.claimCacheTTL() > 0 {
+			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
+		}
 		return resp.Header, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
