@@ -16,6 +16,8 @@ type Services struct {
 	Logs string `json:"logs,omitempty"`
 
 	Dashboard string `json:"dashboard,omitempty"`
+
+	MultiTeam bool `json:"multi_team,omitempty"`
 }
 
 var ErrNoController = errors.New("discovery: no controller URL configured")

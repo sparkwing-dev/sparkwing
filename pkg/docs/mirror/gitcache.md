@@ -109,7 +109,13 @@ cache pod URL`) instead of a pass, and eager-refresh falls back to the
 controller's gitcache proxy routes (`POST /api/v1/gitcache/refresh`,
 then a SHA-scoped bundle seed via `POST /api/v1/gitcache/seed`); if
 those also fail the CLI prints a note and the runner retries on a stale
-SHA. The controller serves the proxy routes only when started with
+SHA. A multi-team controller answers `multi_team: true` from the same
+route, and there the CLI makes neither call unless the shell holds
+`SPARKWING_CACHE_TOKEN`: the cache's `/git/refresh` and `/sync/seed` take
+its operator token, which a team member never holds and a cache grant does
+not replace. It logs one debug line instead, runners fetch a pushed commit
+from origin, and a commit not on origin is refused with "push your commit".
+The controller serves the proxy routes only when started with
 `--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
 cache Service, so set both: `--cache-pod-url` for the
 externally-reachable URL operators hit directly, `--cache-url` for the

@@ -531,6 +531,13 @@ unlock.
 
 ### Changed
 
+- **cli + controller:** on a multi-team controller, `sparkwing run --on`
+  and `sparkwing crons install` no longer call the cache's `/git/refresh`
+  and `/sync/seed`, which take the cache's operator token and answered a
+  team member `401`. `GET /api/v1/services` reports `multi_team`, and the CLI
+  skips both calls with one debug line unless `SPARKWING_CACHE_TOKEN` is set.
+  A commit not on origin is refused with "push your commit" alone.
+
 - **controller:** `GET /api/v1/secrets` is open to every team member
   (`runs.read`), not only owners, and lists each unmasked variable with its
   value. A masked secret still lists with metadata only.
