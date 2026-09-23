@@ -390,22 +390,25 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "done"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
-	// safety: a done node refuses a named claim, and a refused claim creates no
-	// Job, so this controller predates the route and the Job runs unfenced.
-	controllerHandler := controller.New(st, nil).Handler()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/build/claim") {
-			controller.WriteUnsupportedRoute(w, r)
-			return
-		}
-		controllerHandler.ServeHTTP(w, r)
-	}))
+	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
+	// safety: a done node refuses a named claim, so the node turns done with
+	// no outcome only once the Job exists, which is the state a pod that died
+	// between its two writes leaves.
 	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("create", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if err := st.SetNodeStatus(ctx, "run-1", "build", "done"); err != nil {
+			t.Errorf("SetNodeStatus: %v", err)
+		}
+		return false, nil, nil
+	})
 	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
 	})

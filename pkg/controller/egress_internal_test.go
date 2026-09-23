@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,8 +28,9 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 
 	s.egress.Record("alice", egress.ClassArtifact, 400)
 	s.sweepEgressUsage(ctx)
+	month := time.Now().UTC().Format("2006-01")
 
-	rows, err := st.ListEgressUsage(ctx, "")
+	rows, err := st.ListEgressUsage(ctx, month)
 	if err != nil {
 		t.Fatalf("ListEgressUsage: %v", err)
 	}
@@ -41,7 +43,7 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 	s.sweepEgressUsage(ctx)
 	s.egress.Record("alice", egress.ClassArtifact, 100)
 	s.sweepEgressUsage(ctx)
-	rows, err = st.ListEgressUsage(ctx, "")
+	rows, err = st.ListEgressUsage(ctx, month)
 	if err != nil {
 		t.Fatalf("ListEgressUsage: %v", err)
 	}
@@ -176,5 +178,25 @@ func TestPersistenceDoesNotDependOnBuilderOrder(t *testing.T) {
 	// park either.
 	if New(nil, nil).WithEgressMeter(egress.New(egress.Config{})).egress.State().Persisted {
 		t.Error("a storeless controller marked its meter as drained")
+	}
+}
+
+// safety: the daily cap is the backstop on the whole process's bill, so a
+// restart that started the day over let a crash loop spend it again.
+func TestARestartedControllerResumesTheDailyCap(t *testing.T) {
+	cfg := egress.Config{GlobalDailyCapBytes: 1000}
+	s, st := egressServer(t, cfg)
+	s.egress.Record("alice", egress.ClassArtifact, 600)
+	s.egress.Record("bob", egress.ClassLog, 400)
+	s.sweepEgressUsage(t.Context())
+
+	restarted := New(st, nil).WithEgressMeter(egress.New(cfg))
+	restarted.loadEgressUsage(t.Context())
+	if got := restarted.egress.State().GlobalDayBytes; got != 1000 {
+		t.Fatalf("a restarted controller resumed the day at %d bytes, want 1000", got)
+	}
+	var budget *egress.BudgetError
+	if err := restarted.egress.Check("carol"); !errors.As(err, &budget) || !budget.ProcessWide {
+		t.Fatalf("Check after the restart = %v, want the daily cap's refusal", err)
 	}
 }

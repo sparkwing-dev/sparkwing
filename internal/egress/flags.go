@@ -172,9 +172,8 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		downloads := read(EnvMaxDownloads)
 		downloadsFlag = fs.Int64("egress-max-downloads", *downloads,
 			"metered downloads one principal may hold open at once; a further one is refused "+
-				"with 429. It bounds how far a burst carries a principal past the monthly "+
-				"budget, to this many times the largest object. 0, the default, is unlimited "+
-				"(env: "+EnvName(svc, EnvMaxDownloads)+")")
+				"with 429. Every pod sharing a bearer counts against the same cap. 0, the "+
+				"default, is unlimited (env: "+EnvName(svc, EnvMaxDownloads)+")")
 	}
 	if surfaces.LogStreams {
 		streams := read(EnvMaxLogStreams)

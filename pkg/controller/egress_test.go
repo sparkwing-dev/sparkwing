@@ -106,30 +106,21 @@ func (f egressFixture) fetch(t *testing.T, method, path, token string) fetched {
 	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
 }
 
-func (f egressFixture) fetchAs(t *testing.T, path, token, pod string) fetched {
-	t.Helper()
-	req := f.request(t, http.MethodGet, path, token)
-	req.Header.Set(store.RunnerIdentityHeader, pod)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read response: %v", err)
-	}
-	return fetched{status: resp.StatusCode, header: resp.Header, body: body}
-}
-
 func (f egressFixture) get(t *testing.T, path, token string) fetched {
 	t.Helper()
 	return f.fetch(t, http.MethodGet, path, token)
 }
 
+// safety: a download the budget cuts is aborted, which spending the budget
+// expects, so neither the request nor the read has to succeed.
 func (f egressFixture) spend(t *testing.T, path, token string) {
 	t.Helper()
-	f.get(t, path, token)
+	resp, err := http.DefaultClient.Do(f.request(t, http.MethodGet, path, token))
+	if err != nil {
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }
 
 func seedLiveLog(t *testing.T, f egressFixture, runID, nodeID, text string) {
@@ -176,7 +167,7 @@ func claimRunForRunner(t *testing.T, f egressFixture, runID string) {
 
 func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 150}, art)
+	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 200}, art)
 
 	first := f.get(t, "/api/v1/artifacts/k", f.adminToken)
 	if first.status != http.StatusOK || len(first.body) != 100 {
@@ -211,8 +202,8 @@ func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 	if refusal.Code != controller.EgressBudgetCode || refusal.Principal != "root" {
 		t.Fatalf("refusal = %+v", refusal)
 	}
-	if refusal.LimitBytes != 150 || refusal.UsedBytes != 200 {
-		t.Fatalf("refusal counters = %+v, want 200 of 150", refusal)
+	if refusal.LimitBytes != 200 || refusal.UsedBytes != 200 {
+		t.Fatalf("refusal counters = %+v, want 200 of 200", refusal)
 	}
 	if !strings.Contains(refusal.Error, "egress budget exceeded") {
 		t.Errorf("error member %q does not carry the reason", refusal.Error)
@@ -221,7 +212,7 @@ func TestArtifactDownloadCountsAgainstThePrincipalsBudget(t *testing.T) {
 
 func TestOneBudgetDoesNotRefuseAnotherPrincipal(t *testing.T) {
 	art := &fakeArtifactStore{objects: map[string][]byte{"runs/r1/k": bytes.Repeat([]byte("x"), 100)}}
-	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 50}, art)
+	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 100}, art)
 	// safety: only the operator reads a key that names no run, so the CLI
 	// token fetches an artifact of a run its team owns.
 	if err := f.store.CreateRun(context.Background(), store.Run{ID: "r1", Pipeline: "p", Status: "running"}); err != nil {
@@ -541,9 +532,9 @@ func TestTheGitcacheProxyIsByteMeteredButHoldsNoSlot(t *testing.T) {
 	}
 }
 
-// safety: twenty pods share one pool bearer, so a cap keyed on the
-// principal alone refuses nineteen of them at once.
-func TestEachPodOfAPoolHoldsItsOwnDownloadSlot(t *testing.T) {
+// safety: the pod header is the caller's to write, so a slot keyed on it
+// let one bearer open as many downloads as it invented pod names.
+func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 	art := &blockingArtifactStore{
 		payload: []byte("payload"),
 		started: make(chan struct{}),
@@ -565,18 +556,41 @@ func TestEachPodOfAPoolHoldsItsOwnDownloadSlot(t *testing.T) {
 	}()
 	<-art.started
 
-	// safety: a second pod under the same bearer gets its own slot.
-	other := f.fetchAs(t, "/api/v1/artifacts/k", f.adminToken, "pod-b")
-	if other.status == http.StatusTooManyRequests {
-		t.Fatal("a second pod was refused by the first pod's slot")
-	}
-
-	// safety: the cap still holds within one pod.
-	same := f.fetchAs(t, "/api/v1/artifacts/k", f.adminToken, "pod-a")
-	if same.status != http.StatusTooManyRequests {
-		t.Fatalf("the same pod's second simultaneous download = %d, want 429", same.status)
+	for _, header := range []string{store.RunnerIdentityHeader, store.ClaimHolderHeader} {
+		req := f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken)
+		req.Header.Set(header, "pod-b")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusTooManyRequests {
+			t.Errorf("a second download naming %s pod-b = %d, want 429 from the principal's one slot", header, resp.StatusCode)
+		}
 	}
 
 	close(art.release)
 	<-done
+}
+
+// safety: a download admitted just under the budget used to finish past it,
+// so parallel downloads started at the edge each carried the whole object.
+// The cut response is aborted, which a client sees as a failed read or, when
+// nothing reached it, retries into the refusal.
+func TestADownloadStopsAtThePrincipalsBudget(t *testing.T) {
+	art := &fakeArtifactStore{objects: map[string][]byte{"k": bytes.Repeat([]byte("x"), 100)}}
+	f := newEgressFixture(t, egress.Config{PerPrincipalMonthlyBytes: 150}, art)
+
+	f.spend(t, "/api/v1/artifacts/k", f.adminToken)
+	resp, err := http.DefaultClient.Do(f.request(t, http.MethodGet, "/api/v1/artifacts/k", f.adminToken))
+	if err == nil {
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr == nil && resp.StatusCode == http.StatusOK {
+			t.Fatalf("the second download ended cleanly with %d bytes, want it cut at the budget", len(body))
+		}
+	}
+	if got := f.meter.State().GlobalMonthBytes; got != 150 {
+		t.Fatalf("metered %d bytes, want the 150 the budget allows", got)
+	}
 }

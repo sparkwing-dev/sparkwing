@@ -266,12 +266,6 @@ unlock.
 
 ### Changed
 
-- **controller:** the `cloud` and `cloud-free` limits profiles now also set
-  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
-  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
-  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
-  with a profile previously left run creation and egress bytes unlimited. A
-  flag or environment variable the operator names still wins.
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
@@ -285,6 +279,12 @@ unlock.
   runner, and `agent.yaml` refuses `cache_token`. See
   [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
 
+- **controller:** the `cloud` and `cloud-free` limits profiles now also set
+  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
+  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
+  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
+  with a profile previously left run creation and egress bytes unlimited. A
+  flag or environment variable the operator names still wins.
 - **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
   replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
   dependencies allowed to run build scripts, and the local build, dev server and
@@ -379,12 +379,35 @@ unlock.
   Postgres broke the deadlock after a second by aborting one side. The round
   now locks the run `FOR NO KEY UPDATE`.
 
+- **controller:** a restart no longer reopens the egress daily cap. Only the
+  per-principal month totals were persisted, so a controller restarted after
+  reaching `--egress-daily-cap-bytes` served the whole cap again that day. The
+  day's process total is now written on the maintenance sweep beside the
+  month totals and restored before the listener binds.
+- **egress:** the daily cap and the monthly budget are hard byte caps. They
+  were checked once before a response started, so parallel downloads begun
+  just under a cap each finished past it. Bytes are now charged as they are
+  written, a write past either budget sends only what is left, and the
+  controller, logs service and cache abort the cut response so the client
+  sees a failed transfer. The download and log-stream concurrency caps key on
+  the authenticated principal alone; they had keyed on the caller's
+  `X-Sparkwing-Runner` or claim-holder header, so a caller multiplied its
+  slots by naming pods. A pool behind one bearer now shares its caps, so size
+  `--egress-max-downloads` and `--egress-max-log-streams` for the pool.
+- **run-node:** a Kubernetes pod stops its node when the controller refuses
+  the claim renewal, which is how a cancellation for exhausted credits, a
+  reaped claim, or a cancelled node reaches it. The refusal was logged and the
+  step ran on, billing compute until the Job deadline of up to 24 hours. The
+  node's process group is now killed within one renewal period, `run-node`
+  exits non-zero, and the Job ends. A controller unreachable for a whole claim
+  lease stops the node the same way.
 - **runners/k8s:** a Kubernetes fallback Job is no longer created when the
   controller refuses the node's named claim. The claim is where the credit check
   lives, and a refusal such as `402 insufficient credits` was logged and the Job
   created anyway, unfenced and uncharged, so a team with no credits ran cloud
-  compute. The node now fails with `credits_exhausted` (or the refusal it got);
-  only a controller that predates the route still runs the Job unfenced. A
+  compute. The node now fails with `credits_exhausted` (or the refusal it got).
+  A controller that does not serve the named-claim route is refused the same
+  way, so no Job runs without a claim. A
   node's declared timeout now stretches its Job's deadline to at most 24 hours,
   or the operator's `--k8s-job-deadline` when that is longer.
 - **store:** the credit balance and credit exhaustion are per team. The balance

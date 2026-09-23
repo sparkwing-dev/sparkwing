@@ -27,7 +27,9 @@ var egressUsageTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").
 // budget.
 type EgressUsage struct {
 	Principal string
-	// Month is the UTC month the bytes fell in, as "2006-01".
+	// Month is the UTC month the bytes fell in, as "2006-01". The
+	// controller's row for a process's daily total carries the UTC day,
+	// "2006-01-02", here instead.
 	Month     string
 	Bytes     int64
 	UpdatedAt time.Time

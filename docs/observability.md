@@ -764,23 +764,14 @@ shape, where no budget is set anyway.
 
 ### A bearer can be a pool
 
-A runner pool shares one token, so twenty pods are one principal. The
-byte budget is keyed on the principal deliberately: the bill is the
-team's, however many pods spent it. The **concurrency caps are not**.
-They are keyed on the pod behind the request, taken from the
-`X-Sparkwing-Runner` identity the shipped runners already set for the
-controller's claim budgets, then from the claim-holder header, falling
-back to the principal only when nothing names a pod. A cap of eight keyed
-on the principal would refuse twelve of a twenty-pod pool while the byte
-budget sat untouched.
+A runner pool shares one token, so twenty pods are one principal. Both
+the byte budget and the concurrency caps key on that principal: the bill
+is the team's, however many pods spent it, and a header naming a pod is
+the caller's to write, so a cap keyed on it let one bearer open as many
+downloads as it invented pod names. Size `--egress-max-downloads` and
+`--egress-max-log-streams` for the whole pool behind a bearer.
 
-That identity is cooperative: a caller that invents a pod name gets its
-own slots. The concurrency caps therefore bound an honest pool's burst
-and the blast radius of a stuck client; the monthly byte budget, which
-keys on the principal and cannot be moved by a header, is what bounds a
-caller that is trying to get around it.
-
-For the same reason the gitcache proxy routes take no slot at all. They
+The gitcache proxy routes take no slot at all. They
 are the checkout path every node walks, so a cap there refuses the clone
 rather than the download it was meant to bound. Those routes are still
 byte-metered, and still refused when the monthly byte budget is spent.
@@ -805,29 +796,22 @@ method carries a body. A `HEAD` charges nothing, because net/http
 discards what the handler writes to one, and an error body charges
 nothing, because it is not the download the budget is for.
 
-A budget is checked before a response starts, not during it, so a
-principal at zero can still finish whatever it already has in flight.
-The concurrency caps bound that overshoot only as far as they reach. The
-most a team can take past its monthly budget is
-
-```text
-(--egress-max-downloads + --egress-max-log-streams)
-  x  the largest object those slotted routes serve
-  x  the number of pods behind the bearer
-```
-
-because each pod holds its own slots, plus whatever the gitcache proxy
-routes serve, which hold no slot at all. A caller that invents pod names
-multiplies the pod count itself, so treat the formula as the bound on an
-honest fleet and the byte budget as the bound on the rest. Leave the caps
-unlimited and the overshoot is unbounded.
+A budget is checked before a response starts and again as its bytes are
+written. A write that would pass the principal's monthly budget or the
+process's daily cap sends only what is left, and the service aborts the
+response, so the client sees a failed transfer rather than a body that
+ends cleanly with bytes missing. Bytes are charged before they reach the
+connection, so parallel downloads started just under a budget cannot
+together carry the total past it.
 
 ### Persistence and history
 
 Counting is in memory, and only the controller persists it. It writes
-each principal's month total to its store on the maintenance sweep and
-reloads it at startup, so a restart resumes the month rather than handing
-everyone a fresh budget, and no response costs a store write; that sweep
+each principal's month total and its own total for the UTC day to its
+store on the maintenance sweep and reloads both at startup, so a restart
+resumes the month rather than handing everyone a fresh budget and resumes
+the day rather than reopening the daily cap, and no response costs a
+store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
 on every tick. The logs service and the cache count in memory alone: they
 park nothing for a flush that will never come, and their counters start

@@ -42,6 +42,13 @@ func TestRunNode_RefusedClaimCreatesNoJob(t *testing.T) {
 			body: `{"error":"boom"}`, wantFailed: true, wantReason: store.FailureUnknown,
 		},
 		{name: "another holder", status: http.StatusForbidden, body: `{"error":"held"}`},
+		{
+			// safety: a controller without the named-claim route cannot charge
+			// the node either, so it gets no Job rather than an unfenced one.
+			name: "controller without the route", status: http.StatusNotFound,
+			body:       `{"error":"unsupported","route":"POST /api/v1/runs/{id}/nodes/{nodeID}/claim"}`,
+			wantFailed: true, wantReason: store.FailureUnknown,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
