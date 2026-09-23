@@ -19,7 +19,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
 func main() {
@@ -101,6 +103,25 @@ func run(args []string) error {
 			"the measurement. Appends are counted as they happen, so this walk is the only "+
 			"enumeration the ceiling costs; 0 measures once at startup "+
 			"(env: SPARKWING_LOGS_STORE_RECONCILE)")
+	archiveStore := fs.String("archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
+		"s3://bucket/prefix that holds finished runs: a run unwritten for --archive-idle is uploaded as one object "+
+			"per log file under teams/<team>/runs/<run>/ and leaves the volume, which keeps only live runs; a read "+
+			"restores it. --retention then deletes archived runs by day. Region and credentials come from the AWS "+
+			"default chain (IRSA on EKS). Empty keeps every run on the volume (env: SPARKWING_LOGS_ARCHIVE_STORE)")
+	archiveIdleDefault, err := envDuration("SPARKWING_LOGS_ARCHIVE_IDLE", logs.DefaultArchiveIdle)
+	if err != nil {
+		return err
+	}
+	archiveIdle := fs.Duration("archive-idle", archiveIdleDefault,
+		"how long a run goes unwritten before it moves to --archive-store (env: SPARKWING_LOGS_ARCHIVE_IDLE)")
+	usageReconcileDefault, err := envDuration("SPARKWING_LOGS_USAGE_RECONCILE", 24*time.Hour)
+	if err != nil {
+		return err
+	}
+	usageReconcile := fs.Duration("usage-reconcile", usageReconcileDefault,
+		"with --archive-store, how often the per-team count of archived logs is replaced by a listing of the "+
+			"store. Uploads and deletes keep it between listings and it is saved to the store every five minutes; "+
+			"0 lists only when no saved count exists (env: SPARKWING_LOGS_USAGE_RECONCILE)")
 	_ = fs.Parse(args)
 
 	if err := checkNonNegative(
@@ -118,6 +139,8 @@ func run(args []string) error {
 		flagValue{"--retention", int64(*retention)},
 		flagValue{"--sweep-interval", int64(*sweepInterval)},
 		flagValue{"--search-timeout", int64(*searchTimeout)},
+		flagValue{"--archive-idle", int64(*archiveIdle)},
+		flagValue{"--usage-reconcile", int64(*usageReconcile)},
 	); err != nil {
 		return err
 	}
@@ -177,6 +200,14 @@ func run(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	var archive *logs.ArchiveOptions
+	if *archiveStore != "" {
+		store, err := openArchive(ctx, *archiveStore)
+		if err != nil {
+			return fmt.Errorf("--archive-store: %w", err)
+		}
+		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle, UsageReconcile: *usageReconcile}
+	}
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 	return logs.ServeWith(ctx, logs.ServeOptions{
@@ -187,6 +218,7 @@ func run(args []string) error {
 		Limits:        &limits,
 		StoreCeiling:  ceiling,
 		Egress:        egress.New(egressCfg),
+		Archive:       archive,
 	})
 }
 
@@ -330,4 +362,12 @@ func envTruthy(name string) bool {
 	default:
 		return false
 	}
+}
+
+func openArchive(ctx context.Context, raw string) (*teamblob.Store, error) {
+	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
 }

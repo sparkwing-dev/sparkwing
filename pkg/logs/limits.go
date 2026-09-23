@@ -139,7 +139,15 @@ func (s *Server) MeasureStore(ctx context.Context) error {
 			return objectguard.Usage{}, err
 		}
 		defer s.closeRoot(root, "measure store")
-		return storeUsage(ctx, root)
+		usage, err := storeUsage(ctx, root)
+		// perf: the archive's share is the running count its writes keep and
+		// a daily listing replaces, so the measurement lists nothing.
+		if err == nil && s.archive != nil {
+			b, o := s.archive.store.Usage().Total()
+			usage.Bytes += b
+			usage.Objects += o
+		}
+		return usage, err
 	})
 }
 
@@ -527,6 +535,7 @@ func (s *Server) hasFreeSpace() bool {
 // sweep until ctx is done. The sweep half stays idle while retention or
 // the sweep interval is disabled.
 func (s *Server) StartSweeper(ctx context.Context) {
+	s.startArchive(ctx)
 	probing := s.limits.MinFreeBytes > 0
 	sweeping := s.limits.Retention > 0 && s.limits.SweepInterval > 0
 	if !probing && !sweeping {

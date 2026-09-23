@@ -1258,7 +1258,13 @@ func (w *binUploadWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func handleBin(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveBin)(w, r) }
+func handleBin(w http.ResponseWriter, r *http.Request) {
+	if blobStore != nil {
+		serveBinBlob(w, r)
+		return
+	}
+	withBlobDirs(serveBin)(w, r)
+}
 
 func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	hash := strings.TrimPrefix(r.URL.Path, "/bin/")
@@ -1398,7 +1404,13 @@ func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
 
 var validCacheKey = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
-func handleCache(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveCache)(w, r) }
+func handleCache(w http.ResponseWriter, r *http.Request) {
+	if blobStore != nil {
+		serveCacheBlob(w, r)
+		return
+	}
+	withBlobDirs(serveCache)(w, r)
+}
 
 func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	key := strings.TrimPrefix(r.URL.Path, "/cache/")
@@ -1525,7 +1537,13 @@ var (
 	maxCacheArchiveBytes = DefaultMaxCacheArchiveBytes
 )
 
-func handleArtifacts(w http.ResponseWriter, r *http.Request) { withBlobDirs(serveArtifacts)(w, r) }
+func handleArtifacts(w http.ResponseWriter, r *http.Request) {
+	if blobStore != nil {
+		serveArtifactsBlob(w, r)
+		return
+	}
+	withBlobDirs(serveArtifacts)(w, r)
+}
 
 func serveArtifacts(w http.ResponseWriter, r *http.Request, d blobDirs) {
 	path := strings.TrimPrefix(r.URL.Path, "/artifacts/")

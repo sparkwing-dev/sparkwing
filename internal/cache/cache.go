@@ -74,6 +74,14 @@ type Config struct {
 	WarnStoreObjects int64
 
 	StoreReconcile time.Duration
+	// BlobStore, an s3://bucket/prefix URL, moves the binary,
+	// dependency-archive and artifact stores off the volume into that
+	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
+	// the volume. Credentials and region come from the AWS default chain.
+	BlobStore string
+	// UsageReconcile is how often the per-team count of the bucket is
+	// replaced by a listing. Writes and deletes keep it between listings.
+	UsageReconcile time.Duration
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
 	// refuses nothing. Zero is off.
@@ -100,6 +108,7 @@ func DefaultConfig() Config {
 		MaxArtifactBytes:     DefaultMaxArtifactBytes,
 		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
 		StoreReconcile:       objectguard.DefaultCeilingReconcile,
+		UsageReconcile:       24 * time.Hour,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 	}
@@ -215,6 +224,19 @@ func New(cfg Config) (*Server, error) {
 		Remedy:    storeCeilingRemedy,
 	})
 
+	blobStore = nil
+	if cfg.BlobStore != "" {
+		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store, err := openBlobStore(octx, cfg.BlobStore)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("cache: --blob-store: %w", err)
+		}
+		blobStore = store
+		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
+			store.Bucket(), store.Prefix())
+	}
+
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
 		"and the whole store at %d bytes / %d objects (0 means no cap)",
 		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
@@ -266,6 +288,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
+	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
+	s.mux.HandleFunc("/admin/usage", requireToken(handleBlobUsage))
 	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
@@ -298,6 +322,15 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
+	if blobStore != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			blobStore.Maintain(ctx, s.cfg.UsageReconcile, 5*time.Minute, func(op string, err error) {
+				log.Printf("warning: blob store %s: %v", op, err)
+			})
+		}()
+	}
 	measureStore(ctx)
 	s.wg.Add(3)
 	go func() {

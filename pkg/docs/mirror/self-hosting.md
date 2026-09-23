@@ -243,6 +243,78 @@ reach the repository with its configured Git credentials.
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
 
+## Object storage for logs and the cache
+
+`sparkwing-logs` and `sparkwing-cache` keep their data on a volume by default.
+Pointed at an S3 bucket, each keeps its durable data there instead, one
+namespace per team, and the volume shrinks to working space. Give each service
+its own prefix in the bucket; neither ever writes at the bucket root or lists
+outside its prefix, so a per-service IAM policy scoped to the prefix is enough.
+Region and credentials come from the AWS default chain (IRSA on EKS, with
+`AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
+either service at an S3-compatible store.
+
+| Service | Flag | Environment | Keys |
+|---|---|---|---|
+| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `SPARKWING_CACHE_BLOB_STORE` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
+| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `SPARKWING_LOGS_ARCHIVE_STORE` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
+
+**The cache** moves its binary, dependency-archive and artifact stores to the
+bucket. Git mirrors, workspace uploads and the registry proxy stay on
+`--data-dir`, because git needs a real filesystem and the others are
+short-lived working state, so the volume and its `--max-store-bytes` ceiling
+remain, sized for the mirrors. A binary is staged under `--data-dir/tmp` to
+learn its digest before it is written. Uploads above 64 MiB go up in 16 MiB
+parts, and an upload that fails or runs past its size cap is aborted, so no
+partial object is ever readable. Every read is served through the pod, never
+redirected to the bucket, so the egress meter and the request budget see every
+byte.
+
+**The logs service** keeps live runs on its volume and moves finished ones to
+the bucket. An append still lands in a file that grows in place and a follower
+still tails that file, so streaming is exactly what it is without a bucket and
+a running node costs the bucket nothing. A run nobody has written for
+`--archive-idle` (10 minutes by default) is uploaded as one object per node log
+plus two small index objects and leaves the volume; a read or an append of an
+archived run restores it first. `--retention` then deletes archived runs by the
+day of their last write: each pass is one listing of the day index while
+nothing has expired, and a restored run written since its archive waits for
+the archiver to upload it again with the new date. The volume must still outlive a pod restart to keep the
+logs of runs in flight, but it holds only live runs and restored copies.
+
+Both services keep a running per-team byte and object count, adjusted by every
+write and every delete the bucket confirms, saved in the bucket every five minutes, and replaced by a
+listing of the prefix once per `--usage-reconcile` (daily by default). The
+count feeds the store ceiling, so `--max-store-bytes` covers the bucket as well
+as the volume, and it is what the storage allowance reads:
+
+- `GET /admin/usage` on the cache (operator token; `?team=` narrows it)
+- `GET /api/v1/teams/{team}/logs/usage` on the logs service (`admin`)
+
+Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
+cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, which also
+removes the team's runs from the index, both idempotent. A team's credential never reaches another team's namespace: the
+cache takes the team from the controller-signed grant, and the logs service
+records a run's team from the first team credential that writes to it and
+refuses every other team the run even when the controller would answer.
+
+Neither service retries on its own. The SDK sends at most four attempts per
+request, and every attempt spends the process's object-store request budget.
+A `403` on a write or a listing, which is what a bucket-level deny returns,
+pauses both for a minute, doubling to five while the deny lasts, and one
+request probes when each pause ends; three other failures in a row pause them
+for five seconds, doubling to two minutes. Reads and deletes keep working
+through a pause. The cache answers a paused write with `503` and
+`Retry-After`, and the logs service leaves finished runs on the volume and
+reports the pause on `/api/v1/health` under `archive`.
+
+Moving an existing deployment: a volume's blobs are not read once
+`--blob-store` is set, so copy them first or accept the misses (dependency
+archives and binaries are caches and repopulate). For logs, the service
+archives whatever runs are on the volume when it starts with `--archive-store`,
+but a run whose directory predates this release has no recorded team and is
+stored under the operator's prefix.
+
 ## Bound storage growth
 
 A controller keeps every event and every per-node metric sample forever until

@@ -57,6 +57,8 @@ type Server struct {
 
 	egress *egress.Meter
 
+	archive *archive
+
 	controllerURL string
 	authCache     sync.Map
 	authCacheTTL  time.Duration
@@ -176,13 +178,16 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead)))))
-	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun)))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
+	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun))))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream)))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
-	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
+	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.withRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))))
+
+	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs)))
+	mux.Handle("GET /api/v1/teams/{team}/logs/usage", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleTeamLogsUsage)))
 
 	authed := s.authMiddleware(mux)
 
@@ -200,8 +205,11 @@ const (
 )
 
 type logsPrincipal struct {
-	Name        string
-	Kind        string
+	Name string
+	Kind string
+	// Team is the team a non-admin credential acts for, as whoami names
+	// it; the archive keys a run's objects by it.
+	Team        string
 	Scopes      []string
 	TokenPrefix string
 	// credential is the Authorization header the caller sent, forwarded to
@@ -356,6 +364,7 @@ type whoamiResp struct {
 	Kind        string   `json:"kind"`
 	Scopes      []string `json:"scopes"`
 	TokenPrefix string   `json:"token_prefix"`
+	Team        string   `json:"team"`
 }
 
 func (s *Server) whoami(ctx context.Context, credential string) (*logsPrincipal, error) {
@@ -386,6 +395,7 @@ func (s *Server) whoami(ctx context.Context, credential string) (*logsPrincipal,
 		Kind:        body.Kind,
 		Scopes:      body.Scopes,
 		TokenPrefix: body.TokenPrefix,
+		Team:        body.Team,
 		credential:  credential,
 	}, nil
 }
@@ -435,6 +445,9 @@ type ServeOptions struct {
 	// Egress bounds the bytes reads and streams send to clients. Nil
 	// leaves every read unmetered.
 	Egress *egress.Meter
+	// Archive moves idle runs to an object store. Nil keeps every run on
+	// the volume.
+	Archive *ArchiveOptions
 }
 
 // ServeWith starts the HTTP listener described by opts and blocks
@@ -460,6 +473,9 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	}
 	if opts.Egress != nil {
 		s.WithEgressMeter(opts.Egress)
+	}
+	if opts.Archive != nil {
+		s.WithArchive(*opts.Archive)
 	}
 	s.StartSweeper(ctx)
 	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
@@ -536,8 +552,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	problems = append(problems, ceilingProblems...)
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
+	archiveState, archiveProblems := s.archiveHealth()
+	problems = append(problems, archiveProblems...)
 
-	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling, "egress": egressState}
+	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling, "egress": egressState, "archive": archiveState}
 	if len(problems) > 0 {
 		body["status"] = "degraded"
 		body["problems"] = problems
@@ -643,6 +661,14 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = root.Close() }()
 	if err := s.ensureRunDir(root, runID); err != nil {
 		s.storeError(w, "create run dir", err)
+		return
+	}
+	if err := s.labelRun(r, root, runID); err != nil {
+		if errors.Is(err, errRunOfAnotherTeam) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		s.storeError(w, "label run", err)
 		return
 	}
 
@@ -1038,6 +1064,14 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
+	if s.archive != nil {
+		l := s.archive.lock(runID)
+		l.rw.Lock()
+		defer l.rw.Unlock()
+		if !s.mayDeleteArchivedRun(w, r, root, runID) {
+			return
+		}
+	}
 	if err := root.RemoveAll(runID); err != nil {
 		s.storeError(w, "remove run dir", err)
 		return
