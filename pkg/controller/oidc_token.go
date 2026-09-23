@@ -11,16 +11,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 const (
-	oidcTokensPerRun   = 30
-	oidcTokenRefill    = 5 * time.Minute
-	oidcWebhookSource  = "github"
-	oidcTriggerWebhook = "webhook"
-	oidcTriggerCron    = "cron"
-	oidcTriggerManual  = "manual"
-	oidcRunnerGitHub   = "github-actions"
+	oidcTokensPerRun  = 30
+	oidcTokenRefill   = 5 * time.Minute
+	oidcWebhookSource = "github"
+	oidcTriggerPush   = "push"
+	oidcTriggerPR     = "pull_request"
+	oidcTriggerCron   = "cron"
+	oidcTriggerManual = "manual"
+	oidcRunnerGitHub  = "github-actions"
+	githubEventPush   = "push"
 )
 
 type oidcState struct {
@@ -163,21 +166,39 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		c.Pipeline = trig.Pipeline
 		branch, sha = trig.GitBranch, trig.GitSHA
 		owner, repo, repoURL = trig.GithubOwner, trig.GithubRepo, trig.RepoURL
+		// safety: the event name is reserved to the signed webhook, which records
+		// it at intake; a github source without one proves neither event.
+		event := trig.TriggerEnv[sparkwing.EnvGitHubEventName]
 		switch {
-		case trig.TriggerSource == oidcWebhookSource:
-			c.Trigger = oidcTriggerWebhook
+		case trig.TriggerSource == oidcWebhookSource && event == githubEventPush:
+			c.Trigger = oidcTriggerPush
+		case trig.TriggerSource == oidcWebhookSource && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
+			c.Trigger = oidcTriggerPR
 		// safety: submitters cannot set the schedule key, which the intake
 		// strips, so a "schedule" source without it is a submitter's word.
 		case trig.TriggerSource == cronTriggerSource && trig.TriggerEnv[crons.ScheduleEnvKey] != "":
 			c.Trigger = oidcTriggerCron
 		}
 	}
-	if branch != "" {
+	switch {
+	case c.Trigger == oidcTriggerPR:
+		// safety: a pull request's head branch may share a protected branch's
+		// name, so its ref names the pull request and never refs/heads/.
+		c.Ref = "refs/pull/" + pullNumber(trig.TriggerEnv) + "/head"
+	case branch != "":
 		c.Ref = "refs/heads/" + branch
 	}
 	c.SHA = sha
 	c.Repository = canonicalRepository(owner, repo, repoURL)
 	return c
+}
+
+func pullNumber(env map[string]string) string {
+	n := env[sparkwing.EnvPRNumber]
+	if n == "" || strings.Trim(n, "0123456789") != "" {
+		return ""
+	}
+	return n
 }
 
 func oidcRunnerKind(p *Principal) string {

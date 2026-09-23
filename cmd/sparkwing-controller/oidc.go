@@ -12,22 +12,22 @@ import (
 )
 
 const (
-	oidcKeyEnv         = "SPARKWING_OIDC_KEY"
-	oidcPreviousKeyEnv = "SPARKWING_OIDC_PREVIOUS_KEY"
+	oidcKeyEnv          = "SPARKWING_OIDC_KEY"
+	oidcPublishedKeyEnv = "SPARKWING_OIDC_PUBLISHED_KEY"
 )
 
-func loadOIDCIssuer(keyFile, previousKeyFile, externalURL string, ttl time.Duration, log io.Writer) (*oidcissuer.Issuer, error) {
+func loadOIDCIssuer(keyFile, publishedKeyFile, externalURL string, ttl time.Duration, log io.Writer) (*oidcissuer.Issuer, error) {
 	active, err := loadOIDCKey(oidcKeyEnv, keyFile)
 	if err != nil {
 		return nil, err
 	}
-	previous, err := loadOIDCKey(oidcPreviousKeyEnv, previousKeyFile)
+	published, err := loadOIDCKey(oidcPublishedKeyEnv, publishedKeyFile)
 	if err != nil {
 		return nil, err
 	}
 	if active == nil {
-		if previous != nil {
-			return nil, errors.New("a previous OIDC key is configured without a current one; set " +
+		if published != nil {
+			return nil, errors.New("a published OIDC key is configured without a signing one; set " +
 				oidcKeyEnv + " or --oidc-key-file to the key that signs now")
 		}
 		return nil, nil
@@ -39,7 +39,7 @@ func loadOIDCIssuer(keyFile, previousKeyFile, externalURL string, ttl time.Durat
 	if !strings.HasPrefix(issuerURL, "https://") {
 		return nil, fmt.Errorf("the OIDC issuer %q must be https, because cloud providers fetch its keys only over TLS", issuerURL)
 	}
-	iss, err := oidcissuer.New(issuerURL, active, previous, ttl)
+	iss, err := oidcissuer.New(issuerURL, active, published, ttl)
 	if err != nil {
 		return nil, err
 	}

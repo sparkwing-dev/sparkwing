@@ -37,7 +37,7 @@ func rsaPEM(t *testing.T, bits int, pkcs8 bool) []byte {
 
 func runClaims() oidcissuer.Claims {
 	return oidcissuer.Claims{
-		Audience: "sts.amazonaws.com", Team: "acme", Pipeline: "deploy", Trigger: "webhook",
+		Audience: "sts.amazonaws.com", Team: "acme", Pipeline: "deploy", Trigger: "push",
 		RunnerKind: "runner", Ref: "refs/heads/main", SHA: "abc123", Repository: "github.com/acme/api", RunID: "run-1",
 	}
 }
@@ -60,7 +60,7 @@ func TestSubjectFormatIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "team:acme:pipeline:deploy:trigger:webhook:runner:runner:ref:refs/heads/main"; sub != want {
+	if want := "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; sub != want {
 		t.Fatalf("sub = %q, want %q", sub, want)
 	}
 	c := runClaims()
@@ -74,11 +74,14 @@ func TestSubjectFormatIsStable(t *testing.T) {
 // wildcard would match as one inside a StringLike trust condition.
 func TestSubjectRefusesValuesThatForgeSegments(t *testing.T) {
 	for _, bad := range []struct{ field, value string }{
-		{"pipeline", "deploy:trigger:webhook"},
+		{"pipeline", "deploy:trigger:push"},
 		{"pipeline", "de*"},
 		{"ref", "refs/heads/ma?n"},
 		{"ref", "refs/heads/a b"},
 		{"ref", "refs/heads/a\nb"},
+		{"ref", "refs/heads/a\u00a0b"},
+		{"pipeline", "de\u2003ploy"},
+		{"pipeline", "d\u00e9ploy"},
 		{"team", ""},
 		{"pipeline", ""},
 	} {

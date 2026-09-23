@@ -23,14 +23,14 @@ func oidcTestKey(t *testing.T) string {
 func TestLoadOIDCIssuer(t *testing.T) {
 	key := oidcTestKey(t)
 	t.Setenv(oidcKeyEnv, "")
-	t.Setenv(oidcPreviousKeyEnv, "")
+	t.Setenv(oidcPublishedKeyEnv, "")
 
 	iss, err := loadOIDCIssuer("", "", "https://api.sparkwing.dev", 0, &bytes.Buffer{})
 	if err != nil || iss != nil {
 		t.Fatalf("no key: issuer %v, err %v; want the feature off", iss, err)
 	}
 	if _, err := loadOIDCIssuer("", writeFile(t, "prev.pem", key), "https://api.sparkwing.dev", 0, &bytes.Buffer{}); err == nil {
-		t.Error("a previous key with no current key was accepted")
+		t.Error("a published key with no signing key was accepted")
 	}
 	for _, external := range []string{"", "http://api.sparkwing.dev", "https://api.sparkwing.dev/oidc"} {
 		if _, err := loadOIDCIssuer(writeFile(t, "key.pem", key), "", external, 0, &bytes.Buffer{}); err == nil {

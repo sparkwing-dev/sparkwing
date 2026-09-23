@@ -24,7 +24,7 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out oidc-signing.p
 | Flag | Environment | Meaning |
 |---|---|---|
 | `--oidc-key-file` | `SPARKWING_OIDC_KEY` (the PEM itself) | RSA private key, PKCS #1 or PKCS #8 PEM, at least 2048 bits, that signs every token. Without it the controller issues no tokens and the three routes answer 404. |
-| `--oidc-previous-key-file` | `SPARKWING_OIDC_PREVIOUS_KEY` (the PEM itself) | The key that signed before the current one, as a private or public key PEM. The controller publishes it in the key set and never signs with it. |
+| `--oidc-published-key-file` | `SPARKWING_OIDC_PUBLISHED_KEY` (the PEM itself) | A second key, as a private or public key PEM, that the key set publishes and that never signs: the next key before a rotation, the previous key after one. |
 | `--oidc-token-ttl` | | Token lifetime. Default `10m`, at most `1h`, at least `1m`. |
 
 The controller refuses to start when a key is set and `--external-url` is empty or is not an `https` origin. It never logs key material; the startup line names the key ids.
@@ -33,11 +33,14 @@ Each key's `kid` is its RFC 7638 JWK thumbprint, so the same key always publishe
 
 ### Rotate the key
 
-1. Start the controller with the new key in `--oidc-key-file` and the old key in `--oidc-previous-key-file`. New tokens carry the new `kid`; both keys verify.
-2. Wait at least one token lifetime plus the key set's one-hour cache time, so every relying party has fetched the new key and every old token has expired.
-3. Drop `--oidc-previous-key-file`.
+Relying parties cache the key set for up to an hour, so a new key is published before anything signs with it:
 
-A token signed by a key absent from the key set fails verification everywhere, so skipping step 2 breaks in-flight exchanges.
+1. **Publish the next key.** Keep the current key in `--oidc-key-file` and put the new key in `--oidc-published-key-file`. Tokens still carry the current `kid`.
+2. **Wait longer than the one-hour cache time**, so every relying party's cached key set holds the new key.
+3. **Switch signing.** Put the new key in `--oidc-key-file` and the old key in `--oidc-published-key-file`. New tokens carry the new `kid`, and tokens the old key signed keep verifying.
+4. **Wait longer than one token lifetime**, so every old-key token has expired, then drop `--oidc-published-key-file`.
+
+Switching signing before step 2 has passed makes a relying party that cached the old key set reject new tokens until its cache expires.
 
 ## Signing algorithm
 
@@ -57,9 +60,9 @@ Header: `{"alg": "RS256", "kid": "<thumbprint>", "typ": "JWT"}`.
 | `jti` | 128 random bits, hex. |
 | `team` | The run's team slug. |
 | `pipeline` | The pipeline name. |
-| `trigger` | `webhook`, `cron` or `manual`, described below. |
+| `trigger` | `push`, `pull_request`, `cron` or `manual`, described below. |
 | `runner_kind` | `runner`, `github-actions`, `user` or `service`, described below. |
-| `ref` | `refs/heads/<branch>` when the run names a branch; absent otherwise. |
+| `ref` | `refs/pull/<number>/head` for a pull request; otherwise `refs/heads/<branch>` when the run names a branch; absent when it names none. |
 | `sha` | The commit the run names; absent when it names none. |
 | `repository` | `<host>/<owner>/<name>`, for example `github.com/acme/api`, when the run names a repository; absent otherwise. |
 | `run_id` | The run id. |
@@ -73,19 +76,29 @@ team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>
 For example, a push to `main` delivered by the GitHub webhook and executed by a team runner:
 
 ```
-team:acme:pipeline:deploy:trigger:webhook:runner:runner:ref:refs/heads/main
+team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main
 ```
 
-The format is stable. Segments run from the coarsest to the finest, so a trust condition that ends in `*` narrows by prefix. `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. No segment value contains `:`, `*`, `?` or whitespace: the controller refuses to sign for a run whose pipeline or branch contains one (422), so a submitted value cannot forge a later segment or match as a wildcard.
+The same pipeline run for pull request 42, even one opened from a branch named `main`:
+
+```
+team:acme:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/42/head
+```
+
+The format is stable. Segments run from the coarsest to the finest, so a trust condition that ends in `*` narrows by prefix. `<ref>` is empty when the run names no branch, which leaves the subject ending in `:ref:`. Every segment value is printable ASCII with no `:`, `*` or `?`: the controller refuses to sign for a run whose pipeline or branch holds one of those, whitespace, or any other character (422), so a submitted value cannot forge a later segment or match as a wildcard.
 
 ### What each value proves
 
 The controller vouches for the team: it comes from the claimed run's row. The other values are as trustworthy as the path that created the run.
 
-- `trigger` is `webhook` when the run came from a GitHub push delivery whose signature the controller verified; the `ref`, `sha` and `repository` then come from that delivery. It is `cron` when the controller's own schedule started the run; `ref` and `repository` then come from the schedule, which only a `runs.control` principal can write. Every other start, including the CLI, the dashboard, the API and a retry, is `manual`, and its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
+- `trigger` comes from the event the controller recorded when it admitted the run, in fields an API submission cannot set:
+  - `push`: a GitHub push delivery whose signature the controller verified. The `ref`, `sha` and `repository` come from that delivery.
+  - `pull_request`: a verified GitHub `pull_request` delivery. The `ref` is `refs/pull/<number>/head` whatever the head branch is called, and the `sha` is the head commit. Pull requests from forks never run.
+  - `cron`: a schedule on this controller launched the run. That proves the controller started it, not that anyone reviewed it: any principal with `runs.control` can create a schedule, point it at any branch, and fire it at once.
+  - `manual`: every other start, including the CLI, the dashboard, the API and a retry. Its `pipeline`, `ref`, `sha` and `repository` are whatever the submitter sent.
 - `runner_kind` names the credential that holds the claim: `runner` for a runner token, `github-actions` for the credential a GitHub Actions job received through the [runner exchange](github-actions-runners.md), `user` for a person's token or session, which is how a laptop run reaches the controller, and `service` for a service token.
 
-A deploy role should therefore require `trigger:webhook` or `trigger:cron`, and `runner:runner`, in the subject. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
+A deploy role should therefore require `trigger:push` on a protected branch and `runner:runner`, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main`, where branch protection decides what reaches `main`. `trigger:cron` means "launched by a schedule that any editor can create", so reserve it for roles an editor may use anyway. A trust policy that accepts `trigger:manual` or `runner:user` accepts any code a team member with `runs.write` chooses to run.
 
 A GitHub Actions job holding a claim can request a token too, with `runner:github-actions`. Such a job's credential is bound to its own repository's push, so its `ref` and `sha` are the push's. GitHub's own ID token proves the same repository facts with GitHub as the issuer; use Sparkwing's when the trust policy should name the Sparkwing team and pipeline.
 
@@ -168,13 +181,13 @@ Trust policy for the role:
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"api.sparkwing.dev:aud": "sts.amazonaws.com"},
-      "StringLike": {"api.sparkwing.dev:sub": "team:acme:pipeline:deploy:trigger:webhook:runner:runner:ref:refs/heads/main"}
+      "StringLike": {"api.sparkwing.dev:sub": "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"}
     }
   }]
 }
 ```
 
-AWS evaluates only `aud` and `sub` from a generic OIDC provider and ignores the custom claims, which is why the subject carries every value a trust policy needs. Use `*` for a segment you do not restrict, for example `team:acme:pipeline:deploy:trigger:*:runner:runner:ref:refs/heads/main`.
+AWS evaluates only `aud` and `sub` from a generic OIDC provider and ignores the custom claims, which is why the subject carries every value a trust policy needs. Use `*` at the end to admit several refs, for example `team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/release-*`. A `*` in the trigger segment also admits `manual` and `cron` runs.
 
 ## Google Cloud
 
@@ -185,7 +198,7 @@ gcloud iam workload-identity-pools providers create-oidc api-sparkwing-dev \
   --issuer-uri=https://api.sparkwing.dev \
   --allowed-audiences=sparkwing-gcp \
   --attribute-mapping='google.subject=assertion.run_id,attribute.team=assertion.team,attribute.pipeline=assertion.pipeline,attribute.trigger=assertion.trigger,attribute.runner_kind=assertion.runner_kind,attribute.ref=assertion.ref' \
-  --attribute-condition="assertion.team == 'acme' && assertion.runner_kind == 'runner' && assertion.trigger in ['webhook', 'cron']"
+  --attribute-condition="assertion.team == 'acme' && assertion.runner_kind == 'runner' && assertion.trigger == 'push' && assertion.ref == 'refs/heads/main'"
 gcloud iam service-accounts add-iam-policy-binding deploy@my-project.iam.gserviceaccount.com \
   --role=roles/iam.workloadIdentityUser \
   --member='principalSet://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sparkwing/attribute.pipeline/deploy'
@@ -201,7 +214,7 @@ Entra matches the subject exactly, so each federated credential names one subjec
 az ad app federated-credential create --id <app-object-id> --parameters '{
   "name": "sparkwing-deploy-main",
   "issuer": "https://api.sparkwing.dev",
-  "subject": "team:acme:pipeline:deploy:trigger:webhook:runner:runner:ref:refs/heads/main",
+  "subject": "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main",
   "audiences": ["api://AzureADTokenExchange"]
 }'
 ```
@@ -216,7 +229,7 @@ vault write auth/jwt/config oidc_discovery_url=https://api.sparkwing.dev bound_i
 vault write auth/jwt/role/deploy role_type=jwt user_claim=sub \
   bound_audiences=vault \
   bound_claims_type=glob \
-  bound_claims='{"team":"acme","pipeline":"deploy","trigger":"webhook","runner_kind":"runner","ref":"refs/heads/main"}' \
+  bound_claims='{"team":"acme","pipeline":"deploy","trigger":"push","runner_kind":"runner","ref":"refs/heads/main"}' \
   token_policies=deploy token_ttl=10m
 ```
 

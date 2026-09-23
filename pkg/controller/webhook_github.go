@@ -355,10 +355,11 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		User:   payload.Pusher.Name,
 	}
 	triggerEnv := map[string]string{
-		"GITHUB_DELIVERY":   delivery,
-		"GITHUB_REPOSITORY": payload.Repository.FullName,
-		"GITHUB_BEFORE":     payload.Before,
-		"GITHUB_AFTER":      payload.After,
+		"GITHUB_DELIVERY":            delivery,
+		"GITHUB_REPOSITORY":          payload.Repository.FullName,
+		"GITHUB_BEFORE":              payload.Before,
+		"GITHUB_AFTER":               payload.After,
+		sparkwing.EnvGitHubEventName: githubEventPush,
 	}
 	owner, repoName := "", ""
 	if parts := strings.SplitN(payload.Repository.FullName, "/", 2); len(parts) == 2 {

@@ -2,7 +2,7 @@
 // RS256 ID tokens for runs and serves the discovery document and key set a
 // cloud provider reads to verify them.
 //
-//	iss, err := oidcissuer.New("https://api.sparkwing.dev", activePEM, previousPEM, 10*time.Minute)
+//	iss, err := oidcissuer.New("https://api.sparkwing.dev", activePEM, publishedPEM, 10*time.Minute)
 //	token, exp, err := iss.Mint(claims, time.Now(), time.Time{})
 package oidcissuer
 
@@ -52,8 +52,10 @@ type signingKey struct {
 	pub *rsa.PublicKey
 }
 
-// Issuer signs tokens with one active key and publishes it together with
-// the previous key, so tokens signed before a rotation keep verifying.
+// Issuer signs tokens with one active key and publishes it together with an
+// optional second key: the next key before a rotation, so cached key sets
+// already hold it when signing switches, or the previous key after, so
+// tokens it signed keep verifying.
 type Issuer struct {
 	issuer   string
 	ttl      time.Duration
@@ -62,10 +64,10 @@ type Issuer struct {
 	keys     []signingKey
 }
 
-// New returns an issuer for issuerURL signing with activePEM. previousPEM
+// New returns an issuer for issuerURL signing with activePEM. publishedPEM
 // may be empty; when set it is published and never used to sign. ttl zero
 // means DefaultTTL.
-func New(issuerURL string, activePEM, previousPEM []byte, ttl time.Duration) (*Issuer, error) {
+func New(issuerURL string, activePEM, publishedPEM []byte, ttl time.Duration) (*Issuer, error) {
 	if err := ValidateIssuerURL(issuerURL); err != nil {
 		return nil, err
 	}
@@ -81,10 +83,10 @@ func New(issuerURL string, activePEM, previousPEM []byte, ttl time.Duration) (*I
 	}
 	iss := &Issuer{issuer: issuerURL, ttl: ttl, active: active, activeID: Thumbprint(&active.PublicKey)}
 	iss.keys = append(iss.keys, signingKey{kid: iss.activeID, pub: &active.PublicKey})
-	if len(previousPEM) > 0 {
-		prev, err := parsePublicKey(previousPEM)
+	if len(publishedPEM) > 0 {
+		prev, err := parsePublicKey(publishedPEM)
 		if err != nil {
-			return nil, fmt.Errorf("oidcissuer: previous key: %w", err)
+			return nil, fmt.Errorf("oidcissuer: published key: %w", err)
 		}
 		if kid := Thumbprint(prev); kid != iss.activeID {
 			iss.keys = append(iss.keys, signingKey{kid: kid, pub: prev})
@@ -169,7 +171,7 @@ func (c Claims) Subject() (string, error) {
 			return "", fmt.Errorf("%w: %s is empty", ErrInvalidClaim, s.name)
 		}
 		if strings.ContainsFunc(s.value, forbiddenInSubject) {
-			return "", fmt.Errorf("%w: %s %q holds ':', '*', '?' or whitespace", ErrInvalidClaim, s.name, s.value)
+			return "", fmt.Errorf("%w: %s %q holds ':', '*', '?', whitespace or a byte outside printable ASCII", ErrInvalidClaim, s.name, s.value)
 		}
 		if i > 0 {
 			b.WriteByte(':')
@@ -182,7 +184,7 @@ func (c Claims) Subject() (string, error) {
 }
 
 func forbiddenInSubject(r rune) bool {
-	return r == ':' || r == '*' || r == '?' || r <= ' ' || r == 0x7f
+	return r == ':' || r == '*' || r == '?' || r <= ' ' || r >= 0x7f
 }
 
 // ValidateAudience accepts 1 to MaxAudienceLen printable ASCII characters
@@ -314,7 +316,7 @@ type JWKS struct {
 	Keys []JWK `json:"keys"`
 }
 
-// JWKS returns the active and previous public keys.
+// JWKS returns the active public key, then the published one.
 func (i *Issuer) JWKS() JWKS {
 	out := JWKS{Keys: make([]JWK, 0, len(i.keys))}
 	for _, k := range i.keys {

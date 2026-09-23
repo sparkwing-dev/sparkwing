@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type oidcFixture struct {
@@ -85,12 +86,12 @@ func oidcKeyPEM(t *testing.T) []byte {
 }
 
 // hack: the issuer is the server's own URL, known only once the listener exists.
-func serveOIDC(t *testing.T, st *store.Store, active, previous []byte) *httptest.Server {
+func serveOIDC(t *testing.T, st *store.Store, active, published []byte) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(nil)
 	c := controller.New(st, nil).EnableAuthFromStore()
 	if active != nil {
-		iss, err := oidcissuer.New("http://"+srv.Listener.Addr().String(), active, previous, 0)
+		iss, err := oidcissuer.New("http://"+srv.Listener.Addr().String(), active, published, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +128,7 @@ func verifyAgainst(t *testing.T, srv *httptest.Server, token string) (runTokenCl
 	return claims, err
 }
 
-// A runner holding a webhook run's trigger claim gets a token that verifies
+// A runner holding a push run's trigger claim gets a token that verifies
 // against the key set the controller serves and names the run.
 func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 	ctx := context.Background()
@@ -136,6 +137,7 @@ func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 		ID: "run-hook", Pipeline: "deploy", TriggerSource: "github",
 		GitBranch: "main", GitSHA: "0123456789abcdef0123456789abcdef01234567",
 		GithubOwner: "acme", GithubRepo: "api",
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
 	})
 	raw := f.runner(t, f.acme, "agent:acme")
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
@@ -158,11 +160,11 @@ func TestOIDCTokenVerifiesAndNamesTheClaimedRun(t *testing.T) {
 	if len(claims.Aud) != 1 || claims.Aud[0] != "sts.amazonaws.com" {
 		t.Errorf("aud = %v, want [sts.amazonaws.com]", claims.Aud)
 	}
-	if want := "team:acme:pipeline:deploy:trigger:webhook:runner:runner:ref:refs/heads/main"; claims.Sub != want {
+	if want := "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main"; claims.Sub != want {
 		t.Errorf("sub = %q, want %q", claims.Sub, want)
 	}
 	got := [...]string{claims.Team, claims.Pipeline, claims.Trigger, claims.RunnerKind, claims.Ref, claims.SHA, claims.Repository, claims.RunID}
-	want := [...]string{"acme", "deploy", "webhook", "runner", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "github.com/acme/api", "run-hook"}
+	want := [...]string{"acme", "deploy", "push", "runner", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "github.com/acme/api", "run-hook"}
 	if got != want {
 		t.Errorf("custom claims = %v, want %v", got, want)
 	}
@@ -281,7 +283,7 @@ func TestOIDCTokenValidatesTheRequestAndTheSubject(t *testing.T) {
 	ctx := context.Background()
 	f := newOIDCFixture(t)
 	f.run(t, f.acme, store.Trigger{ID: "run-ok", Pipeline: "deploy", TriggerSource: "cli", GitBranch: "main"})
-	f.run(t, f.acme, store.Trigger{ID: "run-forged", Pipeline: "deploy:trigger:webhook", TriggerSource: "cli"})
+	f.run(t, f.acme, store.Trigger{ID: "run-forged", Pipeline: "deploy:trigger:push", TriggerSource: "cli"})
 	raw := f.runner(t, f.acme, "agent:acme")
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
 	c := client.NewWithToken(srv.URL, nil, raw)
@@ -378,9 +380,10 @@ func TestOIDCRoutesWithAndWithoutAKey(t *testing.T) {
 	}
 }
 
-// After a rotation, a token signed by the old key verifies while the old
-// key is published as previous, and fails once it is dropped. Each
-// controller below is the same deployment restarted with new key flags.
+// The two-step rotation: publish the next key while the old one signs, then
+// switch signing and publish the old key. A key set cached at either step
+// verifies every token issued across the switch. Each controller below is
+// the same deployment restarted with new key flags.
 func TestOIDCKeyRotation(t *testing.T) {
 	ctx := context.Background()
 	f := newOIDCFixture(t)
@@ -396,13 +399,27 @@ func TestOIDCKeyRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	prepublish := serveOIDC(t, f.st, oldKey, newKey)
+	staged, err := client.NewWithToken(prepublish.URL, nil, raw).OIDCToken(ctx, "run-1", "sts.amazonaws.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyAgainst(t, before, staged.Token); err != nil {
+		t.Errorf("publishing the next key changed the signing key: %v", err)
+	}
 	during := serveOIDC(t, f.st, newKey, oldKey)
 	if _, err := verifyAgainst(t, during, old.Token); err != nil {
-		t.Errorf("an old-key token failed while the old key is published as previous: %v", err)
+		t.Errorf("an old-key token failed while the old key is published: %v", err)
 	}
 	fresh, err := client.NewWithToken(during.URL, nil, raw).OIDCToken(ctx, "run-1", "sts.amazonaws.com")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := verifyAgainst(t, prepublish, fresh.Token); err != nil {
+		t.Errorf("a key set cached before the switch rejected a new-key token: %v", err)
+	}
+	if _, err := verifyAgainst(t, before, fresh.Token); !errors.Is(err, jwks.ErrRejected) {
+		t.Errorf("control: a key set that never held the new key: err = %v, want rejected", err)
 	}
 	if _, err := verifyAgainst(t, during, fresh.Token); err != nil {
 		t.Errorf("a new-key token failed during the rotation: %v", err)
@@ -453,5 +470,46 @@ func TestOIDCTokenExpiryAndTampering(t *testing.T) {
 	parts[1] = base64.RawURLEncoding.EncodeToString(forged)
 	if _, err := verifyAgainst(t, srv, strings.Join(parts, ".")); !errors.Is(err, jwks.ErrRejected) {
 		t.Errorf("a token with a rewritten team claim: err = %v, want rejected", err)
+	}
+}
+
+// A same-repository pull request from a branch named main records main as
+// its run branch; it must still never carry the subject a push to main gets.
+func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
+	ctx := context.Background()
+	f := newOIDCFixture(t)
+	f.run(t, f.acme, store.Trigger{
+		ID: "run-pr", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
+		GithubOwner: "acme", GithubRepo: "api",
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest, sparkwing.EnvPRNumber: "7"},
+	})
+	f.run(t, f.acme, store.Trigger{
+		ID: "run-push", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main",
+		GithubOwner: "acme", GithubRepo: "api",
+		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
+	})
+	f.run(t, f.acme, store.Trigger{ID: "run-no-event", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main"})
+	raw := f.runner(t, f.acme, "agent:acme")
+	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
+	c := client.NewWithToken(srv.URL, nil, raw)
+	for _, tc := range []struct{ run, sub, ref string }{
+		{"run-pr", "team:acme:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
+		{"run-push", "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-no-event", "team:acme:pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+	} {
+		if _, err := c.ClaimSpecificTrigger(ctx, tc.run, time.Minute); err != nil {
+			t.Fatalf("%s: ClaimSpecificTrigger: %v", tc.run, err)
+		}
+		tok, err := c.OIDCToken(ctx, tc.run, "sts.amazonaws.com")
+		if err != nil {
+			t.Fatalf("%s: OIDCToken: %v", tc.run, err)
+		}
+		claims, err := verifyAgainst(t, srv, tok.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claims.Sub != tc.sub || claims.Ref != tc.ref {
+			t.Errorf("%s: sub/ref = %q/%q, want %q/%q", tc.run, claims.Sub, claims.Ref, tc.sub, tc.ref)
+		}
 	}
 }

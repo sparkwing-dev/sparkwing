@@ -98,10 +98,11 @@ func run(args []string) error {
 			"tokens runs exchange for cloud credentials (alternative to "+oidcKeyEnv+", "+
 			"which carries the PEM itself). The issuer is --external-url. Unset, the "+
 			"controller issues no ID tokens.")
-	oidcPreviousKeyFile := fs.String("oidc-previous-key-file", "",
-		"path to the OIDC key that signed before the current one, private or public "+
-			"PEM (alternative to "+oidcPreviousKeyEnv+"). It is published in the key set "+
-			"so tokens it signed keep verifying through a rotation, and never signs.")
+	oidcPublishedKeyFile := fs.String("oidc-published-key-file", "",
+		"path to a second OIDC key, private or public PEM, that the key set publishes "+
+			"and that never signs (alternative to "+oidcPublishedKeyEnv+"): the next key "+
+			"before a rotation switches signing to it, and the previous key after, so "+
+			"relying parties' cached key sets verify tokens across the switch.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
@@ -459,7 +460,7 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
-	oidcIssuer, oerr := loadOIDCIssuer(*oidcKeyFile, *oidcPreviousKeyFile, *externalURL, *oidcTokenTTL, os.Stderr)
+	oidcIssuer, oerr := loadOIDCIssuer(*oidcKeyFile, *oidcPublishedKeyFile, *externalURL, *oidcTokenTTL, os.Stderr)
 	if oerr != nil {
 		return fmt.Errorf("oidc issuer: %w", oerr)
 	}
