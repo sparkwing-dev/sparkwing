@@ -228,6 +228,7 @@ export interface RunnerToken {
   created_at?: number;
   expires_at?: number;
   last_used_at?: number;
+  git_credentials?: boolean;
 }
 
 // unixSecondsISO turns the controller's unix-second stamps into the ISO
