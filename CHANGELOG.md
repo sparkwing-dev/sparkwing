@@ -363,6 +363,12 @@ unlock.
 
 ### Fixed
 
+- **controller:** cancelling a run no runner has claimed finishes it as
+  `cancelled` at once. The cancel only flagged the trigger, so the run stayed
+  `pending` and the runner that later claimed it fetched source and started.
+  A claim now refuses a trigger that carries a cancel request; a run a runner
+  already holds still winds down through its lease heartbeat.
+
 - **controller:** a member removed from a team lands in a team they still
   belong to. Their session stayed on the team they had left, so every request
   answered `403 missing_scope` and `/me` showed no active team. Removal now
