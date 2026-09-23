@@ -26,7 +26,7 @@ const blobTestBucket = "cache-blobs"
 // newBlobServer is newBudgetedServer with the blob stores in an in-memory
 // bucket. It returns the raw client so a test can look at the bucket
 // itself rather than trusting the service's own answers.
-func newBlobServer(t *testing.T, token string, presignFrom int64) (*httptest.Server, *s3.Client) {
+func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
@@ -39,18 +39,15 @@ func newBlobServer(t *testing.T, token string, presignFrom int64) (*httptest.Ser
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(blobTestBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	savedOpen, savedStore, savedMin, savedTTL := openBlobStore, blobStore, presignMinBytes, presignTTL
-	t.Cleanup(func() {
-		openBlobStore, blobStore, presignMinBytes, presignTTL = savedOpen, savedStore, savedMin, savedTTL
-	})
+	savedOpen, savedStore := openBlobStore, blobStore
+	t.Cleanup(func() { openBlobStore, blobStore = savedOpen, savedStore })
 	openBlobStore = func(_ context.Context, raw2 string) (*teamblob.Store, error) {
 		if raw2 != "s3://"+blobTestBucket+"/cache" {
 			t.Fatalf("opened %q", raw2)
 		}
 		return teamblob.New(teamblob.Options{
 			Bucket: blobTestBucket, Prefix: "cache", Client: raw,
-			Presigner: s3.NewPresignClient(raw),
-			PartSize:  5 << 20, MultipartThreshold: 5 << 20,
+			PartSize: 5 << 20, MultipartThreshold: 5 << 20,
 		})
 	}
 	savedMeter := egressMeter
@@ -75,7 +72,6 @@ func newBlobServer(t *testing.T, token string, presignFrom int64) (*httptest.Ser
 	c.APIToken = token
 	c.GrantKey = testGrantKey(token)
 	c.BlobStore = "s3://" + blobTestBucket + "/cache"
-	c.PresignMinBytes = presignFrom
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -102,7 +98,7 @@ func bucketKeys(t *testing.T, raw *s3.Client) []string {
 // in two namespaces of the bucket, and neither reaches the other's.
 func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	const token = "operator-token"
-	srv, raw := newBlobServer(t, token, 0)
+	srv, raw := newBlobServer(t, token)
 	teamA, teamB := grantFor(t, token, "team-a"), grantFor(t, token, "team-b")
 
 	writes := []struct{ method, write, read string }{
@@ -191,50 +187,11 @@ func TestBlobStoreKeepsEachTeamsBlobsApart(t *testing.T) {
 	}
 }
 
-// A large read leaves through a presigned URL for that one object, after
-// the grant has confined the caller to its team's namespace.
-func TestBlobStorePresignsLargeReadsForTheCallersTeamOnly(t *testing.T) {
-	const token = "operator-token"
-	srv, _ := newBlobServer(t, token, 4)
-	teamA, teamB := grantFor(t, token, "team-a"), grantFor(t, token, "team-b")
-	if code, body := send(t, srv, http.MethodPut, "/cache/big", teamA, "0123456789"); code != http.StatusCreated {
-		t.Fatalf("put = %d %s", code, body)
-	}
-	if code, body := send(t, srv, http.MethodPut, "/cache/tiny", teamA, "abc"); code != http.StatusCreated {
-		t.Fatalf("put = %d %s", code, body)
-	}
-	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	get := func(path, bearer string) (int, string) {
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+path, nil)
-		req.Header.Set("Authorization", "Bearer "+bearer)
-		resp, err := noFollow.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		return resp.StatusCode, resp.Header.Get("Location")
-	}
-	code, loc := get("/cache/big", teamA)
-	if code != http.StatusTemporaryRedirect || !strings.Contains(loc, "/cache/teams/team-a/cache/big.tar.gz") || !strings.Contains(loc, "X-Amz-Expires=300") {
-		t.Fatalf("large read = %d %s", code, loc)
-	}
-	if code, _ := get("/cache/tiny", teamA); code != http.StatusOK {
-		t.Errorf("a read under the threshold = %d, want it served directly", code)
-	}
-	if code, loc := get("/cache/big", teamB); code != http.StatusNotFound || loc != "" {
-		t.Errorf("team B's read of team A's key = %d %s", code, loc)
-	}
-	// Followed, the redirect reads the object.
-	if code, body := send(t, srv, http.MethodGet, "/cache/big", teamA, ""); code != http.StatusOK || body != "0123456789" {
-		t.Errorf("followed read = %d %q", code, body)
-	}
-}
-
 // An artifact past the cap is refused and leaves nothing in the bucket:
 // no object and no open multipart upload.
 func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
 	const token = "operator-token"
-	srv, raw := newBlobServer(t, token, 0)
+	srv, raw := newBlobServer(t, token)
 	saved := maxArtifactBytes
 	maxArtifactBytes = 6 << 20
 	t.Cleanup(func() { maxArtifactBytes = saved })
@@ -270,7 +227,7 @@ func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
 // reads keep working.
 func TestBlobStoreRefusesWritesFastWhileTheBucketDeniesThem(t *testing.T) {
 	const token = "operator-token"
-	srv, raw := newBlobServer(t, token, 0)
+	srv, raw := newBlobServer(t, token)
 	grant := grantFor(t, token, "team-a")
 	if code, body := send(t, srv, http.MethodPut, "/cache/kept", grant, "kept"); code != http.StatusCreated {
 		t.Fatalf("put = %d %s", code, body)

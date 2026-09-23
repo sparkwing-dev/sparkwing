@@ -266,11 +266,9 @@ short-lived working state, so the volume and its `--max-store-bytes` ceiling
 remain, sized for the mirrors. A binary is staged under `--data-dir/tmp` to
 learn its digest before it is written. Uploads above 64 MiB go up in 16 MiB
 parts, and an upload that fails or runs past its size cap is aborted, so no
-partial object is ever readable. `--presign-min-bytes` answers a GET of a
-dependency archive or single artifact at least that large with a `307` to a
-presigned URL for that one object, valid `--presign-ttl` (5 minutes by
-default, at most an hour), issued only after the caller's grant has confined it
-to its team; the redirected bytes still count against the egress meter.
+partial object is ever readable. Every read is served through the pod, never
+redirected to the bucket, so the egress meter and the request budget see every
+byte.
 
 **The logs service** keeps live runs on its volume and moves finished ones to
 the bucket. An append still lands in a file that grows in place and a follower

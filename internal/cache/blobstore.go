@@ -18,11 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -35,15 +33,6 @@ import (
 // a real filesystem and the others are short-lived working state.
 var blobStore *teamblob.Store
 
-// Presigned reads. A GET of a stored object at least presignMinBytes long
-// is answered with a redirect to a URL that reads that one object for
-// presignTTL, so the bytes leave the bucket without crossing this pod.
-// Zero turns redirects off.
-var (
-	presignMinBytes int64
-	presignTTL      = 5 * time.Minute
-)
-
 // hack: an indirection so a test hands New a store over an in-memory
 // bucket instead of the AWS default chain.
 var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, error) {
@@ -52,10 +41,9 @@ var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, erro
 		return nil, err
 	}
 	return teamblob.New(teamblob.Options{
-		Bucket:    bucket,
-		Prefix:    prefix,
-		Client:    client,
-		Presigner: s3.NewPresignClient(client),
+		Bucket: bucket,
+		Prefix: prefix,
+		Client: client,
 	})
 }
 
@@ -248,9 +236,6 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
-		if redirectToBlob(w, r, team, rel, "") {
-			return
-		}
 		rc, o, err := blobStore.Get(ctx, team, rel)
 		if errors.Is(err, teamblob.ErrNotFound) {
 			countCacheLookup(r, false)
@@ -322,32 +307,6 @@ func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, siz
 	}
 	recordBlobWrite(wr.AddedBytes, wr.AddedObjects)
 	return wr.Bytes, true
-}
-
-// redirectToBlob answers a GET with a short-lived presigned URL for rel
-// when the object is large enough to be worth sending straight from the
-// bucket. The caller has already been confined to team's namespace, and
-// the URL reads that one object only. The bytes still count against this
-// pod's egress meter, so the daily cap keeps bounding the bill.
-func redirectToBlob(w http.ResponseWriter, r *http.Request, team, rel, attachment string) bool {
-	if presignMinBytes <= 0 || !blobStore.CanPresign() {
-		return false
-	}
-	o, err := blobStore.Head(r.Context(), team, rel)
-	if err != nil || o.Size < presignMinBytes {
-		return false
-	}
-	u, err := blobStore.PresignGet(r.Context(), team, rel, presignTTL, attachment)
-	if err != nil {
-		log.Printf("warning: presign %s: %v", rel, err)
-		return false
-	}
-	if egressMeter != nil {
-		egressMeter.Record(cacheEgressPrincipal(r), egress.ClassArtifact, o.Size)
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, u, http.StatusTemporaryRedirect)
-	return true
 }
 
 func serveArtifactsBlob(w http.ResponseWriter, r *http.Request) {
@@ -469,9 +428,6 @@ func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID st
 	prefix := "artifacts/" + jobID + "/"
 	if len(matches) == 1 {
 		name := path.Base(matches[0].Rel)
-		if redirectToBlob(w, r, team, prefix+matches[0].Rel, attachmentDisposition(name)) {
-			return
-		}
 		rc, o, err := blobStore.Get(r.Context(), team, prefix+matches[0].Rel)
 		if err != nil {
 			blobError(w, "get artifact", err)

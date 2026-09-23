@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
 type Config struct {
@@ -80,11 +79,6 @@ type Config struct {
 	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
 	// the volume. Credentials and region come from the AWS default chain.
 	BlobStore string
-	// PresignMinBytes redirects a GET of a stored object at least this
-	// large to a presigned URL for it, valid PresignTTL. Zero serves
-	// every read through the pod.
-	PresignMinBytes int64
-	PresignTTL      time.Duration
 	// UsageReconcile is how often the per-team count of the bucket is
 	// replaced by a listing. Writes and deletes keep it between listings.
 	UsageReconcile time.Duration
@@ -114,7 +108,6 @@ func DefaultConfig() Config {
 		MaxArtifactBytes:     DefaultMaxArtifactBytes,
 		MaxCacheArchiveBytes: DefaultMaxCacheArchiveBytes,
 		StoreReconcile:       objectguard.DefaultCeilingReconcile,
-		PresignTTL:           5 * time.Minute,
 		UsageReconcile:       24 * time.Hour,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
@@ -233,12 +226,6 @@ func New(cfg Config) (*Server, error) {
 
 	blobStore = nil
 	if cfg.BlobStore != "" {
-		if cfg.PresignMinBytes < 0 {
-			return nil, fmt.Errorf("cache: --presign-min-bytes must not be negative; pass 0 to serve every read through the pod")
-		}
-		if cfg.PresignTTL <= 0 || cfg.PresignTTL > teamblob.MaxPresignTTL {
-			return nil, fmt.Errorf("cache: --presign-ttl must be above 0 and at most %s", teamblob.MaxPresignTTL)
-		}
 		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		store, err := openBlobStore(octx, cfg.BlobStore)
 		cancel()
@@ -246,10 +233,8 @@ func New(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("cache: --blob-store: %w", err)
 		}
 		blobStore = store
-		presignMinBytes = cfg.PresignMinBytes
-		presignTTL = cfg.PresignTTL
-		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s; "+
-			"presigned reads from %d bytes (0 is off)", store.Bucket(), store.Prefix(), presignMinBytes)
+		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
+			store.Bucket(), store.Prefix())
 	}
 
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+

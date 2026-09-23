@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -54,12 +53,6 @@ type Client interface {
 	UploadPart(ctx context.Context, in *s3.UploadPartInput, opt ...func(*s3.Options)) (*s3.UploadPartOutput, error)
 	CompleteMultipartUpload(ctx context.Context, in *s3.CompleteMultipartUploadInput, opt ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error)
 	AbortMultipartUpload(ctx context.Context, in *s3.AbortMultipartUploadInput, opt ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error)
-}
-
-// Presigner signs a GET for one object without sending it.
-// *s3.PresignClient satisfies it.
-type Presigner interface {
-	PresignGetObject(ctx context.Context, in *s3.GetObjectInput, opt ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error)
 }
 
 // ErrNotFound reports an object that does not exist.
@@ -81,8 +74,6 @@ const (
 	// DefaultMaxListPages bounds one listing walk. A thousand pages is a
 	// million keys, far past one team's allowance.
 	DefaultMaxListPages = 1000
-	// MaxPresignTTL bounds how long a presigned read stays valid.
-	MaxPresignTTL = time.Hour
 
 	teamsSegment = "teams"
 	metaSegment  = "_meta"
@@ -96,9 +87,8 @@ type Options struct {
 	Bucket string
 	// Prefix is the store's root inside the bucket; empty is the bucket
 	// root. Two services sharing a bucket take different prefixes.
-	Prefix    string
-	Client    Client
-	Presigner Presigner
+	Prefix string
+	Client Client
 	// PartSize and MultipartThreshold default to DefaultPartSize and
 	// DefaultMultipartThreshold. S3 refuses parts under 5 MiB other than
 	// the last, so a smaller PartSize only suits a test fake.
@@ -115,7 +105,6 @@ type Store struct {
 	bucket    string
 	prefix    string
 	client    Client
-	presigner Presigner
 	partSize  int64
 	threshold int64
 	maxPages  int
@@ -142,7 +131,6 @@ func New(opts Options) (*Store, error) {
 		bucket:    opts.Bucket,
 		prefix:    strings.Trim(opts.Prefix, "/"),
 		client:    opts.Client,
-		presigner: opts.Presigner,
 		partSize:  opts.PartSize,
 		threshold: opts.MultipartThreshold,
 		maxPages:  opts.MaxListPages,
@@ -705,35 +693,6 @@ func (s *Store) DeleteTeam(ctx context.Context, team string) (Deleted, error) {
 	}
 	return d, err
 }
-
-// PresignGet returns a URL that reads team's rel for ttl, with a
-// Content-Disposition naming attachment when it is set. The URL
-// authorizes exactly that object, so the caller checks the team first.
-func (s *Store) PresignGet(ctx context.Context, team, rel string, ttl time.Duration, attachment string) (string, error) {
-	if s.presigner == nil {
-		return "", errors.New("teamblob: presigning is not configured")
-	}
-	if ttl <= 0 || ttl > MaxPresignTTL {
-		return "", fmt.Errorf("teamblob: presign ttl %s is outside (0, %s]", ttl, MaxPresignTTL)
-	}
-	key, err := s.Key(team, rel)
-	if err != nil {
-		return "", err
-	}
-	in := &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}
-	if attachment != "" {
-		in.ResponseContentDisposition = aws.String(attachment)
-		in.ResponseContentType = aws.String("application/octet-stream")
-	}
-	req, err := s.presigner.PresignGetObject(ctx, in, func(o *s3.PresignOptions) { o.Expires = ttl })
-	if err != nil {
-		return "", fmt.Errorf("teamblob: presign %s: %w", key, err)
-	}
-	return req.URL, nil
-}
-
-// CanPresign reports whether the store was given a presigner.
-func (s *Store) CanPresign() bool { return s.presigner != nil }
 
 func isNotFound(err error) bool {
 	var nsk *types.NoSuchKey

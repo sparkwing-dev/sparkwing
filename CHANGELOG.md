@@ -29,8 +29,8 @@ unlock.
   reports a per-team byte and object count kept by every write and delete and
   replaced by a listing once per `--usage-reconcile`, and `DELETE
   /admin/teams/{team}` removes the team's namespace from the bucket.
-  `--presign-min-bytes` redirects a large dependency-archive or artifact read to
-  a short-lived presigned URL for that one object. See
+  Every read goes through the service, so the egress meter and request budget
+  cover it. See
   [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
 
 - **logs:** `--archive-store s3://bucket/prefix` moves a run nobody has written

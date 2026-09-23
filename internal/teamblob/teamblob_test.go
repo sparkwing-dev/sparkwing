@@ -160,7 +160,6 @@ func newFixture(t *testing.T, opts teamblob.Options) *fixture {
 	if opts.Prefix == "" {
 		opts.Prefix = "svc"
 	}
-	opts.Presigner = s3.NewPresignClient(raw)
 	st, err := teamblob.New(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -388,35 +387,6 @@ func TestMultipartUploadRoundTripsAndAbortsOnFailure(t *testing.T) {
 	}
 	if got := f.client.count("AbortMultipartUpload"); got != 1 {
 		t.Fatalf("aborts = %d, want 1", got)
-	}
-}
-
-func TestPresignedURLReadsOnlyTheNamedObject(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t, teamblob.Options{})
-	ctx := context.Background()
-	put(t, f.store, "team-a", "cache/key.tar.gz", "payload")
-	u, err := f.store.PresignGet(ctx, "team-a", "cache/key.tar.gz", 5*time.Minute, `attachment; filename="key.tar.gz"`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(u, "/teams/team-a/cache/key.tar.gz") || !strings.Contains(u, "X-Amz-Expires=300") {
-		t.Fatalf("presigned URL = %s", u)
-	}
-	resp, err := http.Get(u)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if string(b) != "payload" {
-		t.Fatalf("presigned read = %q", b)
-	}
-	if _, err := f.store.PresignGet(ctx, "team-a", "cache/key.tar.gz", 2*time.Hour, ""); err == nil {
-		t.Fatal("a presign past the TTL cap was signed")
-	}
-	if _, err := f.store.PresignGet(ctx, "team-a", "../team-b/x", time.Minute, ""); !errors.Is(err, teamblob.ErrInvalidKey) {
-		t.Fatalf("presign of a traversal: %v", err)
 	}
 }
 
