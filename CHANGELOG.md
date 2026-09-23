@@ -414,6 +414,13 @@ unlock.
   `pending` and the runner that later claimed it fetched source and started.
   A claim now refuses a trigger that carries a cancel request; a run a runner
   already holds still winds down through its lease heartbeat.
+- **controller:** a metered trigger claim reserves the cheapest class's first
+  minute on the team's ledger, and the trigger step is billed by the wall time
+  its claim ran, with the unused part of the minute refunded. The claim only
+  checked the balance, so every runner polling at once could start a run
+  against the same minute before any node claim charged it. Claims racing for
+  a balance that covers one minute now start one run. Schema 53 adds
+  `triggers.credit_reserved_at`. See [Metered runners](docs/auth.md#metered-runners).
 
 - **controller:** a member removed from a team lands in a team they still
   belong to. Their session stayed on the team they had left, so every request

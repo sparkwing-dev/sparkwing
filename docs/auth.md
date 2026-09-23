@@ -42,10 +42,20 @@ names how the runner executes the trigger's nodes (`node_runner`: `k8s`,
 a trigger holder runs in its own process hold no node claim and are never
 charged; `sparkwing-runner runner --trigger-runner=inprocess` on a metered
 token stops its trigger loop with that reason and keeps claiming nodes. A
-metered `k8s` or `warm` claim still answers `402` when the team's balance
-cannot cover the cheapest class's first minute, and the trigger stays pending.
-A metered pool therefore sets `runner.triggerRunner.kind` to `k8s` or `warm`
+metered pool therefore sets `runner.triggerRunner.kind` to `k8s` or `warm`
 in the runner-bundle chart.
+
+The trigger step itself, the planning and orchestration the holder runs on
+the claiming pool, is billed too. A metered `k8s` or `warm` claim reserves
+the cheapest class's first minute inside the claim's transaction, the same
+way a node claim does, so claims racing for a balance that covers one minute
+start one run; the rest answer `402` and their triggers stay pending. The
+claim does not say how large the pool is, so the step is billed at the
+cheapest class. When the claim ends, the step is billed for the wall time
+since the claim: a finish inside the minute refunds the unused tail, one past
+it bills the rest, and a lapsed lease is billed through the lease's end
+rather than through the reap. A claim requeued before its run started is
+refunded whole. These ledger rows carry the run id and an empty node id.
 
 The live claim's fenced execution acknowledgement starts billing immediately
 before the node body runs. Claiming, queueing, provisioning, image pulls and

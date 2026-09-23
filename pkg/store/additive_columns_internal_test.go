@@ -94,6 +94,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// older binary keeps writing sessions, tokens and teams it never tags
 	// with an account, and runs whose event counters it never bumps.
 	52: {teamIdentityCols, sessionAccountCols, tokenCreatorCols, runEventUsageCols},
+	// safety: v53 adds a trigger's open credit reservation with a default of
+	// none, so an older binary keeps claiming and finishing triggers; it opens
+	// no reservation and the next claim overwrites one it left open.
+	53: {triggersCreditCols},
 }
 
 func columnSpecMaps() []map[string]string {
