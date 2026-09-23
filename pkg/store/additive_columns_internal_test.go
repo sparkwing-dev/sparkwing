@@ -125,6 +125,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// tables and no column, and nothing older reads them, so an older binary
 	// keeps writing the migrated database.
 	62: nil,
+	// safety: v63 adds defaulted trigger columns an older binary never names
+	// and an index, so an older binary keeps writing the migrated database.
+	63: {triggerGitHubCheckRunCols},
 }
 
 func columnSpecMaps() []map[string]string {

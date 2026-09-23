@@ -55,7 +55,27 @@ const (
 var (
 	ErrRejected     = errors.New("githubapp: github rejected the credential")
 	ErrNotInstalled = errors.New("githubapp: the app is not installed there")
+	// ErrPermissionMissing means the installation has not granted a
+	// permission the request needs, as when its owner has not yet accepted
+	// one the App added.
+	ErrPermissionMissing = errors.New("githubapp: the installation has not granted the permission")
 )
+
+// APIError is an answer from GitHub that is none of the errors above.
+type APIError struct {
+	Op     string
+	Status int
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("githubapp: %s answered %d", e.Op, e.Status)
+}
+
+// Temporary reports whether the same request may succeed later: GitHub
+// answered 429 or a 5xx.
+func (e *APIError) Temporary() bool {
+	return e.Status == http.StatusTooManyRequests || e.Status >= 500
+}
 
 // Config names the App and where GitHub answers.
 type Config struct {
@@ -139,6 +159,10 @@ func New(cfg Config) *Client {
 
 // Slug is the App's public name.
 func (c *Client) Slug() string { return c.cfg.Slug }
+
+// AppID is the App's numeric id, which GitHub names in the check runs and
+// check suites the App owns.
+func (c *Client) AppID() int64 { return c.cfg.AppID }
 
 // StateKey derives a key for signing connect-flow state from the App's
 // private key, so every controller replica holding the key agrees on it and
@@ -346,18 +370,23 @@ func (c *Client) InstallationToken(ctx context.Context, installation int64, repo
 	}
 	c.apiHeaders(req, "Bearer "+jwt)
 	req.Header.Set("Content-Type", "application/json")
-	var tok Token
-	status, err := c.do(req, &tok)
+	status, raw, err := c.send(req)
 	if err != nil {
 		return Token{}, err
 	}
+	var tok Token
+	if status < 300 && json.Unmarshal(raw, &tok) != nil {
+		return Token{}, fmt.Errorf("githubapp: unreadable answer from %s", req.URL.Path)
+	}
 	switch {
+	case status == http.StatusUnprocessableEntity && permissionsNotGranted(raw):
+		return Token{}, fmt.Errorf("%w: %v", ErrPermissionMissing, permissions)
 	case status == http.StatusNotFound || status == http.StatusUnprocessableEntity:
 		return Token{}, ErrNotInstalled
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return Token{}, fmt.Errorf("%w: installation token for %d answered %d", ErrRejected, installation, status)
 	case status != http.StatusCreated && status != http.StatusOK:
-		return Token{}, fmt.Errorf("githubapp: installation token answered %d", status)
+		return Token{}, &APIError{Op: "installation token", Status: status}
 	case tok.Token == "":
 		return Token{}, errors.New("githubapp: github returned no installation token")
 	}
@@ -413,28 +442,95 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 	return out, nil
 }
 
+// permissionsNotGranted reports whether a refused token request names
+// permissions the installation has not granted, which GitHub answers with 422
+// like a repository the installation does not cover.
+func permissionsNotGranted(body []byte) bool {
+	var answer struct {
+		Message string `json:"message"`
+	}
+	return json.Unmarshal(body, &answer) == nil &&
+		strings.Contains(strings.ToLower(answer.Message), "permissions requested are not granted")
+}
+
 // CreateCommitStatus posts a commit status with an installation token.
 func (c *Client) CreateCommitStatus(ctx context.Context, token, owner, repo, sha string, status any) error {
-	body, err := json.Marshal(status)
+	_, err := c.repoWrite(ctx, http.MethodPost, token, owner, repo, "/statuses/"+url.PathEscape(sha), "commit status", status)
+	return err
+}
+
+// CheckRunOutput is the text a check run shows on GitHub. GitHub accepts at
+// most 65535 characters in Summary.
+type CheckRunOutput struct {
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
+// CheckRun is what the App writes to one check run. Status is "queued",
+// "in_progress" or "completed"; Conclusion is set only with "completed".
+type CheckRun struct {
+	Name        string          `json:"name,omitempty"`
+	HeadSHA     string          `json:"head_sha,omitempty"`
+	DetailsURL  string          `json:"details_url,omitempty"`
+	ExternalID  string          `json:"external_id,omitempty"`
+	Status      string          `json:"status"`
+	Conclusion  string          `json:"conclusion,omitempty"`
+	StartedAt   *time.Time      `json:"started_at,omitempty"`
+	CompletedAt *time.Time      `json:"completed_at,omitempty"`
+	Output      *CheckRunOutput `json:"output,omitempty"`
+}
+
+// CreateCheckRun creates a check run on owner/repo with an installation
+// token and returns its id. A token without checks:write is
+// [ErrPermissionMissing].
+func (c *Client) CreateCheckRun(ctx context.Context, token, owner, repo string, run CheckRun) (int64, error) {
+	raw, err := c.repoWrite(ctx, http.MethodPost, token, owner, repo, "/check-runs", "create check run", run)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.cfg.APIURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/statuses/"+url.PathEscape(sha),
-		bytes.NewReader(body))
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if json.Unmarshal(raw, &created) != nil || created.ID <= 0 {
+		return 0, errors.New("githubapp: github returned no check run id")
+	}
+	return created.ID, nil
+}
+
+// UpdateCheckRun updates check run id on owner/repo. GitHub keeps the name
+// and head commit the run was created with.
+func (c *Client) UpdateCheckRun(ctx context.Context, token, owner, repo string, id int64, run CheckRun) error {
+	run.HeadSHA = ""
+	_, err := c.repoWrite(ctx, http.MethodPatch, token, owner, repo,
+		"/check-runs/"+strconv.FormatInt(id, 10), "update check run", run)
+	return err
+}
+
+// repoWrite sends body to a repository route with an installation token and
+// returns GitHub's answer. GitHub answers 403 to a token that lacks the
+// route's permission.
+func (c *Client) repoWrite(ctx context.Context, method, token, owner, repo, path, op string, body any) ([]byte, error) {
+	payload, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method,
+		c.cfg.APIURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+path, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
 	}
 	c.apiHeaders(req, "token "+token)
 	req.Header.Set("Content-Type", "application/json")
-	code, err := c.do(req, nil)
-	if err != nil {
-		return err
+	status, raw, err := c.send(req)
+	switch {
+	case err != nil:
+		return nil, err
+	case status == http.StatusForbidden:
+		return nil, fmt.Errorf("%w: %s answered 403", ErrPermissionMissing, op)
+	case status < 200 || status >= 300:
+		return nil, &APIError{Op: op, Status: status}
 	}
-	if code != http.StatusCreated && code != http.StatusOK {
-		return fmt.Errorf("githubapp: commit status answered %d", code)
-	}
-	return nil
+	return raw, nil
 }
 
 var errNotFound = errors.New("githubapp: not found")
@@ -468,23 +564,31 @@ func (c *Client) apiHeaders(req *http.Request, authorization string) {
 }
 
 func (c *Client) do(req *http.Request, out any) (int, error) {
-	ctx, cancel := context.WithTimeout(req.Context(), requestTimeout)
-	defer cancel()
-	resp, err := c.cfg.HTTP.Do(req.WithContext(ctx))
+	status, body, err := c.send(req)
 	if err != nil {
-		return 0, fmt.Errorf("githubapp: %s: %w", req.URL.Host, err)
+		return 0, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
-	if err != nil {
-		return 0, fmt.Errorf("githubapp: read %s: %w", req.URL.Host, err)
-	}
-	if out != nil && len(body) > 0 && resp.StatusCode < 300 {
+	if out != nil && len(body) > 0 && status < 300 {
 		if err := json.Unmarshal(body, out); err != nil {
 			return 0, fmt.Errorf("githubapp: unreadable answer from %s: %w", req.URL.Path, err)
 		}
 	}
-	return resp.StatusCode, nil
+	return status, nil
+}
+
+func (c *Client) send(req *http.Request) (int, []byte, error) {
+	ctx, cancel := context.WithTimeout(req.Context(), requestTimeout)
+	defer cancel()
+	resp, err := c.cfg.HTTP.Do(req.WithContext(ctx))
+	if err != nil {
+		return 0, nil, fmt.Errorf("githubapp: %s: %w", req.URL.Host, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return 0, nil, fmt.Errorf("githubapp: read %s: %w", req.URL.Host, err)
+	}
+	return resp.StatusCode, body, nil
 }
 
 func (c *Client) appJWT(now time.Time) (string, error) {

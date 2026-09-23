@@ -116,3 +116,69 @@ func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
 		t.Fatal("a digest past its retention was kept")
 	}
 }
+
+func TestGitHubCheckRunIsRecordedOnce(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	repoID := int64(4_000_000_701)
+	for _, trig := range []struct {
+		tenant *store.Tenant
+		id     string
+		sha    string
+	}{{acme, "run-a", sha}, {acme, "run-b", sha}, {acme, "run-c", "fedcba9876543210fedcba9876543210fedcba98"}, {other, "run-x", sha}} {
+		if err := trig.tenant.CreateTrigger(ctx, store.Trigger{
+			ID: trig.id, Pipeline: "build", GitSHA: trig.sha, GithubOwner: "acme", GithubRepo: "widgets", GithubRepoID: repoID, CreatedAt: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if id, err := acme.GitHubCheckRun(ctx, "run-a"); err != nil || id != 0 {
+		t.Fatalf("check run before any = %d, %v; want 0", id, err)
+	}
+	if id, err := acme.RecordGitHubCheckRun(ctx, "run-a", 41); err != nil || id != 41 {
+		t.Fatalf("record = %d, %v", id, err)
+	}
+	if id, err := acme.RecordGitHubCheckRun(ctx, "run-a", 42); err != nil || id != 41 {
+		t.Fatalf("second record = %d, %v; want the first kept", id, err)
+	}
+	if _, err := acme.GitHubCheckRun(ctx, "no-such-run"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("check run of a missing trigger = %v, want ErrNotFound", err)
+	}
+	if _, err := other.RecordGitHubCheckRun(ctx, "run-b", 43); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another team recording on acme's run = %v, want ErrNotFound", err)
+	}
+	if id, err := acme.GitHubCheckRun(ctx, "run-b"); err != nil || id != 0 {
+		t.Fatalf("acme's run-b after another team's record = %d, %v; want 0", id, err)
+	}
+
+	got, err := acme.GitHubCommitTriggers(ctx, store.GitHubRepo{ID: repoID, Owner: "acme", Name: "widgets"}, sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, trig := range got {
+		ids = append(ids, trig.ID)
+	}
+	if len(ids) != 2 || ids[0] != "run-b" || ids[1] != "run-a" {
+		t.Fatalf("acme's triggers for the commit = %v, want [run-b run-a] and not the other team's", ids)
+	}
+	got, err = acme.GitHubCommitTriggers(ctx, store.GitHubRepo{ID: repoID + 1, Owner: "acme", Name: "widgets"}, sha)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("recreated repository inherited old runs: %+v, %v", got, err)
+	}
+	if err := acme.CreateTrigger(ctx, store.Trigger{
+		ID: "legacy", Pipeline: "build", GitSHA: sha, GithubOwner: "acme", GithubRepo: "widgets", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = acme.GitHubCommitTriggers(ctx, store.GitHubRepo{ID: repoID, Owner: "acme", Name: "widgets"}, sha)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("legacy trigger matched a repository id it never recorded: %+v, %v", got, err)
+	}
+	got, err = acme.GitHubCommitTriggers(ctx, store.GitHubRepo{Owner: "acme", Name: "widgets"}, sha)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("lookup without a repository id matched runs: %+v, %v", got, err)
+	}
+}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -95,6 +96,8 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		githubAppIgnored(w, "the repositories an installation covers are read from GitHub when a run starts or a token is minted")
 	case "push", "pull_request":
 		s.handleGitHubAppRunEvent(w, r, event, delivery, env, body)
+	case "check_run", "check_suite":
+		s.handleGitHubAppCheckEvent(w, r, event, delivery, env, body)
 	default:
 		githubAppIgnored(w, "event "+event+" starts nothing")
 	}
@@ -257,33 +260,45 @@ func githubAppDeliveryDigest(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request, event, delivery string, env githubAppDelivery, body []byte) {
+// githubAppBinding resolves the team holding the installation a delivery
+// names. When no team holds it, it answers the delivery and returns false.
+func (s *Server) githubAppBinding(w http.ResponseWriter, r *http.Request, env githubAppDelivery) (store.GitHubAppInstallation, *store.Tenant, store.GitHubRepo, bool) {
 	ctx := r.Context()
 	repo, ok := store.ParseGitHubRepo(env.Repository.FullName)
 	if !ok || env.Repository.ID <= 0 || env.Installation.ID <= 0 {
 		githubAppIgnored(w, "the delivery names no repository and installation")
-		return
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
+	repo.ID = env.Repository.ID
 	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
-		return
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	if err != nil {
 		s.writeInternalError(w, r, "github app installation", err)
-		return
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	if in.Suspended {
 		githubAppIgnored(w, "the installation is suspended")
-		return
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	tenant, err := s.tenantForTeam(ctx, in.Team)
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
 		githubAppIgnored(w, "no team holds this installation")
-		return
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
 	if err != nil {
 		s.writeInternalError(w, r, "github app team", err)
+		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
+	}
+	return in, tenant, repo, true
+}
+
+func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request, event, delivery string, env githubAppDelivery, body []byte) {
+	ctx := r.Context()
+	in, tenant, repo, ok := s.githubAppBinding(w, r, env)
+	if !ok {
 		return
 	}
 	intake, skip, err := githubAppIntakeFor(event, env, body)
@@ -317,16 +332,32 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		s.writeInternalError(w, r, "github app triggers", err)
 		return
 	}
-	var wanted []store.GitHubAppTrigger
+	var planned []githubAppPlannedRun
 	for _, sub := range subs {
 		if (event == "push" && sub.Push) || (event == "pull_request" && sub.PullRequest) {
-			wanted = append(wanted, sub)
+			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake})
 		}
 	}
-	if len(wanted) == 0 {
+	if len(planned) == 0 {
 		githubAppIgnored(w, "no pipeline of this team subscribes to "+event+" on "+repo.Slug())
 		return
 	}
+	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
+}
+
+// githubAppPlannedRun is one run a delivery would start.
+type githubAppPlannedRun struct {
+	pipeline string
+	intake   githubAppIntake
+}
+
+// startGitHubAppRuns starts planned, the runs a delivery bound to in asks
+// for, once per signed body and within the team's run budget.
+func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in store.GitHubAppInstallation,
+	tenant *store.Tenant, env githubAppDelivery, repo store.GitHubRepo, event, delivery string, body []byte,
+	planned []githubAppPlannedRun,
+) {
+	ctx := r.Context()
 	// safety: the digest is of the signed body and is kept for every team, so
 	// a redelivery spends no run budget and a replay after the installation
 	// moves teams starts nothing in the new one.
@@ -337,7 +368,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if seen {
-		s.writeGitHubAppDuplicate(w, r, tenant, wanted, delivery, body)
+		s.writeGitHubAppDuplicate(w, r, tenant, planned, delivery, body)
 		return
 	}
 	// safety: GitHub is asked on every delivery rather than through the cache
@@ -354,12 +385,12 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
 	shed := 0
-	for _, sub := range wanted {
+	for _, plan := range planned {
 		// safety: a run this delivery already started answers without spending,
 		// so a redelivery after a partial shed pays only for what was shed.
 		if existing, err := tenant.FindTriggerByWebhookReplay(ctx,
-			githubAppReplayKey(tenant.Team(), sub.Pipeline, body), delivery+"/"+sub.Pipeline); err == nil && existing != nil {
-			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: sub.Pipeline, RunID: existing.ID, Status: "duplicate"})
+			githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline); err == nil && existing != nil {
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, RunID: existing.ID, Status: "duplicate"})
 			continue
 		}
 		// safety: each run spends one of the team's budget, so a repository
@@ -371,10 +402,10 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 				return
 			}
 			shed++
-			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: sub.Pipeline, Status: "shed"})
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "shed"})
 			continue
 		}
-		run, err := s.startGitHubAppRun(r, tenant, sub, intake, repo, delivery, body)
+		run, err := s.startGitHubAppRun(r, tenant, plan, repo, delivery, body)
 		if err != nil {
 			writeIdentityError(w, s, r, "github app run", err)
 			return
@@ -389,7 +420,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
-		"repo", repo.Slug(), "sha", intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
+		"repo", repo.Slug(), "sha", planned[0].intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
@@ -409,13 +440,13 @@ func githubAppFloodKey(team store.Team) string {
 }
 
 func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
-	wanted []store.GitHubAppTrigger, delivery string, body []byte,
+	planned []githubAppPlannedRun, delivery string, body []byte,
 ) {
 	resp := githubAppWebhookResp{Status: "duplicate"}
-	for _, sub := range wanted {
-		run := githubAppRun{Pipeline: sub.Pipeline, Status: "duplicate"}
+	for _, plan := range planned {
+		run := githubAppRun{Pipeline: plan.pipeline, Status: "duplicate"}
 		existing, err := tenant.FindTriggerByWebhookReplay(r.Context(),
-			githubAppReplayKey(tenant.Team(), sub.Pipeline, body), delivery+"/"+sub.Pipeline)
+			githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline)
 		if err == nil && existing != nil {
 			run.RunID = existing.ID
 		}
@@ -425,13 +456,13 @@ func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) startGitHubAppRun(
-	r *http.Request, tenant *store.Tenant, sub store.GitHubAppTrigger, in githubAppIntake,
-	repo store.GitHubRepo, delivery string, body []byte,
+	r *http.Request, tenant *store.Tenant, plan githubAppPlannedRun, repo store.GitHubRepo, delivery string, body []byte,
 ) (githubAppRun, error) {
 	ctx := r.Context()
-	replayKey := githubAppReplayKey(tenant.Team(), sub.Pipeline, body)
-	if existing, err := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+sub.Pipeline); err == nil && existing != nil {
-		return githubAppRun{Pipeline: sub.Pipeline, RunID: existing.ID, Status: "duplicate"}, nil
+	pipeline, in := plan.pipeline, plan.intake
+	replayKey := githubAppReplayKey(tenant.Team(), pipeline, body)
+	if existing, err := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); err == nil && existing != nil {
+		return githubAppRun{Pipeline: pipeline, RunID: existing.ID, Status: "duplicate"}, nil
 	}
 	runID := newRunID()
 	triggerEnv := map[string]string{"GITHUB_DELIVERY": delivery}
@@ -440,32 +471,29 @@ func (s *Server) startGitHubAppRun(
 	}
 	trigger := sparkwing.TriggerInfo{Source: "github", User: in.user, PullRequest: in.prInfo}
 	err := tenant.CreateTrigger(ctx, store.Trigger{
-		ID: runID, Pipeline: sub.Pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
+		ID: runID, Pipeline: pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
 		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
-		GithubOwner: repo.Owner, GithubRepo: repo.Name,
-		WebhookDelivery: delivery + "/" + sub.Pipeline, WebhookReplayKey: replayKey,
+		GithubOwner: repo.Owner, GithubRepo: repo.Name, GithubRepoID: repo.ID,
+		WebhookDelivery: delivery + "/" + pipeline, WebhookReplayKey: replayKey,
 		CreatedAt: time.Now(),
 	})
 	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
-		existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+sub.Pipeline)
-		if ferr != nil || existing == nil {
-			return githubAppRun{Pipeline: sub.Pipeline, Status: "duplicate"}, nil
+		run := githubAppRun{Pipeline: pipeline, Status: "duplicate"}
+		if existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+pipeline); ferr == nil && existing != nil {
+			run.RunID = existing.ID
 		}
-		return githubAppRun{Pipeline: sub.Pipeline, RunID: existing.ID, Status: "duplicate"}, nil
+		return run, nil
 	}
 	if err != nil {
 		return githubAppRun{}, fmt.Errorf("persist trigger: %w", err)
 	}
-	pendingStatus := s.reserveGitHubCommitStatus(ctx, runID, "pending")
-	dispatched := false
-	defer func() { pendingStatus(dispatched) }()
 	s.recordQueueActivity(time.Now())
 	if err := s.dispatcher.Dispatch(ctx, RunRequest{
-		RunID: runID, Pipeline: sub.Pipeline, Trigger: trigger,
+		RunID: runID, Pipeline: pipeline, Trigger: trigger,
 		Git: &sparkwing.Git{Branch: in.branch, SHA: in.sha, Repo: repo.Slug()},
 	}); err != nil {
 		return githubAppRun{}, err
 	}
-	dispatched = true
-	return githubAppRun{Pipeline: sub.Pipeline, RunID: runID, Status: "dispatched"}, nil
+	s.reportGitHubRunState(context.WithoutCancel(ctx), runID, "pending")
+	return githubAppRun{Pipeline: pipeline, RunID: runID, Status: "dispatched"}, nil
 }

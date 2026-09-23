@@ -4,7 +4,7 @@ The Sparkwing GitHub App connects a team to the GitHub repositories it controls.
 
 - push and pull request runs from the App's webhook, for the pipelines the team subscribes to each repository;
 - source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories a team owner listed for it ([extra repositories](git-credentials.md#extra-repositories));
-- commit statuses on the commits those runs build.
+- a check run on the commit each of those runs builds, and a re-run when someone re-runs it from GitHub.
 
 A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out only tokens restricted to a single repository.
 
@@ -31,10 +31,10 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 - **Setup URL**: `https://console.sparkwing.dev/github/app/setup`, with **Redirect on update** checked.
 - **Callback URLs**: `https://console.sparkwing.dev/github/app/callback`, beside the sign-in callback.
 - **Request user authorization (OAuth) during installation**: unchecked. The connect flow asks for the user's authorization as its own step.
-- **Repository permissions**: Contents read-only, Commit statuses read and write, Metadata read-only, Pull requests read-only.
+- **Repository permissions**: Checks read and write, Contents read-only, Commit statuses read and write, Metadata read-only, Pull requests read-only. Commit statuses serve an installation until its owner accepts the Checks permission; see [Check runs](#check-runs).
 - **Organization permissions**: Members read-only.
 - **Account permissions**: Email addresses read-only (sign-in).
-- **Subscribe to events**: Push, Pull request. GitHub sends `installation` and `installation_repositories` to every App without a checkbox.
+- **Subscribe to events**: Check run, Check suite, Push, Pull request. GitHub sends `installation` and `installation_repositories` to every App without a checkbox.
 
 ## Connecting a team
 
@@ -77,6 +77,8 @@ The controller remembers the digest of every signed body that started runs, for 
 
 Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered. A redelivery answers the runs it already started as `duplicate` without spending anything, and spends the budget only on the runs that were shed.
 
+The hourly budget is enforced separately by each controller replica.
+
 `installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source-token route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept.
 
 ### Pull requests from forks
@@ -99,9 +101,35 @@ A claim holds one live token. Asking again returns the same token until five min
 
 The fetch inherits the token on a pipe, and a credential helper scoped to `https://github.com/`, set in the fetch's environment, reads it from there when GitHub asks. A fetch that presents a released credential reads no system, global or environment git config, so no helper, `http.extraHeader` or `insteadOf` rule of the machine takes part, and it runs without the machine's ssh agent. The token is never in an environment variable, the URL, a command line, a file or a log line; the fetch runs without `GIT_TRACE*` and `GIT_CURL_VERBOSE`, which would write it to a trace; and the checkout's own git commands see neither the helper nor the pipe. While the fetch runs, the token is in the memory of git's own processes, which the runner's user can read like any of its processes.
 
-## Commit statuses
+## Check runs
 
-A run the App started reports `pending`, `success`, `failure` or `error` on its commit under the context `sparkwing/<pipeline>`, posted with an installation token restricted to that repository and `statuses: write`. Only runs whose trigger the App webhook created report this way. The operator's `GITHUB_TOKEN` reporter keeps serving operator webhook bindings, unchanged.
+Each run the App started reports as one check run named `sparkwing/<pipeline>` on the commit it builds: the pushed commit, or a pull request's head. Only runs whose trigger the App webhook created report this way; the operator's `GITHUB_TOKEN` reporter keeps posting commit statuses for operator webhook bindings, unchanged.
+
+The check run is created `queued` when the run is dispatched, moves to `in_progress` when a runner starts it, and ends `completed` with one of these conclusions:
+
+| Run outcome | Conclusion |
+| --- | --- |
+| `success` | `success` |
+| `failed` | `failure` |
+| `cancelled` | `cancelled` |
+| no runner claimed it before the queue deadline | `timed_out` |
+
+`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run.
+
+The controller writes check runs in the background with an installation token restricted to the run's repository and `checks: write`. GitHub failing a write never fails or delays the run: a write GitHub answers with 429 or a 5xx, or does not answer, is tried up to four times with waits of 0.25, 0.5 and 1 seconds, each failure is logged at warn, and a write that still fails is dropped. The next state of the run is written as usual; when the check run was never created, that write creates it.
+
+An installation whose owner has not yet accepted the Checks permission gets commit statuses instead: `pending`, then `success`, `failure` or `error`, under the context `sparkwing/<pipeline>`, with a token restricted to `statuses: write`. The controller logs this once per installation. A run that started on commit statuses finishes on them, and runs after the owner accepts get check runs.
+
+### Re-running from GitHub
+
+GitHub's **Re-run** buttons start runs:
+
+- `check_run` `rerequested` runs that check run's pipeline again. The check run must be this App's, and its `external_id` must name a run of the installation's team on the same repository id and commit.
+- `check_suite` `rerequested` runs each subscribed pipeline with its own prior App run on that repository id and commit.
+
+A re-run copies the branch and pull request from that pipeline's own prior run. The pipeline must still subscribe to that run's event, push or pull request. A commit the team never ran starts nothing, and so does a check run or suite whose pull requests include one from a fork. Older runs without a recorded GitHub repository id cannot be re-run from GitHub. Otherwise a re-run follows the push rules: the installation must be bound to a team and not suspended, GitHub must still report it covers the repository, each run spends one of the team's hourly runs, and a delivery whose signed body was processed before answers `duplicate`.
+
+`check_suite` `requested` starts nothing: GitHub sends it for every push, and the push delivery already starts that commit's runs. `check_run` `created` and `completed`, which GitHub sends for the controller's own writes, and every other `check_run` and `check_suite` action start nothing either.
 
 ## GitHub Actions runners
 

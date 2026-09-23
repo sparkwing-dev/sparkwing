@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 62
+const expectedSchemaVersion = 63
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2033,6 +2033,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTeamStorageMigrationSQLite(ctx, tx)
 	case 62:
 		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTableSQLite+"\n"+githubAppExtraReposTableSQLite)
+	case 63:
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerGitHubCheckRunCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerGitHubCommitIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2426,6 +2432,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyTeamStorageMigrationPostgres(ctx, tx)
 	case 62:
 		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTablePostgres+"\n"+githubAppExtraReposTablePostgres)
+	case 63:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerGitHubCheckRunCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerGitHubCommitIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -6542,10 +6554,11 @@ type Trigger struct {
 	// ParentRunID: spawning RunAndAwait; for cycle detection.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Mirror of Run repo fields; threaded into CreateRun.
-	Repo        string `json:"repo,omitempty"`
-	RepoURL     string `json:"repo_url,omitempty"`
-	GithubOwner string `json:"github_owner,omitempty"`
-	GithubRepo  string `json:"github_repo,omitempty"`
+	Repo         string `json:"repo,omitempty"`
+	RepoURL      string `json:"repo_url,omitempty"`
+	GithubOwner  string `json:"github_owner,omitempty"`
+	GithubRepo   string `json:"github_repo,omitempty"`
+	GithubRepoID int64  `json:"-"`
 	// RepoInherited distinguishes an implicit same-repository await from an
 	// explicit cross-repository request after parent provenance is copied.
 	RepoInherited bool `json:"repo_inherited,omitempty"`
@@ -6746,12 +6759,12 @@ func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) err
 		ctx, `
 INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+		              repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, "full",
 		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
+		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.GithubRepoID, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
 	)
 	if err != nil && isUniqueViolation(err) {

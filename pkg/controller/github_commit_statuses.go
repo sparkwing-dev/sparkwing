@@ -28,7 +28,6 @@ const (
 
 type githubCommitStatusReporter struct {
 	token        string
-	tokenFor     func(context.Context, githubCommitStatus) (string, error)
 	dashboardURL string
 	apiBaseURL   string
 	httpClient   *http.Client
@@ -88,14 +87,13 @@ type githubCommitStatusRequest struct {
 }
 
 type githubCommitStatus struct {
-	Installation int64
-	Owner        string
-	Repo         string
-	SHA          string
-	Pipeline     string
-	RunID        string
-	State        string
-	Description  string
+	Owner       string
+	Repo        string
+	SHA         string
+	Pipeline    string
+	RunID       string
+	State       string
+	Description string
 }
 
 // WithGitHubCommitStatuses enables best-effort GitHub commit statuses for
@@ -149,7 +147,28 @@ func newGitHubCommitStatusReporterWithCapacity(token, dashboardURL, apiBaseURL s
 	return r
 }
 
-func (s *Server) reportGitHubCommitStatus(ctx context.Context, runID, runStatus string) {
+// reportGitHubRunState reports runStatus for runID to GitHub: as a check run
+// when the App started the run, else as a commit status when the operator's
+// token is configured. runStatus is a run status, "pending" for a run not yet
+// started, or "timed_out" for one no runner claimed in time.
+func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
+	if s.githubCommitStatuses == nil && s.githubApp == nil {
+		return
+	}
+	if s.githubApp != nil {
+		trigger, err := s.store.GetTrigger(ctx, runID)
+		if err == nil && trigger.TriggerEnv[envGitHubAppInstallation] != "" {
+			if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
+				s.githubApp.checks.enqueue(s.logger, update)
+			}
+			return
+		}
+	}
+	// safety: a commit status has no running state, and the pending one
+	// already stands for it.
+	if runStatus == "running" {
+		return
+	}
 	reporter, status, ok := s.githubCommitStatus(ctx, runID, runStatus)
 	if !ok {
 		return
@@ -165,25 +184,21 @@ func (s *Server) reserveGitHubCommitStatus(ctx context.Context, runID, runStatus
 	return reporter.reserve(s.logger, status)
 }
 
+// githubCommitStatus answers the operator's commit status for runID.
 func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string) (*githubCommitStatusReporter, githubCommitStatus, bool) {
 	reporter := s.githubCommitStatuses
-	appReporter := s.githubAppStatusReporter()
-	if reporter == nil && appReporter == nil {
-		return nil, githubCommitStatus{}, false
-	}
-	trigger, err := s.store.GetTrigger(ctx, runID)
-	if err == nil && trigger.TriggerEnv[envGitHubAppInstallation] != "" {
-		status, ok := s.githubAppCommitStatus(ctx, trigger, runStatus)
-		return appReporter, status, ok && appReporter != nil
-	}
 	if reporter == nil {
 		return nil, githubCommitStatus{}, false
 	}
+	trigger, err := s.store.GetTrigger(ctx, runID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, githubCommitStatus{}, false
 	}
 	if err != nil {
 		s.logger.Warn("github commit status trigger lookup failed", "run_id", runID, "err", err)
+		return nil, githubCommitStatus{}, false
+	}
+	if trigger.TriggerEnv[envGitHubAppInstallation] != "" {
 		return nil, githubCommitStatus{}, false
 	}
 	status, ok := githubCommitStatusFromTrigger(trigger, runStatus)
@@ -576,7 +591,7 @@ func githubCommitState(runStatus string) (state, description string) {
 		return "pending", "Sparkwing pipeline is running"
 	case "success":
 		return "success", "Sparkwing pipeline passed"
-	case "failed":
+	case "failed", "timed_out":
 		return "failure", "Sparkwing pipeline failed"
 	default:
 		return "error", "Sparkwing pipeline could not complete"
@@ -605,14 +620,8 @@ func (r *githubCommitStatusReporter) post(ctx context.Context, status githubComm
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	token := r.token
-	if r.tokenFor != nil {
-		if token, err = r.tokenFor(ctx, status); err != nil {
-			return fmt.Errorf("installation token: %w", err)
-		}
-	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+r.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "sparkwing-controller")
 	req.Header.Set("X-GitHub-Api-Version", githubStatusAPIVersion)

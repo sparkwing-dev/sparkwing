@@ -2150,6 +2150,8 @@ func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) 
 func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
 func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, repositoryID int64) (_ []GitHubAppTrigger, err error)
+func (t *Tenant) GitHubCheckRun(ctx context.Context, runID string) (int64, error)
+func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) ([]*Trigger, error)
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
@@ -2191,6 +2193,7 @@ func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
 func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error)
+func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error)
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)

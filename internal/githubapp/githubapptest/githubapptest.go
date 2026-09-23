@@ -1,7 +1,7 @@
 // Package githubapptest runs a local stand-in for the parts of GitHub a
 // Sparkwing GitHub App talks to: App JWT authentication, installations,
 // installation tokens restricted to repositories, the user authorization
-// code exchange, organization memberships and commit statuses. It enforces
+// code exchange, organization memberships, commit statuses and check runs. It enforces
 // what GitHub enforces, so a suite can prove the controller asks for no more
 // than it should.
 package githubapptest
@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
@@ -46,6 +47,9 @@ type Installation struct {
 	Account   githubapp.Account
 	Repos     []Repo
 	Suspended bool
+	// NoChecks is an installation whose owner has not accepted the App's
+	// checks permission: GitHub refuses to mint a token that asks for it.
+	NoChecks bool
 }
 
 // MintedToken records one installation token the fake issued.
@@ -61,6 +65,22 @@ type Status struct {
 	SHA     string
 	State   string
 	Context string
+}
+
+// CheckRunCall records one check run write the fake accepted. An update
+// carries the name and head commit the check run was created with.
+type CheckRunCall struct {
+	Method     string
+	ID         int64
+	Repo       string
+	Name       string
+	HeadSHA    string
+	Status     string
+	Conclusion string
+	DetailsURL string
+	ExternalID string
+	Title      string
+	Summary    string
 }
 
 type userCode struct {
@@ -90,6 +110,10 @@ type GitHub struct {
 	tokens map[string]*issuedToken
 	minted []MintedToken
 	stats  []Status
+	checks []CheckRunCall
+	// checkRuns maps a check run id to the call that created it.
+	checkRuns  map[int64]CheckRunCall
+	failChecks int
 }
 
 // New starts the fake and stops it when t ends.
@@ -101,10 +125,11 @@ func New(t testing.TB) *GitHub {
 	}
 	g := &GitHub{
 		Key: key, t: t,
-		insts:  map[int64]*Installation{},
-		codes:  map[string]*userCode{},
-		users:  map[string]*userCode{},
-		tokens: map[string]*issuedToken{},
+		insts:     map[int64]*Installation{},
+		codes:     map[string]*userCode{},
+		users:     map[string]*userCode{},
+		tokens:    map[string]*issuedToken{},
+		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
@@ -115,6 +140,8 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /repos/{owner}/{repo}/installation", g.appOnly(g.handleRepoInstallation))
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
+	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
+	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
 	srv := httptest.NewServer(mux)
 	g.URL = srv.URL
 	t.Cleanup(srv.Close)
@@ -142,6 +169,28 @@ func (g *GitHub) SetRepos(id int64, repos ...Repo) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.insts[id].Repos = repos
+}
+
+// SetChecksGranted records whether installation id's owner accepted the
+// checks permission.
+func (g *GitHub) SetChecksGranted(id int64, granted bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.insts[id].NoChecks = !granted
+}
+
+// FailCheckRuns makes the next n check run writes answer 502.
+func (g *GitHub) FailCheckRuns(n int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failChecks = n
+}
+
+// CheckRunCalls lists the check run writes accepted so far.
+func (g *GitHub) CheckRunCalls() []CheckRunCall {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]CheckRunCall(nil), g.checks...)
 }
 
 // IssueCode registers an authorization code GitHub would hand the browser of
@@ -359,6 +408,10 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if _, checks := req.Permissions["checks"]; checks && inst.NoChecks {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "The permissions requested are not granted to this installation."})
+		return
+	}
 	tok := &issuedToken{
 		installation: inst.ID, repos: map[string]bool{}, permissions: req.Permissions,
 		expires: time.Now().Add(time.Hour),
@@ -441,6 +494,76 @@ func (g *GitHub) handleStatus(w http.ResponseWriter, r *http.Request) {
 	g.stats = append(g.stats, Status{Repo: full, SHA: r.PathValue("sha"), State: req.State, Context: req.Context})
 	g.mu.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]string{"state": req.State})
+}
+
+func (g *GitHub) handleCheckRun(w http.ResponseWriter, r *http.Request) {
+	tok := g.installationToken(r)
+	full := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	if tok == nil || !tok.repos[full] || tok.permissions["checks"] != "write" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Resource not accessible by integration"})
+		return
+	}
+	var req struct {
+		Name       string `json:"name"`
+		HeadSHA    string `json:"head_sha"`
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+		DetailsURL string `json:"details_url"`
+		ExternalID string `json:"external_id"`
+		Output     *struct {
+			Title   string `json:"title"`
+			Summary string `json:"summary"`
+		} `json:"output"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failChecks > 0 {
+		g.failChecks--
+		writeJSON(w, http.StatusBadGateway, map[string]string{"message": "Server Error"})
+		return
+	}
+	call := CheckRunCall{
+		Method: "create", Repo: full, Name: req.Name, HeadSHA: req.HeadSHA, Status: req.Status,
+		Conclusion: req.Conclusion, DetailsURL: req.DetailsURL, ExternalID: req.ExternalID,
+	}
+	if req.Output != nil {
+		call.Title, call.Summary = req.Output.Title, req.Output.Summary
+		// GitHub refuses a summary longer than this many characters.
+		if utf8.RuneCountInString(call.Summary) > 65535 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "output.summary is too long"})
+			return
+		}
+	}
+	if (call.Status == "completed") != (call.Conclusion != "") {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "conclusion goes with status completed"})
+		return
+	}
+	if r.Method == http.MethodPatch {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		created, ok := g.checkRuns[id]
+		if err != nil || !ok || created.Repo != full {
+			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+			return
+		}
+		call.Method, call.ID, call.Name, call.HeadSHA = "update", id, created.Name, created.HeadSHA
+	} else {
+		if call.Name == "" || len(call.HeadSHA) != 40 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "name and head_sha are required"})
+			return
+		}
+		call.ID = int64(len(g.checkRuns) + 1000)
+		g.checkRuns[call.ID] = call
+	}
+	g.checks = append(g.checks, call)
+	status := http.StatusCreated
+	if call.Method == "update" {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]any{"id": call.ID, "status": call.Status})
 }
 
 func randomHex() string {

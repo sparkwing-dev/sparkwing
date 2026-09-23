@@ -24,3 +24,9 @@ func MuxRouteScopes(t *testing.T) map[string]string {
 func SetHostKeyScan(s *Server, scan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)) {
 	s.hostKeyScan = scan
 }
+
+// DrainGitHubChecks waits until every check run update s accepted has reached
+// GitHub or been given up on.
+func DrainGitHubChecks(ctx context.Context, s *Server) error {
+	return s.githubApp.checks.idle(ctx)
+}
