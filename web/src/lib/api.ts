@@ -1,4 +1,5 @@
 import { readCSRFCookie } from "./csrfCookie";
+import type { LogCompleteness } from "./logCompleteness";
 import type { TriggerGit } from "./triggerSource";
 
 function getApiUrl(): string {
@@ -385,6 +386,18 @@ export async function getNodeLogs(
   );
   if (!res.ok) return "";
   return res.text();
+}
+
+export async function getNodeLogCompleteness(
+  runID: string,
+  nodeID: string,
+): Promise<LogCompleteness | null> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/completeness`,
+    { cache: "no-store" },
+  ).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
 }
 
 export interface RunLogMatch {

@@ -39,6 +39,7 @@ import {
   type RunDetail,
   cancelRun,
   deleteRun,
+  getNodeLogCompleteness,
   getNodeLogs,
   listRunEvents,
   getNodeStreamUrl,
@@ -68,6 +69,11 @@ import Tooltip from "@/components/Tooltip";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import ResourceChart from "@/components/ResourceChart";
 import LogBucketView from "@/components/LogBucketView";
+import LogCompletenessLine from "@/components/LogCompletenessLine";
+import {
+  completenessSettled,
+  type LogCompleteness,
+} from "@/lib/logCompleteness";
 import SetupPanel from "@/components/SetupPanel";
 import SummaryPanel, { NodeAttrChips } from "@/components/SummaryPanel";
 import { parseLogLines } from "@/lib/logParser";
@@ -3912,6 +3918,9 @@ function StoredLogs({
   findCurrentLine?: number | null;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const [completeness, setCompleteness] = useState<LogCompleteness | null>(
+    null,
+  );
   const parsed = useMemo(
     () => (text === null ? null : parseLogLines(text.split("\n"))),
     [text],
@@ -3928,26 +3937,53 @@ function StoredLogs({
     };
   }, [runID, nodeID]);
 
+  // A node that just finished reads "streaming" until the runner's seal
+  // lands or its grace runs out, so the verdict is asked for again until
+  // it settles.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async (attempt: number) => {
+      const c = await getNodeLogCompleteness(runID, nodeID);
+      if (cancelled) return;
+      setCompleteness(c);
+      if (!completenessSettled(c) && c !== null && attempt < 12) {
+        timer = setTimeout(() => void poll(attempt + 1), 10_000);
+      }
+    };
+    void poll(0);
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [runID, nodeID]);
+
   if (text === null || parsed === null) {
     return <div className="text-sm text-[var(--muted)]">loading...</div>;
   }
   if (text.trim() === "") {
     return (
-      <div className="text-sm text-[var(--muted)]">
-        No logs captured for this node.
-      </div>
+      <>
+        <div className="text-sm text-[var(--muted)]">
+          No logs captured for this node.
+        </div>
+        <LogCompletenessLine completeness={completeness} />
+      </>
     );
   }
   return (
-    <LogBucketView
-      parsed={parsed}
-      jobId={`${runID}-${nodeID}`}
-      focusStep={focusStep}
-      focusLine={focusLine}
-      nodeSteps={steps}
-      findLineSet={findLineSet}
-      findCurrentLine={findCurrentLine}
-    />
+    <>
+      <LogBucketView
+        parsed={parsed}
+        jobId={`${runID}-${nodeID}`}
+        focusStep={focusStep}
+        focusLine={focusLine}
+        nodeSteps={steps}
+        findLineSet={findLineSet}
+        findCurrentLine={findCurrentLine}
+      />
+      <LogCompletenessLine completeness={completeness} />
+    </>
   );
 }
 

@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -239,6 +240,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/runs/grep", runsGrepHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}", nodeLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness", nodeLogCompletenessHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
 
 	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
@@ -1281,6 +1283,30 @@ func containsExact(list []string, v string) bool {
 func nodeLogsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serveLogs(b, w, r, r.PathValue("id"), r.PathValue("node"))
+	}
+}
+
+// nodeLogCompletenessHandler answers whether a node's log is whole, so the
+// dashboard can draw the synthetic line that says so after the log.
+func nodeLogCompletenessHandler(b backend.Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID, nodeID := r.PathValue("id"), r.PathValue("node")
+		nodes, err := b.ListNodes(r.Context(), runID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		i := slices.IndexFunc(nodes, func(n *store.Node) bool { return n.NodeID == nodeID })
+		if i < 0 {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("node %s not found in run %s", nodeID, runID))
+			return
+		}
+		c, err := backend.NodeLogCompleteness(r.Context(), b, runID, nodes[i], time.Now())
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, c)
 	}
 }
 
