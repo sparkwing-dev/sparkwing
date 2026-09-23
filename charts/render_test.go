@@ -3088,3 +3088,21 @@ func TestLogsStoreCeilingFlagsComeFromValues(t *testing.T) {
 		}
 	}
 }
+
+// The runner's own default listens on loopback only, so the chart names the
+// port a scrape reaches and turns the listener off when told to.
+func TestRunnerMetricsFlagFollowsMetricsPort(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: helm renders twice; the fast class runs under -short")
+	}
+	render := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-runner-bundle",
+			"templates/runner-deployment.yaml", "sparkwing", sets...))
+	}
+	if got, _ := hasFlag(render(), "--metrics-addr="); got != "--metrics-addr=:9090" {
+		t.Fatalf("default metrics flag = %q, want --metrics-addr=:9090", got)
+	}
+	if got, ok := hasFlag(render("runner.metricsPort=0"), "--metrics-addr"); !ok || got != "--metrics-addr=" {
+		t.Fatalf("metricsPort=0 metrics flag = %q, want --metrics-addr= to disable the listener", got)
+	}
+}

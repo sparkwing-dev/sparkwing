@@ -12,11 +12,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -308,5 +310,72 @@ func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
 	}
 	if got, _ := nodeRunner.Load().(string); got != "inprocess" {
 		t.Fatalf("the claim named node runner %q, want inprocess", got)
+	}
+}
+
+// Against a controller older than the claim filter a direct-source runner
+// claims without its list, and fails a run outside the list naming the list,
+// before anything is fetched.
+func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var reason string
+	var sentAllow []string
+	var claimed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			var claim struct {
+				AllowRepos []string `json:"allow_repos"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&claim)
+			sentAllow = claim.AllowRepos
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "evil", Pipeline: "demo", Status: "claimed", ClaimSeq: 1,
+				RepoURL: "https://git.invalid/evil/payload.git",
+				GitSHA:  "0123456789abcdef0123456789abcdef01234567",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/evil/finish":
+			var body struct {
+				Error string `json:"error"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			reason = body.Error
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/evil/done":
+			w.WriteHeader(http.StatusNoContent)
+			cancel()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, AllowRepos: allow, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// safety: this controller advertises no claim filter, so the runner claims
+	// without the field and its own refusal is what stops the run.
+	if sentAllow != nil {
+		t.Fatalf("claims carried allow_repos %q to a controller that does not advertise it", sentAllow)
+	}
+	if !strings.Contains(reason, "github.com/acme/*") || !strings.Contains(reason, "git.invalid/evil/payload") {
+		t.Fatalf("run finished with %q, want a refusal naming the repository and the allowlist", reason)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "source-direct")); !os.IsNotExist(statErr) {
+		t.Fatalf("a refused run still reached the fetch: %v", statErr)
 	}
 }

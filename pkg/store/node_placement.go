@@ -35,6 +35,9 @@ type RunnerPresence struct {
 	// another team never holds a node back; empty is the unauthenticated
 	// local runner, which belongs to [DefaultTeam].
 	TokenPrefix string
+	// AllowRepos is the repository list the runner sent with its last claim.
+	// Nil is a runner that sent none and may take any repository.
+	AllowRepos RepoFilter
 }
 
 // ClaimPlacement is the local-first policy applied to one legacy claim. A node
@@ -84,7 +87,7 @@ type placementDecision struct {
 	nodeOwned bool
 }
 
-func (p ClaimPlacement) decide(needs, nodePrefers []string, runner claimLabels, holdFrom *time.Time, now time.Time) placementDecision {
+func (p ClaimPlacement) decide(needs, nodePrefers []string, repo runRepository, runner claimLabels, holdFrom *time.Time, now time.Time) placementDecision {
 	prefers := p.prefersFor(nodePrefers)
 	nodeOwned := len(nodePrefers) > 0
 	switch {
@@ -92,7 +95,7 @@ func (p ClaimPlacement) decide(needs, nodePrefers []string, runner claimLabels, 
 		return placementDecision{reason: PlacementNone}
 	case preferenceMet(prefers, runner.soft):
 		return placementDecision{reason: PlacementPreferred, nodeOwned: nodeOwned}
-	case p.Hold > 0 && holdFrom != nil && now.Before(holdFrom.Add(p.Hold)) && p.someLiveRunnerCanTakeIt(needs, prefers):
+	case p.Hold > 0 && holdFrom != nil && now.Before(holdFrom.Add(p.Hold)) && p.someLiveRunnerCanTakeIt(needs, prefers, repo):
 		return placementDecision{hold: true, nodeOwned: nodeOwned}
 	default:
 		return placementDecision{reason: PlacementFallback, nodeOwned: nodeOwned}
@@ -165,10 +168,14 @@ func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (_ map[s
 }
 
 // safety: a runner that cannot execute the node is no reason to withhold it
-// from one that can, so the preference alone never earns a hold.
-func (p ClaimPlacement) someLiveRunnerCanTakeIt(needs, prefers []string) bool {
+// from one that can, so the preference alone never earns a hold, and neither
+// does a runner whose repository list would refuse the node's run.
+func (p ClaimPlacement) someLiveRunnerCanTakeIt(needs, prefers []string, repo runRepository) bool {
 	for _, runner := range p.Live {
 		if runner.FreeSlots < 1 {
+			continue
+		}
+		if runner.AllowRepos != nil && !repo.admitsNodeFor(runner.AllowRepos) {
 			continue
 		}
 		labels := newClaimLabels(runner.Labels)
@@ -187,6 +194,20 @@ func preferenceMet(prefers []string, have map[string]struct{}) bool {
 			continue
 		}
 		if labelTermSatisfied(term, have) {
+			return true
+		}
+	}
+	return false
+}
+
+// safety: the node's repository costs a read, so it is looked up only when some
+// live runner's list could turn on it.
+func (p ClaimPlacement) needsRunRepository() bool {
+	if p.Hold <= 0 {
+		return false
+	}
+	for _, runner := range p.Live {
+		if runner.AllowRepos != nil {
 			return true
 		}
 	}

@@ -83,16 +83,25 @@ type capabilitiesAuth struct {
 }
 
 type capabilitiesResp struct {
-	Teams capabilitiesTeams `json:"teams"`
-	Auth  capabilitiesAuth  `json:"auth"`
+	Teams  capabilitiesTeams  `json:"teams"`
+	Auth   capabilitiesAuth   `json:"auth"`
+	Claims capabilitiesClaims `json:"claims"`
+}
+
+// capabilitiesClaims tells a runner which claim fields this controller reads,
+// so a newer runner sends only what an older controller accepts.
+type capabilitiesClaims struct {
+	// AllowRepos reports that trigger and node claims take allow_repos.
+	AllowRepos bool `json:"allow_repos"`
 }
 
 // safety: unauthenticated, because a signed-out browser draws the sign-in page from it; it reports only
-// whether teams exist and which providers to offer.
+// whether teams exist, which providers to offer and which claim fields this controller reads.
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	var resp capabilitiesResp
 	resp.Teams.Enabled = s.MultiTeam()
 	resp.Auth.Providers = s.signInProviders()
+	resp.Claims.AllowRepos = true
 	writeJSON(w, http.StatusOK, resp)
 }
 

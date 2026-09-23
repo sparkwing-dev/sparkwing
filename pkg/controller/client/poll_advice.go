@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,6 +51,88 @@ func (c *Client) WithRunnerIdentity(id string) *Client {
 func (c *Client) WithTriggerNodeRunner(kind string) *Client {
 	c.triggerNodeRunner = kind
 	return c
+}
+
+// WithAllowRepos sends patterns, the repository list this runner's owner
+// allows, with every trigger and node claim, so the controller hands this
+// client only work from those repositories. An empty non-nil list claims
+// nothing; nil sends no list. The list goes only to a controller whose
+// GET /api/v1/capabilities advertises claims.allow_repos, because an older
+// one refuses a claim that carries it; against that controller the client
+// claims without it and the runner refuses a disallowed run itself.
+func (c *Client) WithAllowRepos(patterns []string) *Client {
+	if patterns == nil {
+		c.allowRepos = nil
+		return c
+	}
+	c.allowRepos = append([]string{}, patterns...)
+	return c
+}
+
+const (
+	repoFilterUnknown int32 = iota
+	repoFilterAdvertised
+	repoFilterAbsent
+)
+
+// capabilitiesReadTimeout bounds the one capabilities read, so a slow answer
+// delays a claim rather than holding it.
+const capabilitiesReadTimeout = 5 * time.Second
+
+// claimAllowRepos is the list a claim carries, or nil when there is none or
+// the controller does not advertise the field. A read that fails leaves the
+// answer unknown and this claim without the list, and the next claim asks
+// again.
+func (c *Client) claimAllowRepos(ctx context.Context) []string {
+	if c.allowRepos == nil {
+		return nil
+	}
+	switch c.repoFilter.Load() {
+	case repoFilterAdvertised:
+		return c.allowRepos
+	case repoFilterAbsent:
+		return nil
+	}
+	advertised, known := c.readRepoFilterCapability(ctx)
+	if !known {
+		return nil
+	}
+	if advertised {
+		c.repoFilter.Store(repoFilterAdvertised)
+		return c.allowRepos
+	}
+	c.repoFilter.Store(repoFilterAbsent)
+	return nil
+}
+
+func (c *Client) readRepoFilterCapability(ctx context.Context) (advertised, known bool) {
+	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
+	if err != nil {
+		return false, false
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return false, false
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return false, true
+	default:
+		return false, false
+	}
+	var caps struct {
+		Claims struct {
+			AllowRepos bool `json:"allow_repos"`
+		} `json:"claims"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		return false, false
+	}
+	return caps.Claims.AllowRepos, true
 }
 
 // meteredInProcessNodesCode is the code the controller answers a metered

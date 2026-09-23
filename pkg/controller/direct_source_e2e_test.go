@@ -83,7 +83,8 @@ func newDirectSourceE2E(t *testing.T) *directSourceE2E {
 		Command string `json:"command"`
 	}
 	if code := e.f.call("POST", "/api/v1/team/runner-tokens", e.alice.auth,
-		map[string]string{"name": "alice-laptop"}, &minted); code != http.StatusCreated {
+		map[string]any{"name": "alice-laptop", "repos": []string{envOr("SPARKWING_E2E_ALLOW_REPO", "github.com/sparkwing-dev/sparkwing")}},
+		&minted); code != http.StatusCreated {
 		t.Fatalf("mint runner token = %d", code)
 	}
 	e.command = minted.Command

@@ -393,11 +393,13 @@ expires_at}`: a bearer the controller signs with the grant key
 or until the requesting credential expires, whichever comes first. The cache
 verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
 without calling the controller and confines the request to that team. The
-grant key is a secret of its own: the cache refuses to start, and the
-controller to mint, when it equals the cache's operator token, and it is never
-a runner's token, because pipeline code can read that token. A cache without
-a grant key accepts no grants, and a controller without one answers the route
-with 404. A GitHub Actions runner credential gets 403: it is confined to one
+grant key is a secret of its own: the cache refuses to start when it equals
+the cache's operator token, and it is never a runner's token, because pipeline
+code can read that token. A multi-team controller configured with a cache
+(`--cache-url` or `--cache-pod-url`) refuses to start without a grant key or
+with one equal to `SPARKWING_CACHE_TOKEN`. A single-team controller starts
+either way: without a key it answers the route with 404, and with the operator
+token as its key it answers 503. A cache without a grant key accepts no grants. A GitHub Actions runner credential gets 403: it is confined to one
 repository, and a grant opens the team's whole tree.
 
 - `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own

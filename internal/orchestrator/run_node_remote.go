@@ -40,6 +40,7 @@ func runNodeRemote(
 	trigger *store.Trigger,
 	run *store.Run,
 	controllerURL, logsURL, gitcacheURL, cacheGrant, runID, nodeID, token string,
+	allow *sourceurl.RepoAllowlist,
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	if cacheGrant == "" {
@@ -59,6 +60,13 @@ func runNodeRemote(
 	repoURL, sourceErr := TriggerSourceURL(trigger, direct)
 	if sourceErr != nil {
 		return runner.Result{}, sourceErr
+	}
+	if allow != nil && (direct || !allow.Empty()) {
+		if err := AdmitTriggerSource(*allow, trigger, repoURL); err != nil {
+			logger.Warn("runNodeRemote: refused a node from a repository this machine does not allow",
+				"run_id", runID, "node_id", nodeID, "allow_repo", allow.String(), "err", err)
+			return runner.Result{}, err
+		}
 	}
 	if repoURL == "" {
 		return runner.Result{},
@@ -296,13 +304,46 @@ var remoteExecutionPrivateEnv = map[string]bool{
 	"SPARKWING_ATTEMPT_ORDINAL":          true,
 }
 
+// ErrRepoNotAllowed marks a run whose repository this machine's owner did not
+// allow it to build.
+var ErrRepoNotAllowed = errors.New("repository not allowed on this machine")
+
+// AdmitTriggerSource refuses trigger unless allow admits every repository it
+// names: the remote fetchURL this machine would fetch, after any ssh-to-https
+// rewrite, and the repository its GitHub fields name. A runner that fetches
+// with its own credentials runs what it fetches as its own user, so the machine
+// owner's list, not the controller, decides what it builds.
+func AdmitTriggerSource(allow sourceurl.RepoAllowlist, trigger *store.Trigger, fetchURL string) error {
+	named, err := sourceurl.TriggerRepository(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo)
+	if err != nil {
+		return err
+	}
+	identities := []string{named}
+	if fetchURL != "" {
+		fetched, err := sourceurl.Identity(fetchURL)
+		if err != nil {
+			return err
+		}
+		identities = append(identities, fetched)
+	}
+	for _, id := range identities {
+		if id != "" && !allow.Admits(id) {
+			return fmt.Errorf("%w: run %s builds %s, which this machine's --allow-repo list (%s) does not name; "+
+				"trigger it again for a runner whose list names it", ErrRepoNotAllowed, trigger.ID, id, allow)
+		}
+	}
+	return nil
+}
+
 // TriggerSourceURL is the remote a trigger's source comes from; direct reports
 // a runner that fetches it itself rather than through the git cache.
 func TriggerSourceURL(trigger *store.Trigger, direct bool) (string, error) {
 	if trigger == nil {
 		return "", nil
 	}
-	return bincache.TriggerRepoURL(triggerGitHubRepository(trigger), trigger.RepoURL, direct)
+	return bincache.TriggerRepoURL(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo, direct)
 }
 
 func triggerGitHubRepository(trigger *store.Trigger) string {

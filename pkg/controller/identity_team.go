@@ -2,11 +2,13 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -211,7 +213,14 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 
 type runnerTokenReq struct {
 	Name string `json:"name"`
+	// Repos are the repositories the machine may build, as host/path patterns
+	// such as github.com/acme/*. They go into the advertised command, since the
+	// allowlist is the machine owner's and lives on the machine.
+	Repos []string `json:"repos"`
 }
+
+// maxRunnerRepos bounds the patterns one advertised command carries.
+const maxRunnerRepos = 32
 
 type runnerTokenResp struct {
 	Token   string `json:"token"`
@@ -256,6 +265,20 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, errors.New("name is 1 to 63 letters, digits, '-', '_' or '.'"))
 		return
 	}
+	if len(req.Repos) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("repos names the repositories this machine may build, "+
+			"e.g. github.com/acme/*; the machine runs their pipeline code as the user who starts it"))
+		return
+	}
+	if len(req.Repos) > maxRunnerRepos {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("repos holds at most %d patterns", maxRunnerRepos))
+		return
+	}
+	allow, err := sourceurl.ParseRepoAllowlist(req.Repos)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("repos: %w", err))
+		return
+	}
 	raw, tok, err := t.CreateRunnerToken(r.Context(), runnerPrincipalPrefix+name, runnerTokenScopes, p.AccountID, time.Now().UTC())
 	if errors.Is(err, store.ErrRunnerTokenLimit) {
 		writeError(w, http.StatusConflict, err)
@@ -268,23 +291,30 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 	s.logger.Info("runner token minted", "team", string(p.Team), "prefix", tok.Prefix, "by", p.AccountID)
 	writeJSON(w, http.StatusCreated, runnerTokenResp{
 		Token: raw, Prefix: tok.Prefix,
-		Command: "SPARKWING_AGENT_TOKEN=" + raw + " " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name),
+		Command: "SPARKWING_AGENT_TOKEN=" + raw + " " + runnerConnectArgs(s.controllerURL(r), s.logsURL, name, allow),
 	})
 }
 
 // runnerConnectArgs is the command that turns a machine into one of the team's
-// runners: it claims triggered runs as well as their nodes, fetches each run's
+// runners: it claims triggered runs as well as their nodes, serves no metrics
+// listener (a second runner on the machine would collide on its port, and
+// nothing scrapes a laptop), fetches each run's
 // source itself with the machine's own git credentials (there is no --gitcache,
-// since the git cache is the operator's), ships logs to the logs service the
-// controller announces, and keeps claiming until stopped. The controller serves
-// no logs route, so with no logs service announced the flag is left out and the
-// runner keeps logs on the machine.
-func runnerConnectArgs(controllerURL, logsURL, name string) string {
+// since the git cache is the operator's), builds only the repositories allow
+// names, ships logs to the logs service the controller announces, and keeps
+// claiming until stopped. The controller serves no logs route, so with no logs
+// service announced the flag is left out and the runner keeps logs on the
+// machine. Each pattern is single-quoted because '*' is a shell glob; the
+// pattern grammar admits no quote.
+func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist) string {
 	cmd := "sparkwing-runner runner --controller " + controllerURL
 	if logsURL != "" {
 		cmd += " --logs " + strings.TrimRight(logsURL, "/")
 	}
-	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --holder-prefix " + name
+	for _, p := range allow.Patterns() {
+		cmd += " --allow-repo '" + p + "'"
+	}
+	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {

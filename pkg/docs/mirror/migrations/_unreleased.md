@@ -108,3 +108,40 @@ A self-hosted controller using the built-in cipher needs no change. Its first
 start reseals every row in place and logs how many it resealed; keep the same
 `SPARKWING_SECRETS_KEY` across the upgrade.
 
+## A runner without the git cache names the repositories it may build
+
+`sparkwing-runner runner` started without `--gitcache` refuses to start until it
+has at least one `--allow-repo`. Such a runner fetches, compiles and runs each
+run's pipeline code as the user who started it, and any team member who can
+trigger a run chose the repository, so the machine's owner now names what it
+may build.
+
+- **Before:** `sparkwing-runner runner --controller https://c --also-claim-triggers ...`
+- **After:** `sparkwing-runner runner --controller https://c --allow-repo 'github.com/acme/*' --also-claim-triggers ...`
+
+A pattern is a host and path with no scheme; `*` matches within one path
+segment, and matching ignores case. Quote a pattern that holds `*`. The runner
+sends the list as `allow_repos` with every trigger and node claim to a
+controller whose `GET /api/v1/capabilities` advertises `claims.allow_repos`,
+and that controller hands it only runs from those repositories. The runner and
+controller upgrade in either order: against an older controller the runner
+claims without the field, may claim a run outside its list, and fails that run
+before fetching anything, with a reason naming the repository and the list. A
+runner that sends no list claims as before. A `--github-actions` runner
+given no list builds only its own repository, and a runner with `--gitcache` is
+unaffected unless given a list.
+
+`POST /api/v1/team/runner-tokens` now requires `repos`, a list of the same
+patterns, and the `command` it returns carries one `--allow-repo` per pattern.
+A client that sends only `name` gets 400. See
+[local-execution.md](../local-execution.md#what-a-laptop-runner-trusts).
+
+## A trigger names one repository
+
+`POST /api/v1/triggers` answers 400 when `git.repo_url`,
+`trigger.env.GITHUB_REPOSITORY` and `git.github_owner`/`git.github_repo` name
+different repositories. The run page read the GitHub name while a
+direct-source runner fetched `git.repo_url`, so such a trigger showed one
+repository and ran another. Send only the fields that name the repository you
+mean, or make them agree; `https://github.com/acme/app.git`,
+`git@github.com:acme/app.git` and `acme/app` agree.

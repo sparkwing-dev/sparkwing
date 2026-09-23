@@ -541,6 +541,44 @@ unlock.
 
 ### Security
 
+- **runner (Breaking):** a runner without the git cache builds only the
+  repositories its owner allows. It fetched, compiled and ran pipeline code
+  from whatever repository a run named, as the user who started it, so any
+  team editor could run code with a laptop owner's ssh keys and cloud
+  credentials. `--allow-repo` (host/path, `*` within one segment) is now
+  required without `--gitcache`. The runner sends the list as `allow_repos`
+  with each trigger and node claim to a controller whose
+  `/api/v1/capabilities` advertises `claims.allow_repos`, and that controller
+  hands it only runs from those repositories, leaving the rest for other
+  runners; a runner whose list
+  refuses a node's repository no longer holds that node back from the cloud
+  under local-first placement. A run outside the list that still reaches the
+  runner fails before anything is fetched, naming the repository and the list.
+  `POST /api/v1/team/runner-tokens` requires `repos`, and the machines page
+  asks for them. See
+  [migration guide](migrations/_unreleased.md#a-runner-without-the-git-cache-names-the-repositories-it-may-build).
+- **runner:** a direct-source checkout reads no system or global git config
+  and skips LFS smudging, so a fetched tree cannot name a filter driver or
+  hook that runs; the fetch refuses http redirects, hosts that resolve to
+  internal or special-purpose addresses, and cluster names, runs ssh in batch
+  mode with strict host keys and no forwarding, and gives up after ten
+  minutes. Mirrors are keyed by a normalized remote and capped at 20 and
+  10 GiB, and a `.sparkwing` symlink is refused. See
+  [Team runners fetch source themselves](docs/local-execution.md#team-runners-fetch-source-themselves).
+- **controller (Breaking):** a trigger whose `git.repo_url`,
+  `GITHUB_REPOSITORY` and `github_owner`/`github_repo` name different
+  repositories is refused with 400, and a runner refuses such a stored
+  trigger, so a run can no longer show one repository and fetch another. See
+  [migration guide](migrations/_unreleased.md#a-trigger-names-one-repository).
+- **runner:** `sparkwing-runner runner` serves `/metrics` on
+  `127.0.0.1:9090` by default instead of every interface, and the command the
+  machines page prints passes `--metrics-addr=` so a laptop runner opens no
+  listener and a second runner on the machine does not collide. The runner
+  chart passes `:9090` itself and now turns the listener off when
+  `runner.metricsPort` is 0.
+- **controller:** a multi-team controller configured with a cache refuses to
+  start without `SPARKWING_CACHE_GRANT_KEY`, or with it equal to
+  `SPARKWING_CACHE_TOKEN`, instead of failing each grant request at run time.
 - **controller:** a run is attributed to the credential that submitted it.
   `POST /api/v1/triggers` took the run's user from `trigger.user` in the body,
   so any caller could put a run under another person's name. The controller

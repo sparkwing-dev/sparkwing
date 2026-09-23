@@ -102,6 +102,8 @@ spec:
             {{- include "sparkwing-runner-bundle.runnerLabelArgs" . | nindent 12 }}
             {{- if gt (int .Values.runner.metricsPort) 0 }}
             - {{ printf "--metrics-addr=:%d" (int .Values.runner.metricsPort) | quote }}
+            {{- else }}
+            - --metrics-addr=
             {{- end }}
             {{- if .Values.runner.alsoClaimTriggers }}
             - --also-claim-triggers

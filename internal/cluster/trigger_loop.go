@@ -30,7 +30,11 @@ type TriggerLoopOptions struct {
 	// GitcacheURL is the operator's git cache. Empty means direct source: the
 	// runner fetches each trigger's repository itself with its own git
 	// credentials, and so do the node executors it starts.
-	GitcacheURL     string
+	GitcacheURL string
+	// AllowRepos is the machine owner's list of repositories this runner may
+	// build. A direct-source runner refuses every run outside it, an empty list
+	// included; with a git cache it binds only when given.
+	AllowRepos      sourceurl.RepoAllowlist
 	Token           string
 	RunnerKind      string
 	K8sNamespace    string
@@ -86,11 +90,15 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
 		WithRunnerIdentity(processRunnerIdentity("trigger-loop")).
 		WithTriggerNodeRunner(nodeRunner)
+	if opts.GitcacheURL == "" || !opts.AllowRepos.Empty() {
+		cli.WithAllowRepos(opts.AllowRepos.Patterns())
+	}
 	logger.Info(
 		"trigger loop started",
 		"controller", opts.ControllerURL,
 		"gitcache", opts.GitcacheURL,
 		"direct_source", opts.GitcacheURL == "",
+		"allow_repo", opts.AllowRepos.String(),
 		"poll", opts.Poll,
 		"work_root", opts.WorkRoot,
 		"max_concurrent", opts.MaxConcurrent,
@@ -197,6 +205,12 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	direct := opts.GitcacheURL == ""
 	repoURL, sourceErr := orchestrator.TriggerSourceURL(trigger, direct)
+	if sourceErr == nil && (direct || !opts.AllowRepos.Empty()) {
+		if sourceErr = orchestrator.AdmitTriggerSource(opts.AllowRepos, trigger, repoURL); sourceErr != nil {
+			logger.Warn("trigger loop: refused a run from a repository this machine does not allow",
+				"run_id", trigger.ID, "allow_repo", opts.AllowRepos.String(), "err", sourceErr)
+		}
+	}
 
 	childCtx, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()

@@ -38,7 +38,7 @@ func TestRunNodeRemoteCancelAbortsSourceFetch(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := runNodeRemote(ctx, trigger, run, "", "", srv.URL, "", "run-1", "node-1", "", logger)
+		_, err := runNodeRemote(ctx, trigger, run, "", "", srv.URL, "", "run-1", "node-1", "", nil, logger)
 		done <- err
 	}()
 

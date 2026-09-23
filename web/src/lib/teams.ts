@@ -306,14 +306,23 @@ export async function listRunnerTokens(): Promise<RunnerToken[]> {
 
 export async function mintRunnerToken(
   name: string,
+  repos: string[],
 ): Promise<MintedRunnerToken> {
   const res = await send(
     "POST",
     "/api/v1/team/runner-tokens",
     "Connect a machine",
-    { name },
+    { name, repos },
   );
   return (await res.json()) as MintedRunnerToken;
+}
+
+// The page collects one free-form field; the controller validates each pattern.
+export function parseRepoPatterns(input: string): string[] {
+  return input
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 export async function revokeRunnerToken(prefix: string): Promise<void> {
@@ -332,6 +341,7 @@ export const controllerURLPlaceholder = "<controller-url>";
 export function runnerConnectCommand(
   minted: MintedRunnerToken,
   name: string,
+  repos: string[],
 ): string {
   if (minted.command) return minted.command;
   const quoted = (s: string) =>
@@ -340,7 +350,8 @@ export function runnerConnectCommand(
     `SPARKWING_AGENT_TOKEN=${quoted(minted.token)}`,
     "sparkwing-runner runner",
     `--controller ${controllerURLPlaceholder}`,
-    "--also-claim-triggers --max-claims-before-restart 0",
+    ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
+    "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }
