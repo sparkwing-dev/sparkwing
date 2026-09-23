@@ -363,20 +363,44 @@ var errHostKeyRead = errors.New("host key read")
 // safety: an owner names the host, so it is held to the runner's own rule
 // for where a fetch may go, and the controller never probes its own network.
 func scanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, error) {
-	ctx, cancel := context.WithTimeout(ctx, hostKeyScanTimeout)
-	defer cancel()
-	if err := sourceurl.CheckResolvedHost(ctx, "ssh://git@"+host+"/scan", net.DefaultResolver.LookupIPAddr); err != nil {
-		return nil, err
-	}
-	return readHostKey(ctx, net.JoinHostPort(host, strconv.Itoa(port)))
+	var d net.Dialer
+	return scanHostKeyVia(ctx, host, port, net.DefaultResolver.LookupIPAddr, d.DialContext)
 }
 
-func readHostKey(ctx context.Context, addr string) (_ ssh.PublicKey, err error) {
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", addr)
+// safety: the name is resolved once, and the scan dials the address that
+// passed the check, so a resolver that answers differently the second time
+// cannot steer the dial inward. The name stays the host key's.
+func scanHostKeyVia(ctx context.Context, host string, port int, lookup sourceurl.Lookup,
+	dial func(ctx context.Context, network, addr string) (net.Conn, error),
+) (ssh.PublicKey, error) {
+	ctx, cancel := context.WithTimeout(ctx, hostKeyScanTimeout)
+	defer cancel()
+	var resolved []net.IPAddr
+	resolveOnce := func(ctx context.Context, name string) ([]net.IPAddr, error) {
+		addrs, err := lookup(ctx, name)
+		resolved = addrs
+		return addrs, err
+	}
+	if err := sourceurl.CheckResolvedHost(ctx, "ssh://git@"+host+"/scan", resolveOnce); err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		if len(resolved) == 0 {
+			return nil, fmt.Errorf("%s does not resolve", host)
+		}
+		ip = resolved[0].IP
+	}
+	conn, err := dial(ctx, "tcp", net.JoinHostPort(ip.String(), strconv.Itoa(port)))
 	if err != nil {
 		return nil, err
 	}
+	return readHostKey(ctx, conn, net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// readHostKey runs the handshake on conn, which it closes, as the ssh client
+// of addr.
+func readHostKey(ctx context.Context, conn net.Conn, addr string) (_ ssh.PublicKey, err error) {
 	defer func() {
 		if cerr := conn.Close(); cerr != nil && !errors.Is(cerr, net.ErrClosed) && err == nil {
 			err = cerr

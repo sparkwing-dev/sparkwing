@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"net"
 	"testing"
 
@@ -39,7 +40,11 @@ func TestReadHostKeyTakesTheKeyTheServerPresents(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 		_, _, _, _ = ssh.NewServerConn(conn, cfg)
 	}()
-	got, err := readHostKey(context.Background(), ln.Addr().String())
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := readHostKey(context.Background(), conn, ln.Addr().String())
 	if err != nil {
 		t.Fatalf("read host key: %v", err)
 	}
@@ -55,5 +60,39 @@ func TestScanHostKeyRefusesAnInwardHost(t *testing.T) {
 		if _, err := scanHostKey(context.Background(), host, 22); err == nil {
 			t.Errorf("scan of %s went ahead", host)
 		}
+	}
+}
+
+// A name whose resolver answers a public address to the check and an
+// internal one right after must not reach the internal one: the scan dials
+// the very address it checked and never resolves the name a second time.
+func TestScanHostKeyDialsTheAddressItChecked(t *testing.T) {
+	lookups := 0
+	rebinding := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		lookups++
+		if lookups == 1 {
+			return []net.IPAddr{{IP: net.ParseIP("140.82.112.3")}}, nil
+		}
+		return []net.IPAddr{{IP: net.ParseIP("10.0.0.8")}}, nil
+	}
+	var dialed []string
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if net.ParseIP(host) == nil {
+			addrs, err := rebinding(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			addr = net.JoinHostPort(addrs[0].IP.String(), port)
+		}
+		dialed = append(dialed, addr)
+		return nil, errors.New("test dial goes nowhere")
+	}
+	_, _ = scanHostKeyVia(context.Background(), "git.example.com", 2222, rebinding, dial)
+	if len(dialed) != 1 || dialed[0] != "140.82.112.3:2222" {
+		t.Fatalf("dialed %v, want exactly the checked public address", dialed)
 	}
 }
