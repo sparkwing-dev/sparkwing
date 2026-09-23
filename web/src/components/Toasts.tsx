@@ -41,6 +41,9 @@ export default function Toaster() {
   useEffect(() => {
     const fn: Listener = (next) => setList(next);
     listeners.add(fn);
+    // A toast raised by a component that mounted first would otherwise wait
+    // for the next toast to appear.
+    fn(toasts);
     return () => {
       listeners.delete(fn);
     };

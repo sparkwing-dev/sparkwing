@@ -5,6 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import { type Role, switchTeam } from "@/lib/teams";
 import { useTeamState } from "@/lib/useTeam";
 import { toast } from "@/components/Toasts";
+import {
+  rememberTeamNotice,
+  switchedNotice,
+  takeTeamNotice,
+} from "@/lib/teamNotice";
 
 export function RolePill({ role }: { role: Role }) {
   const tone =
@@ -27,6 +32,11 @@ export default function TeamSwitcher() {
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const notice = takeTeamNotice();
+    if (notice) toast(notice, "success", 6000);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -58,6 +68,8 @@ export default function TeamSwitcher() {
     setSwitching(slug);
     try {
       await switchTeam(slug);
+      const to = me.memberships.find((m) => m.slug === slug);
+      rememberTeamNotice(switchedNotice(to?.display_name ?? slug));
       window.location.reload();
     } catch (err) {
       setSwitching(null);

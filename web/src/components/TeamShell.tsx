@@ -7,6 +7,7 @@ import { type Me, acceptInvitation, renameTeam } from "@/lib/teams";
 import { refreshTeamState, useTeamState } from "@/lib/useTeam";
 import { RolePill } from "@/components/TeamSwitcher";
 import { toast } from "@/components/Toasts";
+import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
 
 const tabs = [
   { href: "/team", label: "Members" },
@@ -71,10 +72,11 @@ export function errorText(err: unknown): string {
 export function InvitationsForMe({ me }: { me: Me }) {
   const [busy, setBusy] = useState<string | null>(null);
   if (me.invitations.length === 0) return null;
-  async function accept(id: string) {
+  async function accept(id: string, team: string) {
     setBusy(id);
     try {
       await acceptInvitation(id);
+      rememberTeamNotice(joinedNotice(team));
       window.location.reload();
     } catch (err) {
       setBusy(null);
@@ -92,12 +94,16 @@ export function InvitationsForMe({ me }: { me: Me }) {
             You are invited to join{" "}
             <span className="font-medium">{inv.team_display_name}</span> as{" "}
             <RolePill role={inv.role} />
+            <div className="text-xs text-[var(--muted)] mt-1">
+              Accepting adds it to your teams and switches to it; your current
+              teams stay in the team menu.
+            </div>
           </div>
           <button
             type="button"
             className={buttonClass}
             disabled={busy !== null}
-            onClick={() => accept(inv.id)}
+            onClick={() => accept(inv.id, inv.team_display_name)}
           >
             {busy === inv.id ? "Joining…" : "Accept"}
           </button>

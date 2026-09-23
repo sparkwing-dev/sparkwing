@@ -12,6 +12,7 @@ import {
 } from "@/components/TeamShell";
 import { toast } from "@/components/Toasts";
 import { createTeam, slugFromName, teamSlugProblem } from "@/lib/teams";
+import { createdNotice } from "@/lib/teamNotice";
 import { refreshTeamState, useTeamState } from "@/lib/useTeam";
 
 export default function NewTeamPage() {
@@ -41,6 +42,7 @@ export default function NewTeamPage() {
     try {
       await createTeam(effectiveSlug, name.trim());
       await refreshTeamState();
+      toast(createdNotice(name.trim()), "success");
       router.push("/team");
     } catch (err) {
       setCreating(false);
@@ -52,8 +54,9 @@ export default function NewTeamPage() {
     <div className="flex-1 overflow-y-auto p-6 max-w-xl mx-auto w-full">
       <h1 className="text-xl font-bold mb-1">Create a team</h1>
       <p className="text-sm text-[var(--muted)] mb-6">
-        You become its owner, and it becomes your active team. Pipelines, runs,
-        secrets and machines belong to one team.
+        You&apos;ll own the new team and switch to it. Your personal space and
+        other teams stay as they are - switch between them anytime from the team
+        menu. Each team has its own pipelines, runs, secrets and machines.
       </p>
       <form
         onSubmit={submit}
