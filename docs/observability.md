@@ -738,6 +738,8 @@ unlimited until an operator sets one.
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
 | `--egress-daily-cap-bytes` | yes | yes | yes | Bytes the process may send in a UTC day. Past it, every download it serves answers `429` until the day rolls, whoever asks. The per-principal budgets bound one caller; this bounds the month's bill at 31 times the cap however many principals share it. |
+| `--egress-team-daily-free-bytes` | no | no | yes | Bytes the cache serves one team without credits through its grants in a UTC day, 5 GiB by default. Past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
+| `--egress-team-daily-funded-bytes` | no | no | yes | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
 
 The controller's two concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming
@@ -760,15 +762,30 @@ route, and the logs service resolves one through the controller's
 whoami, so their monthly and concurrency caps fall on the caller that
 spent the bytes.
 
-The cache resolves every credentialed caller to the same name, so it
-carries **no per-principal budget**: a monthly cap there would answer
-`429` to every runner in the fleet at once, for up to a month. The
-per-team cap that protects the bill belongs to the controller, which
-knows who each bearer is. The cache's one refusal is
-`--egress-daily-cap-bytes`, the process-wide backstop: past it every
-metered download answers `429` with a `Retry-After` naming the wait until
-the UTC day rolls. Its health reports `egress.enforced: true` and
-`daily_cap_bytes` while that cap is set.
+The cache tells one kind of caller apart: a cache grant names the team
+the controller minted it for. Every byte the cache serves a grant, from
+binaries, artifacts, dependency archives and git mirror fetches, is
+charged to that team for the UTC day, and a team past its daily cap is
+refused with `429` and a `Retry-After` naming the wait until midnight
+UTC. The cap is `--egress-team-daily-funded-bytes` for a team the
+controller answers is funded and `--egress-team-daily-free-bytes`
+otherwise; the cache asks the same storage-tier route its free-storage
+share uses, and a funded answer older than five minutes counts as free,
+so a controller outage never lifts the cap for long. The operator's own
+team and the operator token carry no per-team cap, because every
+in-cluster runner shares them; a monthly cap on them would answer `429`
+to the whole fleet at once. The per-team monthly cap belongs to the
+controller, which knows who each bearer is.
+
+The cache's other refusal is `--egress-daily-cap-bytes`, the process-wide
+backstop: past it every metered download answers `429` with a
+`Retry-After` naming the wait until the UTC day rolls. Its health reports
+`egress.enforced: true` and `daily_cap_bytes` while that cap is set.
+
+`sparkwing.cache.team_download_bytes{team}` reports each team's bytes
+today for the ten teams that downloaded most, with the rest summed under
+`team="(other)"`, so the series count does not grow with the number of
+teams.
 
 A service running with auth off resolves every request to `anonymous`,
 which is one shared budget for the same reason; that is the laptop-local
@@ -809,8 +826,8 @@ discards what the handler writes to one, and an error body charges
 nothing, because it is not the download the budget is for.
 
 A budget is checked before a response starts and again as its bytes are
-written. A write that would pass the principal's monthly budget or the
-process's daily cap sends only what is left, and the service aborts the
+written. A write that would pass the principal's monthly budget, the team's
+daily cap or the process's daily cap sends only what is left, and the service aborts the
 response, so the client sees a failed transfer rather than a body that
 ends cleanly with bytes missing. Bytes are charged before they reach the
 connection, so parallel downloads started just under a budget cannot
@@ -829,7 +846,9 @@ on every tick. A cache with `--blob-store` keeps its own totals for the
 UTC day and the UTC month as one small object per month,
 `egress/<YYYY-MM>.json` in the bucket's operator namespace, written at most
 once a minute and at shutdown and read back at start, so a restart keeps
-the daily cap spent and `global_month_bytes` counting. A cache without a
+the daily cap spent and `global_month_bytes` counting. The same object
+carries each team's bytes for the day under `Principals`, so a restart
+keeps a team's daily cap spent too. A cache without a
 bucket and the logs service count in memory alone: their counters are per
 process and start over on a restart.
 

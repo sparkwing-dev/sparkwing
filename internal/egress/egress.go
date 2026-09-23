@@ -18,8 +18,11 @@
 // The global daily cap does refuse: past it every download on the process
 // is refused, and every one under way stops, until the UTC day rolls,
 // which is the backstop that bounds the bill when many principals each
-// stay inside their own budget. Both byte budgets are charged as bytes are
-// written, so parallel downloads cannot carry the total past either.
+// stay inside their own budget. A caller may also hold one principal to a
+// [DailyCap] it picks per request, which is how a service that knows each
+// caller's plan bounds what that caller downloads in a day. Every byte
+// budget is charged as bytes are written, so parallel downloads cannot
+// carry a total past it.
 //
 // Enforcement needs a principal the meter can tell apart. A service that
 // authenticates one shared token, or that serves with auth off, resolves
@@ -110,9 +113,23 @@ type BudgetError struct {
 	// whole process's bytes today rather than this principal's month, so
 	// UsedBytes and LimitBytes are the process's.
 	ProcessWide bool
+	// PrincipalDaily marks a refusal by the principal's [DailyCap], so
+	// UsedBytes and LimitBytes are the principal's bytes today.
+	PrincipalDaily bool
+	// Remedy is the [DailyCap]'s sentence on how its cap is raised.
+	Remedy string
 }
 
 func (e *BudgetError) Error() string {
+	if e.PrincipalDaily {
+		msg := fmt.Sprintf(
+			"daily download cap reached: %s has downloaded %s from this service today, its %s cap, so its downloads are refused until the UTC day rolls, in %s",
+			e.Principal, FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), roundWait(e.RetryAfter))
+		if e.Remedy == "" {
+			return msg
+		}
+		return msg + ". " + e.Remedy
+	}
 	if e.ProcessWide {
 		flag := e.Flag
 		if flag == "" {
@@ -177,6 +194,16 @@ func (e *ConcurrencyError) Error() string {
 }
 
 func (e *ConcurrencyError) Unwrap() error { return ErrConcurrencyLimit }
+
+// DailyCap bounds what one principal may download in a UTC day, on top of
+// the meter's own budgets. The caller picks it per request, because what a
+// principal may download can depend on who it is, such as whether a team
+// pays. Zero Bytes is no cap.
+type DailyCap struct {
+	Bytes int64
+	// Remedy ends a refusal by this cap, telling the caller how it is raised.
+	Remedy string
+}
 
 // SlotRetryAfter is the wait a refused response is told to observe. A
 // stream ends when its node does and a download ends when its bytes run
@@ -389,7 +416,13 @@ func (m *Meter) Config() Config { return m.cfg }
 // monthly budget is spent and nil otherwise, including when no budget
 // applies.
 func (m *Meter) Check(principal string) error {
-	if m == nil || !m.cfg.bytesBounded() {
+	return m.CheckDaily(principal, DailyCap{})
+}
+
+// CheckDaily is [Meter.Check] that also refuses a principal whose bytes
+// today have reached daily.
+func (m *Meter) CheckDaily(principal string, daily DailyCap) error {
+	if m == nil || (!m.cfg.bytesBounded() && daily.Bytes <= 0) {
 		return nil
 	}
 	m.mu.Lock()
@@ -400,11 +433,28 @@ func (m *Meter) Check(principal string) error {
 		m.refused++
 		return m.dailyCapErrorLocked(key, now)
 	}
+	if daily.Bytes > 0 && st.dayBytes >= daily.Bytes {
+		m.refused++
+		return principalDailyError(key, st, daily, "", now)
+	}
 	if m.cfg.PerPrincipalMonthlyBytes <= 0 || st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
 		return nil
 	}
 	m.refused++
 	return m.monthlyErrorLocked(key, st, now)
+}
+
+func principalDailyError(key string, st *principalCounters, daily DailyCap, class Class, now time.Time) *BudgetError {
+	return &BudgetError{
+		Principal:      key,
+		Class:          class,
+		LimitBytes:     daily.Bytes,
+		UsedBytes:      st.dayBytes,
+		Month:          st.month,
+		RetryAfter:     untilNextDay(now),
+		PrincipalDaily: true,
+		Remedy:         daily.Remedy,
+	}
 }
 
 func (c Config) bytesBounded() bool {
@@ -440,7 +490,7 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	if m == nil {
 		return
 	}
-	m.charge(principal, class, n, false)
+	m.charge(principal, class, n, false, DailyCap{})
 }
 
 // charged is what one charge admitted, and the refusal that stopped it
@@ -452,7 +502,7 @@ type charged struct {
 
 // safety: the bytes are charged before they are written, so writers racing
 // for the last of a budget cannot each see room and together pass it.
-func (m *Meter) charge(principal string, class Class, n int64, bounded bool) charged {
+func (m *Meter) charge(principal string, class Class, n int64, bounded bool, daily DailyCap) charged {
 	if n <= 0 {
 		return charged{}
 	}
@@ -468,6 +518,10 @@ func (m *Meter) charge(principal string, class Class, n int64, bounded bool) cha
 	if bounded && m.cfg.PerPrincipalMonthlyBytes > 0 && m.cfg.PerPrincipalMonthlyBytes-st.monthBytes < allowed {
 		allowed = max(m.cfg.PerPrincipalMonthlyBytes-st.monthBytes, 0)
 		refusal = m.monthlyErrorLocked(key, st, now)
+	}
+	if bounded && daily.Bytes > 0 && daily.Bytes-st.dayBytes < allowed {
+		allowed = max(daily.Bytes-st.dayBytes, 0)
+		refusal = principalDailyError(key, st, daily, class, now)
 	}
 	if refusal != nil {
 		m.refused++
@@ -526,7 +580,16 @@ func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, 
 	if m == nil {
 		return w
 	}
-	_, out := m.serve(w, r, principal, class)
+	return m.ServeDaily(w, r, principal, class, DailyCap{})
+}
+
+// ServeDaily is [Meter.Serve] that also stops a write at the principal's
+// daily cap.
+func (m *Meter) ServeDaily(w http.ResponseWriter, r *http.Request, principal string, class Class, daily DailyCap) http.ResponseWriter {
+	if m == nil {
+		return w
+	}
+	_, out := m.serve(w, r, principal, class, daily)
 	return out
 }
 
@@ -535,23 +598,30 @@ func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, 
 // so the client sees a failed transfer rather than a chunked body that
 // ends cleanly with bytes missing. A nil meter runs next unmetered.
 func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string, class Class, next http.Handler) {
+	m.HandleDaily(w, r, principal, class, DailyCap{}, next)
+}
+
+// HandleDaily is [Meter.Handle] that also cuts a response at the
+// principal's daily cap.
+func (m *Meter) HandleDaily(w http.ResponseWriter, r *http.Request, principal string, class Class, daily DailyCap, next http.Handler) {
 	if m == nil {
 		next.ServeHTTP(w, r)
 		return
 	}
-	counting, out := m.serve(w, r, principal, class)
+	counting, out := m.serve(w, r, principal, class, daily)
 	next.ServeHTTP(out, r)
 	if counting.cut {
 		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http recovers this sentinel and resets the connection; it is the only way a handler aborts a response
 	}
 }
 
-func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) (*countingWriter, http.ResponseWriter) {
+func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class, daily DailyCap) (*countingWriter, http.ResponseWriter) {
 	counting := &countingWriter{
 		ResponseWriter: w,
 		meter:          m,
 		principal:      principal,
 		class:          class,
+		daily:          daily,
 		bodyless:       Bodyless(r),
 		status:         http.StatusOK,
 	}
@@ -725,6 +795,9 @@ type DayUsage struct {
 	// total for it, so a restart later in the month resumes it too.
 	Month      string `json:",omitempty"`
 	MonthBytes int64  `json:",omitempty"`
+	// Principals is each principal's bytes on Day, so a restart does not
+	// reopen a [DailyCap].
+	Principals map[string]int64 `json:",omitempty"`
 }
 
 // FlushDay gives persist today's process total when it moved since the
@@ -741,6 +814,15 @@ func (m *Meter) FlushDay(persist func(DayUsage) error) error {
 		return nil
 	}
 	usage := DayUsage{Day: m.day, Bytes: m.dayBytes, Month: m.month, MonthBytes: m.monthBytes}
+	for name, st := range m.principals {
+		if st.day != m.day || st.dayBytes <= 0 {
+			continue
+		}
+		if usage.Principals == nil {
+			usage.Principals = make(map[string]int64)
+		}
+		usage.Principals[name] = st.dayBytes
+	}
 	m.mu.Unlock()
 	if err := persist(usage); err != nil {
 		return err
@@ -769,11 +851,39 @@ func (m *Meter) RestoreDay(u DayUsage) {
 	if u.Month == m.month && u.MonthBytes > m.monthBytes {
 		m.monthBytes = u.MonthBytes
 	}
-	if u.Day != m.day || u.Bytes <= m.dayBytes {
+	if u.Day != m.day {
+		return
+	}
+	for name, bytes := range u.Principals {
+		if _, st := m.counters(name, now); bytes > st.dayBytes {
+			st.dayBytes = bytes
+		}
+	}
+	if u.Bytes <= m.dayBytes {
 		return
 	}
 	m.dayBytes = u.Bytes
 	m.raiseAlarmLocked(now)
+}
+
+// PrincipalDayBytes returns each principal's bytes today, for a service
+// that reports them.
+func (m *Meter) PrincipalDayBytes() map[string]int64 {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now().UTC()
+	m.rollGlobal(now)
+	out := make(map[string]int64)
+	for name, st := range m.principals {
+		m.rollPrincipal(name, st, now)
+		if st.dayBytes > 0 {
+			out[name] = st.dayBytes
+		}
+	}
+	return out
 }
 
 // State snapshots the meter for the health route and the top-consumers
@@ -1008,6 +1118,7 @@ type countingWriter struct {
 	meter     *Meter
 	principal string
 	class     Class
+	daily     DailyCap
 	// safety: true when the server discards this response body, so nothing
 	// written through the wrapper reaches the wire and nothing is charged.
 	bodyless bool
@@ -1030,7 +1141,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	if !w.charges() {
 		return w.ResponseWriter.Write(p)
 	}
-	c := w.meter.charge(w.principal, w.class, int64(len(p)), true)
+	c := w.meter.charge(w.principal, w.class, int64(len(p)), true, w.daily)
 	n, err := w.ResponseWriter.Write(p[:c.allowed])
 	if c.refusal != nil {
 		w.cut = true

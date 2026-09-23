@@ -128,6 +128,17 @@ func run(args []string) error {
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
+	teamFreeEnv := egress.EnvName(egress.ServiceCache, "TEAM_DAILY_FREE_BYTES")
+	fs.Int64Var(&cfg.TeamDailyDownloadFreeBytes, "egress-team-daily-free-bytes",
+		envInt64(teamFreeEnv, cfg.TeamDailyDownloadFreeBytes),
+		"bytes the cache serves one team without credits through its grants in a UTC day: binaries, artifacts, "+
+			"dependency archives and git fetches. Past it that team's downloads are refused with 429 until midnight UTC. "+
+			"The operator's team and token are exempt, and 0 turns the cap off. Falls back to $"+teamFreeEnv+".")
+	teamFundedEnv := egress.EnvName(egress.ServiceCache, "TEAM_DAILY_FUNDED_BYTES")
+	fs.Int64Var(&cfg.TeamDailyDownloadFundedBytes, "egress-team-daily-funded-bytes",
+		envInt64(teamFundedEnv, cfg.TeamDailyDownloadFundedBytes),
+		"the same daily cap for a team with credits, as --controller answers; a funded answer older than five "+
+			"minutes counts as free. 0 turns the cap off. Falls back to $"+teamFundedEnv+".")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 

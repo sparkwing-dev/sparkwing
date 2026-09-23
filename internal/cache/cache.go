@@ -102,6 +102,12 @@ type Config struct {
 	// rolls. It bounds the pod's bill whoever the callers are. Zero is
 	// off.
 	EgressDailyCapBytes int64
+	// TeamDailyDownloadFreeBytes and TeamDailyDownloadFundedBytes cap what
+	// the cache serves one team's grants in a UTC day, by whether the team
+	// pays; past it the team's downloads are refused with 429 until the day
+	// rolls. The operator's team and token are exempt. Zero is off.
+	TeamDailyDownloadFreeBytes   int64
+	TeamDailyDownloadFundedBytes int64
 }
 
 func DefaultConfig() Config {
@@ -123,8 +129,19 @@ func DefaultConfig() Config {
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
 		ProxyMaxBytes:       DefaultProxyMaxBytes,
+
+		TeamDailyDownloadFreeBytes:   DefaultTeamDailyDownloadFreeBytes,
+		TeamDailyDownloadFundedBytes: DefaultTeamDailyDownloadFundedBytes,
 	}
 }
+
+// DefaultTeamDailyDownloadFreeBytes and DefaultTeamDailyDownloadFundedBytes
+// are what the cache serves one team's grants in a UTC day, by whether the
+// team pays, when the operator named no cap.
+const (
+	DefaultTeamDailyDownloadFreeBytes   int64 = 5 << 30
+	DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
+)
 
 // DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
 // verifies grants starts with when the operator named none: what one pod may
@@ -201,6 +218,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
 		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
+	}
+	if cfg.TeamDailyDownloadFreeBytes < 0 || cfg.TeamDailyDownloadFundedBytes < 0 {
+		return nil, fmt.Errorf("cache: a team daily download cap must not be negative; pass 0 to turn it off")
 	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
@@ -293,6 +313,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
+	setTeamDownloadCaps(cfg)
 	if blobStore != nil {
 		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := restoreEgressDay(rctx); err != nil {
@@ -310,6 +331,9 @@ func New(cfg Config) (*Server, error) {
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
+	if err := registerTeamDownloadMetric(otelutil.Meter("sparkwing-cache")); err != nil {
+		log.Printf("warning: team download metric: %v", err)
+	}
 	if blobQuota != nil {
 		if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-cache"), "cache", blobQuota); err != nil {
 			log.Printf("warning: free storage metric: %v", err)

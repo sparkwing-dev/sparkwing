@@ -19,20 +19,27 @@ import (
 var blobQuota *storagequota.Quota
 
 func newBlobQuota(store *teamblob.Store, cfg Config) *storagequota.Quota {
-	var lookup storagequota.Lookup
-	switch {
-	case cfg.ControllerURL != "":
-		lookup = storagequota.HTTPLookup(cfg.ControllerURL, cfg.APIToken, nil)
-	case cfg.GrantKey != "":
-		log.Printf("warning: sparkwing-cache has grants but no --controller, so every team a grant names " +
-			"is held to the default free share whatever it pays")
-	}
 	return storagequota.New(storagequota.Options{
 		Share:  storagequota.CacheShare,
 		Used:   func(team string) int64 { return store.Usage().Team(team).Bytes },
-		Lookup: lookup,
-		Exempt: func(team string) bool { return team == "" || team == authwire.OperatorTeam },
+		Lookup: standingLookup(cfg),
+		Exempt: operatorTeam,
 	})
+}
+
+func operatorTeam(team string) bool { return team == "" || team == authwire.OperatorTeam }
+
+// standingLookup asks the controller what each team pays for. Without one,
+// every team a grant names is answered for as free.
+func standingLookup(cfg Config) storagequota.Lookup {
+	switch {
+	case cfg.ControllerURL != "":
+		return storagequota.HTTPLookup(cfg.ControllerURL, cfg.APIToken, nil)
+	case cfg.GrantKey != "":
+		log.Printf("warning: sparkwing-cache has grants but no --controller, so every team a grant names " +
+			"is held to the free share and the free daily download cap whatever it pays")
+	}
+	return nil
 }
 
 var errBeyondShare = errors.New("the upload passed the room the team's free share left it; add credits to store more")

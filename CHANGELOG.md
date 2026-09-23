@@ -22,6 +22,21 @@ unlock.
 
 ### Added
 
+- **cache:** a per-team daily download cap. Every byte the cache serves a
+  grant (binaries, artifacts, dependency archives and git mirror fetches) is
+  charged to the grant's team for the UTC day; past
+  `--egress-team-daily-free-bytes` (5 GiB) for a free team, or
+  `--egress-team-daily-funded-bytes` (50 GiB) for a funded one, the team's
+  downloads answer `429` with a `Retry-After` naming the wait until midnight
+  UTC. The tier comes from the controller's storage-tier route, a funded
+  answer older than five minutes counts as free, and the operator's team and
+  token are exempt. With `--blob-store` each team's day is saved in
+  `egress/<YYYY-MM>.json` with the process's, so a restart keeps it spent.
+  `sparkwing.cache.team_download_bytes{team}` reports the ten largest teams
+  and the rest as `(other)`. `0` turns either cap off; the process-wide
+  `--egress-daily-cap-bytes` stays the backstop. See
+  [Egress budgets](docs/observability.md#egress-budgets).
+
 - **controller:** a free tier bounded by counting teams. A team without
   credits takes one of `--free-team-slots` (200) the first time it starts a
   run, in the trigger's transaction, and keeps it until the team is deleted,
