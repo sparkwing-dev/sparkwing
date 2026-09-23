@@ -609,6 +609,27 @@ least recently used, and deletes a mirror that alone exceeds the size cap
 after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
 resolves outside the checkout, is refused.
 
+### An agent that fetches source itself
+
+`sparkwing-runner agent` fetches source through the controller's gitcache
+proxy unless its `agent.yaml` names `allow_repos` and no `gitcache`, or it
+starts with `--allow-repo`, which replaces the file's list:
+
+```yaml
+controller: https://sparkwing.example.com
+token: swr_...
+allow_repos:
+  - github.com/acme/*
+```
+
+Such an agent claims only runs of those repositories, sending the list with
+every claim, and fetches each one's source directly: with the credential the
+controller releases for the run, else with the machine owner's own git
+credentials. The list follows the rules in
+[What a laptop runner trusts](#what-a-laptop-runner-trusts).
+`sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
+An `agent.yaml` without `allow_repos` keeps the proxy, as before.
+
 ### Remote machine capacity
 
 `sparkwing-runner agent` runs claim mode, the mode that executes work. Its

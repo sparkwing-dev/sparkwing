@@ -809,6 +809,11 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
+With --allow-repo the agent fetches each run's source itself, from the
+repositories the list names, with the credential the controller releases or
+else this machine's own git credentials. Without it the agent fetches through
+the controller's gitcache proxy.
+
 The command prints the token prefix and the revoke command. The raw token
 reaches only the config file.
 
@@ -817,6 +822,7 @@ reaches only the config file.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Runner name, shown in the dashboard (required) |
+| `--allow-repo PATTERN` | Repository this machine may build and fetch directly, as host/path with '*' within one segment (repeatable) |
 | `--labels CSV` | Comma-separated self-asserted placement labels |
 | `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
 | `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
@@ -837,6 +843,9 @@ sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4
 
 # Write the config and supervise the agent yourself
 sparkwing cluster runners add --profile prod --name dev-laptop --no-service
+
+# Fetch source directly for the team's repositories
+sparkwing cluster runners add --profile prod --name dev-laptop --allow-repo 'github.com/acme/*'
 ```
 
 ## `sparkwing cluster runners remove`

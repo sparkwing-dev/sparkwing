@@ -193,7 +193,9 @@ assisted offer protocol.
 
 The file carries claim-mode keys only. `agent.yaml` has no `name` and no
 `coordinators`; a file that still sets either key fails to load and names the
-removed enrolled mode. See [local-execution.md](local-execution.md) for the
+removed enrolled mode. `allow_repos`, which `runners add --allow-repo` writes,
+makes the agent fetch source directly rather than through the controller's
+gitcache proxy; see [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself). See [local-execution.md](local-execution.md) for the
 controller-side enrolled design.
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent

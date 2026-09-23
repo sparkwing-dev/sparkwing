@@ -204,6 +204,12 @@ unlock.
   credential on an inherited pipe, and drops `GIT_TRACE*` and
   `GIT_CURL_VERBOSE` from its environment. Against a controller without the
   route the runner asks `POST /api/v1/runs/{id}/source-token` instead.
+- **runner:** `sparkwing-runner agent --allow-repo`, and `allow_repos` in
+  `agent.yaml`, make an agent claim only those repositories and fetch their
+  source directly, with the credential the controller releases or else the
+  machine owner's own, instead of through the controller's gitcache proxy.
+  `sparkwing cluster runners add --allow-repo` writes the list. An agent
+  without one keeps the proxy.
 - **chart:** sparkwing-runner-bundle renders `runner.alsoClaimTriggers=true`
   without a gitcache; such runners fetch source directly with the credential
   the controller releases.

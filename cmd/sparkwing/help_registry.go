@@ -3911,10 +3911,16 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
+With --allow-repo the agent fetches each run's source itself, from the
+repositories the list names, with the credential the controller releases or
+else this machine's own git credentials. Without it the agent fetches through
+the controller's gitcache proxy.
+
 The command prints the token prefix and the revoke command. The raw token
 reaches only the config file.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Runner name, shown in the dashboard", Required: true, Group: "Identity"},
+		{Name: "allow-repo", Argument: "PATTERN", Desc: "Repository this machine may build and fetch directly, as host/path with '*' within one segment (repeatable)", Group: "Identity"},
 		{Name: "labels", Argument: "CSV", Desc: "Comma-separated self-asserted placement labels", Group: "Identity"},
 		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
 		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
@@ -3929,6 +3935,7 @@ reaches only the config file.`,
 		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
 		{"Enroll with a capacity ceiling and labels", "sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64"},
 		{"Write the config and supervise the agent yourself", "sparkwing cluster runners add --profile prod --name dev-laptop --no-service"},
+		{"Fetch source directly for the team's repositories", "sparkwing cluster runners add --profile prod --name dev-laptop --allow-repo 'github.com/acme/*'"},
 	},
 }
 
