@@ -127,6 +127,11 @@ unlock.
   hands it to git on an inherited pipe, through a credential helper scoped to
   github.com. A direct fetch now also drops `GIT_TRACE*` and
   `GIT_CURL_VERBOSE` from its environment.
+- **web:** `/team/secrets` manages a team's secrets and variables. Owners
+  create, overwrite and delete rows scoped to the team or to one pipeline;
+  editors and readers see the names and the variables' values. A secret is
+  write-only: its value is never shown after it is saved, and **Update** opens
+  an empty field. A variable is shown and edited in place.
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
@@ -368,6 +373,10 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **controller:** `GET /api/v1/secrets` is open to every team member
+  (`runs.read`), not only owners, and lists each unmasked variable with its
+  value. A masked secret still lists with metadata only.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
@@ -642,6 +651,15 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** `GET /api/v1/secrets/{name}` returns a masked secret's
+  value only to the operator's `admin` bearer token and to a runner reading
+  through its claimed run. A dashboard session, the operator's password
+  session and a `team.admin` bearer get `403` with error `write_only`, and
+  still read an unmasked variable. `sparkwing secret get --profile` keeps
+  working on an operator token. Every secrets response, and the dashboard's
+  proxy of `/api/v1/secrets`, now sends `Cache-Control: no-store` and
+  `Pragma: no-cache`.
 
 - **runner (Breaking):** a runner without the git cache builds only the
   repositories its owner allows. It fetched, compiled and ran pipeline code

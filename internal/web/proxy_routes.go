@@ -46,6 +46,11 @@ var proxyRoutes = []proxyRoute{
 	{"GET /api/v1/team/github-app/triggers", controller.ScopeRunsRead},
 	{"PUT /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
 	{"DELETE /api/v1/team/github-app/triggers", controller.ScopeTeamAdmin},
+	// safety: no single-secret read is proxied, so a browser never reaches a
+	// value route; the list returns variable values and no secret's.
+	{"GET /api/v1/secrets", controller.ScopeRunsRead},
+	{"POST /api/v1/secrets", controller.ScopeTeamAdmin},
+	{"DELETE /api/v1/secrets/{name}", controller.ScopeTeamAdmin},
 }
 
 // safety: a membership role, which the controller resolves on every request for the

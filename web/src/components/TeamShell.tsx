@@ -18,6 +18,7 @@ import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
 const baseTabs = [
   { href: "/team", label: "Members" },
   { href: "/team/machines", label: "Machines" },
+  { href: "/team/secrets", label: "Secrets" },
 ];
 
 export function teamTabs(caps: Capabilities | null) {

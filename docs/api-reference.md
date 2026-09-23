@@ -149,7 +149,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/source-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
-| `GET` | `/api/v1/secrets` | `admin` or `team.admin` |
+| `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
