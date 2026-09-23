@@ -433,6 +433,14 @@ downloads carry `Content-Type: application/octet-stream` with
 `Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
 execute in a browser on the cache's origin.
 
+A cache published outside the cluster starts with `--disable-proxy` and
+`--metrics-addr`. The first drops `/proxy/` and `/stats`; the second moves
+`/metrics`, and `/stats` when the proxy is on, to a listener of its own
+(`--metrics-addr=:9090`, falling back to `SPARKWING_METRICS_ADDR`) that the
+ingress does not route to. The main listener then answers only `/health`
+and the credentialed routes. Without `--metrics-addr` an ingress rule is
+the only thing keeping `/metrics` private.
+
 The cache refuses to start without a token. A laptop or test setup that
 wants the endpoints open passes `--allow-unauthenticated` (or
 `SPARKWING_CACHE_ALLOW_UNAUTHENTICATED=1`); the pod logs a warning at
@@ -563,6 +571,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
+| `SPARKWING_METRICS_ADDR` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 

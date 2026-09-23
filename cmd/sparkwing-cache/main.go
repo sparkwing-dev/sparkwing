@@ -121,6 +121,11 @@ func run(args []string) error {
 	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
 		"serve no registry proxy (/proxy/ and /stats). The proxy takes no credential, so a cache reachable "+
 			"from outside the cluster sets this.")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr",
+		envOr("SPARKWING_METRICS_ADDR", cfg.MetricsAddr),
+		"bind address for /metrics and the proxy's /stats. Set it to move both off --addr, and off any ingress "+
+			"fronting that listener, onto a port of their own; a cache published outside the cluster sets it with "+
+			"--disable-proxy. Empty serves both on --addr. Falls back to $SPARKWING_METRICS_ADDR.")
 	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
 		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
 		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+

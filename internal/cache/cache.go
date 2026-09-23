@@ -90,6 +90,10 @@ type Config struct {
 	// DisableProxy serves no registry proxy. The proxy takes no
 	// credential, so a cache published outside the cluster sets it.
 	DisableProxy bool
+	// MetricsAddr moves /metrics and the proxy's /stats off Addr onto a
+	// listener of their own, so a cache published through an ingress on
+	// Addr exposes neither. Empty serves both on Addr.
+	MetricsAddr string
 	// ProxyMaxBytes caps the registry proxy's directory; past it the least
 	// recently served entries are evicted. Zero leaves it unbounded.
 	ProxyMaxBytes int64
@@ -157,7 +161,10 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 	http    *http.Server
-	wg      sync.WaitGroup
+	// metrics serves /metrics and /stats when Config.MetricsAddr is set.
+	metrics     http.Handler
+	metricsHTTP *http.Server
+	wg          sync.WaitGroup
 }
 
 func New(cfg Config) (*Server, error) {
@@ -370,12 +377,23 @@ func New(cfg Config) (*Server, error) {
 	// safety: runner pods reach the proxy with no credential, so it stays
 	// open; it is served inside the cluster only, and the daily egress cap
 	// bounds what any caller churns through it.
+	operator := s.mux
+	if cfg.MetricsAddr != "" {
+		operator = http.NewServeMux()
+		s.metrics = operator
+		s.metricsHTTP = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           operator,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      30 * time.Second,
+		}
+	}
 	if !cfg.DisableProxy {
 		s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
-		s.mux.HandleFunc("/stats", handleProxyStats)
+		operator.HandleFunc("/stats", handleProxyStats)
 	}
-
-	s.mux.Handle("/metrics", s.tel.PromHandler)
+	operator.Handle("/metrics", s.tel.PromHandler)
 
 	s.handler = withSecurityHeaders(s.mux)
 
@@ -394,6 +412,10 @@ func New(cfg Config) (*Server, error) {
 // store reconcile that Run starts, so a caller can mount the cache on its own
 // listener.
 func (s *Server) Handler() http.Handler { return s.handler }
+
+// MetricsHandler serves /metrics and /stats when Config.MetricsAddr moved
+// them off the main listener, and is nil otherwise.
+func (s *Server) MetricsHandler() http.Handler { return s.metrics }
 
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
@@ -431,7 +453,17 @@ func (s *Server) Run(ctx context.Context) error {
 		proxyCleanupLoop(ctx)
 	}()
 
-	serveErr := make(chan error, 1)
+	serveErr := make(chan error, 2)
+	if s.metricsHTTP != nil {
+		go func() {
+			log.Printf("sparkwing-cache serves /metrics and /stats on %s", s.cfg.MetricsAddr)
+			err := s.metricsHTTP.ListenAndServe()
+			if err == http.ErrServerClosed {
+				return
+			}
+			serveErr <- fmt.Errorf("metrics listener: %w", err)
+		}()
+	}
 	go func() {
 		log.Printf("sparkwing-cache listening on %s (proxy cache: %s)", s.cfg.Addr, s.cfg.ProxyDir)
 		err := s.http.ListenAndServe()
@@ -452,6 +484,11 @@ func (s *Server) Run(ctx context.Context) error {
 	defer cancel()
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
+	}
+	if s.metricsHTTP != nil {
+		if err := s.metricsHTTP.Shutdown(shutdownCtx); err != nil {
+			log.Printf("metrics listener shutdown: %v", err)
+		}
 	}
 	_ = s.tel.Shutdown(shutdownCtx)
 	s.wg.Wait()

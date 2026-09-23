@@ -22,6 +22,11 @@ unlock.
 
 ### Added
 
+- **cache:** `--metrics-addr` (`SPARKWING_METRICS_ADDR`) moves `/metrics`,
+  and the proxy's `/stats`, off the main listener onto a port of their own,
+  so a cache published through an ingress with `--disable-proxy` answers only
+  `/health` and its credentialed routes. Empty keeps both on `--addr`.
+
 - **cache:** a per-team daily download cap. Every byte the cache serves a
   grant (binaries, artifacts, dependency archives and git mirror fetches) is
   charged to the grant's team for the UTC day; past
