@@ -82,6 +82,9 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	applyCheckoutProjectConfig(&opts, logger)
 	res, err := Run(ctx, backends, opts)
 	if err != nil {
+		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
+		}
 		logger.Error(
 			"run failed setup",
 			"run_id", trigger.ID,

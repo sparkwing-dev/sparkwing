@@ -20,6 +20,13 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **controller + runner:** A claimed trigger whose pipeline is absent from the
+  fetched repository now produces a failed trigger and run. The failure names
+  the repository revision and defined pipelines, appears in trigger and run
+  API responses and the CLI, and is logged by the controller at warn level.
+
 ### Added
 
 - **runner:** an off-cluster agent reads the cache the controller announces

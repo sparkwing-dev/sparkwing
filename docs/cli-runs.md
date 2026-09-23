@@ -1129,14 +1129,14 @@ sparkwing runs tree --run run-fictional --profile prod -o json
 Fire, list, or inspect controller triggers
 
 Inspect the controller's queue of pipeline triggers. 'list' shows pending,
-claimed, and completed entries. 'get' reads one trigger by identifier.
+claimed, completed, and failed entries. 'get' reads one trigger by identifier.
 Select the controller with --profile NAME.
 
 Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
 
 ### Subcommands
 
-- `list` -- List pending / claimed / done triggers
+- `list` -- List pending / claimed / done / failed triggers
 - `get` -- Inspect one trigger's full metadata by id
 
 ### Examples
@@ -1157,7 +1157,7 @@ sparkwing pipeline trigger fictional-deploy --profile prod
 Inspect one trigger's full metadata by id
 
 Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
-git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
+git, env, status, error, claim lease). Defaults to a compact multi-line rendering; -o
 json emits the raw response.
 
 ### Flags
@@ -1181,7 +1181,7 @@ sparkwing runs triggers get --id run-fictional --profile prod -o json
 
 ## `sparkwing runs triggers list`
 
-List pending / claimed / done triggers
+List pending / claimed / done / failed triggers
 
 Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
@@ -1199,7 +1199,7 @@ an older entry is not reported.
 
 | Flag | Description |
 |---|---|
-| `--status STATUS` | Filter by status: pending \| claimed \| done |
+| `--status STATUS` | Filter by status: pending \| claimed \| done \| failed |
 | `--pipeline NAME` | Filter by pipeline name |
 | `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
 | `--limit N` | Maximum triggers to show (default: 20) |
