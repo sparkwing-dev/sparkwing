@@ -40,6 +40,12 @@ type oauthFlow struct {
 	State    string `json:"state"`
 	Verifier string `json:"verifier"`
 	Next     string `json:"next"`
+	// Mode is oauthFlowLink for a flow adding a sign-in to the signed-in
+	// account, and empty for a sign-in.
+	Mode string `json:"mode,omitempty"`
+	// Code is the provider's code, kept while a link flow moves on to a
+	// same-site request that carries the session.
+	Code string `json:"code,omitempty"`
 }
 
 type oauthStartResp struct {
@@ -82,12 +88,10 @@ func oauthStartHandler(opts HandlerOptions) http.HandlerFunc {
 			}), http.StatusBadGateway, cookiesSecure(opts))
 			return
 		}
-		value, err := json.Marshal(oauthFlow{Provider: provider.Name, State: start.State, Verifier: start.Verifier, Next: next})
-		if err != nil {
+		if !setOAuthFlow(w, oauthFlow{Provider: provider.Name, State: start.State, Verifier: start.Verifier, Next: next}, cookiesSecure(opts)) {
 			http.Error(w, "could not start sign-in", http.StatusInternalServerError)
 			return
 		}
-		setOAuthFlowCookie(w, base64.RawURLEncoding.EncodeToString(value), int(oauthFlowTTL/time.Second), cookiesSecure(opts))
 		http.Redirect(w, r, start.AuthorizeURL, http.StatusSeeOther)
 	}
 }
@@ -100,6 +104,10 @@ func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		secure := cookiesSecure(opts)
 		query := r.URL.Query()
+		if flow, ok := readOAuthFlow(r, secure); ok && flow.Mode == oauthFlowLink && flow.Provider == provider.Name {
+			identityLinkCallback(w, r, provider, flow, secure)
+			return
+		}
 		if query.Get("error") != "" {
 			refuseOAuth(w, r, opts, secure, http.StatusUnauthorized, provider.Label+" sign-in was not completed.")
 			return
@@ -165,6 +173,15 @@ func dashboardURL(r *http.Request, path string) string {
 	return (&url.URL{Scheme: scheme, Host: r.Host, Path: path}).String()
 }
 
+func setOAuthFlow(w http.ResponseWriter, flow oauthFlow, secure bool) bool {
+	value, err := json.Marshal(flow)
+	if err != nil {
+		return false
+	}
+	setOAuthFlowCookie(w, base64.RawURLEncoding.EncodeToString(value), int(oauthFlowTTL/time.Second), secure)
+	return true
+}
+
 func setOAuthFlowCookie(w http.ResponseWriter, value string, maxAge int, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName(oauthFlowCookieName, secure),
@@ -228,8 +245,11 @@ func absoluteHTTPURL(raw string) bool {
 }
 
 type controllerStatusError struct {
-	Path    string
-	Status  int
+	Path   string
+	Status int
+	// Code is the controller's machine-readable reason, when its answer
+	// carried one beside the message.
+	Code    string
 	Message string
 }
 
@@ -272,9 +292,24 @@ func postControllerJSONAs(ctx context.Context, controllerURL, path, clientIP, se
 		if err != nil {
 			return &controllerStatusError{Path: path, Status: resp.StatusCode}
 		}
-		return &controllerStatusError{Path: path, Status: resp.StatusCode, Message: controllerErrorMessage(msg)}
+		return &controllerStatusError{
+			Path: path, Status: resp.StatusCode, Code: controllerErrorCode(msg), Message: controllerErrorMessage(msg),
+		}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// controllerErrorCode reads the code of an answer shaped {"error": code,
+// "message": text}. A bare {"error": text} carries a message, not a code.
+func controllerErrorCode(body []byte) string {
+	var parsed struct {
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Message == "" {
+		return ""
+	}
+	return parsed.Error
 }
 
 func controllerErrorMessage(body []byte) string {

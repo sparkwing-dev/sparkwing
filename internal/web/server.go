@@ -280,6 +280,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
 	authedMux.HandleFunc("POST /github/app/connect", githubAppConnectHandler(opts))
 	authedMux.HandleFunc("GET "+githubAppCompletePath, githubAppCompleteHandler(opts))
+	authedMux.HandleFunc("POST /auth/{provider}/link", identityLinkHandler(opts))
+	authedMux.HandleFunc("GET /auth/{provider}/link/complete", identityLinkCompleteHandler(opts))
 
 	authedMux.Handle("/", spaHandler(bundleFS, opts))
 

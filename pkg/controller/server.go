@@ -37,7 +37,9 @@ type Server struct {
 	hostKeyScan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	// gitCredentialLimit holds a claim to a few credential releases a
 	// minute, so a looping pipeline cannot flood the audit trail.
-	gitCredentialLimit claimRateLimiter
+	gitCredentialLimit perMinuteLimiter
+	// identityLinkLimit holds an account to a few link attempts a minute.
+	identityLinkLimit perMinuteLimiter
 
 	pool *poolBinding
 
@@ -1068,6 +1070,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
 	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
 	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
+	mux.Handle("GET /api/v1/me/identities", http.HandlerFunc(s.handleIdentities))
+	mux.Handle("POST /api/v1/me/identities/{provider}/link", http.HandlerFunc(s.handleIdentityLinkStart))
+	mux.Handle("POST /api/v1/me/identities/{provider}/link/complete", http.HandlerFunc(s.handleIdentityLinkComplete))
+	mux.Handle("DELETE /api/v1/me/identities/{provider}", http.HandlerFunc(s.handleIdentityUnlink))
 	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
 	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
 	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))

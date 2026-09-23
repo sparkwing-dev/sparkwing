@@ -22,6 +22,24 @@ unlock.
 
 ### Added
 
+- **controller + web:** a signed-in user links a Google or GitHub sign-in to
+  their own account from **Account -> Linked sign-ins**, whatever address the
+  provider holds, and unlinks one while another remains. The flow is the
+  provider's PKCE flow with a state the controller signs and binds to the
+  account and session for ten minutes and accepts once; the identity is keyed
+  by the provider's stable subject. A provider account already attached to any
+  account is refused with `409 identity_linked_elsewhere` and nothing changes;
+  accounts are never combined. Linking never changes the account's email.
+  Link start, link completion and unlinking need a sign-in from the last 10
+  minutes. Link attempts are limited to ten a minute per account per controller
+  replica. Unlinking keeps one sign-in method and ends the account's other
+  sessions, including sessions created by a concurrent sign-in. New routes:
+  `GET /api/v1/me/identities`,
+  `POST /api/v1/me/identities/{provider}/link`, `.../link/complete` and
+  `DELETE /api/v1/me/identities/{provider}`. Schema 64 adds
+  `identities.linked`, `identity_link_states` and `identity_unlinks`. See
+  [Linked sign-ins](docs/auth.md#linked-sign-ins).
+
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
   and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the

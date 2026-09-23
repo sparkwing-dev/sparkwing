@@ -44,6 +44,17 @@ function Account({ me }: { me: Me }) {
         {me.user.name ? `${me.user.name} · ` : ""}
         {me.user.email}
       </div>
+      <Panel title="Linked sign-ins">
+        <div className="p-4 text-sm flex items-center gap-3">
+          <p className="flex-1 text-[var(--muted)]">
+            Add or remove the Google and GitHub sign-ins that reach this
+            account.
+          </p>
+          <Link href="/account/sign-ins" className="underline">
+            Manage
+          </Link>
+        </div>
+      </Panel>
       <TeamDeletions />
       <DeleteAccount me={me} />
     </div>

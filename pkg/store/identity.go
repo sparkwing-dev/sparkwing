@@ -460,6 +460,8 @@ func personalDisplayName(p SignInProfile) string {
 	return truncate(name+"'s space", maxDisplayNameLen)
 }
 
+var errSignInIdentityChanged = errors.New("store: sign-in identity changed during resolution")
+
 // ResolveSignIn turns an authenticated provider profile into an account and
 // makes sure the account has a team to land in.
 //
@@ -468,7 +470,8 @@ func personalDisplayName(p SignInProfile) string {
 //  1. An identity seen before belongs to the account it already belongs to.
 //  2. Otherwise it attaches to an existing account only when the provider
 //     asserts the address verified AND that address is verified on the
-//     account. Both sides verified, or no link.
+//     account, and that account holds no other identity from this provider
+//     and did not unlink this one. Both sides verified, or no link.
 //  3. Otherwise it becomes a new account.
 //
 // Rule 2 is the security property. Linking on an address the provider has not
@@ -491,13 +494,12 @@ func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpCond
 	case !p.EmailVerified || !LooksLikeEmail(p.Email):
 		return SignInResult{}, ErrUnverifiedEmail
 	}
-	// safety: concurrent first sign-ins race on the verified-email index and on a personal slug; the
-	// loser rolls back and its retry re-reads what the winner wrote, rather than failing a person
-	// who did nothing wrong.
+	// safety: the retry re-reads email claims, personal slugs, and identities
+	// after a concurrent sign-in or unlink changes the first decision.
 	var last error
 	for range 5 {
 		res, err := s.resolveSignInOnce(ctx, p, c, now)
-		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
+		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken) && !errors.Is(err, errSignInIdentityChanged)) {
 			return res, err
 		}
 		last = err
@@ -515,35 +517,54 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 
 	var res SignInResult
 	var accountID string
+	var linked int
 	err = tx.QueryRowContext(ctx,
-		`SELECT account_id FROM identities WHERE provider = ? AND subject = ?`,
-		p.Provider, p.Subject).Scan(&accountID)
+		`SELECT account_id, linked FROM identities WHERE provider = ? AND subject = ?`,
+		p.Provider, p.Subject).Scan(&accountID, &linked)
 	switch {
 	case err == nil:
+		if err := lockAccountTx(ctx, tx, accountID); err != nil {
+			return SignInResult{}, err
+		}
+		err = tx.QueryRowContext(ctx,
+			`SELECT linked FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
+			p.Provider, p.Subject, accountID).Scan(&linked)
+		if errors.Is(err, sql.ErrNoRows) {
+			return SignInResult{}, errSignInIdentityChanged
+		}
+		if err != nil {
+			return SignInResult{}, err
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE identities SET email = ?, email_verified = ? WHERE provider = ? AND subject = ?`,
 			p.Email, boolInt(p.EmailVerified), p.Provider, p.Subject); err != nil {
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
 		}
 		// safety: the account's address is its linking and invitation key, so it follows what the
-		// provider asserts now; an address left behind would let whoever holds it next walk in.
-		if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
-			return SignInResult{}, err
+		// provider asserts now; an address left behind would let whoever holds it next walk in. A
+		// linked identity was attached whatever its address, so its address is not the account's.
+		if linked == 0 {
+			if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
+				return SignInResult{}, err
+			}
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		// safety: rule 2, the account side must hold this address verified too.
 		err = tx.QueryRowContext(ctx,
 			`SELECT id FROM accounts WHERE email = ? AND email_verified = 1`, p.Email).Scan(&accountID)
 		if err == nil {
-			var sameProvider int
-			if err := tx.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM identities WHERE account_id = ? AND provider = ?`,
-				accountID, p.Provider).Scan(&sameProvider); err != nil {
+			var sameProvider, unlinked int
+			if err := tx.QueryRowContext(ctx, `
+				SELECT (SELECT COUNT(*) FROM identities WHERE account_id = ? AND provider = ?),
+				       (SELECT COUNT(*) FROM identity_unlinks WHERE account_id = ? AND provider = ? AND subject = ?)`,
+				accountID, p.Provider, accountID, p.Provider, p.Subject).Scan(&sameProvider, &unlinked); err != nil {
 				return SignInResult{}, err
 			}
 			// safety: one provider account per human, so a second subject from the same provider on this
 			// address is a recycled address or another person; it gets a fresh account, never this one.
-			if sameProvider > 0 {
+			// A provider account this account unlinked is held to the same rule, or unlinking would undo
+			// itself at the next sign-in.
+			if sameProvider > 0 || unlinked > 0 {
 				if err := releaseEmailTx(ctx, tx, p.Email, "", at); err != nil {
 					return SignInResult{}, err
 				}
@@ -1010,6 +1031,56 @@ func (s *Store) CreateAccountSession(
 		VALUES (?, ?, ?, '', ?, ?, ?)`,
 		sessionDigest(rawSession), string(team), acct.Email, acct.ID, now.UTC().Unix(), expires.Unix()); err != nil {
 		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	}
+	return rawSession, csrfToken, &Session{
+		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,
+		CSRFToken: csrfToken, CreatedAt: now.UTC(), ExpiresAt: expires,
+	}, nil
+}
+
+// CreateIdentityAccountSession opens a session only while the named provider
+// identity still belongs to acct. It serializes with unlink's session
+// revocation on the account row.
+func (s *Store) CreateIdentityAccountSession(
+	ctx context.Context, acct Account, team Team, provider, subject string, ttl time.Duration, now time.Time,
+) (rawSession, csrfToken string, sess *Session, err error) {
+	if acct.ID == "" || provider == "" || subject == "" || ttl <= 0 {
+		return "", "", nil, fmt.Errorf("%w: account, provider, subject, and positive ttl required", ErrInvalidInput)
+	}
+	rawSession, err = newSessionID()
+	if err != nil {
+		return "", "", nil, err
+	}
+	//nolint:contextcheck // the CSRF key is read or minted once per store under its own transaction
+	csrfToken, err = s.deriveCSRFToken(rawSession)
+	if err != nil {
+		return "", "", nil, err
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return "", "", nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := lockAccountTx(ctx, tx, acct.ID); err != nil {
+		return "", "", nil, err
+	}
+	var linked string
+	err = tx.QueryRowContext(ctx, `SELECT account_id FROM identities WHERE provider = ? AND subject = ? AND account_id = ?`,
+		provider, subject, acct.ID).Scan(&linked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil, ErrIdentityUnlinked
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	expires := now.Add(ttl).UTC()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (hash, team, principal, scopes, account_id, created_at, expires_at)
+		VALUES (?, ?, ?, '', ?, ?, ?)`, sessionDigest(rawSession), string(team), acct.Email, acct.ID,
+		now.UTC().Unix(), expires.Unix()); err != nil {
+		return "", "", nil, fmt.Errorf("sessions: insert: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", "", nil, err
 	}
 	return rawSession, csrfToken, &Session{
 		ID: rawSession, Principal: acct.Email, Team: team, AccountID: acct.ID,

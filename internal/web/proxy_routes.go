@@ -71,6 +71,8 @@ var identityProxyRoutes = []proxyRoute{
 	{"DELETE /api/v1/me", ""},
 	{"GET /api/v1/me/team-deletions", ""},
 	{"POST /api/v1/me/active-team", ""},
+	{"GET /api/v1/me/identities", ""},
+	{"DELETE /api/v1/me/identities/{provider}", ""},
 	{"POST /api/v1/teams", ""},
 	{"PATCH /api/v1/team", ""},
 	{"DELETE /api/v1/team", ""},

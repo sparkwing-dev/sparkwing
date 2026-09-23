@@ -688,11 +688,12 @@ repositories; see [GitHub App](github-app.md).
 
 A Google identity joins an existing user only when Google and that user both
 hold the email verified, and never when that user already has a different
-identity from the same provider; a GitHub identity joins a Google user the same
-way. A second account from one provider on one address is a recycled address
-or another person, so it gets its own user and the first user's claim on the
-address is withdrawn. A user's email follows what Google asserts at each
-sign-in. A user with no team, other than one on the
+identity from the same provider or unlinked this one; a GitHub identity joins a
+Google user the same way. A second account from one provider on one address is
+a recycled address or another person, so it gets its own user and the first
+user's claim on the address is withdrawn. A user's email follows what the
+provider asserts at each sign-in, except through a sign-in the user linked
+(see [Linked sign-ins](#linked-sign-ins)). A user with no team, other than one on the
 [sign-up waitlist](#sign-up-gate), gets a personal space: a team
 whose only member is its owner, slugged from the email's local part, with the
 smallest free integer appended on a collision. The user's active team is
@@ -794,8 +795,9 @@ the user stay with the team and name `deleted user` instead: runs, triggers,
 approvals, cron schedules armed, node bounces, debug-pause releases, credit
 grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
 month) and the text of event payloads. The match is on the account's email and
-every email its identities asserted, in every team, and on the principal of
-every token it minted, only in that token's team, because another team may
+every email its sign-in identities asserted, never a linked sign-in's, in every
+team, and on the principal of every token it minted, only in that token's team,
+because another team may
 use the same principal name for its own token; egress usage carries no team,
 so it is relabeled for the emails alone. Credit
 charges name the team, not a person, and are left as they are. A replica's
@@ -814,6 +816,55 @@ runner token they mint reads the secrets of every run it claims. This is the
 same model as GitHub Actions, where anyone who can push a workflow can use the
 repository's secrets. Grant `editor` only to someone you would hand those
 secrets.
+
+### Linked sign-ins
+
+An account holds sign-in methods and team memberships. Runs, secrets, credits
+and machines belong to teams. A signed-in user adds a sign-in method to their
+own account from **Account -> Linked sign-ins** in the dashboard, whatever
+address the provider holds. Linking adds a way to sign in and moves nothing
+from another account: Sparkwing does not combine accounts.
+
+1. `POST /api/v1/me/identities/{provider}/link {redirect_uri}` returns the
+   provider's authorize URL, a state and a PKCE verifier. The state carries the
+   controller's signature and names the account, the session and the provider,
+   and expires after ten minutes.
+2. The provider returns the browser to the dashboard's sign-in callback,
+   `/auth/{provider}/callback`, so no new redirect URI needs registering. The
+   dashboard keeps the code in its flow cookie and moves on to a same-site page
+   whose request carries the session.
+3. `POST /api/v1/me/identities/{provider}/link/complete {state, verifier, code,
+   redirect_uri}` checks the state against the caller's account and session,
+   records it as used, redeems the code, and attaches the provider account by
+   its stable subject: Google's `sub`, GitHub's numeric id.
+
+The controller refuses, and changes nothing, when the provider account is
+already attached to any account (`409 identity_linked_elsewhere`, or
+`identity_already_linked` for this one), or when the account already has a
+sign-in from that provider (`409 provider_already_linked`). A user with a
+second Sparkwing account either keeps both, invites one into the other's team
+and switches teams with the team switcher, or deletes the other account and then
+links its sign-in.
+
+A linked sign-in never changes the account's email, at the link or at any later
+sign-in through it, and does not withdraw another account's claim on its
+address. The rule for joining by email is unchanged: a new identity still joins
+an account only when both sides hold the address verified.
+
+`DELETE /api/v1/me/identities/{provider}` unlinks a sign-in while the account
+keeps at least one other (`409 last_sign_in_method` otherwise). It ends every
+other session of the account, and the unlinked provider account then signs in
+as a new account, even when it asserts the account's own address. Unlinking
+GitHub leaves each GitHub App installation the user connected bound to its
+team; connecting another installation needs a linked GitHub sign-in again.
+
+Link start, link completion and unlinking need a session signed in within the
+last 10 minutes (`403 reauth_required`). An account makes at most ten link
+attempts a minute (`429 rate_limited`); the limit is per controller replica.
+The controller logs `identity.linked`,
+`identity.unlinked` and `identity.change_refused` with the account, the provider
+and, for a change, the provider's subject. `GET /api/v1/me/identities` lists
+the account's sign-in methods and the providers it can link.
 
 ### Sign-up gate
 

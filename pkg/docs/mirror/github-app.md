@@ -38,7 +38,7 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 
 ## Connecting a team
 
-Only a team owner connects, and only as a signed-in account with a linked GitHub identity. In the dashboard, the owner opens **Team -> GitHub** and chooses **Connect GitHub**; the tab appears when `GET /api/v1/capabilities` reports `github_app`. Readers and editors see the same tab read-only.
+Only a team owner connects, and only as a signed-in account with a linked GitHub identity, which a Google-first account adds from **Account -> Linked sign-ins** ([linked sign-ins](auth.md#linked-sign-ins)). Unlinking that GitHub sign-in later leaves the installations the account connected bound to their teams. In the dashboard, the owner opens **Team -> GitHub** and chooses **Connect GitHub**; the tab appears when `GET /api/v1/capabilities` reports `github_app`. Readers and editors see the same tab read-only.
 
 1. The dashboard calls `POST /api/v1/team/github-app/connect {redirect_uri}` and gets `{install_url, authorize_url, state, verifier}`. It keeps `state` and `verifier` in a short-lived `__Host-` cookie and sends the browser to `install_url`.
 2. GitHub returns the browser to the setup URL with `installation_id`, `setup_action` and `state`. The dashboard checks `state` against its cookie, keeps `installation_id` in the cookie, and sends the browser to `authorize_url`.

@@ -164,6 +164,7 @@ export default function TeamSwitcher() {
               { href: "/team/machines", label: "Connect a machine" },
               { href: "/team/secrets", label: "Secrets and variables" },
               { href: "/team/new", label: "Create a team" },
+              { href: "/account/sign-ins", label: "Linked sign-ins" },
               { href: "/account", label: "Delete account" },
             ].map((item) => (
               <Link

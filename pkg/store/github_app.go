@@ -365,18 +365,7 @@ func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string)
 // the state expires, so every replica and a restarted controller refuse a
 // state that was used once.
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
-	if nonce == "" {
-		return false, nil
-	}
-	if _, err := s.exec(ctx, `DELETE FROM github_app_connect_states WHERE expires_at <= ?`, now.Unix()); err != nil {
-		return false, err
-	}
-	_, err := s.exec(ctx, `INSERT INTO github_app_connect_states (nonce, expires_at) VALUES (?, ?)`,
-		nonce, expires.Unix())
-	if isUniqueViolation(err) {
-		return false, nil
-	}
-	return err == nil, err
+	return s.consumeFlowNonce(ctx, "github_app_connect_states", nonce, expires, now)
 }
 
 // GitHubAppDeliveryRetention is how long a delivery's digest is remembered;

@@ -3,9 +3,6 @@ package controller
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -78,20 +75,8 @@ type githubConnectState struct {
 	Verifier string `json:"v"`
 }
 
-func verifierDigest(verifier string) string {
-	sum := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
 func (a *githubAppState) signState(st githubConnectState) (string, error) {
-	payload, err := json.Marshal(st)
-	if err != nil {
-		return "", err
-	}
-	mac := hmac.New(sha256.New, a.stateKey)
-	mac.Write(payload)
-	enc := base64.RawURLEncoding
-	return enc.EncodeToString(payload) + "." + enc.EncodeToString(mac.Sum(nil)), nil
+	return signFlowState(a.stateKey, st)
 }
 
 var errConnectState = errors.New("the connect flow's state is not valid; start connecting again")
@@ -100,26 +85,8 @@ var errConnectState = errors.New("the connect flow's state is not valid; start c
 // and team, and the verifier proves this browser is the one that started it;
 // the caller records the nonce so a state finishes one flow only.
 func (a *githubAppState) openState(raw, verifier string, p *Principal, now time.Time) (githubConnectState, error) {
-	enc := base64.RawURLEncoding
-	body, sig, ok := strings.Cut(raw, ".")
-	if !ok {
-		return githubConnectState{}, errConnectState
-	}
-	payload, err := enc.DecodeString(body)
-	if err != nil {
-		return githubConnectState{}, errConnectState
-	}
-	got, err := enc.DecodeString(sig)
-	if err != nil {
-		return githubConnectState{}, errConnectState
-	}
-	mac := hmac.New(sha256.New, a.stateKey)
-	mac.Write(payload)
-	if !hmac.Equal(got, mac.Sum(nil)) {
-		return githubConnectState{}, errConnectState
-	}
 	var st githubConnectState
-	if err := json.Unmarshal(payload, &st); err != nil {
+	if !openFlowState(a.stateKey, raw, &st) {
 		return githubConnectState{}, errConnectState
 	}
 	switch {

@@ -434,23 +434,23 @@ func readHostKey(ctx context.Context, conn net.Conn, addr string) (_ ssh.PublicK
 	return nil, err
 }
 
-// claimRateLimiter counts one claim's asks per minute.
-type claimRateLimiter struct {
+// perMinuteLimiter counts each key's calls in the current minute.
+type perMinuteLimiter struct {
 	mu   sync.Mutex
-	seen map[string]*claimRateWindow
+	seen map[string]*perMinuteWindow
 }
 
-type claimRateWindow struct {
+type perMinuteWindow struct {
 	start time.Time
 	calls int
 }
 
 // allow reports whether key may ask again, at most perMin times a minute.
-func (l *claimRateLimiter) allow(key string, perMin int, now time.Time) bool {
+func (l *perMinuteLimiter) allow(key string, perMin int, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.seen == nil {
-		l.seen = map[string]*claimRateWindow{}
+		l.seen = map[string]*perMinuteWindow{}
 	}
 	for k, w := range l.seen {
 		if now.Sub(w.start) > time.Minute {
@@ -459,7 +459,7 @@ func (l *claimRateLimiter) allow(key string, perMin int, now time.Time) bool {
 	}
 	w := l.seen[key]
 	if w == nil {
-		w = &claimRateWindow{start: now}
+		w = &perMinuteWindow{start: now}
 		l.seen[key] = w
 	}
 	w.calls++

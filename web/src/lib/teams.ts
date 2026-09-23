@@ -101,7 +101,10 @@ export class TeamApiError extends Error {
   }
 }
 
-async function failure(res: Response, action: string): Promise<TeamApiError> {
+export async function failure(
+  res: Response,
+  action: string,
+): Promise<TeamApiError> {
   let detail = "";
   try {
     const text = (await res.text()).trim();
