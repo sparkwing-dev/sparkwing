@@ -67,6 +67,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"selectGitCredentialsTx":                 "reads every team's git credential so one key rotation reseals the whole table, and rewrites each row under its own team",
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
+	"(*Store).UnlinkIdentity":                "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"(*Store).approveOneOnce":                "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +

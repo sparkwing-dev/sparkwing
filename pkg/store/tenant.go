@@ -297,6 +297,8 @@ var operatorTables = []string{
 	"github_app_connect_states",
 	"github_app_deliveries",
 	"identities",
+	"identity_link_states",
+	"identity_unlinks",
 	"signup_admissions",
 	"signup_gate",
 	"sparkwing_meta",

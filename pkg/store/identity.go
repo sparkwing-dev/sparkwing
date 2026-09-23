@@ -468,7 +468,8 @@ func personalDisplayName(p SignInProfile) string {
 //  1. An identity seen before belongs to the account it already belongs to.
 //  2. Otherwise it attaches to an existing account only when the provider
 //     asserts the address verified AND that address is verified on the
-//     account. Both sides verified, or no link.
+//     account, and that account holds no other identity from this provider
+//     and did not unlink this one. Both sides verified, or no link.
 //  3. Otherwise it becomes a new account.
 //
 // Rule 2 is the security property. Linking on an address the provider has not
@@ -515,9 +516,10 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 
 	var res SignInResult
 	var accountID string
+	var linked int
 	err = tx.QueryRowContext(ctx,
-		`SELECT account_id FROM identities WHERE provider = ? AND subject = ?`,
-		p.Provider, p.Subject).Scan(&accountID)
+		`SELECT account_id, linked FROM identities WHERE provider = ? AND subject = ?`,
+		p.Provider, p.Subject).Scan(&accountID, &linked)
 	switch {
 	case err == nil:
 		if _, err := tx.ExecContext(ctx,
@@ -526,24 +528,30 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 			return SignInResult{}, fmt.Errorf("identity: refresh: %w", err)
 		}
 		// safety: the account's address is its linking and invitation key, so it follows what the
-		// provider asserts now; an address left behind would let whoever holds it next walk in.
-		if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
-			return SignInResult{}, err
+		// provider asserts now; an address left behind would let whoever holds it next walk in. A
+		// linked identity was attached whatever its address, so its address is not the account's.
+		if linked == 0 {
+			if err := claimEmailTx(ctx, tx, accountID, p.Email, at); err != nil {
+				return SignInResult{}, err
+			}
 		}
 	case errors.Is(err, sql.ErrNoRows):
 		// safety: rule 2, the account side must hold this address verified too.
 		err = tx.QueryRowContext(ctx,
 			`SELECT id FROM accounts WHERE email = ? AND email_verified = 1`, p.Email).Scan(&accountID)
 		if err == nil {
-			var sameProvider int
-			if err := tx.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM identities WHERE account_id = ? AND provider = ?`,
-				accountID, p.Provider).Scan(&sameProvider); err != nil {
+			var sameProvider, unlinked int
+			if err := tx.QueryRowContext(ctx, `
+				SELECT (SELECT COUNT(*) FROM identities WHERE account_id = ? AND provider = ?),
+				       (SELECT COUNT(*) FROM identity_unlinks WHERE account_id = ? AND provider = ? AND subject = ?)`,
+				accountID, p.Provider, accountID, p.Provider, p.Subject).Scan(&sameProvider, &unlinked); err != nil {
 				return SignInResult{}, err
 			}
 			// safety: one provider account per human, so a second subject from the same provider on this
 			// address is a recycled address or another person; it gets a fresh account, never this one.
-			if sameProvider > 0 {
+			// A provider account this account unlinked is held to the same rule, or unlinking would undo
+			// itself at the next sign-in.
+			if sameProvider > 0 || unlinked > 0 {
 				if err := releaseEmailTx(ctx, tx, p.Email, "", at); err != nil {
 					return SignInResult{}, err
 				}

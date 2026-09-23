@@ -673,6 +673,7 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`DELETE FROM memberships WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM sessions WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM identities WHERE account_id = ?`, []any{accountID}},
+		{`DELETE FROM identity_unlinks WHERE account_id = ?`, []any{accountID}},
 		{`DELETE FROM invitations WHERE email = ?`, []any{acct.Email}},
 		{`UPDATE invitations SET invited_by = '' WHERE invited_by = ?`, []any{accountID}},
 		{`UPDATE invitations SET accepted_by = '' WHERE accepted_by = ?`, []any{accountID}},
@@ -751,8 +752,8 @@ type principalName struct {
 }
 
 // accountPrincipalNamesTx lists the names a row may carry for this account:
-// its address now and every address an identity asserted for it, in every
-// team, and the principal of every token it minted, in that token's team.
+// its address now and every address a sign-in identity asserted for it, in
+// every team, and the principal of every token it minted, in that token's team.
 // Principal columns hold a name rather than an account id, so these are what
 // the relabel matches.
 func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
@@ -764,7 +765,7 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT email, '' FROM identities WHERE account_id = ?
+		SELECT email, '' FROM identities WHERE account_id = ? AND linked = 0
 		UNION SELECT principal, team FROM tokens WHERE created_by = ?`, acct.ID, acct.ID)
 	if err != nil {
 		return nil, err

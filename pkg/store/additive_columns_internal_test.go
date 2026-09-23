@@ -125,6 +125,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and a nullable trigger column an older binary never names, so an older
 	// binary keeps writing the migrated database.
 	62: {triggerSourceExtraReposCols},
+	// safety: v63 adds a defaulted identities column an older binary never
+	// names and two tables nothing older reads, so an older binary keeps
+	// writing the migrated database.
+	63: {identityLinkedCols},
 }
 
 func columnSpecMaps() []map[string]string {
