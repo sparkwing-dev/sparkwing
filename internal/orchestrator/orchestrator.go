@@ -175,21 +175,16 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
-		repo, sha := "unknown", "unknown"
-		if opts.Git != nil {
-			if opts.Git.Repo != "" {
-				repo = opts.Git.Repo
-			}
-			if opts.Git.SHA != "" {
-				sha = opts.Git.SHA
-			}
+		location := ""
+		if opts.Git != nil && opts.Git.Repo != "" && opts.Git.SHA != "" {
+			location = " in " + opts.Git.Repo + "@" + opts.Git.SHA
 		}
 		defined := strings.Join(sparkwing.Registered(), ", ")
 		if defined == "" {
 			defined = "(none)"
 		}
-		return nil, fmt.Errorf("pipeline %s is not defined in %s@%s; defined: %s",
-			opts.Pipeline, repo, sha, defined)
+		return nil, fmt.Errorf("pipeline %s is not defined%s; defined: %s",
+			opts.Pipeline, location, defined)
 	}
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {

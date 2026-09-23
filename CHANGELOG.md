@@ -24,8 +24,9 @@ unlock.
 
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
-  the repository revision and defined pipelines, appears in trigger and run
-  API responses and the CLI, and is logged by the controller at warn level.
+  the defined pipelines and, when known, the repository revision. It appears
+  in trigger and run API responses and the CLI, and the controller logs it at
+  warn level. A dispatch rejected by a guard still creates no run.
 
 ### Added
 

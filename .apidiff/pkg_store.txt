@@ -2267,6 +2267,7 @@ type Trigger struct {
 	GitBranch      string
 	GitSHA         string
 	Status         string
+	Error          string
 	CreatedAt      time.Time
 	ClaimedAt      *time.Time
 	LeaseExpiresAt *time.Time

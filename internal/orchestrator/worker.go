@@ -136,11 +136,14 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 }
 
 func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
+	if _, defined := sparkwing.Lookup(trigger.Pipeline); defined {
+		return nil
+	}
 	if _, err := state.GetRun(ctx, trigger.ID); errors.Is(err, store.ErrNotFound) {
 		if err := state.CreateRun(ctx, store.Run{
 			ID: trigger.ID, Pipeline: trigger.Pipeline, Status: "running",
 			TriggerSource: trigger.TriggerSource, GitBranch: trigger.GitBranch, GitSHA: trigger.GitSHA,
-			DeclaredRepo: trigger.Repo, RepoURL: trigger.RepoURL,
+			RepoURL:   trigger.RepoURL,
 			StartedAt: time.Now(), ParentRunID: trigger.ParentRunID,
 		}); err != nil {
 			return err

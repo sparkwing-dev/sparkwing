@@ -527,7 +527,7 @@ func TestRun_UnknownPipelineErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown pipeline")
 	}
-	if !strings.Contains(err.Error(), "not registered") {
+	if !strings.Contains(err.Error(), "pipeline nope-not-registered is not defined; defined: ") || strings.Contains(err.Error(), "unknown@unknown") {
 		t.Fatalf("unexpected err: %v", err)
 	}
 }
