@@ -430,19 +430,23 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 }
 
 func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	setup := context.Background()
+	if err := st.CreateRun(setup, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+	if err := st.CreateNode(setup, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
+	// safety: opening and migrating the store under -race takes longer than
+	// the budget, so the budget starts once setup is done and bounds only the
+	// runner's handling of the missing Job.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
