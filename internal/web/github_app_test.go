@@ -376,7 +376,7 @@ func TestGitHubAppCompleteExplainsEachRefusal(t *testing.T) {
 	}{
 		{
 			http.StatusForbidden, `{"error":"link a GitHub sign-in to this account before connecting the GitHub App"}`,
-			http.StatusForbidden, "Sign in with GitHub first to prove you own this org",
+			http.StatusForbidden, "Link your GitHub account to your Sparkwing account first",
 		},
 		{
 			http.StatusForbidden, `{"error":"your GitHub account does not administer the account this installation belongs to"}`,

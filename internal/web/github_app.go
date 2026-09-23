@@ -1,11 +1,9 @@
 package web
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -80,7 +78,7 @@ func githubAppConnectHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		if !absoluteHTTPURL(start.InstallURL) || !absoluteHTTPURL(start.AuthorizeURL) ||
 			start.State == "" || start.Verifier == "" {
-			renderGitHubAppPage(w, http.StatusBadGateway, githubAppPage{
+			renderFlowPage(w, http.StatusBadGateway, flowPage{
 				Title:   "GitHub could not be connected",
 				Message: "The controller's answer could not be used. Try again.",
 			})
@@ -92,7 +90,7 @@ func githubAppConnectHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		// safety: the page's form-action 'self' stops a browser following a form's redirect to
 		// GitHub, and a page on this origin that moves on by itself is a navigation, not a form.
-		renderGitHubAppPage(w, http.StatusOK, githubAppPage{
+		renderFlowPage(w, http.StatusOK, flowPage{
 			Title:       "Connecting GitHub",
 			Message:     "Continuing to GitHub to install the App.",
 			Refresh:     start.InstallURL,
@@ -110,7 +108,7 @@ func githubAppSetupHandler(opts HandlerOptions) http.HandlerFunc {
 		query := r.URL.Query()
 		if query.Get("setup_action") == "request" {
 			setGitHubAppFlowCookie(w, "", -1, secure)
-			renderGitHubAppPage(w, http.StatusOK, githubAppPage{
+			renderFlowPage(w, http.StatusOK, flowPage{
 				Title: "Waiting for an organization owner",
 				Message: "An org owner must approve the installation. GitHub has asked them; once they approve it, " +
 					"connect again from the team's GitHub settings.",
@@ -186,7 +184,7 @@ func githubAppCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 			http.Error(w, "could not continue connecting GitHub", http.StatusInternalServerError)
 			return
 		}
-		renderGitHubAppPage(w, http.StatusOK, githubAppPage{
+		renderFlowPage(w, http.StatusOK, flowPage{
 			Title:       "Connecting GitHub",
 			Message:     "Finishing the connection.",
 			Refresh:     githubAppCompletePath,
@@ -235,7 +233,7 @@ func githubAppPrincipal(w http.ResponseWriter, opts HandlerOptions, r *http.Requ
 	}
 	principal, ok := WebPrincipalFromContext(r.Context())
 	if !ok || principal.sessionID == "" {
-		renderGitHubAppPage(w, http.StatusUnauthorized, githubAppPage{
+		renderFlowPage(w, http.StatusUnauthorized, flowPage{
 			Title:       "Sign in to connect GitHub",
 			Message:     "Connecting GitHub needs a signed-in team owner.",
 			ActionHref:  "/login?next=" + url.QueryEscape(githubAppSettingsPath),
@@ -251,7 +249,7 @@ func refuseGitHubAppFlow(w http.ResponseWriter, message string) {
 }
 
 func refuseGitHubAppFlowStatus(w http.ResponseWriter, status int, message string) {
-	renderGitHubAppPage(w, status, githubAppPage{
+	renderFlowPage(w, status, flowPage{
 		Title:       "GitHub was not connected",
 		Message:     message,
 		ActionHref:  githubAppSettingsPath,
@@ -262,23 +260,23 @@ func refuseGitHubAppFlowStatus(w http.ResponseWriter, status int, message string
 // safety: the controller writes its refusal reasons for the user, so a refusal shows them; an outage
 // shows no controller text.
 func renderGitHubAppRefusal(w http.ResponseWriter, err error) {
-	page := githubAppPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
+	page := flowPage{ActionHref: githubAppSettingsPath, ActionLabel: "Back to GitHub settings"}
 	status := http.StatusBadGateway
 	var refused *controllerStatusError
 	if !errors.As(err, &refused) {
 		page.Title = "GitHub could not be connected"
 		page.Message = "The controller could not be reached. Try again."
-		renderGitHubAppPage(w, status, page)
+		renderFlowPage(w, status, page)
 		return
 	}
 	status = refused.Status
 	switch {
 	case refused.Status == http.StatusForbidden && strings.Contains(refused.Message, githubAppNoIdentityReason):
-		page.Title = "Sign in with GitHub first"
-		page.Message = "Sign in with GitHub first to prove you own this org. Sparkwing connects an installation " +
-			"only for an account whose linked GitHub sign-in administers it."
-		page.ActionHref = "/auth/github/start?next=" + url.QueryEscape(githubAppSettingsPath)
-		page.ActionLabel = "Sign in with GitHub"
+		page.Title = "Link GitHub first"
+		page.Message = "Link your GitHub account to your Sparkwing account first, to prove you own this org. " +
+			"Sparkwing connects an installation only for an account whose linked GitHub sign-in administers it."
+		page.ActionHref = signInsSettingsPath
+		page.ActionLabel = "Link GitHub"
 	case refused.Status == http.StatusForbidden:
 		page.Title = "GitHub did not prove you own this account"
 		page.Message = orDefault(refused.Message, "Only a team owner who administers the GitHub account can connect it.")
@@ -301,7 +299,7 @@ func renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 		page.Title = "GitHub could not be reached"
 		page.Message = "GitHub could not be reached to finish connecting. Try again."
 	}
-	renderGitHubAppPage(w, status, page)
+	renderFlowPage(w, status, page)
 }
 
 func orDefault(s, fallback string) string {
@@ -347,53 +345,4 @@ func readGitHubAppFlow(r *http.Request, secure bool) (githubAppFlow, bool) {
 		return githubAppFlow{}, false
 	}
 	return flow, true
-}
-
-type githubAppPage struct {
-	Title       string
-	Message     string
-	Refresh     string
-	ActionHref  string
-	ActionLabel string
-}
-
-var githubAppPageTmpl = template.Must(template.New("github-app").Parse(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  {{if .Refresh}}<meta http-equiv="refresh" content="0;url={{.Refresh}}">{{end}}
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{.Title}}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: #0b0e14; color: #c9d1d9; margin: 0; display: flex; min-height: 100vh; align-items: center; justify-content: center; }
-    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 2rem 2.5rem; width: 100%; max-width: 440px; box-sizing: border-box; }
-    h1 { font-size: 1.15rem; margin: 0 0 1rem 0; font-weight: 600; }
-    p { font-size: 0.9rem; line-height: 1.45; margin: 0 0 1.25rem 0; }
-    a { display: inline-block; padding: 0.5rem 0.9rem; background: #238636; color: white; border-radius: 4px; text-decoration: none; font-size: 0.9rem; }
-    a:hover { background: #2ea043; }
-  </style>
-</head>
-<body>
-  <main class="card">
-    <h1>{{.Title}}</h1>
-    <p>{{.Message}}</p>
-    {{if .ActionHref}}<a href="{{.ActionHref}}">{{.ActionLabel}}</a>{{end}}
-  </main>
-</body>
-</html>
-`))
-
-func renderGitHubAppPage(w http.ResponseWriter, status int, page githubAppPage) {
-	var body bytes.Buffer
-	if err := githubAppPageTmpl.Execute(&body, page); err != nil {
-		http.Error(w, page.Title+": "+page.Message, status)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	// safety: a client that went away mid-page starts the connection again.
-	if _, err := body.WriteTo(w); err != nil {
-		return
-	}
 }
