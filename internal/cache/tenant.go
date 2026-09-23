@@ -39,7 +39,7 @@ var grantKey string
 // the grant key. It fronts the blob stores and the clone routes a runner needs; seeding,
 // refresh, archives, uploads and the admin routes stay behind requireToken,
 // because the mirrors are shared and a seed lands one team's source in them.
-// Registration answers a grant with 403 itself.
+// Registration answers another team's grant with 403 itself.
 func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 	token, key := apiToken, grantKey
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -104,9 +104,17 @@ func withBlobDirs(next func(http.ResponseWriter, *http.Request, blobDirs)) http.
 	}
 }
 
-// safety: the mirrors are shared by every team, so a grant reads only a
-// mirror that holds nothing private: an https origin the cache clones with no
-// credential, registered under the one name derived from that URL.
+// safety: every mirror is the operator's, since only its token or its team's grant registers one, so a mirror
+// registered before grants existed counts too; the store reserves the operator's slug for it alone.
+func (c cacheCaller) operatorGrant() bool { return c.team == authwire.OperatorTeam }
+
+// safety: the operator's own runs register on first fetch as its token did; any other team would clone with the
+// cache's credentials.
+func (c cacheCaller) mayRegisterMirror() bool { return c.team == "" || c.operatorGrant() }
+
+// safety: the mirrors are shared by every team, so another team's grant reads
+// only a mirror that holds nothing private: an https origin the cache clones
+// with no credential, registered under the one name derived from that URL.
 func grantMayUseMirror(name, repoURL string) bool {
 	u, err := url.Parse(repoURL)
 	if err != nil || u.Scheme != "https" || u.User != nil {
@@ -115,7 +123,11 @@ func grantMayUseMirror(name, repoURL string) bool {
 	return name == sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
-func grantMayReadMirror(name string) bool {
+// safety: the operator reads its own private mirrors; another team's grant reads only a public one.
+func (c cacheCaller) mayReadMirror(name string) bool {
+	if c.team == "" || c.operatorGrant() {
+		return true
+	}
 	repoNamesMu.RLock()
 	repoURL, ok := repoNames[name]
 	repoNamesMu.RUnlock()

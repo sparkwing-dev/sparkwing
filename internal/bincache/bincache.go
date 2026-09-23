@@ -324,12 +324,11 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		name = sourceurl.ClaimedRepoNameFromURL(repoSSH)
 	}
 
-	// safety: a cache grant reads mirrors the operator registered and the
-	// cache refuses it a registration, so asking would only fail the fetch.
-	if !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
-			return "", fmt.Errorf("git register: %w", err)
-		}
+	// safety: the operator's own grants register a mirror; the cache refuses any other team's, which then reads
+	// only the mirrors already there, so that refusal leaves the clone to answer.
+	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil &&
+		!(errors.Is(err, errRegisterForbidden) && strings.HasPrefix(token, authwire.CacheGrantPrefix)) {
+		return "", fmt.Errorf("git register: %w", err)
 	}
 
 	cloneURL := strings.TrimRight(gcURL, "/") + "/git/" + name
@@ -510,11 +509,17 @@ func registerRepoWithCache(ctx context.Context, gcURL, token, name, repoURL stri
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+		err := fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusForbidden {
+			err = fmt.Errorf("%w: %w", errRegisterForbidden, err)
+		}
+		return err
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
+
+var errRegisterForbidden = errors.New("the cache refused this credential a registration")
 
 func gitHTTPEnv(gcURL, token string) []string {
 	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

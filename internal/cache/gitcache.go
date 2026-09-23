@@ -2304,10 +2304,11 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// safety: a registration clones a repository onto the shared volume, so a
-	// grant that could register would let one team fill it with mirrors.
-	if callerFrom(r).team != "" {
-		http.Error(w, "mirror registration takes the cache's operator token; a cache grant reads registered mirrors only", http.StatusForbidden)
+	// safety: a registration clones a repository onto the shared volume with
+	// the cache's own credentials, so another team's grant that could register
+	// would fill it with mirrors and read the operator's private origins.
+	if !callerFrom(r).mayRegisterMirror() {
+		http.Error(w, "mirror registration takes the cache's operator token or a grant for the operator's team; this grant reads registered public mirrors only", http.StatusForbidden)
 		return
 	}
 
@@ -2467,7 +2468,7 @@ func handleGit(w http.ResponseWriter, r *http.Request) {
 
 	name := parts[0]
 	rest := parts[1]
-	if callerFrom(r).team != "" && !grantMayReadMirror(name) {
+	if !callerFrom(r).mayReadMirror(name) {
 		http.Error(w, fmt.Sprintf("repo %q not registered", name), http.StatusNotFound)
 		return
 	}

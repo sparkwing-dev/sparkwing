@@ -53,10 +53,12 @@ unlock.
   the requesting credential expires, whichever is first, and is verified
   offline. A GitHub Actions runner credential gets no grant (403). A grant
   reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
-  under `<data-dir>/teams/<team>/`, reads
-  only public `https` mirrors registered under their URL-derived name, and is
-  refused on registration (403), seeding, refresh, archive, upload and admin
-  routes. A team's bins and the git mirrors count toward the store ceiling.
+  under `<data-dir>/teams/<team>/`. A grant for the operator's own team
+  (`default`) reads and registers any mirror, SSH origins included, so the
+  operator's runners still build its private repositories; any other team's
+  grant reads only public `https` mirrors registered under their URL-derived
+  name. Every grant is refused on seeding, refresh, archive, upload and admin
+  routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
   The operator token is unchanged.
 
 - **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
@@ -171,10 +173,12 @@ unlock.
   the requesting credential expires, whichever is first, and is verified
   offline. A GitHub Actions runner credential gets no grant (403). A grant
   reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
-  under `<data-dir>/teams/<team>/`, reads
-  only public `https` mirrors registered under their URL-derived name, and is
-  refused on registration (403), seeding, refresh, archive, upload and admin
-  routes. A team's bins and the git mirrors count toward the store ceiling.
+  under `<data-dir>/teams/<team>/`. A grant for the operator's own team
+  (`default`) reads and registers any mirror, SSH origins included, so the
+  operator's runners still build its private repositories; any other team's
+  grant reads only public `https` mirrors registered under their URL-derived
+  name. Every grant is refused on seeding, refresh, archive, upload and admin
+  routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
   The operator token is unchanged.
 - **web:** Sign in with Google on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`

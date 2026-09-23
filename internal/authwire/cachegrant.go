@@ -29,6 +29,12 @@ type CacheGrant struct {
 	Expires int64  `json:"e"`
 }
 
+// OperatorTeam is the team the deployment operator's own runs belong to. The
+// cache lets its grants read every mirror, because only the operator
+// registers mirrors and they are the operator's own repositories; the store
+// reserves the slug, so no other team can take it.
+const OperatorTeam = "default"
+
 var cacheGrantTeam = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // ErrCacheGrant is the one error a grant that does not verify returns, so a

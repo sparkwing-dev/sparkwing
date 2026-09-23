@@ -131,3 +131,13 @@ func TestCacheGrantEndsWhenTheCredentialDoes(t *testing.T) {
 		t.Fatalf("mint for an expired credential = %d, want a refusal", rec.Code)
 	}
 }
+
+// The cache knows the operator's team only by the name a grant carries, and
+// lets that team's grants read the private mirrors, so the name it trusts must
+// be the team the store puts the operator's runs in.
+func TestCacheGrantOperatorTeamIsTheStoresDefaultTeam(t *testing.T) {
+	if string(store.DefaultTeam) != authwire.OperatorTeam {
+		t.Fatalf("store.DefaultTeam = %q, but the cache trusts grants for %q as the operator's",
+			store.DefaultTeam, authwire.OperatorTeam)
+	}
+}
