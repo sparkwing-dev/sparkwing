@@ -502,7 +502,8 @@ unlock.
   `default` team is left alone and refused, since only the `default` team ever
   held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
   read. The start is refused, before anything is written, when the key opens
-  none of a sample of the envelopes already stored. See
+  none of a sample of the envelopes already stored, or when the sample holds
+  envelopes but none that can confirm the key. See
   [security.md](docs/security.md#secrets-at-rest).
 - **controller (Breaking):** `controller.BoundCipher` takes the owning team.
   `SealBound` and `OpenBound` gain a leading `team` argument, and a new
