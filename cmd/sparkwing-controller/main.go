@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -240,6 +241,12 @@ func run(args []string) error {
 	githubClientID := fs.String("github-client-id", os.Getenv("SPARKWING_GITHUB_CLIENT_ID"),
 		"GitHub OAuth app client id for dashboard sign-in; the secret comes from "+
 			"SPARKWING_GITHUB_CLIENT_SECRET. Offered only with a multi-team license.")
+	emailSender := fs.String("email-sender", os.Getenv("SPARKWING_EMAIL_SENDER"),
+		"address invitation emails are sent from through Amazon SES, such as noreply@example.com; "+
+			"credentials and region come from the AWS default chain. Empty sends no email and logs "+
+			"each invitation instead, so the owner shares its link")
+	emailConfigSet := fs.String("email-configuration-set", os.Getenv("SPARKWING_EMAIL_CONFIGURATION_SET"),
+		"SES configuration set every invitation email names, for delivery and bounce events; empty names none")
 	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
 		"comma-separated dashboard callback URLs a sign-in may return to, "+
 			"such as https://app.example.com/auth/google/callback")
@@ -446,6 +453,16 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
+	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
+		return err
+	}
+	// safety: the bootstrap admin token is the operator credential this
+	// process already holds, and the logs service deletes a run's logs only
+	// for an admin bearer; without it a team deletion waits and says why.
+	srv.WithTeamStorage(controller.TeamStorage{
+		LogsURL: *logsURL, LogsToken: bootstrapToken,
+		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
+	})
 	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
 		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
 		return err
@@ -765,6 +782,18 @@ func loadSecretsKey(envName, filePath string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", filePath, derr)
 	}
 	return decoded, nil
+}
+
+func configureMailer(ctx context.Context, srv *controller.Server, sender, configSet string) error {
+	if strings.TrimSpace(sender) == "" {
+		return nil
+	}
+	m, err := mailer.NewSES(ctx, mailer.SESConfig{From: strings.TrimSpace(sender), ConfigurationSet: strings.TrimSpace(configSet)})
+	if err != nil {
+		return fmt.Errorf("--email-sender: %w", err)
+	}
+	srv.WithMailer(m)
+	return nil
 }
 
 // safety: a trailing newline from a mounted file or a heredoc is editor noise, not part of the credential.

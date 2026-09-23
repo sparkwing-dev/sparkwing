@@ -98,6 +98,11 @@ var additiveColumnSources = map[int][]map[string]string{
 	// none, so an older binary keeps claiming and finishing triggers; it opens
 	// no reservation and the next claim overwrites one it left open.
 	53: {triggersCreditCols},
+	54: nil,
+	// safety: v55 adds a nullable emailed_at to invitations, which an older
+	// binary leaves null on the invitations it writes, and a table it never
+	// reads.
+	55: {invitationEmailCols},
 }
 
 func columnSpecMaps() []map[string]string {

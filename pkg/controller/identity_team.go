@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -146,6 +148,9 @@ type inviteReq struct {
 type inviteResp struct {
 	ID        string `json:"id"`
 	AcceptURL string `json:"accept_url"`
+	// EmailSent reports whether the controller mailed the invitation; when
+	// it did not, the owner hands the accept URL on.
+	EmailSent bool `json:"email_sent"`
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +168,60 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, s, r, "invite", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: s.acceptURL(inv.ID)})
+	accept := s.acceptURL(inv.ID)
+	sent := s.mailInvitation(r.Context(), p, t, inv, accept)
+	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
+}
+
+// WithMailer sends invitation emails through m. Without one, the controller
+// logs that it sent nothing and the owner hands the accept link on.
+func (s *Server) WithMailer(m mailer.Mailer) *Server {
+	s.mailer = m
+	return s
+}
+
+// safety: a failed or refused send leaves the invitation standing, because the
+// owner still holds its accept link; only the email is lost, and the response says so.
+func (s *Server) mailInvitation(ctx context.Context, p *Principal, t *store.Tenant, inv store.Invitation, accept string) bool {
+	if s.mailer == nil {
+		if err := (mailer.Log{Logger: s.logger}).Send(ctx, mailer.Message{To: inv.Email, Subject: "team invitation"}); err != nil {
+			s.logger.Warn("invitation email: log", "err", err)
+		}
+		return false
+	}
+	ok, err := s.store.ClaimInvitationEmail(ctx, inv.ID, time.Now())
+	if err != nil {
+		s.logger.Warn("invitation email: claim", "invitation", inv.ID, "err", err)
+		return false
+	}
+	if !ok {
+		s.logger.Info("invitation email withheld: the address reached its daily limit", "invitation", inv.ID)
+		return false
+	}
+	inviter := p.Name
+	if acct, err := s.store.Account(ctx, p.AccountID); err == nil && strings.TrimSpace(acct.Name) != "" {
+		inviter = acct.Name
+	}
+	team := string(t.Team())
+	if info, err := t.Info(ctx); err == nil {
+		team = info.Label()
+	}
+	msg, err := mailer.InvitationMessage(inv.Email, mailer.Invitation{
+		InviterName: inviter, TeamName: team, Role: string(inv.Role), AcceptURL: accept, ExpiresAt: inv.ExpiresAt,
+	})
+	if err != nil {
+		s.logger.Warn("invitation email: render", "invitation", inv.ID, "err", err)
+		return false
+	}
+	if err := s.mailer.Send(ctx, msg); err != nil {
+		s.logger.Warn("invitation email: send", "invitation", inv.ID, "err", err)
+		return false
+	}
+	return true
 }
 
 // safety: the dashboard origin comes from the first redirect allowlist entry, the one host this deployment
-// already trusts to receive a signed-in browser; no mail is sent, so the owner hands this link on.
+// already trusts to receive a signed-in browser.
 func (s *Server) acceptURL(id string) string {
 	path := "/invitations?id=" + url.QueryEscape(id)
 	if len(s.identity.redirectURIs) == 0 {

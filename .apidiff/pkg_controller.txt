@@ -272,6 +272,7 @@ func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
 func (s *Server) MultiTeam() bool
+func (s *Server) ProcessTeamDeletions(ctx context.Context)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) Shutdown(ctx context.Context) error
@@ -302,6 +303,7 @@ func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes 
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLogsURL(url string) *Server
+func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
@@ -310,6 +312,7 @@ func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
@@ -320,6 +323,14 @@ type ServicesResponse struct {
 	Dashboard string
 }
 const StorageMaintenanceInterval = time.Hour
+const TeamDeletionInterval = time.Minute
+type TeamStorage struct {
+	LogsURL   string
+	LogsToken string
+
+	CacheURL   string
+	CacheToken string
+}
 type TokenRequestBudget struct {
 	PerTokenMinute int
 

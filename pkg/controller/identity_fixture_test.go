@@ -34,11 +34,14 @@ type identityFixture struct {
 	google *googletest.Issuer
 	github *githubtest.Server
 	admin  string
+	srv    *controller.Server
 }
 
 type fixtureOpts struct {
 	license string
 	key     ed25519.PublicKey
+	// configure adds to the server before it starts serving.
+	configure func(*controller.Server)
 }
 
 func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
@@ -78,10 +81,13 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
 		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
+	if o.configure != nil {
+		o.configure(srv)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
-	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin}
+	return &identityFixture{t: t, url: ts.URL, store: st, google: iss, github: gh, admin: admin, srv: srv}
 }
 
 func (f *identityFixture) call(method, path, auth string, body, out any) int {

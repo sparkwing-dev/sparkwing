@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
@@ -120,4 +121,39 @@ func grantMayReadMirror(name string) bool {
 	repoURL, ok := repoNames[name]
 	repoNamesMu.RUnlock()
 	return ok && grantMayUseMirror(name, repoURL)
+}
+
+// handleDeleteTeamTree removes every blob a team's grants wrote, for the
+// controller deleting that team. Deleting a tree that is already gone
+// succeeds, so the controller can retry a deletion that stopped part-way.
+func handleDeleteTeamTree(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "DELETE only", http.StatusMethodNotAllowed)
+		return
+	}
+	team := strings.TrimPrefix(r.URL.Path, "/admin/teams/")
+	// safety: the name becomes a path under teamsDir, so it is held to the
+	// DNS-label charset a team slug has and can never climb out of it.
+	if !isTeamSlug(team) {
+		http.Error(w, "not a team slug", http.StatusBadRequest)
+		return
+	}
+	// #nosec G703 -- the slug is checked above to hold no separator or dot
+	if err := os.RemoveAll(filepath.Join(teamsDir, team)); err != nil {
+		http.Error(w, "delete team tree", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func isTeamSlug(s string) bool {
+	if s == "" || len(s) > 63 || s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+			return false
+		}
+	}
+	return true
 }

@@ -22,6 +22,31 @@ unlock.
 
 ### Added
 
+- **controller:** team and account deletion. `DELETE /api/v1/team`, confirmed
+  with the team's slug, lets an owner delete a team other than their only one:
+  the team closes at once (members leave, tokens are revoked, runs are
+  cancelled) and a background pass removes its logs, cached artifacts and
+  every row, secrets included, retrying until it finishes;
+  `GET /api/v1/me/team-deletions` shows its state. `DELETE /api/v1/me`,
+  confirmed with the account's email, deletes the account, its identities,
+  memberships, sessions and minted tokens, and the teams it was the only
+  member of; runs it left in shared teams name `deleted user`. It answers 409
+  with the list of teams the account is the last owner of while they have
+  other members. The operator deletes an account with
+  `DELETE /api/v1/accounts/{account}` and a team with
+  `DELETE /api/v1/teams/{team}`. Schema v55. See
+  [Authentication](docs/auth.md).
+
+- **controller:** invitation email. With `--email-sender` set the controller
+  mails each invitation through Amazon SES with the inviter's name, the team,
+  the role, the accept link and its seven-day expiry, at most 5 a day to one
+  address across every team; the response gains `email_sent`.
+  `--email-configuration-set` names the SES configuration set. Without a
+  sender nothing is mailed, as before.
+
+- **cache:** `DELETE /admin/teams/{team}` removes a team's artifact, binary
+  and build-cache trees for the operator token.
+
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
   the active team, from a signed-in session only. The token carries the

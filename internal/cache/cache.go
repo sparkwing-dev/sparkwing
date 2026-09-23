@@ -266,6 +266,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
+	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
 	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))

@@ -8,6 +8,13 @@ type Account struct {
 	ActiveTeam    Team
 	CreatedAt     time.Time
 }
+type AccountDeletion struct {
+	AccountID string
+
+	DeletedTeams []Team
+
+	RevokedPrefixes []string
+}
 const AcquireCached AcquireKind = "cached"
 const AcquireCancellingOthers AcquireKind = "cancelling_others"
 const AcquireCoalesced AcquireKind = "coalesced"
@@ -488,6 +495,7 @@ var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun
 const DefaultLeaseDuration = 3 * time.Minute
 const DefaultTeam Team = "default"
 const DefaultWarmCPUClassCores = 2
+const DeletedUserLabel = "deleted user"
 func DetectDialect(dsn string) Dialect
 type Dialect int
 func (d Dialect) String() string
@@ -506,6 +514,7 @@ const EgressUsageRetentionMonths = 13
 var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
+var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
@@ -541,6 +550,7 @@ var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
+var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
@@ -787,6 +797,11 @@ func IsBusyErr(err error) bool
 func IsProtocolErr(err error) bool
 func JoinProfileKey(repo, pipeline string) string
 func KnownRequirements() []string
+type LastOwnerError struct {
+	Teams []TeamInfo
+}
+func (e *LastOwnerError) Error() string
+func (e *LastOwnerError) Unwrap() error
 type LegacyAgentClaim struct {
 	RunID     string
 	Status    string
@@ -821,6 +836,7 @@ const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxEventKindBytes = 128
 const MaxGitHubRunnerCredentials = 20
+const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1008,6 +1024,11 @@ func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSche
 func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
+func (o *Operator) PendingTeamDeletions(ctx context.Context) ([]TeamDeletion, error)
+func (o *Operator) PurgeTeam(ctx context.Context, team Team, now time.Time) error
+func (o *Operator) RecordTeamDeletionFailure(ctx context.Context, team Team, cause string) error
+func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.Time) (TeamDeletion, []string, error)
+func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 const OperatorScope = "admin"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1373,6 +1394,7 @@ type Store struct {
 }
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (Team, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
+func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
@@ -1400,6 +1422,7 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
+func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
 func (s *Store) ClaimNamedNode(
 	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
 	lease time.Duration, opts NamedClaimOptions,
@@ -1462,6 +1485,7 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 func (s *Store) CurrentSchemaVersion(ctx context.Context) (int, error)
 func (s *Store) DB() *sql.DB
 func (s *Store) DatabaseSize(ctx context.Context) (DatabaseSize, error)
+func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Time) (AccountDeletion, error)
 func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
@@ -1662,6 +1686,7 @@ func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month str
 func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error)
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error)
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
+func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
@@ -1687,6 +1712,16 @@ type TableSize struct {
 	Bytes int64
 }
 type Team string
+type TeamDeletion struct {
+	Team        Team
+	State       string
+	RequestedAt time.Time
+	FinishedAt  *time.Time
+	Attempts    int
+	LastError   string
+}
+const TeamDeletionDone = "done"
+const TeamDeletionPending = "pending"
 type TeamInfo struct {
 	Slug        Team
 	DisplayName string
@@ -1791,6 +1826,7 @@ func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outc
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
+func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)

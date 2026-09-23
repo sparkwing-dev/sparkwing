@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -84,6 +85,9 @@ type Server struct {
 
 	cacheURL   string
 	cacheToken string
+
+	teamStorage TeamStorage
+	mailer      mailer.Mailer
 
 	metricsAddr string
 	metricsLn   net.Listener
@@ -1033,10 +1037,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
 	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
+	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
+	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
 	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
 	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
 	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
 	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
+	mux.Handle("DELETE /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteTeam)))
 	mux.Handle("GET /api/v1/team/members", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListMembers)))
 	mux.Handle("PATCH /api/v1/team/members/{user_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetMemberRole)))
 	mux.Handle("DELETE /api/v1/team/members/{user_id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRemoveMember)))
@@ -1072,6 +1079,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
 	mux.Handle("PUT /api/v1/compute-limits", requireScope(ScopeAdmin, http.HandlerFunc(s.handleComputeLimitsSet)))
+
+	mux.Handle("DELETE /api/v1/accounts/{account}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteAccount)))
+	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
 
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
@@ -1254,6 +1264,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
+	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

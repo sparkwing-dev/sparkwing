@@ -640,6 +640,45 @@ it with their runner tokens; an owner demoted to `editor` keeps it, since it
 already carried only the editor's scopes. The member lists and revokes their
 own CLI tokens and no one else's, and holds at most 10 live ones in a team.
 
+With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
+emails each invitation through Amazon SES, taking credentials and region from
+the AWS default chain; `--email-configuration-set`
+(`SPARKWING_EMAIL_CONFIGURATION_SET`) names the SES configuration set every
+message carries. The email names the inviter by display name, the team, the
+role and the accept link, and says the invitation expires in seven days. One
+address receives at most 5 invitation emails a day from every team together;
+past that the invitation is still created and the response says
+`email_sent: false`. Without a sender the controller logs each invitation
+instead of mailing it. Either way the response carries `accept_url` for the
+owner to hand on.
+
+An owner deletes the active team with `DELETE /api/v1/team`, typing its slug
+back as `confirm_slug`. The request closes the team in one transaction: its
+members leave it and their sessions move to another team they belong to, every
+token the team holds is revoked, open invitations are withdrawn, queued runs are
+cancelled and running ones asked to stop, and the team no longer resolves for
+any request. A background pass, once a minute, then deletes the team's logs
+through the logs service, its artifacts and build cache through the cache
+service, and its rows in every team-owned table, secrets included, and frees
+the slug. A pass that fails leaves the deletion pending with the error recorded
+and the next pass starts it again; `GET /api/v1/me/team-deletions` shows the
+requester its state. The controller deletes logs with the bootstrap admin
+token, so with a logs service configured and no bootstrap token a deletion
+stays pending and says so. An owner cannot delete their only team; deleting
+their account does that.
+
+A user deletes their account with `DELETE /api/v1/me`, typing their email back
+as `confirm_email`. The account, its sign-in identities, memberships and
+sessions go, and every token it minted in any team is revoked. Teams the user
+is the only member of, their personal space included, are deleted as above.
+Runs and approvals the user left in shared teams stay with those teams and name
+`deleted user`. While the user is the last owner of a team that has other
+members the request answers `409` and lists those teams, so they hand ownership
+on or delete each first. The operator carries out a request that arrived by
+mail with `DELETE /api/v1/accounts/{account}`, naming the account by id or
+email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
+`admin`.
+
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the
 secrets those pipelines read: they can change what a pipeline runs, and a

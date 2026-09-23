@@ -2037,6 +2037,66 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
 
+  /api/v1/accounts/{account}:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Delete an account on the operator's word.
+      description: >-
+        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
+      parameters:
+        - {name: account, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The account is the last owner of teams that have other members.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
+                type: object
+                required: [error, teams]
+                properties:
+                  error: {type: string}
+                  teams:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+
+  /api/v1/teams/{team}:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Delete a team on the operator's word.
+      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
+      parameters:
+        - {name: team, in: path, required: true, schema: {type: string}}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/users:
     get:
       x-sparkwing-scope: admin
@@ -4287,6 +4347,68 @@ paths:
                         team_display_name: {type: string}
                         role: {type: string, enum: [owner, editor, reader]}
         "401": {$ref: "#/components/responses/Unauthorized"}
+    delete:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Delete the signed-in user's account.
+      description: >-
+        Needs an identity-provider session and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Runs and other rows it left in teams it shared stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.deleteAccountReq
+              type: object
+              required: [confirm_email]
+              properties:
+                confirm_email: {type: string}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "409":
+          description: The account is the last owner of teams that have other members.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
+                type: object
+                required: [error, teams]
+                properties:
+                  error: {type: string}
+                  teams:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+
+  /api/v1/me/team-deletions:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: List the team deletions the signed-in user asked for.
+      description: A requester no longer belongs to a team being deleted, so this is where the deletion's progress stays visible.
+      responses:
+        "200":
+          description: Deletions, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/TeamDeletion"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/me/active-team:
     post:
@@ -4420,6 +4542,32 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Delete the active team and everything it holds.
+      description: >-
+        An owner confirms by sending the team's slug as `confirm_slug`. The request closes the team at once: members leave it, their sessions move to another team they belong to, every token the team holds is revoked, open invitations are withdrawn, queued runs are cancelled and running ones asked to stop. A background pass then removes the team's rows in every table, secrets included, and its logs and cached artifacts, retrying until it finishes; `GET /api/v1/me/team-deletions` shows its state. An owner whose only team this is answers 409 and deletes their account instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.deleteTeamReq
+              type: object
+              required: [confirm_slug]
+              properties:
+                confirm_slug: {type: string}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: This is the owner's only team.}
 
   /api/v1/team/members:
     get:
@@ -4512,7 +4660,7 @@ paths:
       tags: [teams]
       summary: Invite an email address to the active team.
       description: >-
-        Nothing is mailed. The answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter hands on. The role cannot exceed the inviter's own.
+        When the controller has a mail service (`--email-sender`) it emails the invitation, naming the inviter, the team, the role and the link, and `email_sent` is true. One address receives at most 5 invitation emails a day from every team together; past that, and without a mail service, nothing is mailed and `email_sent` is false. Either way the answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter can hand on. The role cannot exceed the inviter's own.
       requestBody:
         required: true
         content:
@@ -4532,10 +4680,11 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.inviteResp
                 type: object
-                required: [id, accept_url]
+                required: [id, accept_url, email_sent]
                 properties:
                   id: {type: string}
                   accept_url: {type: string}
+                  email_sent: {type: boolean, description: Whether the controller mailed the invitation.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -4902,6 +5051,17 @@ components:
         id: {type: string}
         email: {type: string, description: The email Google verified.}
         name: {type: string}
+    TeamDeletion:
+      x-sparkwing-go-type: pkg/controller.teamDeletionJSON
+      type: object
+      required: [slug, state, requested_at, finished_at, attempts, last_error]
+      properties:
+        slug: {type: string}
+        state: {type: string, enum: [pending, done]}
+        requested_at: {type: integer, format: int64, description: Unix seconds.}
+        finished_at: {type: integer, format: int64, nullable: true, description: Unix seconds; null while pending.}
+        attempts: {type: integer, description: Passes that failed to finish the deletion.}
+        last_error: {type: string, description: Why the last failed pass stopped; empty once one succeeds.}
     TeamRef:
       x-sparkwing-go-type: pkg/controller.teamRefJSON
       type: object
