@@ -750,13 +750,15 @@ route, and the logs service resolves one through the controller's
 whoami, so their monthly and concurrency caps fall on the caller that
 spent the bytes.
 
-The cache authenticates one shared token, so every credentialed caller
-resolves to the same name. It therefore **meters and alarms and never
-refuses**: a cap it could enforce would answer `429` to the bearer every
-runner in the fleet shares, stopping every checkout and cache read at
-once, for up to a month, with no recovery but a pod restart. Its health
-reports `egress.enforced: false` to say so. The cap that protects the
-bill belongs to the controller, which knows who each bearer is.
+The cache resolves every credentialed caller to the same name, so it
+carries **no per-principal budget**: a monthly cap there would answer
+`429` to every runner in the fleet at once, for up to a month. The
+per-team cap that protects the bill belongs to the controller, which
+knows who each bearer is. The cache's one refusal is
+`--egress-daily-cap-bytes`, the process-wide backstop: past it every
+metered download answers `429` with a `Retry-After` naming the wait until
+the UTC day rolls. Its health reports `egress.enforced: true` and
+`daily_cap_bytes` while that cap is set.
 
 A service running with auth off resolves every request to `anonymous`,
 which is one shared budget for the same reason; that is the laptop-local

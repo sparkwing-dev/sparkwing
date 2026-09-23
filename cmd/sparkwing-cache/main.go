@@ -107,6 +107,7 @@ func run(args []string) error {
 		return err
 	}
 	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
+	cfg.EgressDailyCapBytes = egressCfg.GlobalDailyCapBytes
 
 	srv, err := cache.New(cfg)
 	if err != nil {

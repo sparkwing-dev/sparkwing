@@ -70,10 +70,13 @@ type Config struct {
 	StoreReconcile time.Duration
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
-	// refuses nothing, because this service authenticates one shared
-	// token and so cannot tell one caller's spend from another's. Zero
-	// is off.
+	// refuses nothing. Zero is off.
 	EgressDailyAlarmBytes int64
+	// EgressDailyCapBytes refuses every metered download with 429 once
+	// this pod has sent this many bytes in a UTC day, until the day
+	// rolls. It bounds the pod's bill whoever the callers are. Zero is
+	// off.
+	EgressDailyCapBytes int64
 }
 
 func DefaultConfig() Config {
@@ -215,7 +218,10 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
-	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	egressCfg := egress.Config{
+		GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes,
+		GlobalDailyCapBytes:   cfg.EgressDailyCapBytes,
+	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
 

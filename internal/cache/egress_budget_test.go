@@ -42,6 +42,7 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	c.APIToken = token
 	c.AllowUnauthenticated = token == ""
 	c.EgressDailyAlarmBytes = cfg.GlobalDailyAlarmBytes
+	c.EgressDailyCapBytes = cfg.GlobalDailyCapBytes
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -273,5 +274,26 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 	}
 	if state := egressMeter.State(); state.GlobalMonthBytes != int64(served) {
 		t.Fatalf("metered %d bytes, want the %d served without a budget", state.GlobalMonthBytes, served)
+	}
+}
+
+// The daily cap is the operator's backstop on this process's bill: once the
+// day's bytes reach it every download is refused until the day rolls,
+// whoever asks, because nothing else bounds what the cache sends.
+func TestTheCacheDailyCapRefusesEveryDownloadPastIt(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 150})
+	seedArtifact(t, "job1", "out.tar", 100)
+	for i := range 2 {
+		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
+			t.Fatalf("download %d under the cap = %d, want 200", i, got.status)
+		}
+	}
+	got := get(t, srv, artifactDownloadPath, "s3cret")
+	if got.status != http.StatusTooManyRequests {
+		t.Fatalf("a download past the daily cap = %d, want 429", got.status)
+	}
+	if got.header.Get("Retry-After") == "" || !strings.Contains(string(got.body), egress.FlagDailyCapBytes) {
+		t.Fatalf("the refusal carries Retry-After %q and body %q, want both naming the reset and the flag",
+			got.header.Get("Retry-After"), got.body)
 	}
 }

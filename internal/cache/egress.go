@@ -1,9 +1,11 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -12,13 +14,12 @@ import (
 // bearer token, and AnonymousPrincipal labels the rest, which is what
 // the open dependency proxy answers.
 //
-// Those two names are the whole principal set this service can resolve,
-// because it authenticates one shared token rather than a directory of
-// identities. That is why the cache meters and alarms but never refuses:
-// a per-principal refusal here would fall on the bearer every runner in
-// the fleet shares, stopping every checkout and cache read at once, with
-// no recovery until the month rolled. The per-team cap belongs to the
-// controller, which knows who each bearer is.
+// Those two names are the whole principal set this service resolves, so
+// it carries no per-principal budget: a per-principal refusal here would
+// fall on every runner in the fleet at once, with no recovery until the
+// month rolled. The per-team cap belongs to the controller, which knows
+// who each bearer is. The process-wide daily cap is the one refusal the
+// cache makes, as the operator's backstop on this pod's bill.
 const BearerPrincipal = "bearer"
 
 var egressMeter *egress.Meter
@@ -40,16 +41,31 @@ func cacheEgressPrincipal(r *http.Request) string {
 	return BearerPrincipal
 }
 
-// safety: this counts and never refuses; [BearerPrincipal] says why a cap
-// this service could enforce would fall on every caller at once.
+// metered counts what next sends and refuses it with 429 once the
+// process-wide daily cap is spent.
 func metered(class egress.Class, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if egressMeter == nil || egress.Bodyless(r) {
 			next(w, r)
 			return
 		}
+		if err := egressMeter.Check(cacheEgressPrincipal(r)); err != nil {
+			writeEgressRefusal(w, err)
+			return
+		}
 		next(egressMeter.Serve(w, r, cacheEgressPrincipal(r), class), r)
 	}
+}
+
+func writeEgressRefusal(w http.ResponseWriter, err error) {
+	retryAfter := int64(60)
+	var budget *egress.BudgetError
+	if errors.As(err, &budget) {
+		retryAfter = max(int64(budget.RetryAfter.Seconds()), 1)
+	}
+	log.Printf("egress refused: %v", err)
+	w.Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
+	http.Error(w, err.Error(), http.StatusTooManyRequests)
 }
 
 // safety: the alarm is this pod's bill crossing a daily threshold, which
@@ -62,11 +78,12 @@ func egressHealth() (map[string]any, []string) {
 	state := egressMeter.State()
 	summary := map[string]any{
 		"enabled":            true,
-		"enforced":           false,
+		"enforced":           state.DailyCapBytes > 0,
 		"alarm":              state.Alarm,
 		"global_day_bytes":   state.GlobalDayBytes,
 		"global_month_bytes": state.GlobalMonthBytes,
 		"daily_alarm_bytes":  state.DailyAlarmBytes,
+		"daily_cap_bytes":    state.DailyCapBytes,
 	}
 	if !state.Alarm {
 		return summary, nil
@@ -77,9 +94,12 @@ func egressHealth() (map[string]any, []string) {
 }
 
 func logEgressBudgets(cfg egress.Config) {
-	if cfg.GlobalDailyAlarmBytes <= 0 {
-		return
+	if cfg.GlobalDailyAlarmBytes > 0 {
+		log.Printf("sparkwing-cache egress alarm: %d bytes per UTC day; the alarm refuses nothing",
+			cfg.GlobalDailyAlarmBytes)
 	}
-	log.Printf("sparkwing-cache egress alarm: %d bytes per UTC day; this service meters and alarms and refuses nothing",
-		cfg.GlobalDailyAlarmBytes)
+	if cfg.GlobalDailyCapBytes > 0 {
+		log.Printf("sparkwing-cache egress daily cap: %d bytes per UTC day; past it every metered download is refused with 429 until the day rolls",
+			cfg.GlobalDailyCapBytes)
+	}
 }
