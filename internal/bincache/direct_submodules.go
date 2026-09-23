@@ -1,14 +1,9 @@
 package bincache
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,56 +14,6 @@ import (
 // helper: one fetch asks once or twice, and a submodule update asks once
 // per submodule it fetches.
 const fetchCredentialAsks = 32
-
-// errDeclarationRouteAbsent reports a controller from before the
-// source-declaration route.
-var errDeclarationRouteAbsent = errors.New("the controller serves no source-declaration route")
-
-// DeclareSourceExtraRepos tells the controller the run's source.extra_repos,
-// read from the pipeline's config at the run's commit, and returns the list
-// the run holds. The first declaration binds; one that differs is refused.
-func DeclareSourceExtraRepos(ctx context.Context, controllerURL, runnerToken, runID string, repos []string) ([]string, error) {
-	if repos == nil {
-		repos = []string{}
-	}
-	payload, err := json.Marshal(map[string]any{"extra_repos": repos})
-	if err != nil {
-		return nil, err
-	}
-	endpoint := strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/source-declaration"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if runnerToken != "" {
-		req.Header.Set("Authorization", "Bearer "+runnerToken)
-	}
-	resp, err := credentialHTTPClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("declare source: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if err != nil {
-		return nil, fmt.Errorf("declare source: %w", err)
-	}
-	var body struct {
-		ExtraRepos []string `json:"extra_repos"`
-		Error      string   `json:"error"`
-	}
-	decodeErr := json.Unmarshal(raw, &body)
-	switch {
-	case resp.StatusCode == http.StatusMethodNotAllowed,
-		resp.StatusCode == http.StatusNotFound && (decodeErr != nil || body.Error == ""):
-		return nil, errDeclarationRouteAbsent
-	case resp.StatusCode != http.StatusOK:
-		return nil, fmt.Errorf("declare source: %s: %s", resp.Status, body.Error)
-	case decodeErr != nil:
-		return nil, fmt.Errorf("declare source: decode: %w", decodeErr)
-	}
-	return body.ExtraRepos, nil
-}
 
 func hasGitmodules(checkout string) bool {
 	fi, err := os.Lstat(filepath.Join(checkout, ".gitmodules"))
@@ -103,12 +48,12 @@ func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCr
 		extra = []*os.File{pipe}
 		env = append(env, "GIT_SSH_COMMAND=ssh"+directSSHOptions)
 	case CredentialSSH:
-		keyDir, command, err := writeSSHCredential(cred)
+		_, command, cleanup, err := writeSSHCredential(cred, opts.keyTmpfsOnly)
 		if err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
 		defer func() {
-			if rmErr := os.RemoveAll(keyDir); rmErr != nil {
+			if rmErr := cleanup(); rmErr != nil {
 				err = errors.Join(err, fmt.Errorf("direct source: remove the deploy key: %w", rmErr))
 			}
 		}()

@@ -2,7 +2,6 @@ package bincache
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,50 +79,32 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 	}
 }
 
-type declarationController struct {
-	mu           sync.Mutex
-	declared     [][]string
-	credentialed [][]string
-}
-
-func (c *declarationController) serve(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			ExtraRepos []string `json:"extra_repos"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/source-declaration"):
-			c.declared = append(c.declared, body.ExtraRepos)
-			_ = json.NewEncoder(w).Encode(map[string]any{"extra_repos": body.ExtraRepos})
-		case strings.HasSuffix(r.URL.Path, "/git-credential"):
-			c.credentialed = append(c.credentialed, body.ExtraRepos)
-			_, _ = w.Write([]byte(`{"kind":"github_app","host":"github.com","token":"ghs_` + strings.ReplaceAll(strings.Join(body.ExtraRepos, "_"), "/", "-") + `x"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-// After the fetch the runner declares the pipeline's source.extra_repos
-// before anything compiles, and with submodules present it widens the App
-// token to them for the submodule checkout. With none declared it still
-// declares, so later pipeline code cannot bind a list of its own.
-func TestFetchRunSourceDirectDeclaresExtraReposAndWidensForSubmodules(t *testing.T) {
-	for _, extras := range [][]string{{"acme/lib"}, {}} {
-		ctrl := &declarationController{}
-		srv := ctrl.serve(t)
+// The runner checks out submodules only when the controller's answer names
+// extra repositories a team owner listed, and then with that one answer: it
+// asks nothing further, so nothing in the fetched tree can widen the token.
+func TestFetchRunSourceDirectChecksOutSubmodulesOnlyForTheOwnersList(t *testing.T) {
+	for name, answer := range map[string]string{
+		"listed":   `{"kind":"github_app","host":"github.com","token":"ghs_wide","extra_repositories":["acme/lib"]}`,
+		"unlisted": `{"kind":"github_app","host":"github.com","token":"ghs_narrow"}`,
+	} {
+		var mu sync.Mutex
+		var asks []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			asks = append(asks, r.URL.Path)
+			mu.Unlock()
+			if !strings.HasSuffix(r.URL.Path, "/git-credential") {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(answer))
+		}))
+		t.Cleanup(srv.Close)
 		checkout := t.TempDir()
 		writeTestFile(t, filepath.Join(checkout, ".gitmodules"), "[submodule \"lib\"]\n")
 		var subCred *DirectCredential
 		_, err := fetchRunSourceDirect(context.Background(), RunSource{
 			ControllerURL: srv.URL, RunnerToken: "runner-tok", RunID: "run-1",
-			ExtraRepos: func(string) ([]string, error) { return extras, nil },
 		}, nil, func(DirectCredential) (string, error) {
 			return filepath.Join(checkout, ".sparkwing"), nil
 		}, func(_ string, cred DirectCredential) error {
@@ -131,22 +112,19 @@ func TestFetchRunSourceDirectDeclaresExtraReposAndWidensForSubmodules(t *testing
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("extras %v: %v", extras, err)
+			t.Fatalf("%s: %v", name, err)
 		}
-		if len(ctrl.declared) != 1 || strings.Join(ctrl.declared[0], ",") != strings.Join(extras, ",") || ctrl.declared[0] == nil {
-			t.Fatalf("extras %v: declared %#v, want exactly one declaration of the list", extras, ctrl.declared)
+		if len(asks) != 1 {
+			t.Fatalf("%s: controller asks = %v, want the one credential request", name, asks)
 		}
-		if len(extras) == 0 {
-			if subCred != nil || len(ctrl.credentialed) != 1 {
-				t.Fatalf("no extras: submodules=%v, credential asks %v; want neither", subCred, ctrl.credentialed)
+		if name == "unlisted" {
+			if subCred != nil {
+				t.Fatalf("unlisted: submodules were checked out with %+v", subCred)
 			}
 			continue
 		}
-		if len(ctrl.credentialed) != 2 || ctrl.credentialed[0] != nil || strings.Join(ctrl.credentialed[1], ",") != "acme/lib" {
-			t.Fatalf("credential asks = %#v, want the run's repository, then with acme/lib", ctrl.credentialed)
-		}
-		if subCred == nil || subCred.Secret != "ghs_acme-libx" {
-			t.Fatalf("submodules got %+v, want the token widened to acme/lib", subCred)
+		if subCred == nil || subCred.Secret != "ghs_wide" || strings.Join(subCred.ExtraRepositories, ",") != "acme/lib" {
+			t.Fatalf("listed: submodules got %+v, want the one widened answer", subCred)
 		}
 	}
 }

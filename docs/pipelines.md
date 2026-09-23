@@ -49,7 +49,6 @@ hard parse error):
 - **profile** - the project profile this pipeline uses (from the `profiles:` map)
 - **requires** - runner-label requirements for every job (e.g. `[local]` pins execution to this machine)
 - **hidden** - omit from `pipeline list` (still invocable by exact name)
-- **source** - `extra_repos`: up to 10 more GitHub repositories, as `owner/name`, that the run's GitHub App token also reads, such as private submodules. A runner that declares them checks out the run's submodules. See [git-credentials.md](git-credentials.md#extra-repositories).
 
 For the complete schema -- every top-level key, pipeline field, and
 trigger field with types -- see the generated [config-reference.md](config-reference.md).

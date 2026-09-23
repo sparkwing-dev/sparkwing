@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import TeamShell, { Panel, errorText } from "@/components/TeamShell";
+import { ExtraReposPanel } from "@/components/GitHubAppExtraRepos";
 import {
   ConnectGitHubForm,
   InstallationRow,
@@ -239,6 +240,9 @@ function ConnectedGitHub({ me }: { me: Me }) {
             onCancel={editing ? () => setEditing(null) : undefined}
           />
         </Panel>
+      ) : null}
+      {installations.length > 0 ? (
+        <ExtraReposPanel repositories={choices} canManage={canManage} />
       ) : null}
       {!canManage ? (
         <div className="text-xs text-[var(--muted)]">

@@ -80,6 +80,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 		logger = slog.Default()
 	}
 	cfg = normalizePoolLoopConfig(cfg)
+	sweepLeftoverDeployKeys(logger)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).

@@ -5427,53 +5427,10 @@ paths:
                   extra_repositories:
                     type: array
                     items: {type: string}
-                    description: Never set on this route; the git-credential route fills it.
+                    description: Never set on this route; the git-credential route fills it from the team owner's list.
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/source-declaration:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
-      tags: [runs]
-      summary: Declare the run pipeline's source.extra_repos, binding the run to them.
-      description: >-
-        For a runner holding a live node or trigger claim on the run, right after it fetches the run's source and before it compiles anything. The first declaration binds the run; a later one that names a different set answers 409, so pipeline code holding the same runner token cannot widen what the App token reads. The repositories are owner/name, at most 10, all of the run's GitHub repository's owner.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.SourceDeclaration
-              type: object
-              required: [extra_repos]
-              properties:
-                extra_repos:
-                  type: array
-                  maxItems: 10
-                  items: {type: string}
-      responses:
-        "200":
-          description: The list the run holds, folded to lower case and sorted.
-          content:
-            application/json:
-              schema:
-                x-sparkwing-go-type: pkg/controller.SourceDeclaration
-                type: object
-                required: [extra_repos]
-                properties:
-                  extra_repos:
-                    type: array
-                    items: {type: string}
-        "400": {$ref: "#/components/responses/BadRequest"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: The run already declared a different set.}
 
   /api/v1/runs/{id}/git-credential:
     parameters:
@@ -5486,20 +5443,7 @@ paths:
       tags: [runs]
       summary: Release the one credential a runner fetches the run's source with.
       description: >-
-        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              x-sparkwing-go-type: pkg/controller.gitCredentialReq
-              type: object
-              properties:
-                extra_repos:
-                  type: array
-                  maxItems: 10
-                  items: {type: string}
-                  description: Repositories of the run's declared source.extra_repos, as owner/name, that the App token also reads; each must be declared and covered by the installation that covers the run's repository, or the route answers 403.
+        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. The App token also reads the extra repositories a team owner listed for the run's repository (PUT /api/v1/team/github-app/extra-repos), each checked again to be covered by the installation that covers the run's repository (403 otherwise); the route reads no request body, so nothing a runner sends widens it. A team credential is released only while the claim is still live inside the transaction that records the release. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
       responses:
         "200":
           description: Credential released.
@@ -5518,7 +5462,7 @@ paths:
                   extra_repositories:
                     type: array
                     items: {type: string}
-                    description: Further owner/name repositories the App token reads.
+                    description: The owner/name repositories a team owner listed for the run's repository. An App token reads them too; the runner checks out submodules only when this names any.
                   username: {type: string, description: "The https username, for kind https."}
                   secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
                   known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
@@ -5739,6 +5683,50 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {description: This claim asked for source tokens too often; Retry-After says when to ask again.}
+
+  /api/v1/team/github-app/extra-repos:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the further repositories each repository's App token also reads.
+      description: Any member. One entry per source repository with a list, sorted by repository.
+      responses:
+        "200":
+          description: Lists.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [extra_repos]
+                properties:
+                  extra_repos:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Set the further repositories a run of a repository's App token also reads.
+      description: >-
+        Owner only. Replaces the list for repository; an empty list clears it. At most 10 owner/name repositories, all of the repository's owner, and each covered by the installation of the team's that covers the repository (400 otherwise; 404 when no installation the team holds covers the repository). The controller checks the coverage again at every mint. The list lives in the controller, never in the repository, so a repository's own code cannot widen its token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+      responses:
+        "200":
+          description: Written, folded to lower case and sorted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: GitHub could not be reached to find the installations.}
 
   /webhooks/github-app:
     post:
@@ -6489,6 +6477,17 @@ components:
         pull_request: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
+    GitHubAppExtraRepos:
+      x-sparkwing-go-type: pkg/controller.githubAppExtraReposJSON
+      type: object
+      required: [repository, extra_repos]
+      properties:
+        repository: {type: string, description: The source repository, owner/name.: ''}
+        extra_repos:
+          type: array
+          maxItems: 10
+          items: {type: string}
+          description: owner/name repositories of the same owner that a run of repository's App token also reads.
     IdentityUser:
       x-sparkwing-go-type: pkg/controller.userJSONBody
       type: object

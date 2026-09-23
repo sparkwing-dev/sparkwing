@@ -77,65 +77,6 @@ type Pipeline struct {
 	// reserved label "local" keeps fleet helpers from claiming the
 	// node; --sw-local-only instead selects local storage backends.
 	Requires []string `yaml:"requires,omitempty"`
-
-	// Source shapes how a runner fetches this pipeline's source.
-	Source Source `yaml:"source,omitempty"`
-}
-
-// MaxExtraRepos bounds [Source.ExtraRepos].
-const MaxExtraRepos = 10
-
-// Source shapes how a runner fetches a pipeline's source.
-type Source struct {
-	// ExtraRepos names further GitHub repositories, as owner/name, that the
-	// run's GitHub App token also reads when the installation covering the
-	// run's repository covers them: private submodules or dependencies.
-	// Declaring them makes a runner check out the run's submodules. At
-	// most [MaxExtraRepos], all of the run repository's owner.
-	ExtraRepos []string `yaml:"extra_repos,omitempty"`
-}
-
-// UnmarshalYAML decodes a source mapping and rejects any key outside the
-// schema, so a misspelled key does not silently drop the list it names.
-func (s *Source) UnmarshalYAML(node *yaml.Node) error {
-	if node == nil {
-		return nil
-	}
-	if node.Kind == yaml.AliasNode && node.Alias != nil {
-		return s.UnmarshalYAML(node.Alias)
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("source: expected a mapping, got %s", nodeKindName(node.Kind))
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if key := node.Content[i]; key.Kind == yaml.ScalarNode && key.Value != "extra_repos" {
-			return fmt.Errorf("source: unknown field %q", key.Value)
-		}
-	}
-	type sourceAlias Source
-	var raw sourceAlias
-	if err := node.Decode(&raw); err != nil {
-		return err
-	}
-	*s = Source(raw)
-	return nil
-}
-
-var extraRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
-
-// Validate refuses a list longer than [MaxExtraRepos] or an entry that is
-// not an owner/name GitHub slug.
-func (s Source) Validate(pipeline string) error {
-	if len(s.ExtraRepos) > MaxExtraRepos {
-		return fmt.Errorf("pipeline %q: source.extra_repos names %d repositories, at most %d",
-			pipeline, len(s.ExtraRepos), MaxExtraRepos)
-	}
-	for _, repo := range s.ExtraRepos {
-		if !extraRepoPattern.MatchString(repo) || strings.HasPrefix(repo, ".") || strings.Contains(repo, "..") {
-			return fmt.Errorf("pipeline %q: source.extra_repos entry %q is not an owner/name GitHub repository", pipeline, repo)
-		}
-	}
-	return nil
 }
 
 // Guards is the pipeline-level dispatch gate. Both fields are lists
@@ -254,7 +195,7 @@ func pipelineKnownYAMLFields() map[string]struct{} {
 	return map[string]struct{}{
 		"name": {}, "entrypoint": {}, "description": {},
 		"on": {}, "hidden": {},
-		"guards": {}, "args": {}, "profile": {}, "requires": {}, "source": {},
+		"guards": {}, "args": {}, "profile": {}, "requires": {},
 	}
 }
 
@@ -811,9 +752,6 @@ func (c *Config) Validate() error {
 			return err
 		}
 		if err := p.On.Schedule.Validate(p.Name); err != nil {
-			return err
-		}
-		if err := p.Source.Validate(p.Name); err != nil {
 			return err
 		}
 	}

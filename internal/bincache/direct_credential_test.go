@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -45,8 +46,11 @@ func TestRequestDirectCredentialReadsEachKind(t *testing.T) {
 		want DirectCredential
 	}{
 		"app": {
-			`{"kind":"github_app","host":"github.com","token":"ghs_ok"}`,
-			DirectCredential{Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: "ghs_ok"},
+			`{"kind":"github_app","host":"github.com","token":"ghs_ok","extra_repositories":["acme/lib"]}`,
+			DirectCredential{
+				Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: "ghs_ok",
+				ExtraRepositories: []string{"acme/lib"},
+			},
 		},
 		"https": {
 			`{"kind":"https","host":"gitlab.example.com","username":"deploy","secret":"glpat-abc"}`,
@@ -61,8 +65,8 @@ func TestRequestDirectCredentialReadsEachKind(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			srv, paths := credentialController(t, http.StatusOK, tc.body)
-			got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1", nil)
-			if err != nil || got != tc.want {
+			got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1")
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("credential = %+v, %v; want %+v", got, err, tc.want)
 			}
 			if len(*paths) != 1 || (*paths)[0] != "/api/v1/runs/run-1/git-credential" {
@@ -75,7 +79,7 @@ func TestRequestDirectCredentialReadsEachKind(t *testing.T) {
 func TestRequestDirectCredentialNamesTheRemedy(t *testing.T) {
 	srv, paths := credentialController(t, http.StatusNotFound,
 		`{"error":"no_source_credential","message":"install the GitHub App or store a git credential for gitlab.example.com"}`)
-	_, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1", nil)
+	_, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1")
 	if !errors.Is(err, ErrNoSourceCredential) || !strings.Contains(err.Error(), "store a git credential") {
 		t.Fatalf("err = %v, want ErrNoSourceCredential carrying the remedy", err)
 	}
@@ -88,7 +92,7 @@ func TestRequestDirectCredentialNamesTheRemedy(t *testing.T) {
 // 404, and the runner asks for the App source token instead.
 func TestRequestDirectCredentialFallsBackOnAnOldController(t *testing.T) {
 	srv, paths := credentialController(t, http.StatusNotFound, "404 page not found\n")
-	got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1", nil)
+	got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1")
 	if err != nil || got.Kind != CredentialGitHubApp || got.Secret != "ghs_legacy" || got.Host != "github.com" {
 		t.Fatalf("credential = %+v, %v; want the legacy App token", got, err)
 	}
@@ -107,10 +111,11 @@ func TestRequestDirectCredentialRefusesUnusableValues(t *testing.T) {
 		"ssh without pin":     `{"kind":"ssh","host":"gitlab.com","secret":` + jsonString(testDeployKey) + `}`,
 		"ssh not a key":       `{"kind":"ssh","host":"gitlab.com","secret":"hunter2","known_hosts":"gitlab.com ssh-ed25519 AAAA"}`,
 		"unknown kind":        `{"kind":"ftp","host":"gitlab.com","secret":"x"}`,
+		"extra repo url":      `{"kind":"github_app","host":"github.com","token":"ghs_ok","extra_repositories":["https://evil/x"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			srv, _ := credentialController(t, http.StatusOK, body)
-			if got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1", nil); err == nil {
+			if got, err := RequestDirectCredential(context.Background(), srv.URL, "runner-tok", "run-1"); err == nil {
 				t.Fatalf("accepted %+v", got)
 			}
 		})

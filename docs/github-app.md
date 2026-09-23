@@ -3,7 +3,7 @@
 The Sparkwing GitHub App connects a team to the GitHub repositories it controls. An installation proves control: GitHub lets only an account's owner install an App on it, so a binding from an installation to a team is something a team member cannot claim for a repository they do not administer. With an installation bound, a team gets:
 
 - push and pull request runs from the App's webhook, for the pipelines the team subscribes to each repository;
-- source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories the pipeline declares in `source.extra_repos` ([extra repositories](git-credentials.md#extra-repositories));
+- source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories a team owner listed for it ([extra repositories](git-credentials.md#extra-repositories));
 - commit statuses on the commits those runs build.
 
 A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out only tokens restricted to a single repository.
@@ -87,7 +87,7 @@ A pull request whose head repository is not its base repository, or whose head r
 
 A runner without the git cache asks `POST /api/v1/runs/{id}/git-credential` before it fetches a run's source. The controller answers a caller that holds a live claim on the run, with a token of the run's own team, and resolves the credential in a fixed order:
 
-1. When the run's repository is on github.com and an installation bound to the run's team, and not suspended, covers it, the answer is `{kind: "github_app", host, token, expires_at, repository}`: an installation token restricted to that repository with `contents: read`. GitHub issues it for at most an hour.
+1. When the run's repository is on github.com and an installation bound to the run's team, and not suspended, covers it, the answer is `{kind: "github_app", host, token, expires_at, repository, extra_repositories}`: an installation token restricted to that repository, and to the extra repositories a team owner listed for it, with `contents: read`. GitHub issues it for at most an hour. The route reads nothing from the request body, so neither the runner nor anything in the fetched tree widens the token.
 2. Otherwise, when the team stored a git credential for the host of the run's repository, the controller releases it; see [Team git credentials](git-credentials.md).
 3. Otherwise it answers 404 with `{"error": "no_source_credential"}` and a message naming both remedies: install the App on the repository, or store a git credential for the host.
 

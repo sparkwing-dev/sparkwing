@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -28,9 +28,6 @@ type RunSource struct {
 	// releases none. Every other runner fetches only with what the
 	// controller releases for the run.
 	OwnerCredentials bool
-	// ExtraRepos reads the run pipeline's source.extra_repos from the
-	// fetched checkout. Nil skips the declaration and submodules.
-	ExtraRepos func(checkout string) ([]string, error)
 }
 
 // FetchRunSourceDirect resolves the run's source credential and checks out
@@ -40,16 +37,21 @@ type RunSource struct {
 // without OwnerCredentials fails with the controller's remedy, and a runner
 // with them fetches with the machine's own credentials.
 //
-// After the fetch, and before anything compiles, the runner declares the
-// pipeline's source.extra_repos to the controller, which binds the run to
-// them. When the pipeline declares any and the checkout has submodules, the
-// runner checks them out with the run's credential, widened to the declared
-// repositories when it is an App token.
+// When a team owner listed extra repositories for the run's repository and
+// the checkout has submodules, the runner checks them out with the same
+// credential, which the controller widened to the listed repositories when it
+// is an App token. Nothing in the fetched tree widens it.
 func FetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logger) (string, error) {
+	opts := defaultDirectOptions()
+	// safety: a runner its owner did not fence is a cloud runner, whose
+	// released keys only ever touch memory.
+	opts.keyTmpfsOnly = !src.OwnerCredentials
 	return fetchRunSourceDirect(ctx, src, logger, func(cred DirectCredential) (string, error) {
-		return FetchPipelineSourceDirect(ctx, src.RepoURL, src.Branch, src.SHA, src.WorkDir, cred)
+		fetchOpts := opts
+		fetchOpts.cred = cred
+		return fetchPipelineSourceDirect(ctx, src.RepoURL, src.Branch, src.SHA, src.WorkDir, fetchOpts)
 	}, func(checkout string, cred DirectCredential) error {
-		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, defaultDirectOptions())
+		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, opts)
 	})
 }
 
@@ -59,7 +61,7 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.RunnerToken, src.RunID, nil)
+	cred, err := RequestDirectCredential(ctx, src.ControllerURL, src.RunnerToken, src.RunID)
 	if err != nil {
 		// safety: a runner its owner did not fence has no credentials of its
 		// own to offer, so it fails rather than fetch as whoever runs it.
@@ -71,33 +73,12 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 		cred = DirectCredential{}
 	}
 	sparkwingDir, err := fetch(cred)
-	if err != nil || src.ExtraRepos == nil {
+	if err != nil || cred.Empty() || len(cred.ExtraRepositories) == 0 {
 		return sparkwingDir, err
 	}
 	checkout := filepath.Dir(sparkwingDir)
-	declared, err := src.ExtraRepos(checkout)
-	if err != nil {
-		return "", fmt.Errorf("direct source: read source.extra_repos: %w", err)
-	}
-	held, err := DeclareSourceExtraRepos(ctx, src.ControllerURL, src.RunnerToken, src.RunID, declared)
-	if errors.Is(err, errDeclarationRouteAbsent) {
+	if !hasGitmodules(checkout) {
 		return sparkwingDir, nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("direct source: %w", err)
-	}
-	if len(held) == 0 || !hasGitmodules(checkout) {
-		return sparkwingDir, nil
-	}
-	if cred.Empty() {
-		logger.Info("direct source: source.extra_repos needs a credential the controller released; submodules left out",
-			"run_id", src.RunID)
-		return sparkwingDir, nil
-	}
-	if cred.Kind == CredentialGitHubApp {
-		if cred, err = RequestDirectCredential(ctx, src.ControllerURL, src.RunnerToken, src.RunID, held); err != nil {
-			return "", fmt.Errorf("direct source: credential for source.extra_repos: %w", err)
-		}
 	}
 	if err := submodules(checkout, cred); err != nil {
 		return "", err
@@ -185,16 +166,36 @@ const directSSHKeyOptions = " -F /dev/null -o IdentitiesOnly=yes -o IdentityAgen
 	" -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no"
 
 // writeSSHCredential writes cred's key and pinned host key into a fresh
-// private directory, on tmpfs where the machine has one, and returns the
-// directory, which the caller removes, and the GIT_SSH_COMMAND that uses them.
-func writeSSHCredential(cred DirectCredential) (dir, command string, err error) {
-	dir, err = os.MkdirTemp(sshKeyRoot(), "sparkwing-git-")
+// private directory and returns it, the GIT_SSH_COMMAND that uses them, and
+// the cleanup that removes the directory. The directory is on a tmpfs where
+// the machine has one; with tmpfsOnly, which a cloud runner sets, it is
+// refused rather than written to a disk. A lock held on the directory until
+// the cleanup tells a starting runner's sweep that the key is still in use.
+func writeSSHCredential(cred DirectCredential, tmpfsOnly bool) (dir, command string, cleanup func() error, err error) {
+	root, err := sshKeyRoot(tmpfsOnly)
 	if err != nil {
-		return "", "", fmt.Errorf("ssh credential directory: %w", err)
+		return "", "", nil, err
+	}
+	dir, err = os.MkdirTemp(root, keyDirPrefix)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("ssh credential directory: %w", err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, keyDirLockName), os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err == nil {
+		if _, lerr := cacheLock(lock, cacheLockExclusive); lerr != nil {
+			err = errors.Join(lerr, lock.Close())
+		}
+	}
+	if err != nil {
+		return "", "", nil, errors.Join(fmt.Errorf("ssh credential lock: %w", err), os.RemoveAll(dir))
+	}
+	cleanup = func() error {
+		return errors.Join(os.RemoveAll(dir), lock.Close())
 	}
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, os.RemoveAll(dir))
+			err = errors.Join(err, cleanup())
+			cleanup = nil
 		}
 	}()
 	key := strings.TrimRight(cred.Secret, "\n") + "\n"
@@ -202,12 +203,12 @@ func writeSSHCredential(cred DirectCredential) (dir, command string, err error) 
 	keyPath, hostsPath := filepath.Join(dir, "key"), filepath.Join(dir, "known_hosts")
 	for path, body := range map[string]string{keyPath: key, hostsPath: knownHosts} {
 		if err := writePrivateFile(path, body); err != nil {
-			return "", "", fmt.Errorf("ssh credential: %w", err)
+			return "", "", nil, fmt.Errorf("ssh credential: %w", err)
 		}
 	}
 	command = "ssh -i " + shellQuote(keyPath) + directSSHKeyOptions +
 		" -o UserKnownHostsFile=" + shellQuote(hostsPath) + directSSHOptions
-	return dir, command, nil
+	return dir, command, cleanup, nil
 }
 
 func writePrivateFile(path, body string) error {
@@ -219,15 +220,87 @@ func writePrivateFile(path, body string) error {
 	return errors.Join(werr, f.Close())
 }
 
-// sshKeyRoot is where a released deploy key is written: /dev/shm, a tmpfs,
-// where the machine has one, so the key never reaches a disk.
-func sshKeyRoot() string {
-	if runtime.GOOS == "linux" {
-		if fi, err := os.Stat("/dev/shm"); err == nil && fi.IsDir() {
-			return "/dev/shm"
+const (
+	keyDirPrefix   = "sparkwing-git-"
+	keyDirLockName = "lock"
+)
+
+// keyRootCandidates are where a released deploy key may be written, in
+// order of preference; onTmpfs reports which are memory-backed.
+var (
+	keyRootCandidates = func() []string {
+		roots := []string{"/dev/shm"}
+		if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+			roots = append(roots, dir)
+		}
+		return append(roots, os.TempDir())
+	}
+	onTmpfs = isTmpfs
+)
+
+// sshKeyRoot is the first key root on a tmpfs, so the key never reaches a
+// disk. Without one, tmpfsOnly refuses, and otherwise the key goes to the
+// temporary directory.
+func sshKeyRoot(tmpfsOnly bool) (string, error) {
+	for _, dir := range keyRootCandidates() {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() && onTmpfs(dir) {
+			return dir, nil
 		}
 	}
-	return os.TempDir()
+	if tmpfsOnly {
+		return "", errors.New("no tmpfs to hold the released deploy key: a cloud runner never writes one to disk; " +
+			"give the runner a tmpfs at /dev/shm")
+	}
+	return os.TempDir(), nil
+}
+
+// SweepSSHKeyDirs removes the deploy key directories a runner of this user
+// left behind when it crashed mid-fetch, from every key root, and reports how
+// many it removed. It leaves a directory whose lock a live fetch holds, one
+// of another user, and anything that is not a directory, such as a symlink.
+func SweepSSHKeyDirs() (int, error) {
+	removed := 0
+	var errs []error
+	seen := map[string]bool{}
+	for _, root := range keyRootCandidates() {
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), keyDirPrefix) {
+				continue
+			}
+			dir := filepath.Join(root, e.Name())
+			fi, err := os.Lstat(dir)
+			if err != nil || !fi.IsDir() || !ownedByThisUser(fi) || keyDirInUse(dir, fi) {
+				continue
+			}
+			if err := os.RemoveAll(dir); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			removed++
+		}
+	}
+	return removed, errors.Join(errs...)
+}
+
+// keyDirInUse reports whether a live fetch holds dir's lock. A directory
+// with no lock file is in use only in the moment between its creation and
+// the lock's, so one older than a minute is a leftover.
+func keyDirInUse(dir string, fi os.FileInfo) bool {
+	lock, err := os.Open(filepath.Join(dir, keyDirLockName))
+	if err != nil {
+		return !os.IsNotExist(err) || time.Since(fi.ModTime()) < time.Minute
+	}
+	defer func() { _ = lock.Close() }()
+	got, err := cacheLock(lock, cacheLockExclusiveNonblock)
+	return err != nil || !got
 }
 
 func shellQuote(s string) string {

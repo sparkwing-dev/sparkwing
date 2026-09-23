@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -124,69 +125,81 @@ func TestGitCredentialNeedsALiveClaimOnTheRun(t *testing.T) {
 	}
 }
 
-func (f *appFixture) declare(auth, runID string, repos []string) int {
-	f.t.Helper()
-	return f.call("POST", "/api/v1/runs/"+runID+"/source-declaration", auth, map[string]any{"extra_repos": repos}, nil)
-}
-
-func (f *appFixture) gitCredentialWith(auth, runID string, extra []string) (gitCredentialAnswer, int) {
+func (f *appFixture) gitCredentialWith(auth, runID string, body map[string]any) (gitCredentialAnswer, int) {
 	f.t.Helper()
 	var out gitCredentialAnswer
-	code := f.call("POST", "/api/v1/runs/"+runID+"/git-credential", auth, map[string]any{"extra_repos": extra}, &out)
+	code := f.call("POST", "/api/v1/runs/"+runID+"/git-credential", auth, body, &out)
 	return out, code
 }
 
-// A run's App token also reads the repositories its pipeline declared in
-// source.extra_repos, once the runner declared them and only when the
-// installation covering the run's repository covers them too. The first
-// declaration binds, so pipeline code holding the same token cannot widen it.
-func TestGitCredentialAppTokenReadsTheDeclaredExtraRepos(t *testing.T) {
+func (f *appFixture) setExtraRepos(who signedIn, repo string, extras []string) (int, map[string]any) {
+	f.t.Helper()
+	var out map[string]any
+	code := f.call("PUT", "/api/v1/team/github-app/extra-repos", who.auth,
+		map[string]any{"repository": repo, "extra_repos": extras}, &out)
+	return code, out
+}
+
+// A run's App token reads a further repository only once a team owner listed
+// it for the run's repository. What the runner asks for, which a pipeline's
+// own config used to decide, widens nothing, and the listed repository must
+// be covered by the installation both when it is listed and at every mint.
+func TestGitCredentialAppTokenReadsOnlyTheOwnersExtraRepos(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	runner, _ := f.runWork(olga, "run-widgets", "https://github.com/acme/widgets.git")
 
-	if _, code := f.gitCredentialWith(runner, "run-widgets", []string{"acme/plans"}); code != http.StatusForbidden {
-		t.Fatalf("extra repos before any declaration = %d, want 403", code)
-	}
-	if code := f.declare(runner, "run-widgets", []string{"acme/plans"}); code != http.StatusOK {
-		t.Fatalf("declare = %d", code)
-	}
-	got, code := f.gitCredentialWith(runner, "run-widgets", []string{"acme/plans"})
-	if code != http.StatusOK || got.Kind != "github_app" || len(got.ExtraRepositories) != 1 || got.ExtraRepositories[0] != "acme/plans" {
-		t.Fatalf("git credential with the declared extra = %d %+v", code, got)
-	}
-	if !f.app.TokenCovers(got.Token, "acme/widgets") || !f.app.TokenCovers(got.Token, "acme/plans") {
-		t.Fatal("the token does not read both the run's repository and the declared extra")
-	}
-	plain, code := f.gitCredential(runner, "run-widgets")
-	if code != http.StatusOK || f.app.TokenCovers(plain.Token, "acme/plans") {
-		t.Fatalf("a request without extras = %d; its token reads acme/plans too", code)
+	asked, code := f.gitCredentialWith(runner, "run-widgets", map[string]any{"extra_repos": []string{"acme/plans"}})
+	if code != http.StatusOK || f.app.TokenCovers(asked.Token, "acme/plans") || len(asked.ExtraRepositories) != 0 {
+		t.Fatalf("a runner naming acme/plans itself = %d %+v; its token must read the run's repository alone", code, asked)
 	}
 
-	if code := f.declare(runner, "run-widgets", []string{"acme/plans", "acme/secret"}); code != http.StatusConflict {
-		t.Fatalf("widening the declaration = %d, want 409", code)
+	eddie := f.user("e", "eddie@example.com")
+	f.join(olga, eddie, "eddie@example.com", "editor")
+	eddie.team = olga.team
+	if code, _ := f.setExtraRepos(eddie, "acme/widgets", []string{"acme/plans"}); code != http.StatusForbidden {
+		t.Fatalf("an editor sets the list = %d, want 403", code)
 	}
-	if _, code := f.gitCredentialWith(runner, "run-widgets", []string{"acme/secret"}); code != http.StatusForbidden {
-		t.Fatalf("an undeclared extra = %d, want 403", code)
+	if code, _ := f.setExtraRepos(olga, "acme/widgets", []string{"acme/secret"}); code != http.StatusBadRequest {
+		t.Fatalf("a repository the installation does not cover = %d, want 400", code)
 	}
-
-	other, _ := f.runWork(olga, "run-uncovered", "https://github.com/acme/widgets.git")
-	if code := f.declare(other, "run-uncovered", []string{"acme/secret"}); code != http.StatusOK {
-		t.Fatalf("declare = %d", code)
-	}
-	if got, code := f.gitCredentialWith(other, "run-uncovered", []string{"acme/secret"}); code != http.StatusForbidden ||
-		!strings.Contains(got.Error, "acme/secret") {
-		t.Fatalf("an extra the installation does not cover = %d %+v, want 403 naming it", code, got)
-	}
-	if code := f.declare(other, "run-uncovered", []string{"bob/tools"}); code != http.StatusBadRequest {
-		t.Fatalf("an extra of another owner = %d, want 400", code)
+	if code, _ := f.setExtraRepos(olga, "acme/widgets", []string{"bob/tools"}); code != http.StatusBadRequest {
+		t.Fatalf("a repository of another owner = %d, want 400", code)
 	}
 	tooMany := make([]string, 11)
 	for i := range tooMany {
 		tooMany[i] = "acme/r" + string(rune('a'+i))
 	}
-	if code := f.declare(other, "run-uncovered", tooMany); code != http.StatusBadRequest {
+	if code, _ := f.setExtraRepos(olga, "acme/widgets", tooMany); code != http.StatusBadRequest {
 		t.Fatalf("eleven extras = %d, want 400", code)
+	}
+	if code, out := f.setExtraRepos(olga, "acme/widgets", []string{"acme/plans"}); code != http.StatusOK {
+		t.Fatalf("the owner sets the list = %d %v", code, out)
+	}
+	var list struct {
+		ExtraRepos []struct {
+			Repository string   `json:"repository"`
+			ExtraRepos []string `json:"extra_repos"`
+		} `json:"extra_repos"`
+	}
+	if code := f.call("GET", "/api/v1/team/github-app/extra-repos", eddie.auth, nil, &list); code != http.StatusOK ||
+		len(list.ExtraRepos) != 1 || list.ExtraRepos[0].Repository != "acme/widgets" || len(list.ExtraRepos[0].ExtraRepos) != 1 {
+		t.Fatalf("a member reads the list = %d %+v", code, list)
+	}
+
+	got, code := f.gitCredential(runner, "run-widgets")
+	if code != http.StatusOK || got.Kind != "github_app" || len(got.ExtraRepositories) != 1 || got.ExtraRepositories[0] != "acme/plans" {
+		t.Fatalf("git credential once listed = %d %+v", code, got)
+	}
+	if !f.app.TokenCovers(got.Token, "acme/widgets") || !f.app.TokenCovers(got.Token, "acme/plans") {
+		t.Fatal("the token does not read both the run's repository and the listed extra")
+	}
+
+	f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/widgets"})
+	_, url := f.replica()
+	f.url = url
+	if got, code := f.gitCredential(runner, "run-widgets"); code != http.StatusForbidden || !strings.Contains(got.Error, "acme/plans") {
+		t.Fatalf("a listed repository the installation stopped covering = %d %+v, want 403 naming it", code, got)
 	}
 }

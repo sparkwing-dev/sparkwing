@@ -153,6 +153,19 @@ describe("GitHub App calls", () => {
     );
   });
 
+  it("lists and saves the owner's extra repositories", async () => {
+    const list = { repository: "octo-org/api", extra_repos: ["octo-org/lib"] };
+    respond = () => json({ extra_repos: [list] });
+    assert.deepEqual(await lib.listExtraRepos(), [list]);
+    assert.equal(calls[0].url, "/api/v1/team/github-app/extra-repos");
+    respond = (call) => json(JSON.parse(call.body));
+    await lib.putExtraRepos(list);
+    assert.equal(calls[1].method, "PUT");
+    assert.equal(calls[1].url, "/api/v1/team/github-app/extra-repos");
+    assert.equal(calls[1].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[1].body), list);
+  });
+
   it("surfaces the controller's refusal", async () => {
     respond = () =>
       json({ error: "no installation this team holds covers a/b" }, 404);
@@ -164,6 +177,37 @@ describe("GitHub App calls", () => {
         pull_request: false,
       }),
       /Save subscription: no installation this team holds covers a\/b/,
+    );
+  });
+});
+
+describe("extra repository rules", () => {
+  it("offers the other covered repositories of the source's owner", () => {
+    assert.deepEqual(
+      lib.extraRepoChoices("Octo-Org/api", [
+        "octo-org/api",
+        "octo-org/lib",
+        "other/lib",
+      ]),
+      ["octo-org/lib"],
+    );
+  });
+
+  it("refuses more than the controller's cap", () => {
+    const eleven = Array.from({ length: 11 }, (_, i) => `octo-org/r${i}`);
+    assert.match(
+      lib.extraReposProblem({
+        repository: "octo-org/api",
+        extra_repos: eleven,
+      }) ?? "",
+      /at most 10/,
+    );
+    assert.equal(
+      lib.extraReposProblem({
+        repository: "octo-org/api",
+        extra_repos: eleven.slice(0, 10),
+      }),
+      null,
     );
   });
 });

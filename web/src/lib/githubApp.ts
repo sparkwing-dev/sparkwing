@@ -179,6 +179,61 @@ export function subscribableRepositories(
   return [...names].sort((a, b) => a.localeCompare(b));
 }
 
+// A team owner's list of the further repositories a run of repository's App
+// token also reads, such as private submodules. Only the controller's list
+// counts: nothing in a repository widens its own token.
+export interface ExtraRepos {
+  repository: string;
+  extra_repos: string[];
+}
+
+// The controller refuses a longer list.
+export const maxExtraRepos = 10;
+
+export async function listExtraRepos(): Promise<ExtraRepos[]> {
+  const res = await send(
+    "GET",
+    "/api/v1/team/github-app/extra-repos",
+    "List extra repositories",
+  );
+  return asList<ExtraRepos>(await res.json(), "extra_repos");
+}
+
+export async function putExtraRepos(draft: ExtraRepos): Promise<ExtraRepos> {
+  const res = await send(
+    "PUT",
+    "/api/v1/team/github-app/extra-repos",
+    "Save extra repositories",
+    { repository: draft.repository, extra_repos: draft.extra_repos },
+  );
+  return (await res.json()) as ExtraRepos;
+}
+
+function repoOwner(slug: string): string {
+  return slug.split("/")[0]?.toLowerCase() ?? "";
+}
+
+// The repositories an owner may list for source: the other repositories of
+// source's owner that the team's installations cover. The controller also
+// requires the installation covering source to cover each one.
+export function extraRepoChoices(
+  source: string,
+  repositories: string[],
+): string[] {
+  const owner = repoOwner(source);
+  return repositories.filter(
+    (r) => repoOwner(r) === owner && r.toLowerCase() !== source.toLowerCase(),
+  );
+}
+
+export function extraReposProblem(draft: ExtraRepos): string | null {
+  if (!draft.repository) return "Choose a repository.";
+  if (draft.extra_repos.length > maxExtraRepos) {
+    return `List at most ${maxExtraRepos} repositories.`;
+  }
+  return null;
+}
+
 export function accountTypeLabel(type: string): string {
   return type === "Organization" ? "Organization" : "Personal account";
 }
