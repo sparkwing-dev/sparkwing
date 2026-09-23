@@ -143,6 +143,18 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		{"owner writes a secret", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
 		{"owner deletes a secret", []string{controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/secrets/API_KEY", http.StatusNoContent},
 		{"operator writes a secret", []string{controller.ScopeAdmin}, http.MethodPost, "/api/v1/secrets", http.StatusNoContent},
+		{"reader reads billing", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/billing", http.StatusNoContent},
+		{"editor cannot check out", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusForbidden},
+		{"owner checks out", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/billing/checkout", http.StatusNoContent},
+		{"reader lists git credentials", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials", http.StatusNoContent},
+		{"editor cannot store a git credential", []string{controller.ScopeRunsRead, controller.ScopeRunsControl}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusForbidden},
+		{"owner stores a git credential", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials", http.StatusNoContent},
+		{"owner confirms a git credential", []string{controller.ScopeTeamAdmin}, http.MethodPost, "/api/v1/team/git-credentials/github.com/confirm", http.StatusNoContent},
+		{"owner deletes a git credential", []string{controller.ScopeTeamAdmin}, http.MethodDelete, "/api/v1/team/git-credentials/github.com", http.StatusNoContent},
+		{"reader cannot list credential releases", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusForbidden},
+		{"owner lists credential releases", []string{controller.ScopeTeamAdmin}, http.MethodGet, "/api/v1/team/git-credentials/releases", http.StatusNoContent},
+		{"editor cannot opt a machine in", []string{controller.ScopeRunsRead, controller.ScopeRunsWrite}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusForbidden},
+		{"owner opts a machine in", []string{controller.ScopeTeamAdmin}, http.MethodPut, "/api/v1/team/runner-tokens/swr_ab12/git-credentials", http.StatusNoContent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
