@@ -142,11 +142,20 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 		`SELECT 1 FROM nodes WHERE run_id = 'run-b' AND node_id = 'build' FOR UPDATE`); err != nil {
 		t.Fatal(err)
 	}
+	var holderPID int
+	if err := holder.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
 		_, err := s.ReapExpiredNodeClaims(ctx)
 		done <- err
 	}()
+	// safety: the holder keeps the row until the pass ends, so the pass must
+	// skip it. A pass that instead blocks on the row is the bug this guards,
+	// and only the holder's own blockees count: other packages' tests share
+	// the database, and a lock wait of theirs once released the row early and
+	// let the pass settle it legitimately.
 	var reapErr error
 	finished := false
 	for !finished {
@@ -156,12 +165,12 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 			continue
 		default:
 		}
-		var waiting int
-		if err := s.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+		var blocked int
+		if err := s.DB().QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM pg_stat_activity
+			WHERE %d = ANY(pg_blocking_pids(pid))`, holderPID)).Scan(&blocked); err != nil {
 			t.Fatal(err)
 		}
-		if waiting > 0 {
+		if blocked > 0 {
 			break
 		}
 		runtime.Gosched()
