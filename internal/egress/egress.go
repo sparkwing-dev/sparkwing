@@ -443,11 +443,18 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	m.charge(principal, class, n, false)
 }
 
+// charged is what one charge admitted, and the refusal that stopped it
+// short when a budget did.
+type charged struct {
+	allowed int64
+	refusal *BudgetError
+}
+
 // safety: the bytes are charged before they are written, so writers racing
 // for the last of a budget cannot each see room and together pass it.
-func (m *Meter) charge(principal string, class Class, n int64, bounded bool) (int64, *BudgetError) {
+func (m *Meter) charge(principal string, class Class, n int64, bounded bool) charged {
 	if n <= 0 {
-		return 0, nil
+		return charged{}
 	}
 	m.mu.Lock()
 	now := m.now().UTC()
@@ -501,7 +508,7 @@ func (m *Meter) charge(principal string, class Class, n int64, bounded bool) (in
 			"principal", key,
 			"class", string(class))
 	}
-	return allowed, refusal
+	return charged{allowed: allowed, refusal: refusal}
 }
 
 // Serve returns a ResponseWriter that charges what the handler sends to
@@ -535,7 +542,7 @@ func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string,
 	counting, out := m.serve(w, r, principal, class)
 	next.ServeHTTP(out, r)
 	if counting.cut {
-		panic(http.ErrAbortHandler)
+		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http recovers this sentinel and resets the connection; it is the only way a handler aborts a response
 	}
 }
 
@@ -1015,12 +1022,12 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	if !w.charges() {
 		return w.ResponseWriter.Write(p)
 	}
-	allowed, refusal := w.meter.charge(w.principal, w.class, int64(len(p)), true)
-	n, err := w.ResponseWriter.Write(p[:allowed])
-	if refusal != nil {
+	c := w.meter.charge(w.principal, w.class, int64(len(p)), true)
+	n, err := w.ResponseWriter.Write(p[:c.allowed])
+	if c.refusal != nil {
 		w.cut = true
 		if err == nil {
-			return n, refusal
+			return n, c.refusal
 		}
 	}
 	return n, err
