@@ -101,11 +101,12 @@ func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: serving a cache entry hands out repository access under a credential
-// the controller holds, and every team shares a mirror named for its URL, so it
-// is bound to a signed webhook delivery in the operator's team and to a
-// repository the operator connected to that pipeline. Another team's delivery
-// proves only that it knows a secret it chose, and a trigger's own repository
-// fields are whatever its submitter typed.
+// the controller holds, and every team shares a mirror named for its URL, so
+// only the operator's team reaches it, and only for the claimed run's own
+// source or a repository the operator connected to that run's pipeline. The
+// operator's team already gets a grant that registers and reads any mirror,
+// so its run's own source fields open nothing that grant does not; another
+// team's delivery proves only that it knows a secret it chose.
 func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Request, name, repoURL string) bool {
 	runID := r.PathValue("id")
 	if runID == "" {
@@ -119,10 +120,6 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)
 		return false
 	}
-	if trigger.WebhookDelivery == "" {
-		http.Error(w, "the cache serves only a run a signed webhook delivery created", http.StatusForbidden)
-		return false
-	}
 	tenant, err := s.tenantFor(r)
 	if err != nil {
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)
@@ -132,22 +129,32 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "the cache serves only the operator's connected repositories", http.StatusForbidden)
 		return false
 	}
-	bindings, err := tenant.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)
-	if err != nil {
-		s.logger.Error("gitcache proxy: list webhook bindings", "run_id", runID, "err", err)
-		http.Error(w, "resolve claimed run source", http.StatusForbidden)
-		return false
+	// safety: an agent built before cache grants fetches every run it claims
+	// here, including the ones a CLI submitted, which no webhook created.
+	source, err := bincache.TriggerRepoURL(trigger.RepoURL, trigger.TriggerEnv["GITHUB_REPOSITORY"],
+		trigger.GithubOwner, trigger.GithubRepo, false)
+	if err == nil && source != "" && sourceurl.ClaimedRepoNameFromURL(source) == name &&
+		(repoURL == "" || repoURL == source) {
+		return true
 	}
-	for _, binding := range bindings {
-		expectedURL, verr := sourceurl.ValidateCloneURL(bincache.RepoURLFromGitHub(binding.Repo))
-		if verr != nil || sourceurl.ClaimedRepoNameFromURL(expectedURL) != name {
-			continue
+	if trigger.WebhookDelivery != "" {
+		bindings, err := tenant.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)
+		if err != nil {
+			s.logger.Error("gitcache proxy: list webhook bindings", "run_id", runID, "err", err)
+			http.Error(w, "resolve claimed run source", http.StatusForbidden)
+			return false
 		}
-		if repoURL == "" || repoURL == expectedURL {
-			return true
+		for _, binding := range bindings {
+			expectedURL, verr := sourceurl.ValidateCloneURL(bincache.RepoURLFromGitHub(binding.Repo))
+			if verr != nil || sourceurl.ClaimedRepoNameFromURL(expectedURL) != name {
+				continue
+			}
+			if repoURL == "" || repoURL == expectedURL {
+				return true
+			}
 		}
 	}
-	http.Error(w, "cache repository is not connected to the claimed run's pipeline", http.StatusForbidden)
+	http.Error(w, "cache repository is neither the claimed run's source nor connected to its pipeline", http.StatusForbidden)
 	return false
 }
 

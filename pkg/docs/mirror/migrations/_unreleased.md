@@ -52,9 +52,10 @@ other team's launcher then executed.
 - The operator's own runners (a runner token in the `default` team) keep
   building private repositories the cache clones over SSH: their runs' grants
   read and register any mirror. Point their `--gitcache` (or
-  `SPARKWING_GITCACHE_URL`) at the cache itself, not at the controller's
-  `/api/v1/gitcache` proxy, which serves only runs a signed webhook delivery
-  created.
+  `SPARKWING_GITCACHE_URL`) at the cache itself. The controller's
+  `/api/v1/gitcache` proxy serves an operator runner only its claimed run's own
+  source or a repository connected to that run's pipeline, and serves no other
+  team.
 - The controller must hold the cache's token (`SPARKWING_CACHE_TOKEN` on the
   controller) to mint grants. Until it does, or on a controller that predates
   the route, runs go without the binary cache and compile instead.

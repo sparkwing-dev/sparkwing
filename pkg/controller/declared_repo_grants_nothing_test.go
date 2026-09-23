@@ -99,20 +99,28 @@ func TestDeclaredRepo_ARunnerCannotManufactureARunOfAnotherPipeline(t *testing.T
 }
 
 // Sequence C. The Git cache holds clones the controller made with a credential
-// of its own. A trigger's GITHUB_REPOSITORY is whatever its submitter wrote, so
-// it no longer selects what the cache serves.
+// of its own, and every team shares them. A trigger's GITHUB_REPOSITORY is
+// whatever its submitter wrote, so outside the operator's team it selects
+// nothing the cache serves.
 func TestDeclaredRepo_ForgedTriggerEnvReadsNoCachedSource(t *testing.T) {
-	f, raw := newScopedFixture(t, runnerScopes)
+	f, _ := newScopedFixture(t, runnerScopes)
 	ctx := context.Background()
-
-	if err := f.store.CreateTrigger(ctx, store.Trigger{
+	if err := f.store.AsOperator().CreateTeam(ctx, "attacker"); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(ctx, "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := tenant.CreateToken(ctx, "attacker-pool", store.TokenKindRunner, runnerScopes, 0, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: "run-attacker", Pipeline: "attacker-build", Status: "running",
 		TriggerEnv: map[string]string{"GITHUB_REPOSITORY": "victim/private"},
 		CreatedAt:  time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.CreateRun(ctx, store.Run{
+	}, store.Run{
 		ID: "run-attacker", Pipeline: "attacker-build", Status: "running", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -125,9 +133,9 @@ func TestDeclaredRepo_ForgedTriggerEnvReadsNoCachedSource(t *testing.T) {
 	if err := f.store.MarkNodeReady(ctx, "run-attacker", "build"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.NewWithToken(f.url, nil, raw).
-		ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil {
-		t.Fatalf("ClaimNode: %v", err)
+	if claimed, err := client.NewWithToken(f.url, nil, raw).
+		ClaimNode(ctx, "holder-1", nil, time.Minute, nil); err != nil || claimed == nil {
+		t.Fatalf("ClaimNode = %+v, %v", claimed, err)
 	}
 
 	name := sourceurl.ClaimedRepoNameFromURL("git@github.com:victim/private.git")
