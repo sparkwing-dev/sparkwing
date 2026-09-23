@@ -188,8 +188,12 @@ func TestLastOwnerCannotLeaveOrBeDemoted(t *testing.T) {
 	if code := f.call("DELETE", "/api/v1/team/members/"+reader.id, reader.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("reader leaving = %d, want 204", code)
 	}
-	if code := f.call("GET", "/api/v1/team/members", reader.auth, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("a reader who left still lists members: %d", code)
+	var members []member
+	f.call("GET", "/api/v1/team/members", reader.auth, nil, &members)
+	for _, m := range members {
+		if m.UserID == owner.id {
+			t.Fatalf("a reader who left still lists the team's members: %+v", members)
+		}
 	}
 }
 
@@ -338,5 +342,68 @@ func TestRunnerTokensAreCappedPerTeam(t *testing.T) {
 	}
 	if code := f.call("POST", "/api/v1/team/runner-tokens", owner.auth, map[string]string{"name": "box-extra"}, nil); code != http.StatusConflict {
 		t.Fatalf("mint past the cap = %d, want 409", code)
+	}
+}
+
+func TestRemovedMemberLandsInTheirPersonalTeam(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.user("o", "olga@example.com")
+	rita := f.user("r", "rita@example.com")
+	personal := rita.team
+	f.join(owner, rita, "rita@example.com", "reader")
+
+	if code := f.call("DELETE", "/api/v1/team/members/"+rita.id, owner.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("owner removing rita = %d", code)
+	}
+
+	if w := f.whoami(rita.auth); w.Team != personal || w.Role != "owner" {
+		t.Fatalf("removed member's whoami = %+v, want owner of %s", w, personal)
+	}
+	var me meBody
+	if code := f.call("GET", "/api/v1/me", rita.auth, nil, &me); code != http.StatusOK {
+		t.Fatalf("/me = %d", code)
+	}
+	if me.ActiveTeam == nil || me.ActiveTeam.Slug != personal {
+		t.Fatalf("/me active_team = %+v, want %s", me.ActiveTeam, personal)
+	}
+	if code := f.call("GET", "/api/v1/runs", rita.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("removed member listing their own runs = %d", code)
+	}
+}
+
+func TestMemberRemovedFromTheirLastTeamIsToldTheyHaveNone(t *testing.T) {
+	f := newIdentityFixture(t)
+	xavier := f.user("x", "xavier@example.com")
+	olga := f.user("o", "olga@example.com")
+	f.join(xavier, olga, "olga@example.com", "owner")
+	if code := f.call("POST", "/api/v1/me/active-team", olga.auth, map[string]string{"slug": olga.team}, nil); code != http.StatusNoContent {
+		t.Fatalf("olga switching home = %d", code)
+	}
+	f.join(olga, xavier, "xavier@example.com", "reader")
+	if code := f.call("POST", "/api/v1/me/active-team", xavier.auth, map[string]string{"slug": xavier.team}, nil); code != http.StatusNoContent {
+		t.Fatalf("xavier switching home = %d", code)
+	}
+	if code := f.call("DELETE", "/api/v1/team/members/"+xavier.id, xavier.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("xavier leaving his personal team = %d", code)
+	}
+	if w := f.whoami(xavier.auth); w.Team != olga.team {
+		t.Fatalf("after leaving, xavier's session is in %q, want %s", w.Team, olga.team)
+	}
+	if code := f.call("DELETE", "/api/v1/team/members/"+xavier.id, olga.auth, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("olga removing xavier = %d", code)
+	}
+
+	var refusal struct {
+		Code string `json:"error"`
+	}
+	if code := f.call("GET", "/api/v1/runs", xavier.auth, nil, &refusal); code != http.StatusForbidden || refusal.Code != "no_team" {
+		t.Fatalf("teamless account listing runs = %d %+v, want 403 no_team", code, refusal)
+	}
+	var me meBody
+	if code := f.call("GET", "/api/v1/me", xavier.auth, nil, &me); code != http.StatusOK {
+		t.Fatalf("/me = %d", code)
+	}
+	if me.ActiveTeam != nil || len(me.Memberships) != 0 {
+		t.Fatalf("/me for a teamless account = %+v", me)
 	}
 }

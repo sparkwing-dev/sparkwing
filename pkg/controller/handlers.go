@@ -695,9 +695,10 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, appendEventResp{Seq: seq})
 }
 
+// safety: the body names no user; the run is attributed to the credential
+// that submitted it, so a caller cannot put a run under someone else's name.
 type triggerReqMeta struct {
 	Source string            `json:"source,omitempty"`
-	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
 }
 
@@ -804,6 +805,15 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 		return nil
 	}
 	return cleaned
+}
+
+// submitterName is the authenticated principal a trigger is attributed
+// to, or empty on a controller that runs without authentication.
+func submitterName(r *http.Request) string {
+	if p, ok := PrincipalFromContext(r.Context()); ok {
+		return p.Name
+	}
+	return ""
 }
 
 func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
@@ -923,7 +933,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		Pipeline:      body.Pipeline,
 		Args:          body.Args,
 		Source:        body.Trigger.Source,
-		User:          body.Trigger.User,
+		User:          submitterName(r),
 		Env:           sanitizeTriggerEnv(body.Trigger.Env),
 		Git:           body.Git,
 		ParentRunID:   body.ParentRunID,

@@ -317,6 +317,15 @@ unlock.
   binaries. The chart refuses to render when any two of the three name the
   same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
   See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
+- **controller (Breaking):** a run is attributed to the credential that
+  submitted it. `POST /api/v1/triggers` took the run's user from
+  `trigger.user` in the body, so any caller could put a run under another
+  person's name. The controller now records the authenticated principal and
+  refuses a body that carries
+  `components.schemas.TriggerRequest.properties.trigger.properties.user`; the
+  CLI no longer sends it. See
+  [migration guide](docs/migrations/_unreleased.md#trigger-user-comes-from-the-credential).
+
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
@@ -404,6 +413,18 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **controller:** cancelling a run no runner has claimed finishes it as
+  `cancelled` at once. The cancel only flagged the trigger, so the run stayed
+  `pending` and the runner that later claimed it fetched source and started.
+  A claim now refuses a trigger that carries a cancel request; a run a runner
+  already holds still winds down through its lease heartbeat.
+
+- **controller:** a member removed from a team lands in a team they still
+  belong to. Their session stayed on the team they had left, so every request
+  answered `403 missing_scope` and `/me` showed no active team. Removal now
+  moves the account's sessions to its personal team, or its oldest remaining
+  membership, and an account with no team left is refused with `403 no_team`.
 
 - **web:** a password-signed-in operator no longer reloads the dashboard forever
   The controller refuses `GET /api/v1/me` for an operator session, which holds

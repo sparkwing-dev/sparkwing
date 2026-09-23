@@ -107,3 +107,17 @@ until the secret is set again.
 A self-hosted controller using the built-in cipher needs no change. Its first
 start reseals every row in place and logs how many it resealed; keep the same
 `SPARKWING_SECRETS_KEY` across the upgrade.
+
+## Trigger user comes from the credential
+
+`POST /api/v1/triggers` no longer accepts `trigger.user`. The run's user is
+the principal of the token or session that submitted it: the token's principal
+or the signed-in account's email. A body that still names a user is refused
+with 400, so a client built against an earlier release fails loudly instead of
+having its value ignored.
+
+- Upgrade the CLI together with the controller; the new CLI does not send the
+  field.
+- A script that posts triggers directly drops `user` from its `trigger` block.
+  To attribute runs to a person, give that person their own token.
+- On a controller running without authentication, runs carry no user.

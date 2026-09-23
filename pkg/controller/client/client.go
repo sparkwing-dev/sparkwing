@@ -596,7 +596,6 @@ type TriggerRequest struct {
 // internal schema changes.
 type TriggerMeta struct {
 	Source string            `json:"source,omitempty"`
-	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
 }
 
@@ -904,7 +903,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	parentNodeID string,
 	retryOf string,
 	source string,
-	user string,
+	_ string, // the controller attributes the run to this client's credential
 	repo string,
 	branch string,
 	triggerEnv map[string]string,
@@ -917,7 +916,6 @@ func (c *Client) EnqueueTriggerWithEnv(
 		RetryOf:      retryOf,
 		Trigger: TriggerMeta{
 			Source: source,
-			User:   user,
 			Env:    triggerEnv,
 		},
 	}

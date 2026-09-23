@@ -5181,10 +5181,11 @@ components:
         trigger:
           type: object
           x-sparkwing-go-type: pkg/controller.triggerReqMeta
+          description: >-
+            The run is attributed to the authenticated principal that submits it; a `user` field is refused.
           required: [source]
           properties:
             source: {type: string}
-            user: {type: string}
             env:
               type: object
               additionalProperties: {type: string}

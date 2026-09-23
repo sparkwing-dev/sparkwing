@@ -7019,6 +7019,30 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	return true, nil
 }
 
+// cancelRequeuedCancelledTriggersTx finalizes every pending trigger that
+// carries a cancel request, inside a claim's own transaction. A trigger
+// gets there when its run was cancelled while claimed and the claim was
+// then released or lapsed back to the queue: the claim filter already
+// refuses it, and finalizing it here keeps it from sitting in the queue
+// forever.
+func cancelRequeuedCancelledTriggersTx(ctx context.Context, tx *storeTx, now time.Time) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs
+		    SET status = ?, finished_at = ?, error = ?
+		  WHERE status = ? AND id IN (
+		        SELECT id FROM triggers
+		         WHERE status = ? AND cancel_requested_at IS NOT NULL)`,
+		runStatusCancelled, now.UnixNano(), "cancelled before dispatch",
+		runStatusPending, triggerStatusPending); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+		  WHERE status = ? AND cancel_requested_at IS NOT NULL`,
+		triggerStatusDone, triggerStatusPending)
+	return err
+}
+
 // SpawnedChild is one row of the cross-pipeline spawn relation. A
 // node X in run R that invoked sparkwing.RunAndAwait("target") yields
 // a SpawnedChild{ParentNodeID: X, Pipeline: "target", ChildRunID: ...}
@@ -7120,6 +7144,9 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
+	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
@@ -7127,7 +7154,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
        idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers
- WHERE status = ? AND available_at <= ?
+ WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
    AND NOT EXISTS (
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
@@ -7287,8 +7314,20 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	return cancelNS.Valid, nil
 }
 
-// RequestCancel flags a trigger for cancellation; idempotent.
+// RequestCancel cancels a run; idempotent. A trigger no consumer has
+// claimed is finalized on the spot through [Store.CancelPendingTrigger];
+// a claimed one is only flagged, and its holder sees the flag on its next
+// lease renewal and winds the run down. A claim that lands between the
+// two statements leaves the flag on a claimed trigger, which is the
+// cooperative path again.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
+	cancelled, err := s.CancelPendingTrigger(ctx, id)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return nil
+	}
 	now := time.Now().UnixNano()
 	res, err := s.exec(ctx,
 		`UPDATE triggers
@@ -7783,6 +7822,9 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
+	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 	expires := now.Add(lease)
 	// safety: the claimant replaces whatever a previous holder left, unbound
 	// included; a pending row has no live claim, so keeping the old principal
@@ -7795,7 +7837,7 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
 		        claim_principal = ?, claim_token_prefix = ?
-		  WHERE id = ? AND status = ? AND available_at <= ?
+		  WHERE id = ? AND status = ? AND available_at <= ? AND cancel_requested_at IS NULL
 		    AND NOT EXISTS (
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
