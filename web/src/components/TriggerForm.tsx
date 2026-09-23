@@ -7,6 +7,8 @@ import {
   getPipelines,
   triggerJob,
 } from "@/lib/api";
+import { repositoryExample, triggerGit } from "@/lib/triggerSource";
+import { useTeamState } from "@/lib/useTeam";
 
 interface TriggerFormProps {
   pipeline?: string;
@@ -24,6 +26,11 @@ export default function TriggerForm({
   const [argValues, setArgValues] = useState<Record<string, string>>({});
   const [triggering, setTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [repository, setRepository] = useState("");
+  const [branch, setBranch] = useState("main");
+  // A team's runners fetch the source themselves, so a run started here has
+  // to name it; a single-team controller's runners take it from the git cache.
+  const namesSource = useTeamState().status === "ready";
 
   useEffect(() => {
     getPipelines().then(setPipelines);
@@ -45,9 +52,16 @@ export default function TriggerForm({
   const meta = pipelines[selectedPipeline];
   const args = meta?.args || [];
   const pipelineNames = Object.keys(pipelines).sort();
+  const source = namesSource ? triggerGit(repository, branch) : null;
+  const sourceProblem =
+    source && !source.ok && repository.trim() !== "" ? source.problem : null;
 
   const handleSubmit = async () => {
     if (!selectedPipeline) return;
+    if (source && !source.ok) {
+      setError(source.problem);
+      return;
+    }
     setTriggering(true);
     setError(null);
 
@@ -60,6 +74,7 @@ export default function TriggerForm({
     try {
       await triggerJob(selectedPipeline, {
         args: Object.keys(argsToSend).length > 0 ? argsToSend : undefined,
+        git: source?.ok ? source.value : undefined,
       });
       onTriggered?.();
       onClose?.();
@@ -96,32 +111,71 @@ export default function TriggerForm({
           <label className="text-xs text-[var(--muted)] block mb-1">
             Pipeline
           </label>
-          {pipelineNames.length > 0 ? (
-            <select
-              className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm"
-              value={selectedPipeline}
-              onChange={(e) => setSelectedPipeline(e.target.value)}
-            >
-              <option value="">Select a pipeline...</option>
-              {pipelineNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="text"
-              className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono"
-              placeholder="pipeline name, e.g. demo-fast"
-              value={selectedPipeline}
-              onChange={(e) => setSelectedPipeline(e.target.value)}
-            />
-          )}
+          <input
+            type="text"
+            list="trigger-pipelines"
+            aria-label="Pipeline"
+            className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono"
+            placeholder="pipeline name, e.g. build"
+            value={selectedPipeline}
+            onChange={(e) => setSelectedPipeline(e.target.value.trim())}
+          />
+          <datalist id="trigger-pipelines">
+            {pipelineNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
         </div>
       )}
 
       {               }
+      {namesSource && (
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_10rem] gap-2">
+          <div>
+            <label
+              htmlFor="trigger-repository"
+              className="text-xs text-[var(--muted)] block mb-1"
+            >
+              Repository
+            </label>
+            <input
+              id="trigger-repository"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono placeholder:text-[var(--muted)]"
+              placeholder={repositoryExample}
+              value={repository}
+              onChange={(e) => setRepository(e.target.value)}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="trigger-branch"
+              className="text-xs text-[var(--muted)] block mb-1"
+            >
+              Branch
+            </label>
+            <input
+              id="trigger-branch"
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full bg-[var(--background)] border border-[var(--border)] rounded px-3 py-1.5 text-sm font-mono"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+            />
+          </div>
+          <p
+            className={`text-xs sm:col-span-2 ${sourceProblem ? "text-yellow-400" : "text-[var(--muted)]"}`}
+          >
+            {sourceProblem ??
+              "A team runner that allows this repository fetches the branch tip and runs it."}
+          </p>
+        </div>
+      )}
+
       {args.length > 0 && (
         <div className="space-y-2">
           {args.map((arg) => (
@@ -153,7 +207,12 @@ export default function TriggerForm({
       <div className="flex items-center gap-2">
         <button
           onClick={handleSubmit}
-          disabled={!selectedPipeline || triggering || missingRequired}
+          disabled={
+            !selectedPipeline ||
+            triggering ||
+            missingRequired ||
+            (source !== null && !source.ok)
+          }
           className="bg-[var(--accent)] hover:bg-indigo-500 disabled:opacity-50 px-4 py-1.5 rounded text-sm font-medium transition-colors"
         >
           {triggering ? "Triggering..." : "Run"}

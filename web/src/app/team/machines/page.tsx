@@ -11,14 +11,20 @@ import TeamShell, {
 import CopyField from "@/components/CopyField";
 import { toast } from "@/components/Toasts";
 import {
+  type CLIToken,
   type Me,
+  type MintedCLIToken,
   type MintedRunnerToken,
   type RunnerToken,
   canConnectMachines,
+  cliTokenStartsRuns,
   controllerURLPlaceholder,
+  listCLITokens,
   listRunnerTokens,
+  mintCLIToken,
   mintRunnerToken,
   parseRepoPatterns,
+  revokeCLIToken,
   revokeRunnerToken,
   runnerConnectCommand,
   unixSecondsISO,
@@ -134,7 +140,159 @@ function Machines({ me }: { me: Me }) {
           </ul>
         )}
       </Panel>
+      <CLIAccess team={me.active_team.display_name} />
     </>
+  );
+}
+
+function CLIAccess({ team }: { team: string }) {
+  const [tokens, setTokens] = useState<CLIToken[] | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [minted, setMinted] = useState<MintedCLIToken | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setTokens(await listCLITokens());
+      setLoadError("");
+    } catch (err) {
+      setLoadError(errorText(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function mint() {
+    setBusy("mint");
+    try {
+      setMinted(await mintCLIToken());
+      await load();
+    } catch (err) {
+      toast(errorText(err), "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revoke(t: CLIToken) {
+    if (
+      !window.confirm(
+        `Revoke ${t.prefix}? A terminal using this token is refused at once.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(t.prefix);
+    try {
+      await revokeCLIToken(t.prefix);
+      if (minted?.prefix === t.prefix) setMinted(null);
+      toast(`Revoked ${t.prefix}`, "success");
+      await load();
+    } catch (err) {
+      toast(errorText(err), "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-6">
+      <Panel
+        title="CLI access"
+        hint={`A personal token lets the sparkwing CLI start and follow ${team}'s runs as you. It lapses after 90 days and goes when you leave the team.`}
+      >
+        <div className="flex items-center gap-2 p-4">
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={busy !== null}
+            onClick={mint}
+          >
+            {busy === "mint" ? "Creating token…" : "Create CLI token"}
+          </button>
+        </div>
+        {minted ? (
+          <div className="px-4 pb-4 space-y-3">
+            <div className="rounded-[var(--radius-control)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              This token is shown once. Sparkwing keeps only its prefix,{" "}
+              <span className="font-mono">{minted.prefix}</span>.
+            </div>
+            {cliTokenStartsRuns(minted.scopes) ? null : (
+              <div className="text-xs text-[var(--muted)]">
+                Your role reads runs, so this token cannot start one.
+              </div>
+            )}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                1. Save it as the {minted.profile} profile
+              </div>
+              <CopyField value={minted.setup} label="Setup command" multiline />
+              <div className="text-xs text-[var(--muted)] mt-1">
+                Paste the token below when the command asks for it.
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                Token
+              </div>
+              <CopyField value={minted.token} label="CLI token" />
+            </div>
+            {cliTokenStartsRuns(minted.scopes) ? (
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1">
+                  2. Start a run from a checkout of a pushed commit
+                </div>
+                <CopyField value={minted.run} label="Run command" />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {loadError ? (
+          <div className="p-4 text-sm text-red-300">{loadError}</div>
+        ) : tokens === null ? (
+          <div className="p-4 text-xs text-[var(--muted)]">Loading…</div>
+        ) : tokens.length === 0 ? (
+          <div className="px-4 pb-4 text-xs text-[var(--muted)]">
+            You hold no CLI tokens in this team.
+          </div>
+        ) : (
+          <ul className="border-t border-[var(--border)]">
+            {tokens.map((t) => (
+              <li
+                key={t.prefix}
+                className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] last:border-0"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-mono truncate">{t.prefix}</div>
+                  <div className="text-xs text-[var(--muted)] truncate">
+                    {cliTokenStartsRuns(t.scopes) ? "starts runs" : "read-only"}
+                    {t.created_at
+                      ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
+                      : ""}
+                    {t.expires_at
+                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
+                      : ""}
+                    {t.last_used_at
+                      ? ` · last used ${fmtDateTime(unixSecondsISO(t.last_used_at))}`
+                      : ""}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={dangerButtonClass}
+                  disabled={busy !== null}
+                  onClick={() => revoke(t)}
+                >
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+    </div>
   );
 }
 

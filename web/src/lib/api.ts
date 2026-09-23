@@ -1,4 +1,5 @@
 import { readCSRFCookie } from "./csrfCookie";
+import type { TriggerGit } from "./triggerSource";
 
 function getApiUrl(): string {
   if (typeof window !== "undefined") return "";
@@ -505,6 +506,7 @@ export interface RunEvent {
 export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
+  git?: TriggerGit,
 ): Promise<{ run_id: string } | null> {
   const res = await authFetch(`${API_URL}/api/v1/triggers`, {
     method: "POST",
@@ -513,6 +515,7 @@ export async function triggerRun(
       pipeline,
       args: args || {},
       trigger: { source: "dashboard" },
+      ...(git ? { git } : {}),
     }),
   });
   if (!res.ok) {
@@ -830,9 +833,10 @@ export async function triggerJob(
     require?: string;
     env?: Record<string, string>;
     args?: Record<string, string>;
+    git?: TriggerGit;
   },
 ): Promise<Job> {
-  const res = await triggerRun(pipeline, opts?.args);
+  const res = await triggerRun(pipeline, opts?.args, opts?.git);
   return {
     id: res?.run_id || "",
     pipeline,

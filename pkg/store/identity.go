@@ -961,9 +961,11 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error) {
 // SetMemberRole changes subject's role. The actor may not grant a role above
 // their own, may not re-role someone who outranks them, and may not demote
 // the last owner, because a team without an owner cannot be administered and
-// nobody can put one back. A demotion to reader revokes the runner tokens the
-// subject minted in t's team, since a reader may not mint one, and returns
-// their prefixes so a caller can drop them from any cache.
+// nobody can put one back. A demotion to reader revokes every token the
+// subject minted in t's team: a reader may not mint a runner token, and a CLI
+// token minted at a higher role carries write scopes. An owner's CLI token
+// already carries only the editor's scopes, so a demotion to editor keeps it.
+// The revoked prefixes are returned so a caller can drop them from any cache.
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error) {
 	if !role.Valid() {
 		return nil, fmt.Errorf("%w: unknown role %q", ErrInvalidInput, role)
@@ -1071,7 +1073,8 @@ func (t *Tenant) moveSessionsOffTeamTx(ctx context.Context, tx *storeTx, account
 }
 
 // safety: a runner token outlives the membership that minted it and reads
-// the secrets of every run it claims, so it goes with its minter's access.
+// the secrets of every run it claims, and a CLI token acts as its minter, so
+// both go with the minter's access.
 func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) ([]string, error) {
 	if accountID == "" {
 		return nil, nil
@@ -1309,13 +1312,25 @@ func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time)
 }
 
 // RunnerTokens lists t's live runner tokens.
-func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) (_ []Token, err error) {
-	rows, err := t.s.query(ctx, `
+func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error) {
+	return t.liveTokens(ctx, TokenKindRunner, "", now)
+}
+
+// liveTokens lists t's unrevoked, unexpired tokens of kind, only those
+// createdBy minted when it is set.
+func (t *Tenant) liveTokens(ctx context.Context, kind, createdBy string, now time.Time) (_ []Token, err error) {
+	at := now.UTC().Unix()
+	q := `
 		SELECT prefix, principal, scopes, created_by, created_at, expires_at, last_used_at
 		FROM tokens
 		WHERE team = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?)
-		  AND (expires_at IS NULL OR expires_at > ?)
-		ORDER BY created_at`, string(t.team), TokenKindRunner, now.UTC().Unix(), now.UTC().Unix())
+		  AND (expires_at IS NULL OR expires_at > ?)`
+	args := []any{string(t.team), kind, at, at}
+	if createdBy != "" {
+		q += ` AND created_by = ?`
+		args = append(args, createdBy)
+	}
+	rows, err := t.s.query(ctx, q+` ORDER BY created_at`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1326,7 +1341,7 @@ func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) (_ []Token, er
 	}()
 	var out []Token
 	for rows.Next() {
-		tok := Token{Team: t.team, Kind: TokenKindRunner}
+		tok := Token{Team: t.team, Kind: kind}
 		var scopes string
 		var created int64
 		var expires, lastUsed sql.NullInt64
@@ -1373,6 +1388,103 @@ func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.
 		UPDATE tokens SET revoked_at = ?
 		WHERE team = ? AND prefix = ? AND kind = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
 		at, string(t.team), prefix, TokenKindRunner, at)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CLI token limits. A member's CLI token authenticates as that member from a
+// terminal, so it lapses on its own like a runner token, and one member holds
+// a bounded number because every live token is a hash a bearer lookup may try.
+const (
+	CLITokenLifetime      = 90 * 24 * time.Hour
+	MaxCLITokensPerMember = 10
+)
+
+// ErrCLITokenLimit refuses a CLI token past [MaxCLITokensPerMember].
+var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
+
+// CreateCLIToken mints a user token for accountID in t's team, carrying
+// scopes and filed under principal, refusing once the member holds
+// [MaxCLITokensPerMember] live ones. It returns the raw token once. The
+// token is revoked with the member's other tokens when they leave the team
+// or are demoted to reader.
+func (t *Tenant) CreateCLIToken(
+	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
+) (string, *Token, error) {
+	if accountID == "" {
+		return "", nil, fmt.Errorf("%w: a CLI token belongs to an account", ErrInvalidInput)
+	}
+	if err := refuseAdminScope(scopes); err != nil {
+		return "", nil, err
+	}
+	for attempt := 1; ; attempt++ {
+		raw, tok, err := t.createCLITokenOnce(ctx, principal, scopes, accountID, now)
+		if err == nil {
+			return raw, tok, nil
+		}
+		if attempt < mintAttempts && isTokenPrefixCollision(err) {
+			continue
+		}
+		return "", nil, err
+	}
+}
+
+func (t *Tenant) createCLITokenOnce(
+	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
+) (string, *Token, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", nil, err
+	}
+	if _, err := t.roleTx(ctx, tx, accountID); err != nil {
+		return "", nil, err
+	}
+	at := now.UTC().Unix()
+	var live int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM tokens
+		WHERE team = ? AND kind = ? AND created_by = ?
+		  AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
+		string(t.team), TokenKindUser, accountID, at, at).Scan(&live); err != nil {
+		return "", nil, err
+	}
+	if live >= MaxCLITokensPerMember {
+		return "", nil, ErrCLITokenLimit
+	}
+	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindUser, scopes, CLITokenLifetime, now,
+		TokenOptions{CreatedBy: accountID})
+	if err != nil {
+		return "", nil, err
+	}
+	return raw, tok, tx.Commit()
+}
+
+// CLITokens lists the live CLI tokens accountID minted in t's team.
+func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error) {
+	return t.liveTokens(ctx, TokenKindUser, accountID, now)
+}
+
+// RevokeCLIToken revokes one of the CLI tokens accountID minted in t's team.
+// A prefix that is another member's, another team's, or already revoked is
+// ErrNotFound.
+func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error {
+	if accountID == "" {
+		return ErrNotFound
+	}
+	at := now.UTC().Unix()
+	res, err := t.s.exec(ctx, `
+		UPDATE tokens SET revoked_at = ?
+		WHERE team = ? AND prefix = ? AND kind = ? AND created_by = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
+		at, string(t.team), prefix, TokenKindUser, accountID, at)
 	if err != nil {
 		return err
 	}

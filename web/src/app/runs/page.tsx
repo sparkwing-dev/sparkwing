@@ -310,6 +310,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
+  const [showNewRun, setShowNewRun] = useState(false);
   const [pendingLogFocus, setPendingLogFocus] = useState<{
     nodeID: string;
     stepID: string | null;
@@ -740,6 +741,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           onClearAll={() => clearAllFilters(filterState)}
           trailingActions={
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNewRun(!showNewRun)}
+                aria-expanded={showNewRun}
+                className="text-[10px] px-2 py-1 rounded border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors shrink-0"
+              >
+                + Start a run
+              </button>
               {topLevel.length > 0 && (
                 <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted)] cursor-pointer shrink-0">
                   <input
@@ -944,6 +953,19 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         <div
           className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
         >
+          {showNewRun && (
+            <div className="p-3 border-b border-[var(--border)] shrink-0">
+              <TriggerForm
+                onTriggered={() => {
+                  window.dispatchEvent(
+                    new CustomEvent("sparkwing:runs-changed"),
+                  );
+                  refresh();
+                }}
+                onClose={() => setShowNewRun(false)}
+              />
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto">
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;

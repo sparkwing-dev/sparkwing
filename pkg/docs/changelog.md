@@ -22,6 +22,22 @@ unlock.
 
 ### Added
 
+- **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
+  /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
+  the active team, from a signed-in session only. The token carries the
+  member's role scopes without `team.admin`, expires after 90 days, and is
+  revoked when the member leaves or drops to `reader`; a member holds at most
+  10 live ones (409). The mint returns the `sparkwing cloud connect` and
+  `sparkwing pipeline trigger` commands that use it. See
+  [Start a run](docs/getting-started.md#start-a-run).
+
+- **web:** on a multi-team controller the run form names a GitHub repository
+  and branch, which a team runner fetches at the branch tip, and takes any
+  pipeline name; **+ Start a run** on the Runs page opens it with no run
+  selected. `/team/machines` gains a CLI access panel that mints a CLI token,
+  shows it and its setup commands once, and lists and revokes the member's
+  tokens.
+
 - **runner:** Kubernetes runner Jobs carry a `sparkwing.dev/team` label and a
   required pod anti-affinity on `kubernetes.io/hostname` that refuses any node
   running another team's Job, so different teams' Jobs never share a node
