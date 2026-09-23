@@ -85,6 +85,7 @@ import {
   ExecutionAttributionPanel,
   ExecutionBadge,
 } from "@/components/ExecutionAttribution";
+import { ansiToHtml, stripAnsi } from "@/lib/ansi";
 import {
   compactExecutionDisplay,
   executionAttempts,
@@ -3140,9 +3141,10 @@ function NodeLogSummary({ node }: { node: RunNode }) {
         )}
       </div>
       {node.error && (
-        <div className="mt-1 font-mono text-[11px] text-red-300/90 whitespace-pre-wrap break-words">
-          {node.error}
-        </div>
+        <div
+          className="mt-1 font-mono text-[11px] text-red-300/90 whitespace-pre-wrap break-words"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(node.error) }}
+        />
       )}
       {!node.error && node.status_detail && (
         <div className="mt-1 font-mono text-[11px] text-[var(--muted)] whitespace-pre-wrap break-words">
@@ -4748,7 +4750,9 @@ function DAG({
                     const w = 18;
                     cursor -= w;
                     const text =
-                      n.error || n.failure_reason || `exit ${n.exit_code}`;
+                      stripAnsi(n.error ?? "") ||
+                      n.failure_reason ||
+                      `exit ${n.exit_code}`;
                     elems.push(
                       <NodeBadge
                         key="error"

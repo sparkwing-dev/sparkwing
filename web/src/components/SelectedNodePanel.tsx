@@ -5,6 +5,7 @@ import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import StatusLabel from "@/components/StatusLabel";
 import FailureReasonBadge from "@/components/FailureReasonBadge";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import { stripAnsi } from "@/lib/ansi";
 import {
   executionAttempts,
   executionDisplay,
@@ -91,9 +92,9 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
       {node.error && !node.failure_reason && (
         <div
           className="text-xs text-red-400 font-mono truncate"
-          title={node.error}
+          title={stripAnsi(node.error)}
         >
-          {node.error}
+          {stripAnsi(node.error)}
         </div>
       )}
       {(() => {
