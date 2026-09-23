@@ -68,6 +68,9 @@ type Profile struct {
 	Login   string
 	Name    string
 	Email   string
+	// CreatedAt is when the GitHub account was opened, or zero when GitHub
+	// did not say.
+	CreatedAt time.Time
 }
 
 // Client talks to one OAuth app registration.
@@ -134,9 +137,10 @@ func (c *Client) Exchange(ctx context.Context, code, verifier, redirectURI strin
 
 func (c *Client) profile(ctx context.Context, accessToken string) (Profile, error) {
 	var user struct {
-		ID    int64  `json:"id"`
-		Login string `json:"login"`
-		Name  string `json:"name"`
+		ID        int64     `json:"id"`
+		Login     string    `json:"login"`
+		Name      string    `json:"name"`
+		CreatedAt time.Time `json:"created_at"`
 	}
 	if err := c.get(ctx, c.cfg.UserURL, accessToken, &user); err != nil {
 		return Profile{}, err
@@ -152,7 +156,7 @@ func (c *Client) profile(ctx context.Context, accessToken string) (Profile, erro
 	if err := c.get(ctx, c.cfg.EmailsURL, accessToken, &addresses); err != nil {
 		return Profile{}, err
 	}
-	p := Profile{Subject: strconv.FormatInt(user.ID, 10), Login: user.Login, Name: user.Name}
+	p := Profile{Subject: strconv.FormatInt(user.ID, 10), Login: user.Login, Name: user.Name, CreatedAt: user.CreatedAt.UTC()}
 	// safety: only the primary address GitHub has verified counts; the profile's public email and any
 	// secondary address are ignored, because linking on an unproven address is an account takeover.
 	for _, a := range addresses {
