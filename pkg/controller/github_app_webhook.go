@@ -269,6 +269,7 @@ func (s *Server) githubAppBinding(w http.ResponseWriter, r *http.Request, env gi
 		githubAppIgnored(w, "the delivery names no repository and installation")
 		return store.GitHubAppInstallation{}, nil, store.GitHubRepo{}, false
 	}
+	repo.ID = env.Repository.ID
 	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
@@ -472,7 +473,7 @@ func (s *Server) startGitHubAppRun(
 	err := tenant.CreateTrigger(ctx, store.Trigger{
 		ID: runID, Pipeline: pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
 		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
-		GithubOwner: repo.Owner, GithubRepo: repo.Name,
+		GithubOwner: repo.Owner, GithubRepo: repo.Name, GithubRepoID: repo.ID,
 		WebhookDelivery: delivery + "/" + pipeline, WebhookReplayKey: replayKey,
 		CreatedAt: time.Now(),
 	})

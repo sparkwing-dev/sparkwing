@@ -77,6 +77,8 @@ The controller remembers the digest of every signed body that started runs, for 
 
 Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered. A redelivery answers the runs it already started as `duplicate` without spending anything, and spends the budget only on the runs that were shed.
 
+The hourly budget is enforced separately by each controller replica.
+
 `installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source-token route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept.
 
 ### Pull requests from forks
@@ -112,7 +114,7 @@ The check run is created `queued` when the run is dispatched, moves to `in_progr
 | `cancelled` | `cancelled` |
 | no runner claimed it before the queue deadline | `timed_out` |
 
-`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives the outcome, the duration, the link, one row per node with its outcome, duration and first error line, and the run's error. It stays within GitHub's 65535-character limit: nodes that do not fit are counted rather than listed, a node's error is cut at 200 characters and the run's at 2000. The controller records the check run's id with the run, so every later update edits the same check run.
+`details_url` links to the run in the dashboard (`--dashboard-url`) and `external_id` is the run id. A completed check run's summary gives only the outcome, duration, counts of nodes by outcome, and a link to the signed-in Sparkwing console. Node names, errors and logs stay on the run page. The controller records the check run's id with the run, so every later update edits the same check run.
 
 The controller writes check runs in the background with an installation token restricted to the run's repository and `checks: write`. GitHub failing a write never fails or delays the run: a write GitHub answers with 429 or a 5xx, or does not answer, is tried up to four times with waits of 0.25, 0.5 and 1 seconds, each failure is logged at warn, and a write that still fails is dropped. The next state of the run is written as usual; when the check run was never created, that write creates it.
 
@@ -122,10 +124,10 @@ An installation whose owner has not yet accepted the Checks permission gets comm
 
 GitHub's **Re-run** buttons start runs:
 
-- `check_run` `rerequested` runs that check run's pipeline again. The check run must be this App's, and its `external_id` must name a run of the installation's team on the same repository and commit.
-- `check_suite` `rerequested` runs every pipeline the team subscribes to the repository, for push or pull requests, on that commit.
+- `check_run` `rerequested` runs that check run's pipeline again. The check run must be this App's, and its `external_id` must name a run of the installation's team on the same repository id and commit.
+- `check_suite` `rerequested` runs each subscribed pipeline with its own prior App run on that repository id and commit.
 
-A re-run copies the branch and pull request of a run the team already made of the commit, which is what shows the commit is the repository's own. A commit the team never ran starts nothing, and so does a check run or suite whose pull requests include one from a fork. Otherwise a re-run follows the push rules: the installation must be bound to a team and not suspended, GitHub must still report it covers the repository, each run spends one of the team's hourly runs, and a delivery whose signed body was processed before answers `duplicate`.
+A re-run copies the branch and pull request from that pipeline's own prior run. The pipeline must still subscribe to that run's event, push or pull request. A commit the team never ran starts nothing, and so does a check run or suite whose pull requests include one from a fork. Older runs without a recorded GitHub repository id cannot be re-run from GitHub. Otherwise a re-run follows the push rules: the installation must be bound to a team and not suspended, GitHub must still report it covers the repository, each run spends one of the team's hourly runs, and a delivery whose signed body was processed before answers `duplicate`.
 
 `check_suite` `requested` starts nothing: GitHub sends it for every push, and the push delivery already starts that commit's runs. `check_run` `created` and `completed`, which GitHub sends for the controller's own writes, and every other `check_run` and `check_suite` action start nothing either.
 

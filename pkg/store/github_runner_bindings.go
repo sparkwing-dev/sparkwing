@@ -326,8 +326,10 @@ func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) 
 	return push, err
 }
 
-// GitHubRepo names a repository on github.com.
+// GitHubRepo identifies a repository on github.com. App deliveries supply ID;
+// parsed slugs alone leave it zero.
 type GitHubRepo struct {
+	ID    int64
 	Owner string
 	Name  string
 }

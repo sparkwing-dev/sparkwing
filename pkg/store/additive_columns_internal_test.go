@@ -125,7 +125,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and a nullable trigger column an older binary never names, so an older
 	// binary keeps writing the migrated database.
 	62: {triggerSourceExtraReposCols},
-	// safety: v63 adds a defaulted trigger column an older binary never names
+	// safety: v63 adds defaulted trigger columns an older binary never names
 	// and an index, so an older binary keeps writing the migrated database.
 	63: {triggerGitHubCheckRunCols},
 }

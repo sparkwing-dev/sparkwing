@@ -45,10 +45,9 @@ type githubAppCheckPayload struct {
 
 // handleGitHubAppCheckEvent re-runs what a person asks GitHub to re-run:
 // check_run rerequested runs that check run's pipeline again, and
-// check_suite rerequested runs every pipeline the team subscribes to the
-// repository. A re-run starts from a run the team already made of the same
-// commit, which is what shows the commit is the repository's own and not a
-// fork's, and copies that run's branch and pull request.
+// check_suite rerequested runs each subscribed pipeline with its own prior
+// App run on this repository and commit, copying that run's branch and pull
+// request when its event remains subscribed.
 func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Request, event, delivery string, env githubAppDelivery, body []byte) {
 	switch {
 	case env.Action == "rerequested":
@@ -103,10 +102,10 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		s.writeInternalError(w, r, "github app triggers", err)
 		return
 	}
-	subscribed := map[string]bool{}
+	subscribed := map[string]store.GitHubAppTrigger{}
 	for _, sub := range subs {
 		if sub.Push || sub.PullRequest {
-			subscribed[sub.Pipeline] = true
+			subscribed[sub.Pipeline] = sub
 		}
 	}
 	runs, err := tenant.GitHubCommitTriggers(r.Context(), repo, sha)
@@ -125,24 +124,19 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 	if event == "check_run" {
 		pipeline, named := strings.CutPrefix(p.CheckRun.Name, "sparkwing/")
 		for _, run := range anchors {
-			if named && run.ID == p.CheckRun.ExternalID && run.Pipeline == pipeline && subscribed[pipeline] {
+			if sub, ok := subscribed[pipeline]; named && ok && run.ID == p.CheckRun.ExternalID && run.Pipeline == pipeline && githubAppRunEventSubscribed(run, sub) {
 				planned = append(planned, githubAppPlannedRun{pipeline: pipeline, intake: githubAppRerunIntake(run, p.Sender.Login)})
 				break
 			}
 		}
-	} else if len(anchors) > 0 {
+	} else {
 		for _, sub := range subs {
-			if !subscribed[sub.Pipeline] {
+			if !sub.Push && !sub.PullRequest {
 				continue
 			}
-			anchor := anchors[0]
-			for _, run := range anchors {
-				if run.Pipeline == sub.Pipeline {
-					anchor = run
-					break
-				}
+			if run := githubAppRerunAnchor(anchors, sub); run != nil {
+				planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: githubAppRerunIntake(run, p.Sender.Login)})
 			}
-			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: githubAppRerunIntake(anchor, p.Sender.Login)})
 		}
 	}
 	if len(planned) == 0 {
@@ -150,6 +144,26 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
+}
+
+func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) *store.Trigger {
+	for _, run := range anchors {
+		if run.Pipeline == sub.Pipeline && githubAppRunEventSubscribed(run, sub) {
+			return run
+		}
+	}
+	return nil
+}
+
+func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
+	switch run.TriggerEnv[sparkwing.EnvGitHubEventName] {
+	case "":
+		return sub.Push
+	case sparkwing.EventPullRequest:
+		return sub.PullRequest
+	default:
+		return false
+	}
 }
 
 // githubAppRerunIntake is a re-run of anchor, asked for by user.

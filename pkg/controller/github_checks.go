@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -431,77 +431,45 @@ func githubCheckLinkLine(text, link string) string {
 	return text + " [Open the run in Sparkwing](" + link + ")."
 }
 
-const (
-	// githubCheckSummaryLimit is GitHub's limit on a check run summary, in
-	// characters.
-	githubCheckSummaryLimit = 65535
-	githubCheckErrorLimit   = 2000
-	githubCheckNodeErrLimit = 200
-)
-
-// githubCheckSummary writes a finished run's summary: its outcome, duration
-// and link, then one row per node for as many nodes as fit within GitHub's
-// limit, and the run's error.
+// githubCheckSummary reports aggregate run state on GitHub; details stay on
+// the authenticated Sparkwing run page.
 func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link string) string {
-	var head strings.Builder
-	head.WriteString("**" + githubCheckTitle(conclusion) + "**")
+	var summary strings.Builder
+	summary.WriteString("**" + githubCheckTitle(conclusion) + "**")
 	if run != nil && run.FinishedAt != nil && !run.StartedAt.IsZero() {
-		head.WriteString(" in " + run.FinishedAt.Sub(run.StartedAt).Round(time.Second).String())
+		summary.WriteString(" in " + run.FinishedAt.Sub(run.StartedAt).Round(time.Second).String())
 	}
-	head.WriteString(".")
+	summary.WriteString(".")
 	if link != "" {
-		head.WriteString(" [Open the run in Sparkwing](" + link + ").")
+		summary.WriteString(" [Open the run in Sparkwing](" + link + ").")
 	}
-	head.WriteString("\n")
-	var tail string
-	if run != nil && run.Error != "" {
-		tail = "\n**Error**\n\n```\n" + strings.ReplaceAll(githubCheckClip(run.Error, githubCheckErrorLimit), "```", "'''") + "\n```\n"
-	}
-	budget := githubCheckSummaryLimit - utf8.RuneCountInString(head.String()) - utf8.RuneCountInString(tail)
-	var table strings.Builder
-	if len(nodes) > 0 {
-		table.WriteString("\n| Node | Outcome | Duration | Error |\n| --- | --- | --- | --- |\n")
-	}
-	shown := 0
+	counts := map[string]int{}
 	for _, n := range nodes {
-		row := githubCheckNodeRow(n)
-		// safety: room is kept for the line that counts the nodes left out.
-		if utf8.RuneCountInString(table.String())+utf8.RuneCountInString(row) > budget-100 {
-			break
+		outcome := n.Outcome
+		if outcome == "" {
+			outcome = n.Status
 		}
-		table.WriteString(row)
-		shown++
+		switch outcome {
+		case "success", "failed", "satisfied", "cached", "skipped", "cancelled", "skipped-concurrent", "superseded", "pending", "running":
+		default:
+			outcome = "other"
+		}
+		counts[outcome]++
 	}
-	if left := len(nodes) - shown; left > 0 {
-		fmt.Fprintf(&table, "\n_%d more nodes are not shown; the run page lists every node._\n", left)
+	if len(counts) > 0 {
+		outcomes := make([]string, 0, len(counts))
+		for outcome := range counts {
+			outcomes = append(outcomes, outcome)
+		}
+		slices.Sort(outcomes)
+		summary.WriteString("\n\nNodes: ")
+		for i, outcome := range outcomes {
+			if i > 0 {
+				summary.WriteString(", ")
+			}
+			fmt.Fprintf(&summary, "%d %s", counts[outcome], outcome)
+		}
+		summary.WriteString(".")
 	}
-	return githubCheckClip(head.String()+table.String()+tail, githubCheckSummaryLimit)
-}
-
-func githubCheckNodeRow(n *store.Node) string {
-	outcome := n.Outcome
-	if outcome == "" {
-		outcome = n.Status
-	}
-	duration := ""
-	if n.StartedAt != nil && n.FinishedAt != nil {
-		duration = n.FinishedAt.Sub(*n.StartedAt).Round(time.Second).String()
-	}
-	errLine, _, _ := strings.Cut(n.Error, "\n")
-	return "| `" + githubCheckCell(strings.ReplaceAll(n.NodeID, "`", "'")) + "` | " + githubCheckCell(outcome) + " | " +
-		duration + " | " + githubCheckCell(githubCheckClip(errLine, githubCheckNodeErrLimit)) + " |\n"
-}
-
-func githubCheckCell(s string) string {
-	return strings.NewReplacer("|", "\\|", "\r", " ", "\n", " ").Replace(s)
-}
-
-// githubCheckClip cuts s to at most limit characters, marking the cut.
-func githubCheckClip(s string, limit int) string {
-	if utf8.RuneCountInString(s) <= limit {
-		return s
-	}
-	const mark = "…"
-	runes := []rune(s)
-	return string(runes[:limit-utf8.RuneCountInString(mark)]) + mark
+	return summary.String()
 }

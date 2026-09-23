@@ -200,7 +200,7 @@ func TestGitHubAppRunReportsOneCheckRun(t *testing.T) {
 	if done.Method != "update" || done.ID != created.ID || done.Status != "completed" || done.Conclusion != "failure" {
 		t.Fatalf("third write = %+v, want completed failure on check run %d", done, created.ID)
 	}
-	for _, want := range []string{"compile", "unit-tests", "3 tests failed", "https://dash.example.com/runs?run=" + runID} {
+	for _, want := range []string{"Failed", "1 success", "1 failed", "https://dash.example.com/runs?run=" + runID} {
 		if !strings.Contains(done.Summary, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, done.Summary)
 		}
@@ -332,8 +332,32 @@ func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 	if !utf8.ValidString(done.Summary) {
 		t.Fatal("summary was cut inside a character")
 	}
-	if !strings.Contains(done.Summary, "more nodes") || !strings.Contains(done.Summary, "https://dash.example.com/runs?run="+runID) {
-		t.Fatalf("summary does not say nodes were left out or lost its link:\n%s", done.Summary[len(done.Summary)-500:])
+	if !strings.Contains(done.Summary, "400 failed") || !strings.Contains(done.Summary, "https://dash.example.com/runs?run="+runID) {
+		t.Fatalf("summary lost its counts or link: %s", done.Summary)
+	}
+}
+
+func TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	runID := f.pushRun(headSHA)
+	runner := f.startRun(olga, runID)
+	f.addNode(runID, "secret-node-name", "failed", "ghp_secret-looking-node-error")
+	f.finishRun(runner, runID, "failed", "ghp_secret-looking-run-error")
+	f.drainChecks()
+	calls := f.app.CheckRunCalls()
+	summary := calls[len(calls)-1].Summary
+	for _, secret := range []string{"secret-node-name", "ghp_secret-looking-node-error", "ghp_secret-looking-run-error"} {
+		if strings.Contains(summary, secret) {
+			t.Fatalf("public check summary exposes %q: %s", secret, summary)
+		}
+	}
+	for _, want := range []string{"Failed", "1 failed", "https://dash.example.com/runs?run=" + runID} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("check summary lacks %q: %s", want, summary)
+		}
 	}
 }
 
@@ -410,6 +434,44 @@ func TestGitHubAppCheckSuiteRerequestedRerunsEveryPipeline(t *testing.T) {
 	}
 	if n := len(f.triggers(olga.team)); n != 4 {
 		t.Fatalf("the team has %d runs, want 4", n)
+	}
+}
+
+func TestGitHubAppCheckSuiteRerequestedNeedsEachPipelinesOwnRun(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.pushRun(headSHA)
+	f.subscribe(olga, "acme/widgets", "test", nil)
+	code, out := f.deliver("check_suite", checkSuitePayload(7, "rerequested", headSHA, nil), "")
+	if ids := startedRunIDs(t, out); code != http.StatusAccepted || len(ids) != 1 {
+		t.Fatalf("suite reran a pipeline with no prior App run: %d %v", code, out)
+	}
+	if runs := f.triggers(olga.team); len(runs) != 2 || runs[0].Pipeline != "build" {
+		t.Fatalf("runs after suite rerequest = %+v, want only build rerun", runs)
+	}
+}
+
+func TestGitHubAppRerequestedNeedsPriorEventsSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.pushRun(headSHA)
+	f.drainChecks()
+	build := f.app.CheckRunCalls()[0]
+	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true})
+	for _, event := range []string{"check_run", "check_suite"} {
+		var payload map[string]any
+		if event == "check_run" {
+			payload = checkRunPayload(7, "rerequested", build)
+		} else {
+			payload = checkSuitePayload(7, "rerequested", headSHA, nil)
+		}
+		if _, out := f.deliver(event, payload, ""); out["status"] != "ignored" {
+			t.Fatalf("%s reran a push after push subscription was removed: %v", event, out)
+		}
 	}
 }
 

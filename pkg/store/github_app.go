@@ -403,14 +403,15 @@ func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery st
 	return err
 }
 
-// triggerGitHubCheckRunCols holds the GitHub check run that reports a run
-// the App started; 0 until the check run is created.
+// triggerGitHubCheckRunCols holds the App's check run and repository identity;
+// 0 means the value was not recorded.
 var triggerGitHubCheckRunCols = map[string]string{
 	"github_check_run_id": "INTEGER NOT NULL DEFAULT 0",
+	"github_repo_id":      "BIGINT NOT NULL DEFAULT 0",
 }
 
 const triggerGitHubCommitIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_github_commit
-    ON triggers(github_owner, github_repo, git_sha)`
+    ON triggers(github_repo_id, git_sha)`
 
 // GitHubCheckRun returns the GitHub check run recorded for t's run runID, or
 // 0 when none is. ErrNotFound when t has no trigger runID.
@@ -444,6 +445,9 @@ const maxGitHubCommitTriggers = 100
 // GitHubCommitTriggers returns t's triggers for commit sha of the GitHub
 // repository repo, newest first and at most 100.
 func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha string) ([]*Trigger, error) {
+	if repo.ID <= 0 {
+		return nil, nil
+	}
 	ids, err := t.githubCommitTriggerIDs(ctx, repo, sha)
 	if err != nil {
 		return nil, err
@@ -464,9 +468,9 @@ func (t *Tenant) GitHubCommitTriggers(ctx context.Context, repo GitHubRepo, sha 
 
 func (t *Tenant) githubCommitTriggerIDs(ctx context.Context, repo GitHubRepo, sha string) (_ []string, err error) {
 	rows, err := t.s.query(ctx, `SELECT id FROM triggers
-		WHERE team = ? AND github_owner = ? AND github_repo = ? AND git_sha = ?
+		WHERE team = ? AND github_repo_id = ? AND github_owner = ? AND github_repo = ? AND git_sha = ?
 		ORDER BY created_at DESC, id DESC LIMIT ?`,
-		string(t.team), repo.Owner, repo.Name, sha, maxGitHubCommitTriggers)
+		string(t.team), repo.ID, repo.Owner, repo.Name, sha, maxGitHubCommitTriggers)
 	if err != nil {
 		return nil, err
 	}

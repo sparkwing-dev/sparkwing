@@ -212,17 +212,18 @@ unlock.
 - **controller:** a run the GitHub App started reports as a GitHub check run
   named `sparkwing/<pipeline>` on its commit, `queued` through `in_progress`
   to `completed` with conclusion `success`, `failure`, `cancelled` or
-  `timed_out`, a link to the run and a summary of its nodes bounded to
-  GitHub's 65535 characters. The App posts no commit statuses for its runs,
+  `timed_out`, a link to the run and a summary with counts of nodes by
+  outcome. The App posts no commit statuses for its runs,
   except for an installation whose owner has not accepted the Checks
   permission, which keeps getting them until it does. A failed check run write
   is retried up to four times and never fails or delays the run. `check_run`
-  and `check_suite` `rerequested` deliveries re-run the pipeline, or every
-  subscribed pipeline, on a commit the team already ran, under the push
-  delivery's binding, fork, budget and replay rules; `check_suite` `requested`
+  and `check_suite` `rerequested` deliveries re-run the pipeline, or each
+  subscribed pipeline with its own prior run, on a commit the team already
+  ran, under the push delivery's binding, fork, budget and replay rules;
+  `check_suite` `requested`
   starts nothing because the push already did. The App needs the Checks read
   and write permission and the Check run and Check suite events. Schema 63
-  records each run's check run. See
+  records each run's check run and GitHub repository id. See
   [GitHub App](docs/github-app.md#check-runs).
 
 - **dashboard:** a Team -> GitHub tab, shown when the controller has a GitHub
@@ -1012,6 +1013,13 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** GitHub check summaries contain only the run outcome,
+  duration, node outcome counts and the console link; private node names and
+  error text stay behind sign-in. GitHub re-runs require the pipeline's own
+  prior App run on the same numeric repository id and a current subscription
+  to that run's event, so a recreated repository or changed subscription
+  cannot inherit the earlier run's context.
 
 - **controller:** `GET /api/v1/secrets/{name}` returns a masked secret's
   value only to the operator's `admin` bearer token and to a runner reading
