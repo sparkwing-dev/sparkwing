@@ -3,6 +3,8 @@ import { type Page, type Route } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { startStaticDashboard } from "./static-server";
 
+
+
 const finishedRun = {
   id: "run-20260827-001",
   pipeline: "deploy-production",
@@ -956,6 +958,73 @@ test("auto-expands the pipeline that owns a selected run", async ({ page }) => {
   await expect
     .poll(() => new URL(page.url()).searchParams.get("exp"))
     .toBe("sparkwing/deploy-production");
+});
+
+test("run rows keep their height while the detail pane closes", async (
+  { page },
+  testInfo,
+) => {
+  const runs = Array.from({ length: 5 }, (_, index) => ({
+    ...finishedRun,
+    id: `run-collapse-${index}`,
+    pipeline: `long-pipeline-name-${index}`,
+    error: "A failed run with a long error message that should take up space in the full activity row layout when the detail pane closes, including additional context for the operator to inspect",
+  }));
+  await installMockAPI(page, {
+    runs,
+    details: Object.fromEntries(
+      runs.map((run) => [run.id, { ...finishedDetail, run }]),
+    ),
+  });
+  await page.goto("/runs");
+  const rows = page.locator("[data-run-id]");
+  await expect(rows).toHaveCount(runs.length);
+  await rows.first().click();
+  await expect(page).toHaveURL(/run=run-collapse-0/);
+  await expect
+    .poll(() =>
+      rows
+        .first()
+        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+    )
+    .toBe(208);
+
+  // Start sampling before the click so the first transition frame is included.
+  const capture = page.evaluate(async () => {
+    const row = document.querySelector<HTMLElement>('[data-run-id="run-collapse-0"]')!;
+    const heights: { height: number; width: number; pane: number }[] = [];
+    for (let frame = 0; frame < 45; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      heights.push({
+        height: row.getBoundingClientRect().height,
+        width: row.getBoundingClientRect().width,
+        pane: row.parentElement!.parentElement!.getBoundingClientRect().width,
+      });
+    }
+    return heights;
+  });
+  await rows.first().click();
+  const samples = await capture;
+  await testInfo.attach("detail-close-row-heights.json", {
+    body: JSON.stringify(samples),
+    contentType: "application/json",
+  });
+  expect(Math.max(...samples.map((sample) => sample.height))).toBeLessThanOrEqual(
+    samples.at(-1)!.height + 2,
+  );
+  await expect(rows.first().locator(".grid").first()).toBeVisible();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await rows.first().click();
+  await expect
+    .poll(() =>
+      rows
+        .first()
+        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+    )
+    .toBe(208);
+  await rows.first().click();
+  await expect(rows.first().locator(".grid").first()).toBeVisible();
 });
 
 test("renders live structured node logs", async ({ page }) => {

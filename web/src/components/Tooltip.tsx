@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 
 interface TooltipProps {
   content: ReactNode;
@@ -19,7 +19,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
   const tipRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!show || !ref.current) return;
     const rect = ref.current.getBoundingClientRect();
     const tipWidth = tipRef.current?.offsetWidth || 200;

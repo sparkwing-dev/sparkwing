@@ -99,7 +99,15 @@ export default function Home() {
       </div>
 
       {!loaded ? (
-        <Panel>Loading...</Panel>
+        <div role="status" aria-label="Loading overview" className="animate-pulse motion-reduce:animate-none">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-24 bg-[var(--surface)] border border-[var(--border)] rounded-lg" />
+            ))}
+          </div>
+          <div className="h-14 bg-[var(--surface)] border border-[var(--border)] rounded-lg mb-5" />
+          <div className="h-20 bg-[var(--surface)] border border-[var(--border)] rounded-lg" />
+        </div>
       ) : (
         <>
           {runs.length >= OVERVIEW_RUN_LIMIT && (
