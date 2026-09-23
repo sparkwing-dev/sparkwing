@@ -516,6 +516,7 @@ var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already ac
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
@@ -736,10 +737,17 @@ type GitHubRunnerBinding struct {
 	CreatedAt  time.Time
 }
 const GitHubRunnerPrincipalPrefix = "github:"
+type GitHubRunnerPush struct {
+	Branch string
+	SHA    string
+}
 type GitHubRunnerScope struct {
 	Team Team
 	Repo GitHubRepo
+
+	Push GitHubRunnerPush
 }
+func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool)
 type GitHubWebhookBinding struct {
 	Team      Team
 	Pipeline  string
@@ -808,6 +816,7 @@ const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxEventKindBytes = 128
+const MaxGitHubRunnerCredentials = 20
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
@@ -1726,6 +1735,7 @@ func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
+func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
 func (t *Tenant) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error)
@@ -1745,9 +1755,11 @@ func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline st
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
 func (t *Tenant) ListSecrets() ([]Secret, error)
 func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
-func (t *Tenant) LiveGitHubRunnerCredentials(ctx context.Context, now time.Time) (int, error)
 func (t *Tenant) MemberRole(ctx context.Context, accountID string) (Role, error)
 func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
+func (t *Tenant) MintGitHubRunnerCredential(
+	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error)
 func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)

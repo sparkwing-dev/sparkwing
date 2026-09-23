@@ -11,6 +11,10 @@ Placement order for a team's work:
 
 GitHub's terms allow Actions to be used for the production, testing, deployment or publication of the software project in the repository where the workflow runs. The controller enforces that boundary: a job's credential claims a node, a trigger, or reads a run only when the run's trigger names the job's repository in every repository field it carries (`github_owner`/`github_repo`, `repo`, `repo_url`, and `GITHUB_REPOSITORY` in its environment). The comparison is case-insensitive and accepts the `https`, `ssh` and `git@github.com:` spellings of `github.com/<owner>/<name>`.
 
+A job's credential is also bound to the push its ID token names: the branch in the `ref` claim and the commit in the `sha` claim. It reaches only a trigger recorded for exactly that branch and commit, so a workflow pushed to a feature branch cannot claim `main`'s runs or read the secrets those runs are given.
+
+Only `push`, `workflow_dispatch` and `schedule` jobs on a branch (`refs/heads/...`) get a credential. The exchange answers 403 for any other event, including `pull_request`, which runs a contributor's code, and `pull_request_target` and `workflow_run`, which hand the base repository's privileges to input a fork controls, and for a tag or pull request ref or a token that names no commit.
+
 ## Two-sided consent
 
 A binding is dangerous in either direction, so an exchange needs both sides:
@@ -77,15 +81,17 @@ jobs:
 
 ## What the credential can do
 
-The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429. The token appears in the team's runner-token list, where an owner can revoke it.
+The exchange mints a runner-kind token for the team with the runner scope bundle, principal `github:<repository_id>:<owner>/<name>`, and a one-hour lifetime, and records the push it was minted for. A team holds at most 20 live GitHub Actions credentials; the 21st exchange answers 429, counted and minted under one lock so a burst of exchanges cannot pass the limit together. Each exchange first deletes the team's expired and revoked GitHub Actions credentials. The token appears in the team's runner-token list, where an owner can revoke it.
+
+The credential gets no cache grant: `POST /api/v1/runs/{id}/cache-grant` answers 403, because a grant opens the team's whole cache tree and the credential is confined to one repository's push. The job builds without the shared binary and dependency caches.
 
 Every request the credential makes passes a fence that lists the routes it may use:
 
 | Route | Rule |
 | --- | --- |
-| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs for the repository; executor offers are refused |
+| `POST /api/v1/nodes/claim` | the queue scan sees only the team's nodes of runs for the repository at the job's branch and commit; executor offers are refused |
 | `POST /api/v1/triggers/claim` | the same filter on triggers |
-| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team and name the repository |
+| `/api/v1/runs/{id}/...`, `/api/v1/triggers/{id}/...` | the run's trigger must belong to the team, name the repository, and carry the job's branch and commit; the cache grant route answers 403 |
 | `POST /api/v1/runs`, concurrency slots, pipeline profile writes, secrets | already bound to a live claim, which the rules above confine |
 | anything else | 403 |
 

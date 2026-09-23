@@ -5582,7 +5582,7 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
-	ghScope, scoped := githubRunnerScopeFrom(ctx)
+	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
@@ -5646,7 +5646,7 @@ func (s *Store) readClaimCandidates(
 		args = append(args, warm.warmCores)
 	}
 	scopeClause := ""
-	if ghScope, ok := githubRunnerScopeFrom(ctx); ok {
+	if ghScope, ok := GitHubRunnerScopeFrom(ctx); ok {
 		var scopeArgs []any
 		scopeClause, scopeArgs = ghScope.nodeClause()
 		args = append(args, scopeArgs...)
@@ -7225,7 +7225,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		sel += " AND trigger_source IN (" + strings.Join(ph, ",") + ")"
 	}
-	scope, scoped := githubRunnerScopeFrom(ctx)
+	scope, scoped := GitHubRunnerScopeFrom(ctx)
 	if scoped {
 		clause, scopeArgs := scope.triggerClause("")
 		sel += clause
@@ -7265,7 +7265,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		t.TriggerEnv = env
 		// safety: the oldest trigger stays pending for other workers, and this
 		// scope reports an empty queue until one of them takes it.
-		if !decoded || !TriggerNamesGitHubRepo(&t, scope.Repo) {
+		if !decoded || !scope.admits(&t) {
 			if commitErr := tx.Commit(); commitErr != nil {
 				return nil, commitErr
 			}

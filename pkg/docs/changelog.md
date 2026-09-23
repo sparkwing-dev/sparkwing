@@ -35,8 +35,9 @@ unlock.
   The cache refuses to start, and the controller to mint, when the key equals
   the operator token. A grant names one run's team, lasts six hours or until
   the requesting credential expires, whichever is first, and is verified
-  offline. A GitHub Actions runner credential gets no grant (403). A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`, reads
   only public `https` mirrors registered under their URL-derived name, and is
   refused on registration (403), seeding, refresh, archive, upload and admin
   routes. A team's bins and the git mirrors count toward the store ceiling.
@@ -125,10 +126,12 @@ unlock.
   /api/v1/runners/github/exchange` trades a workflow job's GitHub ID token
   (audience: the controller's external URL) and the team slug the workflow
   names for a one-hour runner credential; both the binding and the named team
-  must match, and a team holds at most 20 live credentials. The credential
-  claims nodes and triggers, and reaches runs, only of the team's runs for
-  that repository, and every other route answers 403. The bindings table is a
-  step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
+  must match, only a `push`, `workflow_dispatch` or `schedule` job on a branch
+  gets one, and a team holds at most 20 live credentials, counted and minted
+  under one lock. The credential claims nodes and triggers, and reaches runs,
+  only of the team's runs for that repository at the branch and commit its
+  ID token names, gets no cache grant, and every other route answers 403. The
+  bindings and credentials tables are a step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
 - **sparkwing-runner:** `runner --github-actions --team <slug>` exchanges the
   job's ID token, advertises the `github-actions` label and stops claiming ten
   minutes before its credential expires. `--idle-exit <duration>` ends the
@@ -150,8 +153,9 @@ unlock.
   The cache refuses to start, and the controller to mint, when the key equals
   the operator token. A grant names one run's team, lasts six hours or until
   the requesting credential expires, whichever is first, and is verified
-  offline. A GitHub Actions runner credential gets no grant (403). A grant reads and writes only its team's `/bin/`,
-  `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`, reads
   only public `https` mirrors registered under their URL-derived name, and is
   refused on registration (403), seeding, refresh, archive, upload and admin
   routes. A team's bins and the git mirrors count toward the store ceiling.

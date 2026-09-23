@@ -46,11 +46,30 @@ CREATE TABLE IF NOT EXISTS github_runner_bindings (
 
 var githubRunnerBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerBindingsTableSQLite)
 
-// applyGitHubRunnerBindingsMigration creates the bindings table. It is a step
-// of the identity migration rather than a schema version of its own.
-func applyGitHubRunnerBindingsMigration(ctx context.Context, tx *storeTx, ddl string) error {
-	_, err := tx.ExecContext(ctx, ddl)
-	return err
+// github_runner_credentials records the push each GitHub Actions credential
+// was minted for, keyed by the token's prefix.
+const githubRunnerCredentialsTableSQLite = `
+CREATE TABLE IF NOT EXISTS github_runner_credentials (
+    team       TEXT NOT NULL,
+    prefix     TEXT NOT NULL,
+    branch     TEXT NOT NULL,
+    sha        TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (team, prefix)
+)`
+
+var githubRunnerCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerCredentialsTableSQLite)
+
+// applyGitHubRunnerBindingsMigration creates the bindings and credentials
+// tables. It is a step of the identity migration rather than a schema version
+// of its own.
+func applyGitHubRunnerBindingsMigration(ctx context.Context, tx *storeTx, ddl ...string) error {
+	for _, stmt := range ddl {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // GitHubRunnerBindings lists t's bindings, oldest first.
@@ -176,17 +195,107 @@ func livePrefixesLike(ctx context.Context, tx *storeTx, team Team, like string, 
 	return out, rows.Err()
 }
 
-// LiveGitHubRunnerCredentials counts t's unexpired, unrevoked credentials
-// minted for GitHub Actions jobs.
-func (t *Tenant) LiveGitHubRunnerCredentials(ctx context.Context, now time.Time) (int, error) {
+// MaxGitHubRunnerCredentials bounds the live credentials one team's GitHub
+// Actions jobs hold at once, since each exchange is unauthenticated until
+// the job's ID token verifies.
+const MaxGitHubRunnerCredentials = 20
+
+// ErrGitHubRunnerCredentialLimit is returned when a team already holds
+// [MaxGitHubRunnerCredentials] live GitHub Actions credentials.
+var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
+
+// GitHubRunnerPush is the push a GitHub Actions job's ID token was issued
+// for: a branch and the commit on it.
+type GitHubRunnerPush struct {
+	Branch string
+	SHA    string
+}
+
+// MintGitHubRunnerCredential mints a runner credential for principal bound to
+// push, valid for ttl, refusing with [ErrGitHubRunnerCredentialLimit] once
+// the team holds [MaxGitHubRunnerCredentials] live ones. The count and the
+// mint share a transaction under the team's lock, so concurrent exchanges
+// cannot pass the limit together. It drops the team's expired and revoked
+// GitHub Actions credentials first.
+func (t *Tenant) MintGitHubRunnerCredential(
+	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error) {
+	if !strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) || push.Branch == "" || push.SHA == "" || ttl <= 0 {
+		return "", nil, ErrInvalidInput
+	}
+	if err := refuseAdminScope(scopes); err != nil {
+		return "", nil, err
+	}
+	for attempt := 1; ; attempt++ {
+		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, principal, push, scopes, ttl, now)
+		if err == nil {
+			return raw, tok, nil
+		}
+		if attempt < mintAttempts && isTokenPrefixCollision(err) {
+			continue
+		}
+		return "", nil, err
+	}
+}
+
+func (t *Tenant) mintGitHubRunnerCredentialOnce(
+	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+) (string, *Token, error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rollbackOrLog(tx)
+	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", nil, err
+	}
 	at := now.UTC().Unix()
-	var n int
-	err := t.s.queryRow(ctx, `
+	like := GitHubRunnerPrincipalPrefix + "%"
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM github_runner_credentials WHERE team = ? AND expires_at <= ?`, string(t.team), at); err != nil {
+		return "", nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM tokens
+		WHERE team = ? AND kind = ? AND principal LIKE ?
+		  AND ((expires_at IS NOT NULL AND expires_at <= ?) OR (revoked_at IS NOT NULL AND revoked_at <= ?))`,
+		string(t.team), TokenKindRunner, like, at, at); err != nil {
+		return "", nil, err
+	}
+	var live int
+	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM tokens
 		WHERE team = ? AND kind = ? AND principal LIKE ?
 		  AND (revoked_at IS NULL OR revoked_at > ?) AND expires_at IS NOT NULL AND expires_at > ?`,
-		string(t.team), TokenKindRunner, GitHubRunnerPrincipalPrefix+"%", at, at).Scan(&n)
-	return n, err
+		string(t.team), TokenKindRunner, like, at, at).Scan(&live); err != nil {
+		return "", nil, err
+	}
+	if live >= MaxGitHubRunnerCredentials {
+		return "", nil, ErrGitHubRunnerCredentialLimit
+	}
+	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, ttl, now, TokenOptions{})
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO github_runner_credentials (team, prefix, branch, sha, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		string(t.team), tok.Prefix, push.Branch, push.SHA, tok.ExpiresAt.UTC().Unix()); err != nil {
+		return "", nil, err
+	}
+	return raw, tok, tx.Commit()
+}
+
+// GitHubRunnerCredentialPush returns the push the GitHub Actions credential
+// with prefix was minted for, or [ErrNotFound].
+func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error) {
+	var push GitHubRunnerPush
+	err := t.s.queryRow(ctx,
+		`SELECT branch, sha FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
+		string(t.team), prefix).Scan(&push.Branch, &push.SHA)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GitHubRunnerPush{}, ErrNotFound
+	}
+	return push, err
 }
 
 // GitHubRepo names a repository on github.com.
@@ -272,12 +381,22 @@ func TriggerNamesGitHubRepo(tr *Trigger, repo GitHubRepo) bool {
 	return true
 }
 
-// GitHubRunnerScope confines a claim to one team's work for one repository.
-// It is the claim restriction of a credential a GitHub Actions job exchanged
-// its ID token for.
+// GitHubRunnerScope confines a claim to one team's work for one push of one
+// repository. It is the claim restriction of a credential a GitHub Actions
+// job exchanged its ID token for.
 type GitHubRunnerScope struct {
 	Team Team
 	Repo GitHubRepo
+	// Push is the branch and commit the job's ID token names; the scope
+	// admits only triggers recorded for exactly that branch and commit.
+	Push GitHubRunnerPush
+}
+
+// admits reports whether tr is work of the scope's repository recorded for
+// the scope's push. tr's team is checked by the caller's query.
+func (g GitHubRunnerScope) admits(tr *Trigger) bool {
+	return g.Push.Branch != "" && g.Push.SHA != "" &&
+		tr.GitBranch == g.Push.Branch && tr.GitSHA == g.Push.SHA && TriggerNamesGitHubRepo(tr, g.Repo)
 }
 
 type githubRunnerScopeKey struct{}
@@ -288,7 +407,8 @@ func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context
 	return context.WithValue(ctx, githubRunnerScopeKey{}, scope)
 }
 
-func githubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool) {
+// GitHubRunnerScopeFrom returns the scope [WithGitHubRunnerScope] set on ctx.
+func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool) {
 	scope, ok := ctx.Value(githubRunnerScopeKey{}).(GitHubRunnerScope)
 	return scope, ok
 }
@@ -308,14 +428,15 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 	clause := ` AND ` + col("team") + ` = ?` +
 		` AND LOWER(` + col("github_owner") + `) = ? AND LOWER(` + col("github_repo") + `) = ?` +
 		` AND (` + col("repo") + ` = '' OR LOWER(` + col("repo") + `) IN (` + ph + `))` +
-		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))`
+		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))` +
+		` AND ` + col("git_branch") + ` = ? AND ` + col("git_sha") + ` = ?`
 	args := []any{string(g.Team), strings.ToLower(g.Repo.Owner), strings.ToLower(g.Repo.Name)}
 	for range 2 {
 		for _, s := range spellings {
 			args = append(args, s)
 		}
 	}
-	return clause, args
+	return clause, append(args, g.Push.Branch, g.Push.SHA)
 }
 
 // nodeClause narrows a nodes query to nodes of runs whose trigger the scope
@@ -327,15 +448,16 @@ func (g GitHubRunnerScope) nodeClause() (string, []any) {
 }
 
 // GitHubRunnerAdmits reports whether scope admits runID: the run's trigger
-// belongs to the scope's team and names the scope's repository in every
-// repository field, including the ones in its environment.
+// belongs to the scope's team, was recorded for the scope's branch and
+// commit, and names the scope's repository in every repository field,
+// including the ones in its environment.
 func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error) {
 	var tr Trigger
 	var envJSON []byte
 	err := s.queryRow(ctx, `
-		SELECT repo, repo_url, github_owner, github_repo, trigger_env
+		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha
 		FROM triggers WHERE team = ? AND id = ?`, string(scope.Team), runID).
-		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON)
+		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -347,7 +469,7 @@ func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope,
 		return false, nil
 	}
 	tr.TriggerEnv = env
-	return TriggerNamesGitHubRepo(&tr, scope.Repo), nil
+	return scope.admits(&tr), nil
 }
 
 // safety: an environment that does not decode cannot be shown to name the

@@ -15,7 +15,7 @@ import (
 )
 
 // ErrNoCacheGrant reports a controller that mints no cache grants: one that
-// predates the route or holds no cache token to sign with. The run proceeds
+// predates the route or holds no cache grant key to sign with. The run proceeds
 // without the binary and dependency caches.
 var ErrNoCacheGrant = errors.New("controller mints no cache grants")
 

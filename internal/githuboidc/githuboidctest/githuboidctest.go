@@ -27,9 +27,16 @@ type Job struct {
 	Repository        string
 	RepositoryID      int64
 	RepositoryOwnerID int64
-	Ref               string
-	RunID             string
+	// Ref defaults to refs/heads/main, SHA to DefaultSHA and EventName to
+	// push.
+	Ref       string
+	SHA       string
+	EventName string
+	RunID     string
 }
+
+// DefaultSHA is the commit a Job names when it sets none.
+const DefaultSHA = "0123456789abcdef0123456789abcdef01234567"
 
 // New starts an issuer and stops it when t ends.
 func New(t testing.TB) *Issuer {
@@ -83,6 +90,14 @@ func (i *Issuer) sign(key *rsa.PrivateKey, job Job, audience string, override ma
 	if runID == "" {
 		runID = "1000"
 	}
+	sha := job.SHA
+	if sha == "" {
+		sha = DefaultSHA
+	}
+	event := job.EventName
+	if event == "" {
+		event = "push"
+	}
 	claims := map[string]any{
 		"iss": i.URL, "aud": audience, "sub": "repo:" + job.Repository + ":ref:" + ref,
 		"iat": now.Unix(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
@@ -90,6 +105,8 @@ func (i *Issuer) sign(key *rsa.PrivateKey, job Job, audience string, override ma
 		"repository_id":       strconv.FormatInt(job.RepositoryID, 10),
 		"repository_owner_id": strconv.FormatInt(job.RepositoryOwnerID, 10),
 		"ref":                 ref,
+		"sha":                 sha,
+		"event_name":          event,
 		"workflow_ref":        job.Repository + "/.github/workflows/sparkwing.yaml@" + ref,
 		"run_id":              runID,
 	}

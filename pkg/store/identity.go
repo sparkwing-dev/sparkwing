@@ -266,7 +266,7 @@ func applyIdentityMigrationSQLite(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTableSQLite)
+	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTableSQLite, githubRunnerCredentialsTableSQLite)
 }
 
 func applyIdentityMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -282,7 +282,7 @@ func applyIdentityMigrationPostgres(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTablePostgres)
+	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTablePostgres, githubRunnerCredentialsTablePostgres)
 }
 
 func splitStatements(script string) []string {
