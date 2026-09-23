@@ -290,9 +290,9 @@ is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
 carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
 four, 32 GiB at eight. A node takes the smallest class that covers both halves
 of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
-because the 4-core class carries only 16 GiB. The pod is created with cpu and
-memory requests and limits equal to its class, so a node never outgrows the
-class it is billed at.
+because the 4-core class carries only 16 GiB. The class sets the price, while
+the Kubernetes pod requests the pinned CPU and memory. A node with a 0.25-core
+pin still pays for the 2-core class, including the 20-second minimum.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -314,27 +314,27 @@ message.
 Concurrency in the band is whatever the pool's own cpu limit fits. A Job that
 finds no room waits for a machine to free rather than failing, because a full
 fleet is a condition that clears. A Job whose shape no machine in the pool
-could hold still fails after the five-minute wait below, because waiting cures
-nothing.
+could hold fails before the Job is created, because waiting cures nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
-`credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
-so the pod shape and the bill agree whichever ladder the operator priced. A
-claim that names a node carries `sizes_to_class` to say it creates the node's
-executor at that class; a metered claim without it is held to the warm class,
+`credit_cpu_class_memory_bytes`. The Job uses the pipeline's resource pin or
+measured profile for its requests, with 100m CPU and 128 MiB memory defaults
+when no usable measurement exists. Limits retain the runner's burst settings
+and operator ceilings. A claim that names a node carries `sizes_to_class` to
+select the class-routed Kubernetes path; a metered claim without it is held to
+the warm class,
 and an unmetered one may not set it at all, so a customer's local agent can
 never route a class node to itself. The metered token is the operator's own
 pool, and class routing trusts it: the warm loop and the Job dispatcher share
 one process and one token, so the controller takes the flag at its word until
 the Job builder moves server-side and the pod shape is the controller's own.
-A runner cpu or memory ceiling below the billed class fails the node naming
-both, because a customer must never be billed for a class the pod cannot get.
+An operator ceiling caps the pod request without changing the billed class.
 A pod no node accepts is one of two things, and the runner tells them apart by
 measuring the pod's requests against the `allocatable` of the pool machines its
-own node selector admits. No machine in the pool could hold the pod even when
-empty, which is what a class larger than the cluster provisions looks like: the
-node fails after five minutes with the scheduler's own message, as it always
-has. A machine of the right shape is running and simply busy: the node queues,
+own node selector admits. If no matching machine could hold the pod even when
+empty, the node fails before Job creation with a clear error.
+If none exists yet, the five-minute wait allows the pool to provision one.
+A machine of the right shape that is simply busy causes the node to queue,
 its `status_detail` reads `queued: the runner fleet is full` with the
 scheduler's message, a `capacity_queued` event opens the wait, and it runs the
 moment a machine frees. The queue is bounded at nine minutes, one minute short

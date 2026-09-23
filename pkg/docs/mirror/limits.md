@@ -5,6 +5,12 @@ a team can consume that costs the operator money or grows with time, and what
 bounds each one. A team with no credits runs its work on its own machines, so
 what it costs the operator is storage, bandwidth and controller time.
 
+Cloud Jobs request the pipeline's pinned or measured CPU and memory from
+Kubernetes. The credit ledger still prices each claim at the smallest class
+that covers those resources, with a 20-second minimum. A 0.25-core request
+therefore fits a 0.25-core allocatable node but pays for the 2-core class.
+See [Runner classes](auth.md#runner-classes).
+
 ## Free storage allowance
 
 A team without credits keeps a free storage allowance of one gibibyte unless

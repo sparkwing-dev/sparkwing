@@ -487,8 +487,8 @@ func TestAClaimantsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	}
 }
 
-// A node is billed at the class it pinned, because the class is what its pod
-// is given.
+// A node is billed at the class covering its pin, independently of the pod's
+// resource request.
 func TestTheChargeRowCarriesThePinnedClass(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

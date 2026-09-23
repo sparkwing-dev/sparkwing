@@ -1166,8 +1166,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 }
 
 // The class the claim response carries is the class the charge row bills,
-// whichever ladder the operator priced, so the pod shape and the bill cannot
-// disagree.
+// whichever ladder the operator priced.
 func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -1222,8 +1221,44 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	}
 }
 
-// Naming a node is not a way around the ladder: a claimant that will not size
-// its executor to the class is held to the warm one.
+func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCent, "pay-quarter", "root"); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := f.store.CreateRun(ctx, store.Run{
+		ID: "run-quarter", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+		PlanSnapshot: []byte(`{"nodes":[{"id":"build","modifiers":{"res_cores":0.25}}]}`),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := f.store.CreateNode(ctx, store.Node{RunID: "run-quarter", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := f.store.MarkNodeReady(ctx, "run-quarter", "build"); err != nil {
+		t.Fatalf("mark ready: %v", err)
+	}
+	status, body := creditsRequest(t, http.MethodPost,
+		f.url+"/api/v1/runs/run-quarter/nodes/build/claim", f.runner,
+		map[string]any{"holder_id": "k8s-job:build", "lease_secs": 60, "sizes_to_class": true})
+	if status != http.StatusOK {
+		t.Fatalf("claim = %d: %s", status, body)
+	}
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatalf("list charges: %v", err)
+	}
+	if len(charges) != 1 || charges[0].CPUClassCores != 2 ||
+		charges[0].RateMicroPerSecond != 2*store.MicroCreditsPerCredit ||
+		charges[0].AmountMicro != 2*store.MicroCreditsPerCredit*store.MinBillableSeconds {
+		t.Fatalf("reservation = %+v, want 20 seconds at the two-core class", charges)
+	}
+}
+
+// Naming a node is not a way around the ladder: a claimant outside the
+// class-routed path is held to the warm class.
 func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()

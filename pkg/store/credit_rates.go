@@ -34,9 +34,9 @@ const (
 	DefaultWarmCPUClassCores = 2
 )
 
-// CPUClass is one rung of the runner ladder: a whole number of cores and the
-// memory that comes with them. It is the shape a node's executor owes it, and
-// the shape its claim was billed at.
+// CPUClass is one rung of the billing ladder: a whole number of cores and the
+// memory that comes with them. It prices a node independently of the pod's
+// resource request.
 type CPUClass struct {
 	Cores       int64 `json:"cores"`
 	MemoryBytes int64 `json:"memory_bytes"`
@@ -319,10 +319,8 @@ func addCreditRateTableWrites(writes map[string]string, table CreditRateTable) e
 	return nil
 }
 
-// safety: the class is resolved from the cpu and memory the scheduler sizes the
-// node by, which is what the pod is given. Nothing a claimant says about itself
-// reaches this, because a runner that priced its own work could bill an 8-core
-// node at the smallest class.
+// safety: pricing uses the controller's stored resource request, not a claim's
+// self-reported size, so a runner cannot lower its own bill.
 func nodeCreditClassTx(
 	ctx context.Context, q rowQuerier, table CreditRateTable, runID, nodeID string,
 ) (CreditRate, error) {

@@ -20,6 +20,14 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kubernetes runner:** Job CPU and memory requests now follow the pipeline's
+  resource pin or measured profile, with small defaults, instead of the billed
+  class. A request larger than every matching node's allocatable capacity
+  fails before Job creation. Credits still reserve the class rate for at least
+  20 seconds per started node.
+
 ### Added
 
 - **runner:** an off-cluster agent reads the cache the controller announces

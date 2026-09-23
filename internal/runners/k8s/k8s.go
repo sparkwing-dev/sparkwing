@@ -155,11 +155,11 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	// safety: the dispatcher reached here holding the run's trigger claim,
 	// and the controller refuses a request that carries both identities.
 	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
-	if msg := r.ceilingUnderClass(class); msg != "" {
+	job := r.buildJob(name, req, res, class, fence)
+	if msg := r.impossibleShape(ctx, job); msg != "" {
 		r.failNode(ctx, req, msg, store.FailureUnknown, eventClassRefused)
 		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 	}
-	job := r.buildJob(name, req, res, class, fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -419,25 +419,32 @@ func unschedulableEvent(queued bool) string {
 	return eventClassRefused
 }
 
-// safety: a customer is billed for the class at the claim, so a pod that cannot
-// be given that class fails the node instead of running smaller for the same
-// price.
-func (r *Runner) ceilingUnderClass(class store.CPUClass) string {
-	if class.Cores <= 0 {
+// safety: a request larger than every matching node's allocatable capacity
+// cannot become schedulable by waiting for current jobs to finish.
+func (r *Runner) impossibleShape(ctx context.Context, job *batchv1.Job) string {
+	pod := &corev1.Pod{Spec: job.Spec.Template.Spec}
+	cpu, memory := podRequestTotals(pod)
+	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		LabelSelector: labels.Set(pod.Spec.NodeSelector).String(),
+	})
+	if err != nil || len(nodes.Items) == 0 {
 		return ""
 	}
-	if r.cfg.CPUCeiling > 0 && r.cfg.CPUCeiling < float64(class.Cores) {
-		return fmt.Sprintf(
-			"K8sRunner: this node is billed at the %d-core class and the runner cpu ceiling is %g cores; "+
-				"raise the ceiling or lower the pin", class.Cores, r.cfg.CPUCeiling)
+	var maxCPU, maxMemory resource.Quantity
+	for i := range nodes.Items {
+		alloc := nodes.Items[i].Status.Allocatable
+		if alloc.Cpu().Cmp(cpu) >= 0 && alloc.Memory().Cmp(memory) >= 0 {
+			return ""
+		}
+		if alloc.Cpu().Cmp(maxCPU) > 0 {
+			maxCPU = *alloc.Cpu()
+		}
+		if alloc.Memory().Cmp(maxMemory) > 0 {
+			maxMemory = *alloc.Memory()
+		}
 	}
-	if r.cfg.MemoryCeiling > 0 && r.cfg.MemoryCeiling < class.MemoryBytes {
-		return fmt.Sprintf(
-			"K8sRunner: this node is billed at the %d-core class, which carries %s, and the runner memory "+
-				"ceiling is %s; raise the ceiling or lower the pin",
-			class.Cores, gib(class.MemoryBytes), gib(r.cfg.MemoryCeiling))
-	}
-	return ""
+	return fmt.Sprintf("K8sRunner: pod requests %s cpu and %s memory, but no matching node has that allocatable capacity (largest cpu %s, memory %s); lower the resource pin or add a larger node",
+		cpu.String(), memory.String(), maxCPU.String(), maxMemory.String())
 }
 
 func (r *Runner) failNode(ctx context.Context, req runner.Request, msg, reason, event string) {
@@ -826,7 +833,7 @@ func (r *Runner) buildJob(
 		Command:         []string{JobBinary},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
-		Resources:       podResources(res, class, r.cfg),
+		Resources:       podResources(res, r.cfg),
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			RunAsNonRoot:             boolPtr(true),
@@ -1020,18 +1027,7 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 
 // safety: cluster profiles use peak CPU because the resolved core value is a
 // hard CFS limit here; sustained local-host demand would throttle spiky pods.
-func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) corev1.ResourceRequirements {
-	// safety: the class the controller billed outranks the operator ceiling,
-	// which RunNode has already refused when it sits below the class, so a pod
-	// is never smaller than what the customer paid for.
-	if class.Cores > 0 {
-		cpu := milliCores(float64(class.Cores))
-		memory := *resource.NewQuantity(class.MemoryBytes, resource.BinarySI)
-		return corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
-		}
-	}
+func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
 	// safety: an operator ceiling outranks a pipeline pin, which is otherwise unbounded on this path
 	res = capacity.ApplyCeiling(res, cfg.CPUCeiling, cfg.MemoryCeiling)
 	req := corev1.ResourceList{}
@@ -1044,9 +1040,11 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 		req[corev1.ResourceCPU] = milliCores(cores)
 		lim[corev1.ResourceCPU] = milliCores(cappedCores(cores*podCPULimitFactor, cfg.CPUCeiling))
 	} else {
-		if cfg.CPURequest != "" {
-			req[corev1.ResourceCPU] = resource.MustParse(cfg.CPURequest)
+		cpuRequest := cfg.CPURequest
+		if cpuRequest == "" {
+			cpuRequest = "100m"
 		}
+		req[corev1.ResourceCPU] = resource.MustParse(cpuRequest)
 		if cfg.CPULimit != "" {
 			lim[corev1.ResourceCPU] = milliCores(cappedCores(quantityCores(cfg.CPULimit), cfg.CPUCeiling))
 		}
@@ -1057,9 +1055,11 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
 		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)
 	} else {
-		if cfg.MemoryRequest != "" {
-			req[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryRequest)
+		memoryRequest := cfg.MemoryRequest
+		if memoryRequest == "" {
+			memoryRequest = "128Mi"
 		}
+		req[corev1.ResourceMemory] = resource.MustParse(memoryRequest)
 		if cfg.MemoryLimit != "" {
 			lim[corev1.ResourceMemory] = *resource.NewQuantity(
 				cappedBytes(quantityBytes(cfg.MemoryLimit), cfg.MemoryCeiling), resource.BinarySI)
