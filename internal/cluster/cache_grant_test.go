@@ -17,11 +17,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 )
 
-const operatorCacheToken = "operator-cache-token"
+const (
+	operatorCacheToken = "operator-cache-token"
+	cacheGrantKey      = "cache-grant-key"
+)
 
 // newGrantingController stands in for the controller's cache-grant route: it
-// resolves the runner token to its team and signs with the cache's operator
-// token, which only the controller and the cache hold.
+// resolves the runner token to its team and signs with the grant key, which
+// only the controller and the cache hold.
 func newGrantingController(t *testing.T, teams map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -32,7 +35,7 @@ func newGrantingController(t *testing.T, teams map[string]string) *httptest.Serv
 			http.Error(w, "no team", http.StatusForbidden)
 			return
 		}
-		grant, err := authwire.MintCacheGrant(operatorCacheToken, team, r.PathValue("id"), time.Now(), time.Hour)
+		grant, err := authwire.MintCacheGrant(cacheGrantKey, team, r.PathValue("id"), time.Now(), time.Hour)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -52,6 +55,7 @@ func newGrantCache(t *testing.T) *httptest.Server {
 	cfg.ProxyDir = filepath.Join(root, "proxy")
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
 	cfg.APIToken = operatorCacheToken
+	cfg.GrantKey = cacheGrantKey
 	s, err := cache.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +81,7 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 	cacheSrv := newGrantCache(t)
 
 	grantA := requestRunCacheGrant(ctx, ctrl.URL, "runner-a", "run-a", logger)
-	claims, err := authwire.VerifyCacheGrant(operatorCacheToken, grantA, time.Now())
+	claims, err := authwire.VerifyCacheGrant(cacheGrantKey, grantA, time.Now())
 	if err != nil || claims.Team != "team-a" || claims.Run != "run-a" {
 		t.Fatalf("team A's grant = %+v, %v; want team-a for run-a", claims, err)
 	}

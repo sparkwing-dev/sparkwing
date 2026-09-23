@@ -202,13 +202,23 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- $bundle := index .Values "sparkwing-runner-bundle" }}
-            {{- $bundleToken := index $bundle "controller" "tokenSecret" }}
-            {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") (index $bundleToken "name") (index $bundleToken "key") }}
+            {{- if and (index $bundle "enabled") (index $bundle "cache" "enabled") }}
+            {{- $cacheToken := index $bundle "cache" "tokenSecret" | default dict }}
+            {{- if and (index $cacheToken "name") (index $cacheToken "key") }}
             - name: SPARKWING_CACHE_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ index $bundleToken "name" | quote }}
-                  key: {{ index $bundleToken "key" | quote }}
+                  name: {{ index $cacheToken "name" | quote }}
+                  key: {{ index $cacheToken "key" | quote }}
+            {{- end }}
+            {{- $grantKey := index $bundle "cache" "grantKeySecret" | default dict }}
+            {{- if and (index $grantKey "name") (index $grantKey "key") }}
+            - name: SPARKWING_CACHE_GRANT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ index $grantKey "name" | quote }}
+                  key: {{ index $grantKey "key" | quote }}
+            {{- end }}
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-controller"

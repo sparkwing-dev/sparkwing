@@ -388,9 +388,17 @@ same name to the same URL stays idempotent.
 
 A multi-team controller gives runners a cache grant instead of the cache's
 token. `POST /api/v1/runs/<run>/cache-grant` answers `{grant, team,
-expires_at}`: a bearer the controller signs with its own cache token, naming
-the run's team and valid for six hours. The cache verifies it without calling
-the controller and confines the request to that team:
+expires_at}`: a bearer the controller signs with the grant key
+(`SPARKWING_CACHE_GRANT_KEY`), naming the run's team and valid for six hours
+or until the requesting credential expires, whichever comes first. The cache
+verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
+without calling the controller and confines the request to that team. The
+grant key is a secret of its own: the cache refuses to start, and the
+controller to mint, when it equals the cache's operator token, and it is never
+a runner's token, because pipeline code can read that token. A cache without
+a grant key accepts no grants, and a controller without one answers the route
+with 404. A GitHub Actions runner credential gets 403: it is confined to one
+repository, and a grant opens the team's whole tree.
 
 - `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own
   tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
@@ -436,7 +444,7 @@ different release; both default to this release's own pods. Override
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an
 out-of-cluster runner pool. The chart refuses to render a non-`ClusterIP`
-`cache.service.type` unless `controller.tokenSecret.name` is set and
+`cache.service.type` unless `cache.tokenSecret.name` is set and
 `cache.allowUnauthenticated` is false, so a published cache always demands a
 bearer.
 

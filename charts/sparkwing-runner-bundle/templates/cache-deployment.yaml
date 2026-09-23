@@ -80,12 +80,23 @@ spec:
             - name: GITCACHE_REPOS
               value: {{ .Values.cache.repos | quote }}
             {{- end }}
-            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
+            {{- with .Values.cache.tokenSecret }}
+            {{- if and .name .key }}
             - name: SPARKWING_API_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.controller.tokenSecret.name | quote }}
-                  key: {{ .Values.controller.tokenSecret.key | quote }}
+                  name: {{ .name | quote }}
+                  key: {{ .key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.cache.grantKeySecret }}
+            {{- if and .name .key }}
+            - name: SPARKWING_CACHE_GRANT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .name | quote }}
+                  key: {{ .key | quote }}
+            {{- end }}
             {{- end }}
           ports:
             - name: http

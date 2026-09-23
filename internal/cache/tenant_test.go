@@ -18,9 +18,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
+// testGrantKey is the grant key newBudgetedServer gives a cache whose
+// operator token is token.
+func testGrantKey(token string) string { return token + "-grant-key" }
+
 func grantFor(t *testing.T, token, team string) string {
 	t.Helper()
-	g, err := authwire.MintCacheGrant(token, team, "run-"+team, time.Now(), time.Hour)
+	g, err := authwire.MintCacheGrant(testGrantKey(token), team, "run-"+team, time.Now(), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +114,7 @@ func TestCacheRefusesGrantsItCannotVerify(t *testing.T) {
 	const token = "operator-token"
 	srv := newBudgetedServer(t, token, egress.Config{})
 	forged := grantFor(t, "some-other-token", "team-a")
-	expired, err := authwire.MintCacheGrant(token, "team-a", "run-1", time.Now().Add(-2*time.Hour), time.Hour)
+	expired, err := authwire.MintCacheGrant(testGrantKey(token), "team-a", "run-1", time.Now().Add(-2*time.Hour), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,5 +216,33 @@ func TestStoreCeilingCountsTheMirrors(t *testing.T) {
 	measureStore(t.Context())
 	if got := storeCeiling.State().Bytes; got < 4096 {
 		t.Fatalf("store ceiling measured %d bytes, want the 4096-byte mirror pack counted", got)
+	}
+}
+
+// The cache verifies grants with its grant key and nothing else, so its
+// operator token, which signs nothing, cannot stand in for the key.
+func TestCacheVerifiesGrantsWithTheGrantKeyAlone(t *testing.T) {
+	const token = "operator-token"
+	srv := newBudgetedServer(t, token, egress.Config{})
+	byToken, err := authwire.MintCacheGrant(token, "team-a", "run-1", time.Now(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := send(t, srv, http.MethodPut, "/bin/deadbeef", byToken, "x"); code != http.StatusUnauthorized {
+		t.Errorf("a grant signed with the operator token = %d, want 401", code)
+	}
+	if code, body := send(t, srv, http.MethodPut, "/bin/deadbeef", grantFor(t, token, "team-a"), "x"); code/100 != 2 {
+		t.Errorf("a grant signed with the grant key = %d, want 2xx: %s", code, body)
+	}
+}
+
+func TestCacheRefusesAGrantKeyThatIsItsToken(t *testing.T) {
+	newBudgetedServer(t, "operator-token", egress.Config{})
+	c := DefaultConfig()
+	c.DataDir = t.TempDir()
+	c.APIToken = "same-secret"
+	c.GrantKey = "same-secret"
+	if _, err := New(c); err == nil {
+		t.Fatal("New accepted a grant key equal to the operator token")
 	}
 }

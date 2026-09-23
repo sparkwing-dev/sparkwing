@@ -11,6 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -59,6 +60,10 @@ func run(args []string) error {
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
 		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+	fs.StringVar(&cfg.GrantKey, "grant-key",
+		envOr(authwire.CacheGrantKeyEnv, cfg.GrantKey),
+		"key that verifies cache grants, the one the controller signs them with. No runner holds it, and it "+
+			"must differ from --api-token. Empty accepts no grants. Falls back to $"+authwire.CacheGrantKeyEnv+".")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
 		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")

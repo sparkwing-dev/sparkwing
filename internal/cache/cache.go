@@ -13,6 +13,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -44,6 +45,11 @@ type Config struct {
 	TrustForwardedHost bool
 
 	APIToken string
+
+	// GrantKey verifies cache grants. The controller signs grants with the
+	// same key, and no runner holds it. Empty accepts no grants. It must
+	// differ from APIToken.
+	GrantKey string
 
 	AllowUnauthenticated bool
 
@@ -120,6 +126,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	// safety: a Secret key holding only a newline must not count as a configured credential.
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
+	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
+	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
+		return nil, fmt.Errorf("cache: the grant key (--grant-key or $%s) is the operator token; "+
+			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
+			authwire.CacheGrantKeyEnv)
+	}
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
@@ -182,6 +194,7 @@ func New(cfg Config) (*Server, error) {
 	proxyPublicBase = publicBase
 	proxyTrustForwardedHost = cfg.TrustForwardedHost
 	apiToken = cfg.APIToken
+	grantKey = cfg.GrantKey
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
 	fetchFreshWindow = cfg.FetchFreshWindow

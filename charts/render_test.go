@@ -30,16 +30,23 @@ func TestFullChartVersion(t *testing.T) {
 	}
 }
 
-func tokenSecretDefault(chart string) string {
+// tokenSecretDefaults names the runner's token, the cache's operator token
+// and the grant key as three Secrets, the shape the charts require.
+func tokenSecretDefaults(chart string) []string {
+	prefix := ""
 	if strings.Contains(chart, "sparkwing-full") {
-		return "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"
+		prefix = "sparkwing-runner-bundle."
 	}
-	return "controller.tokenSecret.name=sparkwing-token"
+	return []string{
+		prefix + "controller.tokenSecret.name=sparkwing-token",
+		prefix + "cache.tokenSecret.name=sparkwing-cache-token",
+		prefix + "cache.grantKeySecret.name=sparkwing-cache-grant-key",
+	}
 }
 
 func helmArgs(chart, release string, sets []string, extra ...string) []string {
 	args := append([]string{"template", release, chart}, extra...)
-	for _, s := range append([]string{tokenSecretDefault(chart)}, sets...) {
+	for _, s := range append(tokenSecretDefaults(chart), sets...) {
 		args = append(args, "--set", s)
 	}
 	return args
@@ -1646,7 +1653,7 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 	if strings.Contains(cache, "optional: true") {
 		t.Fatalf("configured cache Secret is optional:\n%s", cache)
 	}
-	for _, name := range []string{"sparkwing-token", "sparkwing-ssh"} {
+	for _, name := range []string{"sparkwing-cache-token", "sparkwing-cache-grant-key", "sparkwing-ssh"} {
 		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
 			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
 		}
@@ -1677,6 +1684,18 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 				"sparkwing-runner-bundle.controller.tokenSecret.key=",
 			},
 			want: "controller.tokenSecret.key is required",
+		},
+		{
+			name:  "cache operator token",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"cache.tokenSecret.key="},
+			want:  "cache.tokenSecret.key is required",
+		},
+		{
+			name:  "cache grant key",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"cache.grantKeySecret.key="},
+			want:  "cache.grantKeySecret.key is required",
 		},
 		{
 			name:  "controller webhook",
@@ -2112,8 +2131,8 @@ func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "controller.tokenSecret.name=")
-	for _, want := range []string{"controller.tokenSecret.name", "cache.allowUnauthenticated=true"} {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.tokenSecret.name=")
+	for _, want := range []string{"cache.tokenSecret.name", "cache.allowUnauthenticated=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render error does not name %q:\n%s", want, out)
 		}
@@ -2329,7 +2348,7 @@ func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
 			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
-		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "controller.tokenSecret.name"} {
+		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.tokenSecret.name"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
 			}
@@ -2346,8 +2365,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
-		"sparkwing-runner-bundle.controller.tokenSecret.key=bearer")
+	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=cache-operator",
+		"sparkwing-runner-bundle.cache.tokenSecret.key=bearer")
 	for _, env := range controller.Env {
 		if env.Name != "SPARKWING_CACHE_TOKEN" {
 			continue
@@ -2356,8 +2375,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
 		}
 		ref := *env.ValueFrom.SecretKeyRef
-		if ref.Name != "sparkwing-token" || ref.Key != "bearer" {
-			t.Errorf("controller cache token = %+v, want the release token Secret", ref)
+		if ref.Name != "cache-operator" || ref.Key != "bearer" {
+			t.Errorf("controller cache token = %+v, want the cache's operator token Secret", ref)
 		}
 		return
 	}

@@ -29,9 +29,13 @@ unlock.
   reports its `team`. See [Runner Job placement](docs/security.md#runner-job-placement).
 
 - **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the cache token it already holds, so a runner need not
-  hold the cache's token. A grant names one run's team, lasts six hours, and is
-  verified offline. A grant reads and writes only its team's `/bin/`,
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant reads and writes only its team's `/bin/`,
   `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
   only public `https` mirrors registered under their URL-derived name, and is
   refused on registration (403), seeding, refresh, archive, upload and admin
@@ -140,9 +144,13 @@ unlock.
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
 - **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the cache token it already holds, so a runner need not
-  hold the cache's token. A grant names one run's team, lasts six hours, and is
-  verified offline. A grant reads and writes only its team's `/bin/`,
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant reads and writes only its team's `/bin/`,
   `/cache/` and `/artifacts/` trees under `<data-dir>/teams/<team>/`, reads
   only public `https` mirrors registered under their URL-derived name, and is
   refused on registration (403), seeding, refresh, archive, upload and admin
@@ -279,6 +287,14 @@ unlock.
   `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
   with a profile previously left run creation and egress bytes unlimited. A
   flag or environment variable the operator names still wins.
+- **charts (Breaking):** the cache's operator token and the cache grant key are
+  Secrets of their own, `cache.tokenSecret` and `cache.grantKeySecret` in the
+  runner bundle, instead of the runner's `controller.tokenSecret`. The runner's
+  token reaches the pipeline code it runs, so sharing it let one team's
+  pipeline mint a grant for any team and replace another team's cached
+  binaries. The chart refuses to render when any two of the three name the
+  same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
+  See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on

@@ -224,6 +224,8 @@ type Principal struct {
 	Role string
 
 	AccountID string
+
+	Expires time.Time
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)

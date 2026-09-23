@@ -40,6 +40,38 @@ other team's launcher then executed.
   `SPARKWING_CACHE_GRANT`. A pipeline that relied on another launcher variable
   should receive it as a secret instead.
 
+## The cache's token and grant key are Secrets of their own
+
+The runner-bundle chart used `controller.tokenSecret`, the runner's own
+token, as the cache's operator token and, through it, as the key cache grants
+were signed with. Pipeline code can read the runner's token, so any team's
+pipeline could mint a grant for another team and replace the binaries that
+team's launcher runs. The cache now reads its operator token from
+`cache.tokenSecret` and its grant key from `cache.grantKeySecret`, and the
+full chart hands the controller the same two as `SPARKWING_CACHE_TOKEN` and
+`SPARKWING_CACHE_GRANT_KEY`.
+
+1. Create two random Secrets, neither of them a runner token:
+
+   ```bash
+   kubectl -n sparkwing create secret generic sparkwing-cache-token \
+       --from-literal=token="$(openssl rand -hex 32)"
+   kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
+       --from-literal=key="$(openssl rand -hex 32)"
+   ```
+
+2. Set `cache.tokenSecret.name` and `cache.grantKeySecret.name` (under
+   `sparkwing-runner-bundle.` in the full chart). The chart refuses to render
+   when any two of `controller.tokenSecret`, `cache.tokenSecret` and
+   `cache.grantKeySecret` name the same Secret key.
+3. A controller outside the chart needs the new cache token as
+   `SPARKWING_CACHE_TOKEN` and the grant key as `SPARKWING_CACHE_GRANT_KEY`.
+   Anything else that called the cache with the old shared token, such as an
+   operator's shell, switches to the new cache token.
+
+Grants minted before the upgrade stop verifying, and runs mint fresh ones on
+their next claim.
+
 ## BoundCipher takes the owning team
 
 `controller.BoundCipher` binds an envelope to the team that owns its row.

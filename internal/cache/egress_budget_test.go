@@ -40,6 +40,9 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	c.ProxyDir = filepath.Join(root, "proxy")
 	c.SSHKeyDir = filepath.Join(root, "no-ssh-key")
 	c.APIToken = token
+	if token != "" {
+		c.GrantKey = testGrantKey(token)
+	}
 	c.AllowUnauthenticated = token == ""
 	c.EgressDailyAlarmBytes = cfg.GlobalDailyAlarmBytes
 	c.EgressDailyCapBytes = cfg.GlobalDailyCapBytes
