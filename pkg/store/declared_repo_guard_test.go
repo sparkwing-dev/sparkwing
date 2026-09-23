@@ -30,6 +30,7 @@ var declaredRepoReaders = map[string]string{
 	"cmd/sparkwing/repos.go":                     "groups runs by repository for display",
 	"cmd/sparkwing/repos_info.go":                "matches runs to a repository for display",
 	"cmd/sparkwing/run_detached.go":              "records the repository a detached run was started from",
+	"internal/migrationrehearsal/main.go":        "maps the pre-v48 column name when comparing a copy before and after migration",
 }
 
 var declaredRepoPattern = regexp.MustCompile(`\bDeclaredRepos?\b|\bdeclared_repo\b`)
