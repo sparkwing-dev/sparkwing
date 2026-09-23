@@ -127,13 +127,18 @@ func TestPooledNodeFromARepositoryOutsideTheAllowlistFailsNamingIt(t *testing.T)
 	}
 }
 
-// A direct-source pool runner sends its list with every node claim, so the
-// controller never hands it a node from another repository.
+// A direct-source pool runner sends its list with every node claim to a
+// controller that advertises the field, so it never hands it a node from
+// another repository.
 func TestRunPoolLoopSendsTheRepositoryListWithEachNodeClaim(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	sent := make(chan []string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/capabilities" {
+			_, _ = w.Write([]byte(`{"claims":{"allow_repos":true}}`))
+			return
+		}
 		if r.URL.Path == "/api/v1/nodes/claim" {
 			var claim struct {
 				AllowRepos []string `json:"allow_repos"`

@@ -547,8 +547,10 @@ unlock.
   team editor could run code with a laptop owner's ssh keys and cloud
   credentials. `--allow-repo` (host/path, `*` within one segment) is now
   required without `--gitcache`. The runner sends the list as `allow_repos`
-  with each trigger and node claim and the controller hands it only runs from
-  those repositories, leaving the rest for other runners; a runner whose list
+  with each trigger and node claim to a controller whose
+  `/api/v1/capabilities` advertises `claims.allow_repos`, and that controller
+  hands it only runs from those repositories, leaving the rest for other
+  runners; a runner whose list
   refuses a node's repository no longer holds that node back from the cloud
   under local-first placement. A run outside the list that still reaches the
   runner fails before anything is fetched, naming the repository and the list.

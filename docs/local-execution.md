@@ -548,7 +548,8 @@ team, decides what the machine builds:
 - Without `--gitcache` the runner refuses to start with no `--allow-repo`.
   With `--gitcache` a list binds only when given. A `--github-actions` runner
   given no list builds only the repository whose job started it.
-- The runner sends its list with every trigger and node claim, and the
+- The runner sends its list with every trigger and node claim to a controller
+  that advertises `claims.allow_repos` in `GET /api/v1/capabilities`, and the
   controller hands it only runs whose repository the list admits, passing over
   the rest so another runner can take them. A trigger that names no repository
   is never handed to a runner with a list; a node whose run names none is,

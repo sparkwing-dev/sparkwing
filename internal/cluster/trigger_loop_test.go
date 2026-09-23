@@ -313,9 +313,9 @@ func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
 	}
 }
 
-// A direct-source runner sends its list with every claim, and when a
-// controller hands it a run outside the list anyway it fails the run naming
-// the list, and nothing is fetched.
+// Against a controller older than the claim filter a direct-source runner
+// claims without its list, and fails a run outside the list naming the list,
+// before anything is fetched.
 func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -367,10 +367,11 @@ func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *tes
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(sentAllow, []string{"github.com/acme/*"}) {
-		t.Fatalf("claims carried allow_repos %q, want the runner's list", sentAllow)
+	// safety: this controller advertises no claim filter, so the runner claims
+	// without the field and its own refusal is what stops the run.
+	if sentAllow != nil {
+		t.Fatalf("claims carried allow_repos %q to a controller that does not advertise it", sentAllow)
 	}
-	// safety: this controller ignores the list, so the runner's own refusal is what stops the run.
 	if !strings.Contains(reason, "github.com/acme/*") || !strings.Contains(reason, "git.invalid/evil/payload") {
 		t.Fatalf("run finished with %q, want a refusal naming the repository and the allowlist", reason)
 	}
