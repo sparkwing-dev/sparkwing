@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -141,5 +142,44 @@ func TestGitHubWebhookBinding_ATeamAdminCannotConnectARepository(t *testing.T) {
 	}
 	if len(bindings) != 0 {
 		t.Fatalf("team B holds bindings %+v", bindings)
+	}
+}
+
+// A delivery's flood bucket belongs to the team whose binding signed it, so
+// one team spending its bucket for a repository sheds nothing another team
+// receives for that repository. Each team's own bucket still fills.
+func TestGitHubWebhookFlood_OneTeamCannotShedAnotherTeamsDeliveries(t *testing.T) {
+	st := openSQLiteBindingStore(t)
+	f := newBindingFixture(t, st, func(s *controller.Server) *controller.Server {
+		return s.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 2})
+	})
+	tenantB := teamTenant(t, st, teamB)
+	const secretB = "team-b-own-secret"
+	if err := tenantB.PutGitHubWebhookBinding(context.Background(), store.GitHubWebhookBinding{
+		Pipeline: "build", Repo: "acme/widgets", Secret: secretB,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.connect(t, controller.GitHubWebhookBindingRequest{Pipeline: "build", Repo: "acme/widgets", Secret: bindingSecret})
+
+	deliver := func(secret, delivery, sha string) int {
+		t.Helper()
+		body := pushBody("acme/widgets", sha)
+		resp := postWebhookDelivery(t, f.server.URL+"/webhooks/github/build", "push", delivery, body, signWebhook(secret, body))
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for i := range 2 {
+		if got := deliver(secretB, fmt.Sprintf("b-%d", i), fmt.Sprintf("b%039d", i)); got != http.StatusAccepted {
+			t.Fatalf("team B delivery %d = %d, want 202", i, got)
+		}
+	}
+	if got := deliver(secretB, "b-2", fmt.Sprintf("b%039d", 2)); got != http.StatusTooManyRequests {
+		t.Fatalf("team B's third delivery = %d, want 429", got)
+	}
+	for i := range 2 {
+		if got := deliver(bindingSecret, fmt.Sprintf("a-%d", i), fmt.Sprintf("a%039d", i)); got != http.StatusAccepted {
+			t.Fatalf("the default team's delivery %d after team B's flood = %d, want 202", i, got)
+		}
 	}
 }

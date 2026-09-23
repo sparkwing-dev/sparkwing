@@ -551,6 +551,12 @@ unlock.
   revoked prefixes. `docs/auth.md` now states that an editor can use the
   secrets the team's pipelines read.
 
+- **controller:** a webhook delivery spends its own team's flood budget
+  The hourly run cap keyed a GitHub delivery on the repository alone, so one
+  team spending its budget for `owner/name` shed another team's deliveries
+  for the same repository. The key now carries the team whose binding signed
+  the delivery.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

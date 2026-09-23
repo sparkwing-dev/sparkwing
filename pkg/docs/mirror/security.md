@@ -216,8 +216,9 @@ what it always did.
 `--max-runs-per-principal-hour N` (chart
 `controller.maxRunsPerPrincipalHour`) caps the runs one principal may
 create in a rolling hour. An authenticated submission spends its own
-token's budget; a webhook delivery carries no principal, so it spends the
-budget of the repository it names. Past the cap the controller answers
+token's budget, or its team's for any team but the operator's; a webhook
+delivery carries no principal, so it spends the budget of the team whose
+binding signed it and the repository it names. Past the cap the controller answers
 `429` with a `Retry-After` naming the real refill delay, which lengthens
 while a caller keeps knocking at an empty budget. The budget lives in
 controller memory, so a restart or a rollout refills every principal;

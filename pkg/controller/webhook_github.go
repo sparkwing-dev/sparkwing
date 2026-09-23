@@ -373,7 +373,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github push") {
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github push") {
 		return
 	}
 
@@ -501,7 +501,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github pull_request") {
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github pull_request") {
 		return
 	}
 
@@ -572,19 +572,21 @@ func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request
 		return false
 	}
 	s.logger.Warn("github delivery deduplicated",
-		"principal", githubFloodKey(pipeline, ""), "pipeline", pipeline, "delivery", delivery,
+		"principal", githubFloodKey(tenant.Team(), pipeline, ""), "pipeline", pipeline, "delivery", delivery,
 		"reason", "the delivery id or body digest already started a run", "run_id", existing.ID)
 	writeJSON(w, http.StatusConflict, triggerResp{RunID: existing.ID, Status: "duplicate"})
 	return true
 }
 
-// safety: a delivery carries no principal, so the repository it names is the
-// closest thing it has to an owner and a delivery naming none falls back to its pipeline.
-func githubFloodKey(pipeline, repo string) string {
+// safety: a delivery carries no principal, so the team whose binding signed it
+// and the repository it names are the closest thing it has to an owner, and a
+// delivery naming none falls back to its pipeline. The team keeps one team's
+// deliveries from spending another's bucket for the same repository.
+func githubFloodKey(team store.Team, pipeline, repo string) string {
 	if repo != "" {
-		return "github:" + strings.ToLower(repo)
+		return "github-delivery:" + string(team) + ":" + strings.ToLower(repo)
 	}
-	return "github-pipeline:" + pipeline
+	return "github-pipeline:" + string(team) + ":" + pipeline
 }
 
 func verifyGitHubSignature(header string, body []byte, secret string) bool {
