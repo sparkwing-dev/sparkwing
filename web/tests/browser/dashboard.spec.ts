@@ -1437,6 +1437,46 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
   ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
 });
 
+test("keeps run tabs fixed when selecting a node with execution history", async ({ page }) => {
+  const detail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      run_id: finishedRun.id,
+      executor_kind: "agent",
+      executor_name: "design-mac",
+      executor_location: "local",
+      execution_attempts: [{
+        run_id: finishedRun.id,
+        node_id: node.id,
+        attempt: 1,
+        executor_kind: "agent",
+        executor_name: "design-mac",
+        location: "local",
+        started_at: node.started_at,
+        finished_at: node.finished_at,
+        outcome: "success",
+      }],
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+
+  const summaryTab = page.locator('[data-tab-key="summary"]');
+  await expect(summaryTab).toBeVisible();
+  const before = (await summaryTab.boundingBox())!.y;
+  await page.locator('[data-node-id="verify"]').first().click();
+  const history = page.getByRole("region", { name: "Execution history for verify" });
+  await expect(history).toBeVisible();
+  expect((await summaryTab.boundingBox())!.y).toBe(before);
+  const attempt = history.getByRole("listitem");
+  await expect(attempt).toHaveCount(1);
+  expect((await attempt.boundingBox())!.height).toBeLessThanOrEqual(30);
+});
+
 test("separates fleet policy, observations, and current activity", async ({
   page,
 }) => {

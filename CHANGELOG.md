@@ -660,6 +660,10 @@ unlock.
 
 ### Changed
 
+- **dashboard:** the selected node's execution history now sits below the run
+  summary in the Summary tab. Single attempts use one compact row, and selecting
+  nodes leaves the tab bar in place.
+
 - **cli + controller:** on a multi-team controller, `sparkwing run --on`
   and `sparkwing crons install` no longer call the cache's `/git/refresh`
   and `/sync/seed`, which take the cache's operator token and answered a

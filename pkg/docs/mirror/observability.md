@@ -335,13 +335,15 @@ Hover or focus the icon to see the runner or repository. Machine, Sparkwing
 Cloud, GitHub Actions, and cluster execution use distinct icons; unknown
 locations leave the space empty. Node names use the available row width and
 keep their full name in a tooltip.
-Selecting a node shows every durable execution attempt, including the executor
-kind and name, timestamps, outcome, and retry link when the controller recorded
-one. A recorded platform appears with its attempt; a missing platform remains
-unknown. The dashboard reads this history from explicit public execution
-attribution. The controller derives the current claim's display site from its
-credential and holder without changing stored execution history. Older records
-without enough attribution show no location icon.
+Selecting a node shows its execution history in the run detail's Summary tab,
+below the run and node summary. A single attempt occupies one compact row.
+Every durable attempt retains its executor kind and name, run link, timestamps,
+outcome, and retry link when the controller recorded one. A recorded platform
+appears with its attempt; a missing platform remains unknown. The dashboard
+reads this history from explicit public execution attribution. The controller
+derives the current claim's display site from its credential and holder without
+changing stored execution history. Older records without enough attribution
+show no location icon.
 
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the
