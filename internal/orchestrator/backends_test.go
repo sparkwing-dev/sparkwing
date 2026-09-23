@@ -258,6 +258,10 @@ func (f *fakeState) GetRun(ctx context.Context, runID string) (*store.Run, error
 	return &run, nil
 }
 
+func (f *fakeState) GetTrigger(ctx context.Context, id string) (*store.Trigger, error) {
+	return nil, store.ErrNotFound
+}
+
 func (f *fakeState) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
 	return "", nil
 }

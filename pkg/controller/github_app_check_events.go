@@ -104,7 +104,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 	}
 	subscribed := map[string]store.GitHubAppTrigger{}
 	for _, sub := range subs {
-		if sub.Push || sub.PullRequest {
+		if sub.Push || sub.PullRequest || len(sub.Tags) > 0 {
 			subscribed[sub.Pipeline] = sub
 		}
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		}
 	} else {
 		for _, sub := range subs {
-			if !sub.Push && !sub.PullRequest {
+			if !sub.Push && !sub.PullRequest && len(sub.Tags) == 0 {
 				continue
 			}
 			if run := githubAppRerunAnchor(anchors, sub); run != nil {
@@ -157,7 +157,10 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 
 func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
 	switch run.TriggerEnv[sparkwing.EnvGitHubEventName] {
-	case "":
+	case "", githubEventPush:
+		if run.TriggerEnv["GITHUB_REF_TYPE"] == "tag" {
+			return githubTagMatches(sub.Tags, run.TriggerEnv["GITHUB_TAG"])
+		}
 		return sub.Push
 	case sparkwing.EventPullRequest:
 		return sub.PullRequest

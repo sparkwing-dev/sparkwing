@@ -93,11 +93,15 @@ CREATE TABLE IF NOT EXISTS github_app_deliveries (
 
 var githubAppTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubAppTablesSQLite)
 
-var githubAppTriggerTagsCols = map[string]string{"on_tags": "INTEGER NOT NULL DEFAULT 0"}
-var githubAppTriggerPatternsCols = map[string]string{"tag_patterns": "TEXT NOT NULL DEFAULT '[]'"}
+var (
+	githubAppTriggerTagsCols     = map[string]string{"on_tags": "INTEGER NOT NULL DEFAULT 0"}
+	githubAppTriggerPatternsCols = map[string]string{"tag_patterns": "TEXT NOT NULL DEFAULT '[]'"}
+)
 
-const maxGitHubTagPatterns = 10
-const maxGitHubTagPatternLength = 128
+const (
+	maxGitHubTagPatterns      = 10
+	maxGitHubTagPatternLength = 128
+)
 
 // ValidateGitHubTagPatterns checks the limits and glob syntax of a subscription's tag patterns.
 func ValidateGitHubTagPatterns(patterns []string) error {
@@ -109,7 +113,7 @@ func ValidateGitHubTagPatterns(patterns []string) error {
 			return fmt.Errorf("%w: tag patterns must have 1 to %d bytes", ErrInvalidInput, maxGitHubTagPatternLength)
 		}
 		if _, err := path.Match(pattern, ""); err != nil {
-			return fmt.Errorf("%w: invalid tag pattern %q: %v", ErrInvalidInput, pattern, err)
+			return fmt.Errorf("%w: invalid tag pattern %q: %w", ErrInvalidInput, pattern, err)
 		}
 	}
 	return nil

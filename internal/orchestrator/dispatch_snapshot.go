@@ -63,7 +63,10 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 	if got, _ := r.backends.State.GetRun(ctx, runID); got != nil {
 		run = got
 	}
-	trigger, _ := r.backends.State.GetTrigger(ctx, runID)
+	var trigger *store.Trigger
+	if got, err := r.backends.State.GetTrigger(ctx, runID); err == nil {
+		trigger = got
+	}
 
 	env := collectDispatchEnv(ctx, node, runID, run, trigger)
 	envBytes, err := json.Marshal(env.values)
