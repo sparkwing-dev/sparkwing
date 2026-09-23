@@ -76,7 +76,7 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 		cmd := exec.Command("git", "-C", mirror, "fetch", "--quiet", "--depth", "1", "--", remote, "refs/heads/main")
 		cmd.Env = env
 		if pipeTok != "" {
-			cred, err := credentialPipe(pipeTok)
+			cred, err := credentialPipe("x-access-token", pipeTok)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -90,7 +90,7 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 		return nil
 	}
 
-	fetchEnv := withGitHubCredential(base, srv.URL+"/")
+	fetchEnv := withPipeCredential(base, srv.URL+"/")
 	if err := fetch(fetchEnv, tok); err != nil {
 		t.Fatalf("fetch with the source token: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 		}
 	}
 	seen.Store(0)
-	if err := fetch(withGitHubCredential(base, "https://github.com/"), tok); err == nil || seen.Load() != 0 {
+	if err := fetch(withPipeCredential(base, "https://github.com/"), tok); err == nil || seen.Load() != 0 {
 		t.Fatalf("a helper scoped to github.com answered for another host: err=%v, authorized=%d", err, seen.Load())
 	}
 	if err := fetch(fetchEnv, ""); err == nil {
@@ -130,8 +130,9 @@ func TestDirectGitEnvDropsTraces(t *testing.T) {
 func TestGitHubTokenFetchRefusesAnotherHost(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	_, err := FetchPipelineSourceDirect(context.Background(), "https://gitlab.example.com/o/r.git", "main",
-		strings.Repeat("a", 40), filepath.Join(t.TempDir(), "run"), DirectCredential{GitHubToken: "ghs_x"})
-	if err == nil || !strings.Contains(err.Error(), "only a github.com repository") {
+		strings.Repeat("a", 40), filepath.Join(t.TempDir(), "run"),
+		DirectCredential{Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: "ghs_x"})
+	if err == nil || !strings.Contains(err.Error(), "bound to github.com") {
 		t.Fatalf("err = %v, want a refusal to send the token elsewhere", err)
 	}
 	if got := githubTokenRemote("git@github.com:acme/widgets.git"); got != "https://github.com/acme/widgets.git" {
@@ -162,13 +163,5 @@ func TestRequestSourceToken(t *testing.T) {
 	status, answer = http.StatusOK, `{"token":"ghs_ok\nGIT_CONFIG_KEY_9=core.sshCommand"}`
 	if _, err := RequestSourceToken(ctx, srv.URL, "runner-tok", "run-1"); err == nil {
 		t.Fatal("a token carrying a newline was accepted")
-	}
-}
-
-func TestDirectCredentialForNeedsTheOptIn(t *testing.T) {
-	t.Setenv(GitHubAppSourceEnv, "")
-	cred, err := DirectCredentialFor(context.Background(), "http://127.0.0.1:1", "t", "run-1", "https://github.com/acme/widgets.git")
-	if err != nil || cred.GitHubToken != "" {
-		t.Fatalf("without the opt-in = %+v, %v; want no request and no token", cred, err)
 	}
 }

@@ -192,11 +192,21 @@ unlock.
   the flow's state and verifier in a short-lived `__Host-` cookie, and binds
   the installation as the signed-in owner's own session.
 
-- **runner:** `sparkwing-runner runner --github-app-source` asks the controller
-  for a run's source token before fetching a GitHub repository directly and
-  hands it to git on an inherited pipe, through a credential helper scoped to
-  github.com. A direct fetch now also drops `GIT_TRACE*` and
-  `GIT_CURL_VERBOSE` from its environment.
+- **runner:** a runner without `--gitcache` fetches each run's source
+  straight from its host with the credential the controller releases for the
+  run on `POST /api/v1/runs/{id}/git-credential`: the team's GitHub App token
+  when an installation covers the repository, else the git credential the
+  team stored for the host. A run with neither fails with a message naming
+  both remedies. Only a runner its owner fenced with `--allow-repo` falls back
+  to the machine's own git credentials, so `--allow-repo` is no longer
+  required without `--gitcache`. A fetch that presents a released credential
+  reads none of the machine's git config, ssh agent or keys, receives the
+  credential on an inherited pipe, and drops `GIT_TRACE*` and
+  `GIT_CURL_VERBOSE` from its environment. Against a controller without the
+  route the runner asks `POST /api/v1/runs/{id}/source-token` instead.
+- **chart:** sparkwing-runner-bundle renders `runner.alsoClaimTriggers=true`
+  without a gitcache; such runners fetch source directly with the credential
+  the controller releases.
 - **web:** `/team/secrets` manages a team's secrets and variables. Owners
   create, overwrite and delete rows scoped to the team or to one pipeline;
   editors and readers see the names and the variables' values. A secret is

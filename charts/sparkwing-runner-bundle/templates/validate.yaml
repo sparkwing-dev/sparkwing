@@ -30,17 +30,6 @@
 {{- if and .Values.logs.enabled (not .Values.controller.tokenSecret.name) (not .Values.logs.allowUnauthenticated) -}}
 {{- fail "sparkwing-runner-bundle: logs.enabled=true requires controller.tokenSecret.name, the Secret whose bearer the logs service resolves against the controller before it serves a log route. Set logs.allowUnauthenticated=true to let anyone who can reach the Service read, forge, and delete every run's logs instead" -}}
 {{- end -}}
-{{- $externalGitcache := false -}}
-{{- range .Values.runner.extraEnv -}}
-{{- if eq (default "" .name) "SPARKWING_GITCACHE_URL" -}}
-{{- if or (and (hasKey . "value") (not (empty .value))) (and (hasKey . "valueFrom") (not (empty .valueFrom))) -}}
-{{- $externalGitcache = true -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- if and .Values.runner.alsoClaimTriggers (not .Values.cache.enabled) (not $externalGitcache) -}}
-{{- fail "sparkwing-runner-bundle: runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL with an external gitcache URL" -}}
-{{- end -}}
 {{- if not (has .Values.runner.triggerRunner.kind (list "inprocess" "k8s" "warm")) -}}
 {{- fail "sparkwing-runner-bundle: runner.triggerRunner.kind must be inprocess, k8s, or warm" -}}
 {{- end -}}

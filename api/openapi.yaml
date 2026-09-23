@@ -5257,9 +5257,64 @@ paths:
                   token: {type: string}
                   expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
                   repository: {type: string, description: owner/name.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: Never set on this route; the git-credential route fills it.
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/git-credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Release the one credential a runner fetches the run's source with.
+      description: >-
+        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialReq
+              type: object
+              properties:
+                extra_repos:
+                  type: array
+                  maxItems: 10
+                  items: {type: string}
+                  description: The pipeline's declared source.extra_repos as owner/name, which an App token also reads when the installation covers them.
+      responses:
+        "200":
+          description: Credential released.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.GitCredentialResponse
+                type: object
+                required: [kind, host]
+                properties:
+                  kind: {type: string, enum: [github_app, ssh, https]}
+                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
+                  token: {type: string, description: "The App token, for kind github_app."}
+                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
+                  repository: {type: string, description: owner/name the App token reads.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: Further owner/name repositories the App token reads.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for App tokens more than ten times in a minute; Retry-After says when to ask again.}
+        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
 
   /api/v1/team/github-app:
     get:

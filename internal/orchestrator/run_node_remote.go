@@ -52,8 +52,9 @@ func runNodeRemote(
 	if gcURL == "" {
 		gcURL = bincache.CacheURL()
 	}
-	// safety: without the operator's cache this runner fetches with its own
-	// credentials, so it never borrows a cache it was not given.
+	// safety: without the operator's cache this runner fetches directly, with
+	// the credential the controller releases for the run, so it never
+	// borrows a cache it was not given.
 	direct := gcURL == ""
 	if !direct {
 		gcURL = bincache.ControllerRunGitcacheURL(gcURL, controllerURL, runID)
@@ -63,7 +64,8 @@ func runNodeRemote(
 	if sourceErr != nil {
 		return runner.Result{}, sourceErr
 	}
-	if allow != nil && (direct || !allow.Empty()) {
+	ownerFenced := allow != nil && !allow.Empty()
+	if ownerFenced {
 		if err := AdmitTriggerSource(*allow, trigger, repoURL); err != nil {
 			logger.Warn("runNodeRemote: refused a node from a repository this machine does not allow",
 				"run_id", runID, "node_id", nodeID, "allow_repo", allow.String(), "err", err)
@@ -102,12 +104,11 @@ func runNodeRemote(
 	var err error
 	switch {
 	case direct:
-		cred, credErr := bincache.DirectCredentialFor(ctx, controllerURL, token, runID, repoURL)
-		if credErr != nil {
-			logger.Warn("runNodeRemote: no source token; fetching with this machine's credentials",
-				"run_id", runID, "node_id", nodeID, "err", credErr)
-		}
-		sparkwingDir, err = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, trigger.GitSHA, workDir, cred)
+		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
+			ControllerURL: controllerURL, RunnerToken: token, RunID: runID,
+			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
+			OwnerCredentials: ownerFenced,
+		}, logger)
 	case workspaceSource:
 		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)

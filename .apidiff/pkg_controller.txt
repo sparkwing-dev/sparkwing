@@ -99,6 +99,16 @@ type FreeTierSource interface {
 type FreeTierState string
 const FreeTierThrottled FreeTierState = "throttled"
 const FreeTierUnreadable FreeTierState = "unreadable"
+type GitCredentialResponse struct {
+	Kind string
+
+	Host      string
+	Token     string
+	ExpiresAt int64
+
+	Repository        string
+	ExtraRepositories []string
+}
 const GitHubActionsLabel = "github-actions"
 func GitHubRunnerWorkflow(controllerURL, team string) string
 type GitHubWebhookBinding struct {
@@ -362,6 +372,8 @@ type SourceTokenResponse struct {
 	Token      string
 	ExpiresAt  int64
 	Repository string
+
+	ExtraRepositories []string
 }
 const StorageMaintenanceInterval = time.Hour
 type StorageTierResponse struct {

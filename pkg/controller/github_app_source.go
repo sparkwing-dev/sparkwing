@@ -18,6 +18,9 @@ type SourceTokenResponse struct {
 	Token      string `json:"token"`
 	ExpiresAt  int64  `json:"expires_at"`
 	Repository string `json:"repository"`
+	// ExtraRepositories are the pipeline's declared source.extra_repos the
+	// token also reads.
+	ExtraRepositories []string `json:"extra_repositories,omitempty"`
 }
 
 func runGitHubRepo(trigger *store.Trigger) (store.GitHubRepo, bool) {
@@ -42,75 +45,148 @@ func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := r.PathValue("id")
-	p, _ := PrincipalFromContext(r.Context())
-	claimed, err := s.store.ClaimedRunFor(r.Context(), runID, claimIdentity(r), time.Now())
-	if errors.Is(err, store.ErrNotFound) {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "claim_required", Principal: p.label(),
-			Message: "run " + runID + " is not claimed by this principal",
-		})
+	src, ok := s.claimedRunSource(w, r, runID)
+	if !ok {
 		return
 	}
-	if err != nil {
-		s.writeInternalError(w, r, "source token claim", err)
-		return
-	}
-	tenant, err := s.tenantForTeam(r.Context(), claimed.Team)
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		writeError(w, http.StatusNotFound, runNotFound(runID))
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "source token team", err)
-		return
-	}
-	trigger, err := s.store.GetTrigger(r.Context(), runID)
-	if err != nil || store.NormalizeTeam(trigger.Team) != claimed.Team {
-		writeError(w, http.StatusNotFound, runNotFound(runID))
-		return
-	}
-	repo, ok := runGitHubRepo(trigger)
+	repo, ok := runGitHubRepo(src.trigger)
 	if !ok {
 		writeError(w, http.StatusNotFound, errors.New("run "+runID+" names no GitHub repository"))
 		return
 	}
-	inst, found, err := s.teamInstallationFor(r.Context(), tenant, repo)
+	out, failure := s.runAppToken(r, src, repo, nil)
+	if failure != nil {
+		failure.write(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// claimedRunSource is the run a caller holding a live claim on runID asks a
+// source credential for, or false once the refusal is written.
+type claimedRunSource struct {
+	claimed store.ClaimedRun
+	tenant  *store.Tenant
+	trigger *store.Trigger
+}
+
+// safety: the claim is looked up for this credential's token prefix on every
+// call, and the token's own team must be the run's, so a runner never reads a
+// credential for work it no longer holds or for another team's run.
+func (s *Server) claimedRunSource(w http.ResponseWriter, r *http.Request, runID string) (claimedRunSource, bool) {
+	p, _ := PrincipalFromContext(r.Context())
+	claimed, err := s.store.ClaimedRunFor(r.Context(), runID, claimIdentity(r), time.Now())
+	if errors.Is(err, store.ErrNotFound) || (err == nil && p != nil && p.Team != "" && store.NormalizeTeam(p.Team) != claimed.Team) {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "claim_required", Principal: p.label(),
+			Message: "run " + runID + " is not claimed by this principal",
+		})
+		return claimedRunSource{}, false
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "source credential claim", err)
+		return claimedRunSource{}, false
+	}
+	tenant, err := s.tenantForTeam(r.Context(), claimed.Team)
+	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		writeError(w, http.StatusNotFound, runNotFound(runID))
+		return claimedRunSource{}, false
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "source credential team", err)
+		return claimedRunSource{}, false
+	}
+	trigger, err := s.store.GetTrigger(r.Context(), runID)
+	if err != nil || store.NormalizeTeam(trigger.Team) != claimed.Team {
+		writeError(w, http.StatusNotFound, runNotFound(runID))
+		return claimedRunSource{}, false
+	}
+	return claimedRunSource{claimed: claimed, tenant: tenant, trigger: trigger}, true
+}
+
+// sourceFailure is a refusal a source credential route answers with.
+type sourceFailure struct {
+	status     int
+	err        error
+	retryAfter time.Duration
+	// notCovered marks the refusal that lets the git-credential route go on
+	// to the team's stored credential.
+	notCovered bool
+}
+
+func (f *sourceFailure) write(w http.ResponseWriter) {
+	if f.retryAfter > 0 {
+		setRetryAfter(w, f.retryAfter)
+	}
+	writeError(w, f.status, f.err)
+}
+
+// runAppToken mints the run's App token, read-only and restricted to repo
+// and the extra repositories, all of which one installation the run's team
+// holds must cover.
+func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.GitHubRepo, extra []store.GitHubRepo) (SourceTokenResponse, *sourceFailure) {
+	runID := src.trigger.ID
+	notCovered := func(slug string) *sourceFailure {
+		return &sourceFailure{
+			status: http.StatusNotFound, notCovered: true,
+			err: errors.New("no GitHub App installation this team holds covers " + slug),
+		}
+	}
+	inst, found, err := s.teamInstallationFor(r.Context(), src.tenant, repo)
 	if err != nil {
 		s.logger.Warn("source token installation", "run_id", runID, "repository", repo.Slug(), "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
-		return
+		return SourceTokenResponse{}, &sourceFailure{
+			status: http.StatusBadGateway,
+			err:    errors.New("GitHub could not be reached to find the repository's installation"),
+		}
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, errors.New("no GitHub App installation this team holds covers "+repo.Slug()))
-		return
+		return SourceTokenResponse{}, notCovered(repo.Slug())
 	}
-	key := runID + "\x00" + claimIdentity(r).Principal + "\x00" + claimIdentity(r).TokenPrefix
+	names := []string{repo.Name}
+	slugs := []string{repo.Slug()}
+	for _, x := range extra {
+		// safety: an installation token covers one account's repositories, so
+		// an extra repository of another owner could never ride on it.
+		if !strings.EqualFold(x.Owner, repo.Owner) {
+			return SourceTokenResponse{}, &sourceFailure{
+				status: http.StatusBadRequest,
+				err:    errors.New("source.extra_repos names " + x.Slug() + ", which another account than " + repo.Owner + " owns"),
+			}
+		}
+		names = append(names, x.Name)
+		slugs = append(slugs, x.Slug())
+	}
+	id := claimIdentity(r)
+	key := runID + "\x00" + id.Principal + "\x00" + id.TokenPrefix + "\x00" + strings.ToLower(strings.Join(slugs, ","))
 	cached, refused := s.githubApp.reuseSourceToken(key, time.Now())
 	if refused {
-		setRetryAfter(w, time.Minute)
-		writeError(w, http.StatusTooManyRequests, errors.New("this claim asked for source tokens too often"))
-		return
+		return SourceTokenResponse{}, &sourceFailure{
+			status: http.StatusTooManyRequests, retryAfter: time.Minute,
+			err: errors.New("this claim asked for source tokens too often"),
+		}
 	}
 	if cached != nil {
-		writeJSON(w, http.StatusOK, *cached)
-		return
+		return *cached, nil
 	}
-	tok, err := s.githubApp.client.InstallationToken(r.Context(), inst.InstallationID, repo.Name,
+	tok, err := s.githubApp.client.InstallationToken(r.Context(), inst.InstallationID, names,
 		map[string]string{"contents": "read"})
 	if errors.Is(err, githubapp.ErrNotInstalled) {
-		writeError(w, http.StatusNotFound, errors.New("no GitHub App installation this team holds covers "+repo.Slug()))
-		return
+		return SourceTokenResponse{}, notCovered(strings.Join(slugs, ", "))
 	}
 	if err != nil {
 		s.logger.Warn("source token mint", "run_id", runID, "repository", repo.Slug(), "err", err.Error())
-		writeError(w, http.StatusBadGateway, errors.New("GitHub did not issue a token for "+repo.Slug()))
-		return
+		return SourceTokenResponse{}, &sourceFailure{
+			status: http.StatusBadGateway,
+			err:    errors.New("GitHub did not issue a token for " + repo.Slug()),
+		}
 	}
-	s.logger.Info("source token minted", "team", string(claimed.Team), "run_id", runID,
-		"repository", repo.Slug(), "installation_id", inst.InstallationID, "principal", p.label())
-	out := SourceTokenResponse{Token: tok.Token, ExpiresAt: tok.ExpiresAt.Unix(), Repository: repo.Slug()}
+	p, _ := PrincipalFromContext(r.Context())
+	s.logger.Info("source token minted", "team", string(src.claimed.Team), "run_id", runID,
+		"repositories", strings.Join(slugs, ","), "installation_id", inst.InstallationID, "principal", p.label())
+	out := SourceTokenResponse{Token: tok.Token, ExpiresAt: tok.ExpiresAt.Unix(), Repository: repo.Slug(), ExtraRepositories: slugs[1:]}
 	s.githubApp.keepSourceToken(key, out)
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 // safety: a claim holder gets one live token, reused until shortly before it

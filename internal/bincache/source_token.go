@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,13 +15,209 @@ import (
 	"time"
 )
 
+// ErrNoSourceCredential reports a run the controller has no credential for:
+// no GitHub App installation of the run's team covers its repository, and the
+// team stored no git credential for its host. Its message names both remedies.
+var ErrNoSourceCredential = errors.New("the controller holds no source credential for this run")
+
+// errCredentialRouteAbsent reports a controller from before the git-credential
+// route, which answers a plain 404 for it.
+var errCredentialRouteAbsent = errors.New("the controller serves no git-credential route")
+
+// Kinds of [DirectCredential] the controller releases.
+const (
+	CredentialGitHubApp = "github_app"
+	CredentialSSH       = "ssh"
+	CredentialHTTPS     = "https"
+)
+
+// DirectCredential is a per-run credential a direct fetch presents. The zero
+// value presents nothing, so the fetch uses this process's own git
+// credentials; only a runner its owner fenced with --allow-repo fetches that
+// way.
+type DirectCredential struct {
+	// Kind is one of CredentialGitHubApp, CredentialSSH or CredentialHTTPS.
+	Kind string
+	// Host is the host the credential is bound to; the fetch refuses any
+	// other.
+	Host string
+	// Username and Secret authenticate an https fetch: the App token under
+	// x-access-token, or the team's stored token. For ssh, Secret is the
+	// private key.
+	Username string
+	Secret   string
+	// KnownHosts is the ssh host key the team's owner confirmed, the only
+	// key the fetch trusts.
+	KnownHosts string
+}
+
+// Empty reports the zero credential.
+func (c DirectCredential) Empty() bool { return c.Kind == "" }
+
+// gitCredentialBody is the controller's answer on the git-credential route.
+type gitCredentialBody struct {
+	Kind       string `json:"kind"`
+	Host       string `json:"host"`
+	Token      string `json:"token"`
+	Username   string `json:"username"`
+	Secret     string `json:"secret"`
+	KnownHosts string `json:"known_hosts"`
+	Error      string `json:"error"`
+	Message    string `json:"message"`
+}
+
+// RequestDirectCredential asks the controller for the credential a runner
+// holding a claim on runID fetches the run's source with. The controller
+// decides which: the team's GitHub App token when an installation covers the
+// repository, else the git credential the team stored for the repository's
+// host. extraRepos names the pipeline's declared source.extra_repos, which an
+// App token also covers when the installation includes them. A controller
+// from before the route is asked for its App source token instead.
+func RequestDirectCredential(ctx context.Context, controllerURL, runnerToken, runID string, extraRepos []string) (DirectCredential, error) {
+	if controllerURL == "" || runID == "" {
+		return DirectCredential{}, fmt.Errorf("%w: no controller to ask", ErrNoSourceCredential)
+	}
+	cred, err := requestGitCredential(ctx, controllerURL, runnerToken, runID, extraRepos)
+	if !errors.Is(err, errCredentialRouteAbsent) {
+		return cred, err
+	}
+	tok, err := RequestSourceToken(ctx, controllerURL, runnerToken, runID)
+	if err != nil {
+		return DirectCredential{}, err
+	}
+	return DirectCredential{Kind: CredentialGitHubApp, Host: "github.com", Username: "x-access-token", Secret: tok}, nil
+}
+
+func requestGitCredential(ctx context.Context, controllerURL, runnerToken, runID string, extraRepos []string) (DirectCredential, error) {
+	endpoint := strings.TrimRight(controllerURL, "/") + "/api/v1/runs/" + neturl.PathEscape(runID) + "/git-credential"
+	payload, err := json.Marshal(map[string]any{"extra_repos": extraRepos})
+	if err != nil {
+		return DirectCredential{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return DirectCredential{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if runnerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+runnerToken)
+	}
+	resp, err := credentialHTTPClient().Do(req)
+	if err != nil {
+		return DirectCredential{}, fmt.Errorf("request git credential: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return DirectCredential{}, fmt.Errorf("request git credential: %w", err)
+	}
+	var body gitCredentialBody
+	decodeErr := json.Unmarshal(raw, &body)
+	switch {
+	case resp.StatusCode == http.StatusMethodNotAllowed,
+		resp.StatusCode == http.StatusNotFound && (decodeErr != nil || body.Error == ""):
+		return DirectCredential{}, errCredentialRouteAbsent
+	case resp.StatusCode == http.StatusNotFound && body.Error == "no_source_credential":
+		return DirectCredential{}, fmt.Errorf("%w: %s", ErrNoSourceCredential, body.Message)
+	case resp.StatusCode != http.StatusOK:
+		msg := body.Message
+		if msg == "" {
+			msg = body.Error
+		}
+		if msg == "" {
+			msg = strings.TrimSpace(string(raw))
+			if len(msg) > 512 {
+				msg = msg[:512]
+			}
+		}
+		return DirectCredential{}, fmt.Errorf("request git credential: %s: %s", resp.Status, msg)
+	case decodeErr != nil:
+		return DirectCredential{}, fmt.Errorf("request git credential: decode: %w", decodeErr)
+	}
+	cred := DirectCredential{
+		Kind: body.Kind, Host: strings.ToLower(body.Host), Username: body.Username,
+		Secret: body.Secret, KnownHosts: body.KnownHosts,
+	}
+	if cred.Kind == CredentialGitHubApp {
+		cred.Username, cred.Secret = "x-access-token", body.Token
+	}
+	if err := cred.validate(); err != nil {
+		return DirectCredential{}, fmt.Errorf("request git credential: %w", err)
+	}
+	return cred, nil
+}
+
+func credentialHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 15 * time.Second,
+		// safety: a redirect would carry the runner token to whatever origin it names.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// safety: every field lands in git's credential protocol, an ssh key file or
+// a known_hosts file, so each is held to a shape that cannot smuggle in
+// another attribute, option or host.
+func (c DirectCredential) validate() error {
+	if !validCredentialHost(c.Host) {
+		return fmt.Errorf("the controller answered with an unusable host %q", c.Host)
+	}
+	switch c.Kind {
+	case CredentialGitHubApp:
+		if c.Host != "github.com" || !plainToken(c.Secret) {
+			return errors.New("the controller answered with no usable App token")
+		}
+	case CredentialHTTPS:
+		if !plainCredentialValue(c.Username) || !plainCredentialValue(c.Secret) {
+			return errors.New("the controller answered with no usable https credential")
+		}
+	case CredentialSSH:
+		if !strings.Contains(c.Secret, "PRIVATE KEY") || len(c.Secret) > 16<<10 {
+			return errors.New("the controller answered with no usable ssh key")
+		}
+		if c.KnownHosts == "" || strings.ContainsAny(c.KnownHosts, "\x00\r") || len(c.KnownHosts) > 16<<10 {
+			return errors.New("the controller answered with no pinned host key")
+		}
+	default:
+		return fmt.Errorf("the controller answered with an unknown credential kind %q", c.Kind)
+	}
+	return nil
+}
+
+func validCredentialHost(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, c := range host {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return !strings.HasPrefix(host, "-") && !strings.HasPrefix(host, ".")
+}
+
+// plainCredentialValue is a username or token that fits one line of git's
+// credential protocol.
+func plainCredentialValue(v string) bool {
+	if v == "" || len(v) > 1024 {
+		return false
+	}
+	for _, c := range v {
+		if c <= ' ' || c > '~' {
+			return false
+		}
+	}
+	return true
+}
+
 // ErrNoSourceToken reports a controller that mints no source token for the
 // run: it has no GitHub App, or no installation the run's team holds covers
-// the run's repository. The runner fetches with its own credentials.
+// the run's repository.
 var ErrNoSourceToken = errors.New("the controller mints no source token for this run")
 
 // RequestSourceToken asks the controller for a short-lived GitHub token that
-// reads the run's repository, for a runner holding a claim on runID.
+// reads the run's repository, for a runner holding a claim on runID. It is
+// the route a controller from before the git-credential route serves.
 func RequestSourceToken(ctx context.Context, controllerURL, runnerToken, runID string) (string, error) {
 	if controllerURL == "" || runID == "" {
 		return "", ErrNoSourceToken
@@ -33,12 +230,7 @@ func RequestSourceToken(ctx context.Context, controllerURL, runnerToken, runID s
 	if runnerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+runnerToken)
 	}
-	cli := &http.Client{
-		Timeout: 15 * time.Second,
-		// safety: a redirect would carry the runner token to whatever origin it names.
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	resp, err := cli.Do(req)
+	resp, err := credentialHTTPClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("request source token: %w", err)
 	}
@@ -79,43 +271,19 @@ func plainToken(tok string) bool {
 	return true
 }
 
-// DirectCredential is a per-run credential a direct fetch presents. The zero
-// value presents nothing, so the fetch uses this process's own git
-// credentials.
-type DirectCredential struct {
-	// GitHubToken reads a github.com repository over https. Git reads it from
-	// a pipe the fetch inherits, through a credential helper scoped to
-	// github.com, so it is never in an environment, a URL, a command line or a
-	// file.
-	GitHubToken string
-}
-
-func githubTokenRemote(remote string) string {
-	if https := githubHTTPS(remote); https != "" {
-		return https
-	}
-	if strings.HasPrefix(strings.ToLower(remote), "https://github.com/") {
-		return remote
-	}
-	return ""
-}
-
-// githubTokenScope is the only URL prefix git hands the source token to.
-const githubTokenScope = "https://github.com/"
-
-// credentialFD is the descriptor the fetch inherits the token on: the first
-// of exec.Cmd.ExtraFiles.
+// credentialFD is the descriptor the fetch inherits the credential on: the
+// first of exec.Cmd.ExtraFiles.
 const credentialFD = 3
 
 // safety: the helper answers only git's get, from the inherited pipe, so a
-// store or erase writes the token nowhere; the empty helper before it drops
-// every helper the ambient config names for the scope.
+// store or erase writes the credential nowhere; the empty helper before it
+// drops every helper the ambient config names for the scope.
 const credentialHelper = `!f() { test "$1" != get || cat <&3; }; f`
 
-// withGitHubCredential scopes the pipe's credential to scope in git config
-// carried by the environment. The config names only the helper; the token
-// itself travels on [credentialFD].
-func withGitHubCredential(env []string, scope string) []string {
+// withPipeCredential scopes the pipe's credential to scope in git config
+// carried by the environment. The config names only the helper; the
+// credential itself travels on [credentialFD].
+func withPipeCredential(env []string, scope string) []string {
 	count := 0
 	out := make([]string, 0, len(env)+5)
 	for _, item := range env {
@@ -138,43 +306,18 @@ func withGitHubCredential(env []string, scope string) []string {
 }
 
 // credentialPipe is the read end a fetch inherits as [credentialFD], already
-// holding the token's credential and closed for writing, so the helper reads
-// it once and then sees the end.
-func credentialPipe(tok string) (*os.File, error) {
+// holding the credential and closed for writing, so the helper reads it once
+// and then sees the end.
+func credentialPipe(username, secret string) (*os.File, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	_, werr := io.WriteString(w, "username=x-access-token\npassword="+tok+"\n")
+	_, werr := io.WriteString(w, "username="+username+"\npassword="+secret+"\n")
 	cerr := w.Close()
 	if werr != nil || cerr != nil {
 		_ = r.Close()
 		return nil, errors.Join(werr, cerr)
 	}
 	return r, nil
-}
-
-// GitHubAppSourceEnabled reports whether this runner asks its controller for a
-// source token before a direct fetch of a GitHub repository.
-func GitHubAppSourceEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(GitHubAppSourceEnv)))
-	return v == "1" || v == "true" || v == "yes"
-}
-
-// GitHubAppSourceEnv turns on source tokens for a runner: `sparkwing-runner
-// runner --github-app-source` sets it for the loops it starts.
-const GitHubAppSourceEnv = "SPARKWING_GITHUB_APP_SOURCE"
-
-// DirectCredentialFor asks the controller for the run's source token when this
-// runner opted in and repoURL is a GitHub repository. Any failure falls back
-// to the zero credential, which fetches with this process's own credentials.
-func DirectCredentialFor(ctx context.Context, controllerURL, runnerToken, runID, repoURL string) (DirectCredential, error) {
-	if !GitHubAppSourceEnabled() || githubTokenRemote(repoURL) == "" {
-		return DirectCredential{}, nil
-	}
-	tok, err := RequestSourceToken(ctx, controllerURL, runnerToken, runID)
-	if err != nil {
-		return DirectCredential{}, err
-	}
-	return DirectCredential{GitHubToken: tok}, nil
 }

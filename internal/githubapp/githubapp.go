@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -320,19 +321,21 @@ func (c *Client) RepositoryInstallation(ctx context.Context, owner, name string)
 	return inst, err
 }
 
-// InstallationToken mints a token for installation restricted to the one
-// repository name (without its owner) and to permissions, such as
+// InstallationToken mints a token for installation restricted to the named
+// repositories (each without its owner) and to permissions, such as
 // {"contents": "read"}. GitHub refuses a repository the installation does not
 // cover, which surfaces as ErrNotInstalled.
-func (c *Client) InstallationToken(ctx context.Context, installation int64, repository string, permissions map[string]string) (Token, error) {
-	if repository == "" || len(permissions) == 0 {
-		return Token{}, errors.New("githubapp: an installation token needs one repository and its permissions")
+func (c *Client) InstallationToken(ctx context.Context, installation int64, repositories []string, permissions map[string]string) (Token, error) {
+	// safety: GitHub reads an empty list as every repository the installation
+	// covers, so a token is never minted without naming what it reads.
+	if len(repositories) == 0 || slices.Contains(repositories, "") || len(permissions) == 0 {
+		return Token{}, errors.New("githubapp: an installation token needs its repositories and permissions")
 	}
 	jwt, err := c.appJWT(time.Now())
 	if err != nil {
 		return Token{}, err
 	}
-	body, err := json.Marshal(map[string]any{"repositories": []string{repository}, "permissions": permissions})
+	body, err := json.Marshal(map[string]any{"repositories": repositories, "permissions": permissions})
 	if err != nil {
 		return Token{}, err
 	}

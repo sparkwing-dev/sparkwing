@@ -85,11 +85,19 @@ A pull request whose head repository is not its base repository, or whose head r
 
 ## Source for cloud runners
 
-`POST /api/v1/runs/{id}/source-token` answers a runner that holds a live claim on the run with `{token, expires_at, repository}`. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with `contents: read`. It answers 404 when the repository has no bound installation, and 403 when the caller holds no claim on the run. The token lives at most an hour, as GitHub issues it.
+A runner without the git cache asks `POST /api/v1/runs/{id}/git-credential` before it fetches a run's source. The controller answers a caller that holds a live claim on the run, with a token of the run's own team, and resolves the credential in a fixed order:
+
+1. When the run's repository is on github.com and an installation bound to the run's team, and not suspended, covers it, the answer is `{kind: "github_app", host, token, expires_at, repository}`: an installation token restricted to that repository with `contents: read`. GitHub issues it for at most an hour.
+2. Otherwise, when the team stored a git credential for the host of the run's repository, the controller releases it; see [Team git credentials](git-credentials.md).
+3. Otherwise it answers 404 with `{"error": "no_source_credential"}` and a message naming both remedies: install the App on the repository, or store a git credential for the host.
+
+The caller gets 403 when it holds no claim on the run. The runner never falls back to credentials of the machine it runs on; only a runner its owner fenced with `--allow-repo` does, and only when the controller releases nothing.
+
+`POST /api/v1/runs/{id}/source-token` is the older route, which serves only the App token as `{token, expires_at, repository}`, and 404 when the repository has no bound installation. A runner asks it when the controller answers the git-credential route with a plain 404, as one from before that route does.
 
 A claim holds one live token. Asking again returns the same token until five minutes before it expires, when the controller mints the next one, and a claim that asks more than ten times in a minute answers 429 with `Retry-After`. A runner in a retry loop therefore neither mints a stream of tokens nor spends the App's GitHub rate limit.
 
-A runner started with `--github-app-source` (or `SPARKWING_GITHUB_APP_SOURCE=1`) asks for one before a direct fetch of a GitHub repository. The fetch inherits the token on a pipe, and a credential helper scoped to `https://github.com/`, set in the fetch's environment in place of any helper the machine's own git config names, reads it from there when GitHub asks. The token is never in an environment variable, the URL, a command line, a file or a log line; the fetch runs without `GIT_TRACE*` and `GIT_CURL_VERBOSE`, which would write it to a trace; and the checkout's own git commands see neither the helper nor the pipe. While the fetch runs, the token is in the memory of git's own processes, which the runner's user can read like any of its processes. A runner without the flag, such as a laptop, fetches with its own credentials as before.
+The fetch inherits the token on a pipe, and a credential helper scoped to `https://github.com/`, set in the fetch's environment, reads it from there when GitHub asks. A fetch that presents a released credential reads no system, global or environment git config, so no helper, `http.extraHeader` or `insteadOf` rule of the machine takes part, and it runs without the machine's ssh agent. The token is never in an environment variable, the URL, a command line, a file or a log line; the fetch runs without `GIT_TRACE*` and `GIT_CURL_VERBOSE`, which would write it to a trace; and the checkout's own git commands see neither the helper nor the pipe. While the fetch runs, the token is in the memory of git's own processes, which the runner's user can read like any of its processes.
 
 ## Commit statuses
 
