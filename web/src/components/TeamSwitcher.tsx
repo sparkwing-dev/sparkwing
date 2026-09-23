@@ -151,6 +151,7 @@ export default function TeamSwitcher() {
               { href: "/team", label: "Members and settings" },
               { href: "/team/machines", label: "Connect a machine" },
               { href: "/team/new", label: "Create a team" },
+              { href: "/account", label: "Delete account" },
             ].map((item) => (
               <Link
                 key={item.href}

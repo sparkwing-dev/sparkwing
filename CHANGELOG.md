@@ -44,6 +44,12 @@ unlock.
   `--email-configuration-set` names the SES configuration set. Without a
   sender nothing is mailed, as before.
 
+- **web:** team settings gain a **Delete team** panel for owners, confirmed by
+  typing the slug, and the team menu links to a new **Your account** page that
+  shows the progress of team deletions and deletes the account, confirmed by
+  typing the email and listing the teams that block it. The invite form says
+  whether the invitation was emailed.
+
 - **cache:** `DELETE /admin/teams/{team}` removes a team's artifact, binary
   and build-cache trees for the operator token.
 
