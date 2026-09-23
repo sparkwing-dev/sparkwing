@@ -22,6 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -92,6 +93,17 @@ func run(args []string) error {
 			"where GitHub posts webhook deliveries. `sparkwing cluster webhooks "+
 			"connect` points a repository's webhook at it. Empty answers each "+
 			"connect request with the URL that request arrived at.")
+	oidcKeyFile := fs.String("oidc-key-file", "",
+		"path to an RSA private key PEM (at least 2048 bits) that signs the OIDC ID "+
+			"tokens runs exchange for cloud credentials (alternative to "+oidcKeyEnv+", "+
+			"which carries the PEM itself). The issuer is --external-url. Unset, the "+
+			"controller issues no ID tokens.")
+	oidcPreviousKeyFile := fs.String("oidc-previous-key-file", "",
+		"path to the OIDC key that signed before the current one, private or public "+
+			"PEM (alternative to "+oidcPreviousKeyEnv+"). It is published in the key set "+
+			"so tokens it signed keep verifying through a rotation, and never signs.")
+	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
+		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For "+
 			"for login throttling; empty ignores forwarded headers and keys the "+
@@ -447,6 +459,11 @@ func run(args []string) error {
 	}, slog.Default()); err != nil {
 		return err
 	}
+	oidcIssuer, oerr := loadOIDCIssuer(*oidcKeyFile, *oidcPreviousKeyFile, *externalURL, *oidcTokenTTL, os.Stderr)
+	if oerr != nil {
+		return fmt.Errorf("oidc issuer: %w", oerr)
+	}
+	srv = srv.WithOIDCIssuer(oidcIssuer)
 	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
 		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
 		return err

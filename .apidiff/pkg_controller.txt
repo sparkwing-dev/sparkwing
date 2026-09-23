@@ -189,6 +189,13 @@ type NoopDispatcher struct {
 	Logger *slog.Logger
 }
 func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
+type OIDCTokenRequest struct {
+	Audience string
+}
+type OIDCTokenResponse struct {
+	Token     string
+	ExpiresAt time.Time
+}
 type ObjectStoreBreakerResponse struct {
 	Enabled bool
 
@@ -304,6 +311,7 @@ func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
+func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server

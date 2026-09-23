@@ -81,6 +81,7 @@ type Server struct {
 	logsURL      string
 	dashboardURL string
 	externalURL  string
+	oidc         oidcState
 
 	cacheURL   string
 	cacheToken string
@@ -892,6 +893,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// alone; the CLI's warm-up before a trigger is best-effort without it.
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/oidc-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
@@ -1105,6 +1107,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
 	router.Handle("POST /api/v1/runners/github/exchange", http.HandlerFunc(s.handleGitHubRunnerExchange))
+	router.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
+	router.HandleFunc("GET /.well-known/jwks.json", s.handleOIDCKeys)
 
 	return mux, router
 }
