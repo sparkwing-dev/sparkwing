@@ -263,6 +263,12 @@ describe("getBilling", () => {
     assert.deepEqual(got.usage, []);
     assert.deepEqual(got.grants, []);
     assert.equal(got.can_purchase, true);
+    assert.equal(got.frozen, false);
+  });
+
+  it("reads a held team as frozen", async () => {
+    respond = () => Response.json({ ...billing, frozen: true });
+    assert.equal((await lib.getBilling()).frozen, true);
   });
 
   it("carries the controller's refusal", async () => {

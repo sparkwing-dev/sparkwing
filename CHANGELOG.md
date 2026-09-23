@@ -33,6 +33,20 @@ unlock.
   may omit `team` and lands in the team its payment funded. See
   [Buying credits](docs/auth.md#buying-credits).
 
+- **credits:** refunds and chargebacks. Purchases are final, so a refund is
+  the operator's: `sparkwing cluster credits refund --payment <pi_...>` takes
+  back what the purchase still has on the ledger through
+  `POST /api/v1/credits/reversals` and prints the Stripe dashboard page to
+  issue the money back from; the controller never moves money. The whole
+  purchase is reversed even when spent, so the balance may go negative. A team
+  can be held with `POST /api/v1/credits/freezes` or
+  `sparkwing cluster credits freeze`: its metered claims are refused with 402
+  and `"code": "credits_frozen"` until it is released, and Team -> Billing
+  says it is paused. The checkout service holds a team when a dispute opens on
+  its purchase, reverses the purchase when the dispute is lost, and releases
+  the team when it is won. `GET /api/v1/team/billing` gains `frozen`. See
+  [Buying credits](docs/auth.md#buying-credits).
+
 - **web:** Team -> Billing shows the team's balance against its $5,000 cap,
   the price of each class in credits and dollars from the controller's rate
   table, the minimum billable seconds, recent usage by run and the team's
@@ -626,6 +640,12 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** a `credits.grant` scope for the hosted checkout service. It
+  records `paid` grants only on `POST /api/v1/credits/grants`, reverses and
+  holds by payment, and reads `GET /api/v1/credits/units`, and every other
+  route refuses it; only the operator mints it, and no team's token may carry
+  it. The checkout service no longer needs the controller's admin token.
 
 - **runner (Breaking):** a runner without the git cache builds only the
   repositories its owner allows. It fetched, compiled and ran pipeline code

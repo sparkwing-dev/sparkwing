@@ -161,10 +161,14 @@ amount outside the range, and asks the hosted checkout service at
 `SPARKWING_BILLING_TOKEN`, to open a session for that team. The browser is
 sent to the page it returns. When Stripe confirms the payment, the checkout
 service verifies the webhook and grants the credits to the team the session
-names through `POST /api/v1/credits/grants` with the operator credential only
-it holds, keyed on the payment id so a redelivered webhook grants once. A
-controller with no `--billing-url` sells no credits and answers the checkout
-route with `503` and `"code": "checkout_unavailable"`.
+names through `POST /api/v1/credits/grants`, keyed on the payment id so a
+redelivered webhook grants once. The service holds a token carrying only
+`credits.grant`, which the operator mints with
+`sparkwing cluster tokens create --type service --principal checkout-service --scope credits.grant`; it records paid
+grants, reverses and holds by payment, and reads the ledger's units, and every
+other route refuses it. A controller with no `--billing-url` sells no credits
+and answers the checkout route with `503` and
+`"code": "checkout_unavailable"`.
 
 A team's balance holds at most $5,000, and the cap is held when a checkout
 opens. The controller adds the balance, every checkout of the team still
@@ -177,9 +181,27 @@ cannot both open one. The grant that follows a verified payment is never
 refused by the cap, because the money has already moved; the balance can pass
 the cap only by a payment settled after its session expired. A `paid` grant is
 at most one purchase, $500. The grant route still refuses an operator's `free`
-grant past the cap. A replay of a grant already written is answered as usual. A refund is issued from the Stripe dashboard and
-arrives as a `reversal` that names only the payment, which lands in the team
-the payment funded.
+grant past the cap. A replay of a grant already written is answered as usual.
+
+Purchases are final, so a refund is the operator's decision and is made by
+hand. `sparkwing cluster credits refund --payment <pi_...>` takes back what the
+purchase still has on the ledger, in the team it funded, through
+`POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
+the operator then issues the money back. The controller never moves money, and
+a refund issued in Stripe alone changes nothing on the ledger. The whole
+purchase is reversed even when its credits were spent, so the balance can go
+below zero and the team's metered claims stop until it is funded again. A
+reversal never takes back more than its payment paid, and running the refund
+twice reverses once.
+
+A chargeback holds the team. When Stripe reports a dispute opened on a
+purchase, the checkout service logs an alert and holds the team the payment
+funded through `POST /api/v1/credits/freezes`: its metered claims are refused
+with `402` and `"code": "credits_frozen"` while work already running finishes,
+and Team -> Billing says so. A dispute won releases the team. A dispute lost
+reverses the purchase the way a refund does and leaves the team held until the
+operator releases it with
+`sparkwing cluster credits freeze --team <slug> --release`.
 
 ## Retained storage
 
@@ -425,6 +447,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's

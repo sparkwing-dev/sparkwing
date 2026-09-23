@@ -162,9 +162,15 @@ type InsufficientCreditsError struct {
 	// and on no other team's.
 	RunID  string
 	NodeID string
+	// Frozen is set when the team's cloud usage is held while a payment
+	// dispute is open, whatever the balance reads.
+	Frozen bool
 }
 
 func (e *InsufficientCreditsError) Error() string {
+	if e.Frozen {
+		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
+	}
 	return fmt.Sprintf("insufficient credits: balance %s, need %s",
 		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
 }
@@ -1740,6 +1746,9 @@ func reserveTriggerCreditsTx(
 	}
 	class := table.Sorted()[0]
 	required := class.MicroPerSecond * MinBillableSeconds
+	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, triggerID, ""); err != nil {
+		return err
+	}
 	if balance < required {
 		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
 	}
@@ -1761,6 +1770,20 @@ func reserveTriggerCreditsTx(
 		`UPDATE triggers SET credit_reserved_at = ? WHERE team = ? AND id = ?`,
 		now.UnixNano(), string(team), triggerID)
 	return err
+}
+
+// safety: a frozen team is refused the way an empty balance is, so every
+// runner already backs off from it; the claim rolls back and the work waits.
+func refuseFrozenTeamTx(
+	ctx context.Context, tx *storeTx, team Team, balance, required int64, runID, nodeID string,
+) error {
+	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	if err != nil || !freeze.Frozen {
+		return err
+	}
+	return &InsufficientCreditsError{
+		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
+	}
 }
 
 // safety: every path that ends a trigger claim settles here before its own
@@ -1877,6 +1900,9 @@ func (s *Store) reserveNodeCreditsTx(
 	required := class.MicroPerSecond * MinBillableSeconds
 	if unpriced != nil {
 		required = table.BaseRate() * MinBillableSeconds
+	}
+	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, runID, nodeID); err != nil {
+		return err
 	}
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.

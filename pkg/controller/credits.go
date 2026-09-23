@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -368,6 +367,13 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("kind must be free, paid or reversal"))
 		return
 	}
+	// safety: the checkout service's credential records a verified payment and
+	// nothing else; a free grant or a hand-sized reversal is the operator's.
+	if req.Kind != store.CreditGrantPaid && !isAdmin(r) {
+		writeError(w, http.StatusForbidden, fmt.Errorf(
+			"a %s grant needs the %s scope; %s records paid grants only", req.Kind, ScopeAdmin, ScopeCreditsGrant))
+		return
+	}
 	if err := grantAmountRule(req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -399,10 +405,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	who := authwire.AnonymousPrincipal
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		who = p.Name
-	}
+	who := principalName(r)
 	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who, Checkout: req.Checkout,
@@ -516,6 +519,10 @@ type creditsRefusalJSON struct {
 // heartbeat the ledger refused.
 const CreditsRefusedCode = "insufficient_credits"
 
+// CreditsFrozenCode is the code on a 402 refusing a claim for a team whose
+// cloud usage is held while a payment dispute is open.
+const CreditsFrozenCode = "credits_frozen"
+
 // safety: the refusal is a standing condition, so it is recorded once against
 // the run whose node is waiting rather than on every poll.
 func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
@@ -530,6 +537,9 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	if errors.As(err, &shortfall) {
 		refusal.BalanceMicro = shortfall.BalanceMicro
 		refusal.RequiredMicro = shortfall.RequiredMicro
+		if shortfall.Frozen {
+			refusal.Error, refusal.Code = shortfall.Error(), CreditsFrozenCode
+		}
 		s.noteCreditsBlocked(r, shortfall)
 	}
 	writeJSON(w, http.StatusPaymentRequired, refusal)

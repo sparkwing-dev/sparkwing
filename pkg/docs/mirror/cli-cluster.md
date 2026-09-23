@@ -184,6 +184,8 @@ metered are never charged.
 
 - `show` -- Print the balance, the rate table, and the recent burn
 - `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
+- `refund` -- Take a refunded purchase's credits back and print where to refund it in Stripe
+- `freeze` -- Hold or release a team's cloud usage
 - `history` -- List grants and charges, newest first
 - `settings` -- Read or set the credit rate table, the grace period, and the charge cap
 - `allowance` -- Read or set how many retained bytes a team keeps
@@ -238,6 +240,38 @@ sparkwing cluster credits allowance --profile prod
 sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
 ```
 
+## `sparkwing cluster credits freeze`
+
+Hold or release a team's cloud usage
+
+A held team's metered claims are refused, so no new cloud work
+starts, while work already running finishes. The checkout service
+holds the team a disputed payment funded when the dispute opens and
+releases it when the dispute is won; a lost dispute reverses the
+purchase and leaves the team held for the operator to release.
+Name the team by slug or by a payment it made. Requires the admin
+scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--team SLUG` | Team to hold or release |
+| `--payment ID` | Name the team by a payment it made instead of by slug |
+| `--reason TEXT` | Why the team is held, such as the dispute id; required when holding |
+| `--release` | Release the team instead of holding it |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Hold a team while a dispute is investigated
+sparkwing cluster credits freeze --team acme --reason 'dispute dp_123' --profile prod
+
+# Release it
+sparkwing cluster credits freeze --team acme --release --profile prod
+```
+
 ## `sparkwing cluster credits grant`
 
 Add free or paid credits to the ledger, or reverse a paid grant
@@ -249,9 +283,12 @@ A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
 empty balance. A reference is the payment id: granting it twice
 returns the first grant rather than adding the credits again. A
-reversal takes a refunded payment back out with a negative
-amount, its own reference (the refund id) and --reverses naming
-the paid grant's reference. Requires the admin scope.
+paid grant is at most one $500 purchase; a free grant may not lift
+a team's balance past $5,000. A reversal takes part of a payment
+back out with a negative amount, its own reference and --reverses
+naming the paid grant's reference, and never more than the
+payment paid; refund a whole purchase with
+`sparkwing cluster credits refund`. Requires the admin scope.
 
 ### Flags
 
@@ -273,7 +310,7 @@ sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_1234
 # Hand out five dollars of credits
 sparkwing cluster credits grant --kind free --amount 100000 --profile prod
 
-# Take a refunded payment back out
+# Take part of a payment back out
 sparkwing cluster credits grant --kind reversal --amount -200000 --reference re_9 --reverses pay_12345 --profile prod
 ```
 
@@ -306,6 +343,34 @@ sparkwing cluster credits history --profile prod
 
 # Sum today's charges
 sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
+```
+
+## `sparkwing cluster credits refund`
+
+Take a refunded purchase's credits back and print where to refund it in Stripe
+
+Purchases are final, so a refund is the operator's decision and
+is made by hand. This takes back what the purchase still has on
+the ledger, in the team it funded, and prints the Stripe dashboard
+page where the operator issues the money back; the controller never
+moves money itself. The balance may go below zero when the credits
+were already spent, which stops the team's metered work until it is
+funded again. Running it twice takes the credits back once, and a
+purchase a lost chargeback already reversed has nothing left to
+take. Requires the admin scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--payment ID` | Stripe payment intent id of the purchase (pi_...), the reference its paid grant carries (required) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Refund a purchase
+sparkwing cluster credits refund --payment pi_3Nxyz --profile prod
 ```
 
 ## `sparkwing cluster credits settings`

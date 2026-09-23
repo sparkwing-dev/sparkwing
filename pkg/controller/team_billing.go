@@ -33,22 +33,25 @@ type teamBillingGrantJSON struct {
 }
 
 type teamBillingJSON struct {
-	Team                      string                 `json:"team"`
-	BalanceMicro              int64                  `json:"balance_micro"`
-	BalanceCapMicro           int64                  `json:"balance_cap_micro"`
-	MicroPerCredit            int64                  `json:"micro_per_credit"`
-	CreditsPerDollar          int64                  `json:"credits_per_dollar"`
-	MinBillableSeconds        int64                  `json:"min_billable_seconds"`
-	PurchaseMinCents          int64                  `json:"purchase_min_cents"`
-	PurchaseMaxCents          int64                  `json:"purchase_max_cents"`
-	RateTable                 []creditRateJSON       `json:"rate_table"`
-	StorageRateMicroPerGBDay  int64                  `json:"storage_rate_micro_per_gb_day"`
-	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
-	StorageChargedMicro       int64                  `json:"storage_charged_micro"`
-	CheckoutEnabled           bool                   `json:"checkout_enabled"`
-	CanPurchase               bool                   `json:"can_purchase"`
-	Usage                     []teamBillingUsageJSON `json:"usage"`
-	Grants                    []teamBillingGrantJSON `json:"grants"`
+	Team                      string           `json:"team"`
+	BalanceMicro              int64            `json:"balance_micro"`
+	BalanceCapMicro           int64            `json:"balance_cap_micro"`
+	MicroPerCredit            int64            `json:"micro_per_credit"`
+	CreditsPerDollar          int64            `json:"credits_per_dollar"`
+	MinBillableSeconds        int64            `json:"min_billable_seconds"`
+	PurchaseMinCents          int64            `json:"purchase_min_cents"`
+	PurchaseMaxCents          int64            `json:"purchase_max_cents"`
+	RateTable                 []creditRateJSON `json:"rate_table"`
+	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
+	StorageChargedMicro       int64            `json:"storage_charged_micro"`
+	// Frozen is set while the team's cloud usage is held over an open
+	// payment dispute; its metered claims are refused until it is released.
+	Frozen          bool                   `json:"frozen"`
+	CheckoutEnabled bool                   `json:"checkout_enabled"`
+	CanPurchase     bool                   `json:"can_purchase"`
+	Usage           []teamBillingUsageJSON `json:"usage"`
+	Grants          []teamBillingGrantJSON `json:"grants"`
 }
 
 // handleTeamBilling is the active team's billing page: its balance, the
@@ -75,6 +78,11 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "team billing grants", err)
 		return
 	}
+	freeze, err := t.CreditFreeze(ctx)
+	if err != nil {
+		s.writeInternalError(w, r, "team billing freeze", err)
+		return
+	}
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -88,6 +96,7 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
 		StorageChargedMicro:       state.StorageChargedMicro,
+		Frozen:                    freeze.Frozen,
 		CheckoutEnabled:           s.checkout != nil,
 		CanPurchase:               s.checkout != nil && store.Role(p.Role).AtLeast(store.RoleOwner),
 		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),

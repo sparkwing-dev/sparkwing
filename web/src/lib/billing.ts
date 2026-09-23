@@ -32,6 +32,9 @@ export interface Billing {
   team: string;
   balance_micro: number;
   balance_cap_micro: number;
+  // frozen is true while the team's cloud usage is held over a payment
+  // dispute; its cloud runs do not start until the operator releases it.
+  frozen: boolean;
   micro_per_credit: number;
   credits_per_dollar: number;
   min_billable_seconds: number;
@@ -347,6 +350,7 @@ function normalize(body: Partial<Billing>): Billing {
     grants: body.grants ?? [],
     storage_rate_micro_per_gb_day: body.storage_rate_micro_per_gb_day ?? 0,
     storage_free_allowance_bytes: body.storage_free_allowance_bytes ?? 0,
+    frozen: body.frozen === true,
     checkout_enabled: body.checkout_enabled === true,
     can_purchase: body.can_purchase === true,
   };

@@ -26,7 +26,7 @@ func runCredits(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdCredits, os.Stderr)
-		return fmt.Errorf("credits: subcommand required (show|grant|history|settings|allowance)")
+		return fmt.Errorf("credits: subcommand required (show|grant|refund|freeze|history|settings|allowance)")
 	}
 	switch args[0] {
 	case "show":
@@ -35,6 +35,10 @@ func runCredits(args []string) error {
 		return runCreditsAllowance(args[1:])
 	case "grant":
 		return runCreditsGrant(args[1:])
+	case "refund":
+		return runCreditsRefund(args[1:])
+	case "freeze":
+		return runCreditsFreeze(args[1:])
 	case "history":
 		return runCreditsHistory(args[1:])
 	case "settings":
@@ -759,4 +763,139 @@ func allowanceLine(bytes int64) string {
 		return "ALLOWANCE\tnone; every retained byte is kept\n"
 	}
 	return fmt.Sprintf("ALLOWANCE\t%d bytes; the oldest runs expire above it\n", bytes)
+}
+
+type paymentReversalResp struct {
+	Team          string           `json:"team"`
+	PaymentID     string           `json:"payment_id"`
+	PaidMicro     int64            `json:"paid_micro"`
+	ReversedMicro int64            `json:"reversed_micro"`
+	BalanceMicro  int64            `json:"balance_micro"`
+	Created       bool             `json:"created"`
+	Grant         *creditGrantResp `json:"grant,omitempty"`
+}
+
+// refundReference names an operator's refund of a payment, so running the
+// refund twice takes the credits back once.
+func refundReference(paymentID string) string { return "refund:" + paymentID }
+
+func runCreditsRefund(args []string) error {
+	fs := flag.NewFlagSet(cmdCreditsRefund.Path, flag.ContinueOnError)
+	on := addProfileFlag(fs)
+	payment := fs.String("payment", "", "Stripe payment intent id of the purchase to refund (pi_...)")
+	if err := parseAndCheck(cmdCreditsRefund, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	id := strings.TrimSpace(*payment)
+	if id == "" {
+		return fmt.Errorf("credits refund: --payment is required")
+	}
+	prof, err := resolveProfile(*on)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "credits refund"); err != nil {
+		return err
+	}
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/reversals",
+		map[string]any{"payment_id": id, "reference": refundReference(id)})
+	if err != nil {
+		return err
+	}
+	var out paymentReversalResp
+	if err := json.Unmarshal(resp, &out); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	return renderRefund(os.Stdout, out)
+}
+
+// renderRefund reports what the ledger took back and where the operator
+// issues the money back, which the controller never does itself.
+func renderRefund(w io.Writer, r paymentReversalResp) error {
+	var b strings.Builder
+	switch {
+	case r.Created && r.Grant != nil:
+		fmt.Fprintf(&b, "reversed %s credits of %s from team %s as %s\n",
+			store.FormatCredits(-r.Grant.AmountMicro), r.PaymentID, r.Team, r.Grant.ID)
+	case r.Grant != nil:
+		fmt.Fprintf(&b, "%s was already refunded on the ledger as %s\n", r.PaymentID, r.Grant.ID)
+	default:
+		fmt.Fprintf(&b, "%s has nothing left to reverse: earlier reversals took back all %s credits it paid\n",
+			r.PaymentID, store.FormatCredits(r.PaidMicro))
+	}
+	fmt.Fprintf(&b, "team %s balance: %s credits\n", r.Team, store.FormatCredits(r.BalanceMicro))
+	fmt.Fprintf(&b, "now issue the refund in Stripe; the controller does not move money:\n")
+	fmt.Fprintf(&b, "  test mode: https://dashboard.stripe.com/test/payments/%s\n", r.PaymentID)
+	fmt.Fprintf(&b, "  live mode: https://dashboard.stripe.com/payments/%s\n", r.PaymentID)
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+type creditFreezeResp struct {
+	Team   string `json:"team"`
+	Frozen bool   `json:"frozen"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func runCreditsFreeze(args []string) error {
+	fs := flag.NewFlagSet(cmdCreditsFreeze.Path, flag.ContinueOnError)
+	on := addProfileFlag(fs)
+	team := fs.String("team", "", "slug of the team to hold or release")
+	payment := fs.String("payment", "", "name the team by a payment it made instead of by slug")
+	reason := fs.String("reason", "", "why the team is held, such as the dispute id")
+	release := fs.Bool("release", false, "release the team instead of holding it")
+	if err := parseAndCheck(cmdCreditsFreeze, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	body, err := creditFreezeBody(*team, *payment, *reason, *release)
+	if err != nil {
+		return err
+	}
+	prof, err := resolveProfile(*on)
+	if err != nil {
+		return err
+	}
+	if err := requireController(prof, "credits freeze"); err != nil {
+		return err
+	}
+	resp, err := tokensPost(prof.ControllerURL(), prof.ControllerToken(), "/api/v1/credits/freezes", body)
+	if err != nil {
+		return err
+	}
+	var out creditFreezeResp
+	if err := json.Unmarshal(resp, &out); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	if out.Frozen {
+		fmt.Printf("team %s is held: its metered claims are refused until it is released\n", out.Team)
+		return nil
+	}
+	fmt.Printf("team %s is released\n", out.Team)
+	return nil
+}
+
+func creditFreezeBody(team, payment, reason string, release bool) (map[string]any, error) {
+	team, payment = strings.TrimSpace(team), strings.TrimSpace(payment)
+	if (team == "") == (payment == "") {
+		return nil, fmt.Errorf("credits freeze: name exactly one of --team or --payment")
+	}
+	body := map[string]any{"frozen": !release}
+	if team != "" {
+		body["team"] = team
+	} else {
+		body["payment_id"] = payment
+	}
+	if !release {
+		if strings.TrimSpace(reason) == "" {
+			return nil, fmt.Errorf("credits freeze: --reason is required when holding a team")
+		}
+		body["reason"] = reason
+	}
+	return body, nil
 }

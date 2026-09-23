@@ -94,6 +94,11 @@ const (
 	// ScopeAdmin is the deployment operator's scope. No team membership
 	// grants it.
 	ScopeAdmin = "admin"
+	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
+	// paid grant for a verified payment, reverses a payment, holds or releases
+	// the team a payment funded, and reads the ledger's units, and reaches
+	// nothing else. Only the operator mints it; no team's token may carry it.
+	ScopeCreditsGrant = "credits.grant"
 )
 
 var allScopes = []string{
@@ -110,6 +115,7 @@ var allScopes = []string{
 	ScopeApprovalsWrite,
 	ScopeTeamAdmin,
 	ScopeAdmin,
+	ScopeCreditsGrant,
 }
 
 // safety: the table is the whole grant a membership carries, and ScopeAdmin

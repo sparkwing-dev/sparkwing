@@ -98,6 +98,15 @@ function BillingRoute() {
         </Panel>
       ) : (
         <>
+          {billing.frozen ? (
+            <div
+              role="alert"
+              className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+            >
+              Cloud runs for this team are paused while a payment dispute is
+              open. Contact support to resolve it.
+            </div>
+          ) : null}
           <BalancePanel billing={billing} />
           {billing.checkout_enabled ? <BuyPanel billing={billing} /> : null}
           <PricesPanel billing={billing} />

@@ -62,6 +62,7 @@ const ClaimPollInterval = 500 * time.Millisecond
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
@@ -251,6 +252,7 @@ type RunRequest struct {
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"
+const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"

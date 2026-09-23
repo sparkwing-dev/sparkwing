@@ -324,6 +324,14 @@ func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, err
 func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
 func (t CreditRateTable) Validate() error
+type CreditReversal struct {
+	Team          Team
+	PaidMicro     int64
+	ReversedMicro int64
+	BalanceMicro  int64
+	Grant         *CreditGrant
+	Created       bool
+}
 type CreditSettings struct {
 	RateMicroPerSecond int64
 
@@ -374,6 +382,7 @@ type CreditState struct {
 	BurnMicro                 int64
 	ExhaustedAt               *time.Time
 }
+const CreditsGrantScope = "credits.grant"
 const CreditsPerDollar = 20_000
 type CronDeclaration struct {
 	Cron         string
@@ -514,7 +523,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin or credits.grant scope")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
@@ -563,6 +572,7 @@ var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrUnknownPayment = errors.New("credits: no paid grant carries this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
@@ -782,6 +792,8 @@ type InsufficientCreditsError struct {
 
 	RunID  string
 	NodeID string
+
+	Frozen bool
 }
 func (e *InsufficientCreditsError) Error() string
 func (e *InsufficientCreditsError) Unwrap() error
@@ -1589,6 +1601,7 @@ func (s *Store) OldestWaitingReadyNodeForPrincipal(
 ) (runID, nodeID string, err error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
 func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error)
+func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -1635,6 +1648,7 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, now time.Time) (SignInResult, error)
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
+func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, createdBy string) (_ CreditReversal, err error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
@@ -1671,6 +1685,7 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes int64) (StorageQuota, error)
 func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
+func (s *Store) SetTeamCreditFreeze(ctx context.Context, team Team, frozen bool, reason string, now time.Time) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
@@ -1709,6 +1724,11 @@ type TableSize struct {
 	Bytes int64
 }
 type Team string
+type TeamCreditFreeze struct {
+	Frozen   bool
+	FrozenAt time.Time
+	Reason   string
+}
 type TeamInfo struct {
 	Slug        Team
 	DisplayName string
@@ -1749,6 +1769,7 @@ func (t *Tenant) CreateTokenWith(
 func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
+func (t *Tenant) CreditFreeze(ctx context.Context) (TeamCreditFreeze, error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)

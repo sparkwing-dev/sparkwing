@@ -82,6 +82,7 @@ type teamBilling struct {
 		Cores          int64 `json:"cores"`
 		MicroPerSecond int64 `json:"micro_per_second"`
 	} `json:"rate_table"`
+	Frozen          bool `json:"frozen"`
 	CheckoutEnabled bool `json:"checkout_enabled"`
 	CanPurchase     bool `json:"can_purchase"`
 	Usage           []struct {
