@@ -2,6 +2,7 @@ package bincache
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,9 @@ import (
 )
 
 const testSHA1 = "0123456789abcdef0123456789abcdef01234567"
+
+// httpOnly fetches from the plain-http test server with no address check, since it listens on loopback.
+var httpOnly = directOptions{protocols: "http"}
 
 func TestValidateDirectSourceRefusesUnsafeRemotes(t *testing.T) {
 	cases := map[string]string{
@@ -128,7 +132,7 @@ func TestDirectCheckoutFetchesTheExactCommitAndReusesTheMirror(t *testing.T) {
 	ctx := context.Background()
 
 	first := filepath.Join(t.TempDir(), "run-1")
-	if err := directCheckout(ctx, root, remote, "main", oldSHA, first, "http"); err != nil {
+	if err := directCheckout(ctx, root, remote, "main", oldSHA, first, httpOnly); err != nil {
 		t.Fatalf("directCheckout old: %v", err)
 	}
 	if got := readMarker(t, first); got != "v1" {
@@ -139,7 +143,7 @@ func TestDirectCheckoutFetchesTheExactCommitAndReusesTheMirror(t *testing.T) {
 	}
 
 	second := filepath.Join(t.TempDir(), "run-2")
-	if err := directCheckout(ctx, root, remote, "main", tipSHA, second, "http"); err != nil {
+	if err := directCheckout(ctx, root, remote, "main", tipSHA, second, httpOnly); err != nil {
 		t.Fatalf("directCheckout tip: %v", err)
 	}
 	if got := readMarker(t, second); got != "v2" {
@@ -156,7 +160,7 @@ func TestDirectCheckoutFetchesTheExactCommitAndReusesTheMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	third := filepath.Join(t.TempDir(), "run-3")
-	if err := directCheckout(ctx, root, remote, "main", oldSHA, third, "http"); err != nil {
+	if err := directCheckout(ctx, root, remote, "main", oldSHA, third, httpOnly); err != nil {
 		t.Fatalf("directCheckout after a run directory was removed: %v", err)
 	}
 }
@@ -164,7 +168,7 @@ func TestDirectCheckoutFetchesTheExactCommitAndReusesTheMirror(t *testing.T) {
 func TestDirectCheckoutTakesTheBranchTipWithoutACommit(t *testing.T) {
 	remote, _, tipSHA := directTestRemote(t)
 	dest := filepath.Join(t.TempDir(), "run")
-	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", "", dest, "http"); err != nil {
+	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", "", dest, httpOnly); err != nil {
 		t.Fatalf("directCheckout: %v", err)
 	}
 	if head := gitOut(t, dest, "rev-parse", "HEAD"); head != tipSHA {
@@ -175,7 +179,7 @@ func TestDirectCheckoutTakesTheBranchTipWithoutACommit(t *testing.T) {
 func TestDirectCheckoutRefusesATransportOutsideTheAllowList(t *testing.T) {
 	remote, oldSHA, _ := directTestRemote(t)
 	dest := filepath.Join(t.TempDir(), "run")
-	err := directCheckout(context.Background(), t.TempDir(), remote, "main", oldSHA, dest, directProtocols)
+	err := directCheckout(context.Background(), t.TempDir(), remote, "main", oldSHA, dest, directOptions{protocols: directProtocols})
 	if err == nil {
 		t.Fatal("an http remote was fetched although only https and ssh are allowed")
 	}
@@ -187,7 +191,7 @@ func TestDirectCheckoutRefusesATransportOutsideTheAllowList(t *testing.T) {
 func TestDirectCheckoutRefusesACommitTheRemoteDoesNotHave(t *testing.T) {
 	remote, _, _ := directTestRemote(t)
 	err := directCheckout(context.Background(), t.TempDir(), remote, "main", testSHA1,
-		filepath.Join(t.TempDir(), "run"), "http")
+		filepath.Join(t.TempDir(), "run"), httpOnly)
 	if err == nil || !strings.Contains(err.Error(), "is the commit pushed?") {
 		t.Fatalf("err = %v, want a fetch failure that asks whether the commit was pushed", err)
 	}
@@ -279,7 +283,7 @@ func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
 			t.Setenv("GIT_CONFIG_GLOBAL", global)
 
 			dest := filepath.Join(t.TempDir(), "run")
-			err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, "http")
+			err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly)
 			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
 				t.Fatalf("the checkout ran the %s filter from the ambient config", driver)
 			}
@@ -329,7 +333,7 @@ func TestDirectCheckoutHardensTheUsersSSHCommand(t *testing.T) {
 				wantUserArgs = false
 			}
 			err := directCheckout(context.Background(), t.TempDir(), "ssh://git@example.invalid/o/r.git",
-				"main", testSHA1, filepath.Join(t.TempDir(), "run"), "ssh")
+				"main", testSHA1, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh"})
 			if err == nil {
 				t.Fatal("the fake ssh cannot serve a fetch")
 			}
@@ -382,8 +386,23 @@ func TestDirectCheckoutDoesNotFollowARedirect(t *testing.T) {
 	t.Cleanup(redirect.Close)
 
 	dest := filepath.Join(t.TempDir(), "run")
-	err := directCheckout(context.Background(), t.TempDir(), redirect.URL+"/moved", "main", oldSHA, dest, "http")
+	err := directCheckout(context.Background(), t.TempDir(), redirect.URL+"/moved", "main", oldSHA, dest, httpOnly)
 	if err == nil {
 		t.Fatal("the fetch followed a redirect to another server")
+	}
+}
+
+func TestFetchPipelineSourceDirectRefusesAHostThatResolvesInward(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	opts := defaultDirectOptions()
+	opts.lookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("10.0.0.5")}}, nil
+	}
+	for _, remote := range []string{"https://git.example.com/o/r.git", "git@git.example.com:o/r.git"} {
+		_, err := fetchPipelineSourceDirect(context.Background(), remote, "main", testSHA1,
+			filepath.Join(t.TempDir(), "run"), opts)
+		if err == nil || !strings.Contains(err.Error(), "resolves to 10.0.0.5") {
+			t.Fatalf("fetch of %s: err = %v, want a refusal naming the private address", remote, err)
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,6 +106,21 @@ func DirectRepoURLFromGitHub(fullName string) string {
 // home keyed by the remote, so a later run of the same repository fetches only
 // what it lacks. An empty sha takes the tip of branch.
 func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string) (string, error) {
+	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, defaultDirectOptions())
+}
+
+// directOptions bound a direct fetch. A nil lookup skips the address check,
+// which only a test serving from loopback wants.
+type directOptions struct {
+	protocols string
+	lookup    sourceurl.Lookup
+}
+
+func defaultDirectOptions() directOptions {
+	return directOptions{protocols: directProtocols, lookup: net.DefaultResolver.LookupIPAddr}
+}
+
+func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, opts directOptions) (string, error) {
 	remote, sha, err := ValidateDirectSource(repoURL, sha)
 	if err != nil {
 		return "", err
@@ -125,7 +141,7 @@ func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 		return "", fmt.Errorf("direct source: %w", err)
 	}
 	checkout := filepath.Join(workDir, "src")
-	if err := directCheckout(ctx, root, remote, branch, sha, checkout, directProtocols); err != nil {
+	if err := directCheckout(ctx, root, remote, branch, sha, checkout, opts); err != nil {
 		return "", err
 	}
 	candidate := filepath.Join(checkout, ".sparkwing")
@@ -147,7 +163,7 @@ func directMirrorPath(root, remote string) string {
 	return filepath.Join(root, fmt.Sprintf("%x.git", sum[:16]))
 }
 
-func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protocols string) error {
+func directCheckout(ctx context.Context, root, remote, branch, sha, dest string, opts directOptions) error {
 	mirror := directMirrorPath(root, remote)
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -160,7 +176,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		return fmt.Errorf("direct source: lock mirror: %w", err)
 	}
 
-	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+protocols, "GIT_TERMINAL_PROMPT=0")
+	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
 	run := func(env []string, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
@@ -201,6 +217,16 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 	}
 
 	target := sha
+	needFetch := sha == ""
+	if !needFetch {
+		_, haveErr := git("-C", mirror, "cat-file", "-e", sha+"^{commit}")
+		needFetch = haveErr != nil
+	}
+	if needFetch && opts.lookup != nil {
+		if err := sourceurl.CheckResolvedHost(ctx, remote, opts.lookup); err != nil {
+			return fmt.Errorf("direct source: %w", err)
+		}
+	}
 	if sha == "" {
 		if err := fetchRef("refs/heads/" + branch); err != nil {
 			return fmt.Errorf("direct source: fetch %s branch %s: %w", sourceurl.Redact(remote), branch, err)
@@ -208,7 +234,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		if target, err = git("-C", mirror, "rev-parse", "--verify", "FETCH_HEAD^{commit}"); err != nil {
 			return fmt.Errorf("direct source: %w", err)
 		}
-	} else if _, haveErr := git("-C", mirror, "cat-file", "-e", sha+"^{commit}"); haveErr != nil {
+	} else if needFetch {
 		if err := fetchRef(sha); err != nil {
 			return fmt.Errorf("direct source: fetch %s at %s (is the commit pushed?): %w",
 				sourceurl.Redact(remote), sha, err)
