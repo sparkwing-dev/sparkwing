@@ -1381,6 +1381,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     Record<string, PipelineMeta>
   >({});
   const [runs, setRuns] = useState<Run[]>([]);
+  const [runsReady, setRunsReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
     Promise.all([getRuns({ limit: RUNS_WINDOW }), getPipelines()])
@@ -1388,6 +1389,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         if (cancelled) return;
         setRuns(rs);
         setPipelineMeta(meta);
+        setRunsReady(true);
       })
       .catch(() => {});
     return () => {
@@ -1416,42 +1418,55 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsScanned, setRunsScanned] = useState(0);
+  const [runsMatching, setRunsMatching] = useState(0);
+  const searchGeneration = useRef(0);
   const runGrep = useCallback(
     async (q: string, sinceVal: string) => {
+      const generation = ++searchGeneration.current;
       const trimmed = q.trim();
       if (!trimmed) {
         setResults(null);
         setRunsMap({});
         setRunsScanned(0);
+        setRunsMatching(0);
+        return;
+      }
+      if (!runsReady) return;
+      const candidates = runs.filter((run) => runMatchesFilter(run, filterState, pipelineMeta));
+      setRunsMatching(candidates.length);
+      if (candidates.length === 0) {
+        setResults([]);
+        setRunsMap({});
+        setRunsScanned(0);
+        setLoading(false);
         return;
       }
       setLoading(true);
       setError(null);
+      setResults(null);
+      setRunsMap({});
+      setRunsScanned(0);
       try {
         const resp = await searchRunsGrep(trimmed, {
-          pipelines: filterState.filterPipeline,
-          excludePipelines: filterState.excludePipeline,
-          statuses: filterState.filterStatus,
-          excludeStatuses: filterState.excludeStatus,
-          branches: filterState.filterBranch,
-          excludeBranches: filterState.excludeBranch,
-          shaPrefixes: filterState.filterCommit,
-          excludeShaPrefixes: filterState.excludeCommit,
+          runIDs: candidates.map((run) => run.id),
           since: sinceVal || undefined,
           limit: 200,
           maxMatches: 10,
         });
+        if (generation !== searchGeneration.current) return;
         setResults(resp.matches ?? []);
         setRunsMap(resp.runs ?? {});
         setRunsScanned(resp.runs_scanned);
+        setRunsMatching(resp.runs_matching);
       } catch (e) {
+        if (generation !== searchGeneration.current) return;
         setError(e instanceof Error ? e.message : String(e));
         setResults([]);
       } finally {
-        setLoading(false);
+        if (generation === searchGeneration.current) setLoading(false);
       }
     },
-    [filterState],
+    [filterState, runs, pipelineMeta, runsReady],
   );
   const submit = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1459,16 +1474,15 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     else params.delete("gq");
     if (since && since !== "24h") params.set("gsince", since);
     else params.delete("gsince");
+    if (params.toString() === searchParams.toString()) {
+      runGrep(query, since);
+      return;
+    }
     router.replace(`/runs?${params.toString()}`, { scroll: false });
-    runGrep(query, since);
   }, [query, since, searchParams, router, runGrep]);
-  const ranInitialRef = useRef(false);
   useEffect(() => {
-    if (ranInitialRef.current) return;
-    ranInitialRef.current = true;
-    if (initialQuery) runGrep(initialQuery, initialSince);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (runsReady) runGrep(initialQuery, initialSince);
+  }, [runsReady, runGrep, initialQuery, initialSince]);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -1486,11 +1500,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
-  const visibleResults = results?.filter((match) => {
-    const trigger = runsMap[match.run_id]?.trigger_source || "";
-    return !filterState.excludeTrigger.includes(trigger) &&
-      (!filterState.filterTrigger.length || filterState.filterTrigger.includes(trigger));
-  }) ?? null;
+  const visibleResults = results;
   const byRun = new Map<string, RunsGrepMatch[]>();
   const runOrder: string[] = [];
   for (const m of visibleResults ?? []) {
@@ -1558,6 +1568,11 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3">
+        {/^(success|succeeded|failed|failure|cancelled|canceled)$/i.test(query.trim()) && (
+          <div className="text-xs text-[var(--muted)] mb-3">
+            Search scans log text. Use the Status filter above to find runs by outcome.
+          </div>
+        )}
         {error && (
           <div className="text-xs font-mono text-red-400 mb-3">
             error: {error}
@@ -1566,20 +1581,19 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {visibleResults === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)] space-y-1">
             <div>Searches log body across recent runs.</div>
-            <div>Tip: filters apply to search results.</div>
+            <div>Filters choose which runs are searched.</div>
           </div>
         )}
         {visibleResults !== null && visibleResults.length === 0 && !loading && (
           <div className="text-xs text-[var(--muted)]">
-            no matches across {runsScanned} run{runsScanned === 1 ? "" : "s"}
+            no matches; searched {runsScanned} of {runsMatching} runs matching filters
           </div>
         )}
         {visibleResults !== null && visibleResults.length > 0 && (
           <>
             <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
               {visibleResults.length} match{visibleResults.length === 1 ? "" : "es"} across{" "}
-              {byRun.size} run{byRun.size === 1 ? "" : "s"} (scanned{" "}
-              {runsScanned})
+              {byRun.size} run{byRun.size === 1 ? "" : "s"}; searched {runsScanned} of {runsMatching} runs matching filters
             </div>
             <div className="flex flex-col gap-3">
               {runOrder.map((runID) => {
