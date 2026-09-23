@@ -275,6 +275,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.Handle("GET /docs/{rest...}", http.NotFoundHandler())
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
+	authedMux.HandleFunc("POST /github/app/connect", githubAppConnectHandler(opts))
+	authedMux.HandleFunc("GET "+githubAppCompletePath, githubAppCompleteHandler(opts))
 
 	authedMux.Handle("/", spaHandler(bundleFS, opts))
 
@@ -289,6 +291,8 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
 	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
 	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
+	router.HandleFunc("GET /github/app/setup", githubAppSetupHandler(opts))
+	router.HandleFunc("GET "+githubAppCallbackPath, githubAppCallbackHandler(opts))
 	if opts.ControllerURL != "" {
 		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)

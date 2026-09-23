@@ -6,6 +6,7 @@ export interface Capabilities {
   mode: string;
   teams?: { enabled: boolean };
   auth?: { providers: string[] };
+  github_app?: { slug: string; source_tokens: boolean };
 }
 
 export interface TeamRef {
@@ -114,7 +115,7 @@ async function failure(res: Response, action: string): Promise<TeamApiError> {
   );
 }
 
-async function send(
+export async function send(
   method: string,
   url: string,
   action: string,

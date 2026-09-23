@@ -28,10 +28,16 @@ type Capabilities struct {
 	Features []string            `json:"features"`
 	ReadOnly bool                `json:"read_only,omitempty"`
 
-	// Teams and Auth come from a controller that serves identity; a local
-	// install leaves both nil so its capabilities read as before.
-	Teams *CapabilitiesTeams `json:"teams,omitempty"`
-	Auth  *CapabilitiesAuth  `json:"auth,omitempty"`
+	// Teams, Auth and GitHubApp come from a controller that serves identity;
+	// a local install leaves them nil so its capabilities read as before.
+	Teams     *CapabilitiesTeams     `json:"teams,omitempty"`
+	Auth      *CapabilitiesAuth      `json:"auth,omitempty"`
+	GitHubApp *CapabilitiesGitHubApp `json:"github_app,omitempty"`
+}
+
+type CapabilitiesGitHubApp struct {
+	Slug         string `json:"slug"`
+	SourceTokens bool   `json:"source_tokens"`
 }
 
 type CapabilitiesTeams struct {

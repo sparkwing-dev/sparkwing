@@ -3,17 +3,32 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useState } from "react";
-import { type Me, acceptInvitation, renameTeam } from "@/lib/teams";
+import {
+  type Capabilities,
+  type Me,
+  acceptInvitation,
+  renameTeam,
+} from "@/lib/teams";
+import { githubAppEnabled } from "@/lib/githubApp";
 import { refreshTeamState, useTeamState } from "@/lib/useTeam";
 import { RolePill } from "@/components/TeamSwitcher";
 import { toast } from "@/components/Toasts";
 import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
 
-const tabs = [
+const baseTabs = [
   { href: "/team", label: "Members" },
   { href: "/team/machines", label: "Machines" },
-  { href: "/team/billing", label: "Billing" },
 ];
+
+export function teamTabs(caps: Capabilities | null) {
+  return [
+    ...baseTabs,
+    ...(githubAppEnabled(caps)
+      ? [{ href: "/team/github", label: "GitHub" }]
+      : []),
+    { href: "/team/billing", label: "Billing" },
+  ];
+}
 
 export function Panel({
   title,
@@ -116,7 +131,7 @@ export function InvitationsForMe({ me }: { me: Me }) {
 export default function TeamShell({
   children,
 }: {
-  children: (me: Me) => ReactNode;
+  children: (me: Me, caps: Capabilities | null) => ReactNode;
 }) {
   const state = useTeamState();
   const pathname = usePathname();
@@ -146,13 +161,13 @@ export default function TeamShell({
       </Notice>
     );
   }
-  const { me } = state;
+  const { me, caps } = state;
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
       <InvitationsForMe me={me} />
       <TeamHeader me={me} />
       <div className="flex gap-1 border-b border-[var(--border)] mb-6">
-        {tabs.map((t) => {
+        {teamTabs(caps).map((t) => {
           const active =
             t.href === "/team"
               ? pathname === "/team"
@@ -172,7 +187,7 @@ export default function TeamShell({
           );
         })}
       </div>
-      {children(me)}
+      {children(me, caps)}
     </div>
   );
 }

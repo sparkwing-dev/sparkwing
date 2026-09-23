@@ -38,11 +38,13 @@ The examples use the hosted deployment's hosts: the dashboard at `console.sparkw
 
 ## Connecting a team
 
-Only a team owner connects, and only as a signed-in account with a linked GitHub identity.
+Only a team owner connects, and only as a signed-in account with a linked GitHub identity. In the dashboard, the owner opens **Team -> GitHub** and chooses **Connect GitHub**; the tab appears when `GET /api/v1/capabilities` reports `github_app`. Readers and editors see the same tab read-only.
 
 1. The dashboard calls `POST /api/v1/team/github-app/connect {redirect_uri}` and gets `{install_url, authorize_url, state, verifier}`. It keeps `state` and `verifier` in a short-lived `__Host-` cookie and sends the browser to `install_url`.
 2. GitHub returns the browser to the setup URL with `installation_id`, `setup_action` and `state`. The dashboard checks `state` against its cookie, keeps `installation_id` in the cookie, and sends the browser to `authorize_url`.
 3. GitHub returns the browser to the callback with `code` and `state`. The dashboard checks `state` again and calls `POST /api/v1/team/github-app/connect/complete {state, verifier, code, installation_id, redirect_uri}`.
+
+The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The browser withholds the `SameSite=Strict` session cookie from GitHub's return, so the callback keeps the code in the flow cookie and moves on from a page on the dashboard's own origin, whose request carries the session that `connect/complete` runs as. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
 
 The controller binds the installation to the caller's active team only when all of these hold:
 
