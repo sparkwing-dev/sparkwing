@@ -621,6 +621,15 @@ tokens, at most 50 open invitations, and creates at most 100 invitations a day;
 withdrawing an invitation still counts toward that day. No token minted into a
 team carries `admin`.
 
+Any member mints a personal CLI token with `POST /api/v1/team/cli-tokens`,
+from a signed-in session only; a bearer token cannot mint one. It is a user
+token bound to the member and the active team, carrying the member's role
+scopes without `team.admin`, so a reader's token only reads. It expires 90 days
+after it is minted. Removing the member, or demoting them to `reader`, revokes
+it with their runner tokens; an owner demoted to `editor` keeps it, since it
+already carried only the editor's scopes. The member lists and revokes their
+own CLI tokens and no one else's, and holds at most 10 live ones in a team.
+
 Owning a secret means creating and deleting it, not keeping it from editors.
 Anyone who can run a team's pipelines -- an editor or above -- can use the
 secrets those pipelines read: they can change what a pipeline runs, and a
