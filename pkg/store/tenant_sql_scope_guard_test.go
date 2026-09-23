@@ -69,6 +69,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).AcceptInvitation":        "finds an invitation by its id before the team is known; the accepting write then names that team",
 	"(*Operator).ListGitHubWebhookBindingsAcrossTeams": "an unauthenticated delivery names no team, so every team's " +
 		"binding of the pipeline is a candidate until its secret verifies the signature",
+	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
+		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 }

@@ -109,6 +109,8 @@ const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 type ClaimedRun struct {
 	Team     Team
 	Pipeline string
+
+	Untrusted bool
 }
 const CloudStorageRateMicroPerGBDay = 833_333
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
@@ -522,6 +524,7 @@ var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds 
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
+var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
 var ErrInvalidCredentials = errors.New("invalid username or password")
@@ -553,6 +556,7 @@ var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
+var ErrUntrustedRun = errors.New("store: this run is untrusted; only the team's own machines run it")
 var ErrUnverifiedEmail = errors.New("store: a sign-in needs a verified email")
 var ErrUserNotFound = errors.New("user not found")
 type Event struct {
@@ -721,6 +725,33 @@ var FreeTierQuota = StorageQuota{
 	MaxBytesPerRun:   10 << 20,
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
+}
+type GitHubAppInstallation struct {
+	Team           Team
+	InstallationID int64
+
+	AccountID    int64
+	AccountLogin string
+	AccountType  string
+	Suspended    bool
+
+	ConnectedBy  string
+	GitHubUserID int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+type GitHubAppTrigger struct {
+	Team           Team
+	RepositoryID   int64
+	Repository     string
+	InstallationID int64
+	Pipeline       string
+	Push           bool
+	PullRequest    bool
+
+	ForkPullRequests bool
+	CreatedBy        string
+	CreatedAt        time.Time
 }
 type GitHubRepo struct {
 	Owner string
@@ -1004,10 +1035,13 @@ func OpenReadOnlySnapshot(path string) (*Store, error)
 type Operator struct{}
 func (o *Operator) CountRunsAcrossTeams(ctx context.Context, f RunFilter) (int, error)
 func (o *Operator) CreateTeam(ctx context.Context, team Team) error
+func (o *Operator) GitHubAppInstallationTeam(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (o *Operator) ListCronSchedulesAcrossTeams(ctx context.Context) ([]CronSchedule, error)
 func (o *Operator) ListGitHubWebhookBindingsAcrossTeams(ctx context.Context, pipeline string) ([]GitHubWebhookBinding, error)
 func (o *Operator) ListRunsAcrossTeams(ctx context.Context, f RunFilter) ([]*Run, error)
 func (o *Operator) ListTeams(ctx context.Context) (_ []Team, err error)
+func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
+func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 const OperatorScope = "admin"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1373,6 +1407,7 @@ type Store struct {
 }
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (Team, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
+func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
@@ -1703,6 +1738,7 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
@@ -1729,6 +1765,7 @@ func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
+func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
@@ -1747,6 +1784,10 @@ func (t *Tenant) GetSecret(name string) (*Secret, error)
 func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretRow(name, pipeline string) (*Secret, error)
+func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
+func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
+func (t *Tenant) GitHubAppTriggers(ctx context.Context) (_ []GitHubAppTrigger, err error)
+func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, repositoryID int64) (_ []GitHubAppTrigger, err error)
 func (t *Tenant) GitHubRunnerBinding(ctx context.Context, repositoryID int64) (GitHubRunnerBinding, error)
 func (t *Tenant) GitHubRunnerBindings(ctx context.Context) (_ []GitHubRunnerBinding, err error)
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error)
@@ -1779,6 +1820,7 @@ func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bo
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (t *Tenant) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
+func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, now time.Time) (GitHubAppTrigger, error)
 func (t *Tenant) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (t *Tenant) RecordContention(ctx context.Context, pipeline string) error
 func (t *Tenant) RecordCreditGrant(
@@ -1798,6 +1840,7 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error
 func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error
+func (t *Tenant) RunUntrusted(ctx context.Context, runID string) (bool, error)
 func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error)
 func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
@@ -1809,6 +1852,7 @@ func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, r
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
+func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error
 func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func TierQuota(tier string) (StorageQuota, bool)
@@ -1885,6 +1929,8 @@ type Trigger struct {
 	WebhookReplayKey string
 
 	Team Team
+
+	Untrusted bool
 }
 func (t Trigger) IsFinished() bool
 type TriggerClaimFence struct {

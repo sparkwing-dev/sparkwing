@@ -232,6 +232,8 @@ var tenantTables = []string{
 	"debug_pauses",
 	"egress_usage",
 	"events",
+	"github_app_installations",
+	"github_app_triggers",
 	"github_runner_bindings",
 	"github_runner_credentials",
 	"github_webhook_bindings",
@@ -260,7 +262,10 @@ var tenantTables = []string{
 // safety: these tables are created after v49 with the team column already
 // in their schema, so the v49 ladder step that adds the column to every
 // tenant-owned table runs before they exist and skips them.
-var keyedAtCreation = []string{"github_runner_bindings", "github_runner_credentials", "invitations", "memberships"}
+var keyedAtCreation = []string{
+	"github_app_installations", "github_app_triggers",
+	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
+}
 
 // safety: executors is here because an executor enrolls with the deployment
 // and is offered work from every team on it, and sparkwing_meta because the

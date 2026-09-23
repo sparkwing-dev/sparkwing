@@ -212,6 +212,9 @@ func (t *Tenant) DeleteSecret(name, pipeline string) error {
 type ClaimedRun struct {
 	Team     Team
 	Pipeline string
+	// Untrusted marks a run of code nobody in the team wrote, which reads
+	// no secret.
+	Untrusted bool
 }
 
 // ClaimedRunFor returns the team and pipeline of runID when claimant holds
@@ -225,8 +228,10 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 	}
 	var run ClaimedRun
 	var team string
+	var untrusted int
 	err := s.queryRow(ctx, `
-        SELECT runs.team, runs.pipeline
+        SELECT runs.team, runs.pipeline,
+               COALESCE((SELECT ut.untrusted FROM triggers ut WHERE ut.id = runs.id), 0)
           FROM runs
          WHERE runs.id = ?
            AND (EXISTS (SELECT 1 FROM nodes
@@ -239,14 +244,14 @@ func (s *Store) ClaimedRunFor(ctx context.Context, runID string, claimant ClaimI
 		                   AND `+triggerClaimLiveSQL("")+`))`,
 		runID,
 		claimant.Principal, claimant.TokenPrefix, now.UnixNano(),
-		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline)
+		claimant.Principal, claimant.TokenPrefix, now.UnixNano()).Scan(&team, &run.Pipeline, &untrusted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimedRun{}, ErrNotFound
 	}
 	if err != nil {
 		return ClaimedRun{}, err
 	}
-	run.Team = Team(team)
+	run.Team, run.Untrusted = Team(team), untrusted != 0
 	return run, nil
 }
 
@@ -258,7 +263,8 @@ func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now 
 		return nil, nil
 	}
 	rows, err := s.query(ctx, `
-        SELECT DISTINCT runs.team, runs.pipeline
+        SELECT DISTINCT runs.team, runs.pipeline,
+               COALESCE((SELECT ut.untrusted FROM triggers ut WHERE ut.id = runs.id), 0)
           FROM runs
          WHERE EXISTS (SELECT 1 FROM nodes
                         WHERE nodes.run_id = runs.id
@@ -278,10 +284,11 @@ func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now 
 	for rows.Next() {
 		var run ClaimedRun
 		var team string
-		if err := rows.Scan(&team, &run.Pipeline); err != nil {
+		var untrusted int
+		if err := rows.Scan(&team, &run.Pipeline, &untrusted); err != nil {
 			return nil, err
 		}
-		run.Team = Team(team)
+		run.Team, run.Untrusted = Team(team), untrusted != 0
 		out = append(out, run)
 	}
 	return out, rows.Err()

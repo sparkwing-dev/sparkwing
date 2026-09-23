@@ -471,10 +471,10 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	if _, err := tx.ExecContext(ctx, `INSERT INTO triggers
     (team, id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
      status, created_at, parent_run_id, repo, repo_url, github_owner, github_repo,
-     retry_of, retry_source, "full", available_at)
+     retry_of, retry_source, "full", available_at, untrusted)
  SELECT team, ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
-        id, ?, 0, ?
+        id, ?, 0, ?, COALESCE((SELECT st.untrusted FROM triggers st WHERE st.team = runs.team AND st.id = runs.id), 0)
    FROM runs WHERE id = ?`, retryID, triggerSource, provenanceJSON, triggerStatusPending,
 		now.UnixNano(), RetrySourceAuto, availableAt.UnixNano(), sourceRunID); err != nil {
 		return "", nil, nil, err
