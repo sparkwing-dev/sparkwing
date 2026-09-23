@@ -32,6 +32,12 @@ type Usage struct {
 	teams        map[string]TeamUsage
 	dirty        bool
 	reconciledAt time.Time
+	// delta collects every write and delete while a reconcile lists, so the
+	// listing replaces the count as listed plus delta. An object written
+	// while its team is being listed can land in both and count twice, which
+	// holds the team to less, never more, until the next reconcile.
+	delta      map[string]TeamUsage
+	reconciles int
 }
 
 // ReconciledAt is when a whole-store reconcile last finished cleanly.
@@ -57,23 +63,63 @@ func (u *Usage) add(team string, bytes, objects int64) {
 	t.Objects = max(t.Objects+objects, 0)
 	u.teams[team] = t
 	u.dirty = true
+	if u.delta != nil {
+		d := u.delta[team]
+		d.Bytes += bytes
+		d.Objects += objects
+		u.delta[team] = d
+	}
+}
+
+func (u *Usage) beginReconcile() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.reconciles == 0 {
+		u.delta = map[string]TeamUsage{}
+	}
+	u.reconciles++
+}
+
+func (u *Usage) endReconcile() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.reconciles--; u.reconciles == 0 {
+		u.delta = nil
+	}
+}
+
+// replace sets team's count to what a listing found plus what was written
+// and deleted since the reconcile began.
+func (u *Usage) replace(team string, listed TeamUsage) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	d := u.delta[team]
+	listed.Bytes = max(listed.Bytes+d.Bytes, 0)
+	listed.Objects = max(listed.Objects+d.Objects, 0)
+	if listed.Bytes == 0 && listed.Objects == 0 {
+		delete(u.teams, team)
+	} else {
+		u.teams[team] = listed
+	}
+	u.dirty = true
+}
+
+// forgetUnwritten drops team unless it was written since the reconcile
+// began, which a listing taken before the write cannot have seen.
+func (u *Usage) forgetUnwritten(team string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if _, written := u.delta[team]; written {
+		return
+	}
+	delete(u.teams, team)
+	u.dirty = true
 }
 
 func (u *Usage) forget(team string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	delete(u.teams, team)
-	u.dirty = true
-}
-
-func (u *Usage) set(team string, t TeamUsage) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if t.Bytes == 0 && t.Objects == 0 {
-		delete(u.teams, team)
-	} else {
-		u.teams[team] = t
-	}
 	u.dirty = true
 }
 
@@ -115,12 +161,14 @@ func (s *Store) ReconcileTeam(ctx context.Context, team string) (TeamUsage, erro
 	if err != nil {
 		return TeamUsage{}, err
 	}
+	s.usage.beginReconcile()
+	defer s.usage.endReconcile()
 	t, err := s.measure(ctx, ns)
 	if err != nil {
 		return TeamUsage{}, err
 	}
-	s.usage.set(team, t)
-	return t, nil
+	s.usage.replace(team, t)
+	return s.usage.Team(team), nil
 }
 
 // Reconcile measures every namespace in the store and replaces the whole
@@ -129,6 +177,8 @@ func (s *Store) ReconcileTeam(ctx context.Context, team string) (TeamUsage, erro
 // so it runs on a schedule of hours, never per request. A namespace whose
 // listing fails keeps its running count and the error is returned.
 func (s *Store) Reconcile(ctx context.Context) error {
+	s.usage.beginReconcile()
+	defer s.usage.endReconcile()
 	root := s.root()
 	tops, err := s.children(ctx, root)
 	if err != nil {
@@ -159,7 +209,7 @@ func (s *Store) Reconcile(ctx context.Context) error {
 					errs = append(errs, err)
 					continue
 				}
-				s.usage.set(team, t)
+				s.usage.replace(team, t)
 			}
 		default:
 			t, err := s.measure(ctx, top)
@@ -173,7 +223,7 @@ func (s *Store) Reconcile(ctx context.Context) error {
 	}
 	operator.ReconciledAt = s.now().UTC()
 	if len(errs) == 0 {
-		s.usage.set("", operator)
+		s.usage.replace("", operator)
 		s.usage.mu.Lock()
 		s.usage.reconciledAt = operator.ReconciledAt
 		s.usage.mu.Unlock()
@@ -181,7 +231,7 @@ func (s *Store) Reconcile(ctx context.Context) error {
 		// was purged by some other path; keeping it would charge it forever.
 		for team := range s.usage.Snapshot() {
 			if team != "" && !seen[team] {
-				s.usage.forget(team)
+				s.usage.forgetUnwritten(team)
 			}
 		}
 	}

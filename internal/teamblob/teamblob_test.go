@@ -37,6 +37,8 @@ type counting struct {
 	failOn map[string]error
 	// keepKey makes a batch delete report the matching keys as failed.
 	keepKey func(key string) bool
+	// afterList runs once a listing has answered, before the caller sees it.
+	afterList func(in *s3.ListObjectsV2Input)
 }
 
 func (c *counting) note(op string) error {
@@ -129,7 +131,11 @@ func (c *counting) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input,
 	if err := c.note("ListObjectsV2"); err != nil {
 		return nil, err
 	}
-	return c.Client.ListObjectsV2(ctx, in, o...)
+	out, err := c.Client.ListObjectsV2(ctx, in, o...)
+	if c.afterList != nil {
+		c.afterList(in)
+	}
+	return out, err
 }
 
 func (c *counting) CreateMultipartUpload(ctx context.Context, in *s3.CreateMultipartUploadInput, o ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
@@ -664,5 +670,32 @@ func TestRestoreReconcilesAtStartWhenAsked(t *testing.T) {
 		if got := next.Usage().Team("team-a").Bytes; got != c.want {
 			t.Errorf("reconcile at start %v: team-a = %d bytes, want %d", c.atStart, got, c.want)
 		}
+	}
+}
+
+// A write that lands after the reconcile listed its team but before the
+// reconcile replaced the count must survive the replacement.
+func TestAPutDuringTheReconcileListingIsNeverLost(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, teamblob.Options{})
+	put(t, f.store, "team-a", "cache/listed", "12345")
+	var once sync.Once
+	f.client.afterList = func(in *s3.ListObjectsV2Input) {
+		if in.Delimiter == nil && strings.Contains(aws.ToString(in.Prefix), "teams/team-a/") {
+			once.Do(func() { put(t, f.store, "team-a", "cache/late", "1234567890") })
+		}
+	}
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes < 15 || got.Objects < 2 {
+		t.Fatalf("team-a after a put during the listing = %+v, want both objects counted", got)
+	}
+	f.client.afterList = nil
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 15 || got.Objects != 2 {
+		t.Fatalf("team-a after a quiet reconcile = %+v, want exactly 15 bytes in 2 objects", got)
 	}
 }
