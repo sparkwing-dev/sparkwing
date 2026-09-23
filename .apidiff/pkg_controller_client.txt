@@ -101,7 +101,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	parentNodeID string,
 	retryOf string,
 	source string,
-	user string,
+	_ string,
 	repo string,
 	branch string,
 	triggerEnv map[string]string,
@@ -373,7 +373,6 @@ type StateWaiter struct {
 func (w StateWaiter) CancelTimeoutDuration() time.Duration
 type TriggerMeta struct {
 	Source string
-	User   string
 	Env    map[string]string
 }
 type TriggerRequest struct {

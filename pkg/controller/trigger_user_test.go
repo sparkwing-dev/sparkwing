@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -51,7 +52,9 @@ func TestTrigger_UserIsTheAuthenticatedPrincipal(t *testing.T) {
 	}
 }
 
-func TestTrigger_RefusesAUserNamedInTheBody(t *testing.T) {
+// Released CLIs still send trigger.user, and a CLI and a controller upgrade
+// independently, so the field is accepted and never trusted.
+func TestTrigger_IgnoresAUserNamedInTheBody(t *testing.T) {
 	st, ts, raw := newTriggerUserServer(t)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/triggers",
@@ -65,15 +68,19 @@ func TestTrigger_RefusesAUserNamedInTheBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a body that names its own user", resp.StatusCode)
+	var created struct {
+		RunID string `json:"run_id"`
 	}
-	runs, err := st.ListRuns(context.Background(), store.RunFilter{})
+	decodeErr := json.NewDecoder(resp.Body).Decode(&created)
+	_ = resp.Body.Close()
+	if resp.StatusCode/100 != 2 || decodeErr != nil || created.RunID == "" {
+		t.Fatalf("status = %d (%v, run %q), want a released CLI's body accepted", resp.StatusCode, decodeErr, created.RunID)
+	}
+	trig, err := st.GetTrigger(context.Background(), created.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 0 {
-		t.Fatalf("refused submission still created %d run(s)", len(runs))
+	if trig.TriggerUser != "alice" {
+		t.Fatalf("trigger user = %q, want the token's principal alice, never the body's mallory", trig.TriggerUser)
 	}
 }

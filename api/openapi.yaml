@@ -5182,10 +5182,14 @@ components:
           type: object
           x-sparkwing-go-type: pkg/controller.triggerReqMeta
           description: >-
-            The run is attributed to the authenticated principal that submits it; a `user` field is refused.
+            The run is attributed to the authenticated principal that submits it; a `user` field is accepted and ignored.
           required: [source]
           properties:
             source: {type: string}
+            user:
+              type: string
+              deprecated: true
+              description: Ignored. Released CLIs send it; the run's user is the authenticated principal.
             env:
               type: object
               additionalProperties: {type: string}

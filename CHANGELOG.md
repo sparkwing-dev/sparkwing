@@ -317,15 +317,6 @@ unlock.
   binaries. The chart refuses to render when any two of the three name the
   same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
   See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
-- **controller (Breaking):** a run is attributed to the credential that
-  submitted it. `POST /api/v1/triggers` took the run's user from
-  `trigger.user` in the body, so any caller could put a run under another
-  person's name. The controller now records the authenticated principal and
-  refuses a body that carries
-  `components.schemas.TriggerRequest.properties.trigger.properties.user`; the
-  CLI no longer sends it. See
-  [migration guide](docs/migrations/_unreleased.md#trigger-user-comes-from-the-credential).
-
 - **runner (Breaking):** a runner hands a run a cache grant, never the cache
   token. After each claim the trigger loop, pool runner and agent ask the
   controller for a grant for that run with their own runner token, send it on
@@ -546,6 +537,12 @@ unlock.
 
 ### Security
 
+- **controller:** a run is attributed to the credential that submitted it.
+  `POST /api/v1/triggers` took the run's user from `trigger.user` in the body,
+  so any caller could put a run under another person's name. The controller
+  now records the token's principal or the signed-in account's email and
+  ignores `trigger.user`, which released CLIs still send; the CLI no longer
+  sends it.
 - **controller:** stored secrets are sealed to their team, and a multi-team
   controller needs a key. A controller whose license allows more than one team
   refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,

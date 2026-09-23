@@ -695,10 +695,12 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, appendEventResp{Seq: seq})
 }
 
-// safety: the body names no user; the run is attributed to the credential
-// that submitted it, so a caller cannot put a run under someone else's name.
+// safety: the run is attributed to the credential that submitted it, so a
+// caller cannot put a run under someone else's name. User is still decoded
+// because released CLIs send it, and it is never read.
 type triggerReqMeta struct {
 	Source string            `json:"source,omitempty"`
+	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
 }
 

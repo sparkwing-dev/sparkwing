@@ -107,3 +107,4 @@ until the secret is set again.
 A self-hosted controller using the built-in cipher needs no change. Its first
 start reseals every row in place and logs how many it resealed; keep the same
 `SPARKWING_SECRETS_KEY` across the upgrade.
+

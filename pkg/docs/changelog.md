@@ -405,6 +405,18 @@ unlock.
 
 ### Fixed
 
+- **controller:** cancelling a run no runner has claimed finishes it as
+  `cancelled` at once. The cancel only flagged the trigger, so the run stayed
+  `pending` and the runner that later claimed it fetched source and started.
+  A claim now refuses a trigger that carries a cancel request; a run a runner
+  already holds still winds down through its lease heartbeat.
+
+- **controller:** a member removed from a team lands in a team they still
+  belong to. Their session stayed on the team they had left, so every request
+  answered `403 missing_scope` and `/me` showed no active team. Removal now
+  moves the account's sessions to its personal team, or its oldest remaining
+  membership, and an account with no team left is refused with `403 no_team`.
+
 - **web:** a password-signed-in operator no longer reloads the dashboard forever
   The controller refuses `GET /api/v1/me` for an operator session, which holds
   no team identity, and the dashboard read that `401` as its own session ending
@@ -525,6 +537,12 @@ unlock.
 
 ### Security
 
+- **controller:** a run is attributed to the credential that submitted it.
+  `POST /api/v1/triggers` took the run's user from `trigger.user` in the body,
+  so any caller could put a run under another person's name. The controller
+  now records the token's principal or the signed-in account's email and
+  ignores `trigger.user`, which released CLIs still send; the CLI no longer
+  sends it.
 - **controller:** stored secrets are sealed to their team, and a multi-team
   controller needs a key. A controller whose license allows more than one team
   refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,
