@@ -185,6 +185,14 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 		return fmt.Errorf("direct source: %w", err)
 	}
 
+	configured, err := fetch("-C", mirror, "config", "--get", "core.sshCommand")
+	// safety: git exits 1 when the key is unset; any other failure is a config the fetch cannot read either.
+	var exitErr *exec.ExitError
+	if err != nil && (!errors.As(err, &exitErr) || exitErr.ExitCode() != 1) {
+		return fmt.Errorf("direct source: %w", err)
+	}
+	fetchEnv = append(fetchEnv, "GIT_SSH_COMMAND="+directSSHCommand(fetchEnv, configured))
+
 	target := sha
 	if sha == "" {
 		if _, err := fetch("-C", mirror, "fetch", "--quiet", "--no-tags", "--depth", "1", "--",
@@ -224,6 +232,41 @@ func directGitEnv(base []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+// directSSHOptions keep an ssh fetch from prompting, trusting a host key it
+// has not seen, or lending the fetched host this process's agent or ports.
+const directSSHOptions = " -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
+
+// directSSHCommand is the GIT_SSH_COMMAND a fetch runs: the ssh command git
+// would otherwise have picked from env and configured (core.sshCommand), in
+// git's own order, with directSSHOptions appended. ssh keeps the first value
+// it reads for an option, so an -o the user's own command already passes wins;
+// a non-OpenSSH program such as plink fails on the options rather than
+// running unhardened.
+func directSSHCommand(env []string, configured string) string {
+	lookup := func(key string) string {
+		value := ""
+		for _, item := range env {
+			if name, v, ok := strings.Cut(item, "="); ok && name == key {
+				value = v
+			}
+		}
+		return value
+	}
+	base := lookup("GIT_SSH_COMMAND")
+	if base == "" {
+		base = configured
+	}
+	if base == "" {
+		if program := lookup("GIT_SSH"); program != "" {
+			base = "'" + strings.ReplaceAll(program, "'", `'\''`) + "'"
+		}
+	}
+	if base == "" {
+		base = "ssh"
+	}
+	return base + directSSHOptions
 }
 
 // directLocalGitEnv is fetchEnv for every git command that touches only the

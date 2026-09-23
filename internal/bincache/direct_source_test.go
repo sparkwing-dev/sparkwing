@@ -290,3 +290,80 @@ func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
 		})
 	}
 }
+
+// fakeSSH is an ssh stand-in that appends its argv to the returned file, one
+// argument per line, and fails.
+func fakeSSH(t *testing.T) (program, argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argsFile = filepath.Join(dir, "args")
+	program = filepath.Join(dir, "fake-ssh")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '" + argsFile + "'\nexit 1\n"
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return program, argsFile
+}
+
+func TestDirectCheckoutHardensTheUsersSSHCommand(t *testing.T) {
+	for _, source := range []string{"GIT_SSH_COMMAND", "core.sshCommand", "GIT_SSH"} {
+		t.Run(source, func(t *testing.T) {
+			program, argsFile := fakeSSH(t)
+			for _, name := range []string{"GIT_SSH_COMMAND", "GIT_SSH", "GIT_SSH_VARIANT"} {
+				t.Setenv(name, "")
+				_ = os.Unsetenv(name)
+			}
+			t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+			wantUserArgs := true
+			switch source {
+			case "GIT_SSH_COMMAND":
+				t.Setenv("GIT_SSH_COMMAND", program+" -i /keys/user")
+			case "core.sshCommand":
+				global := filepath.Join(t.TempDir(), "gitconfig")
+				writeTestFile(t, global, "[core]\n\tsshCommand = "+program+" -i /keys/user\n")
+				t.Setenv("GIT_CONFIG_GLOBAL", global)
+			case "GIT_SSH":
+				t.Setenv("GIT_SSH", program)
+				wantUserArgs = false
+			}
+			err := directCheckout(context.Background(), t.TempDir(), "ssh://git@example.invalid/o/r.git",
+				"main", testSHA1, filepath.Join(t.TempDir(), "run"), "ssh")
+			if err == nil {
+				t.Fatal("the fake ssh cannot serve a fetch")
+			}
+			raw, readErr := os.ReadFile(argsFile)
+			if readErr != nil {
+				t.Fatalf("the user's ssh program never ran: %v (fetch: %v)", readErr, err)
+			}
+			args := string(raw)
+			want := []string{"BatchMode=yes", "StrictHostKeyChecking=yes", "ForwardAgent=no", "ClearAllForwardings=yes"}
+			if wantUserArgs {
+				want = append(want, "/keys/user")
+			}
+			for _, w := range want {
+				if !strings.Contains(args, w+"\n") {
+					t.Errorf("ssh argv lacks %q:\n%s", w, args)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectSSHCommandPrefersGitsOwnOrder(t *testing.T) {
+	cases := []struct {
+		name       string
+		env        []string
+		configured string
+		want       string
+	}{
+		{"default", nil, "", "ssh"},
+		{"env over config", []string{"GIT_SSH_COMMAND=ssh -i a", "GIT_SSH=/bin/b"}, "ssh -i c", "ssh -i a"},
+		{"config over GIT_SSH", []string{"GIT_SSH=/bin/b"}, "ssh -i c", "ssh -i c"},
+		{"GIT_SSH is one quoted word", []string{"GIT_SSH=/opt/it's ssh"}, "", `'/opt/it'\''s ssh'`},
+	}
+	for _, tc := range cases {
+		if got := directSSHCommand(tc.env, tc.configured); got != tc.want+directSSHOptions {
+			t.Errorf("%s: directSSHCommand = %q, want %q", tc.name, got, tc.want+directSSHOptions)
+		}
+	}
+}
