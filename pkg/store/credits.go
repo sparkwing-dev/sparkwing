@@ -398,17 +398,17 @@ var nodesCreditBillingCols = map[string]string{
 }
 
 // platformSetupFailures are the failure reasons that mean the platform, not
-// the customer's pipeline, stopped a node before its execution started: the
-// runner vanished or lost its lease, no machine of the class came free, or
-// the log service refused or dropped the node's writes. A node that fails
-// this way before execution gets back everything its claim billed; any other
-// failure before execution, such as a compile error, keeps its setup billed.
+// the customer's pipeline, stopped a node before its execution started: no
+// machine of the class came free, or the log service refused or dropped the
+// node's writes. A node that fails this way before execution gets back
+// everything its claim billed; any other failure before execution, such as a
+// compile error, keeps its setup billed. A lost runner or lease is not here:
+// its machine ran until the lease ran out, and the recovery that clears the
+// claim bills it to there.
 var platformSetupFailures = map[string]bool{
-	FailureAgentLost:          true,
-	FailureRunnerLeaseExpired: true,
-	FailureQueueTimeout:       true,
-	FailureLogsAuth:           true,
-	FailureLogsDropped:        true,
+	FailureQueueTimeout: true,
+	FailureLogsAuth:     true,
+	FailureLogsDropped:  true,
 }
 
 // safety: a metered trigger claim reserves from this instant, and zero means
@@ -2131,9 +2131,8 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
-// expiredClaim is a started node whose claim lapsed with its charge window
-// open, the token that held it, and when the lease that stopped being renewed
-// ran out.
+// expiredClaim is a node whose claim lapsed with its charge window open, the
+// token that held it, and when the lease that stopped being renewed ran out.
 type expiredClaim struct {
 	runID, nodeID, tokenPrefix string
 	leaseNS                    int64
@@ -2142,7 +2141,9 @@ type expiredClaim struct {
 // safety: the holder stopped renewing, so the node ran until its lease ran
 // out and no later; the interval since the last charge is billed to there,
 // under the same per-charge cap a heartbeat is held to, before the claim that
-// anchors it is cleared.
+// anchors it is cleared. Billing starts when the machine starts work, so a
+// lease lost before execution began is billed the same way; a claim whose
+// machine never started is refunded whole by the settle itself.
 func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
 	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
 		time.Unix(0, min(claim.leaseNS, nowNS)), true)

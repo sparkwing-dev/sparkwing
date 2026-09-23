@@ -73,10 +73,12 @@ minute pays for a minute.
 A node whose machine never started gets its reservation back: a pod that never
 came up, a claim reaped before its pod renewed it. A node the platform stops
 before its execution starts gets back everything its claim billed, setup
-included. That covers a lost runner (`agent_lost`), an expired runner lease
-(`runner_lease_expired`), a claim reaped before execution, no machine of the
-class coming free (`queue_timeout`), and a log service that refused or dropped
-the node's writes (`logs_auth`, `logs_dropped`). Any other end before
+included. That covers no machine of the class coming free (`queue_timeout`)
+and a log service that refused or dropped the node's writes (`logs_auth`,
+`logs_dropped`). A runner that stops renewing its claim, before or after
+execution starts, ran until its lease ran out: when the reaper or agent-loss
+recovery clears the claim, the seconds since its last charge are billed to the
+lease's end, under the per-charge cap. Any other end before
 execution is the pipeline's own and keeps its setup billed: a compile error, a
 source fetch the repository refused, a cancellation, an out-of-memory kill. A
 platform failure after execution starts is billed like any other finish.

@@ -315,7 +315,9 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	}
 }
 
-func TestReapExpiredNodeClaimRefundsAReservationWhenExecutionNeverStarts(t *testing.T) {
+// A queue claim bills from the claim, so a lease lost before execution began
+// keeps the minimum its machine already ran for.
+func TestReapExpiredNodeClaimKeepsTheMinimumWhenExecutionNeverStarts(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
@@ -336,8 +338,8 @@ func TestReapExpiredNodeClaimRefundsAReservationWhenExecutionNeverStarts(t *test
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if balance != granted {
-		t.Fatalf("balance = %d, want the full grant %d restored", balance, granted)
+	if want := granted - store.DefaultCreditRateMicro/2*store.MinBillableSeconds; balance != want {
+		t.Fatalf("balance = %d, want %d: the grant less the two-core minimum", balance, want)
 	}
 	n, err := s.GetNode(ctx, "run-expired", "build")
 	if err != nil {

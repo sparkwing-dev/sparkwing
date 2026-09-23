@@ -191,8 +191,8 @@ func TestSetupRefundFollowsWhoseFailureItWas(t *testing.T) {
 		started  bool
 		refunded bool
 	}{
-		{"agent lost during setup", "failed", store.FailureAgentLost, false, true},
-		{"runner lease expired during setup", "failed", store.FailureRunnerLeaseExpired, false, true},
+		{"agent lost during setup", "failed", store.FailureAgentLost, false, false},
+		{"runner lease expired during setup", "failed", store.FailureRunnerLeaseExpired, false, false},
 		{"no machine came free", "failed", store.FailureQueueTimeout, false, true},
 		{"log service refused the runner", "failed", store.FailureLogsAuth, false, true},
 		{"log service dropped the writes", "failed", store.FailureLogsDropped, false, true},
@@ -245,12 +245,12 @@ func TestSetupRefundFollowsWhoseFailureItWas(t *testing.T) {
 	}
 }
 
-// A claim reaped before execution started is a runner that stopped renewing,
-// which the platform answers for, so the setup it billed comes back.
-func TestReapBeforeExecutionRefundsTheSetupTheClaimBilled(t *testing.T) {
+// A claim reaped before execution started is a machine that ran setup until
+// its lease ran out, so the setup it billed stands.
+func TestReapBeforeExecutionKeepsTheSetupTheClaimBilled(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	claimant, granted := fundedMeteredNode(t, s, "run-reaped")
+	claimant, _ := fundedMeteredNode(t, s, "run-reaped")
 	n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
 	if err != nil || n == nil {
 		t.Fatalf("claim: %v", err)
@@ -261,10 +261,11 @@ func TestReapBeforeExecutionRefundsTheSetupTheClaimBilled(t *testing.T) {
 		t.Fatalf("setup heartbeat = %+v, %v", res.Charge, err)
 	}
 	expireNodeLease(t, s, n.RunID, n.NodeID, time.Now().Add(-time.Minute))
+	before := mustBalance(t, s)
 	if _, err := s.ReapExpiredNodeClaims(ctx); err != nil {
 		t.Fatalf("reap: %v", err)
 	}
-	if got := mustBalance(t, s); got != granted {
-		t.Fatalf("balance = %d, want the whole claim refunded to %d", got, granted)
+	if got := mustBalance(t, s); got != before {
+		t.Fatalf("balance = %d, want %d: the machine ran setup, so its billing stands", got, before)
 	}
 }

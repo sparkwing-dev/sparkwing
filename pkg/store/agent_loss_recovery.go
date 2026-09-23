@@ -207,16 +207,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	for _, runID := range runOrder {
 		items := byRun[runID]
 		for _, item := range items {
-			if !item.started && item.chargeWindowOpen {
-				team, err := creditTeamForRunTx(ctx, tx, item.runID)
-				if err != nil {
-					return nil, err
-				}
-				if _, err := refundClaimTx(
-					ctx, tx, team, item.runID, item.nodeID, now.UnixNano()); err != nil {
-					return nil, err
-				}
-			} else if item.chargeWindowOpen {
+			if item.chargeWindowOpen {
 				if err := s.settleExpiredClaimTx(ctx, tx, expiredClaim{
 					runID: item.runID, nodeID: item.nodeID, tokenPrefix: item.tokenPrefix, leaseNS: item.leaseNS,
 				}, now.UnixNano()); err != nil {

@@ -357,10 +357,11 @@ unlock.
   from the queue or accepting an offer bills from its claim, and a node a
   dispatcher claims before creating its Job bills from the pod's first claim
   renewal, which `run-node` now sends as the pod starts, or its execution
-  start. A node the platform stops before its execution starts (`agent_lost`,
-  `runner_lease_expired`, `queue_timeout`, `logs_auth`, `logs_dropped`, or a
-  reaped claim) gets back everything its claim billed; any other end before
-  execution keeps its setup billed. Schema v56 adds
+  start. A node the platform stops before its execution starts
+  (`queue_timeout`, `logs_auth`, `logs_dropped`) gets back everything its claim
+  billed, as does a dispatcher's claim whose pod never started; a lost runner
+  or lease is billed to the lease's end, and any other end before execution
+  keeps its setup billed. Schema v56 adds
   `nodes.credit_billing_from`.
 
 - **credits:** a team's balance holds at most $5,000, held when a checkout
@@ -493,10 +494,11 @@ unlock.
 
 ### Fixed
 
-- **credits:** a started metered node whose runner stopped renewing now pays
-  for the seconds between its last charge and its lease's end, under the
-  per-charge cap, when the reaper or agent-loss recovery clears its claim.
-  Those seconds used to go unbilled.
+- **credits:** a metered node whose runner stopped renewing now pays for the
+  seconds between its last charge and its lease's end, under the per-charge
+  cap, when the reaper or agent-loss recovery clears its claim, whether or not
+  execution had started. Those seconds used to go unbilled, and a lease lost
+  before execution used to be refunded whole although its machine had run.
 
 - **runner:** a pooled runner whose node fails before it starts, for example
   a pipeline that does not compile, finishes the node as failed with that
