@@ -528,46 +528,65 @@ type Sized struct {
 }
 
 // DeleteMany removes the named objects of team in batches of a thousand
-// per request. Sizes the caller supplies adjust the running count; an
-// object that was already gone is corrected at the next reconcile.
+// per request. The running count drops by the sizes the caller supplies,
+// for the keys the store confirmed deleted; a key it refused stays
+// counted, and one that was already gone is corrected at the next
+// reconcile.
 func (s *Store) DeleteMany(ctx context.Context, team string, objs []Sized) error {
-	keys := make([]string, 0, len(objs))
-	var bytes int64
+	keys := make([]sizedKey, 0, len(objs))
 	for _, o := range objs {
 		k, err := s.Key(team, o.Rel)
 		if err != nil {
 			return err
 		}
-		keys = append(keys, k)
-		bytes += o.Size
+		keys = append(keys, sizedKey{key: k, size: o.Size})
 	}
-	if err := s.deleteKeys(ctx, keys); err != nil {
-		return err
-	}
-	s.usage.add(team, -bytes, -int64(len(objs)))
-	return nil
+	d, err := s.deleteKeys(ctx, keys)
+	s.usage.add(team, -d.Bytes, -d.Objects)
+	return err
 }
 
-func (s *Store) deleteKeys(ctx context.Context, keys []string) error {
+type sizedKey struct {
+	key  string
+	size int64
+}
+
+// deleteKeys reports what the store confirmed deleted: every key of a
+// batch it answered, less the keys it listed as failed. A batch that
+// failed outright deleted nothing the caller can count.
+func (s *Store) deleteKeys(ctx context.Context, keys []sizedKey) (Deleted, error) {
+	var d Deleted
+	var errs []error
 	for start := 0; start < len(keys); start += deleteBatch {
-		end := min(start+deleteBatch, len(keys))
-		ids := make([]types.ObjectIdentifier, 0, end-start)
-		for _, k := range keys[start:end] {
-			ids = append(ids, types.ObjectIdentifier{Key: aws.String(k)})
+		batch := keys[start:min(start+deleteBatch, len(keys))]
+		ids := make([]types.ObjectIdentifier, 0, len(batch))
+		for _, k := range batch {
+			ids = append(ids, types.ObjectIdentifier{Key: aws.String(k.key)})
 		}
 		out, err := s.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
 			Bucket: aws.String(s.bucket),
 			Delete: &types.Delete{Objects: ids, Quiet: aws.Bool(true)},
 		})
 		if err != nil {
-			return fmt.Errorf("teamblob: delete %d objects: %w", len(ids), err)
+			errs = append(errs, fmt.Errorf("teamblob: delete %d objects: %w", len(ids), err))
+			break
+		}
+		failed := map[string]bool{}
+		for _, e := range out.Errors {
+			failed[aws.ToString(e.Key)] = true
+		}
+		for _, k := range batch {
+			if !failed[k.key] {
+				d.Objects++
+				d.Bytes += k.size
+			}
 		}
 		if len(out.Errors) > 0 {
 			e := out.Errors[0]
-			return fmt.Errorf("teamblob: delete: %d object(s) failed; %s: %s", len(out.Errors), aws.ToString(e.Key), aws.ToString(e.Code))
+			errs = append(errs, fmt.Errorf("teamblob: delete: %d object(s) failed; %s: %s", len(out.Errors), aws.ToString(e.Key), aws.ToString(e.Code)))
 		}
 	}
-	return nil
+	return d, errors.Join(errs...)
 }
 
 // ErrListTruncated reports a listing that stopped at its page cap.
@@ -645,39 +664,40 @@ type Deleted struct {
 
 // DeletePrefix removes every object of team under relPrefix: one LIST
 // per thousand objects and one DeleteObjects per thousand. An empty
-// relPrefix on a team deletes the team's whole namespace.
+// relPrefix on a team deletes the team's whole namespace. The running
+// count and the result carry only deletions the store confirmed.
 func (s *Store) DeletePrefix(ctx context.Context, team, relPrefix string) (Deleted, error) {
 	full, _, err := s.listPrefix(team, relPrefix)
 	if err != nil {
 		return Deleted{}, err
 	}
 	var d Deleted
-	var keys []string
-	flush := func() error {
-		if len(keys) == 0 {
-			return nil
-		}
-		err := s.deleteKeys(ctx, keys)
-		keys = keys[:0]
-		return err
-	}
-	var werr error
-	walkErr := s.walk(ctx, full, func(o types.Object) {
-		if werr != nil {
+	var keys []sizedKey
+	var derr error
+	flush := func() {
+		if len(keys) == 0 || derr != nil {
 			return
 		}
-		keys = append(keys, aws.ToString(o.Key))
-		d.Objects++
-		d.Bytes += aws.ToInt64(o.Size)
+		got, err := s.deleteKeys(ctx, keys)
+		d.Objects += got.Objects
+		d.Bytes += got.Bytes
+		derr = err
+		keys = keys[:0]
+	}
+	walkErr := s.walk(ctx, full, func(o types.Object) {
+		if derr != nil {
+			return
+		}
+		keys = append(keys, sizedKey{key: aws.ToString(o.Key), size: aws.ToInt64(o.Size)})
 		if len(keys) == deleteBatch {
-			werr = flush()
+			flush()
 		}
 	})
-	if werr == nil {
-		werr = flush()
+	if walkErr == nil {
+		flush()
 	}
 	s.usage.add(team, -d.Bytes, -d.Objects)
-	return d, errors.Join(walkErr, werr)
+	return d, errors.Join(walkErr, derr)
 }
 
 // DeleteTeam removes team's whole namespace and zeroes its count. It is

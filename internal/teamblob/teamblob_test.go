@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
@@ -34,6 +35,8 @@ type counting struct {
 	mu     sync.Mutex
 	calls  map[string]int
 	failOn map[string]error
+	// keepKey makes a batch delete report the matching keys as failed.
+	keepKey func(key string) bool
 }
 
 func (c *counting) note(op string) error {
@@ -97,7 +100,29 @@ func (c *counting) DeleteObjects(ctx context.Context, in *s3.DeleteObjectsInput,
 	if err := c.note("DeleteObjects"); err != nil {
 		return nil, err
 	}
-	return c.Client.DeleteObjects(ctx, in, o...)
+	if c.keepKey == nil {
+		return c.Client.DeleteObjects(ctx, in, o...)
+	}
+	var send []types.ObjectIdentifier
+	var failed []types.Error
+	for _, id := range in.Delete.Objects {
+		if c.keepKey(aws.ToString(id.Key)) {
+			failed = append(failed, types.Error{Key: id.Key, Code: aws.String("AccessDenied")})
+		} else {
+			send = append(send, id)
+		}
+	}
+	out := &s3.DeleteObjectsOutput{}
+	if len(send) > 0 {
+		in.Delete.Objects = send
+		res, err := c.Client.DeleteObjects(ctx, in, o...)
+		if err != nil {
+			return nil, err
+		}
+		out = res
+	}
+	out.Errors = append(out.Errors, failed...)
+	return out, nil
 }
 
 func (c *counting) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, o ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
@@ -520,5 +545,45 @@ func TestRepeatedFailuresPauseWrites(t *testing.T) {
 	}
 	if got := f.client.count("PutObject"); got != 3 {
 		t.Fatalf("50 writes against a failing bucket sent %d PUTs, want 3", got)
+	}
+}
+
+// The running count drops only by deletions the store confirmed: a key a
+// batch delete reports as failed, or a listing that fails, leaves the
+// count holding what is still stored.
+func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, teamblob.Options{})
+	ctx := context.Background()
+	for i := range 10 {
+		put(t, f.store, "team-a", fmt.Sprintf("artifacts/job/%02d", i), "12345")
+	}
+	f.client.keepKey = func(key string) bool { return strings.HasSuffix(key, "/03") || strings.HasSuffix(key, "/07") }
+	if _, err := f.store.DeletePrefix(ctx, "team-a", "artifacts/job/"); err == nil {
+		t.Fatal("a delete with refused keys reported success")
+	}
+	if u := f.store.Usage().Team("team-a"); u.Objects != 2 || u.Bytes != 10 {
+		t.Fatalf("count after a partly refused delete = %+v, want the 2 objects still stored", u)
+	}
+	objs, err := f.store.List(ctx, "team-a", "artifacts/job/")
+	if err != nil || len(objs) != 2 {
+		t.Fatalf("stored after the delete: %d objects, %v", len(objs), err)
+	}
+
+	f.client.keepKey = nil
+	f.client.failOn["ListObjectsV2"] = errors.New("503 SlowDown")
+	if _, err := f.store.DeletePrefix(ctx, "team-a", "artifacts/job/"); err == nil {
+		t.Fatal("a delete whose listing failed reported success")
+	}
+	if u := f.store.Usage().Team("team-a"); u.Objects != 2 {
+		t.Fatalf("a failed listing moved the count: %+v", u)
+	}
+	delete(f.client.failOn, "ListObjectsV2")
+	f.client.failOn["DeleteObjects"] = errors.New("503 SlowDown")
+	if err := f.store.DeleteMany(ctx, "team-a", []teamblob.Sized{{Rel: "artifacts/job/03", Size: 5}}); err == nil {
+		t.Fatal("a refused batch delete reported success")
+	}
+	if u := f.store.Usage().Team("team-a"); u.Objects != 2 {
+		t.Fatalf("a refused batch moved the count: %+v", u)
 	}
 }
