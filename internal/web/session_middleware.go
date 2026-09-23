@@ -108,17 +108,21 @@ type webPrincipal struct {
 
 	sessionID string
 	csrfToken string
+	// accountBound marks a signed-up account's session, which reads its
+	// team's view from the controller rather than this dashboard's own.
+	accountBound bool
 }
 
 type webPrincipalCtxKey struct{}
 
 func contextWithWebPrincipal(ctx context.Context, sess *sessionResp, sessionID string) context.Context {
 	return context.WithValue(ctx, webPrincipalCtxKey{}, &webPrincipal{
-		Name:      sess.Principal,
-		Scopes:    sess.Scopes,
-		ExpiresAt: time.Unix(sess.ExpiresAt, 0).UTC(),
-		sessionID: sessionID,
-		csrfToken: sess.CSRFToken,
+		Name:         sess.Principal,
+		Scopes:       sess.Scopes,
+		ExpiresAt:    time.Unix(sess.ExpiresAt, 0).UTC(),
+		sessionID:    sessionID,
+		csrfToken:    sess.CSRFToken,
+		accountBound: sess.accountBound(),
 	})
 }
 

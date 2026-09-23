@@ -9,6 +9,7 @@ let getNodeStreamUrl!: typeof import("./api").getNodeStreamUrl;
 let cancelRun!: typeof import("./api").cancelRun;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
 let triggerRun!: typeof import("./api").triggerRun;
+let pipelinesByName!: typeof import("./api").pipelinesByName;
 
 before(async () => {
   const runtime = globalThis as unknown as { window?: RuntimeWindow };
@@ -21,6 +22,7 @@ before(async () => {
       cancelRun,
       getConnectionStatus,
       triggerRun,
+      pipelinesByName,
     } = await import("./api"));
   } finally {
     if (hadWindow) runtime.window = previousWindow;
@@ -212,5 +214,21 @@ describe("session expiry", () => {
       if (hadDocument) runtime.document = previousDocument;
       else delete runtime.document;
     }
+  });
+});
+
+describe("pipelinesByName", () => {
+  it("keeps a team list's newest-first order and its last run", () => {
+    const got = pipelinesByName([
+      { name: "deploy", last_status: "failed", last_run_at: "2026-09-23T10:00:00Z" },
+      { name: "build" },
+    ]);
+    assert.deepEqual(Object.keys(got), ["deploy", "build"]);
+    assert.equal(got.deploy.last_status, "failed");
+    assert.deepEqual(got.build.args, []);
+  });
+
+  it("passes the local name-keyed map through", () => {
+    assert.deepEqual(pipelinesByName({ lint: { args: [] } }), { lint: { args: [] } });
   });
 });

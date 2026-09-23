@@ -2432,6 +2432,30 @@ paths:
                     type: string
                     description: Echoed back only when the request filtered by pipeline.
 
+  /api/v1/pipelines:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [pipelines]
+      summary: List the caller's team's pipelines, most recently active first.
+      description: |
+        A pipeline appears once the caller's team has a run, a trigger or a
+        declared schedule for it. Each entry carries the pipeline's newest run
+        by start time; a pipeline that has only been queued or scheduled has
+        none. The team is the caller's, never one named in the request.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+          description: Most pipelines to return; values above 200 read as 200.
+      responses:
+        "200":
+          description: The team's pipelines.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PipelinesList"}
+        "400": {description: limit is not a positive integer.}
+        "403": {description: The credential lacks the scope or acts for no team.}
+
   /api/v1/pipelines/{name}/latest:
     parameters:
       - in: path
@@ -4060,6 +4084,38 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/StorageSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/admin/usage-metrics:
+    get:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Read the deployment's weekly usage for its operator.
+      description: |
+        Counts, per Monday-to-Monday UTC week, the teams with at least one
+        run started, those runs split into cloud and connected-machine runs,
+        how many runs each active team started, and the accounts and teams
+        created. For teams created in the window it reports the time from
+        the team's creation to the finish of its first successful run. Every
+        figure comes from the controller's own tables and names no team,
+        account or source. The default team never counts.
+      parameters:
+        - in: query
+          name: weeks
+          schema: {type: integer, minimum: 1, maximum: 104, default: 12}
+          description: Whole weeks to report, ending with the week in progress.
+        - in: query
+          name: exclude_team
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+          description: More teams to leave out, such as the operator's own test teams.
+      responses:
+        "200":
+          description: The weekly usage.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UsageMetrics"}
+        "400": {description: weeks is outside 1 to 104.}
 
   /api/v1/egress:
     get:
@@ -5917,6 +5973,65 @@ components:
       properties:
         name: {type: string}
         bytes: {type: integer, format: int64}
+    PipelinesList:
+      x-sparkwing-go-type: pkg/controller.pipelinesList
+      type: object
+      properties:
+        pipelines: {type: array, items: {$ref: "#/components/schemas/PipelineSummary"}}
+    PipelineSummary:
+      x-sparkwing-go-type: pkg/store.PipelineSummary
+      type: object
+      description: One pipeline a team has run, queued or scheduled.
+      properties:
+        name: {type: string}
+        last_activity_at: {type: string, format: date-time, description: Newest run start or trigger; absent for a pipeline known only from a schedule.}
+        last_run_id: {type: string}
+        last_status: {type: string}
+        last_run_at: {type: string, format: date-time}
+        last_finished_at: {type: string, format: date-time}
+    UsageMetrics:
+      x-sparkwing-go-type: pkg/controller.usageMetricsResponse
+      type: object
+      properties:
+        generated_at: {type: string, format: date-time}
+        excluded_teams: {type: array, items: {type: string}}
+        weeks: {type: array, description: Oldest first; the last entry is the week in progress., items: {$ref: "#/components/schemas/UsageWeek"}}
+        time_to_first_green: {$ref: "#/components/schemas/FirstGreenStats"}
+    UsageWeek:
+      x-sparkwing-go-type: pkg/store.UsageWeek
+      type: object
+      properties:
+        week_start: {type: string, format: date-time}
+        active_teams: {type: integer}
+        runs: {type: integer}
+        cloud_runs: {type: integer, description: Runs with at least one node on a cloud runner.}
+        connected_runs: {type: integer, description: Runs whose every node ran on a machine the team connected.}
+        teams_by_runs: {$ref: "#/components/schemas/RunsBands"}
+        median_runs_per_active_team: {type: number}
+        new_accounts: {type: integer}
+        new_teams: {type: integer}
+    RunsBands:
+      x-sparkwing-go-type: pkg/store.RunsBands
+      type: object
+      description: Active teams counted by how many runs each started in the week.
+      properties:
+        runs_1: {type: integer}
+        runs_2_to_9: {type: integer}
+        runs_10_to_49: {type: integer}
+        runs_50_plus: {type: integer}
+    FirstGreenStats:
+      x-sparkwing-go-type: pkg/store.FirstGreenStats
+      type: object
+      description: Time from a team's creation to the finish of its first successful run, for teams created in the window.
+      properties:
+        teams_created: {type: integer}
+        teams_green: {type: integer}
+        median_seconds: {type: integer, format: int64}
+        p90_seconds: {type: integer, format: int64}
+        within_hour: {type: integer}
+        within_day: {type: integer}
+        within_week: {type: integer}
+        later: {type: integer}
     StorageState:
       x-sparkwing-go-type: pkg/controller.storageStateJSON
       type: object

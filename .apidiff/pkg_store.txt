@@ -727,6 +727,16 @@ const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
 const FailureVerify = "verify"
+type FirstGreenStats struct {
+	TeamsCreated  int
+	TeamsGreen    int
+	MedianSeconds int64
+	P90Seconds    int64
+	WithinHour    int
+	WithinDay     int
+	WithinWeek    int
+	Later         int
+}
 func FormatCredits(micro int64) string
 var FreeTierQuota = StorageQuota{
 	Tier:             StorageTierFree,
@@ -1063,6 +1073,7 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, installation int64, suspended bool, now time.Time) error
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
+func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, exclude []Team) (*UsageMetrics, error)
 const OperatorScope = "admin"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -1117,6 +1128,16 @@ type PipelineProfile struct {
 	PrevPeakMemoryBytes int64
 
 	PrevSustainedCores float64
+}
+type PipelineSummary struct {
+	Name string
+
+	LastActivityAt time.Time
+
+	LastRunID      string
+	LastStatus     string
+	LastRunAt      *time.Time
+	LastFinishedAt *time.Time
 }
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
@@ -1285,6 +1306,12 @@ const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000
 const RunnerScaleWindow = 30 * 24 * time.Hour
 const RunnerTokenLifetime = 90 * 24 * time.Hour
+type RunsBands struct {
+	One            int
+	TwoToNine      int
+	TenToFortyNine int
+	FiftyPlus      int
+}
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -1846,6 +1873,7 @@ func (t *Tenant) ListGitHubWebhookBindings(ctx context.Context, pipeline string)
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error)
 func (t *Tenant) ListPendingApprovals(ctx context.Context) (_ []*Approval, err error)
 func (t *Tenant) ListPipelineProfiles(ctx context.Context, pipeline string) ([]PipelineProfile, error)
+func (t *Tenant) ListPipelines(ctx context.Context, limit int) ([]PipelineSummary, error)
 func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error)
 func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error)
 func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error)
@@ -1998,6 +2026,25 @@ type UnpricedCPUClassError struct {
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error
+type UsageMetrics struct {
+	Weeks      []UsageWeek
+	FirstGreen FirstGreenStats
+}
+type UsageWeek struct {
+	WeekStart time.Time
+
+	ActiveTeams int
+	Runs        int
+
+	CloudRuns     int
+	ConnectedRuns int
+
+	TeamsByRuns             RunsBands
+	MedianRunsPerActiveTeam float64
+	NewAccounts             int
+	NewTeams                int
+}
+func UsageWeekStart(at time.Time) time.Time
 type User struct {
 	Name        string
 	PWHash      string

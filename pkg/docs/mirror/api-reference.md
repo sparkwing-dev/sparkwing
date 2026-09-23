@@ -8,6 +8,7 @@ Every route the controller and logs service register, with the scope each requir
 | Method | Path | Scope |
 |---|---|---|
 | `DELETE` | `/api/v1/accounts/{account}` | `admin` |
+| `GET` | `/api/v1/admin/usage-metrics` | `admin` |
 | `GET` | `/api/v1/agents` | `runs.read` |
 | `PUT` | `/api/v1/agents/{name}` | `admin` |
 | `POST` | `/api/v1/agents/{name}/heartbeat` | `nodes.claim` |
@@ -68,6 +69,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
+| `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
 | `POST` | `/api/v1/pipelines/{name}/profile/contention` | `runs.state` |

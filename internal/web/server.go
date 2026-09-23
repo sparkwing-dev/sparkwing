@@ -245,7 +245,6 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
 
 	authedMux.HandleFunc("GET /api/v1/capabilities", dashboardCapabilitiesHandler(opts))
-	authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler())
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles", capacityProfilesHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
@@ -253,9 +252,11 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		authedMux.Handle("/api/v1/logs/", logsProxy(opts))
 	}
 	if opts.ControllerURL != "" {
-		authedMux.Handle("/api/v1/",
-			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true)))
+		controllerAPI := proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true))
+		authedMux.Handle("/api/v1/", controllerAPI)
+		authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler(controllerAPI))
 	} else {
+		authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler(nil))
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)

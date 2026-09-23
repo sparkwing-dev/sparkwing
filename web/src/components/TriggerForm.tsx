@@ -51,7 +51,9 @@ export default function TriggerForm({
 
   const meta = pipelines[selectedPipeline];
   const args = meta?.args || [];
-  const pipelineNames = Object.keys(pipelines).sort();
+  // A team's list arrives most recently run first, which is the order worth
+  // suggesting; the local list arrives sorted by name.
+  const pipelineNames = Object.keys(pipelines);
   const source = namesSource ? triggerGit(repository, branch) : null;
   const sourceProblem =
     source && !source.ok && repository.trim() !== "" ? source.problem : null;
