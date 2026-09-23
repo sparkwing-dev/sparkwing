@@ -112,7 +112,7 @@ unlock.
   `GET /auth/google/callback` run the flow on the dashboard host with the state
   and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
   whose state does not match that cookie is refused. The nav shows the active
-  team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+  team and your role and switches teams. See [auth](docs/auth.md#google-and-github-sign-in).
 - **web:** Sign in with Google or GitHub on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled`, the sign-in page
   offers each provider `auth.providers` lists, `google` with Google's standard
@@ -223,7 +223,7 @@ unlock.
   `GET /auth/google/callback` run the flow on the dashboard host with the state
   and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
   whose state does not match that cookie is refused. The nav shows the active
-  team and your role and switches teams. See [auth](docs/auth.md#google-sign-in).
+  team and your role and switches teams. See [auth](docs/auth.md#google-and-github-sign-in).
 - **web:** Sign in with Google or GitHub on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled`, the sign-in page
   offers each provider `auth.providers` lists, `google` with Google's standard
