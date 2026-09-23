@@ -557,6 +557,7 @@ var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above you
 var ErrRunNotLive = errors.New("run is not live")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
+var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrStorageQuota = errors.New("storage quota exceeded")
@@ -857,7 +858,7 @@ var Maintenance = storeMaintenanceFns{
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
 const MaxCLITokensPerMember = 10
-const MaxCreatedTeams = 10
+const MaxCreatedTeams = 3
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
 const MaxCreditRateMicro = 1_000_000_000_000
@@ -872,6 +873,8 @@ const MaxNodeDispatchEnvelope = 4 << 20
 const MaxOpenInvitations = 50
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 10
+const MaxSecretValueBytes = 128 << 10
+const MaxSecretsPerTeam = 100
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 type Membership struct {
 	Team        Team

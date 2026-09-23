@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -26,6 +27,20 @@ type Secret struct {
 	UpdatedAt time.Time
 }
 
+// A signed-up team's secrets are rows the operator stores for free, so they
+// are bounded in count and size; the operator's own team is not.
+const (
+	// MaxSecretsPerTeam bounds the secret rows one signed-up team holds.
+	MaxSecretsPerTeam = 100
+	// MaxSecretValueBytes bounds one stored secret value of a signed-up
+	// team, as stored, sealed envelope included.
+	MaxSecretValueBytes = 128 << 10
+)
+
+// ErrSecretLimit refuses a signed-up team's secret past [MaxSecretsPerTeam]
+// or [MaxSecretValueBytes].
+var ErrSecretLimit = errors.New("store: secret limit reached")
+
 // CreateOrReplaceSecret upserts sec into the default team.
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error {
 	return s.defaultTenant().CreateOrReplaceSecret(sec, now)
@@ -37,12 +52,17 @@ func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error {
 //
 // The team is in the conflict target because it leads the primary key,
 // so a name another team already used names a different row rather than
-// that team's.
+// that team's. A signed-up team is refused with [ErrSecretLimit] past
+// [MaxSecretsPerTeam] new rows or a value over [MaxSecretValueBytes];
+// replacing a row it already holds is not a new row.
 func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error {
 	if sec.Name == "" {
 		return errors.New("secrets: name required")
 	}
 	ts := now.UTC().Unix()
+	if holdsFreeAllowance(t.team) {
+		return t.createOrReplaceBoundedSecret(sec, ts)
+	}
 	_, err := t.s.execNoCtx(`
         INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -54,6 +74,36 @@ func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error {
             updated_at = excluded.updated_at
     `, string(t.team), sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts)
 	return err
+}
+
+// safety: the count and the insert are one statement, so a refused write
+// stores nothing; concurrent creates can pass the cap by at most the writes
+// in flight together, which the request budget bounds.
+func (t *Tenant) createOrReplaceBoundedSecret(sec Secret, ts int64) error {
+	if len(sec.Value) > MaxSecretValueBytes {
+		return fmt.Errorf("%w: a secret value may be at most %d bytes as stored and this one is %d",
+			ErrSecretLimit, MaxSecretValueBytes, len(sec.Value))
+	}
+	res, err := t.s.execNoCtx(`
+        INSERT INTO secrets (team, name, value, principal, masked, pipeline, shared, created_at, updated_at)
+        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE (SELECT COUNT(*) FROM secrets WHERE team = ?) < ?
+            OR EXISTS (SELECT 1 FROM secrets WHERE team = ? AND name = ? AND pipeline = ?)
+        ON CONFLICT(team, name, pipeline) DO UPDATE SET
+            value = excluded.value,
+            principal = excluded.principal,
+            masked = excluded.masked,
+            shared = excluded.shared,
+            updated_at = excluded.updated_at
+    `, string(t.team), sec.Name, sec.Value, sec.Principal, boolInt(sec.Masked), sec.Pipeline, boolInt(sec.Shared), ts, ts,
+		string(t.team), MaxSecretsPerTeam, string(t.team), sec.Name, sec.Pipeline)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("%w: team %s holds %d secrets, the most a team may", ErrSecretLimit, t.team, MaxSecretsPerTeam)
+	}
+	return nil
 }
 
 func boolInt(b bool) int {
