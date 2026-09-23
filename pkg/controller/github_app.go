@@ -439,27 +439,47 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 }
 
 type githubAppTriggerReq struct {
-	Repository  string `json:"repository"`
-	Pipeline    string `json:"pipeline"`
-	Push        bool   `json:"push"`
-	PullRequest bool   `json:"pull_request"`
+	Repository                string   `json:"repository"`
+	Pipeline                  string   `json:"pipeline"`
+	Push                      bool     `json:"push"`
+	PullRequest               bool     `json:"pull_request"`
+	PullRequestClosed         bool     `json:"pull_request_closed"`
+	PullRequestLabeled        bool     `json:"pull_request_labeled"`
+	PullRequestLabels         []string `json:"pull_request_labels"`
+	PullRequestReadyForReview bool     `json:"pull_request_ready_for_review"`
+	ReleasePublished          bool     `json:"release_published"`
+	ReleasePrereleased        bool     `json:"release_prereleased"`
+	BranchCreate              bool     `json:"branch_create"`
+	BranchDelete              bool     `json:"branch_delete"`
 }
 
 type githubAppTriggerJSON struct {
-	Repository     string `json:"repository"`
-	RepositoryID   int64  `json:"repository_id"`
-	InstallationID int64  `json:"installation_id"`
-	Pipeline       string `json:"pipeline"`
-	Push           bool   `json:"push"`
-	PullRequest    bool   `json:"pull_request"`
-	CreatedBy      string `json:"created_by"`
-	CreatedAt      int64  `json:"created_at"`
+	Repository                string   `json:"repository"`
+	RepositoryID              int64    `json:"repository_id"`
+	InstallationID            int64    `json:"installation_id"`
+	Pipeline                  string   `json:"pipeline"`
+	Push                      bool     `json:"push"`
+	PullRequest               bool     `json:"pull_request"`
+	PullRequestClosed         bool     `json:"pull_request_closed"`
+	PullRequestLabeled        bool     `json:"pull_request_labeled"`
+	PullRequestLabels         []string `json:"pull_request_labels"`
+	PullRequestReadyForReview bool     `json:"pull_request_ready_for_review"`
+	ReleasePublished          bool     `json:"release_published"`
+	ReleasePrereleased        bool     `json:"release_prereleased"`
+	BranchCreate              bool     `json:"branch_create"`
+	BranchDelete              bool     `json:"branch_delete"`
+	CreatedBy                 string   `json:"created_by"`
+	CreatedAt                 int64    `json:"created_at"`
 }
 
 func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 	return githubAppTriggerJSON{
 		Repository: tr.Repository, RepositoryID: tr.RepositoryID, InstallationID: tr.InstallationID,
 		Pipeline: tr.Pipeline, Push: tr.Push, PullRequest: tr.PullRequest,
+		PullRequestClosed: tr.PullRequestClosed, PullRequestLabeled: tr.PullRequestLabeled,
+		PullRequestLabels: tr.PullRequestLabels, PullRequestReadyForReview: tr.PullRequestReadyForReview,
+		ReleasePublished: tr.ReleasePublished, ReleasePrereleased: tr.ReleasePrereleased,
+		BranchCreate: tr.BranchCreate, BranchDelete: tr.BranchDelete,
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
 }
@@ -505,8 +525,12 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if !req.Push && !req.PullRequest {
-		writeError(w, http.StatusBadRequest, errors.New("subscribe to push, pull_request or both"))
+	if !req.Push && !req.PullRequest && !req.PullRequestClosed && !req.PullRequestLabeled && !req.PullRequestReadyForReview && !req.ReleasePublished && !req.ReleasePrereleased && !req.BranchCreate && !req.BranchDelete {
+		writeError(w, http.StatusBadRequest, errors.New("subscribe to at least one event"))
+		return
+	}
+	if req.PullRequestLabeled && len(req.PullRequestLabels) == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("pull_request_labeled needs pull_request_labels"))
 		return
 	}
 	repo, _ := store.ParseGitHubRepo(slug)
@@ -538,6 +562,10 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
 		Pipeline: pipeline, Push: req.Push, PullRequest: req.PullRequest,
+		PullRequestClosed: req.PullRequestClosed, PullRequestLabeled: req.PullRequestLabeled,
+		PullRequestLabels: req.PullRequestLabels, PullRequestReadyForReview: req.PullRequestReadyForReview,
+		ReleasePublished: req.ReleasePublished, ReleasePrereleased: req.ReleasePrereleased,
+		BranchCreate: req.BranchCreate, BranchDelete: req.BranchDelete,
 		CreatedBy: p.AccountID,
 	}, time.Now())
 	if err != nil {

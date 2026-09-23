@@ -611,6 +611,180 @@ func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
 	}
 }
 
+func TestGitHubAppAdditionalEventsRequireSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, ref := range []string{"refs/tags/v1-published", "refs/tags/v1-prereleased", "refs/heads/topic-create", "refs/heads/main"} {
+		f.app.SetCommit("acme/widgets", ref, headSHA)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "baseline", map[string]any{"push": false, "pull_request": true}); code != http.StatusOK {
+		t.Fatalf("baseline subscription = %d", code)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "opted", map[string]any{
+		"push": false, "pull_request": false, "pull_request_closed": true,
+		"pull_request_labeled": true, "pull_request_labels": []string{"ship"},
+		"pull_request_ready_for_review": true, "release_published": true,
+		"release_prereleased": true, "branch_create": true, "branch_delete": true,
+	}); code != http.StatusOK {
+		t.Fatalf("opt-in subscription = %d", code)
+	}
+	check := func(event string, payload map[string]any, want string) {
+		t.Helper()
+		_, out := f.deliver(event, payload, "")
+		if out["status"] != want {
+			t.Fatalf("%s delivery = %v, want %s", event, out, want)
+		}
+	}
+	pr := prPayload(7, 701, "acme/widgets", 701)
+	pr["action"] = "labeled"
+	pr["label"] = map[string]any{"name": "skip"}
+	check("pull_request", pr, "ignored")
+	pr["action"] = "closed"
+	check("pull_request", pr, "dispatched")
+	pr["label"] = map[string]any{"name": "ship"}
+	pr["action"] = "labeled"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "closed"
+	pr["pull_request"].(map[string]any)["merged"] = true
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "ready_for_review"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "opened"
+	check("pull_request", pr, "dispatched")
+	pr["action"] = "labeled"
+	pr["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]any{"id": 999}
+	check("pull_request", pr, "ignored")
+	check("release", map[string]any{"action": "draft", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"}}, "ignored")
+	for _, action := range []string{"published", "prereleased"} {
+		check("release", map[string]any{
+			"action": action, "installation": map[string]any{"id": 7},
+			"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+			"release":    map[string]any{"tag_name": "v1-" + action, "target_commitish": "main", "published_at": time.Now().UTC().Format(time.RFC3339)},
+		}, "dispatched")
+	}
+	for _, event := range []string{"create", "delete"} {
+		branch := map[string]any{
+			"ref": "topic-" + event, "ref_type": "branch", "master_branch": "main",
+			"installation": map[string]any{"id": 7},
+			"repository":   map[string]any{"id": 701, "full_name": "acme/widgets", "pushed_at": time.Now().Unix()},
+			"sender":       map[string]any{"login": "olga"},
+		}
+		check(event, branch, "dispatched")
+		branch["ref_type"] = "tag"
+		check(event, branch, "ignored")
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 9 {
+		t.Fatalf("triggers = %d, want 9", len(got))
+	}
+	counts := map[string]int{}
+	for _, tr := range got {
+		event := tr.TriggerEnv["GITHUB_EVENT_NAME"]
+		counts[event]++
+		if tr.Pipeline == "baseline" && tr.TriggerEnv["GITHUB_EVENT_NAME"] != "pull_request" {
+			t.Fatalf("baseline received %v", tr.TriggerEnv)
+		}
+		if tr.Pipeline == "opted" {
+			ref := tr.TriggerEnv["GITHUB_REF"]
+			if ref == "" || tr.TriggerEnv["GITHUB_REF_TYPE"] == "" || tr.GitSHA != headSHA {
+				t.Fatalf("missing ref or resolved commit: %+v", tr)
+			}
+			switch event {
+			case "pull_request":
+				if ref != "refs/pull/12/head" || tr.TriggerEnv["GITHUB_ACTION"] == "" {
+					t.Fatalf("PR env = %v", tr.TriggerEnv)
+				}
+				if tr.TriggerEnv["GITHUB_ACTION"] == "closed" && tr.TriggerEnv["GITHUB_MERGED"] == "" {
+					t.Fatalf("closed PR env = %v", tr.TriggerEnv)
+				}
+			case "release":
+				if !strings.HasPrefix(ref, "refs/tags/v1-") || tr.TriggerEnv["GITHUB_TAG_NAME"] == "" {
+					t.Fatalf("release env = %v", tr.TriggerEnv)
+				}
+			case "create", "delete":
+				if !strings.HasPrefix(ref, "refs/heads/topic-") {
+					t.Fatalf("branch env = %v", tr.TriggerEnv)
+				}
+			}
+		}
+	}
+	if counts["pull_request"] != 5 || counts["release"] != 2 || counts["create"] != 1 || counts["delete"] != 1 {
+		t.Fatalf("event counts = %v", counts)
+	}
+}
+
+func TestGitHubAppRepositoryIdentitySurvivesRenameAndTransfer(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	f.app.SetRepos(7, githubapptest.Repo{ID: 999, FullName: "acme/gadgets"})
+	if _, out := f.deliver("repository", map[string]any{"action": "renamed", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/gadgets"}}, ""); out["status"] != "ignored" {
+		t.Fatalf("rename to a different repository id = %v", out)
+	}
+	f.app.SetRepos(7, githubapptest.Repo{ID: 701, FullName: "acme/gadgets"})
+	if code, out := f.deliver("repository", map[string]any{"action": "renamed", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/gadgets"}}, ""); code != http.StatusOK || out["status"] != "updated" {
+		t.Fatalf("rename = %d %v", code, out)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/gadgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after rename = %v", out)
+	}
+	f.app.AddInstallation(githubapptest.Installation{ID: 9, Account: githubapp.Account{ID: 90, Login: "other", Type: "Organization"},
+		Repos: []githubapptest.Repo{{ID: 701, FullName: "other/gadgets"}}})
+	f.connect(olga, 501, 9, map[string]githubapp.OrgMembership{"other": {State: "active", Role: "admin"}})
+	f.app.SetRepos(7)
+	if code, out := f.deliver("repository", map[string]any{"action": "transferred", "installation": map[string]any{"id": 9},
+		"repository": map[string]any{"id": 701, "full_name": "other/gadgets"}}, ""); code != http.StatusOK || out["status"] != "updated" {
+		t.Fatalf("transfer = %d %v", code, out)
+	}
+	if _, out := f.deliver("push", pushPayload(9, 701, "other/gadgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("push after transfer = %v", out)
+	}
+	got := f.triggers(olga.team)
+	if len(got) != 2 {
+		t.Fatalf("runs after repository changes = %d, want 2", len(got))
+	}
+	for _, tr := range got {
+		if tr.Repo != "acme/gadgets" && tr.Repo != "other/gadgets" {
+			t.Fatalf("unexpected repository %q", tr.Repo)
+		}
+	}
+}
+
+func TestGitHubAppReleaseReplayAndCoverage(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "release", map[string]any{"push": false, "release_published": true}); code != http.StatusOK {
+		t.Fatal(code)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
+	payload := map[string]any{"action": "published", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)}}
+	if _, out := f.deliver("release", payload, ""); out["status"] != "dispatched" {
+		t.Fatalf("release = %v", out)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", "")
+	f.app.SetRepos(7)
+	if _, out := f.deliver("release", payload, ""); out["status"] != "duplicate" {
+		t.Fatalf("redelivery = %v", out)
+	}
+	payload["release"].(map[string]any)["tag_name"] = "v2"
+	if _, out := f.deliver("release", payload, ""); out["status"] != "ignored" {
+		t.Fatalf("release after installation lost repository = %v", out)
+	}
+	if got := f.triggers(olga.team); len(got) != 1 {
+		t.Fatalf("replay and uncovered release started %d runs", len(got))
+	}
+}
+
 func TestGitHubAppPushOfNoCommitIsIgnored(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
@@ -668,6 +842,35 @@ func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
 	}
 	if n := len(f.triggers(olga.team)); n != 2 {
 		t.Fatalf("the team has %d runs, want 2", n)
+	}
+}
+
+func TestGitHubAppPartialReleaseRedeliveryKeepsResolvedCommit(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, pipeline := range []string{"build", "test"} {
+		if code := f.subscribe(olga, "acme/widgets", pipeline, map[string]any{"push": false, "release_published": true}); code != http.StatusOK {
+			t.Fatal(code)
+		}
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", headSHA)
+	payload := map[string]any{"action": "published", "installation": map[string]any{"id": 7},
+		"repository": map[string]any{"id": 701, "full_name": "acme/widgets"},
+		"release":    map[string]any{"tag_name": "v1", "published_at": time.Now().UTC().Format(time.RFC3339)}}
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("first release = %v", out)
+	}
+	f.app.SetCommit("acme/widgets", "refs/tags/v1", strings.Repeat("a", 40))
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	if _, out := f.deliver("release", payload, ""); !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
+		t.Fatalf("release redelivery = %v", out)
+	}
+	for _, tr := range f.triggers(olga.team) {
+		if tr.GitSHA != headSHA {
+			t.Fatalf("redelivery changed release commit to %s", tr.GitSHA)
+		}
 	}
 }
 

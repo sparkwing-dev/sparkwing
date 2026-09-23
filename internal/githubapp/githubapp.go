@@ -442,6 +442,26 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 	return out, nil
 }
 
+// ResolveCommit reads the commit selected by a branch or tag with a token
+// restricted to that repository.
+func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, repo, ref string) (string, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	err = c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(ref), "Bearer "+tok.Token, &commit)
+	if err != nil {
+		return "", err
+	}
+	if len(commit.SHA) != 40 {
+		return "", errors.New("githubapp: ref did not resolve to a commit")
+	}
+	return commit.SHA, nil
+}
+
 // permissionsNotGranted reports whether a refused token request names
 // permissions the installation has not granted, which GitHub answers with 422
 // like a repository the installation does not cover.

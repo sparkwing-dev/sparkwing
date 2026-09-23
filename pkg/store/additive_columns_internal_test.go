@@ -9,6 +9,7 @@ import (
 // version adding no column maps to nil, so a new migration fails the test below until
 // its author has classified it.
 var additiveColumnSources = map[int][]map[string]string{
+	65: {githubAppTriggerOptionCols},
 	1:  columnSpecMaps(),
 	2:  columnSpecMaps(),
 	3:  columnSpecMaps(),

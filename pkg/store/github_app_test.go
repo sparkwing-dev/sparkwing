@@ -76,6 +76,42 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	}
 }
 
+func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	base := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "base", Push: true}
+	if _, err := acme.PutGitHubAppTrigger(ctx, base, now); err != nil {
+		t.Fatal(err)
+	}
+	opt := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "opt",
+		PullRequestClosed: true, PullRequestLabeled: true, PullRequestLabels: []string{"ship"}, PullRequestReadyForReview: true,
+		ReleasePublished: true, ReleasePrereleased: true, BranchCreate: true, BranchDelete: true}
+	if _, err := acme.PutGitHubAppTrigger(ctx, opt, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(subs) != 2 {
+		t.Fatalf("subscriptions = %+v, %v", subs, err)
+	}
+	if subs[0].PullRequestClosed || subs[0].ReleasePublished || subs[0].BranchDelete {
+		t.Fatalf("existing event defaults = %+v", subs[0])
+	}
+	got := subs[1]
+	if !got.PullRequestClosed || !got.PullRequestLabeled || len(got.PullRequestLabels) != 1 || got.PullRequestLabels[0] != "ship" ||
+		!got.PullRequestReadyForReview || !got.ReleasePublished || !got.ReleasePrereleased || !got.BranchCreate || !got.BranchDelete {
+		t.Fatalf("new event options = %+v", got)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7,
+		Pipeline: "bad", PullRequestLabeled: true}, now); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("empty label filter = %v", err)
+	}
+}
+
 func TestGitHubAppConnectStateIsUsedOnce(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

@@ -15,15 +15,18 @@ import (
 )
 
 const (
-	oidcTokensPerRun  = 30
-	oidcTokenRefill   = 5 * time.Minute
-	oidcWebhookSource = "github"
-	oidcTriggerPush   = "push"
-	oidcTriggerPR     = "pull_request"
-	oidcTriggerCron   = "cron"
-	oidcTriggerManual = "manual"
-	oidcRunnerGitHub  = "github-actions"
-	githubEventPush   = "push"
+	oidcTokensPerRun   = 30
+	oidcTokenRefill    = 5 * time.Minute
+	oidcWebhookSource  = "github"
+	oidcTriggerPush    = "push"
+	oidcTriggerPR      = "pull_request"
+	oidcTriggerRelease = "release"
+	oidcTriggerCreate  = "create"
+	oidcTriggerDelete  = "delete"
+	oidcTriggerCron    = "cron"
+	oidcTriggerManual  = "manual"
+	oidcRunnerGitHub   = "github-actions"
+	githubEventPush    = "push"
 )
 
 type oidcState struct {
@@ -174,6 +177,12 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 			c.Trigger = oidcTriggerPush
 		case trig.TriggerSource == oidcWebhookSource && event == sparkwing.EventPullRequest && pullNumber(trig.TriggerEnv) != "":
 			c.Trigger = oidcTriggerPR
+		case trig.TriggerSource == oidcWebhookSource && event == "release" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/tags/"):
+			c.Trigger = oidcTriggerRelease
+		case trig.TriggerSource == oidcWebhookSource && event == "create" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+			c.Trigger = oidcTriggerCreate
+		case trig.TriggerSource == oidcWebhookSource && event == "delete" && strings.HasPrefix(trig.TriggerEnv["GITHUB_REF"], "refs/heads/"):
+			c.Trigger = oidcTriggerDelete
 		// safety: submitters cannot set the schedule key, which the intake
 		// strips, so a "schedule" source without it is a submitter's word.
 		case trig.TriggerSource == cronTriggerSource && trig.TriggerEnv[crons.ScheduleEnvKey] != "":
@@ -185,6 +194,8 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		// safety: a pull request's head branch may share a protected branch's
 		// name, so its ref names the pull request and never refs/heads/.
 		c.Ref = "refs/pull/" + pullNumber(trig.TriggerEnv) + "/head"
+	case c.Trigger == oidcTriggerRelease || c.Trigger == oidcTriggerCreate || c.Trigger == oidcTriggerDelete:
+		c.Ref = trig.TriggerEnv["GITHUB_REF"]
 	case branch != "":
 		c.Ref = "refs/heads/" + branch
 	}

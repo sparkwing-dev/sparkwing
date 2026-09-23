@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **controller:** GitHub App subscriptions can opt into PR closed, labeled and ready-for-review actions, release published and prereleased actions, and branch create and delete events. Runs expose event, ref, action, label, merge and tag environment values; OIDC subjects use the event's ref and trigger. Subscriptions follow a repository id across rename and same-team transfer. Schema 65 adds default-off subscription columns; existing subscriptions retain their behavior.
+
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the

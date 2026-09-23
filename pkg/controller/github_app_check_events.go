@@ -156,14 +156,15 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 }
 
 func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
-	switch run.TriggerEnv[sparkwing.EnvGitHubEventName] {
-	case "":
-		return sub.Push
-	case sparkwing.EventPullRequest:
-		return sub.PullRequest
-	default:
-		return false
+	event := run.TriggerEnv[sparkwing.EnvGitHubEventName]
+	if event == "" {
+		event = "push"
 	}
+	action := run.TriggerEnv["GITHUB_ACTION"]
+	if action == "" && event == sparkwing.EventPullRequest {
+		action = run.TriggerEnv[sparkwing.EnvPRAction]
+	}
+	return githubAppSubscribes(sub, event, action, run.TriggerEnv["GITHUB_LABEL"])
 }
 
 // githubAppRerunIntake is a re-run of anchor, asked for by user.

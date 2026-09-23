@@ -489,6 +489,14 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 		TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: "push"},
 	})
 	f.run(t, f.acme, store.Trigger{ID: "run-no-event", Pipeline: "deploy", TriggerSource: "github", GitBranch: "main"})
+	for _, tc := range []struct{ id, event, branch, ref string }{
+		{"run-release", "release", "v1", "refs/tags/v1"},
+		{"run-create", "create", "topic", "refs/heads/topic"},
+		{"run-delete", "delete", "main", "refs/heads/topic"},
+	} {
+		f.run(t, f.acme, store.Trigger{ID: tc.id, Pipeline: "deploy", TriggerSource: "github", GitBranch: tc.branch,
+			TriggerEnv: map[string]string{sparkwing.EnvGitHubEventName: tc.event, "GITHUB_REF": tc.ref}})
+	}
 	raw := f.runner(t, f.acme, "agent:acme")
 	srv := serveOIDC(t, f.st, oidcKeyPEM(t), nil)
 	c := client.NewWithToken(srv.URL, nil, raw)
@@ -496,6 +504,9 @@ func TestOIDCTokenPullRequestNeverLooksLikeAPush(t *testing.T) {
 		{"run-pr", "team:acme:pipeline:deploy:trigger:pull_request:runner:runner:ref:refs/pull/7/head", "refs/pull/7/head"},
 		{"run-push", "team:acme:pipeline:deploy:trigger:push:runner:runner:ref:refs/heads/main", "refs/heads/main"},
 		{"run-no-event", "team:acme:pipeline:deploy:trigger:manual:runner:runner:ref:refs/heads/main", "refs/heads/main"},
+		{"run-release", "team:acme:pipeline:deploy:trigger:release:runner:runner:ref:refs/tags/v1", "refs/tags/v1"},
+		{"run-create", "team:acme:pipeline:deploy:trigger:create:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
+		{"run-delete", "team:acme:pipeline:deploy:trigger:delete:runner:runner:ref:refs/heads/topic", "refs/heads/topic"},
 	} {
 		if _, err := c.ClaimSpecificTrigger(ctx, tc.run, time.Minute); err != nil {
 			t.Fatalf("%s: ClaimSpecificTrigger: %v", tc.run, err)

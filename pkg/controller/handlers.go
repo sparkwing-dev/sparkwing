@@ -739,6 +739,12 @@ type triggerResp struct {
 // safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
 var submittedTriggerEnvKeys = map[string]bool{
 	"GITHUB_REPOSITORY":             true,
+	"GITHUB_REF":                    true,
+	"GITHUB_REF_TYPE":               true,
+	"GITHUB_ACTION":                 true,
+	"GITHUB_LABEL":                  true,
+	"GITHUB_MERGED":                 true,
+	"GITHUB_TAG_NAME":               true,
 	sparkwing.EnvGitHubEventName:    true,
 	sparkwing.EnvPRNumber:           true,
 	sparkwing.EnvPRAction:           true,
@@ -756,6 +762,12 @@ var submittedTriggerEnvKeys = map[string]bool{
 }
 
 var githubProvenanceEnvKeys = map[string]bool{
+	"GITHUB_REF":                 true,
+	"GITHUB_REF_TYPE":            true,
+	"GITHUB_ACTION":              true,
+	"GITHUB_LABEL":               true,
+	"GITHUB_MERGED":              true,
+	"GITHUB_TAG_NAME":            true,
 	sparkwing.EnvGitHubEventName: true,
 	sparkwing.EnvPRNumber:        true,
 	sparkwing.EnvPRAction:        true,

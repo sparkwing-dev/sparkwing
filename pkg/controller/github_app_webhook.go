@@ -94,8 +94,10 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 		// repository removed on GitHub starts nothing from the next delivery on.
 		s.githubApp.forgetCovering()
 		githubAppIgnored(w, "the repositories an installation covers are read from GitHub when a run starts or a token is minted")
-	case "push", "pull_request":
+	case "push", "pull_request", "release", "create", "delete":
 		s.handleGitHubAppRunEvent(w, r, event, delivery, env, body)
+	case "repository":
+		s.handleGitHubAppRepositoryEvent(w, r, env)
 	case "check_run", "check_suite":
 		s.handleGitHubAppCheckEvent(w, r, event, delivery, env, body)
 	default:
@@ -148,9 +150,13 @@ type githubAppPushPayload struct {
 }
 
 type githubAppPullRequestPayload struct {
-	Number      int `json:"number"`
+	Number int `json:"number"`
+	Label  struct {
+		Name string `json:"name"`
+	} `json:"label"`
 	PullRequest struct {
 		UpdatedAt string `json:"updated_at"`
+		Merged    bool   `json:"merged"`
 		Head      struct {
 			Ref  string            `json:"ref"`
 			SHA  string            `json:"sha"`
@@ -197,6 +203,8 @@ func githubPushedAt(raw json.RawMessage) time.Time {
 func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githubAppIntake, string, error) {
 	base := map[string]string{
 		"GITHUB_REPOSITORY":      env.Repository.FullName,
+		"GITHUB_EVENT_NAME":      event,
+		"GITHUB_ACTION":          env.Action,
 		envGitHubAppInstallation: strconv.FormatInt(env.Installation.ID, 10),
 	}
 	if event == "push" {
@@ -212,11 +220,71 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 			return githubAppIntake{}, "not a branch push", nil
 		}
 		base["GITHUB_BEFORE"], base["GITHUB_AFTER"] = p.Before, p.After
+		base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = p.Ref, "branch"
 		return githubAppIntake{
 			user: p.Pusher.Name, branch: branch, sha: p.After, env: base, at: githubPushedAt(p.Repository.PushedAt),
 		}, "", nil
 	}
-	if _, built := defaultPullRequestActions[env.Action]; !built {
+	if event == "release" {
+		var p struct {
+			Release struct {
+				TagName     string `json:"tag_name"`
+				PublishedAt string `json:"published_at"`
+				Author      struct {
+					Login string `json:"login"`
+				} `json:"author"`
+			} `json:"release"`
+		}
+		if err := json.Unmarshal(body, &p); err != nil {
+			return githubAppIntake{}, "", err
+		}
+		if env.Action != "published" && env.Action != "prereleased" {
+			return githubAppIntake{}, "release action starts nothing", nil
+		}
+		if p.Release.TagName == "" || strings.Contains(p.Release.TagName, "..") || strings.HasPrefix(p.Release.TagName, "/") {
+			return githubAppIntake{}, "invalid release tag", nil
+		}
+		base["GITHUB_REF"], base["GITHUB_REF_TYPE"], base["GITHUB_TAG_NAME"] = "refs/tags/"+p.Release.TagName, "tag", p.Release.TagName
+		at, _ := time.Parse(time.RFC3339, p.Release.PublishedAt)
+		return githubAppIntake{user: p.Release.Author.Login, branch: p.Release.TagName, env: base, at: at}, "", nil
+	}
+	if event == "create" || event == "delete" {
+		var p struct {
+			Ref          string `json:"ref"`
+			RefType      string `json:"ref_type"`
+			MasterBranch string `json:"master_branch"`
+			Repository   struct {
+				PushedAt  json.RawMessage `json:"pushed_at"`
+				UpdatedAt json.RawMessage `json:"updated_at"`
+			} `json:"repository"`
+			Sender struct {
+				Login string `json:"login"`
+			} `json:"sender"`
+		}
+		if err := json.Unmarshal(body, &p); err != nil {
+			return githubAppIntake{}, "", err
+		}
+		if p.RefType != "branch" || p.Ref == "" || strings.Contains(p.Ref, "..") || strings.HasPrefix(p.Ref, "/") {
+			return githubAppIntake{}, "not a branch event", nil
+		}
+		if event == "delete" && p.MasterBranch == "" {
+			return githubAppIntake{}, "branch deletion names no default branch", nil
+		}
+		base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/heads/"+p.Ref, "branch"
+		at := githubPushedAt(p.Repository.PushedAt)
+		if updated := githubPushedAt(p.Repository.UpdatedAt); updated.After(at) {
+			at = updated
+		}
+		branch := p.Ref
+		if event == "delete" {
+			branch = p.MasterBranch
+		}
+		return githubAppIntake{user: p.Sender.Login, branch: branch, env: base, at: at}, "", nil
+	}
+	if event != "pull_request" {
+		return githubAppIntake{}, "unknown event", nil
+	}
+	if _, built := defaultPullRequestActions[env.Action]; !built && env.Action != "closed" && env.Action != "labeled" && env.Action != "ready_for_review" {
 		return githubAppIntake{}, "pull_request action " + env.Action + " starts nothing", nil
 	}
 	var p githubAppPullRequestPayload
@@ -224,6 +292,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		return githubAppIntake{}, "", err
 	}
 	pr := p.PullRequest
+	if p.Number <= 0 {
+		return githubAppIntake{}, "the pull request has no number", nil
+	}
 	// safety: a head repository that is gone or is not the base repository is
 	// someone else's code, whatever the branch is called, and nothing runs it.
 	if pr.Head.Repo == nil || pr.Base.Repo == nil || pr.Head.Repo.ID != pr.Base.Repo.ID {
@@ -237,6 +308,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	base[sparkwing.EnvPRAction] = env.Action
 	base[sparkwing.EnvPRBaseRef], base[sparkwing.EnvPRBaseSHA] = pr.Base.Ref, pr.Base.SHA
 	base[sparkwing.EnvPRHeadRef], base[sparkwing.EnvPRHeadSHA] = pr.Head.Ref, pr.Head.SHA
+	base["GITHUB_REF"], base["GITHUB_REF_TYPE"] = "refs/pull/"+strconv.Itoa(p.Number)+"/head", "branch"
+	base["GITHUB_LABEL"] = p.Label.Name
+	base["GITHUB_MERGED"] = strconv.FormatBool(pr.Merged)
 	// safety: an unreadable updated_at leaves the time zero, and the caller
 	// refuses an undated event.
 	updated, err := time.Parse(time.RFC3339, pr.UpdatedAt)
@@ -334,7 +408,7 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	var planned []githubAppPlannedRun
 	for _, sub := range subs {
-		if (event == "push" && sub.Push) || (event == "pull_request" && sub.PullRequest) {
+		if githubAppSubscribes(sub, event, env.Action, intake.env["GITHUB_LABEL"]) {
 			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake})
 		}
 	}
@@ -343,6 +417,79 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
+}
+
+func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
+	if env.Action != "renamed" && env.Action != "transferred" {
+		githubAppIgnored(w, "repository action starts nothing")
+		return
+	}
+	_, tenant, repo, ok := s.githubAppBinding(w, r, env)
+	if !ok {
+		return
+	}
+	inst, covered, err := s.githubApp.liveCoveringInstallation(r.Context(), repo)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	if !covered || inst.ID != env.Installation.ID || inst.SuspendedAt != nil {
+		githubAppIgnored(w, "the installation no longer covers "+repo.Slug())
+		return
+	}
+	repositories, err := s.githubApp.client.InstallationRepositories(r.Context(), env.Installation.ID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+	matched := false
+	for _, current := range repositories {
+		if current.ID == repo.ID && strings.EqualFold(current.FullName, repo.Slug()) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		githubAppIgnored(w, "the installation no longer covers repository id")
+		return
+	}
+	if err := tenant.RenameGitHubAppTriggerRepository(r.Context(), env.Installation.ID, repo.ID, repo.Slug()); err != nil {
+		s.writeInternalError(w, r, "update github app repository", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
+}
+
+func githubAppSubscribes(sub store.GitHubAppTrigger, event, action, label string) bool {
+	switch event {
+	case "push":
+		return sub.Push
+	case "pull_request":
+		switch action {
+		case "opened", "synchronize", "reopened":
+			return sub.PullRequest
+		case "closed":
+			return sub.PullRequestClosed
+		case "ready_for_review":
+			return sub.PullRequestReadyForReview
+		case "labeled":
+			if !sub.PullRequestLabeled {
+				return false
+			}
+			for _, want := range sub.PullRequestLabels {
+				if strings.EqualFold(want, label) {
+					return true
+				}
+			}
+		}
+	case "release":
+		return action == "published" && sub.ReleasePublished || action == "prereleased" && sub.ReleasePrereleased
+	case "create":
+		return sub.BranchCreate
+	case "delete":
+		return sub.BranchDelete
+	}
+	return false
 }
 
 // githubAppPlannedRun is one run a delivery would start.
@@ -382,6 +529,32 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 	if !covered || gh.ID != env.Installation.ID || gh.SuspendedAt != nil {
 		githubAppIgnored(w, "the installation no longer covers "+repo.Slug())
 		return
+	}
+	if event == "release" || event == "create" || event == "delete" {
+		sha := ""
+		for _, plan := range planned {
+			existing, err := tenant.FindTriggerByWebhookReplay(ctx,
+				githubAppReplayKey(tenant.Team(), plan.pipeline, body), delivery+"/"+plan.pipeline)
+			if err == nil && existing != nil && existing.GitSHA != "" {
+				sha = existing.GitSHA
+				break
+			}
+		}
+		if sha == "" {
+			ref := planned[0].intake.env["GITHUB_REF"]
+			if event == "delete" {
+				ref = "refs/heads/" + planned[0].intake.branch
+			}
+			var err error
+			sha, err = s.githubApp.client.ResolveCommit(ctx, env.Installation.ID, repo.Owner, repo.Name, ref)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, fmt.Errorf("resolve GitHub ref: %w", err))
+				return
+			}
+		}
+		for i := range planned {
+			planned[i].intake.sha = sha
+		}
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
 	shed := 0
