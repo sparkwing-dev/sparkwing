@@ -31,6 +31,15 @@ export default function NewTeamPage() {
     );
   }
 
+  if (state.me.waitlisted) {
+    return (
+      <Notice>
+        Your account is on the waitlist, so it cannot create a team yet. You can
+        still work in teams that invite you.
+      </Notice>
+    );
+  }
+
   const effectiveSlug = slugEdited ? slug : slugFromName(name);
   const problem = effectiveSlug ? teamSlugProblem(effectiveSlug) : null;
 

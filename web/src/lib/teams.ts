@@ -26,7 +26,13 @@ export interface Me {
   active_team: TeamRef;
   memberships: TeamRef[];
   invitations: PendingInvitation[];
+  // True while the account waits for admission: it holds no personal space
+  // and cannot create a team, but it can join a team that invites it.
+  waitlisted?: boolean;
 }
+
+// A waitlisted account with no team yet; it has no active team to show.
+export type WaitlistedMe = Omit<Me, "active_team">;
 
 export function teamsEnabled(caps: Capabilities | null): boolean {
   return caps?.teams?.enabled === true;
@@ -141,7 +147,10 @@ export async function getCapabilities(): Promise<Capabilities | null> {
 }
 
 export type MeResult =
-  { kind: "member"; me: Me } | { kind: "operator" } | { kind: "unavailable" };
+  | { kind: "member"; me: Me }
+  | { kind: "waitlisted"; me: WaitlistedMe }
+  | { kind: "operator" }
+  | { kind: "unavailable" };
 
 // A password-signed-in operator holds no team identity, and the controller
 // refuses /me for that session; the refusal means "no account", not "signed out".
@@ -151,6 +160,17 @@ export async function getMe(): Promise<MeResult> {
     if ([401, 403, 404].includes(res.status)) return { kind: "operator" };
     if (!res.ok) return { kind: "unavailable" };
     const body = (await res.json()) as Partial<Me> & { operator?: boolean };
+    if (body.user && body.waitlisted && !body.active_team && !body.operator) {
+      return {
+        kind: "waitlisted",
+        me: {
+          user: body.user,
+          memberships: body.memberships ?? [],
+          invitations: body.invitations ?? [],
+          waitlisted: true,
+        },
+      };
+    }
     if (!body.user || !body.active_team || body.operator) {
       return { kind: "operator" };
     }

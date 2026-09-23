@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type Me, getCapabilities, getMe, teamsEnabled } from "./teams";
+import {
+  type Me,
+  type WaitlistedMe,
+  getCapabilities,
+  getMe,
+  teamsEnabled,
+} from "./teams";
 
 export type TeamState =
   | { status: "loading" }
   | { status: "single-team" }
   | { status: "ready"; me: Me }
+  | { status: "waitlisted"; me: WaitlistedMe }
   | { status: "operator" }
   | { status: "unavailable" };
 
@@ -18,6 +25,7 @@ async function readTeamState(): Promise<TeamState> {
   if (!teamsEnabled(caps)) return { status: "single-team" };
   const me = await getMe();
   if (me.kind === "member") return { status: "ready", me: me.me };
+  if (me.kind === "waitlisted") return { status: "waitlisted", me: me.me };
   return { status: me.kind };
 }
 

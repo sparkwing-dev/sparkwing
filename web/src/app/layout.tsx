@@ -5,6 +5,7 @@ import Nav from "@/components/Nav";
 import ConnectionBanner from "@/components/ConnectionBanner";
 import DynamicFavicon from "@/components/DynamicFavicon";
 import Toaster from "@/components/Toasts";
+import WaitlistGate from "@/components/WaitlistGate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,7 +42,9 @@ export default function RootLayout({
         <DynamicFavicon />
         <Nav />
         <ConnectionBanner />
-        <div className="flex-1 flex flex-col overflow-hidden">{children}</div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <WaitlistGate>{children}</WaitlistGate>
+        </div>
         <Toaster />
       </body>
     </html>
