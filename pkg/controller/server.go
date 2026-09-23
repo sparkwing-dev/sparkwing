@@ -1401,10 +1401,11 @@ func (s *Server) drainGitHubCommitStatuses() {
 // calls Shutdown automatically; callers serving Handler directly must call it.
 func (s *Server) Shutdown(ctx context.Context) error {
 	var errs []error
-	for _, r := range []*githubCommitStatusReporter{s.githubCommitStatuses, s.githubAppStatusReporter()} {
-		if r != nil {
-			errs = append(errs, r.shutdown(ctx))
-		}
+	if s.githubCommitStatuses != nil {
+		errs = append(errs, s.githubCommitStatuses.shutdown(ctx))
+	}
+	if s.githubApp != nil {
+		errs = append(errs, s.githubApp.checks.shutdown(ctx))
 	}
 	return errors.Join(errs...)
 }
@@ -1428,7 +1429,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 		if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
 			s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
 		} else {
-			s.reportGitHubCommitStatus(ctx, id, "failed")
+			s.reportGitHubRunState(ctx, id, "failed")
 		}
 		if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 			"runner lease expired before node reported completion",
@@ -1527,7 +1528,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "failed")
 				}
 			}
 
@@ -1538,7 +1539,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "failed")
 				}
 			}
 
@@ -1550,7 +1551,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				for _, id := range ids {
 					s.logger.Warn("reaped run whose trigger outlived the queue deadline",
 						"run_id", id, "queue_timeout", s.queueTimeout)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "timed_out")
 				}
 			}
 

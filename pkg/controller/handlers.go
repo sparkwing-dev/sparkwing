@@ -160,6 +160,9 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if body.Status == "running" {
+		s.reportGitHubRunState(context.WithoutCancel(r.Context()), body.ID, "running")
+	}
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -237,7 +240,7 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 			s.foldRunProfiles(follow, tenant, refreshed)
 		}
 	}
-	s.reportGitHubCommitStatus(follow, runID, body.Status)
+	s.reportGitHubRunState(follow, runID, body.Status)
 	w.WriteHeader(http.StatusNoContent)
 }
 

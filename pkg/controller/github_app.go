@@ -30,7 +30,7 @@ const githubAppStateTTL = 10 * time.Minute
 type githubAppState struct {
 	client   *githubapp.Client
 	stateKey []byte
-	statuses *githubCommitStatusReporter
+	checks   *githubCheckReporter
 
 	// safety: GitHub's answer for which installation covers a repository is
 	// read on every run and token, so it is kept briefly rather than asked
@@ -51,32 +51,15 @@ type coveringEntry struct {
 // repository.
 func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	client := githubapp.New(cfg)
-	apiURL := cfg.APIURL
-	if apiURL == "" {
-		apiURL = githubapp.GitHubAPIURL
+	if s.githubApp != nil {
+		s.githubApp.checks.stop()
 	}
-	httpClient := cfg.HTTP
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: githubStatusTimeout}
-	}
-	app := &githubAppState{
+	s.githubApp = &githubAppState{
 		client: client, stateKey: client.StateKey(),
+		checks:   newGitHubCheckReporter(client, s.store, s.dashboardURL),
 		covering: map[string]coveringEntry{}, sources: map[string]*sourceTokenEntry{},
 	}
-	app.statuses = newGitHubCommitStatusReporter("", s.dashboardURL, apiURL, httpClient)
-	app.statuses.tokenFor = func(ctx context.Context, st githubCommitStatus) (string, error) {
-		tok, err := client.InstallationToken(ctx, st.Installation, []string{st.Repo}, map[string]string{"statuses": "write"})
-		return tok.Token, err
-	}
-	s.githubApp = app
 	return s
-}
-
-func (s *Server) githubAppStatusReporter() *githubCommitStatusReporter {
-	if s.githubApp == nil {
-		return nil
-	}
-	return s.githubApp.statuses
 }
 
 func (s *Server) githubAppEnabled(w http.ResponseWriter) bool {
@@ -644,29 +627,28 @@ func (s *Server) teamInstallationFor(ctx context.Context, t *store.Tenant, repo 
 
 // safety: a run reports only while the installation it arrived through is still bound
 // to the run's team.
-func (s *Server) githubAppCommitStatus(ctx context.Context, trigger *store.Trigger, runStatus string) (githubCommitStatus, bool) {
+func (s *Server) githubAppCheckUpdate(ctx context.Context, trigger *store.Trigger, runStatus string) (githubCheckUpdate, bool) {
 	if s.githubApp == nil || trigger.Pipeline == "" || trigger.GithubOwner == "" || trigger.GithubRepo == "" {
-		return githubCommitStatus{}, false
+		return githubCheckUpdate{}, false
 	}
 	installation, err := strconv.ParseInt(trigger.TriggerEnv[envGitHubAppInstallation], 10, 64)
 	if err != nil {
-		return githubCommitStatus{}, false
+		return githubCheckUpdate{}, false
 	}
 	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, installation)
 	if err != nil || in.Team != store.NormalizeTeam(trigger.Team) || in.Suspended {
-		return githubCommitStatus{}, false
+		return githubCheckUpdate{}, false
 	}
 	sha := trigger.GitSHA
 	if head := trigger.TriggerEnv[sparkwing.EnvPRHeadSHA]; trigger.TriggerEnv[sparkwing.EnvGitHubEventName] == sparkwing.EventPullRequest && head != "" {
 		sha = head
 	}
 	if !githubCommit(strings.ToLower(sha)) {
-		return githubCommitStatus{}, false
+		return githubCheckUpdate{}, false
 	}
-	state, description := githubCommitState(runStatus)
-	return githubCommitStatus{
-		Installation: installation, Owner: trigger.GithubOwner, Repo: trigger.GithubRepo, SHA: sha,
-		Pipeline: trigger.Pipeline, RunID: trigger.ID, State: state, Description: description,
+	return githubCheckUpdate{
+		installation: installation, owner: trigger.GithubOwner, repo: trigger.GithubRepo, sha: sha,
+		pipeline: trigger.Pipeline, runID: trigger.ID, runStatus: runStatus, team: in.Team,
 	}, true
 }
 

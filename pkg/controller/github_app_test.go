@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,6 +33,8 @@ type appFixture struct {
 	*identityFixture
 	app *githubapptest.GitHub
 	srv *controller.Server
+	// logs holds what every replica logs.
+	logs *syncBuffer
 	// replica starts another controller over the same store and App.
 	replica func() (*controller.Server, string)
 }
@@ -57,8 +60,10 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 		ID: 8, Account: githubapp.Account{ID: 502, Login: "bob", Type: "User"},
 		Repos: []githubapptest.Repo{{ID: 801, FullName: "bob/tools"}},
 	})
+	logs := &syncBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	replica := func() (*controller.Server, string) {
-		srv := controller.New(st, nil).EnableAuthFromStore().
+		srv := controller.New(st, logger).EnableAuthFromStore().
 			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
 			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
 			WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect, appCallback}).
@@ -75,7 +80,7 @@ func newAppFixture(t *testing.T, opts ...func(*controller.Server) *controller.Se
 	srv, url := replica()
 	return &appFixture{
 		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin},
-		app:             app, srv: srv, replica: replica,
+		app:             app, srv: srv, replica: replica, logs: logs,
 	}
 }
 
@@ -790,29 +795,5 @@ func TestGitHubAppSourceTokenIsMintedOncePerClaim(t *testing.T) {
 	}
 	if !refused {
 		t.Fatal("a claim asking in a loop was never refused")
-	}
-}
-
-func TestGitHubAppCommitStatusesPostAsTheInstallation(t *testing.T) {
-	f := newAppFixture(t)
-	olga := f.ghUser(501, "olga")
-	f.connect(olga, 501, 7, acmeAdmin)
-	f.subscribe(olga, "acme/widgets", "build", nil)
-	if code, _ := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted {
-		t.Fatal("push refused")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := f.srv.Shutdown(ctx); err != nil {
-		t.Fatalf("drain statuses: %v", err)
-	}
-	got := f.app.Statuses()
-	if len(got) != 1 || got[0].Repo != "acme/widgets" || got[0].SHA != headSHA || got[0].State != "pending" || got[0].Context != "sparkwing/build" {
-		t.Fatalf("statuses = %+v, want one pending sparkwing/build on the pushed commit", got)
-	}
-	for _, m := range f.app.Minted() {
-		if m.Permissions["statuses"] == "write" && (len(m.Repositories) != 1 || m.Repositories[0] != "widgets" || len(m.Permissions) != 1) {
-			t.Fatalf("status token request = %+v, want widgets with statuses:write only", m)
-		}
 	}
 }

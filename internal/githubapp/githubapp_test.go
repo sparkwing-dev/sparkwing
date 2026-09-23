@@ -105,3 +105,48 @@ func TestParsePrivateKey_AcceptsPKCS1AndPKCS8(t *testing.T) {
 		t.Error("text that is not PEM parsed")
 	}
 }
+
+func TestCheckRuns_NeedTheChecksPermission(t *testing.T) {
+	gh, c := fixture(t)
+	ctx := context.Background()
+	run := githubapp.CheckRun{Name: "sparkwing/build", HeadSHA: "0123456789abcdef0123456789abcdef01234567", Status: "queued"}
+
+	statuses, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"statuses": "write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateCheckRun(ctx, statuses.Token, "acme", "widgets", run); !errors.Is(err, githubapp.ErrPermissionMissing) {
+		t.Fatalf("create with a token lacking checks:write = %v, want ErrPermissionMissing", err)
+	}
+
+	gh.SetChecksGranted(7, false)
+	if _, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"}); !errors.Is(err, githubapp.ErrPermissionMissing) {
+		t.Fatalf("checks token on an installation without the permission = %v, want ErrPermissionMissing", err)
+	}
+	if _, err := c.InstallationToken(ctx, 7, []string{"elsewhere"}, map[string]string{"statuses": "write"}); !errors.Is(err, githubapp.ErrNotInstalled) {
+		t.Fatalf("control: a repository outside the installation = %v, want ErrNotInstalled", err)
+	}
+
+	gh.SetChecksGranted(7, true)
+	checks, err := c.InstallationToken(ctx, 7, []string{"widgets"}, map[string]string{"checks": "write"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := c.CreateCheckRun(ctx, checks.Token, "acme", "widgets", run)
+	if err != nil || id <= 0 {
+		t.Fatalf("create = %d, %v", id, err)
+	}
+	run.Status, run.Conclusion = "completed", "success"
+	if err := c.UpdateCheckRun(ctx, checks.Token, "acme", "widgets", id, run); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	gh.FailCheckRuns(1)
+	var apiErr *githubapp.APIError
+	if err := c.UpdateCheckRun(ctx, checks.Token, "acme", "widgets", id, run); !errors.As(err, &apiErr) || !apiErr.Temporary() {
+		t.Fatalf("update GitHub answered 502 = %v, want a temporary APIError", err)
+	}
+	calls := gh.CheckRunCalls()
+	if len(calls) != 2 || calls[1].Method != "update" || calls[1].ID != id || calls[1].Conclusion != "success" {
+		t.Fatalf("check run writes = %+v", calls)
+	}
+}
