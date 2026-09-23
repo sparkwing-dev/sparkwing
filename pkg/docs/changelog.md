@@ -22,6 +22,20 @@ unlock.
 
 ### Added
 
+- **logs + runner:** a node's log says whether it is whole. The runner
+  numbers every line it appends (`X-Sparkwing-Log-Stream`,
+  `X-Sparkwing-Log-Seq`) and, when the node finishes, seals each stream
+  with `POST /api/v1/logs/{runID}/{nodeID}/seal`: the last number, the
+  lines and bytes numbered, the lines it failed to deliver, and a SHA-256
+  of the stream. Only the node's claim holder can seal, and the seal
+  survives the archive. `sparkwing runs logs` and the dashboard read it
+  back as `complete`, `incomplete`, `cut_off` (no seal 60 seconds after
+  the node finished), `unconfirmed` (a runner that never numbers its
+  lines) or `streaming`, and draw one line after the log when it is not
+  whole. The dashboard serves the verdict at
+  `GET /api/v1/runs/{id}/logs/{node}/completeness`. See
+  [Log completeness](docs/observability.md#log-completeness).
+
 - **controller:** a free tier bounded by counting teams. A team without
   credits takes one of `--free-team-slots` (200) the first time it starts a
   run, in the trigger's transaction, and keeps it until the team is deleted,
