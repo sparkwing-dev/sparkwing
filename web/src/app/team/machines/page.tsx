@@ -13,6 +13,7 @@ import { toast } from "@/components/Toasts";
 import {
   type CLIToken,
   type Me,
+  type Member,
   type MintedCLIToken,
   type MintedRunnerToken,
   type RunnerToken,
@@ -21,7 +22,9 @@ import {
   cliTokenStartsRuns,
   controllerURLPlaceholder,
   listCLITokens,
+  listMembers,
   listRunnerTokens,
+  memberLabel,
   mintCLIToken,
   mintRunnerToken,
   parseRepoPatterns,
@@ -40,6 +43,7 @@ export default function MachinesPage() {
 function Machines({ me }: { me: Me }) {
   const role = me.active_team.role;
   const [tokens, setTokens] = useState<RunnerToken[] | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -55,6 +59,13 @@ function Machines({ me }: { me: Me }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Members only name each token's creator, so the token list stands without them.
+  useEffect(() => {
+    listMembers()
+      .then(setMembers)
+      .catch(() => {});
+  }, []);
 
   async function revoke(t: RunnerToken) {
     const label = t.name || t.prefix;
@@ -134,7 +145,7 @@ function Machines({ me }: { me: Me }) {
                   <div className="text-sm truncate">{t.name || t.prefix}</div>
                   <div className="text-xs text-[var(--muted)] font-mono truncate">
                     {t.prefix}
-                    {t.created_by ? ` · by ${t.created_by}` : ""}
+                    {creatorSuffix(t, members)}
                     {t.created_at
                       ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}`
                       : ""}
@@ -181,6 +192,11 @@ function Machines({ me }: { me: Me }) {
       <CLIAccess team={me.active_team.display_name} />
     </>
   );
+}
+
+function creatorSuffix(t: RunnerToken, members: Member[]): string {
+  const creator = memberLabel(t.created_by, members);
+  return creator ? ` · by ${creator}` : "";
 }
 
 function CLIAccess({ team }: { team: string }) {
