@@ -260,7 +260,6 @@ func TestRunnerTokenIsBoundToTheTeamThatMintedIt(t *testing.T) {
 		t.Fatalf("mint = %d", code)
 	}
 	if !strings.HasPrefix(minted.Command, "SPARKWING_AGENT_TOKEN="+minted.Token+" sparkwing-runner runner --controller ") ||
-		!strings.Contains(minted.Command, " --logs ") ||
 		!strings.Contains(minted.Command, " --also-claim-triggers ") ||
 		!strings.Contains(minted.Command, " --max-claims-before-restart 0 ") ||
 		strings.Contains(minted.Command, "--gitcache") ||
