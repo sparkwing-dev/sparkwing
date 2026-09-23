@@ -6784,6 +6784,11 @@ components:
         executor_location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived from the claim credential and holder; absent without enough evidence.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         required_executor_location:
           type: string
           enum: ["", local, cloud, unknown]
@@ -6854,6 +6859,11 @@ components:
         location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived for the current claim's attempt when available.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         outcome: {type: string}

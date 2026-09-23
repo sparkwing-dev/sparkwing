@@ -195,6 +195,8 @@ export interface Node {
   executor_kind?: string;
   executor_name?: string;
   executor_location?: "local" | "cloud" | "unknown";
+  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
+  execution_site_name?: string;
   execution_started_at?: string;
   execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
@@ -226,6 +228,8 @@ export interface ExecutionAttempt {
   executor_kind?: string;
   executor_name?: string;
   location?: "local" | "cloud" | "unknown";
+  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
+  execution_site_name?: string;
   platform?: string;
   started_at?: string;
   finished_at?: string;

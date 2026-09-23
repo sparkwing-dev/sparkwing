@@ -102,6 +102,29 @@ describe("executionAttempts", () => {
 });
 
 describe("executionDisplay", () => {
+  it("maps known execution origins to a compact icon and specific tooltip", () => {
+    assert.deepEqual(
+      [
+        executionDisplay({ executor_kind: "agent", executor_name: "moonborn", location: "local" }),
+        executionDisplay({ executor_kind: "github-actions", executor_name: "koreyGambill/moonborn-ws", location: "unknown" }),
+        executionDisplay({ executor_kind: "cloud", location: "cloud" }),
+        executionDisplay({ executor_kind: "kubernetes", executor_name: "warm-pool", location: "cloud" }),
+      ].map(({ icon, tooltip }) => [icon, tooltip]),
+      [
+        ["machine", "Ran on moonborn (your machine)"],
+        ["github", "Ran on GitHub Actions: koreyGambill/moonborn-ws"],
+        ["cloud", "Ran in Sparkwing Cloud"],
+        ["cluster", "Ran on the cluster warm pool"],
+      ],
+    );
+    assert.equal(executionDisplay({ location: "unknown" }).icon, null);
+    assert.equal(executionDisplay({
+      executor_kind: "agent",
+      executor_name: "runner-1",
+      execution_site: "machine",
+      execution_site_name: "moonborn",
+    }).executorLabel, "agent runner-1");
+  });
   it("uses text and a separate style for every location", () => {
     const local = executionDisplay({
       location: "local",

@@ -85,13 +85,13 @@ import AttemptsDropdown from "@/components/AttemptsDropdown";
 import {
   ExecutionAttributionPanel,
   ExecutionBadge,
+  ExecutionIconPaths,
 } from "@/components/ExecutionAttribution";
 import { ansiToHtml, stripAnsi } from "@/lib/ansi";
 import {
   compactExecutionDisplay,
   executionAttempts,
   executionDisplay,
-  type ExecutionDisplay,
 } from "@/lib/executionAttribution";
 
 const POLL_MS = 2000;
@@ -1052,7 +1052,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
         {                             }
         {run && activeDetail && (
-          <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
+          <div className="w-72 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
             <div
               onClick={() => {
                 setFocusedColumn("nodes");
@@ -1758,7 +1758,6 @@ function NodeRow({
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
   reused?: boolean;
 }) {
-  const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
   const statusLabel = reused ? "reused" : n.outcome || n.status;
   const steps = n.work?.steps ?? [];
   const hasSteps = steps.length > 0;
@@ -1799,8 +1798,8 @@ function NodeRow({
             className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status, reused)}`}
             title={reused ? "Reused from prior attempt" : undefined}
           />
-          <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
           <ExecutionBadge node={n} />
+          <span className="text-[11px] truncate flex-1 min-w-0" title={n.id}>{n.id}</span>
           {(() => {
             const annos = collectNodeAnnotations(n);
             if (annos.length === 0) return null;
@@ -4588,12 +4587,25 @@ function DAG({
                   {fmtMs(nodeDuration(n))}
                 </text>
                 {(() => {
+                  const site = compactExecutionDisplay(n);
+                  if (!site?.icon || !site.tooltip) return null;
+                  const tipWidth = Math.min(270, Math.max(120, site.tooltip.length * 6.2 + 16));
+                  return (
+                    <g role="img" aria-label={site.tooltip} tabIndex={0} className="group" style={{ color: "#94a3b8" }}>
+                      <title>{site.tooltip}</title>
+                      <rect x={p.w - 22} y={1} width={18} height={18} fill="transparent" pointerEvents="all" />
+                      <svg x={p.w - 20} y={3} width={14} height={14} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <ExecutionIconPaths icon={site.icon} />
+                      </svg>
+                      <g className="pointer-events-none hidden group-hover:block group-focus:block">
+                        <rect x={p.w - tipWidth} y={-31} width={tipWidth} height={22} rx={4} fill="#0f172a" stroke="#475569" />
+                        <text x={p.w - tipWidth + 8} y={-16} fontSize={11} fill="#f1f5f9">{site.tooltip}</text>
+                      </g>
+                    </g>
+                  );
+                })()}
+                {(() => {
                   type TopPill =
-                    | {
-                        kind: "execution";
-                        w: number;
-                        display: ExecutionDisplay;
-                      }
                     | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
                     | { kind: "reused"; w: number }
@@ -4601,14 +4613,6 @@ function DAG({
                     | { kind: "inline"; w: number }
                     | { kind: "spawned"; w: number };
                   const pills: TopPill[] = [];
-                  const execution = compactExecutionDisplay(n);
-                  if (execution) {
-                    pills.push({
-                      kind: "execution",
-                      w: executionPillWidth(execution),
-                      display: execution,
-                    });
-                  }
                   if (n.dynamic) {
                     pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
                   }
@@ -4641,15 +4645,6 @@ function DAG({
                     const x = cursor;
                     cursor += pl.w + gap;
                     switch (pl.kind) {
-                      case "execution":
-                        out.push(
-                          <ExecutionPill
-                            key="execution"
-                            display={pl.display}
-                            x={x}
-                          />,
-                        );
-                        break;
                       case "dynamic":
                         out.push(
                           <DynamicPill key="dynamic" nodeW={p.w} x={x} />,
@@ -5556,11 +5551,11 @@ function DagNodeTooltip({
           <span className="font-mono">{state || "pending"}</span>
           <span className="text-[var(--muted)]">Duration:</span>
           <span className="font-mono">{fmtMs(nodeDuration(node))}</span>
-          {(attempts.length > 0 || node.claimed || node.started_at) && (
+          {(execution.tooltip || execution.executorLabel !== "Executor unknown") && (
             <>
               <span className="text-[var(--muted)]">Execution:</span>
               <span className="font-mono">
-                {execution.locationLabel} · {execution.executorLabel}
+                {execution.tooltip || execution.executorLabel}
               </span>
             </>
           )}
@@ -5685,52 +5680,6 @@ function NodeBadge({
 }
 
 const DYNAMIC_PILL_W = 56;
-function executionPillWidth(display: ExecutionDisplay): number {
-  return Math.max(46, 14 + display.location.length * 6);
-}
-
-function ExecutionPill({
-  display,
-  x,
-}: {
-  display: ExecutionDisplay;
-  x: number;
-}) {
-  const label = display.location.toUpperCase();
-  const width = executionPillWidth(display);
-  const fill =
-    display.location === "local"
-      ? "rgba(52,211,153,0.95)"
-      : "rgba(56,189,248,0.95)";
-  const title = `${display.locationLabel} · ${display.executorLabel}`;
-  return (
-    <g role="img" aria-label={title} style={{ pointerEvents: "none" }}>
-      <title>{title}</title>
-      <rect
-        x={x}
-        y={-6}
-        width={width}
-        height={15}
-        rx={7.5}
-        ry={7.5}
-        fill={fill}
-      />
-      <text
-        x={x + width / 2}
-        y={5}
-        textAnchor="middle"
-        fill="rgba(8,20,28,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.5px" }}
-      >
-        {label}
-      </text>
-    </g>
-  );
-}
-
 function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   const pillW = DYNAMIC_PILL_W;
   const pillH = 15;

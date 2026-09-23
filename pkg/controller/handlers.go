@@ -439,7 +439,11 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		if nodes == nil {
 			nodes = []*store.Node{}
 		}
-		nodes = nodesForResponse(nodes)
+		nodes, err = s.publicNodesWithExecutionLocation(r.Context(), nodes)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
 		for _, n := range nodes {
 			if n.Deps == nil {
 				n.Deps = []string{}
@@ -514,7 +518,12 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	if nodes == nil {
 		nodes = []*store.Node{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodesForResponse(nodes)})
+	public, err := s.publicNodesWithExecutionLocation(r.Context(), nodes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"nodes": public})
 }
 
 func splitCSV(s string) []string {
@@ -1531,7 +1540,12 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, nodeForResponse(n))
+	public, err := s.publicNodesWithExecutionLocation(r.Context(), []*store.Node{n})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, public[0])
 }
 
 func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {

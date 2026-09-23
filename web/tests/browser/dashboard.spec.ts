@@ -54,6 +54,43 @@ const finishedDetail = {
   ],
 };
 
+test("keeps a long node name visible beside its location icon", async ({ page }) => {
+  const longName = "verify-production-checks";
+  const detail = {
+    ...finishedDetail,
+    nodes: [{
+      ...finishedDetail.nodes[0],
+      id: longName,
+      executor_kind: "agent",
+      executor_name: "moonborn",
+      executor_location: "local",
+    }],
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const row = page.locator(`[data-node-id="${longName}"]`).first();
+  await expect(row).toBeVisible();
+  await expect(row.getByText(longName, { exact: true })).toBeVisible();
+  const label = row.getByText(longName, { exact: true });
+  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
+  const rowSite = row.getByLabel("Ran on moonborn (your machine)");
+  await expect(rowSite).toBeVisible();
+  await rowSite.focus();
+  await expect(rowSite.getByRole("tooltip")).toBeVisible();
+  await page.getByRole("button", { name: /DAG/ }).click();
+  const dagSite = page.locator('svg [role="img"][aria-label="Ran on moonborn (your machine)"]');
+  await expect(dagSite).toBeVisible();
+  await dagSite.hover();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await dagSite.focus();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+});
+
 function isoFromNow(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
 }

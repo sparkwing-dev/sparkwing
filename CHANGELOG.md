@@ -39,6 +39,11 @@ unlock.
   `DELETE /api/v1/me/identities/{provider}`. Schema 64 adds
   `identities.linked`, `identity_link_states` and `identity_unlinks`. See
   [Linked sign-ins](docs/auth.md#linked-sign-ins).
+- **dashboard + controller:** run node rows and DAG cards show small execution
+  site icons with runner details on hover or focus. Node names use the row width,
+  and the controller derives machine, GitHub Actions, cloud, or cluster sites
+  from the claim credential and holder when available. Unknown sites leave no
+  badge.
 
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
