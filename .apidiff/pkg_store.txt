@@ -888,6 +888,8 @@ type GitHubAppTrigger struct {
 	Pipeline       string
 	Push           bool
 	PullRequest    bool
+	Branches       []string
+	BaseBranches   []string
 	CreatedBy      string
 	CreatedAt      time.Time
 }

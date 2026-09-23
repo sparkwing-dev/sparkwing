@@ -158,9 +158,9 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
 	switch run.TriggerEnv[sparkwing.EnvGitHubEventName] {
 	case "":
-		return sub.Push
+		return sub.Push && githubAppBranchMatches(sub.Branches, run.GitBranch)
 	case sparkwing.EventPullRequest:
-		return sub.PullRequest
+		return sub.PullRequest && githubAppBranchMatches(sub.BaseBranches, run.TriggerEnv[sparkwing.EnvPRBaseRef])
 	default:
 		return false
 	}

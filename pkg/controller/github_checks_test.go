@@ -475,6 +475,33 @@ func TestGitHubAppRerequestedNeedsPriorEventsSubscription(t *testing.T) {
 	}
 }
 
+func TestGitHubAppRerequestedUsesCurrentBranchFilter(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.pushRun(headSHA)
+	f.drainChecks()
+	build := f.app.CheckRunCalls()[0]
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"branches": []string{"release/*"}}); code != http.StatusOK {
+		t.Fatalf("update subscription = %d", code)
+	}
+	for _, event := range []string{"check_run", "check_suite"} {
+		var payload map[string]any
+		if event == "check_run" {
+			payload = checkRunPayload(7, "rerequested", build)
+		} else {
+			payload = checkSuitePayload(7, "rerequested", headSHA, nil)
+		}
+		if code, out := f.deliver(event, payload, ""); code != http.StatusAccepted || out["status"] != "ignored" {
+			t.Fatalf("%s reran a branch excluded by the updated filter: %d %v", event, code, out)
+		}
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("rerun created %d extra runs", n-1)
+	}
+}
+
 // A re-run is refused whatever else about it is in order when the commit is
 // a fork's pull request head, when Sparkwing never ran the commit, or when the
 // check run is not this App's.

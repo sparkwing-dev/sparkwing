@@ -216,7 +216,7 @@ function ConnectedGitHub({ me }: { me: Me }) {
       </Panel>
       <Panel
         title="Runs from GitHub"
-        hint="Each subscription runs one pipeline when its repository gets a push or a pull request. Pull requests from forks aren't run."
+        hint="Each subscription runs one pipeline on matching pushes or pull requests. Set push branches for deploy pipelines. Pull requests from forks aren't run."
       >
         <SubscriptionsTable
           subscriptions={subscriptions}

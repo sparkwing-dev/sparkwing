@@ -29,6 +29,8 @@ const subscription = {
   pipeline: "ci",
   push: true,
   pull_request: true,
+  branches: ["main", "release/*"],
+  base_branches: ["main"],
   created_by: "u1",
   created_at: 1_700_000_000,
 };
@@ -115,6 +117,8 @@ describe("SubscriptionForm", () => {
       "the pull request help is on the form",
     );
     assert.doesNotMatch(html, /Fork pull requests/);
+    assert.match(html, /Push branches/);
+    assert.match(html, /Pull request base branches/);
   });
 
   it("keeps an edited repository the installation no longer lists", () => {
@@ -150,6 +154,7 @@ describe("SubscriptionsTable", () => {
     assert.match(html, />Edit</);
     assert.match(html, />Remove</);
     assert.match(html, /aria-label="Pull requests: yes"/);
+    assert.match(html, /release\/\*/);
     assert.doesNotMatch(html, /Fork/);
   });
 

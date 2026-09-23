@@ -196,6 +196,26 @@ export function SubscriptionForm({
       <p role="note" className="text-xs text-[var(--muted)]">
         {pullRequestHelp}
       </p>
+      <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
+        Push branches (one pattern per line; empty runs on every branch)
+        <textarea
+          className={`${inputClass} w-full font-mono`}
+          rows={2}
+          value={(draft.branches ?? []).join("\n")}
+          onChange={(e) => set({ branches: e.target.value.split("\n") })}
+          placeholder={"main\nrelease/*"}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
+        Pull request base branches (one pattern per line; empty runs on every base branch)
+        <textarea
+          className={`${inputClass} w-full font-mono`}
+          rows={2}
+          value={(draft.base_branches ?? []).join("\n")}
+          onChange={(e) => set({ base_branches: e.target.value.split("\n") })}
+          placeholder="main"
+        />
+      </label>
       {shown ? (
         <div role="alert" className="text-xs text-red-300">
           {shown}
@@ -253,7 +273,9 @@ export function SubscriptionsTable({
           <th className="px-4 py-2 font-medium">Repository</th>
           <th className="px-4 py-2 font-medium">Pipeline</th>
           <th className="px-4 py-2 font-medium">Pushes</th>
+          <th className="px-4 py-2 font-medium">Push branches</th>
           <th className="px-4 py-2 font-medium">Pull requests</th>
+          <th className="px-4 py-2 font-medium">Base branches</th>
           {canManage ? <th className="px-4 py-2" /> : null}
         </tr>
       </thead>
@@ -268,9 +290,11 @@ export function SubscriptionsTable({
             <td className="px-4 py-2">
               <Mark on={s.push} label="Pushes" />
             </td>
+            <td className="px-4 py-2 font-mono text-xs">{s.branches?.join(", ") || "All"}</td>
             <td className="px-4 py-2">
               <Mark on={s.pull_request} label="Pull requests" />
             </td>
+            <td className="px-4 py-2 font-mono text-xs">{s.base_branches?.join(", ") || "All"}</td>
             {canManage ? (
               <td className="px-4 py-2 text-right whitespace-nowrap">
                 <button

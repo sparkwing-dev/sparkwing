@@ -61,7 +61,9 @@ An installation stops being bound when GitHub reports it deleted, when a team ow
 
 ## Runs from pushes and pull requests
 
-A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, pull_request}`. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block.
+A team subscribes a pipeline to a repository with `PUT /api/v1/team/github-app/triggers {repository, pipeline, push, pull_request, branches, base_branches}`. The repository must be in one of the team's installations when the subscription is written. The pipeline is named explicitly, the way `POST /webhooks/github/{pipeline}` names it in its URL: the controller does not read a repository's `on:` block.
+
+`branches` filters push events by the pushed branch. `base_branches` filters pull request events by the pull request's base branch. Both are arrays of up to 10 glob patterns, each at most 128 bytes, matched with Go `path.Match` against the branch name. An empty list matches every branch, including for subscriptions written before these fields existed. For example, `{"repository":"acme/widgets","pipeline":"deploy","push":true,"branches":["main","release/*"]}` runs deploy on `main` or a one-level `release/` branch. Set `branches` on every deploy pipeline subscribed to push so feature branches cannot deploy. The controller applies these filters before creating a run; pipeline YAML in the pushed commit cannot change them.
 
 `POST /webhooks/github-app` verifies `X-Hub-Signature-256` with the App's webhook secret and answers 401 for a signature that does not verify. It routes by the payload's `installation.id` to the bound team; a delivery for an unbound or suspended installation is acknowledged and does nothing. For `push` and for `pull_request` (`opened`, `synchronize`, `reopened`) it creates one trigger in that team per subscribed pipeline, recording the branch, commit, repository and the installation id.
 
@@ -69,6 +71,7 @@ A delivery starts nothing, and is acknowledged with the reason, when:
 
 - it is a pull request from a fork (see below);
 - it is a push of no commit: a deleted branch, or an `after` of all zeros;
+- no subscribed pipeline matches the push branch or pull request base branch;
 - the event is older than the team's binding of the installation, going by the push's `repository.pushed_at` or the pull request's `updated_at`, so an event meant for the installation's previous team does not run in the next one;
 - the event carries no such time, or one the controller cannot read, since nothing then shows it is not older than the binding;
 - GitHub no longer reports the installation as covering the repository. The controller asks GitHub on every delivery that would start a run, never from a cached answer.
@@ -127,7 +130,7 @@ GitHub's **Re-run** buttons start runs:
 - `check_run` `rerequested` runs that check run's pipeline again. The check run must be this App's, and its `external_id` must name a run of the installation's team on the same repository id and commit.
 - `check_suite` `rerequested` runs each subscribed pipeline with its own prior App run on that repository id and commit.
 
-A re-run copies the branch and pull request from that pipeline's own prior run. The pipeline must still subscribe to that run's event, push or pull request. A commit the team never ran starts nothing, and so does a check run or suite whose pull requests include one from a fork. Older runs without a recorded GitHub repository id cannot be re-run from GitHub. Otherwise a re-run follows the push rules: the installation must be bound to a team and not suspended, GitHub must still report it covers the repository, each run spends one of the team's hourly runs, and a delivery whose signed body was processed before answers `duplicate`.
+A re-run copies the branch and pull request from that pipeline's own prior run. The pipeline must still subscribe to that run's event, push or pull request, and its branch filter must still match. A commit the team never ran starts nothing, and so does a check run or suite whose pull requests include one from a fork. Older runs without a recorded GitHub repository id cannot be re-run from GitHub. Otherwise a re-run follows the push rules: the installation must be bound to a team and not suspended, GitHub must still report it covers the repository, each run spends one of the team's hourly runs, and a delivery whose signed body was processed before answers `duplicate`.
 
 `check_suite` `requested` starts nothing: GitHub sends it for every push, and the push delivery already starts that commit's runs. `check_run` `created` and `completed`, which GitHub sends for the controller's own writes, and every other `check_run` and `check_suite` action start nothing either.
 

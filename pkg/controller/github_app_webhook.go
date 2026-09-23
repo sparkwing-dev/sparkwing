@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -334,15 +335,29 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	var planned []githubAppPlannedRun
 	for _, sub := range subs {
-		if (event == "push" && sub.Push) || (event == "pull_request" && sub.PullRequest) {
+		if (event == "push" && sub.Push && githubAppBranchMatches(sub.Branches, intake.branch)) ||
+			(event == "pull_request" && sub.PullRequest && githubAppBranchMatches(sub.BaseBranches, intake.env[sparkwing.EnvPRBaseRef])) {
 			planned = append(planned, githubAppPlannedRun{pipeline: sub.Pipeline, intake: intake})
 		}
 	}
 	if len(planned) == 0 {
-		githubAppIgnored(w, "no pipeline of this team subscribes to "+event+" on "+repo.Slug())
+		githubAppIgnored(w, "no pipeline of this team subscribes to "+event+" on "+repo.Slug()+" for this branch")
 		return
 	}
 	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
+}
+
+func githubAppBranchMatches(patterns []string, branch string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, pattern := range patterns {
+		matched, err := path.Match(pattern, branch)
+		if err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 // githubAppPlannedRun is one run a delivery would start.

@@ -22,6 +22,13 @@ unlock.
 
 ### Added
 
+- **controller + web:** GitHub App push subscriptions accept `branches` and
+  pull request subscriptions accept `base_branches`, each with up to 10 glob
+  patterns. The controller checks the push branch or pull request base branch
+  before starting a run, including a GitHub rerun. Empty lists keep the existing
+  all-branches behavior. The dashboard edits both filters. Schema 65 adds the
+  stored filters. Set `branches` for any deploy pipeline subscribed to push.
+
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the

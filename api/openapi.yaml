@@ -5783,7 +5783,7 @@ paths:
       tags: [teams]
       summary: Subscribe a pipeline to a repository's pushes and pull requests.
       description: >-
-        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
+        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. Branch patterns use Go path.Match against the pushed branch or pull request base branch; an empty list matches every branch. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
       requestBody:
         required: true
         content:
@@ -5797,6 +5797,8 @@ paths:
                 pipeline: {type: string}
                 push: {type: boolean}
                 pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
+                branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Push branch glob patterns, at most 128 bytes each. Empty matches all branches."}
+                base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Pull request base branch glob patterns, at most 128 bytes each. Empty matches all base branches."}
       responses:
         "200":
           description: Written.
@@ -6592,7 +6594,7 @@ components:
     GitHubAppTrigger:
       x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
       type: object
-      required: [repository, repository_id, installation_id, pipeline, push, pull_request, created_by, created_at]
+      required: [repository, repository_id, installation_id, pipeline, push, pull_request, branches, base_branches, created_by, created_at]
       properties:
         repository: {type: string, description: owner/name as GitHub spells it.}
         repository_id: {type: integer, format: int64}
@@ -6600,6 +6602,8 @@ components:
         pipeline: {type: string}
         push: {type: boolean}
         pull_request: {type: boolean}
+        branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
     GitHubAppExtraRepos:

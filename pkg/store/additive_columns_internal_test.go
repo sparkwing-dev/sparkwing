@@ -132,6 +132,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// names and two tables nothing older reads, so an older binary keeps
 	// writing the migrated database.
 	64: {identityLinkedCols},
+	65: {githubAppBranchFilterCols},
 }
 
 func columnSpecMaps() []map[string]string {
