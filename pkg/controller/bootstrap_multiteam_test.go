@@ -37,8 +37,11 @@ func TestBootstrap_MultiTeamControllerRefusesAWebSignup(t *testing.T) {
 	status, body := postJSONWithStatus(t, base+"/api/v1/users", map[string]string{
 		"name": "attacker", "password": "correctbatteryhorse",
 	})
-	if status != http.StatusForbidden {
-		t.Fatalf("web signup on a multi-team controller = %d %s, want 403", status, body)
+	// safety: a multi-team license turns auth on over an empty tokens table,
+	// so the unauthenticated signup is refused with 401 before the signup
+	// handler's own 403 refusal is reached.
+	if status != http.StatusUnauthorized {
+		t.Fatalf("web signup on a multi-team controller = %d %s, want 401", status, body)
 	}
 	if n, err := st.CountUsers(); err != nil || n != 0 {
 		t.Fatalf("users after the refused signup = %d (%v), want 0", n, err)
