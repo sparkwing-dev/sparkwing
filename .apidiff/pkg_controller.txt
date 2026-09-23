@@ -355,6 +355,8 @@ type ServicesResponse struct {
 	Logs string
 
 	Dashboard string
+
+	MultiTeam bool
 }
 type SourceTokenResponse struct {
 	Token      string
