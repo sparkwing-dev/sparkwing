@@ -122,8 +122,19 @@ externally-reachable URL operators hit directly, `--cache-url` for the
 controller-to-cache proxy target.
 
 Off-cluster agents default `gitcache` to
-`https://<controller>/api/v1/gitcache`. During node execution the runner
-narrows that URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
+`https://<controller>/api/v1/gitcache`. Before a claimed node touches the
+cache, the agent asks the controller for the run's
+[cache grant](#cache-grants). With a grant and an announced cache, the node
+reads source, the binary cache and artifacts from the announced
+`--cache-pod-url` directly, carrying the grant, and never through the
+controller's proxy, so the controller stays off the data path. An explicit
+`gitcache` that names a cache directly, such as an in-cluster Service, is
+kept. A controller that mints no grant answers the grant request with 404,
+and the node runs as before: through the proxy below, or, with no
+`gitcache`, without the cache.
+
+Without a grant the runner
+narrows the proxy URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
 register and read only the repository of its live run claim. The controller
 removes that bearer before contacting the internal cache. The unscoped
 `/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache

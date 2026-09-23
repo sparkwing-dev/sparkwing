@@ -246,20 +246,23 @@ func ControllerRunGitcacheURL(gcURL, controllerURL, runID string) string {
 
 // ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and a reviewed proxy path.
 func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
-	if token == "" {
+	if token == "" || !IsControllerGitcache(gcURL, controllerURL) {
 		return ""
 	}
+	return token
+}
+
+// IsControllerGitcache reports whether gcURL is the controller's own gitcache
+// proxy, admin or claim-bound, rather than a cache the caller reaches directly.
+func IsControllerGitcache(gcURL, controllerURL string) bool {
 	cache, cacheErr := parseCacheEndpoint(gcURL)
 	controller, controllerErr := parseCacheEndpoint(controllerURL)
 	if cacheErr != nil || controllerErr != nil ||
 		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
 		!strings.EqualFold(cache.Host, controller.Host) {
-		return ""
+		return false
 	}
-	if !controllerGitcacheProxyPath(cache.Path, controller.Path) {
-		return ""
-	}
-	return token
+	return controllerGitcacheProxyPath(cache.Path, controller.Path)
 }
 
 func controllerGitcachePath(controllerPath string) string {

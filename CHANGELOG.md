@@ -22,6 +22,16 @@ unlock.
 
 ### Added
 
+- **runner:** an off-cluster agent reads the cache the controller announces
+  directly. A claimed node asks for its run's cache grant first; with a grant
+  and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the
+  binary cache and artifacts go to that cache with the grant instead of
+  through the controller's `/api/v1/gitcache` proxy, and a pooled agent's
+  artifacts carry the node's grant rather than one from its environment. A
+  `--gitcache` naming a cache directly is kept, and a controller that mints no
+  grant leaves the node on its previous path. See
+  [Operator Discovery](docs/gitcache.md#operator-discovery).
+
 - **cache:** `--metrics-addr` (`SPARKWING_METRICS_ADDR`) moves `/metrics`,
   and the proxy's `/stats`, off the main listener onto a port of their own,
   so a cache published through an ingress with `--disable-proxy` answers only
