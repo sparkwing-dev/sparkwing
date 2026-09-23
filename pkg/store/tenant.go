@@ -260,7 +260,10 @@ var tenantTables = []string{
 	"sessions",
 	"storage_month_usage",
 	"storage_quotas",
+	"storage_reservations",
 	"storage_run_usage",
+	"team_download_day",
+	"team_storage",
 	"tokens",
 	"triggers",
 	"users",
@@ -272,6 +275,7 @@ var tenantTables = []string{
 var keyedAtCreation = []string{
 	"credit_checkouts", "credit_freezes", "free_slots", "github_app_installations", "github_app_triggers",
 	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
+	"storage_reservations", "team_download_day", "team_storage",
 }
 
 // safety: executors is here because an executor enrolls with the deployment
@@ -284,6 +288,7 @@ var keyedAtCreation = []string{
 // its velocity limits count.
 var operatorTables = []string{
 	"accounts",
+	"egress_day",
 	"executors",
 	"github_app_connect_states",
 	"github_app_deliveries",

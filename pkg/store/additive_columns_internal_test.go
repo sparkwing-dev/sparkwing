@@ -120,6 +120,7 @@ var additiveColumnSources = map[int][]map[string]string{
 	// start, as it always did.
 	59: {nodesCreditBillingCols},
 	60: nil,
+	61: nil,
 }
 
 func columnSpecMaps() []map[string]string {
