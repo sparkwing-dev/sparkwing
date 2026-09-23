@@ -200,9 +200,17 @@ export interface RunnerToken {
   prefix: string;
   name?: string;
   created_by?: string;
-  created_at?: string;
+  // Unix seconds, as the controller reports them.
+  created_at?: number;
   expires_at?: number;
-  last_used_at?: string;
+  last_used_at?: number;
+}
+
+// unixSecondsISO turns the controller's unix-second stamps into the ISO
+// string the time formatters read; Date takes milliseconds.
+export function unixSecondsISO(seconds?: number): string {
+  if (!seconds) return "";
+  return new Date(seconds * 1000).toISOString();
 }
 
 export interface MintedRunnerToken {

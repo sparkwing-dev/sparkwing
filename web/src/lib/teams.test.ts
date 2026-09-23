@@ -280,3 +280,13 @@ describe("runnerConnectCommand", () => {
     );
   });
 });
+
+describe("unixSecondsISO", () => {
+  it("reads the controller's unix seconds as a date in its own year, not 1970", () => {
+    assert.equal(teams.unixSecondsISO(1_790_000_000), "2026-09-21T14:13:20.000Z");
+  });
+  it("leaves an absent stamp empty", () => {
+    assert.equal(teams.unixSecondsISO(undefined), "");
+    assert.equal(teams.unixSecondsISO(0), "");
+  });
+});

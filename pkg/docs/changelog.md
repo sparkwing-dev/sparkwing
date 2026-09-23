@@ -609,6 +609,11 @@ unlock.
   answered `429` naming the cap. Runner names a route derives from its path
   are not counted.
 
+- **dashboard:** the machines page shows runner token dates in their own year
+  The runner-token list reports unix seconds, which the machines page handed to
+  `Date` as milliseconds, so every created, last-seen and expiry date read as
+  January 1970.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

@@ -20,6 +20,7 @@ import {
   mintRunnerToken,
   revokeRunnerToken,
   runnerConnectCommand,
+  unixSecondsISO,
 } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
 
@@ -104,15 +105,15 @@ function Machines({ me }: { me: Me }) {
                   <div className="text-xs text-[var(--muted)] font-mono truncate">
                     {t.prefix}
                     {t.created_by ? ` · by ${t.created_by}` : ""}
-                    {t.created_at ? ` · ${fmtDateTime(t.created_at)}` : ""}
+                    {t.created_at ? ` · ${fmtDateTime(unixSecondsISO(t.created_at))}` : ""}
                     {t.expires_at
-                      ? ` · expires ${fmtDateTime(new Date(t.expires_at * 1000).toISOString())}`
+                      ? ` · expires ${fmtDateTime(unixSecondsISO(t.expires_at))}`
                       : ""}
                   </div>
                 </div>
                 {t.last_used_at ? (
                   <span className="text-xs text-[var(--muted)]">
-                    last seen {fmtDateTime(t.last_used_at)}
+                    last seen {fmtDateTime(unixSecondsISO(t.last_used_at))}
                   </span>
                 ) : null}
                 {mayRevoke ? (
