@@ -546,6 +546,124 @@ func TestGitHubAppTagBooleanRejected(t *testing.T) {
 	}
 }
 
+func TestGitHubAppPushBranchSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{"branches": []string{"main", "release/*"}}); code != http.StatusOK {
+		t.Fatalf("subscribe with branches = %d, want 200", code)
+	}
+	feature := pushPayload(7, 701, "acme/widgets", headSHA)
+	feature["ref"] = "refs/heads/feature/risky"
+	if code, out := f.deliver("push", feature, ""); code != http.StatusAccepted || out["status"] != "ignored" || out["reason"] == "" {
+		t.Fatalf("nonmatching push = %d %v, want ignored with reason", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("nonmatching push started %d runs", n)
+	}
+	nested := pushPayload(7, 701, "acme/widgets", headSHA)
+	nested["ref"] = "refs/heads/release/one/two"
+	if code, out := f.deliver("push", nested, ""); code != http.StatusAccepted || out["status"] != "ignored" {
+		t.Fatalf("nested release push = %d %v, want ignored by path.Match", code, out)
+	}
+	release := pushPayload(7, 701, "acme/widgets", headSHA)
+	release["ref"] = "refs/heads/release/1.0"
+	if code, out := f.deliver("push", release, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("matching push = %d %v, want dispatched", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("matching push started %d runs, want 1", n)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{"branches": []string{}}); code != http.StatusOK {
+		t.Fatalf("clear branch filter = %d", code)
+	}
+	feature["after"] = strings.Repeat("2", 40)
+	if code, out := f.deliver("push", feature, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push with empty filter = %d %v, want dispatched", code, out)
+	}
+}
+
+func TestGitHubAppPullRequestBaseBranchSubscription(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{
+		"push": false, "pull_request": true, "base_branches": []string{"main", "release/*"},
+	}); code != http.StatusOK {
+		t.Fatalf("subscribe with base_branches = %d, want 200", code)
+	}
+	feature := prPayload(7, 701, "acme/widgets", 701)
+	feature["pull_request"].(map[string]any)["base"].(map[string]any)["ref"] = "feature"
+	if code, out := f.deliver("pull_request", feature, ""); code != http.StatusAccepted || out["status"] != "ignored" || out["reason"] == "" {
+		t.Fatalf("nonmatching PR base = %d %v, want ignored with reason", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("nonmatching PR base started %d runs", n)
+	}
+	if code, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 701), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("matching PR base = %d %v, want dispatched", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 1 {
+		t.Fatalf("matching PR base started %d runs, want 1", n)
+	}
+}
+
+func TestGitHubAppSubscriptionRejectsInvalidBranchPatterns(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"too many push patterns", map[string]any{"branches": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}}},
+		{"long push pattern", map[string]any{"branches": []string{strings.Repeat("x", 129)}}},
+		{"push pattern exceeds byte limit", map[string]any{"branches": []string{strings.Repeat("é", 65)}}},
+		{"malformed push pattern", map[string]any{"branches": []string{"["}}},
+		{"empty push pattern", map[string]any{"branches": []string{""}}},
+		{"too many base patterns", map[string]any{"base_branches": []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"}}},
+		{"long base pattern", map[string]any{"base_branches": []string{strings.Repeat("x", 129)}}},
+		{"malformed base pattern", map[string]any{"base_branches": []string{"["}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if code := f.subscribe(olga, "acme/widgets", "build", tc.body); code != http.StatusBadRequest {
+				t.Fatalf("invalid patterns = %d, want 400", code)
+			}
+		})
+	}
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"branches": []string{strings.Repeat("x", 128)}}); code != http.StatusOK {
+		t.Fatalf("128-byte pattern = %d, want 200", code)
+	}
+}
+
+func TestGitHubAppBranchFilterLeavesTagPatternsAlone(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "deploy", map[string]any{
+		"branches": []string{"main"}, "tags": []string{"v*"},
+	}); code != http.StatusOK {
+		t.Fatalf("subscribe with branches and tags = %d", code)
+	}
+	for _, tc := range []struct {
+		ref, sha, status string
+	}{
+		{"refs/heads/feature", strings.Repeat("1", 40), "ignored"},
+		{"refs/tags/canary", strings.Repeat("2", 40), "ignored"},
+		{"refs/heads/main", strings.Repeat("3", 40), "dispatched"},
+		{"refs/tags/v1.0.0", strings.Repeat("4", 40), "dispatched"},
+	} {
+		payload := pushPayload(7, 701, "acme/widgets", tc.sha)
+		payload["ref"] = tc.ref
+		if _, out := f.deliver("push", payload, ""); out["status"] != tc.status {
+			t.Fatalf("%s = %v, want %s", tc.ref, out, tc.status)
+		}
+	}
+	if n := len(f.triggers(olga.team)); n != 2 {
+		t.Fatalf("branch and tag filters started %d runs, want 2", n)
+	}
+}
+
 func TestGitHubAppRedeliveryStartsOneRun(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")

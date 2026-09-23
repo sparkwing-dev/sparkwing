@@ -891,6 +891,8 @@ type GitHubAppTrigger struct {
 	Push           bool
 	Tags           []string
 	PullRequest    bool
+	Branches       []string
+	BaseBranches   []string
 	CreatedBy      string
 	CreatedAt      time.Time
 }

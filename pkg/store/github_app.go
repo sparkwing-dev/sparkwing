@@ -43,6 +43,8 @@ type GitHubAppTrigger struct {
 	Push           bool
 	Tags           []string
 	PullRequest    bool
+	Branches       []string
+	BaseBranches   []string
 	CreatedBy      string
 	CreatedAt      time.Time
 }
@@ -117,6 +119,11 @@ func ValidateGitHubTagPatterns(patterns []string) error {
 		}
 	}
 	return nil
+}
+
+var githubAppBranchFilterCols = map[string]string{
+	"branches":      "TEXT NOT NULL DEFAULT '[]'",
+	"base_branches": "TEXT NOT NULL DEFAULT '[]'",
 }
 
 func applyGitHubAppMigrationSQLite(ctx context.Context, tx *storeTx) error {
@@ -289,21 +296,27 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 }
 
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,
-       created_by, created_at`
+       branches, base_branches, created_by, created_at`
 
 func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
 		var push, pr int
-		var patterns string
+		var patterns, branches, baseBranches string
 		var created int64
 		if err := rows.Scan(&tr.RepositoryID, &tr.Pipeline, &tr.Repository, &tr.InstallationID, &push, &patterns, &pr,
-			&tr.CreatedBy, &created); err != nil {
+			&branches, &baseBranches, &tr.CreatedBy, &created); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(patterns), &tr.Tags); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(branches), &tr.Branches); err != nil {
+			return nil, fmt.Errorf("decode push branches: %w", err)
+		}
+		if err := json.Unmarshal([]byte(baseBranches), &tr.BaseBranches); err != nil {
+			return nil, fmt.Errorf("decode pull request base branches: %w", err)
 		}
 		tr.Push, tr.PullRequest = push != 0, pr != 0
 		tr.CreatedAt = time.Unix(created, 0).UTC()
@@ -322,6 +335,18 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	if err := ValidateGitHubTagPatterns(tr.Tags); err != nil {
 		return GitHubAppTrigger{}, err
 	}
+	if err := validateGitHubBranchPatterns("branches", tr.Branches); err != nil {
+		return GitHubAppTrigger{}, err
+	}
+	if err := validateGitHubBranchPatterns("base_branches", tr.BaseBranches); err != nil {
+		return GitHubAppTrigger{}, err
+	}
+	if tr.Branches == nil {
+		tr.Branches = []string{}
+	}
+	if tr.BaseBranches == nil {
+		tr.BaseBranches = []string{}
+	}
 	if _, err := t.GitHubAppInstallation(ctx, tr.InstallationID); err != nil {
 		return GitHubAppTrigger{}, err
 	}
@@ -339,19 +364,43 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 		}
 		return 0
 	}
+	branches, err := json.Marshal(tr.Branches)
+	if err != nil {
+		return GitHubAppTrigger{}, fmt.Errorf("encode push branches: %w", err)
+	}
+	baseBranches, err := json.Marshal(tr.BaseBranches)
+	if err != nil {
+		return GitHubAppTrigger{}, fmt.Errorf("encode pull request base branches: %w", err)
+	}
 	_, err = t.s.exec(ctx, `
 		INSERT INTO github_app_triggers (team, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
 		    on_push = excluded.on_push, tag_patterns = excluded.tag_patterns, on_pull_request = excluded.on_pull_request,
+		    branches = excluded.branches, base_branches = excluded.base_branches,
 		    created_by = excluded.created_by, created_at = excluded.created_at`,
 		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push), string(patterns),
-		flag(tr.PullRequest), tr.CreatedBy, tr.CreatedAt.Unix())
+		flag(tr.PullRequest), string(branches), string(baseBranches), tr.CreatedBy, tr.CreatedAt.Unix())
 	if err != nil {
 		return GitHubAppTrigger{}, err
 	}
 	return tr, nil
+}
+
+func validateGitHubBranchPatterns(field string, patterns []string) error {
+	if len(patterns) > 10 {
+		return fmt.Errorf("%w: %s has more than 10 patterns", ErrInvalidInput, field)
+	}
+	for _, pattern := range patterns {
+		if pattern == "" || len(pattern) > 128 {
+			return fmt.Errorf("%w: each %s pattern must be 1 to 128 bytes", ErrInvalidInput, field)
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return fmt.Errorf("%w: invalid %s pattern %q: %w", ErrInvalidInput, field, pattern, err)
+		}
+	}
+	return nil
 }
 
 // DeleteGitHubAppTrigger removes t's subscription of pipeline to repository,

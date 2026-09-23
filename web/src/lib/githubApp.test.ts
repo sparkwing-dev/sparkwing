@@ -132,6 +132,8 @@ describe("GitHub App calls", () => {
       pipeline: " ci ",
       push: true,
       pull_request: false,
+      branches: ["main", "release/*"],
+      base_branches: [],
     });
     assert.equal(calls[0].method, "PUT");
     assert.equal(calls[0].url, "/api/v1/team/github-app/triggers");
@@ -141,6 +143,8 @@ describe("GitHub App calls", () => {
       pipeline: "ci",
       push: true,
       pull_request: false,
+      branches: ["main", "release/*"],
+      base_branches: [],
     });
   });
 
@@ -251,6 +255,17 @@ describe("subscription form rules", () => {
     );
   });
 
+  it("checks branch pattern limits in bytes", () => {
+    assert.match(
+      lib.subscriptionProblem({ ...draft, branches: Array(11).fill("main") }) ?? "",
+      /at most 10/,
+    );
+    assert.match(
+      lib.subscriptionProblem({ ...draft, base_branches: ["é".repeat(65)] }) ?? "",
+      /128 bytes/,
+    );
+  });
+
   it("never asks for pull requests from forks", () => {
     const stored = {
       repository: "octo-org/api",
@@ -262,10 +277,12 @@ describe("subscription form rules", () => {
       created_by: "u1",
       created_at: 1_700_000_000,
       fork_pull_requests: true,
+      branches: [],
+      base_branches: [],
     };
     assert.deepEqual(
       Object.keys(lib.subscriptionRequest(lib.draftFromSubscription(stored))),
-      ["repository", "pipeline", "push", "pull_request"],
+      ["repository", "pipeline", "push", "pull_request", "branches", "base_branches"],
     );
   });
 

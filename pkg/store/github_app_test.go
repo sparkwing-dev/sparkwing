@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -177,7 +178,44 @@ func TestGitHubAppTagPatternMigrationDisablesBooleanTags(t *testing.T) {
 	acme = teamHandle(t, st, "acme")
 	subs, err := acme.GitHubAppTriggers(ctx)
 	if err != nil || len(subs) != 1 || !subs[0].Push || len(subs[0].Tags) != 0 {
-		t.Fatalf("subscription after v64 migration = %+v, %v", subs, err)
+		t.Fatalf("subscription after v66 migration = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppSubscriptionBranchesRoundTrip(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	tr := store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7,
+		Pipeline: "deploy", Push: true, PullRequest: true,
+		Branches: []string{"main", "release/*"}, BaseBranches: []string{"main"},
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, list := range []func(context.Context) ([]store.GitHubAppTrigger, error){
+		acme.GitHubAppTriggers,
+		func(ctx context.Context) ([]store.GitHubAppTrigger, error) {
+			return acme.GitHubAppTriggersFor(ctx, 7, 701)
+		},
+	} {
+		got, err := list(ctx)
+		if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0].Branches, tr.Branches) || !reflect.DeepEqual(got[0].BaseBranches, tr.BaseBranches) {
+			t.Fatalf("subscription after write = %+v, %v", got, err)
+		}
+	}
+	tr.Branches, tr.BaseBranches = nil, nil
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(got) != 1 || len(got[0].Branches) != 0 || len(got[0].BaseBranches) != 0 {
+		t.Fatalf("subscription after clearing filters = %+v, %v", got, err)
 	}
 }
 

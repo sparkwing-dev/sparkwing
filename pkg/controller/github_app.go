@@ -439,11 +439,13 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 }
 
 type githubAppTriggerReq struct {
-	Repository  string   `json:"repository"`
-	Pipeline    string   `json:"pipeline"`
-	Push        bool     `json:"push"`
-	Tags        []string `json:"tags"`
-	PullRequest bool     `json:"pull_request"`
+	Repository   string   `json:"repository"`
+	Pipeline     string   `json:"pipeline"`
+	Push         bool     `json:"push"`
+	Tags         []string `json:"tags"`
+	PullRequest  bool     `json:"pull_request"`
+	Branches     []string `json:"branches"`
+	BaseBranches []string `json:"base_branches"`
 }
 
 type githubAppTriggerJSON struct {
@@ -454,6 +456,8 @@ type githubAppTriggerJSON struct {
 	Push           bool     `json:"push"`
 	Tags           []string `json:"tags"`
 	PullRequest    bool     `json:"pull_request"`
+	Branches       []string `json:"branches"`
+	BaseBranches   []string `json:"base_branches"`
 	CreatedBy      string   `json:"created_by"`
 	CreatedAt      int64    `json:"created_at"`
 }
@@ -465,6 +469,7 @@ func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 	return githubAppTriggerJSON{
 		Repository: tr.Repository, RepositoryID: tr.RepositoryID, InstallationID: tr.InstallationID,
 		Pipeline: tr.Pipeline, Push: tr.Push, Tags: tr.Tags, PullRequest: tr.PullRequest,
+		Branches: tr.Branches, BaseBranches: tr.BaseBranches,
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
 }
@@ -547,6 +552,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
 		Pipeline: pipeline, Push: req.Push, Tags: req.Tags, PullRequest: req.PullRequest,
+		Branches: req.Branches, BaseBranches: req.BaseBranches,
 		CreatedBy: p.AccountID,
 	}, time.Now())
 	if err != nil {

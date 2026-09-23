@@ -31,6 +31,8 @@ export interface GitHubAppSubscription {
   pipeline: string;
   push: boolean;
   pull_request: boolean;
+  branches: string[];
+  base_branches: string[];
   created_by: string;
   created_at: number;
 }
@@ -40,6 +42,8 @@ export interface SubscriptionDraft {
   pipeline: string;
   push: boolean;
   pull_request: boolean;
+  branches?: string[];
+  base_branches?: string[];
 }
 
 export const emptySubscriptionDraft: SubscriptionDraft = {
@@ -47,6 +51,8 @@ export const emptySubscriptionDraft: SubscriptionDraft = {
   pipeline: "",
   push: true,
   pull_request: true,
+  branches: [],
+  base_branches: [],
 };
 
 // The dashboard server owns the connect flow, because it keeps the state and
@@ -134,6 +140,8 @@ export function subscriptionRequest(
     pipeline: draft.pipeline.trim(),
     push: draft.push,
     pull_request: draft.pull_request,
+    branches: (draft.branches ?? []).map((v) => v.trim()).filter(Boolean),
+    base_branches: (draft.base_branches ?? []).map((v) => v.trim()).filter(Boolean),
   };
 }
 
@@ -148,6 +156,15 @@ export function subscriptionProblem(draft: SubscriptionDraft): string | null {
   if (!req.push && !req.pull_request) {
     return "Run on pushes, pull requests or both.";
   }
+  for (const [label, patterns] of [
+    ["Push branches", req.branches],
+    ["Pull request base branches", req.base_branches],
+  ] as const) {
+    if (patterns && patterns.length > 10) return `${label} allows at most 10 patterns.`;
+    if (patterns?.some((pattern) => !pattern || new TextEncoder().encode(pattern).length > 128)) {
+      return `${label} patterns must be 1 to 128 bytes.`;
+    }
+  }
   return null;
 }
 
@@ -159,6 +176,8 @@ export function draftFromSubscription(
     pipeline: sub.pipeline,
     push: sub.push,
     pull_request: sub.pull_request,
+    branches: sub.branches ?? [],
+    base_branches: sub.base_branches ?? [],
   };
 }
 

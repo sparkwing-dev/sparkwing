@@ -161,9 +161,9 @@ func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger)
 		if run.TriggerEnv["GITHUB_REF_TYPE"] == "tag" {
 			return githubTagMatches(sub.Tags, run.TriggerEnv["GITHUB_TAG"])
 		}
-		return sub.Push
+		return sub.Push && githubAppBranchMatches(sub.Branches, run.GitBranch)
 	case sparkwing.EventPullRequest:
-		return sub.PullRequest
+		return sub.PullRequest && githubAppBranchMatches(sub.BaseBranches, run.TriggerEnv[sparkwing.EnvPRBaseRef])
 	default:
 		return false
 	}
