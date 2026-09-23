@@ -101,6 +101,25 @@ func run(args []string) error {
 		"how often the service walks its stored trees and replaces the running count with the measurement. "+
 			"Uploads are counted as they happen, so this walk is the only enumeration the ceiling costs; "+
 			"0 measures once at startup. Falls back to $SPARKWING_CACHE_STORE_RECONCILE.")
+	fs.StringVar(&cfg.BlobStore, "blob-store",
+		envOr("SPARKWING_CACHE_BLOB_STORE", cfg.BlobStore),
+		"s3://bucket/prefix that holds the binary, dependency-archive and artifact stores instead of the volume, "+
+			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
+			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors, uploads and the registry proxy stay "+
+			"on --data-dir. Empty keeps everything on the volume. Falls back to $SPARKWING_CACHE_BLOB_STORE.")
+	fs.Int64Var(&cfg.PresignMinBytes, "presign-min-bytes",
+		envInt64("SPARKWING_CACHE_PRESIGN_MIN_BYTES", cfg.PresignMinBytes),
+		"with --blob-store, answer a GET of a dependency archive or single artifact at least this large with a redirect "+
+			"to a presigned URL for that one object, so its bytes do not cross the pod; they still count against the "+
+			"egress meter. 0, the default, serves every read through the pod. Falls back to $SPARKWING_CACHE_PRESIGN_MIN_BYTES.")
+	fs.DurationVar(&cfg.PresignTTL, "presign-ttl",
+		envDuration("SPARKWING_CACHE_PRESIGN_TTL", cfg.PresignTTL),
+		"how long a presigned read stays valid, at most 1h. Falls back to $SPARKWING_CACHE_PRESIGN_TTL.")
+	fs.DurationVar(&cfg.UsageReconcile, "usage-reconcile",
+		envDuration("SPARKWING_CACHE_USAGE_RECONCILE", cfg.UsageReconcile),
+		"with --blob-store, how often the per-team count of the bucket is replaced by a listing of it. Writes and "+
+			"deletes keep the count between listings, and it is saved to the bucket every five minutes, so a restart "+
+			"does not list. 0 lists only when no saved count exists. Falls back to $SPARKWING_CACHE_USAGE_RECONCILE.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
