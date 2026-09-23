@@ -23,11 +23,11 @@ const (
 	// StorageChargeDaySeconds is the day the storage rate prices.
 	StorageChargeDaySeconds = 86_400
 
-	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at GitHub's $0.25
-	// per GB-month over a thirty-day month, which is 25 credits a month and
-	// 0.833333 credits a day. Nothing sets it on its own: an installation
-	// bills storage only once an operator writes the rate.
-	CloudStorageRateMicroPerGBDay = 833_333
+	// CloudStorageRateMicroPerGBDay prices a gibibyte-day at the published
+	// 0.10 dollars a GB-month over a thirty-day month, which is 2,000 credits
+	// a month and about 66.67 credits a day. Nothing sets it on its own: an
+	// installation bills storage only once an operator writes the rate.
+	CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 
 	// MaxStorageRateMicroPerGBDay is the highest price an operator may put on
 	// a gibibyte-day, a million credits, which is the ceiling that keeps the

@@ -137,17 +137,17 @@ func TestCreditsBalanceIsGrantsMinusCharges(t *testing.T) {
 		t.Fatalf("fresh balance = %d, want 0", balance)
 	}
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_123", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_123", "admin"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 50*store.MicroCreditsPerCredit, "", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 50*store.MicroCreditsPerCent, "", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
 	balance, err = s.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if want := int64(1050 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(1050 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
@@ -179,7 +179,7 @@ func TestMeteredClaimReservesItsFirstMinute(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-reserve", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -274,7 +274,7 @@ func TestMeteredBillingStartsAtTheExactExecutionAttempt(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-delayed", "build")
-	granted := int64(100 * store.MicroCreditsPerCredit)
+	granted := int64(100 * store.MicroCreditsPerCent)
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestFinalizeNodeCreditsRefundsAReservationWhenExecutionNeverStarts(t *testi
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-never-started", "build")
-	granted := int64(100 * store.MicroCreditsPerCredit)
+	granted := int64(100 * store.MicroCreditsPerCent)
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestReapExpiredNodeClaimRefundsAReservationWhenExecutionNeverStarts(t *test
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-expired", "build")
-	granted := int64(100 * store.MicroCreditsPerCredit)
+	granted := int64(100 * store.MicroCreditsPerCent)
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestChargeNodeCreditsBillsElapsedSecondsIdempotently(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-charge", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -489,7 +489,7 @@ func TestRunnerChargesKeepTheRunPrincipalAfterRunDeletion(t *testing.T) {
 	ctx := context.Background()
 	pool := meteredClaimant(t, s, "runner:shared-pool")
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_attribution", "admin"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_attribution", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	create := func(principal, runID string) {
@@ -570,7 +570,7 @@ func TestChargeNodeCreditsDoesNotDoubleChargeTheReservedMinute(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-reserved", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -601,7 +601,7 @@ func TestReclaimedNodeIsNotBilledForItsIdleGap(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-gap", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -660,7 +660,7 @@ func TestFinalizeNodeCreditsRefundsTheUnusedReservation(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-short", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	before, err := s.CreditBalanceMicro(ctx)
@@ -711,7 +711,7 @@ func TestFinalizeNodeCreditsBillsTheTailPastTheLastHeartbeat(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-tail", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -737,7 +737,7 @@ func TestChargeCapForgivesAStalledGap(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-stall", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -810,7 +810,7 @@ func TestChargeNodeCreditsCancelsAfterGrace(t *testing.T) {
 		t.Fatalf("expected a cancellation after the grace period, got %+v", res)
 	}
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_2", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_2", "admin"); err != nil {
 		t.Fatalf("top-up: %v", err)
 	}
 	rewindChargeWindow(t, s, "run-empty", "build", start.Add(40*time.Second))
@@ -828,7 +828,7 @@ func TestCancelNodeForExhaustedCreditsFailsAndReleasesTheNode(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-cancel", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
@@ -1020,7 +1020,7 @@ func TestCreditHistoryLimitIsClampedToItsMaximum(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	for i := range 3 {
-		if _, err := s.GrantCredits(ctx, store.CreditGrantFree, int64(i+1)*store.MicroCreditsPerCredit, "", "admin"); err != nil {
+		if _, err := s.GrantCredits(ctx, store.CreditGrantFree, int64(i+1)*store.MicroCreditsPerCent, "", "admin"); err != nil {
 			t.Fatalf("grant %d: %v", i, err)
 		}
 	}
@@ -1107,7 +1107,7 @@ func TestCreditClaimIsRefusedAtTheHighestAllowedRate(t *testing.T) {
 		t.Fatalf("set rate: %v", err)
 	}
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		10*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+		10*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)

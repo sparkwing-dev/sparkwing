@@ -14,7 +14,7 @@ func TestPostgresCancellationKeepsReservationUntilExecutionStartIsFenced(t *test
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-cancel-start", "build")
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_cancel_start", "admin"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_cancel_start", "admin"); err != nil {
 		t.Fatal(err)
 	}
 	n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)

@@ -170,8 +170,9 @@ sparkwing cluster concurrency --namespace deploy-prod --profile prod
 
 Inspect and top up the prepaid credit balance
 
-Cloud runner time is prepaid. One hundred credits is one dollar,
-so a ten dollar top-up is a thousand credits. The balance is
+Cloud runner time is prepaid. One credit is one vCPU-second and
+20,000 credits is one dollar, so a ten dollar top-up is 200,000
+credits. The balance is
 grants minus charges: a claim reserves a minute of cloud runner
 time before it is granted, heartbeats charge the seconds they
 cover, and the finish refunds whatever of the reservation the
@@ -193,7 +194,7 @@ never charged.
 sparkwing cluster credits show --profile prod
 
 # Load ten dollars
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod
 ```
 
 ## `sparkwing cluster credits allowance`
@@ -241,7 +242,8 @@ sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
 Add free or paid credits to the ledger, or reverse a paid grant
 
 Adds credits and records who added them, which kind they are, and
-the payment they came from. One hundred credits is one dollar.
+the payment they came from. One credit is one vCPU-second and
+20,000 credits is one dollar.
 A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
 empty balance. A reference is the payment id: granting it twice
@@ -255,7 +257,7 @@ the paid grant's reference. Requires the admin scope.
 | Flag | Description |
 |---|---|
 | `--kind KIND` | Grant kind: free \| paid \| reversal (required) |
-| `--amount N` | Credits to add, negative on a reversal; 100 credits is one dollar (required) |
+| `--amount N` | Credits to add, negative on a reversal; 20,000 credits is one dollar (required) |
 | `--reference REF` | Payment id or operator note recorded with the grant; granting the same one twice returns the first grant |
 | `--reverses REF` | Reference of the paid grant a reversal takes back |
 | `--team SLUG` | Team whose balance the grant funds; required on a multi-team controller |
@@ -265,13 +267,13 @@ the paid grant's reference. Requires the admin scope.
 
 ```sh
 # Load ten dollars against a payment
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod
 
-# Hand out trial credits
-sparkwing cluster credits grant --kind free --amount 500 --profile prod
+# Hand out five dollars of credits
+sparkwing cluster credits grant --kind free --amount 100000 --profile prod
 
 # Take a refunded payment back out
-sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod
+sparkwing cluster credits grant --kind reversal --amount -200000 --reference re_9 --reverses pay_12345 --profile prod
 ```
 
 ## `sparkwing cluster credits history`

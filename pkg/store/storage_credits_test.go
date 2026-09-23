@@ -89,7 +89,7 @@ func TestStorageChargeBillsTheBytesAboveTheFreeAllowanceForADay(t *testing.T) {
 }
 
 // The division truncates toward zero, so a fraction of a micro-credit is never
-// billed: a gibibyte and a half for a day is 1,249,999 and not 1,250,000.
+// billed: a gibibyte and a half for a day is 499,999 and not 499,999.5.
 func TestStorageChargeTruncatesAFractionOfAMicroCredit(t *testing.T) {
 	st := storetest.Open(t)
 	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
@@ -97,8 +97,8 @@ func TestStorageChargeTruncatesAFractionOfAMicroCredit(t *testing.T) {
 	seedRetainedRun(t, st, "acme", "r1", 2*gib+gib/2, start.Add(-time.Hour))
 
 	billed := billOneInterval(t, st, start, 24*time.Hour)
-	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != 1_249_999 {
-		t.Fatalf("charges = %+v, want one of 1249999 micro", billed.Charges)
+	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != 499_999 {
+		t.Fatalf("charges = %+v, want one of 499999 micro", billed.Charges)
 	}
 }
 
@@ -108,11 +108,11 @@ func TestStorageChargeBillsAPartialDayProRata(t *testing.T) {
 	start := time.Unix(1_700_000_000, 0).UTC()
 	seedRetainedRun(t, st, "acme", "r1", 3*gib, start.Add(-time.Hour))
 
-	// safety: thirty hours is a day and a quarter, so 2 GiB at 833,333 a
-	// gibibyte-day is 2,083,332.5 and the truncation bills 2,083,332.
+	// safety: thirty hours is a day and a quarter, so 2 GiB at 333,333 a
+	// gibibyte-day is 833,332.5 and the truncation bills 833,332.
 	billed := billOneInterval(t, st, start, 30*time.Hour)
-	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != 2_083_332 {
-		t.Fatalf("charges = %+v, want one of 2083332 micro", billed.Charges)
+	if len(billed.Charges) != 1 || billed.Charges[0].AmountMicro != 833_332 {
+		t.Fatalf("charges = %+v, want one of 833332 micro", billed.Charges)
 	}
 	if billed.Charges[0].Seconds != 30*3600 {
 		t.Fatalf("seconds = %d, want 108000", billed.Charges[0].Seconds)
@@ -436,7 +436,7 @@ func TestAMonthOfStorageChargesReconcilesWithTheBalance(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, gib)
-	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 1_000*store.MicroCreditsPerCredit,
+	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 1_000*store.MicroCreditsPerCent,
 		"pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestAnEmptyBalanceRefusesAWriteThatGrowsRetainedBytes(t *testing.T) {
 		t.Fatalf("events = %d, want the refused write stored nothing", got)
 	}
 
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*store.MicroCreditsPerCredit,
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*store.MicroCreditsPerCent,
 		"", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -627,7 +627,7 @@ func TestAPaidBalanceDrainsNothingBelowTheAllowance(t *testing.T) {
 	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
 		t.Fatalf("set retention: %v", err)
 	}
-	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit,
+	if _, err := st.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent,
 		"pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

@@ -98,6 +98,11 @@ var additiveColumnSources = map[int][]map[string]string{
 	// none, so an older binary keeps claiming and finishing triggers; it opens
 	// no reservation and the next claim overwrites one it left open.
 	53: {triggersCreditCols},
+	54: nil,
+	55: nil,
+	// safety: v56 rewrites one setting's value in place and adds no column,
+	// so an older binary keeps writing the migrated database.
+	56: nil,
 }
 
 func columnSpecMaps() []map[string]string {

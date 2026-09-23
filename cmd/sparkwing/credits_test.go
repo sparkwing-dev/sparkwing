@@ -35,7 +35,7 @@ func TestRenderCreditState(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"987.50 credits", "1000.00 credits", "0.020000 credits", "BURN (24h)", "GRACE", "CHARGE CAP"} {
+	for _, want := range []string{"197500.00 credits", "200000.00 credits", "4.000000 credits", "BURN (24h)", "GRACE", "CHARGE CAP"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("credit state output is missing %q:\n%s", want, out)
 		}
@@ -87,7 +87,7 @@ func TestCreditHistoryRowsMergeNewestFirst(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"usage", "reservation", "refund", "grant", "run-a/build", "ref=pay_1", "-0.60", "0.40"} {
+	for _, want := range []string{"usage", "reservation", "refund", "grant", "run-a/build", "ref=pay_1", "-120.00", "80.00"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("history output is missing %q:\n%s", want, out)
 		}
@@ -139,7 +139,7 @@ func TestCreditsCLIWireMatchesTheController(t *testing.T) {
 
 	if _, err := tokensPost(srv.URL, admin, "/api/v1/credits/grants", map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": int64(1000) * store.MicroCreditsPerCredit,
+		"amount_micro": int64(1000) * store.MicroCreditsPerCent,
 		"reference":    "pay_42",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -153,7 +153,7 @@ func TestCreditsCLIWireMatchesTheController(t *testing.T) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode show: %v", err)
 	}
-	if state.BalanceMicro != int64(1000)*store.MicroCreditsPerCredit {
+	if state.BalanceMicro != int64(1000)*store.MicroCreditsPerCent {
 		t.Fatalf("balance = %d", state.BalanceMicro)
 	}
 	if state.MicroPerCredit != store.MicroCreditsPerCredit {
@@ -222,7 +222,7 @@ func TestRenderCreditSettings(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"0.020000 credits", "20000 micro", "GRACE", "0s past", "CHARGE CAP", "30s"} {
+	for _, want := range []string{"4.000000 credits", "20000 micro", "GRACE", "0s past", "CHARGE CAP", "30s"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("credit settings output is missing %q:\n%s", want, out)
 		}
@@ -392,7 +392,7 @@ func TestCreditHistoryRowNamesTheReversedPayment(t *testing.T) {
 	t.Parallel()
 	rows := creditHistoryRows(creditHistoryResp{
 		Grants: []creditGrantResp{{
-			ID: "grant-r", Kind: store.CreditGrantReversal, AmountMicro: -5 * store.MicroCreditsPerCredit,
+			ID: "grant-r", Kind: store.CreditGrantReversal, AmountMicro: -5 * store.MicroCreditsPerCent,
 			Reference: "re_1", Reverses: "pay_1", CreatedBy: "billing", CreatedAt: 100,
 		}},
 	})
@@ -418,7 +418,7 @@ func TestRenderCreditStateShowsReversals(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if !strings.Contains(buf.String(), "REVERSED") || !strings.Contains(buf.String(), "400.00 credits") {
+	if !strings.Contains(buf.String(), "REVERSED") || !strings.Contains(buf.String(), "80000.00 credits") {
 		t.Errorf("credit state output does not report the reversal:\n%s", buf.String())
 	}
 }
@@ -447,7 +447,7 @@ func TestRenderCreditSettingsNamesEveryClass(t *testing.T) {
 		RateMicroPerSecond: store.DefaultCreditRateMicro,
 		RateTable: []creditRateResp{
 			{Cores: 2, MicroPerSecond: 10_000},
-			{Cores: 8, MicroPerSecond: 36_667},
+			{Cores: 8, MicroPerSecond: 40_000},
 		},
 		MaxChargeSeconds: store.DefaultCreditMaxChargeSeconds,
 		MicroPerCredit:   store.MicroCreditsPerCredit,
@@ -457,7 +457,7 @@ func TestRenderCreditSettingsNamesEveryClass(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"2-CORE", "0.010000 credits", "8-CORE", "36667 micro"} {
+	for _, want := range []string{"2-CORE", "2.000000 credits", "8-CORE", "8.000000 credits", "40000 micro"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("settings output is missing %q:\n%s", want, out)
 		}

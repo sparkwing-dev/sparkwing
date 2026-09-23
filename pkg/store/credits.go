@@ -15,19 +15,24 @@ import (
 	"time"
 )
 
-// Credit ledger arithmetic. One credit is one hundredth of a dollar, so a
-// ten dollar top-up is a thousand credits. Grants and charges are stored in
-// micro-credits because a cloud runner second costs well under one credit
-// and an integer ledger must charge it exactly.
+// Credit ledger arithmetic. One credit is one second of one vCPU, and a
+// dollar buys 20,000 of them, which prices compute at 0.18 dollars a
+// vCPU-hour. Grants and charges are stored in micro-credits, 5,000 to the
+// credit, so a dollar is 100,000,000 micro-credits and a cent is 1,000,000.
 //
-// At the default rate a cloud runner second costs 0.02 credits, so a minute
-// costs 1.2 credits and an hour costs 72 credits ($0.72). Ten dollars is a
-// thousand credits, which buys 50,000 cloud runner seconds, just under
+// A class costs its core count in credits a second: the default four-core
+// rate is 4 credits a second, 240 a minute, 0.72 dollars an hour. Ten dollars
+// is 200,000 credits, which buys 50,000 four-core seconds, just under
 // fourteen hours.
 const (
-	CreditsPerDollar       = 100
-	MicroCreditsPerCredit  = 1_000_000
-	DefaultCreditRateMicro = 20_000
+	CreditsPerDollar       = 20_000
+	MicroCreditsPerCredit  = 5_000
+	DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
+
+	// MicroCreditsPerCent is what one cent of a payment buys, which a
+	// checkout converts by. It is the figure that must not move when the
+	// credit does, because every stored amount is priced by it.
+	MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 
 	// DefaultCreditGraceSeconds is how long a node keeps running after the
 	// balance reaches zero before the controller cancels it.
@@ -39,10 +44,10 @@ const (
 	// bounds how far concurrent runners can drive the balance below zero.
 	CreditClaimFloorSeconds = 60
 
-	// MaxCreditGrantMicro caps the size of one grant at a billion credits,
-	// ten million dollars. A ledger sums grants in SQL, so an amount near the
-	// integer limit turns a later balance read into an overflow rather than a
-	// number, and no real payment reaches this ceiling.
+	// MaxCreditGrantMicro caps the size of one grant at ten billion dollars.
+	// A ledger sums grants in SQL, so an amount near the integer limit turns a
+	// later balance read into an overflow rather than a number, and no real
+	// payment reaches this ceiling.
 	MaxCreditGrantMicro = 1_000_000_000_000_000
 
 	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
@@ -52,9 +57,9 @@ const (
 	DefaultCreditMaxChargeSeconds = 30
 
 	// MaxCreditRateMicro is the highest price an operator may put on a cloud
-	// runner second: a million credits, which is ten thousand dollars. The
-	// ceiling is what keeps the arithmetic the ledger does with the rate inside
-	// int64: the largest reservation is the rate times CreditClaimFloorSeconds
+	// runner second: ten thousand dollars. The ceiling is what keeps the
+	// arithmetic the ledger does with the rate inside int64: the largest
+	// reservation is the rate times CreditClaimFloorSeconds
 	// and the largest single charge is the rate times MaxCreditMaxChargeSeconds,
 	// and both stay far below the int64 maximum. Without it a rate near that
 	// maximum wraps a reservation negative, and a claim the ledger must refuse
@@ -247,6 +252,35 @@ func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
 	}
 	_, err = tx.ExecContext(ctx, creditGrantTeamReferenceIndex)
 	return err
+}
+
+// creditUnitScale is how many of today's credits one credit bought before a
+// credit became a vCPU-second, when it was a hundredth of a dollar. Micro-credit
+// amounts kept their dollar value across the change, so only a setting written
+// in whole credits needs it.
+const creditUnitScale = 1_000_000 / MicroCreditsPerCredit
+
+// applyCreditUnitMigration restates runner_scale_step_credits, the one setting
+// written in whole credits, in the vCPU-second credit, so a step an operator set
+// keeps its dollar value. It is a step of v56.
+func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
+	key := computeLimitKey(ComputeLimitRunnerScaleStepCredits)
+	var raw string
+	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	step, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	// safety: a value the guard reader cannot parse reads as unset there, so
+	// it is left for the operator rather than guessed at.
+	if err != nil || step <= 0 {
+		return nil
+	}
+	return setCreditSettingTx(ctx, tx, key,
+		formatCreditSetting(min(step*creditUnitScale, RunnerScaleMaxStepCredits)))
 }
 
 func duplicateTeamGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
@@ -2396,8 +2430,9 @@ func newCreditID(prefix string) (string, error) {
 	return prefix + "-" + hex.EncodeToString(suffix[:]), nil
 }
 
-// FormatCredits renders micro-credits as credits with two decimal places,
-// which is the resolution an operator reads a balance at.
+// FormatCredits renders micro-credits as credits with two decimal places.
+// Every class bills whole credits a second, so the decimals show only on a
+// storage charge or a rate an operator set off the ladder.
 func FormatCredits(micro int64) string {
 	neg := ""
 	if micro < 0 {

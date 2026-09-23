@@ -301,6 +301,17 @@ unlock.
 
 ### Changed
 
+- **credits (Breaking):** one credit is one vCPU-second and a dollar buys
+  20,000 of them, $0.18 a vCPU-hour. The ledger still stores micro-credits and
+  a dollar is still 100,000,000 of them, so every balance, grant and charge
+  keeps its dollar value; `micro_per_credit` reads 5,000 and
+  `credits_per_dollar` 20,000, and a client that hardcoded 100 renders balances
+  200 times too small. The default ladder bills each class its core count in
+  credits a second, so the eight-core class moves from 36,667 to 40,000
+  micro-credits a second. Schema v56 multiplies a stored
+  `runner_scale_step_credits` by 200 so the step keeps its dollar value.
+  `sparkwing cluster credits grant --amount` counts the new credit.
+
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
   `welcome`, and a repeat within a team still returns the grant already

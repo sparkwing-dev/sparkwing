@@ -110,7 +110,7 @@ type ClaimedRun struct {
 	Team     Team
 	Pipeline string
 }
-const CloudStorageRateMicroPerGBDay = 833_333
+const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -363,7 +363,7 @@ type CreditState struct {
 	BurnMicro                 int64
 	ExhaustedAt               *time.Time
 }
-const CreditsPerDollar = 100
+const CreditsPerDollar = 20_000
 type CronDeclaration struct {
 	Cron         string
 	TZ           string
@@ -482,7 +482,7 @@ const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
-const DefaultCreditRateMicro = 20_000
+const DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
 const DefaultLeaseDuration = 3 * time.Minute
@@ -847,7 +847,8 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
-const MicroCreditsPerCredit = 1_000_000
+const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
+const MicroCreditsPerCredit = 5_000
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
@@ -1227,7 +1228,7 @@ type RunnerPresence struct {
 	AllowRepos RepoFilter
 }
 const RunnerScaleMaxRunners = 1_000_000
-const RunnerScaleMaxStepCredits = 1_000_000_000
+const RunnerScaleMaxStepCredits = 10_000_000 * CreditsPerDollar
 const RunnerScaleWindow = 30 * 24 * time.Hour
 const RunnerTokenLifetime = 90 * 24 * time.Hour
 type SchemaRequirement struct {

@@ -54,7 +54,7 @@ func readyNodePinned(t *testing.T, s *store.Store, runID, nodeID string, cores f
 func fundLedger(t *testing.T, s *store.Store, credits int64) {
 	t.Helper()
 	if _, err := s.GrantCredits(context.Background(), store.CreditGrantPaid,
-		credits*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+		credits*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	want := store.CreditRateTable{
 		{Cores: 2, MicroPerSecond: 10_000},
 		{Cores: 4, MicroPerSecond: 20_000},
-		{Cores: 8, MicroPerSecond: 36_667},
+		{Cores: 8, MicroPerSecond: 40_000},
 	}
 	if len(table) != len(want) {
 		t.Fatalf("the default table prices %d classes, want %d", len(table), len(want))
@@ -149,8 +149,8 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	if got := table.RateFor(store.CreditRateBaseClassCores); got != 50_000 {
 		t.Fatalf("four-core class = %d, want the single rate 50000", got)
 	}
-	if got := table.RateFor(8); got != 36_667 {
-		t.Fatalf("eight-core class = %d, want the ladder's 36667", got)
+	if got := table.RateFor(8); got != 40_000 {
+		t.Fatalf("eight-core class = %d, want the ladder's 40000", got)
 	}
 	set, err := s.CreditRateTableSet(ctx)
 	if err != nil || set {
@@ -447,7 +447,7 @@ func TestAnEarlyFinishRefundsAtTheRateTheClaimReserved(t *testing.T) {
 	if want := res.Charge.Seconds * 36_667; res.Charge.AmountMicro != want {
 		t.Fatalf("refund = %d, want %d", res.Charge.AmountMicro, want)
 	}
-	if res.BalanceMicro > 10_000*store.MicroCreditsPerCredit {
+	if res.BalanceMicro > 10_000*store.MicroCreditsPerCent {
 		t.Fatalf("the refund lifted the balance above what was granted: %d", res.BalanceMicro)
 	}
 }

@@ -83,11 +83,13 @@ marks none bills nothing.
 
 ## Credits
 
-Cloud runner time is prepaid. Amounts are stored in micro-credits: a million
-micro-credits is one credit, and a hundred credits is one dollar, so a ten
-dollar top-up is a thousand credits. At the default rate a cloud runner second
-costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
-hour, so ten dollars buys just under fourteen hours.
+Cloud runner time is prepaid. One credit is one second of one vCPU, and
+20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
+Amounts are stored in micro-credits, 5,000 to the credit, so a dollar is
+100,000,000 micro-credits and a cent is 1,000,000. A class costs its core count
+in credits a second: a four-core second is 4 credits, a minute 240, an hour
+14,400 ($0.72), so ten dollars (200,000 credits) buys just under fourteen
+four-core hours.
 
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
@@ -98,13 +100,13 @@ when the class is chosen, failing the node with `unpriced_cpu_class` and a
 `credits_unpriced_class` event naming both sizes, rather than reserving credits
 for a node no claim can pay for.
 
-An installation that never set a table bills the default ladder, which carries
-GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
-4-core 20,000, 8-core 36,667. `credit_rate_micro_per_second` is the four-core
+An installation that never set a table bills the default ladder, each class at
+its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
+8-core 40,000. `credit_rate_micro_per_second` is the four-core
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
-`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
+`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=40000` sets
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.
 
@@ -163,8 +165,8 @@ The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
 toward zero, so a fraction of a micro-credit is never billed and truncation
 forgives at most one micro-credit per team per pass. Three gibibytes retained
 against a one-gibibyte free allowance for one day is two gibibyte-days, which
-at 833,333 micro-credits a gibibyte-day is 1,666,666 micro-credits, or 25
-credits a gibibyte-month, GitHub's $0.25.
+at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
+is 2,000 credits a gibibyte-month, the published $0.10.
 
 The charge is a `storage` row naming the team, the bytes it billed and the
 interval it covered, so `sparkwing cluster credits show` and `credits history`
@@ -279,7 +281,7 @@ none behaves as it did before the guards existed.
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
 | `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most a billion; zero turns scaling off | the controller's ledger |
+| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | the controller's ledger |
 | `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
@@ -307,8 +309,10 @@ Every scaling setting is zero by default, which holds each principal to the
 static `max_concurrent_runners`, and the rule applies only while that guard is
 set. Scaling only ever raises that guard: a ceiling below it is ignored.
 `runner_scale_base` and `runner_scale_ceiling` are capped at a million runners
-and `runner_scale_step_credits` at a billion credits, so a typo cannot mint a
-cap.
+and `runner_scale_step_credits` at 200 billion credits, ten million dollars, so
+a typo cannot mint a cap. The step is written in whole credits, so schema v56
+multiplied a step written when a credit was a cent by 200, keeping its dollar
+value.
 
 `free` credit earns nothing and a payment ages out after 30 days. A refund is a
 `reversal` grant naming the payment's reference, and it is matched to that

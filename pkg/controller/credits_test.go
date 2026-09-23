@@ -267,7 +267,7 @@ func TestCredits_MeteredTriggerClaimRefusedOnAnEmptyBalance(t *testing.T) {
 func TestCredits_MeteredTriggerClaimRefusesInProcessNodes(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCredit, "", "operator"); err != nil {
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -298,7 +298,7 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.runner)
@@ -448,7 +448,7 @@ func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	before, err := f.store.CreditBalanceMicro(ctx)
@@ -536,7 +536,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 
 	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
-		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCredit, "reference": "pay_9"})
+		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCent, "reference": "pay_9"})
 	if status != http.StatusCreated {
 		t.Fatalf("grant = %d: %s", status, body)
 	}
@@ -970,7 +970,7 @@ func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) 
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1076,7 +1076,7 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1123,7 +1123,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1182,7 +1182,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1235,7 +1235,7 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -1271,7 +1271,7 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{

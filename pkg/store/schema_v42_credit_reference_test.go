@@ -45,7 +45,7 @@ func TestSchemaV42_UpgradeFromAStoreStampedShortOfTheReferenceKey(t *testing.T) 
 	}
 	ctx := context.Background()
 	if _, err := seeded.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pi_legacy", "admin"); err != nil {
+		1000*store.MicroCreditsPerCent, "pi_legacy", "admin"); err != nil {
 		t.Fatalf("seed grant: %v", err)
 	}
 	before, err := seeded.Requirements(ctx)
@@ -71,7 +71,7 @@ func TestSchemaV42_UpgradeFromAStoreStampedShortOfTheReferenceKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("balance after upgrade: %v", err)
 	}
-	if want := int64(1000 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(1000 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance after upgrade = %d, want the seeded grant %d", balance, want)
 	}
 
@@ -93,7 +93,7 @@ func TestSchemaV42_UpgradeFromAStoreStampedShortOfTheReferenceKey(t *testing.T) 
 		t.Error("the reference key let a second paid grant of one payment in")
 	}
 	if _, err := upgraded.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -400 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -400 * store.MicroCreditsPerCent,
 		Reference: "re_legacy", Reverses: "pi_legacy", CreatedBy: "billing",
 	}); err != nil {
 		t.Fatalf("reversal on the migrated store: %v", err)
@@ -102,7 +102,7 @@ func TestSchemaV42_UpgradeFromAStoreStampedShortOfTheReferenceKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("balance after the reversal: %v", err)
 	}
-	if want := int64(600*store.MicroCreditsPerCredit + 5); balance != want {
+	if want := int64(600*store.MicroCreditsPerCent + 5); balance != want {
 		t.Fatalf("balance after the reversal = %d, want %d", balance, want)
 	}
 }
@@ -138,14 +138,14 @@ func TestSchemaV42_OpensOverGrantsThatAlreadyRepeatAReference(t *testing.T) {
 		t.Errorf("the migration created the key over rows that repeat a reference: %v", err)
 	}
 	first, err := upgraded.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCent,
 		Reference: "pi_after", CreatedBy: "billing",
 	})
 	if err != nil {
 		t.Fatalf("grant after the upgrade: %v", err)
 	}
 	again, err := upgraded.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: store.MicroCreditsPerCent,
 		Reference: "pi_after", CreatedBy: "billing",
 	})
 	if err != nil {

@@ -27,7 +27,7 @@ func TestGrantCreditsIsIdempotentByReference(t *testing.T) {
 	ctx := context.Background()
 
 	first, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent,
 		Reference: "pi_1", CreatedBy: "billing",
 	})
 	if err != nil {
@@ -37,7 +37,7 @@ func TestGrantCreditsIsIdempotentByReference(t *testing.T) {
 		t.Fatal("the first grant reports that it wrote nothing")
 	}
 	second, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent,
 		Reference: "pi_1", CreatedBy: "billing",
 	})
 	if err != nil {
@@ -56,7 +56,7 @@ func TestGrantCreditsIsIdempotentByReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if want := int64(1000 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(1000 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 }
@@ -65,11 +65,11 @@ func TestGrantCreditsKeepsKindsWithOneReferenceApart(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 5*store.MicroCreditsPerCredit,
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 5*store.MicroCreditsPerCent,
 		"promo_7", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 20*store.MicroCreditsPerCredit,
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 20*store.MicroCreditsPerCent,
 		"promo_7", "admin"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestGrantCreditsRepeatsAnEmptyReference(t *testing.T) {
 
 	for range 2 {
 		if _, err := s.GrantCredits(ctx, store.CreditGrantFree,
-			5*store.MicroCreditsPerCredit, "", "admin"); err != nil {
+			5*store.MicroCreditsPerCent, "", "admin"); err != nil {
 			t.Fatalf("unreferenced grant: %v", err)
 		}
 	}
@@ -98,11 +98,11 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pi_2", "billing"); err != nil {
+		1000*store.MicroCreditsPerCent, "pi_2", "billing"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 	res, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -400 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -400 * store.MicroCreditsPerCent,
 		Reference: "re_2a", Reverses: "pi_2", CreatedBy: "billing",
 	})
 	if err != nil {
@@ -116,7 +116,7 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if want := int64(600 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(600 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 
@@ -124,13 +124,13 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state: %v", err)
 	}
-	if want := int64(1000 * store.MicroCreditsPerCredit); state.GrantedMicro != want {
+	if want := int64(1000 * store.MicroCreditsPerCent); state.GrantedMicro != want {
 		t.Errorf("granted = %d, want the paid grant %d", state.GrantedMicro, want)
 	}
-	if want := int64(400 * store.MicroCreditsPerCredit); state.ReversedMicro != want {
+	if want := int64(400 * store.MicroCreditsPerCent); state.ReversedMicro != want {
 		t.Errorf("reversed = %d, want %d", state.ReversedMicro, want)
 	}
-	if want := int64(600 * store.MicroCreditsPerCredit); state.BalanceMicro != want {
+	if want := int64(600 * store.MicroCreditsPerCent); state.BalanceMicro != want {
 		t.Errorf("state balance = %d, want %d", state.BalanceMicro, want)
 	}
 
@@ -138,10 +138,10 @@ func TestCreditReversalNetsOutOfTheBalanceAndTheHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("totals: %v", err)
 	}
-	if want := int64(400 * store.MicroCreditsPerCredit); totals.ReversedMicro != want {
+	if want := int64(400 * store.MicroCreditsPerCent); totals.ReversedMicro != want {
 		t.Errorf("totals reversed = %d, want %d", totals.ReversedMicro, want)
 	}
-	if want := int64(600 * store.MicroCreditsPerCredit); totals.BalanceMicro != want {
+	if want := int64(600 * store.MicroCreditsPerCent); totals.BalanceMicro != want {
 		t.Errorf("totals balance = %d, want %d", totals.BalanceMicro, want)
 	}
 
@@ -167,11 +167,11 @@ func TestCreditReversalIsIdempotentByRefundReference(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pi_3", "billing"); err != nil {
+		1000*store.MicroCreditsPerCent, "pi_3", "billing"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 	partial := store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -100 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -100 * store.MicroCreditsPerCent,
 		Reference: "re_3a", Reverses: "pi_3", CreatedBy: "billing",
 	}
 	first, err := s.RecordCreditGrant(ctx, partial)
@@ -194,7 +194,7 @@ func TestCreditReversalIsIdempotentByRefundReference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if want := int64(800 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(800 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 }
@@ -204,11 +204,11 @@ func TestCreditReversalRefusesAPaymentTheLedgerNeverSaw(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := s.GrantCredits(ctx, store.CreditGrantFree,
-		10*store.MicroCreditsPerCredit, "pi_absent", "admin"); err != nil {
+		10*store.MicroCreditsPerCent, "pi_absent", "admin"); err != nil {
 		t.Fatalf("free grant: %v", err)
 	}
 	_, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -10 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -10 * store.MicroCreditsPerCent,
 		Reference: "re_absent", Reverses: "pi_absent", CreatedBy: "billing",
 	})
 	if err == nil {
@@ -226,7 +226,7 @@ func TestCreditGrantRequestValidation(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pi_4", "billing"); err != nil {
+		1000*store.MicroCreditsPerCent, "pi_4", "billing"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 
@@ -261,11 +261,11 @@ func TestCreditReversalMayTakeTheBalanceBelowZero(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pi_6", "billing"); err != nil {
+		100*store.MicroCreditsPerCent, "pi_6", "billing"); err != nil {
 		t.Fatalf("paid grant: %v", err)
 	}
 	if _, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -150 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -150 * store.MicroCreditsPerCent,
 		Reference: "re_6", Reverses: "pi_6", CreatedBy: "billing",
 	}); err != nil {
 		t.Fatalf("reversal: %v", err)
@@ -274,7 +274,7 @@ func TestCreditReversalMayTakeTheBalanceBelowZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if want := int64(-50 * store.MicroCreditsPerCredit); balance != want {
+	if want := int64(-50 * store.MicroCreditsPerCent); balance != want {
 		t.Fatalf("balance = %d, want %d", balance, want)
 	}
 }
@@ -329,7 +329,7 @@ func TestGrantCreditsRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	paid := store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: 1000 * store.MicroCreditsPerCent,
 		Reference: "pi_terms", CreatedBy: "billing",
 	}
 	if _, err := s.RecordCreditGrant(ctx, paid); err != nil {
@@ -344,19 +344,19 @@ func TestGrantCreditsRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 	}
 
 	other := paid
-	other.AmountMicro = 999 * store.MicroCreditsPerCredit
+	other.AmountMicro = 999 * store.MicroCreditsPerCent
 	if _, err := s.RecordCreditGrant(ctx, other); !errors.Is(err, store.ErrCreditGrantConflict) {
 		t.Fatalf("a different amount under one reference = %v, want a conflict", err)
 	}
 
 	if _, err := s.RecordCreditGrant(ctx, store.CreditGrantRequest{
-		Kind: store.CreditGrantPaid, AmountMicro: 500 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantPaid, AmountMicro: 500 * store.MicroCreditsPerCent,
 		Reference: "pi_other", CreatedBy: "billing",
 	}); err != nil {
 		t.Fatalf("second payment: %v", err)
 	}
 	reversal := store.CreditGrantRequest{
-		Kind: store.CreditGrantReversal, AmountMicro: -100 * store.MicroCreditsPerCredit,
+		Kind: store.CreditGrantReversal, AmountMicro: -100 * store.MicroCreditsPerCent,
 		Reference: "re_terms", Reverses: "pi_terms", CreatedBy: "billing",
 	}
 	if _, err := s.RecordCreditGrant(ctx, reversal); err != nil {

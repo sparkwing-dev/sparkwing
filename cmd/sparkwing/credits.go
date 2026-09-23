@@ -167,7 +167,9 @@ func rateTableOrigin(set bool) string {
 	return "RATE TABLE\tnot set; the default ladder applies\n"
 }
 
-// safety: micro-credits carry six places, so a sub-credit rate needs all six.
+// safety: a sub-credit rate, such as a storage gibibyte-day, is printed to six
+// places whatever the controller's micro-credits per credit, so a reader never
+// sees a fraction rounded to nothing.
 func creditsPerUnit(micro, perCredit int64) string {
 	if perCredit <= 0 {
 		return strconv.FormatInt(micro, 10)
@@ -177,7 +179,7 @@ func creditsPerUnit(micro, perCredit int64) string {
 	if frac < 0 {
 		frac = -frac
 	}
-	return fmt.Sprintf("%d.%06d", whole, frac)
+	return fmt.Sprintf("%d.%06d", whole, frac*1_000_000/perCredit)
 }
 
 type creditSettingsResp struct {
@@ -406,7 +408,7 @@ func runCreditsGrant(args []string) error {
 	fs := flag.NewFlagSet(cmdCreditsGrant.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
 	kind := fs.String("kind", "", "grant kind: free|paid|reversal")
-	amount := fs.Int64("amount", 0, "credits to add, or to take back as a negative number on a reversal (100 credits = one dollar)")
+	amount := fs.Int64("amount", 0, "credits to add, or to take back as a negative number on a reversal (one credit is a vCPU-second; 20,000 credits = one dollar)")
 	reference := fs.String("reference", "", "payment id or operator note recorded with the grant")
 	reverses := fs.String("reverses", "", "reference of the paid grant a reversal takes back")
 	team := fs.String("team", "", "slug of the team whose balance the grant funds; required on a multi-team controller")
