@@ -191,7 +191,9 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/team/git-credentials/{host}/confirm` | `team.admin` |
 | `GET` | `/api/v1/team/github-app` | `runs.read` |
 | `POST` | `/api/v1/team/github-app/connect` | `team.admin` |
+| `POST` | `/api/v1/team/github-app/connect/available` | `team.admin` |
 | `POST` | `/api/v1/team/github-app/connect/complete` | `team.admin` |
+| `POST` | `/api/v1/team/github-app/connect/select` | `team.admin` |
 | `GET` | `/api/v1/team/github-app/extra-repos` | `runs.read` |
 | `PUT` | `/api/v1/team/github-app/extra-repos` | `team.admin` |
 | `DELETE` | `/api/v1/team/github-app/installations/{installation_id}` | `team.admin` |

@@ -5634,7 +5634,7 @@ paths:
       tags: [teams]
       summary: Start connecting a GitHub App installation to the active team.
       description: >-
-        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie, sends the browser to `install_url`, and on GitHub's return to the setup URL (with `installation_id`, `setup_action` and `state`) checks `state` and sends the browser to `authorize_url`. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
+        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie. To install, it sends the browser to `install_url`, then sends the setup return to `authorize_url`. To connect an existing installation, it sends the browser straight to `authorize_url` and calls connect/available after GitHub returns. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
       requestBody:
         required: true
         content:
@@ -5664,6 +5664,53 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/team/github-app/connect/available:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List existing App installations the authorized user administers.
+      description: >-
+        Owner only. Redeems the GitHub authorization code with PKCE and checks the linked GitHub identity. Reads GET /user/installations with the user token and returns only this App's installations whose accounts the user administers. The encrypted authorization proof expires with the signed state. An installation bound to another team is marked without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppAvailableReq
+              type: object
+              required: [state, verifier, code, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Administered installations and a proof for selecting one.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppAvailableResp
+                type: object
+                required: [authorization, installations]
+                properties:
+                  authorization: {type: string, description: Encrypted proof bound to the state.}
+                  installations:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppAvailableInstallation
+                      type: object
+                      required: [installation_id, account_login, account_type, connected_elsewhere]
+                      properties:
+                        installation_id: {type: integer, format: int64}
+                        account_login: {type: string}
+                        account_type: {type: string}
+                        connected_elsewhere: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/team/github-app/connect/complete:
     post:
       x-sparkwing-scope: team.admin
@@ -5685,6 +5732,38 @@ paths:
                 code: {type: string, description: The code GitHub returned to the callback.}
                 installation_id: {type: integer, format: int64, description: From the setup redirect.}
                 redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Another team holds the installation.}
+
+  /api/v1/team/github-app/connect/select:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Bind one existing installation to the active team.
+      description: >-
+        Owner only. Checks the signed state, PKCE verifier, linked GitHub identity, encrypted authorization proof, and live GitHub administration of the chosen installation. Consumes the state once in the store before binding. Answers 409 when another team holds the installation without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppSelectReq
+              type: object
+              required: [state, verifier, authorization, installation_id]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                authorization: {type: string}
+                installation_id: {type: integer, format: int64}
       responses:
         "201":
           description: Bound.

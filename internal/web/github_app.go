@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,9 +23,10 @@ const githubAppFlowCookieName = hostPrefix + "sw_github_app"
 const githubAppFlowTTL = 10 * time.Minute
 
 const (
-	githubAppSettingsPath = "/team/github"
-	githubAppCallbackPath = "/github/app/callback"
-	githubAppCompletePath = "/github/app/complete"
+	githubAppSettingsPath  = "/team/github"
+	githubAppCallbackPath  = "/github/app/callback"
+	githubAppCompletePath  = "/github/app/complete"
+	githubAppAvailablePath = "/github/app/available"
 )
 
 // hack: the controller's 403 for an account with no linked GitHub sign-in carries no code of its own,
@@ -36,6 +39,8 @@ type githubAppFlow struct {
 	AuthorizeURL   string `json:"authorize_url"`
 	InstallationID int64  `json:"installation_id,omitempty"`
 	Code           string `json:"code,omitempty"`
+	Existing       bool   `json:"existing,omitempty"`
+	Authorization  string `json:"authorization,omitempty"`
 }
 
 type githubAppConnectResp struct {
@@ -52,7 +57,7 @@ type githubAppInstallation struct {
 
 // safety: the controller call runs as the browser's session, because only an owner of the
 // active team may connect and the state the controller signs names that team.
-func githubAppConnectHandler(opts HandlerOptions) http.HandlerFunc {
+func githubAppConnectHandler(opts HandlerOptions, existing bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		secure := cookiesSecure(opts)
@@ -84,17 +89,21 @@ func githubAppConnectHandler(opts HandlerOptions) http.HandlerFunc {
 			})
 			return
 		}
-		if !setGitHubAppFlow(w, githubAppFlow{State: start.State, Verifier: start.Verifier, AuthorizeURL: start.AuthorizeURL}, secure) {
+		if !setGitHubAppFlow(w, githubAppFlow{State: start.State, Verifier: start.Verifier, AuthorizeURL: start.AuthorizeURL, Existing: existing}, secure) {
 			http.Error(w, "could not start connecting GitHub", http.StatusInternalServerError)
 			return
 		}
 		// safety: the page's form-action 'self' stops a browser following a form's redirect to
 		// GitHub, and a page on this origin that moves on by itself is a navigation, not a form.
+		destination, message := start.InstallURL, "Continuing to GitHub to install the App."
+		if existing {
+			destination, message = start.AuthorizeURL, "Continuing to GitHub to authorize the App."
+		}
 		renderFlowPage(w, http.StatusOK, flowPage{
 			Title:       "Connecting GitHub",
-			Message:     "Continuing to GitHub to install the App.",
-			Refresh:     start.InstallURL,
-			ActionHref:  start.InstallURL,
+			Message:     message,
+			Refresh:     destination,
+			ActionHref:  destination,
 			ActionLabel: "Continue to GitHub",
 		})
 	}
@@ -170,7 +179,7 @@ func githubAppCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		// safety: the installation comes only from the setup return this browser's
 		// flow recorded, never from the callback URL, which anyone can write.
-		if flow.InstallationID <= 0 {
+		if !flow.Existing && flow.InstallationID <= 0 {
 			refuseGitHubAppFlow(w, "GitHub did not report an installation for this connection. Start again.")
 			return
 		}
@@ -184,13 +193,128 @@ func githubAppCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 			http.Error(w, "could not continue connecting GitHub", http.StatusInternalServerError)
 			return
 		}
+		next, message := githubAppCompletePath, "Finishing the connection."
+		if flow.Existing {
+			next, message = githubAppAvailablePath, "Finding installations you administer."
+		}
 		renderFlowPage(w, http.StatusOK, flowPage{
 			Title:       "Connecting GitHub",
-			Message:     "Finishing the connection.",
-			Refresh:     githubAppCompletePath,
-			ActionHref:  githubAppCompletePath,
+			Message:     message,
+			Refresh:     next,
+			ActionHref:  next,
 			ActionLabel: "Continue",
 		})
+	}
+}
+
+type githubAppAvailableResp struct {
+	Authorization string `json:"authorization"`
+	Installations []struct {
+		InstallationID     int64  `json:"installation_id"`
+		AccountLogin       string `json:"account_login"`
+		AccountType        string `json:"account_type"`
+		ConnectedElsewhere bool   `json:"connected_elsewhere"`
+	} `json:"installations"`
+}
+
+func githubAppAvailableHandler(opts HandlerOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		secure := cookiesSecure(opts)
+		principal, ok := githubAppPrincipal(w, opts, r)
+		if !ok {
+			return
+		}
+		flow, ok := readGitHubAppFlow(r, secure)
+		if !ok || !flow.Existing || flow.Code == "" || flow.Authorization != "" {
+			refuseGitHubAppFlow(w, "This connection was not started in this browser. Start again.")
+			return
+		}
+		var available githubAppAvailableResp
+		err := postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect/available",
+			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]any{
+				"state": flow.State, "verifier": flow.Verifier, "code": flow.Code,
+				"redirect_uri": dashboardURL(r, githubAppCallbackPath),
+			}, &available)
+		if err != nil {
+			renderGitHubAppRefusal(w, err)
+			return
+		}
+		flow.Code = ""
+		flow.Authorization = available.Authorization
+		if flow.Authorization == "" || !setGitHubAppFlow(w, flow, secure) {
+			refuseGitHubAppFlow(w, "GitHub authorization could not be kept. Start again.")
+			return
+		}
+		if len(available.Installations) == 0 {
+			var body bytes.Buffer
+			if err := githubAppEmptyPickerTmpl.Execute(&body, principal.csrfToken); err != nil {
+				http.Error(w, "could not show installations", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := body.WriteTo(w); err != nil {
+				return
+			}
+			return
+		}
+		var body bytes.Buffer
+		if err := githubAppPickerTmpl.Execute(&body, struct {
+			Installations any
+			CSRFToken     string
+		}{available.Installations, principal.csrfToken}); err != nil {
+			http.Error(w, "could not show installations", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if _, err := body.WriteTo(w); err != nil {
+			return
+		}
+	}
+}
+
+var githubAppEmptyPickerTmpl = template.Must(template.New("github-app-empty-picker").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>No existing installations</title></head><body><main><h1>No existing installations</h1><p>Install the App on GitHub to connect a team.</p><form method="post" action="/github/app/connect"><input type="hidden" name="csrf_token" value="{{.}}"><button type="submit">Connect GitHub</button></form></main></body></html>`))
+
+var githubAppPickerTmpl = template.Must(template.New("github-app-picker").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Connect an existing installation</title></head><body><main><h1>Connect an existing installation</h1><ul>{{range .Installations}}<li>{{.AccountLogin}} ({{.AccountType}}) {{if .ConnectedElsewhere}}Connected to another team{{else}}<form method="post" action="/github/app/select"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="installation_id" value="{{.InstallationID}}"><button type="submit">Connect</button></form>{{end}}</li>{{end}}</ul><a href="/team/github">Back to GitHub settings</a></main></body></html>`))
+
+func githubAppSelectHandler(opts HandlerOptions) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		secure := cookiesSecure(opts)
+		principal, ok := githubAppPrincipal(w, opts, r)
+		if !ok {
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !validFormCSRF(r, secure) || !constantTimeEqual(r.PostForm.Get("csrf_token"), principal.csrfToken) {
+			csrfError(w)
+			return
+		}
+		flow, ok := readGitHubAppFlow(r, secure)
+		if !ok || !flow.Existing || flow.Authorization == "" {
+			refuseGitHubAppFlow(w, "This connection was not started in this browser. Start again.")
+			return
+		}
+		id, err := strconv.ParseInt(r.PostForm.Get("installation_id"), 10, 64)
+		if err != nil || id <= 0 {
+			refuseGitHubAppFlow(w, "Choose an installation.")
+			return
+		}
+		setGitHubAppFlowCookie(w, "", -1, secure)
+		var bound githubAppInstallation
+		err = postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect/select",
+			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]any{
+				"state": flow.State, "verifier": flow.Verifier, "authorization": flow.Authorization, "installation_id": id,
+			}, &bound)
+		if err != nil {
+			renderGitHubAppRefusal(w, err)
+			return
+		}
+		next := url.URL{Path: githubAppSettingsPath, RawQuery: url.Values{"connected": {bound.AccountLogin}}.Encode()}
+		http.Redirect(w, r, next.String(), http.StatusSeeOther)
 	}
 }
 

@@ -53,6 +53,7 @@ unlock.
   from the claim credential and holder when available. Unknown sites leave no
   badge.
 - **controller (Breaking):** GitHub App subscriptions select tag pushes with `tags: ["v*"]` or other explicit tag globs. Empty `tags` selects none; replace any `tags: true` subscription with a pattern list. Existing boolean tag subscriptions stop matching after schema v66 adds the default-off pattern column. Operator GitHub webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`.
+- **controller + web:** Team owners can connect a GitHub App installation made directly on GitHub by authorizing the App, choosing an installation they administer, and binding it to their team. The picker marks installations held by another team without naming that team.
 
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
@@ -876,6 +877,9 @@ unlock.
   heartbeat store errors with run and node IDs, answers transient PostgreSQL
   contention with `503` and `Retry-After`, and runners retry an execution-start
   request on that response or a transient connection failure.
+- **controller:** selecting an existing GitHub App installation now accepts
+  only IDs in the encrypted picker proof. An unlisted ID answers 404, and a
+  failed selection consumes the connection state.
 
 - **dashboard:** activity rows keep their height while a run's detail pane
   closes. The queue status dot pulses when the daemon status changes, the

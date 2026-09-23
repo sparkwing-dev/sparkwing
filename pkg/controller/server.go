@@ -1115,6 +1115,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
 	mux.Handle("POST /api/v1/team/github-app/connect", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnect)))
 	mux.Handle("POST /api/v1/team/github-app/connect/complete", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnectComplete)))
+	mux.Handle("POST /api/v1/team/github-app/connect/available", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAvailable)))
+	mux.Handle("POST /api/v1/team/github-app/connect/select", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppSelect)))
 	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
 	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
 	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))

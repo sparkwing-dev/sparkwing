@@ -82,6 +82,8 @@ func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T
 		{http.MethodGet, "/api/v1/logs/r1/n1/tail"},
 		{http.MethodPost, "/api/v1/team/github-app/connect"},
 		{http.MethodPost, "/api/v1/team/github-app/connect/complete"},
+		{http.MethodPost, "/api/v1/team/github-app/connect/available"},
+		{http.MethodPost, "/api/v1/team/github-app/connect/select"},
 		{http.MethodDelete, "/api/v1/github-app/installations/42"},
 	} {
 		t.Run(test.method+" "+test.path, func(t *testing.T) {

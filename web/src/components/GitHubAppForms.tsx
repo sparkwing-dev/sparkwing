@@ -29,12 +29,20 @@ export function ConnectGitHubForm({
   connected: boolean;
 }) {
   return (
-    <form method="POST" action={connectFormAction}>
-      <input type="hidden" name="csrf_token" value={csrfToken} />
-      <button type="submit" className={buttonClass} disabled={!csrfToken}>
-        {connected ? "Connect another account" : "Connect GitHub"}
-      </button>
-    </form>
+    <div className="flex flex-col items-end gap-2">
+      <form method="POST" action={connectFormAction}>
+        <input type="hidden" name="csrf_token" value={csrfToken} />
+        <button type="submit" className={buttonClass} disabled={!csrfToken}>
+          {connected ? "Connect another account" : "Connect GitHub"}
+        </button>
+      </form>
+      <form method="POST" action="/github/app/connect/existing">
+        <input type="hidden" name="csrf_token" value={csrfToken} />
+        <button type="submit" className={quietButtonClass} disabled={!csrfToken}>
+          Already installed the app? Connect an existing installation
+        </button>
+      </form>
+    </div>
   );
 }
 

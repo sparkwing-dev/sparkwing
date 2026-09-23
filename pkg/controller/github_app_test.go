@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -168,6 +169,154 @@ func TestGitHubAppConnectBindsAnInstallationItsOrgAdminProves(t *testing.T) {
 	f.call("GET", "/api/v1/capabilities", "", nil, &caps)
 	if caps.GitHubApp == nil || caps.GitHubApp.Slug != "sparkwing-test" {
 		t.Fatalf("capabilities github_app = %+v", caps.GitHubApp)
+	}
+}
+
+func TestGitHubAppExistingInstallationPicker(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	bob := f.ghUser(502, "bob")
+	f.connect(bob, 502, 8, nil)
+	start := f.start(olga)
+	f.app.IssueCode("existing-code", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+	var available struct {
+		Authorization string `json:"authorization"`
+		Installations []struct {
+			InstallationID     int64 `json:"installation_id"`
+			ConnectedElsewhere bool  `json:"connected_elsewhere"`
+		} `json:"installations"`
+	}
+	if code := f.call("POST", "/api/v1/team/github-app/connect/available", olga.auth, map[string]any{
+		"state": start.State, "verifier": start.Verifier, "code": "existing-code", "redirect_uri": appCallback,
+	}, &available); code != http.StatusOK {
+		t.Fatalf("available = %d, want 200", code)
+	}
+	if len(available.Installations) != 1 || available.Installations[0].InstallationID != 7 || available.Authorization == "" {
+		t.Fatalf("available = %+v, want administered installation 7 and a proof", available)
+	}
+	selectInstallation := func(who signedIn, state, proof string, id int64) int {
+		return f.call("POST", "/api/v1/team/github-app/connect/select", who.auth, map[string]any{
+			"state": state, "verifier": start.Verifier, "authorization": proof, "installation_id": id,
+		}, nil)
+	}
+	if code := selectInstallation(olga, start.State, available.Authorization, 7); code != http.StatusCreated {
+		t.Fatalf("administered installation = %d, want 201", code)
+	}
+	if ids := f.installations(olga); !slices.Equal(ids, []int64{7}) {
+		t.Fatalf("bound installations = %v, want [7]", ids)
+	}
+	if code := selectInstallation(olga, start.State, available.Authorization, 7); code != http.StatusForbidden {
+		t.Fatalf("replayed selection = %d, want 403", code)
+	}
+}
+
+func TestGitHubAppExistingPickerOnlyBindsListedInstallations(t *testing.T) {
+	selectInstallation := func(code string, id int64) (int, map[string]any) {
+		t.Helper()
+		f := newAppFixture(t)
+		olga := f.ghUser(501, "olga")
+		start := f.start(olga)
+		f.app.IssueCode(code, githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+		var available struct {
+			Authorization string `json:"authorization"`
+			Installations []struct {
+				InstallationID int64 `json:"installation_id"`
+			} `json:"installations"`
+		}
+		if status := f.call("POST", "/api/v1/team/github-app/connect/available", olga.auth, map[string]any{
+			"state": start.State, "verifier": start.Verifier, "code": code, "redirect_uri": appCallback,
+		}, &available); status != http.StatusOK {
+			t.Fatalf("available = %d", status)
+		}
+		if len(available.Installations) != 1 || available.Installations[0].InstallationID != 7 {
+			t.Fatalf("available = %+v, want only installation 7", available)
+		}
+		f.app.AddInstallation(githubapptest.Installation{
+			ID: 9, Account: githubapp.Account{ID: 70, Login: "acme", Type: "Organization"},
+		})
+		var response map[string]any
+		status := f.call("POST", "/api/v1/team/github-app/connect/select", olga.auth, map[string]any{
+			"state": start.State, "verifier": start.Verifier, "authorization": available.Authorization, "installation_id": id,
+		}, &response)
+		if id != 7 {
+			if replay := f.call("POST", "/api/v1/team/github-app/connect/select", olga.auth, map[string]any{
+				"state": start.State, "verifier": start.Verifier, "authorization": available.Authorization, "installation_id": 7,
+			}, nil); replay != http.StatusForbidden {
+				t.Fatalf("selection after failed attempt = %d, want 403", replay)
+			}
+		}
+		return status, response
+	}
+	status, unlisted := selectInstallation("unlisted-existing", 9)
+	if status != http.StatusNotFound {
+		t.Fatalf("unlisted existing installation = %d, want 404", status)
+	}
+	status, missing := selectInstallation("missing-existing", 999)
+	if status != http.StatusNotFound || !reflect.DeepEqual(unlisted, missing) {
+		t.Fatalf("missing installation = %d %+v, want same 404 as unlisted %+v", status, missing, unlisted)
+	}
+	status, _ = selectInstallation("listed-existing", 7)
+	if status != http.StatusCreated {
+		t.Fatalf("listed installation = %d, want 201", status)
+	}
+}
+
+func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	bob := f.ghUser(502, "bob")
+	f.connect(bob, 502, 7, acmeAdmin)
+	start := f.start(olga)
+	f.app.IssueCode("foreign-existing", githubapp.User{ID: 666, Login: "mallory"}, start.Verifier, appCallback, acmeAdmin)
+	request := func(code string, out any) int {
+		return f.call("POST", "/api/v1/team/github-app/connect/available", olga.auth, map[string]any{
+			"state": start.State, "verifier": start.Verifier, "code": code, "redirect_uri": appCallback,
+		}, out)
+	}
+	if code := request("foreign-existing", nil); code != http.StatusForbidden {
+		t.Fatalf("foreign linked identity = %d, want 403", code)
+	}
+	f.app.IssueCode("admin-existing", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
+	var available struct {
+		Authorization string `json:"authorization"`
+		Installations []struct {
+			InstallationID     int64 `json:"installation_id"`
+			ConnectedElsewhere bool  `json:"connected_elsewhere"`
+		} `json:"installations"`
+	}
+	if code := request("admin-existing", &available); code != http.StatusOK {
+		t.Fatalf("available = %d", code)
+	}
+	if len(available.Installations) != 1 || !available.Installations[0].ConnectedElsewhere {
+		t.Fatalf("bound installation = %+v, want connected_elsewhere", available.Installations)
+	}
+	var refused map[string]any
+	if code := f.call("POST", "/api/v1/team/github-app/connect/select", olga.auth, map[string]any{
+		"state": start.State, "verifier": start.Verifier, "authorization": available.Authorization, "installation_id": 7,
+	}, &refused); code != http.StatusConflict {
+		t.Fatalf("bound selection = %d, want 409", code)
+	}
+	if strings.Contains(strings.ToLower(refused["error"].(string)), "bob") {
+		t.Fatalf("conflict names another team: %+v", refused)
+	}
+}
+
+func TestGitHubAppExistingPickerHidesVisibleInstallationWithoutAdminMembership(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	start := f.start(olga)
+	f.app.IssueCode("member-existing", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback,
+		map[string]githubapp.OrgMembership{"acme": {State: "active", Role: "member"}})
+	var available struct {
+		Installations []any `json:"installations"`
+	}
+	if code := f.call("POST", "/api/v1/team/github-app/connect/available", olga.auth, map[string]any{
+		"state": start.State, "verifier": start.Verifier, "code": "member-existing", "redirect_uri": appCallback,
+	}, &available); code != http.StatusOK {
+		t.Fatalf("available = %d", code)
+	}
+	if len(available.Installations) != 0 {
+		t.Fatalf("member sees %v, want no selectable installations", available.Installations)
 	}
 }
 
