@@ -520,9 +520,13 @@ var ownerAlsoAdmitted = map[string]bool{
 
 func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	for _, role := range []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner} {
+		// A membership is a human's; the machine scopes belong to runner
+		// credentials, and secrets.read is what a run reads its secrets with.
 		for _, s := range controller.ScopesForRole(role) {
-			if s == controller.ScopeAdmin {
-				t.Errorf("role %s carries the admin scope", role)
+			switch s {
+			case controller.ScopeAdmin, controller.ScopeSecretsRead, controller.ScopeNodesClaim,
+				controller.ScopeTriggersClaim, controller.ScopeRunsState, controller.ScopeLogsWrite:
+				t.Errorf("role %s carries the %s scope", role, s)
 			}
 		}
 	}
