@@ -24,7 +24,7 @@ func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 			t.Fatalf("narrow %s back to the v49 key: %v", table, err)
 		}
 	}
-	stmts := []string{`DROP INDEX idx_runs_team_started`}
+	stmts := []string{`DROP INDEX idx_runs_team_started`, `DROP INDEX IF EXISTS idx_credit_grants_team_reference`}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)
 	}
