@@ -510,7 +510,7 @@ var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
-var ErrCronScheduleTaken = errors.New("store: another team has armed a schedule for this repository, pipeline and name")
+var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
@@ -1207,6 +1207,7 @@ type RunnerPresence struct {
 const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 1_000_000_000
 const RunnerScaleWindow = 30 * 24 * time.Hour
+const RunnerTokenLifetime = 90 * 24 * time.Hour
 type SchemaRequirement struct {
 	Name    string
 	AddedBy string
@@ -1758,7 +1759,7 @@ func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wai
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int64, now time.Time) (revoked []string, err error)
-func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string) error
+func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
@@ -1773,7 +1774,7 @@ func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declare
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
 func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
-func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role) error
+func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error

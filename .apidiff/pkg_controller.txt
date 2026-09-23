@@ -66,6 +66,7 @@ const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
 const DefaultMaxIdleClaimPoll = 5 * time.Second
+const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
@@ -231,6 +232,7 @@ const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int
+	RunnersPerToken     int
 }
 type RunRequest struct {
 	RunID       string

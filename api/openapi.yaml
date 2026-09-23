@@ -3796,7 +3796,7 @@ paths:
 
   /api/v1/webhooks/github/bindings:
     delete:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: admin
       tags: [webhooks]
       summary: Disconnect one repository from one pipeline.
       description: |
@@ -3824,7 +3824,7 @@ paths:
               schema: {$ref: "#/components/schemas/GitHubWebhookDisconnectResponse"}
         "400": {$ref: "#/components/responses/BadRequest"}
     post:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: admin
       tags: [webhooks]
       summary: Connect one repository to one pipeline.
       description: |
@@ -4547,12 +4547,13 @@ paths:
                 items:
                   x-sparkwing-go-type: pkg/controller.runnerTokenJSON
                   type: object
-                  required: [prefix, name, created_by, created_at, last_used_at]
+                  required: [prefix, name, created_by, created_at, expires_at, last_used_at]
                   properties:
                     prefix: {type: string}
                     name: {type: string}
                     created_by: {type: string, description: User id of the minter; empty for an operator-minted token.}
                     created_at: {type: integer, format: int64, description: Unix seconds.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds; a runner token minted here lapses after 90 days.}
                     last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
