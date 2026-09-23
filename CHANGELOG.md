@@ -541,6 +541,24 @@ unlock.
 
 ### Security
 
+- **runner (Breaking):** a runner without the git cache builds only the
+  repositories its owner allows. It fetched, compiled and ran pipeline code
+  from whatever repository a run named, as the user who started it, so any
+  team editor could run code with a laptop owner's ssh keys and cloud
+  credentials. `--allow-repo` (host/path, `*` within one segment) is now
+  required without `--gitcache`, and a claimed trigger or pooled node outside
+  it fails before anything is fetched, naming the repository and the list.
+  `POST /api/v1/team/runner-tokens` requires `repos`, and the machines page
+  asks for them. See
+  [migration guide](migrations/_unreleased.md#a-runner-without-the-git-cache-names-the-repositories-it-may-build).
+- **controller (Breaking):** a trigger whose `git.repo_url`,
+  `GITHUB_REPOSITORY` and `github_owner`/`github_repo` name different
+  repositories is refused with 400, and a runner refuses such a stored
+  trigger, so a run can no longer show one repository and fetch another. See
+  [migration guide](migrations/_unreleased.md#a-trigger-names-one-repository).
+- **controller:** a multi-team controller configured with a cache refuses to
+  start without `SPARKWING_CACHE_GRANT_KEY`, or with it equal to
+  `SPARKWING_CACHE_TOKEN`, instead of failing each grant request at run time.
 - **controller:** a run is attributed to the credential that submitted it.
   `POST /api/v1/triggers` took the run's user from `trigger.user` in the body,
   so any caller could put a run under another person's name. The controller

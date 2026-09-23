@@ -519,19 +519,57 @@ The git cache and its controller proxy belong to the operator, so a runner that
 holds a team's runner token starts without `--gitcache`. Such a runner fetches
 each claimed run's source directly: it fetches the commit the trigger recorded
 from the remote the trigger recorded, using the machine's own git config and
-credentials. The dashboard's machines page prints this command:
+credentials. The dashboard's machines page asks which repositories the machine
+may build and prints this command:
 
 ```bash
 SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
   --controller https://sparkwing.example.com --logs https://logs.example.com \
+  --allow-repo 'github.com/acme/*' \
   --also-claim-triggers --max-claims-before-restart 0 --holder-prefix my-laptop
 ```
 
-Nodes the run dispatches to a pool runner or a Kubernetes Job fetch the same
-commit the same way. A cloud pod holds no git credential, so it fetches only
-public repositories, and it converts a GitHub ssh remote to https. The runner
-keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct` and
-checks out each run in its own worktree. It refuses any remote that is not
+#### What a laptop runner trusts
+
+A runner compiles the pipeline code it fetches and runs it as the user who
+started the runner. That code reads what that user can read: ssh keys,
+`~/.aws`, other tokens in the home directory, and the runner token itself,
+which it receives to report its run. Any team member who can trigger a run
+chooses which repository and commit that is. So the machine's owner, not the
+team, decides what the machine builds:
+
+- `--allow-repo` names the repositories the machine may build, as host and
+  path with no scheme. It repeats, matches without regard to case, and `*`
+  matches within one path segment: `github.com/acme/*` admits
+  `github.com/acme/app` but not `github.com/acme/app/sub` or
+  `github.com/other/app`. Quote a pattern that holds `*`, since the shell
+  expands it.
+- Without `--gitcache` the runner refuses to start with no `--allow-repo`.
+  With `--gitcache` a list binds only when given. A `--github-actions` runner
+  given no list builds only the repository whose job started it.
+- The runner checks the remote it would fetch, after it rewrites a GitHub ssh
+  remote to https, and the repository the trigger's GitHub fields name. A run
+  that names any repository outside the list fails before anything is fetched,
+  and the failure names the repository and the list. The controller has no way
+  to hand a claimed run back, so another runner does not pick that run up.
+  Trigger it again once a runner that allows the repository is connected.
+- The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
+  and `github_owner`/`github_repo` name different repositories, so the run page
+  always shows the repository the runner fetched.
+
+Allow only repositories whose every committer you would trust to run code under
+your account. Only an allowlist stands between a run and your files: the
+pipeline is not sandboxed. On a machine that holds credentials you would not
+hand to those committers, run the runner as a separate user or in a container
+or VM.
+
+Nodes the run dispatches to a pool runner fetch the same commit the same way,
+and a pool runner holds each node to its own `--allow-repo` list. A Kubernetes
+Job that the run's trigger runner created builds that runner's repository and
+carries no list of its own. A cloud pod holds no git credential, so it fetches
+only public repositories, and it converts a GitHub ssh remote to https. The
+runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
+and checks out each run in its own worktree. It refuses any remote that is not
 https or ssh, a remote that carries a credential, and a commit that is not a
 full hex object id. `sparkwing pipeline trigger` therefore needs a commit that
 is already pushed, and `--working-tree` needs the operator's cache.
