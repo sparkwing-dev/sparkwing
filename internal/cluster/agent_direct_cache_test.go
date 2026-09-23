@@ -132,8 +132,10 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	newRun := func(tenant *store.Tenant, runID string) {
 		t.Helper()
 		if err := tenant.CreateTriggerWithRun(ctx,
-			store.Trigger{ID: runID, Pipeline: "hello", Status: "running", CreatedAt: now,
-				RepoURL: repoURL, GitBranch: "main", GitSHA: sha},
+			store.Trigger{
+				ID: runID, Pipeline: "hello", Status: "running", CreatedAt: now,
+				RepoURL: repoURL, GitBranch: "main", GitSHA: sha,
+			},
 			store.Run{ID: runID, Pipeline: "hello", Status: "running", StartedAt: now},
 		); err != nil {
 			t.Fatal(err)

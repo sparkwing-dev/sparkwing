@@ -480,7 +480,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	log.Printf("sparkwing-cache shutting down (30s drain)")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
