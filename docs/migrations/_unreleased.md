@@ -214,3 +214,14 @@ direct-source runner fetched `git.repo_url`, so such a trigger showed one
 repository and ran another. Send only the fields that name the repository you
 mean, or make them agree; `https://github.com/acme/app.git`,
 `git@github.com:acme/app.git` and `acme/app` agree.
+
+## Execution attribution
+
+Schema 68 adds a defaulted `run_id` column to `github_runner_credentials`.
+The store migrates on open. Existing credentials retain an empty run ID, so
+their attempts can show the repository but cannot recover the workflow run.
+New GitHub Actions credential exchanges record the verified OIDC run ID.
+
+Upgrade every process sharing a runs store before relying on the new execution
+history fields. Older binaries do not record the new runner identity, and a
+mixed deployment can still produce attempts with incomplete attribution.

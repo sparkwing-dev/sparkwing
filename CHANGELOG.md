@@ -34,7 +34,7 @@ unlock.
   Older attempts derive a site from matching claim credentials and holders when
   available. GitHub Actions attempts include the repository and workflow run
   ID. Schema 68 adds `github_runner_credentials.run_id`. See
-  [Execution attribution migration](docs/migrations/execution-attribution.md).
+  [Execution attribution](docs/migrations/_unreleased.md#execution-attribution).
 - **controller:** GitHub App subscriptions can opt into PR closed, labeled and ready-for-review actions, release published and prereleased actions, and branch create and delete events. Runs expose event, ref, action, label, merge and tag environment values; OIDC subjects use the event's ref and trigger. Subscriptions follow a repository id across rename and same-team transfer. Schema 69 adds default-off subscription columns; existing subscriptions retain their behavior. Branch filters also gate branch creation and deletion, and base-branch filters gate every pull request action.
 
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
