@@ -284,7 +284,9 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 // day's bytes reach it every download is refused until the day rolls,
 // whoever asks, because nothing else bounds what the cache sends.
 func TestTheCacheDailyCapRefusesEveryDownloadPastIt(t *testing.T) {
-	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 150})
+	// safety: the meter stops a response at the cap rather than letting one
+	// download cross it, so the cap holds exactly the two downloads that fit.
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 200})
 	seedArtifact(t, "job1", "out.tar", 100)
 	for i := range 2 {
 		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
