@@ -261,48 +261,6 @@ unlock.
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
-- **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
-  `--grant-key` on the cache), a secret that is neither the cache's operator
-  token nor any runner's token, so a runner need not hold the cache's token.
-  The cache refuses to start, and the controller to mint, when the key equals
-  the operator token. A grant names one run's team, lasts six hours or until
-  the requesting credential expires, whichever is first, and is verified
-  offline. A GitHub Actions runner credential gets no grant (403). A grant
-  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
-  under `<data-dir>/teams/<team>/`. A grant for the operator's own team
-  (`default`) reads and registers any mirror, SSH origins included, so the
-  operator's runners still build its private repositories; any other team's
-  grant reads only public `https` mirrors registered under their URL-derived
-  name. Every grant is refused on seeding, refresh, archive, upload and admin
-  routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
-  The operator token is unchanged.
-- **web:** Sign in with Google on a multi-team controller
-  When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
-  provider, the sign-in page offers Google. `GET /auth/google/start` and
-  `GET /auth/google/callback` run the flow on the dashboard host with the state
-  and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
-  whose state does not match that cookie is refused. The nav shows the active
-  team and your role and switches teams. See [auth](docs/auth.md#google-and-github-sign-in).
-- **web:** Sign in with Google or GitHub on a multi-team controller
-  When `GET /api/v1/capabilities` reports `teams.enabled`, the sign-in page
-  offers each provider `auth.providers` lists, `google` with Google's standard
-  dark button and `github` beside it. `GET /auth/<provider>/start` and
-  `GET /auth/<provider>/callback` run the flow on the dashboard host with the
-  provider, state and PKCE verifier in a short-lived `__Host-sw_oauth` cookie,
-  and a callback whose state or provider does not match that cookie is refused.
-  The nav shows the active team and your role and switches teams. See
-  [auth](docs/auth.md#google-and-github-sign-in).
-
-- **web:** team pages on a multi-team controller
-  `/team` lists members, invites by email with a copyable accept link, revokes
-  pending invitations, changes roles and removes members; `/team/machines`
-  mints a runner token for the active team, shows it and its
-  `sparkwing-runner` command once, and lists and revokes tokens; `/team/new`
-  creates a team and `/invitations` accepts one. Controls follow the member's
-  role and the controller decides every request. A local install shows none of
-  them.
-
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
