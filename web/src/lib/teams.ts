@@ -351,7 +351,7 @@ export function runnerConnectCommand(
     "sparkwing-runner runner",
     `--controller ${controllerURLPlaceholder}`,
     ...repos.map((r) => `--allow-repo '${r.replace(/'/g, `'\\''`)}'`),
-    "--also-claim-triggers --max-claims-before-restart 0",
+    "--also-claim-triggers --max-claims-before-restart 0 --metrics-addr=",
     `--holder-prefix ${quoted(name)}`,
   ].join(" ");
 }

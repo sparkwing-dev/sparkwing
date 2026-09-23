@@ -306,6 +306,10 @@ func executorKind(source string) string {
 	return "runner"
 }
 
+// defaultRunnerMetricsAddr is loopback-only because a runner on a laptop would
+// otherwise serve /metrics on every interface; the chart passes its own port.
+const defaultRunnerMetricsAddr = "127.0.0.1:9090"
+
 func runRunnerCLI(args []string, version string) error {
 	fs := flag.NewFlagSet("runner", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
@@ -327,8 +331,8 @@ func runRunnerCLI(args []string, version string) error {
 		"runner label (repeatable, e.g. --label=arm64 --label=arch=arm64)")
 	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),
 		"shared-secret bearer token for controller + logs auth (env: SPARKWING_AGENT_TOKEN)")
-	metricsAddr := fs.String("metrics-addr", ":9090",
-		"address for the /metrics listener (empty disables)")
+	metricsAddr := fs.String("metrics-addr", defaultRunnerMetricsAddr,
+		"address for the /metrics listener (empty disables; a pod that is scraped passes :9090)")
 	maxClaims := fs.Int("max-claims-before-restart", 25,
 		"exit the loop after N successful claims so kubelet restarts the container (0 = unlimited; FOLLOWUPS #12)")
 	alsoClaimTriggers := fs.Bool("also-claim-triggers", false,

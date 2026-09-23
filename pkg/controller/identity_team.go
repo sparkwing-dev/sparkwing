@@ -296,7 +296,9 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 }
 
 // runnerConnectArgs is the command that turns a machine into one of the team's
-// runners: it claims triggered runs as well as their nodes, fetches each run's
+// runners: it claims triggered runs as well as their nodes, serves no metrics
+// listener (a second runner on the machine would collide on its port, and
+// nothing scrapes a laptop), fetches each run's
 // source itself with the machine's own git credentials (there is no --gitcache,
 // since the git cache is the operator's), builds only the repositories allow
 // names, ships logs to the logs service the controller announces, and keeps
@@ -312,7 +314,7 @@ func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.Repo
 	for _, p := range allow.Patterns() {
 		cmd += " --allow-repo '" + p + "'"
 	}
-	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --holder-prefix " + name
+	return cmd + " --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= --holder-prefix " + name
 }
 
 func (s *Server) controllerURL(r *http.Request) string {

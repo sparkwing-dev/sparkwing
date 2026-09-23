@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -297,5 +298,17 @@ func TestRunRunnerCLI_RefusesABadAllowRepoPattern(t *testing.T) {
 	}, "")
 	if err == nil || !strings.Contains(err.Error(), "--allow-repo") {
 		t.Fatalf("runRunnerCLI() error = %v, want the pattern refused", err)
+	}
+}
+
+// A runner on a laptop would otherwise serve /metrics on every interface and
+// collide with a second runner on the same machine; a pod names its port.
+func TestRunnerMetricsDefaultListensOnLoopbackOnly(t *testing.T) {
+	host, _, err := net.SplitHostPort(defaultRunnerMetricsAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("default --metrics-addr %q is not a loopback address", defaultRunnerMetricsAddr)
 	}
 }
