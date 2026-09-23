@@ -189,8 +189,10 @@ func TestACacheThatCannotCountItsBucketRefusesToStart(t *testing.T) {
 	openBlobStore = func(context.Context, string) (*teamblob.Store, error) {
 		return teamblob.New(teamblob.Options{
 			Bucket: blobTestBucket, Prefix: "cache", ReconcileAtStart: true,
-			Client: s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
-				Credentials: credentials.NewStaticCredentialsProvider("test", "test", "")}),
+			Client: s3.New(s3.Options{
+				Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
+				Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
+			}),
 		})
 	}
 	root := t.TempDir()

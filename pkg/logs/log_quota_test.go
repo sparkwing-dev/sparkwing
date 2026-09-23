@@ -172,8 +172,10 @@ func TestALogsServiceThatCannotCountItsArchiveRefusesToStart(t *testing.T) {
 	t.Cleanup(fake.Close)
 	store, err := teamblob.New(teamblob.Options{
 		Bucket: archiveBucket, Prefix: "logs", ReconcileAtStart: true,
-		Client: s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
-			Credentials: credentials.NewStaticCredentialsProvider("test", "test", "")}),
+		Client: s3.New(s3.Options{
+			Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
+			Credentials: credentials.NewStaticCredentialsProvider("test", "test", ""),
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
