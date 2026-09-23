@@ -126,6 +126,11 @@ yourself, and an existing config is replaced only with `--force`. Retire the
 machine with `sparkwing cluster runners remove --profile prod`, which stops the
 service and then revokes the token.
 
+From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
+`sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
+updates both binaries from the same checkout. Keep that directory on the
+service's PATH when using the source installer.
+
 The command needs an admin credential on the profile, because minting a token
 is an admin route. A machine whose operator holds no admin token uses the
 interactive installer with a token an administrator minted for them:
