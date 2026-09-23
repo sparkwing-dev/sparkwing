@@ -94,18 +94,19 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	plain := sec.Value
-	if s.secretsCipher != nil {
-		opened, oerr := openSecret(s.secretsCipher, bindingForRow(tn.Team(), sec), plain)
-		if oerr != nil {
-			s.logger.Error("secret read: open envelope", "team", tn.Team(), "name", sec.Name, "pipeline", sec.Pipeline, "err", oerr)
-			// safety: the cipher's own text names the row's storage state, which a reader that cannot open it may not learn.
-			writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: stored value did not open"))
-			return
-		}
-		plain = opened
-	} else if secrets.IsEncrypted(plain) {
-		writeError(w, http.StatusInternalServerError, errors.New("secrets cipher: encrypted value but no key configured"))
+	// safety: a browser session holds no run, so a masked value would only
+	// ever be displayed; its value leaves the controller to a runner or a token.
+	if p, authed := PrincipalFromContext(r.Context()); authed && p.session != "" && sec.Masked {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code:      "write_only",
+			Principal: p.label(),
+			Message:   "a masked secret's value is never returned to a dashboard session",
+		})
+		return
+	}
+	plain, err := s.openStoredSecret(tn.Team(), sec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, secretJSON{
@@ -119,6 +120,22 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: sec.CreatedAt.Unix(),
 		UpdatedAt: sec.UpdatedAt.Unix(),
 	})
+}
+
+func (s *Server) openStoredSecret(team store.Team, sec *store.Secret) (string, error) {
+	if s.secretsCipher == nil {
+		if secrets.IsEncrypted(sec.Value) {
+			return "", errors.New("secrets cipher: encrypted value but no key configured")
+		}
+		return sec.Value, nil
+	}
+	opened, err := openSecret(s.secretsCipher, bindingForRow(team, sec), sec.Value)
+	if err != nil {
+		s.logger.Error("secret read: open envelope", "team", team, "name", sec.Name, "pipeline", sec.Pipeline, "err", err)
+		// safety: the cipher's own text names the row's storage state, which a reader that cannot open it may not learn.
+		return "", errors.New("secrets cipher: stored value did not open")
+	}
+	return opened, nil
 }
 
 // safety: a non-admin reader's standing is the pipeline of a run it holds live
@@ -223,8 +240,19 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]secretJSON, 0, len(secs))
 	for _, sec := range secs {
+		// safety: an unmasked row is plain config every member may read, while
+		// a masked row's value never appears in a list, whoever asks. A row
+		// that does not open lists without its value, so one bad row cannot
+		// hide the others, and openStoredSecret has logged it.
+		var value string
+		if !sec.Masked {
+			if opened, oerr := s.openStoredSecret(tn.Team(), &sec); oerr == nil {
+				value = opened
+			}
+		}
 		out = append(out, secretJSON{
 			Name:      sec.Name,
+			Value:     value,
 			Principal: sec.Principal,
 			Pipeline:  sec.Pipeline,
 			Masked:    sec.Masked,

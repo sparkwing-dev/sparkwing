@@ -301,6 +301,10 @@ unlock.
 
 ### Changed
 
+- **controller:** `GET /api/v1/secrets` is open to every team member
+  (`runs.read`), not only owners, and lists each unmasked variable with its
+  value. A masked secret still lists with metadata only.
+
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
   `welcome`, and a repeat within a team still returns the grant already
@@ -567,6 +571,13 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** `GET /api/v1/secrets/{name}` answers a dashboard session
+  `403` with error `write_only` for a masked secret, team owners and the
+  operator's password session included. A session still reads an unmasked
+  variable. Bearer tokens are unchanged: a runner reads through its claimed
+  run, and an operator or team owner token reads by name, so `sparkwing secret
+  get --profile` and `SPARKWING_SECRETS_PROFILE` keep working.
 
 - **runner (Breaking):** a runner without the git cache builds only the
   repositories its owner allows. It fetched, compiled and ran pipeline code

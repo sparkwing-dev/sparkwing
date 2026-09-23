@@ -144,7 +144,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
-| `GET` | `/api/v1/secrets` | `admin` or `team.admin` |
+| `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |

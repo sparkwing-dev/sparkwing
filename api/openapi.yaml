@@ -2265,9 +2265,14 @@ paths:
       responses:
         "201": {description: Created.}
     get:
-      x-sparkwing-scope: admin or team.admin
+      x-sparkwing-scope: runs.read or team.admin
       tags: [secrets]
-      summary: List secrets (metadata only; values are never returned in list).
+      summary: List secrets and variables.
+      description: |
+        Lists every row in the caller's team. A masked row (a secret) lists
+        with its metadata only; its value is never returned here. An unmasked
+        row (a variable) lists with its value, so any member who reads runs
+        sees the team's variables.
       responses:
         "200":
           description: Secrets list.
@@ -2292,12 +2297,18 @@ paths:
       x-sparkwing-scope: secrets.read or team.admin
       tags: [secrets]
       summary: Read one secret (value included).
+      description: |
+        A dashboard session gets `403` with error `write_only` for a masked
+        row, owners included; it may read an unmasked variable. A bearer
+        token reads values as before: a runner through the run it has
+        claimed, and an operator or team owner token by name.
       responses:
         "200":
           description: Secret.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Secret"}
+        "403": {description: The caller may not read this value.}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
       x-sparkwing-scope: admin or team.admin
@@ -5662,7 +5673,7 @@ components:
     Secret:
       x-sparkwing-go-type: pkg/controller.secretJSON
       type: object
-      description: One stored secret. List endpoints redact `value`.
+      description: One stored secret. The list carries `value` for unmasked rows only.
       required: [name]
       properties:
         name: {type: string}
