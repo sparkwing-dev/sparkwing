@@ -450,6 +450,13 @@ unlock.
   cap unless `--egress-daily-cap-bytes` names another value. It bounds what
   any caller churns through the registry proxy, which takes no credential and
   belongs inside the cluster only.
+  With `--blob-store` the day's total survives a restart. `--disable-proxy`
+  serves no registry proxy, and the runner bundle refuses a cache Service
+  other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which
+  sets it.
+
+- **cache, logs:** a service that holds teams to a free share counts its
+  bucket before it serves and refuses to start when it cannot.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 30 days.
 
