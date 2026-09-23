@@ -688,6 +688,10 @@ unlock.
 
 ### Fixed
 
+- **cache:** the store ceiling counts git mirrors from the moment a clone or
+  fetch finishes, by re-measuring the store then, instead of at the next
+  scheduled measurement.
+
 - **controller:** a team cannot be deleted while money is in flight for it.
   `DELETE /api/v1/team`, the operator's `DELETE /api/v1/teams/{team}` and an
   account deletion that would delete a team answer 409 while the team has an

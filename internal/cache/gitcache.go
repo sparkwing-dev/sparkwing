@@ -409,17 +409,25 @@ func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 	return 0
 }
 
+// safety: git writes a mirror's files itself, so no write passes through the
+// store's running count; the store is re-measured once a clone or fetch
+// finishes instead, coalesced so a burst of fetches costs one walk.
+func mirrorWritten(out string, err error) (string, error) {
+	measureStoreAsync()
+	return out, err
+}
+
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
-	return gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	return mirrorWritten(gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"))
 }
 
 var cloneMirror = func(repoURL, bareRepo string) (string, error) {
-	return gitCmd("clone", "--bare", "--", repoURL, bareRepo)
+	return mirrorWritten(gitCmd("clone", "--bare", "--", repoURL, bareRepo))
 }
 
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
 	_ = os.RemoveAll(bareRepo)
-	return gitCmd("clone", "--bare", "--", repoURL, bareRepo)
+	return mirrorWritten(gitCmd("clone", "--bare", "--", repoURL, bareRepo))
 }
 
 const mirrorFetchTimeout = 2 * time.Minute
@@ -2466,7 +2474,7 @@ func autoRegisterRepos() {
 		lock := repoLock(hash)
 		lock.Lock()
 		log.Printf("auto-register: cloning %s (%s)", name, sourceurl.Redact(repoURL))
-		if out, err := gitCmd("clone", "--bare", "--", repoURL, bareRepo); err != nil {
+		if out, err := cloneMirror(repoURL, bareRepo); err != nil {
 			log.Printf("auto-register: clone failed for %s: %v %s", name, err, sshHint(out))
 		} else {
 			enableSHAFetch(bareRepo)

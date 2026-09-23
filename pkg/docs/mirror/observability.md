@@ -681,7 +681,8 @@ and an error naming its own flags.
 
 Each service counts what it stores as it stores it and walks its own
 trees on `--store-reconcile` (hourly by default, `0` measures once at
-startup). The walk is local file I/O rather than billed requests, it
+startup). Git writes the cache's mirrors itself, so the cache re-measures
+its store whenever a mirror clone or fetch finishes instead. The walk is local file I/O rather than billed requests, it
 stops when the service's context does and reports the total as partial
 rather than folding a short one in, and a
 measurement that finds the store back under its ceiling thaws it.
