@@ -4555,6 +4555,72 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/team/cli-tokens:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the caller's live CLI tokens in the active team.
+      description: Any member lists the CLI tokens they minted; nobody sees another member's.
+      responses:
+        "200":
+          description: CLI tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.cliTokenJSON
+                  type: object
+                  required: [prefix, scopes, created_at, expires_at, last_used_at]
+                  properties:
+                    prefix: {type: string}
+                    scopes: {type: array, items: {type: string}}
+                    created_at: {type: integer, format: int64, description: Unix seconds.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a CLI token lapses after 90 days."}
+                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Mint a CLI token that acts for the caller in the active team.
+      description: >-
+        Needs a signed-in session; a bearer token cannot mint one. The token carries the scopes of the caller's role except team administration, so a reader's token only reads, and it lapses after 90 days. Removing the member, or demoting them to reader, revokes it. The plaintext is returned once, with the `sparkwing cloud connect` command that stores it in a profile named for the team and the `sparkwing pipeline trigger` command that starts a run with it.
+      responses:
+        "201":
+          description: Minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.cliTokenResp
+                type: object
+                required: [token, prefix, scopes, expires_at, profile, setup, run]
+                properties:
+                  token: {type: string}
+                  prefix: {type: string}
+                  scopes: {type: array, items: {type: string}}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  profile: {type: string, description: "The profile name the setup command writes, which is the team slug."}
+                  setup: {type: string, description: A command that reads the token from a no-echo prompt and writes the profile.}
+                  run: {type: string, description: "The command that starts a run from a pushed checkout, with a pipeline placeholder."}
+        "409": {description: The caller already holds 10 live CLI tokens in this team.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/cli-tokens/{prefix}:
+    delete:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Revoke one of the caller's CLI tokens.
+      description: A member revokes only the CLI tokens they minted; another member's prefix answers 404.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/team/runner-tokens:
     get:
       x-sparkwing-scope: runs.write

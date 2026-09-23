@@ -83,6 +83,7 @@ const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
+const CLITokenLifetime = 90 * 24 * time.Hour
 type CPUClass struct {
 	Cores       int64
 	MemoryBytes int64
@@ -506,6 +507,7 @@ var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry th
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
+var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
@@ -810,6 +812,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxCLITokensPerMember = 10
 const MaxCreatedTeams = 10
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
@@ -1700,10 +1703,14 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
+func (t *Tenant) CreateCLIToken(
+	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
+) (string, *Token, error)
 func (t *Tenant) CreateInvitation(ctx context.Context, actorID, email string, role Role, now time.Time) (Invitation, error)
 func (t *Tenant) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (t *Tenant) CreateRun(ctx context.Context, r Run) error
@@ -1789,9 +1796,10 @@ func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (Pro
 func (t *Tenant) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) (err error)
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
+func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error
 func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error
 func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error)
-func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) (_ []Token, err error)
+func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
