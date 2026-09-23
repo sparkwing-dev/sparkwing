@@ -3,9 +3,13 @@ package client
 import (
 	"context"
 	"errors"
+	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -25,7 +29,22 @@ const MaxUnavailableWait = 5 * time.Second
 func (c *Client) do(req *http.Request) (*http.Response, error) {
 	for attempt := 0; ; attempt++ {
 		resp, err := c.http.Do(req)
-		if err != nil || resp.StatusCode != http.StatusServiceUnavailable {
+		if err != nil {
+			if attempt >= UnavailableRetries || !executionStartRequest(req) || req.Context().Err() != nil || !transientExecutionStartError(err) {
+				return resp, err
+			}
+			next, rewindErr := rewind(req)
+			if rewindErr != nil {
+				return resp, err
+			}
+			backoff := time.Duration(1<<attempt) * 100 * time.Millisecond
+			if waitErr := waitFor(req.Context(), backoff+retryJitter(backoff)); waitErr != nil {
+				return resp, waitErr
+			}
+			req = next
+			continue
+		}
+		if resp.StatusCode != http.StatusServiceUnavailable {
 			return resp, err
 		}
 		wait, ok := retryAfter(resp)
@@ -46,17 +65,29 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	}
 }
 
-// safety: an ingress can answer 503 after the handler ran, so only a method
-// the server must treat as repeatable is sent twice. No route this client
-// posts to accepts an idempotency key, so no POST qualifies: a replayed
-// submission would be a second run.
+// safety: execution-start is idempotent for one claim generation and attempt
+// ordinal, so a lost answer may be repeated without spending another attempt.
 func repeatable(req *http.Request) bool {
 	switch req.Method {
 	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete:
 		return req.Body == nil || req.GetBody != nil
+	case http.MethodPost:
+		return executionStartRequest(req) && (req.Body == nil || req.GetBody != nil)
 	default:
 		return false
 	}
+}
+
+func executionStartRequest(req *http.Request) bool {
+	return req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/api/v1/runs/") &&
+		strings.HasSuffix(req.URL.Path, "/execution-start")
+}
+
+func transientExecutionStartError(err error) bool {
+	var netErr net.Error
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
 }
 
 func retryAfter(resp *http.Response) (time.Duration, bool) {

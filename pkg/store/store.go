@@ -6332,13 +6332,14 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	return out, rows.Err()
 }
 
-// safety: holding the run row is what serializes callers that allocate a
-// per-run sequence number from MAX(seq)+1. A run with no row leaves nothing
-// to lock; the caller's own insert then fails its foreign key, as before.
+// safety: holding the run row serializes callers that allocate a per-run
+// sequence number from MAX(seq)+1. NO KEY UPDATE leaves foreign-key checks
+// on sibling nodes free to proceed while those nodes await their event turn.
+// A missing run leaves nothing to lock; the insert then fails its foreign key.
 func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
 	var id string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&id)
+		`SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

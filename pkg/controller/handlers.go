@@ -1967,13 +1967,14 @@ func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, errors.New("a local execution attempt requires executor_id"))
 		return
 	}
-	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), claimIdentity(r), body)
+	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
+	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), runID, nodeID, claimIdentity(r), body)
 	if errors.Is(err, store.ErrLockHeld) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeNodeStoreError(w, "acknowledge node execution start", runID, nodeID, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -2427,10 +2428,24 @@ func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	if err := s.store.TouchNodeHeartbeat(r.Context(), runID, nodeID); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		s.writeNodeStoreError(w, "touch node heartbeat", runID, nodeID, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) writeNodeStoreError(w http.ResponseWriter, operation, runID, nodeID string, err error) {
+	s.logger.Error(operation, "run_id", runID, "node_id", nodeID, "err", err)
+	var sqlErr interface{ SQLState() string }
+	if errors.As(err, &sqlErr) {
+		switch sqlErr.SQLState() {
+		case "40001", "40P01", "55P03":
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, err)
+			return
+		}
+	}
+	writeError(w, http.StatusInternalServerError, err)
 }
 
 func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
