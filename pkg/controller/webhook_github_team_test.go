@@ -88,17 +88,18 @@ func TestGitHubWebhookBinding_ADeliveryRunsInTheTeamWhoseSecretSignedIt(t *testi
 		t.Errorf("the default team's delivery reads in team B: %v", err)
 	}
 
-	// safety: the delivery id is an unsigned header, so a default-team delivery
-	// reusing team B's is refused without naming team B's run.
+	// safety: the delivery id is an unsigned header and unique only within a
+	// team, so a default-team delivery reusing team B's is neither refused nor
+	// answered with team B's run.
 	replay := pushBody("acme/widgets", "aaa222")
 	dup := postWebhookDelivery(t, url, "push", "delivery-b", replay, signWebhook(bindingSecret, replay))
 	defer func() { _ = dup.Body.Close() }()
 	raw, _ := io.ReadAll(dup.Body)
-	if dup.StatusCode != http.StatusConflict {
-		t.Errorf("a reused delivery id = %d, want 409", dup.StatusCode)
+	if dup.StatusCode != http.StatusAccepted {
+		t.Errorf("a delivery id another team used = %d, want 202", dup.StatusCode)
 	}
-	if bytes.Contains(raw, []byte(`"run_id"`)) {
-		t.Errorf("a reused delivery id answered with another team's run: %s", raw)
+	if b, err := tenantB.FindTriggerByWebhookReplay(ctx, "", "delivery-b"); err != nil || bytes.Contains(raw, []byte(b.ID)) {
+		t.Errorf("a delivery id another team used answered with that team's run: %s (%v)", raw, err)
 	}
 
 	bad := postWebhookDelivery(t, url, "push", "delivery-c", bodyB, signWebhook("neither-team", bodyB))

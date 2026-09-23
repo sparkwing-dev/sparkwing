@@ -565,6 +565,17 @@ unlock.
   delivery skips the allow-list only when the binding whose secret signed it
   names the repository.
 
+- **store:** schedule, idempotency, delivery and replay keys are unique per team
+  The unique indexes on `cron_schedules (repo_path, pipeline, schedule_name)`,
+  `triggers (pipeline, idempotency_key)`, `triggers (webhook_delivery)` and
+  `triggers (webhook_replay_key)` predated the team column. One team arming a
+  repository, pipeline and name refused every other team the same schedule and
+  answered `409` naming it, and a delivery id or signed body one team held
+  refused it to the rest. Schema 52 rebuilds all four to lead with the team.
+  A schedule armed in any team but the operator's also takes an id seeded
+  with its team, so two teams' schedules for one repository never share an
+  id; the operator's ids are unchanged.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

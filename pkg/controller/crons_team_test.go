@@ -40,8 +40,8 @@ func teamToken(t *testing.T, tenant *store.Tenant, scopes ...string) string {
 
 // A schedule answers only to the team that armed it: another team's list
 // omits it, its id reads as missing on every route, a repository delete
-// leaves it armed, and arming the same repository from another team is
-// refused rather than taking the row over.
+// leaves it armed, and arming the same repository from another team arms that
+// team's own schedules rather than taking the row over or learning it exists.
 func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 	f := newCronsFixture(t)
 	tenantB := teamTenant(t, f.store, teamB)
@@ -104,8 +104,17 @@ func TestControllerCrons_ASchedulesTeamIsTheOnlyOneThatSeesIt(t *testing.T) {
 		t.Errorf("the default team's repository delete removed %d of team B's schedules", removed.Removed)
 	}
 
-	if got := f.status(http.MethodPut, "/api/v1/crons/repos", f.writer, cronPushBody()); got != http.StatusConflict {
-		t.Errorf("the default team arming team B's repository = %d, want 409", got)
+	f.call(http.MethodPut, "/api/v1/crons/repos", f.writer, cronPushBody(), http.StatusOK, nil)
+	own, err := f.store.ListCronSchedules(ctx)
+	if err != nil || len(own) != 2 {
+		t.Fatalf("the default team holds %d schedules (err %v) after arming the same repository, want 2", len(own), err)
+	}
+	for _, sched := range own {
+		for _, theirs := range stored {
+			if sched.ID == theirs.ID {
+				t.Errorf("the default team's schedule reuses team B's id %s", sched.ID)
+			}
+		}
 	}
 	after, err := tenantB.GetCronSchedule(ctx, id)
 	if err != nil {

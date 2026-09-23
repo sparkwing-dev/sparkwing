@@ -93,7 +93,7 @@ func (s *Service) Arm(ctx context.Context, repoRoot string, opts ArmOptions) (Ar
 	if err != nil {
 		return ArmReport{}, fmt.Errorf("resolve %s: %w", repoRoot, err)
 	}
-	declared, err := DeclaredSchedules(root)
+	declared, err := s.declaredSchedules(root)
 	if err != nil {
 		return ArmReport{}, err
 	}
@@ -569,7 +569,7 @@ func (s *Service) Refresh(ctx context.Context) (RefreshReport, error) {
 			continue
 		}
 		report.Repos++
-		declared, derr := DeclaredSchedules(root)
+		declared, derr := s.declaredSchedules(root)
 		if derr != nil {
 			report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", root, derr))
 			continue
@@ -630,4 +630,14 @@ func (s *Service) refreshOne(
 		return
 	}
 	report.Updated++
+}
+
+// declaredSchedules is [DeclaredSchedules] with each entry placed in the team s
+// arms in, so its id matches the row that team's store holds.
+func (s *Service) declaredSchedules(root string) ([]Declared, error) {
+	declared, err := DeclaredSchedules(root)
+	for i := range declared {
+		declared[i].Team = s.team()
+	}
+	return declared, err
 }

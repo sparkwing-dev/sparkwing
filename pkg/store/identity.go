@@ -271,6 +271,9 @@ func applyIdentityMigrationSQLite(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
+	if err := applyTeamScopedUserValueKeys(ctx, tx); err != nil {
+		return err
+	}
 	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTableSQLite)
 }
 
@@ -287,7 +290,37 @@ func applyIdentityMigrationPostgres(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
+	if err := applyTeamScopedUserValueKeys(ctx, tx); err != nil {
+		return err
+	}
 	return applyGitHubRunnerBindingsMigration(ctx, tx, githubRunnerBindingsTablePostgres)
+}
+
+// safety: these keys predate the team column, so one team holding a schedule
+// key, an idempotency key, a webhook delivery id or a replay digest refused
+// every other team the same value and told it the value was taken. Each index
+// keeps its name, which older ladder steps recreate, and leads with the team
+// from here on.
+func applyTeamScopedUserValueKeys(ctx context.Context, tx *storeTx) error {
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_cron_schedules_repo_pipeline_name`,
+		`CREATE UNIQUE INDEX idx_cron_schedules_repo_pipeline_name
+    ON cron_schedules(team, repo_path, pipeline, schedule_name)`,
+		`DROP INDEX IF EXISTS ` + TriggerIdempotencyIndexName,
+		`CREATE UNIQUE INDEX ` + TriggerIdempotencyIndexName + `
+    ON triggers(team, pipeline, idempotency_key) WHERE idempotency_key != ''`,
+		`DROP INDEX IF EXISTS ` + TriggerWebhookDeliveryIndexName,
+		`CREATE UNIQUE INDEX ` + TriggerWebhookDeliveryIndexName + `
+    ON triggers(team, ` + triggerWebhookDeliveryColumn + `) WHERE ` + triggerWebhookDeliveryColumn + ` != ''`,
+		`DROP INDEX IF EXISTS ` + TriggerWebhookReplayKeyIndexName,
+		`CREATE UNIQUE INDEX ` + TriggerWebhookReplayKeyIndexName + `
+    ON triggers(team, ` + triggerWebhookReplayKeyColumn + `) WHERE ` + triggerWebhookReplayKeyColumn + ` != ''`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitStatements(script string) []string {

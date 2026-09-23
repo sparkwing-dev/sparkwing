@@ -237,11 +237,12 @@ var cronScheduleInsertPlaceholders = placeholders(strings.Count(cronScheduleInse
 
 const cronFireColumns = `id, schedule_id, due_at, decided_at, outcome, run_id, detail, args`
 
-// ErrCronScheduleTaken reports an arm whose repository, pipeline and name
-// another team already holds. The unique index on those three columns
-// predates the tenant key and spans every team, so the second team is
-// refused rather than handed the first team's row.
-var ErrCronScheduleTaken = errors.New("store: another team has armed a schedule for this repository, pipeline and name")
+// ErrCronScheduleTaken reports an arm whose schedule id another team already
+// holds. Ids are unique across the store and derive from the team as well as
+// the repository, pipeline and name, so this is a collision rather than a
+// key two teams share, and the second team is refused rather than handed the
+// first team's row.
+var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 
 // ArmCronSchedule records the declaration in the default team.
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error) {
@@ -259,7 +260,7 @@ func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now tim
 // [CronScheduleDefaultName], an empty Overlap means CronOverlapSkip, and
 // an empty Where means CronWhereLocal. A row that recorded no ArmedBy takes
 // the one this arming carries, so a schedule armed before the host recorded
-// an owner gains one on its next push. A key another team holds is
+// an owner gains one on its next push. An id another team holds is
 // [ErrCronScheduleTaken].
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error) {
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
@@ -305,9 +306,8 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 		if armedAt.IsZero() {
 			armedAt = now
 		}
-		// safety: the id and the (repo_path, pipeline, schedule_name) index both
-		// span every team, so a key another team holds fails this insert rather
-		// than reaching an update that would rewrite their row.
+		// safety: the id spans every team, so an id another team holds fails
+		// this insert rather than reaching an update that would rewrite their row.
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO cron_schedules (team, `+cronScheduleInsertColumns+`)
 VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
