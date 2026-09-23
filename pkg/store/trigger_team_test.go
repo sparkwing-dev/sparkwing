@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,18 +16,27 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 
-	seedPending(t, s, "t-acme")
-	if _, err := s.DB().Exec(storetest.Rebind(s,
-		`UPDATE triggers SET team = ? WHERE id = ?`), "acme", "t-acme"); err != nil {
-		t.Fatalf("set team: %v", err)
+	acme := teamHandle(t, s, "acme")
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "t-acme", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	// Control: the unauthenticated local claim is the default team's, so it
+	// leaves acme's trigger alone.
+	if tr, err := s.ClaimNextTriggerFor(ctx, store.ClaimIdentity{}, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("default-team claim = %+v, %v; want nothing", tr, err)
 	}
 
-	claimed, err := s.ClaimNextTriggerFor(ctx, store.ClaimIdentity{}, time.Minute, nil, nil)
+	_, tok, err := acme.CreateToken(ctx, "acme-runner", store.TokenKindRunner, []string{"triggers.claim"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	claimed, err := s.ClaimNextTriggerFor(ctx,
+		store.ClaimIdentity{Principal: "acme-runner", TokenPrefix: tok.Prefix}, time.Minute, nil, nil)
 	if err != nil {
 		t.Fatalf("ClaimNextTriggerFor: %v", err)
 	}
-	if claimed.Team != "acme" {
-		t.Fatalf("claimed team = %q, want acme", claimed.Team)
+	if claimed.ID != "t-acme" || claimed.Team != "acme" {
+		t.Fatalf("claimed %s team = %q, want t-acme in acme", claimed.ID, claimed.Team)
 	}
 	read, err := s.GetTrigger(ctx, "t-acme")
 	if err != nil {
