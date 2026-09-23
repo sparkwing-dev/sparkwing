@@ -123,8 +123,10 @@ func TestCacheGrantEndsWhenTheCredentialDoes(t *testing.T) {
 	if _, err := authwire.VerifyCacheGrant("grant-key", body.Grant, expires.Add(time.Second)); err == nil {
 		t.Fatal("the grant still verifies after the credential expired")
 	}
-	expired := &Principal{Name: "pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes,
-		Expires: time.Now().Add(-time.Second)}
+	expired := &Principal{
+		Name: "pool", Kind: store.TokenKindRunner, Team: "team-a", Scopes: runnerTokenScopes,
+		Expires: time.Now().Add(-time.Second),
+	}
 	if rec := mintAs(t, s, expired, teamA); rec.Code/100 == 2 {
 		t.Fatalf("mint for an expired credential = %d, want a refusal", rec.Code)
 	}

@@ -66,11 +66,14 @@ func TestSharedCacheSecretsFailAtRender(t *testing.T) {
 	}
 	for name, sets := range map[string][]string{
 		"operator token is the runner token": {
-			"cache.tokenSecret.name=sparkwing-token", "cache.tokenSecret.key=token"},
+			"cache.tokenSecret.name=sparkwing-token", "cache.tokenSecret.key=token",
+		},
 		"grant key is the runner token": {
-			"cache.grantKeySecret.name=sparkwing-token", "cache.grantKeySecret.key=token"},
+			"cache.grantKeySecret.name=sparkwing-token", "cache.grantKeySecret.key=token",
+		},
 		"grant key is the operator token": {
-			"cache.grantKeySecret.name=sparkwing-cache-token", "cache.grantKeySecret.key=token"},
+			"cache.grantKeySecret.name=sparkwing-cache-token", "cache.grantKeySecret.key=token",
+		},
 	} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", sets...)
 		if !strings.Contains(out, "must name a different Secret key") {
