@@ -805,6 +805,12 @@ unlock.
 
 ### Fixed
 
+- **controller + runner:** parallel nodes of one run no longer deadlock while
+  recording execution start. The controller logs execution-start and node
+  heartbeat store errors with run and node IDs, answers transient PostgreSQL
+  contention with `503` and `Retry-After`, and runners retry an execution-start
+  request on that response or a transient connection failure.
+
 - **dashboard:** activity rows keep their height while a run's detail pane
   closes. The queue status dot pulses when the daemon status changes, the
   overview reserves its card layout while loading, and tooltips appear at
