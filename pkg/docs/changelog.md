@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **controller + web:** Team owners can connect a GitHub App installation made directly on GitHub by authorizing the App, choosing an installation they administer, and binding it to their team. The picker marks installations held by another team without naming that team.
+
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
   and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the

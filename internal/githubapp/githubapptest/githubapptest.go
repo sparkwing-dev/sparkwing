@@ -109,6 +109,7 @@ func New(t testing.TB) *GitHub {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
 	mux.HandleFunc("GET /user", g.handleUser)
+	mux.HandleFunc("GET /user/installations", g.handleUserInstallations)
 	mux.HandleFunc("GET /user/memberships/orgs/{org}", g.handleMembership)
 	mux.HandleFunc("GET /app/installations/{id}", g.appOnly(g.handleInstallation))
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", g.appOnly(g.handleMint))
@@ -252,6 +253,24 @@ func (g *GitHub) handleMembership(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
+func (g *GitHub) handleUserInstallations(w http.ResponseWriter, r *http.Request) {
+	u := g.userFor(r)
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
+		return
+	}
+	g.mu.Lock()
+	var installations []map[string]any
+	for _, inst := range g.insts {
+		if inst.Account.Type == "User" && inst.Account.ID == u.user.ID ||
+			inst.Account.Type == "Organization" && u.userTokenOrgs[inst.Account.Login].State == "active" {
+			installations = append(installations, installationJSON(inst))
+		}
+	}
+	g.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"installations": installations})
+}
+
 func (g *GitHub) appOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -305,6 +324,7 @@ func (g *GitHub) installation(r *http.Request) *Installation {
 func installationJSON(inst *Installation) map[string]any {
 	out := map[string]any{
 		"id":                   inst.ID,
+		"app_id":               AppID,
 		"account":              inst.Account,
 		"repository_selection": "selected",
 		"suspended_at":         nil,

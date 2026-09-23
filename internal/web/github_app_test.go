@@ -33,6 +33,7 @@ type githubAppController struct {
 	mu             sync.Mutex
 	completeStatus int
 	completeBody   string
+	availableEmpty bool
 	calls          []githubAppCall
 }
 
@@ -84,8 +85,70 @@ func (c *githubAppController) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(c.completeBody))
+	case "/api/v1/team/github-app/connect/available":
+		if c.availableEmpty {
+			_ = json.NewEncoder(w).Encode(map[string]any{"authorization": "sealed-proof", "installations": []any{}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"authorization": "sealed-proof", "installations": []map[string]any{
+			{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization", "connected_elsewhere": false},
+			{"installation_id": 43, "account_login": "other-org", "account_type": "Organization", "connected_elsewhere": true},
+		}})
+	case "/api/v1/team/github-app/connect/select":
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"installation_id": 42, "account_login": "octo-org"})
 	default:
 		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func TestGitHubAppExistingPickerLinksToInstallWhenEmpty(t *testing.T) {
+	handler, ctrl := githubAppDashboard(t)
+	ctrl.availableEmpty = true
+	flow := startedFlow()
+	flow.Existing, flow.Code = true, "gh-code"
+	rec := githubAppReturn(handler, "/github/app/available", nil, &flow, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `action="/github/app/connect"`) ||
+		!strings.Contains(rec.Body.String(), `name="csrf_token" value="`+githubAppTestCSRF+`"`) {
+		t.Fatalf("empty picker = %d %s, want a CSRF-protected install form", rec.Code, rec.Body)
+	}
+}
+
+func TestGitHubAppExistingPickerAuthorizesAndSelects(t *testing.T) {
+	handler, ctrl := githubAppDashboard(t)
+	req := connectRequest(githubAppTestCSRF)
+	req.URL.Path = "/github/app/connect/existing"
+	start := httptest.NewRecorder()
+	handler.ServeHTTP(start, req)
+	if start.Code != http.StatusOK || !strings.Contains(start.Body.String(), fakeAppAuthorizeURL) || strings.Contains(start.Body.String(), fakeInstallURL) {
+		t.Fatalf("existing start = %d %s, want authorization without install page", start.Code, start.Body)
+	}
+	flow := flowFrom(t, start)
+	callback := githubAppReturn(handler, githubAppCallbackPath, url.Values{"code": {"gh-code"}, "state": {fakeAppState}}, &flow, false)
+	if callback.Code != http.StatusOK || !strings.Contains(callback.Body.String(), "/github/app/available") {
+		t.Fatalf("callback = %d %s, want available page", callback.Code, callback.Body)
+	}
+	flow = flowFrom(t, callback)
+	listed := githubAppReturn(handler, "/github/app/available", nil, &flow, true)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), "octo-org") || !strings.Contains(listed.Body.String(), "Connected to another team") {
+		t.Fatalf("picker = %d %s", listed.Code, listed.Body)
+	}
+	flow = flowFrom(t, listed)
+	form := url.Values{"csrf_token": {githubAppTestCSRF}, "installation_id": {"42"}}
+	selectReq := httptest.NewRequest(http.MethodPost, githubAppTestDashHost+"/github/app/select", strings.NewReader(form.Encode()))
+	selectReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	selectReq.Header.Set("Origin", githubAppTestDashHost)
+	selectReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: githubAppTestSession})
+	selectReq.AddCookie(&http.Cookie{Name: csrfCookieName, Value: githubAppTestCSRF})
+	selectReq.AddCookie(&http.Cookie{Name: githubAppFlowCookie, Value: githubAppFlowValue(flow)})
+	selected := httptest.NewRecorder()
+	handler.ServeHTTP(selected, selectReq)
+	if selected.Code != http.StatusSeeOther || selected.Header().Get("Location") != "/team/github?connected=octo-org" {
+		t.Fatalf("selection = %d %s", selected.Code, selected.Body)
+	}
+	calls := ctrl.snapshot()
+	if len(calls) != 3 || calls[1].Path != "/api/v1/team/github-app/connect/available" || calls[2].Path != "/api/v1/team/github-app/connect/select" {
+		t.Fatalf("controller calls = %+v", calls)
 	}
 }
 
