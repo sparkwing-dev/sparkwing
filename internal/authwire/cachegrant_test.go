@@ -47,3 +47,43 @@ func TestCacheGrantRefusesATeamThatCouldLeaveItsDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheGrantWireFormatIsStable(t *testing.T) {
+	// The controller mints and the cache verifies, and the two can run
+	// different builds, so the MAC key derivation and payload encoding are a
+	// wire contract.
+	raw, err := authwire.MintCacheGrant("k", "team-a", "r", time.Unix(1_800_000_000, 0), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "swcg1.eyJ0IjoidGVhbS1hIiwiciI6InIiLCJlIjoxODAwMDAzNjAwfQ.8evRyDhk8hVXLPYuYmoZ7GWongdZ7Kv8Hjg_gPkCXcM"
+	if raw != want {
+		t.Fatalf("grant = %s, want %s", raw, want)
+	}
+}
+
+func TestCacheGrantMintRefusesMissingInputs(t *testing.T) {
+	now := time.Now()
+	cases := map[string]func() (string, error){
+		"blank key": func() (string, error) { return authwire.MintCacheGrant("  ", "team-a", "run-1", now, time.Hour) },
+		"no run":    func() (string, error) { return authwire.MintCacheGrant("k", "team-a", "", now, time.Hour) },
+		"zero ttl":  func() (string, error) { return authwire.MintCacheGrant("k", "team-a", "run-1", now, 0) },
+	}
+	for name, mint := range cases {
+		if raw, err := mint(); err == nil {
+			t.Errorf("%s: minted %q", name, raw)
+		}
+	}
+}
+
+func TestCacheBearerPrefersTheRunGrant(t *testing.T) {
+	t.Setenv(authwire.CacheGrantEnv, "grant")
+	t.Setenv(authwire.CacheTokenEnv, "token")
+	if got := authwire.CacheBearerFromEnv(); got != "grant" {
+		t.Errorf("bearer = %q, want the grant", got)
+	}
+	t.Setenv(authwire.CacheGrantEnv, "")
+	if got := authwire.CacheBearerFromEnv(); got != "token" {
+		t.Errorf("bearer = %q, want the operator token", got)
+	}
+}
