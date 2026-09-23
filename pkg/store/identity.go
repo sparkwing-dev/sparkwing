@@ -1046,7 +1046,7 @@ func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, no
 
 // safety: a runner token outlives the membership that minted it and reads
 // the secrets of every run it claims, so it goes with its minter's access.
-func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) (_ []string, err error) {
+func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accountID string, now time.Time) ([]string, error) {
 	if accountID == "" {
 		return nil, nil
 	}
@@ -1058,19 +1058,8 @@ func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accoun
 	if err != nil {
 		return nil, err
 	}
-	var prefixes []string
-	for rows.Next() {
-		var prefix string
-		if err := rows.Scan(&prefix); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		prefixes = append(prefixes, prefix)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
+	prefixes, err := scanPrefixes(rows)
+	if err != nil {
 		return nil, err
 	}
 	if len(prefixes) == 0 {
@@ -1083,6 +1072,19 @@ func (t *Tenant) revokeTokensMintedByTx(ctx context.Context, tx *storeTx, accoun
 		return nil, err
 	}
 	return prefixes, nil
+}
+
+func scanPrefixes(rows *sql.Rows) (_ []string, err error) {
+	defer closeRowsInto(rows, &err)
+	var prefixes []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			return nil, err
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes, rows.Err()
 }
 
 // safety: counting and then inserting is a race unless the team row is locked first; Postgres
