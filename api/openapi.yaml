@@ -4683,6 +4683,131 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/me/identities:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: List the signed-in user's sign-in methods and the providers the account can link.
+      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      responses:
+        "200":
+          description: The account's sign-in methods.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.identitiesResp
+                type: object
+                required: [identities, providers]
+                properties:
+                  identities:
+                    type: array
+                    items: {$ref: "#/components/schemas/LinkedIdentity"}
+                  providers:
+                    type: array
+                    items: {type: string, enum: [google, github]}
+                    description: The sign-in providers this controller offers, which are the ones an account can link.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/me/identities/{provider}:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    delete:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Unlink one of the signed-in user's sign-in methods.
+      description: >-
+        Needs an identity-provider session signed in within the last 10 minutes. The account keeps at least one sign-in method, and its email does not change. Every other session of the account ends. The unlinked provider account then signs in as a new account, even when it asserts the account's own address. Unlinking GitHub leaves any GitHub App installation the user connected bound to its team.
+      responses:
+        "204": {description: Unlinked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "It is the account's only sign-in method (`error: last_sign_in_method`)."}
+
+  /api/v1/me/identities/{provider}/link:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Begin adding a provider's sign-in to the signed-in user's account.
+      description: >-
+        Needs an identity-provider session signed in within the last 10 minutes. Returns the provider's authorization URL, a state the controller signs and binds to the account, the session and the provider for ten minutes, and a PKCE verifier. The caller keeps `state` and `verifier` on the browser that started the flow. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist; the dashboard uses its sign-in callback. An account holds at most ten link attempts, starts and completions together, a minute. Answers 404 unless the provider's sign-in is offered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/github/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`)."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The account already has a sign-in from this provider (`error: provider_already_linked`); unlink it first."}
+        "429": {description: "Too many link attempts this minute (`error: rate_limited`); `Retry-After` says when to try again."}
+
+  /api/v1/me/identities/{provider}/link/complete:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Finish adding a provider's sign-in to the signed-in user's account.
+      description: >-
+        Attaches the provider account, keyed by the provider's stable subject (Google's `sub`, GitHub's numeric id), when the state is this controller's, unexpired, unused, and names the caller's account, session and this provider, and the verifier matches it. The provider's email plays no part and the account's email does not change. A provider account already attached to any account, this one included, is refused and nothing changes. Every refusal carries `error` (a code) and `message`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.identityLinkCompleteReq
+              type: object
+              required: [state, verifier, code, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string, description: The code the provider returned to the callback.}
+                redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Linked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LinkedIdentity"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {description: "No account session, or the provider did not confirm the sign-in (`error: provider_rejected`)."}
+        "403": {description: "The state is invalid, expired, used, or another account's or session's (`error: link_state_invalid`), or the provider has not verified the account's email (`error: provider_unverified`)."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The provider account is attached to another account (`error: identity_linked_elsewhere`) or to this one (`error: identity_already_linked`), or this account already has a sign-in from the provider (`error: provider_already_linked`)."}
+        "429": {description: "Too many link attempts this minute (`error: rate_limited`)."}
+        "502": {description: "The provider could not be reached (`error: provider_unreachable`)."}
+
   /api/v1/teams:
     post:
       x-sparkwing-scope: authenticated
@@ -6489,6 +6614,14 @@ components:
         pull_request: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
+    LinkedIdentity:
+      x-sparkwing-go-type: pkg/controller.identityJSON
+      type: object
+      required: [provider, email, created_at]
+      properties:
+        provider: {type: string, enum: [google, github]}
+        email: {type: string, description: The address the provider last asserted. It never sets the account's email for a linked sign-in.}
+        created_at: {type: integer, format: int64, description: Unix seconds when the sign-in was attached.}
     IdentityUser:
       x-sparkwing-go-type: pkg/controller.userJSONBody
       type: object

@@ -69,6 +69,10 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
 | `POST` | `/api/v1/me/active-team` | `authenticated` |
+| `GET` | `/api/v1/me/identities` | `authenticated` |
+| `DELETE` | `/api/v1/me/identities/{provider}` | `authenticated` |
+| `POST` | `/api/v1/me/identities/{provider}/link` | `authenticated` |
+| `POST` | `/api/v1/me/identities/{provider}/link/complete` | `authenticated` |
 | `GET` | `/api/v1/me/team-deletions` | `authenticated` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |

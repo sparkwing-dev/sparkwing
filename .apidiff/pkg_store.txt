@@ -606,6 +606,8 @@ var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds 
 var ErrGitHubWebhookBinding = errors.New("github webhook binding")
 var ErrHashingBusy = errors.New("hashing capacity is saturated")
 var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
+var ErrIdentityAlreadyLinked = errors.New("store: that sign-in is already linked to this account")
+var ErrIdentityLinkedElsewhere = errors.New("store: that sign-in belongs to another account")
 var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
@@ -619,6 +621,7 @@ var ErrInvitationClosed = errors.New("store: invitation is expired or already us
 var ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 var ErrInvitationOpen = errors.New("store: that address already has an open invitation")
 var ErrLastOwner = errors.New("store: a team keeps at least one owner")
+var ErrLastSignInMethod = errors.New("store: an account keeps at least one sign-in method")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
 var ErrNoTeam = errors.New("store: team is required")
@@ -629,6 +632,7 @@ var ErrNotMember = errors.New("store: not a member of this team")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
+var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
@@ -922,6 +926,15 @@ type GitHubWebhookBinding struct {
 	HookID    int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+type Identity struct {
+	Provider string
+	Subject  string
+
+	Email string
+
+	Linked    bool
+	CreatedAt time.Time
 }
 type IdentityPrune struct {
 	Invitations             int64
@@ -1681,6 +1694,7 @@ type Store struct {
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
+func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
 func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string) (string, error)
 func (s *Store) AccountMemberships(ctx context.Context, accountID string) (_ []Membership, err error)
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error
@@ -1734,6 +1748,7 @@ func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
+func (s *Store) ConsumeIdentityLinkState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
@@ -1845,6 +1860,8 @@ func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary Execu
 func (s *Store) HoldTeamForDispute(
 	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
 ) (_ bool, err error)
+func (s *Store) IdentityLinkStateKey() ([]byte, error)
+func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
@@ -2022,6 +2039,7 @@ func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, e
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
+func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
