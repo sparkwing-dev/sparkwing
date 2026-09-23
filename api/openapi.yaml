@@ -1210,6 +1210,10 @@ paths:
                 trigger_sources:
                   type: array
                   items: {type: string}
+                node_runner:
+                  type: string
+                  enum: [inprocess, k8s, warm]
+                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
       responses:
         "200":
           description: Claimed trigger.
@@ -2877,6 +2881,10 @@ paths:
               type: object
               properties:
                 lease_nanos: {type: integer, format: int64}
+                node_runner:
+                  type: string
+                  enum: [inprocess, k8s, warm]
+                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
       responses:
         "200":
           description: The claimed trigger.
