@@ -220,6 +220,12 @@ unlock.
   Values are sealed under the secrets key and resealed by
   `POST /api/v1/secrets/rotate`. Schema 61 adds the tables. See
   [Team git credentials](docs/git-credentials.md).
+- **web:** a **Git credentials** tab beside Secrets lists the team's git
+  credentials by host, never their values. Owners store or replace an SSH
+  deploy key or HTTPS token, confirm an SSH key's pinned host key after
+  checking its fingerprint, delete credentials and read recent releases; the
+  page points github.com users to the GitHub App. The Machines page gains an
+  owner toggle for whether a machine receives the team's git credentials.
 - **config + runner:** `source.extra_repos` in a pipeline entry names up to 10
   more GitHub repositories of the run repository's owner that the run's App
   token also reads. The runner declares them with
