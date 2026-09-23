@@ -1064,6 +1064,71 @@ test("run rows keep their height while the detail pane closes", async (
   await expect(rows.first().locator(".grid").first()).toBeVisible();
 });
 
+test("runs and nodes collapse into selectable rails and remember the viewer's choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await installMockAPI(page, {
+    runs: [runningRun, finishedRun],
+    details: {
+      [runningRun.id]: {
+        run: runningRun,
+        nodes: [
+          { id: "compile", status: "success", outcome: "success", duration_ms: 1200 },
+          { id: "publish", status: "running", outcome: "", duration_ms: 2300 },
+        ],
+      },
+      [finishedRun.id]: finishedDetail,
+    },
+  });
+  await page.goto(`/runs?run=${runningRun.id}`);
+
+  const runsRail = page.getByLabel("Runs rail");
+  const nodesRail = page.getByLabel("Nodes rail");
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect(nodesRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect.poll(() => runsRail.evaluate((rail) => rail.parentElement!.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect.poll(() => nodesRail.evaluate((rail) => rail.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect(runsRail.locator('[data-rail-id="run-20260827-002"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(runsRail.locator("[data-rail-id]").first()).toHaveAttribute("aria-label", /sparkwing-dev\/sparkwing.*pre-commit.*main.*2026/);
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("deploy-production");
+  await nodesRail.locator('[data-rail-id="publish"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("publish · 2.3s");
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').click();
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await nodesRail.locator('[data-rail-id="verify"]').click();
+  await expect(page).toHaveURL(/node=verify/);
+  await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await expect(runsRail).toHaveCount(0);
+  await expect(page.locator('[data-run-id="run-20260827-001"]')).toBeVisible();
+  await page.reload();
+  await expect(runsRail).toHaveCount(0);
+  await page.getByRole("button", { name: "Collapse runs and nodes" }).click();
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+});
+
+test("runs columns follow the viewport until the viewer chooses a width", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const tab = page.getByRole("button", { name: "Activity" });
+  const tabY = await tab.evaluate((element) => element.getBoundingClientRect().top);
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Collapse runs and nodes" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  expect(await tab.evaluate((element) => element.getBoundingClientRect().top)).toBe(tabY);
+  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+});
+
 test("renders live structured node logs", async ({ page }) => {
   let requestedFormat = "";
   const runningDetail = {

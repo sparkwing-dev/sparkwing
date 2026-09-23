@@ -22,6 +22,10 @@ unlock.
 
 ### Added
 
+- **dashboard:** the Runs page can collapse its runs and nodes columns into
+  status-dot rails. Each dot keeps selection and shows its run or node label on
+  hover or focus. Narrow screens default to collapsed rails, and the viewer's
+  choice persists in the browser.
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the

@@ -84,7 +84,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
         >
           {pos.flip && arrow}
           <div className="bg-[#1e293b] border border-[var(--border)] rounded-lg px-3 py-2 text-xs shadow-xl whitespace-pre-wrap break-words max-w-[min(90vw,40rem)] w-max">
-            {content}
+            <span role="tooltip">{content}</span>
           </div>
           {!pos.flip && arrow}
         </div>
