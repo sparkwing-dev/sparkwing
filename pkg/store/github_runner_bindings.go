@@ -429,8 +429,7 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 		` AND LOWER(` + col("github_owner") + `) = ? AND LOWER(` + col("github_repo") + `) = ?` +
 		` AND (` + col("repo") + ` = '' OR LOWER(` + col("repo") + `) IN (` + ph + `))` +
 		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))` +
-		` AND ` + col("git_branch") + ` = ? AND ` + col("git_sha") + ` = ?` +
-		` AND ` + col("untrusted") + ` = 0`
+		` AND ` + col("git_branch") + ` = ? AND ` + col("git_sha") + ` = ?`
 	args := []any{string(g.Team), strings.ToLower(g.Repo.Owner), strings.ToLower(g.Repo.Name)}
 	for range 2 {
 		for _, s := range spellings {
@@ -455,19 +454,15 @@ func (g GitHubRunnerScope) nodeClause() (string, []any) {
 func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error) {
 	var tr Trigger
 	var envJSON []byte
-	var untrusted int
 	err := s.queryRow(ctx, `
-		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha, untrusted
+		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha
 		FROM triggers WHERE team = ? AND id = ?`, string(scope.Team), runID).
-		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA, &untrusted)
+		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
-	}
-	if untrusted != 0 {
-		return false, nil
 	}
 	env, decoded := decodeTriggerEnv(envJSON)
 	if !decoded {

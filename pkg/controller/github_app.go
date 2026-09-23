@@ -32,8 +32,18 @@ type githubAppState struct {
 	stateKey []byte
 	statuses *githubCommitStatusReporter
 
-	mu   sync.Mutex
-	used map[string]time.Time
+	// safety: GitHub's answer for which installation covers a repository is
+	// read on every run and token, so it is kept briefly rather than asked
+	// for each time.
+	mu       sync.Mutex
+	covering map[string]coveringEntry
+	sources  map[string]*sourceTokenEntry
+}
+
+type coveringEntry struct {
+	inst    githubapp.Installation
+	missing bool
+	until   time.Time
 }
 
 // WithGitHubApp enables the deployment's GitHub App. The client holds the
@@ -49,7 +59,10 @@ func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: githubStatusTimeout}
 	}
-	app := &githubAppState{client: client, stateKey: client.StateKey(), used: map[string]time.Time{}}
+	app := &githubAppState{
+		client: client, stateKey: client.StateKey(),
+		covering: map[string]coveringEntry{}, sources: map[string]*sourceTokenEntry{},
+	}
 	app.statuses = newGitHubCommitStatusReporter("", s.dashboardURL, apiURL, httpClient)
 	app.statuses.tokenFor = func(ctx context.Context, st githubCommitStatus) (string, error) {
 		tok, err := client.InstallationToken(ctx, st.Installation, st.Repo, map[string]string{"statuses": "write"})
@@ -101,8 +114,8 @@ func (a *githubAppState) signState(st githubConnectState) (string, error) {
 var errConnectState = errors.New("the connect flow's state is not valid; start connecting again")
 
 // safety: the state proves this controller started the flow for this account
-// and team, the verifier proves this browser is the one that started it, and
-// a state finishes one flow only.
+// and team, and the verifier proves this browser is the one that started it;
+// the caller records the nonce so a state finishes one flow only.
 func (a *githubAppState) openState(raw, verifier string, p *Principal, now time.Time) (githubConnectState, error) {
 	enc := base64.RawURLEncoding
 	body, sig, ok := strings.Cut(raw, ".")
@@ -134,17 +147,6 @@ func (a *githubAppState) openState(raw, verifier string, p *Principal, now time.
 	case verifier == "" || !hmac.Equal([]byte(st.Verifier), []byte(verifierDigest(verifier))):
 		return githubConnectState{}, errors.New("the connect flow was started in another browser")
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for nonce, exp := range a.used {
-		if now.After(exp) {
-			delete(a.used, nonce)
-		}
-	}
-	if _, seen := a.used[st.Nonce]; seen {
-		return githubConnectState{}, errors.New("the connect flow was already used; start connecting again")
-	}
-	a.used[st.Nonce] = time.Unix(st.Expires, 0)
 	return st, nil
 }
 
@@ -276,7 +278,21 @@ func (s *Server) handleGitHubAppConnectComplete(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, errors.New("redirect_uri is not on this controller's allowlist"))
 		return
 	}
-	if _, err := s.githubApp.openState(req.State, req.Verifier, p, time.Now()); err != nil {
+	now := time.Now()
+	st, err := s.githubApp.openState(req.State, req.Verifier, p, now)
+	if err == nil {
+		// safety: the used state is recorded in the store, so no replica and no
+		// restart finishes the same flow twice.
+		fresh, cerr := s.store.ConsumeGitHubAppConnectState(r.Context(), st.Nonce, time.Unix(st.Expires, 0), now)
+		if cerr != nil {
+			s.writeInternalError(w, r, "github app connect state", cerr)
+			return
+		}
+		if !fresh {
+			err = errors.New("the connect flow was already used; start connecting again")
+		}
+	}
+	if err != nil {
 		s.logger.Info("github app connect refused", "team", string(p.Team), "account", p.AccountID, "reason", err.Error())
 		writeError(w, http.StatusForbidden, err)
 		return
@@ -334,7 +350,7 @@ func (s *Server) handleGitHubAppConnectComplete(w http.ResponseWriter, r *http.R
 		return
 	}
 	if err != nil {
-		s.writeInternalError(w, r, "github app bind", err)
+		writeIdentityError(w, s, r, "github app bind", err)
 		return
 	}
 	s.logger.Info("github app installation connected", "team", string(p.Team), "installation_id", inst.ID,
@@ -473,29 +489,27 @@ func (s *Server) handleGitHubAppRepositories(w http.ResponseWriter, r *http.Requ
 }
 
 type githubAppTriggerReq struct {
-	Repository       string `json:"repository"`
-	Pipeline         string `json:"pipeline"`
-	Push             bool   `json:"push"`
-	PullRequest      bool   `json:"pull_request"`
-	ForkPullRequests bool   `json:"fork_pull_requests"`
+	Repository  string `json:"repository"`
+	Pipeline    string `json:"pipeline"`
+	Push        bool   `json:"push"`
+	PullRequest bool   `json:"pull_request"`
 }
 
 type githubAppTriggerJSON struct {
-	Repository       string `json:"repository"`
-	RepositoryID     int64  `json:"repository_id"`
-	InstallationID   int64  `json:"installation_id"`
-	Pipeline         string `json:"pipeline"`
-	Push             bool   `json:"push"`
-	PullRequest      bool   `json:"pull_request"`
-	ForkPullRequests bool   `json:"fork_pull_requests"`
-	CreatedBy        string `json:"created_by"`
-	CreatedAt        int64  `json:"created_at"`
+	Repository     string `json:"repository"`
+	RepositoryID   int64  `json:"repository_id"`
+	InstallationID int64  `json:"installation_id"`
+	Pipeline       string `json:"pipeline"`
+	Push           bool   `json:"push"`
+	PullRequest    bool   `json:"pull_request"`
+	CreatedBy      string `json:"created_by"`
+	CreatedAt      int64  `json:"created_at"`
 }
 
 func githubAppTriggerOut(tr store.GitHubAppTrigger) githubAppTriggerJSON {
 	return githubAppTriggerJSON{
 		Repository: tr.Repository, RepositoryID: tr.RepositoryID, InstallationID: tr.InstallationID,
-		Pipeline: tr.Pipeline, Push: tr.Push, PullRequest: tr.PullRequest, ForkPullRequests: tr.ForkPullRequests,
+		Pipeline: tr.Pipeline, Push: tr.Push, PullRequest: tr.PullRequest,
 		CreatedBy: tr.CreatedBy, CreatedAt: tr.CreatedAt.Unix(),
 	}
 }
@@ -573,7 +587,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	}
 	saved, err := t.PutGitHubAppTrigger(r.Context(), store.GitHubAppTrigger{
 		RepositoryID: match.ID, Repository: match.FullName, InstallationID: inst.InstallationID,
-		Pipeline: pipeline, Push: req.Push, PullRequest: req.PullRequest, ForkPullRequests: req.ForkPullRequests,
+		Pipeline: pipeline, Push: req.Push, PullRequest: req.PullRequest,
 		CreatedBy: p.AccountID,
 	}, time.Now())
 	if err != nil {
@@ -582,7 +596,7 @@ func (s *Server) handlePutGitHubAppTrigger(w http.ResponseWriter, r *http.Reques
 	}
 	s.logger.Info("github app trigger written", "team", string(p.Team), "repository", saved.Repository,
 		"pipeline", saved.Pipeline, "push", saved.Push, "pull_request", saved.PullRequest,
-		"fork_pull_requests", saved.ForkPullRequests, "by", p.AccountID)
+		"by", p.AccountID)
 	writeJSON(w, http.StatusOK, githubAppTriggerOut(saved))
 }
 
@@ -611,11 +625,8 @@ func (s *Server) handleDeleteGitHubAppTrigger(w http.ResponseWriter, r *http.Req
 // safety: an installation another team holds, or a suspended one, reads as not found,
 // so nothing mints a token from it.
 func (s *Server) teamInstallationFor(ctx context.Context, t *store.Tenant, repo store.GitHubRepo) (store.GitHubAppInstallation, bool, error) {
-	gh, err := s.githubApp.client.RepositoryInstallation(ctx, repo.Owner, repo.Name)
-	if errors.Is(err, githubapp.ErrNotInstalled) {
-		return store.GitHubAppInstallation{}, false, nil
-	}
-	if err != nil {
+	gh, covered, err := s.githubApp.coveringInstallation(ctx, repo, time.Now())
+	if err != nil || !covered {
 		return store.GitHubAppInstallation{}, false, err
 	}
 	in, err := t.GitHubAppInstallation(ctx, gh.ID)
@@ -657,4 +668,40 @@ func (s *Server) githubAppCommitStatus(ctx context.Context, trigger *store.Trigg
 		Installation: installation, Owner: trigger.GithubOwner, Repo: trigger.GithubRepo, SHA: sha,
 		Pipeline: trigger.Pipeline, RunID: trigger.ID, State: state, Description: description,
 	}, true
+}
+
+// coveringTTL bounds how stale GitHub's answer for a repository's
+// installation may be when a run is created or a token minted.
+const coveringTTL = time.Minute
+
+// coveringInstallation answers the installation GitHub reports covers repo,
+// or false when none does.
+func (a *githubAppState) coveringInstallation(ctx context.Context, repo store.GitHubRepo, now time.Time) (githubapp.Installation, bool, error) {
+	key := strings.ToLower(repo.Slug())
+	a.mu.Lock()
+	e, ok := a.covering[key]
+	a.mu.Unlock()
+	if ok && now.Before(e.until) {
+		return e.inst, !e.missing, nil
+	}
+	inst, err := a.client.RepositoryInstallation(ctx, repo.Owner, repo.Name)
+	missing := errors.Is(err, githubapp.ErrNotInstalled)
+	if err != nil && !missing {
+		return githubapp.Installation{}, false, err
+	}
+	a.mu.Lock()
+	for k, old := range a.covering {
+		if !now.Before(old.until) {
+			delete(a.covering, k)
+		}
+	}
+	a.covering[key] = coveringEntry{inst: inst, missing: missing, until: now.Add(coveringTTL)}
+	a.mu.Unlock()
+	return inst, !missing, nil
+}
+
+func (a *githubAppState) forgetCovering() {
+	a.mu.Lock()
+	clear(a.covering)
+	a.mu.Unlock()
 }

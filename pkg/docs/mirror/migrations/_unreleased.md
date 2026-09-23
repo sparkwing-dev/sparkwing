@@ -1,14 +1,5 @@
 # Migrating to the next release
 
-## Schema 54 refuses an older binary
-
-Schema 54 adds the GitHub App tables and marks pull requests from forks as
-untrusted runs, and it records the `untrusted-runs` requirement. A binary that
-predates it cannot read the mark, so it refuses to open a migrated store rather
-than hand an untrusted run secrets or a metered runner. Roll every controller
-and every local CLI sharing the store forward together. See
-[GitHub App](../github-app.md).
-
 ## Dashboard session and CSRF cookies carry the `__Host-` prefix
 
 On a dashboard that keeps `Secure` cookies, the session and CSRF cookies are

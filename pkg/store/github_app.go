@@ -40,11 +40,8 @@ type GitHubAppTrigger struct {
 	Pipeline       string
 	Push           bool
 	PullRequest    bool
-	// ForkPullRequests admits pull requests from forks, which run
-	// untrusted.
-	ForkPullRequests bool
-	CreatedBy        string
-	CreatedAt        time.Time
+	CreatedBy      string
+	CreatedAt      time.Time
 }
 
 // ErrInstallationBoundElsewhere is returned when a team connects an
@@ -73,17 +70,23 @@ CREATE TABLE IF NOT EXISTS github_app_triggers (
     installation_id    INTEGER NOT NULL,
     on_push            INTEGER NOT NULL DEFAULT 0,
     on_pull_request    INTEGER NOT NULL DEFAULT 0,
-    fork_pull_requests INTEGER NOT NULL DEFAULT 0,
     created_by         TEXT NOT NULL DEFAULT '',
     created_at         INTEGER NOT NULL,
     PRIMARY KEY (team, repository_id, pipeline)
 );
-CREATE INDEX IF NOT EXISTS idx_github_app_triggers_installation ON github_app_triggers(installation_id, repository_id)
+CREATE INDEX IF NOT EXISTS idx_github_app_triggers_installation ON github_app_triggers(installation_id, repository_id);
+CREATE TABLE IF NOT EXISTS github_app_connect_states (
+    nonce      TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS github_app_deliveries (
+    digest      TEXT PRIMARY KEY,
+    delivery_id TEXT NOT NULL,
+    received_at INTEGER NOT NULL
+)
 `
 
 var githubAppTablesPostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubAppTablesSQLite)
-
-var triggersUntrustedCols = map[string]string{"untrusted": "INTEGER NOT NULL DEFAULT 0"}
 
 func applyGitHubAppMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	for _, stmt := range splitStatements(githubAppTablesSQLite) {
@@ -91,7 +94,7 @@ func applyGitHubAppMigrationSQLite(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return ensureColumnsSQLite(ctx, tx, "triggers", triggersUntrustedCols)
+	return nil
 }
 
 func applyGitHubAppMigrationPostgres(ctx context.Context, tx *storeTx) error {
@@ -100,7 +103,7 @@ func applyGitHubAppMigrationPostgres(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	return addColumnsTx(ctx, tx, "triggers", triggersUntrustedCols)
+	return nil
 }
 
 const githubAppInstallationCols = `installation_id, team, account_id, account_login, account_type, suspended,
@@ -255,19 +258,19 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 }
 
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, on_pull_request,
-       fork_pull_requests, created_by, created_at`
+       created_by, created_at`
 
 func (t *Tenant) scanGitHubAppTriggers(rows *sql.Rows) ([]GitHubAppTrigger, error) {
 	var out []GitHubAppTrigger
 	for rows.Next() {
 		tr := GitHubAppTrigger{Team: t.team}
-		var push, pr, forks int
+		var push, pr int
 		var created int64
 		if err := rows.Scan(&tr.RepositoryID, &tr.Pipeline, &tr.Repository, &tr.InstallationID, &push, &pr,
-			&forks, &tr.CreatedBy, &created); err != nil {
+			&tr.CreatedBy, &created); err != nil {
 			return nil, err
 		}
-		tr.Push, tr.PullRequest, tr.ForkPullRequests = push != 0, pr != 0, forks != 0
+		tr.Push, tr.PullRequest = push != 0, pr != 0
 		tr.CreatedAt = time.Unix(created, 0).UTC()
 		out = append(out, tr)
 	}
@@ -293,14 +296,13 @@ func (t *Tenant) PutGitHubAppTrigger(ctx context.Context, tr GitHubAppTrigger, n
 	}
 	_, err := t.s.exec(ctx, `
 		INSERT INTO github_app_triggers (team, `+githubAppTriggerCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (team, repository_id, pipeline) DO UPDATE SET
 		    repository = excluded.repository, installation_id = excluded.installation_id,
 		    on_push = excluded.on_push, on_pull_request = excluded.on_pull_request,
-		    fork_pull_requests = excluded.fork_pull_requests, created_by = excluded.created_by,
-		    created_at = excluded.created_at`,
+		    created_by = excluded.created_by, created_at = excluded.created_at`,
 		string(t.team), tr.RepositoryID, tr.Pipeline, tr.Repository, tr.InstallationID, flag(tr.Push),
-		flag(tr.PullRequest), flag(tr.ForkPullRequests), tr.CreatedBy, tr.CreatedAt.Unix())
+		flag(tr.PullRequest), tr.CreatedBy, tr.CreatedAt.Unix())
 	if err != nil {
 		return GitHubAppTrigger{}, err
 	}
@@ -345,54 +347,6 @@ func (t *Tenant) GitHubAppTriggersFor(ctx context.Context, installation, reposit
 	return t.scanGitHubAppTriggers(rows)
 }
 
-// RunUntrusted reports whether t's run runID was started by code nobody in
-// the team wrote. A run t does not own is ErrNotFound.
-func (t *Tenant) RunUntrusted(ctx context.Context, runID string) (bool, error) {
-	var flag int
-	err := t.s.queryRow(ctx, `SELECT untrusted FROM triggers WHERE team = ? AND id = ?`,
-		string(t.team), runID).Scan(&flag)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrNotFound
-	}
-	return flag != 0, err
-}
-
-// ErrUntrustedRun is returned when a metered runner or a GitHub Actions
-// credential reaches for a run of code nobody in its team wrote.
-var ErrUntrustedRun = errors.New("store: this run is untrusted; only the team's own machines run it")
-
-// safety: a metered claim is a cloud pod holding a pool credential, and fork
-// code on it could spend the team's credits and reach its other runs, so the
-// claim is refused even when it names the run directly.
-func refuseUntrustedTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
-	var flag int
-	err := tx.QueryRowContext(ctx, `SELECT untrusted FROM triggers WHERE team = ? AND id = ?`,
-		string(team), runID).Scan(&flag)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if flag != 0 {
-		return ErrUntrustedRun
-	}
-	return nil
-}
-
-// safety: the queue scans pass untrusted runs over for these claimants, so an
-// untrusted run at the head of the queue cannot starve the work behind it.
-const untrustedTriggerClause = ` AND triggers.untrusted = 0`
-
-const untrustedNodeClause = ` AND NOT EXISTS (SELECT 1 FROM triggers ut WHERE ut.id = nodes.run_id AND ut.untrusted <> 0)`
-
-func (s *Store) untrustedExcluded(ctx context.Context, claimant ClaimIdentity) (bool, error) {
-	if _, scoped := GitHubRunnerScopeFrom(ctx); scoped {
-		return true, nil
-	}
-	return s.TokenMetered(ctx, claimant.TokenPrefix)
-}
-
 // AccountIdentity returns the subject of accountID's identity at provider,
 // such as the numeric GitHub user id, or ErrNotFound when the account has
 // none linked.
@@ -406,15 +360,45 @@ func (s *Store) AccountIdentity(ctx context.Context, accountID, provider string)
 	return subject, err
 }
 
-// safety: a child or a retry of an untrusted run runs the same untrusted code,
-// so the mark follows the parent and the source run whatever the caller set.
-func inheritsUntrustedTx(ctx context.Context, tx *storeTx, team Team, t Trigger) (bool, error) {
-	if t.Untrusted || (t.ParentRunID == "" && t.RetryOf == "") {
-		return t.Untrusted, nil
+// ConsumeGitHubAppConnectState records that the connect flow named by nonce
+// finished, and reports false when one already did. The record lives until
+// the state expires, so every replica and a restarted controller refuse a
+// state that was used once.
+func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error) {
+	if nonce == "" {
+		return false, nil
 	}
+	if _, err := s.exec(ctx, `DELETE FROM github_app_connect_states WHERE expires_at <= ?`, now.Unix()); err != nil {
+		return false, err
+	}
+	_, err := s.exec(ctx, `INSERT INTO github_app_connect_states (nonce, expires_at) VALUES (?, ?)`,
+		nonce, expires.Unix())
+	if isUniqueViolation(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// GitHubAppDeliveryRetention is how long a delivery's digest is remembered;
+// a delivery replayed later than this is accepted again.
+const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
+
+// GitHubAppDeliverySeen reports whether a delivery with digest was processed
+// before, for any team.
+func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error) {
 	var n int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers
-		WHERE team = ? AND untrusted <> 0 AND id IN (?, ?)`,
-		string(team), t.ParentRunID, t.RetryOf).Scan(&n)
+	err := s.queryRow(ctx, `SELECT COUNT(*) FROM github_app_deliveries WHERE digest = ?`, digest).Scan(&n)
 	return n > 0, err
+}
+
+// RecordGitHubAppDelivery remembers that a delivery with digest was
+// processed, and forgets digests older than [GitHubAppDeliveryRetention].
+func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error {
+	if _, err := s.exec(ctx, `DELETE FROM github_app_deliveries WHERE received_at <= ?`,
+		now.Add(-GitHubAppDeliveryRetention).Unix()); err != nil {
+		return err
+	}
+	_, err := s.exec(ctx, `INSERT INTO github_app_deliveries (digest, delivery_id, received_at) VALUES (?, ?, ?)
+		ON CONFLICT (digest) DO NOTHING`, digest, delivery, now.Unix())
+	return err
 }

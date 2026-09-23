@@ -27,23 +27,27 @@ unlock.
   `POST /api/v1/team/github-app/connect` and `.../connect/complete`, which bind
   it only when the signed-in account's linked GitHub user administers the
   installation's account; an installation belongs to one team (409 for a
-  second). `POST /webhooks/github-app` verifies the App's signature, routes by
+  second), and a connect state finishes one flow across replicas and restarts.
+  `POST /webhooks/github-app` verifies the App's signature, routes by
   installation, and starts runs for the pipelines the team subscribed with
-  `PUT /api/v1/team/github-app/triggers`. A pull request from a fork runs only
-  when subscribed, and runs untrusted: no secrets, no cache grant, never on a
-  metered or GitHub Actions runner. `POST /api/v1/runs/{id}/source-token` gives
-  a claim holder a one-repository, `contents: read` installation token, and
-  App runs report commit statuses as the installation. Configure with
+  `PUT /api/v1/team/github-app/triggers`, once GitHub confirms the installation
+  still covers the repository. Pull requests from forks are never run. A
+  delivery's signed body is remembered for every team, so a redelivery or a
+  replay after the installation moves teams starts nothing, and each run a
+  delivery creates spends one of the team's hourly runs.
+  `POST /api/v1/runs/{id}/source-token` gives a claim holder one live
+  `contents: read` installation token for the run's repository, and App runs
+  report commit statuses as the installation. Configure with
   `--github-app-id`, `--github-app-slug`,
   `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` and
-  `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`. Schema 54 adds the installation and
-  subscription tables and `triggers.untrusted`, and declares the
-  `untrusted-runs` requirement, so a binary predating it refuses the store. See
+  `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`. Schema 54 adds the App's tables. See
   [GitHub App](docs/github-app.md).
 
 - **runner:** `sparkwing-runner runner --github-app-source` asks the controller
   for a run's source token before fetching a GitHub repository directly and
-  passes it to git as an extraheader in the fetch's environment only.
+  hands it to git on an inherited pipe, through a credential helper scoped to
+  github.com. A direct fetch now also drops `GIT_TRACE*` and
+  `GIT_CURL_VERBOSE` from its environment.
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for

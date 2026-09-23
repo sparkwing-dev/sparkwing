@@ -149,11 +149,6 @@ func (s *Server) readSecretForCaller(w http.ResponseWriter, r *http.Request, nam
 		return sec, tn, reportSecretRead(w, sec, err)
 	}
 	claimed, refused := s.claimedRunForReader(r, runID)
-	// safety: an untrusted run is a fork's code, and a secret it read would be
-	// the fork author's to keep.
-	if refused == "" && claimed.Untrusted {
-		refused = "this run is untrusted (a pull request from a fork), so it reads no secret"
-	}
 	if refused != "" {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "claim_required",

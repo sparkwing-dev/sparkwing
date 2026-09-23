@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -57,6 +56,10 @@ func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenant, err := s.tenantForTeam(r.Context(), claimed.Team)
+	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		writeError(w, http.StatusNotFound, runNotFound(runID))
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "source token team", err)
 		return
@@ -81,6 +84,17 @@ func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, errors.New("no GitHub App installation this team holds covers "+repo.Slug()))
 		return
 	}
+	key := runID + "\x00" + claimIdentity(r).Principal + "\x00" + claimIdentity(r).TokenPrefix
+	cached, refused := s.githubApp.reuseSourceToken(key, time.Now())
+	if refused {
+		setRetryAfter(w, time.Minute)
+		writeError(w, http.StatusTooManyRequests, errors.New("this claim asked for source tokens too often"))
+		return
+	}
+	if cached != nil {
+		writeJSON(w, http.StatusOK, *cached)
+		return
+	}
 	tok, err := s.githubApp.client.InstallationToken(r.Context(), inst.InstallationID, repo.Name,
 		map[string]string{"contents": "read"})
 	if errors.Is(err, githubapp.ErrNotInstalled) {
@@ -94,20 +108,56 @@ func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logger.Info("source token minted", "team", string(claimed.Team), "run_id", runID,
 		"repository", repo.Slug(), "installation_id", inst.InstallationID, "principal", p.label())
-	writeJSON(w, http.StatusOK, SourceTokenResponse{Token: tok.Token, ExpiresAt: tok.ExpiresAt.Unix(), Repository: repo.Slug()})
+	out := SourceTokenResponse{Token: tok.Token, ExpiresAt: tok.ExpiresAt.Unix(), Repository: repo.Slug()}
+	s.githubApp.keepSourceToken(key, out)
+	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) runUntrusted(ctx context.Context, team store.Team, runID string) (bool, error) {
-	t, err := s.tenantForTeam(ctx, team)
-	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
-		return false, nil
+// safety: a claim holder gets one live token, reused until shortly before it
+// expires, and a claim asking in a loop is refused, so a runner cannot turn
+// its claim into a stream of GitHub tokens or spend the App's rate limit.
+const (
+	sourceTokenReuseMargin = 5 * time.Minute
+	sourceTokenCallsPerMin = 10
+)
+
+type sourceTokenEntry struct {
+	token  *SourceTokenResponse
+	window time.Time
+	calls  int
+}
+
+func (a *githubAppState) reuseSourceToken(key string, now time.Time) (cached *SourceTokenResponse, refused bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for k, e := range a.sources {
+		expired := e.token == nil || now.After(time.Unix(e.token.ExpiresAt, 0))
+		if expired && now.Sub(e.window) > time.Minute {
+			delete(a.sources, k)
+		}
 	}
-	if err != nil {
-		return false, err
+	e := a.sources[key]
+	if e == nil {
+		e = &sourceTokenEntry{window: now}
+		a.sources[key] = e
 	}
-	untrusted, err := t.RunUntrusted(ctx, runID)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
+	if now.Sub(e.window) > time.Minute {
+		e.window, e.calls = now, 0
 	}
-	return untrusted, err
+	e.calls++
+	if e.calls > sourceTokenCallsPerMin {
+		return nil, true
+	}
+	if e.token != nil && time.Unix(e.token.ExpiresAt, 0).Sub(now) > sourceTokenReuseMargin {
+		return e.token, false
+	}
+	return nil, false
+}
+
+func (a *githubAppState) keepSourceToken(key string, tok SourceTokenResponse) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if e := a.sources[key]; e != nil {
+		e.token = &tok
+	}
 }

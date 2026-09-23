@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp/githubapptest"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth"
@@ -32,6 +32,8 @@ type appFixture struct {
 	*identityFixture
 	app *githubapptest.GitHub
 	srv *controller.Server
+	// replica starts another controller over the same store and App.
+	replica func() (*controller.Server, string)
 }
 
 func newAppFixture(t *testing.T) *appFixture {
@@ -55,18 +57,22 @@ func newAppFixture(t *testing.T) *appFixture {
 		ID: 8, Account: githubapp.Account{ID: 502, Login: "bob", Type: "User"},
 		Repos: []githubapptest.Repo{{ID: 801, FullName: "bob/tools"}},
 	})
-	srv := controller.New(st, nil).EnableAuthFromStore().
-		WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
-		WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
-		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect, appCallback}).
-		WithDashboardURL("https://dash.example.com").
-		WithGitHubApp(app.Config())
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	replica := func() (*controller.Server, string) {
+		srv := controller.New(st, nil).EnableAuthFromStore().
+			WithLicense(license.Resolve(raw, pub, time.Now(), nil)).
+			WithGoogleSignIn(googleauth.New(google.Config()), []string{dashRedirect}).
+			WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect, appCallback}).
+			WithDashboardURL("https://dash.example.com").
+			WithGitHubApp(app.Config())
+		ts := httptest.NewServer(srv.Handler())
+		t.Cleanup(ts.Close)
+		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+		return srv, ts.URL
+	}
+	srv, url := replica()
 	return &appFixture{
-		identityFixture: &identityFixture{t: t, url: ts.URL, store: st, google: google, github: gh, admin: admin},
-		app:             app, srv: srv,
+		identityFixture: &identityFixture{t: t, url: url, store: st, google: google, github: gh, admin: admin},
+		app:             app, srv: srv, replica: replica,
 	}
 }
 
@@ -213,6 +219,24 @@ func TestGitHubAppConnectRefusesForgedReplayedAndForeignState(t *testing.T) {
 	}
 	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusForbidden {
 		t.Fatalf("replayed state = %d, want 403", code)
+	}
+}
+
+// A state finishes one flow across every replica and restart, because the
+// used nonce is kept in the store rather than in one controller's memory.
+func TestGitHubAppConnectStateIsSingleUseAcrossReplicas(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	s := f.start(olga)
+	_, other := f.replica()
+	first := f.url
+	f.url = other
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusCreated {
+		t.Fatalf("control: completing on another replica = %d, want 201", code)
+	}
+	f.url = first
+	if code := f.finish(olga, s, s.Verifier, 501, 7, acmeAdmin); code != http.StatusForbidden {
+		t.Fatalf("the same state on the replica that issued it = %d, want 403", code)
 	}
 }
 
@@ -552,44 +576,172 @@ func (f *appFixture) claimTrigger(owner signedIn, runID string) string {
 	return auth
 }
 
-func TestGitHubAppForkPullRequestRunsUntrusted(t *testing.T) {
-	t.Setenv(authwire.CacheGrantKeyEnv, "cache-grant-key-for-this-test")
+func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true, "fork_pull_requests": true}); code != http.StatusBadRequest {
+		t.Fatalf("subscribing with fork_pull_requests = %d, want 400", code)
+	}
 	if code := f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true}); code != http.StatusOK {
 		t.Fatalf("subscribe = %d", code)
 	}
-	if code := f.call("POST", "/api/v1/secrets", olga.auth,
-		map[string]any{"name": "DEPLOY_KEY", "value": "s3cret", "pipeline": "build"}, nil); code != http.StatusNoContent {
-		t.Fatalf("create secret = %d", code)
-	}
-
 	if _, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 999), ""); out["status"] != "ignored" {
-		t.Fatalf("fork PR without fork_pull_requests = %v, want ignored", out)
+		t.Fatalf("fork PR = %v, want ignored", out)
 	}
+	gone := prPayload(7, 701, "acme/widgets", 0)
+	gone["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = nil
+	if _, out := f.deliver("pull_request", gone, ""); out["status"] != "ignored" {
+		t.Fatalf("PR from a deleted head repository = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("fork PRs started %d runs", n)
+	}
+	if _, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 701), ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a same-repository PR = %v, want dispatched", out)
+	}
+}
 
-	_, out := f.deliver("pull_request", prPayload(7, 701, "acme/widgets", 701), "")
-	sameRepo := out["runs"].([]any)[0].(map[string]any)["run_id"].(string)
-	trusted := f.claimTrigger(olga, sameRepo)
-	if code := f.call("GET", "/api/v1/secrets/DEPLOY_KEY?run="+sameRepo, trusted, nil, nil); code != http.StatusOK {
-		t.Fatalf("control: a same-repository PR run reads its secret = %d, want 200", code)
+func TestGitHubAppPushOfNoCommitIsIgnored(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", strings.Repeat("0", 40)), ""); out["status"] != "ignored" {
+		t.Fatalf("push to the zero commit = %v, want ignored", out)
 	}
-	if code := f.call("POST", "/api/v1/runs/"+sameRepo+"/cache-grant", trusted, nil, nil); code != http.StatusOK {
-		t.Fatalf("control: a same-repository PR run's cache grant = %d, want 200", code)
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("a push of no commit started %d runs", n)
 	}
+}
 
-	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": false, "pull_request": true, "fork_pull_requests": true})
-	payload := prPayload(7, 701, "acme/widgets", 999)
-	payload["number"] = 13
-	_, out = f.deliver("pull_request", payload, "")
-	fork := out["runs"].([]any)[0].(map[string]any)["run_id"].(string)
-	untrusted := f.claimTrigger(olga, fork)
-	if code := f.call("GET", "/api/v1/secrets/DEPLOY_KEY?run="+fork, untrusted, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("a fork PR run read its secret = %d, want 403", code)
+func runStatuses(out map[string]any) []string {
+	runs, _ := out["runs"].([]any)
+	var got []string
+	for _, r := range runs {
+		got = append(got, r.(map[string]any)["status"].(string))
 	}
-	if code := f.call("POST", "/api/v1/runs/"+fork+"/cache-grant", untrusted, nil, nil); code != http.StatusForbidden {
-		t.Fatalf("a fork PR run's cache grant = %d, want 403", code)
+	return got
+}
+
+// The hourly cap binds the team, counts each run a delivery creates, and is
+// not spent by a redelivery.
+func TestGitHubAppFloodCapCountsTheTeamsRuns(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 3})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	for _, sub := range [][2]string{{"acme/widgets", "build"}, {"acme/widgets", "test"}, {"acme/plans", "build"}, {"acme/plans", "test"}} {
+		if code := f.subscribe(olga, sub[0], sub[1], nil); code != http.StatusOK {
+			t.Fatalf("subscribe %v = %d", sub, code)
+		}
+	}
+	widgets := pushPayload(7, 701, "acme/widgets", headSHA)
+	if code, out := f.deliver("push", widgets, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "dispatched"}) {
+		t.Fatalf("first push = %d %v", code, out)
+	}
+	if code, out := f.deliver("push", widgets, ""); code == http.StatusTooManyRequests || !slices.Equal(runStatuses(out), []string{"duplicate", "duplicate"}) {
+		t.Fatalf("redelivery = %d %v, want duplicates that spend nothing", code, out)
+	}
+	code, out := f.deliver("push", pushPayload(7, 702, "acme/plans", headSHA), "")
+	if code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("push to another repository = %d %v, want one run and one shed", code, out)
+	}
+	if code, _ := f.deliver("push", pushPayload(7, 702, "acme/plans", strings.Repeat("2", 40)), ""); code != http.StatusTooManyRequests {
+		t.Fatalf("push past the team's cap = %d, want 429", code)
+	}
+	if n := len(f.triggers(olga.team)); n != 3 {
+		t.Fatalf("the team has %d runs, want the cap of 3", n)
+	}
+}
+
+func pushedAt(p map[string]any, at time.Time) map[string]any {
+	p["repository"].(map[string]any)["pushed_at"] = at.Unix()
+	return p
+}
+
+// After the operator moves an installation, a delivery the old team already
+// ran, or any event from before the move, starts nothing in the new team.
+func TestGitHubAppReplayAfterAMoveStartsNothing(t *testing.T) {
+	f := newAppFixture(t)
+	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	old := pushedAt(pushPayload(7, 701, "acme/widgets", headSHA), time.Now())
+	if _, out := f.deliver("push", old, ""); out["status"] != "dispatched" {
+		t.Fatalf("olga's push = %v", out)
+	}
+	unsent := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("3", 40)), time.Now().Add(-time.Hour))
+	if code := f.call("DELETE", "/api/v1/github-app/installations/7", "Bearer "+f.admin, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("operator unbind = %d", code)
+	}
+	f.connect(bob, 502, 7, acmeAdmin)
+	f.subscribe(bob, "acme/widgets", "build", nil)
+
+	if _, out := f.deliver("push", old, ""); out["status"] == "dispatched" {
+		t.Fatalf("replay of olga's delivery in bob's team = %v", out)
+	}
+	if _, out := f.deliver("push", unsent, ""); out["status"] != "ignored" {
+		t.Fatalf("an event from before bob connected = %v, want ignored", out)
+	}
+	if n := len(f.triggers(bob.team)); n != 0 {
+		t.Fatalf("bob's team got %d runs from events before it held the installation", n)
+	}
+	fresh := pushedAt(pushPayload(7, 701, "acme/widgets", strings.Repeat("4", 40)), time.Now())
+	if _, out := f.deliver("push", fresh, ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a push after bob connected = %v, want dispatched", out)
+	}
+}
+
+// A repository removed from the installation on GitHub starts nothing, even
+// though the team's subscription to it remains.
+func TestGitHubAppRunNeedsTheRepositoryStillCovered(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.app.SetRepos(7, githubapptest.Repo{ID: 702, FullName: "acme/plans", Private: true})
+	if code, _ := f.deliver("installation_repositories", map[string]any{
+		"action": "removed", "installation": map[string]any{"id": 7},
+	}, ""); code != http.StatusAccepted {
+		t.Fatalf("installation_repositories = %d", code)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "ignored" {
+		t.Fatalf("push to a repository the installation no longer covers = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("an uncovered repository started %d runs", n)
+	}
+}
+
+// A runner that asks for its run's source token in a loop gets the one live
+// token back, and a claim that keeps asking is refused.
+func TestGitHubAppSourceTokenIsMintedOncePerClaim(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	runner := f.appWork(olga, "run-widgets", "acme/widgets")
+	before := len(f.app.Minted())
+	first, code := f.sourceToken(runner, "run-widgets")
+	if code != http.StatusOK {
+		t.Fatalf("source token = %d", code)
+	}
+	for i := 0; i < 5; i++ {
+		again, code := f.sourceToken(runner, "run-widgets")
+		if code != http.StatusOK || again.Token != first.Token {
+			t.Fatalf("ask %d = %d %q, want the first token again", i, code, again.Token)
+		}
+	}
+	if n := len(f.app.Minted()) - before; n != 1 {
+		t.Fatalf("six asks minted %d tokens, want 1", n)
+	}
+	refused := false
+	for i := 0; i < 10 && !refused; i++ {
+		_, code := f.sourceToken(runner, "run-widgets")
+		refused = code == http.StatusTooManyRequests
+	}
+	if !refused {
+		t.Fatal("a claim asking in a loop was never refused")
 	}
 }
 

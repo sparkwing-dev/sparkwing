@@ -1618,9 +1618,6 @@ func reserveTriggerCreditsTx(
 	if err != nil || !metered {
 		return err
 	}
-	if err := refuseUntrustedTx(ctx, tx, team, triggerID); err != nil {
-		return err
-	}
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
@@ -1753,9 +1750,6 @@ func (s *Store) reserveNodeCreditsTx(
 	}
 	team, err := creditTeamForRunTx(ctx, tx, runID)
 	if err != nil {
-		return err
-	}
-	if err := refuseUntrustedTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	balance, err := creditBalanceTx(ctx, tx, team)

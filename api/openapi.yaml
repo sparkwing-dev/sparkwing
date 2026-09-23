@@ -4850,7 +4850,7 @@ paths:
       tags: [runs]
       summary: Mint a short-lived GitHub token that reads the run's repository.
       description: >-
-        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A runner hands it to git as an http extraheader in the fetch's environment. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
+        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A claim gets one live token: asking again returns the same token until five minutes before it expires, and a claim that asks more than ten times a minute answers 429 with Retry-After. A runner hands the token to git through a credential helper reading an inherited pipe. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
       responses:
         "200":
           description: Token minted.
@@ -5053,7 +5053,7 @@ paths:
       tags: [teams]
       summary: Subscribe a pipeline to a repository's pushes and pull requests.
       description: >-
-        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork runs only when `fork_pull_requests` is set, and then runs untrusted: no secrets, no cache grant, never on a metered or GitHub Actions runner.
+        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
       requestBody:
         required: true
         content:
@@ -5066,8 +5066,7 @@ paths:
                 repository: {type: string, description: owner/name.}
                 pipeline: {type: string}
                 push: {type: boolean}
-                pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened."}
-                fork_pull_requests: {type: boolean}
+                pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
       responses:
         "200":
           description: Written.
@@ -5078,6 +5077,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for source tokens too often; Retry-After says when to ask again.}
 
   /webhooks/github-app:
     post:
@@ -5085,10 +5085,10 @@ paths:
       tags: [webhooks]
       summary: Receive a delivery from the deployment's GitHub App.
       description: >-
-        Verifies X-Hub-Signature-256 with the App's webhook secret (401 on mismatch) and requires X-GitHub-Delivery. Routes by the payload's installation id to the team holding it. `push` and `pull_request` start one run per subscribed pipeline; `installation` deleted unbinds and suspend or unsuspend marks the binding; anything else is acknowledged with 202 and starts nothing. A redelivery answers with the run it already started, status `duplicate`.
+        Verifies X-Hub-Signature-256 with the App's webhook secret (401 on mismatch) and requires X-GitHub-Delivery. Routes by the payload's installation id to the team holding it. `push` and `pull_request` start one run per subscribed pipeline, after GitHub confirms the installation still covers the repository; a pull request from a fork, a push of no commit, and an event older than the team's binding start nothing. `installation` deleted unbinds and suspend or unsuspend marks the binding; anything else is acknowledged with 202 and starts nothing. A delivery whose signed body was processed before, for any team, answers 200 with status `duplicate` and spends nothing. Each run spends one of the team's hourly runs: once the cap is reached the first run answers 429 with Retry-After, and a later run of the same delivery is listed with status `shed`.
       security: []
       responses:
-        "200": {description: Ping answered or installation event applied.}
+        "200": {description: "Ping answered, installation event applied, or a duplicate delivery answered with the runs it started (status duplicate)."}
         "202":
           description: Accepted.
           content:
@@ -5098,7 +5098,7 @@ paths:
                 type: object
                 required: [status]
                 properties:
-                  status: {type: string, enum: [dispatched, ignored]}
+                  status: {type: string, enum: [dispatched, ignored, duplicate]}
                   reason: {type: string}
                   runs:
                     type: array
@@ -5109,10 +5109,13 @@ paths:
                       properties:
                         pipeline: {type: string}
                         run_id: {type: string}
-                        status: {type: string, enum: [dispatched, duplicate]}
+                        status: {type: string, enum: [dispatched, duplicate, shed]}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: The team's hourly run cap is reached; Retry-After says when.}
+        "502": {description: GitHub could not be reached to confirm the repository's installation.}
+        "503": {description: The controller's queue is above its shed threshold; Retry-After says when.}
 
 components:
   securitySchemes:
@@ -5212,7 +5215,7 @@ components:
     GitHubAppTrigger:
       x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
       type: object
-      required: [repository, repository_id, installation_id, pipeline, push, pull_request, fork_pull_requests, created_by, created_at]
+      required: [repository, repository_id, installation_id, pipeline, push, pull_request, created_by, created_at]
       properties:
         repository: {type: string, description: owner/name as GitHub spells it.}
         repository_id: {type: integer, format: int64}
@@ -5220,7 +5223,6 @@ components:
         pipeline: {type: string}
         push: {type: boolean}
         pull_request: {type: boolean}
-        fork_pull_requests: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
     IdentityUser:

@@ -276,6 +276,8 @@ var keyedAtCreation = []string{
 var operatorTables = []string{
 	"accounts",
 	"executors",
+	"github_app_connect_states",
+	"github_app_deliveries",
 	"identities",
 	"sparkwing_meta",
 	"sparkwing_requirements",

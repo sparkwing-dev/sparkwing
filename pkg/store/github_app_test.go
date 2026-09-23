@@ -76,87 +76,43 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 	}
 }
 
-func untrustedWork(t *testing.T, st *store.Store, runID string, untrusted bool, parent string) {
-	t.Helper()
+func TestGitHubAppConnectStateIsUsedOnce(t *testing.T) {
+	st := storetest.Open(t)
 	ctx := context.Background()
-	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now()
-	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", CreatedAt: now, Untrusted: untrusted, ParentRunID: parent,
-	}, store.Run{ID: runID, Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now, ParentRunID: parent}); err != nil {
-		t.Fatalf("create %s: %v", runID, err)
+	expires := now.Add(10 * time.Minute)
+	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-1", expires, now); err != nil || !ok {
+		t.Fatalf("first use = %v, %v; want accepted", ok, err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "compile", Status: "pending"}); err != nil {
-		t.Fatal(err)
+	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-1", expires, now); err != nil || ok {
+		t.Fatalf("second use = %v, %v; want refused", ok, err)
 	}
-	if err := st.MarkNodeReady(ctx, runID, "compile"); err != nil {
-		t.Fatal(err)
+	if ok, err := st.ConsumeGitHubAppConnectState(ctx, "nonce-2", expires, now); err != nil || !ok {
+		t.Fatalf("another state = %v, %v; want accepted", ok, err)
 	}
 }
 
-func TestUntrustedRunIsInheritedByChildrenAndRetries(t *testing.T) {
+func TestGitHubAppDeliveryIsRememberedAcrossTeams(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
-	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	untrustedWork(t, st, "fork-run", true, "")
-	untrustedWork(t, st, "child-run", false, "fork-run")
-	untrustedWork(t, st, "own-run", false, "")
 	now := time.Now()
-	if err := st.CreateRetryWithRun(ctx, "fork-run", store.Trigger{
-		ID: "retry-run", Pipeline: "build", RetryOf: "fork-run", CreatedAt: now,
-	}, store.Run{ID: "retry-run", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
-		t.Fatalf("retry: %v", err)
+	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || seen {
+		t.Fatalf("unseen delivery = %v, %v", seen, err)
 	}
-	for id, want := range map[string]bool{"fork-run": true, "child-run": true, "retry-run": true, "own-run": false} {
-		got, err := tenant.RunUntrusted(ctx, id)
-		if err != nil || got != want {
-			t.Errorf("RunUntrusted(%s) = %v, %v; want %v", id, got, err, want)
-		}
-	}
-}
-
-func TestMeteredClaimantNeverTakesAnUntrustedRun(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	untrustedWork(t, st, "fork-run", true, "")
-	pool := meteredClaimant(t, st, "agent:cloud")
-	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 1_000_000_000, "", "operator"); err != nil {
+	if err := st.RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
 		t.Fatal(err)
 	}
-
-	if tr, err := st.ClaimNextTriggerFor(ctx, pool, 0, nil, nil); err == nil {
-		t.Fatalf("metered pool claimed untrusted trigger %s", tr.ID)
+	if err := st.RecordGitHubAppDelivery(ctx, "digest-1", "d-1", now); err != nil {
+		t.Fatalf("recording twice: %v", err)
 	}
-	if _, err := st.ClaimSpecificTriggerFor(ctx, "fork-run", pool, 0); err == nil {
-		t.Fatal("metered pool claimed the untrusted trigger by id")
+	if seen, err := st.GitHubAppDeliverySeen(ctx, "digest-1"); err != nil || !seen {
+		t.Fatalf("recorded delivery = %v, %v; want seen", seen, err)
 	}
-	if n, err := st.ClaimNextReadyNode(ctx, pool, "pod-1", time.Minute, nil); err == nil && n != nil {
-		t.Fatalf("metered pool claimed node %s/%s of an untrusted run", n.RunID, n.NodeID)
+	later := now.Add(store.GitHubAppDeliveryRetention + time.Hour)
+	if err := st.RecordGitHubAppDelivery(ctx, "digest-2", "d-2", later); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := st.ClaimNamedNode(ctx, pool, "fork-run", "compile", "k8s-job:1", time.Minute,
-		store.NamedClaimOptions{}); !errors.Is(err, store.ErrUntrustedRun) {
-		t.Fatalf("metered claim of the untrusted node by name = %v, want ErrUntrustedRun", err)
-	}
-
-	untrustedWork(t, st, "own-run", false, "")
-	if tr, err := st.ClaimNextTriggerFor(ctx, pool, 0, nil, nil); err != nil || tr.ID != "own-run" {
-		t.Fatalf("metered trigger claim behind an untrusted one = %+v, %v; want own-run", tr, err)
-	}
-	if n, err := st.ClaimNextReadyNode(ctx, pool, "pod-1", time.Minute, nil); err != nil || n == nil || n.RunID != "own-run" {
-		t.Fatalf("metered claim of a trusted node = %+v, %v; want own-run", n, err)
-	}
-	local := unmeteredClaimant(t, st, "agent:laptop")
-	if tr, err := st.ClaimSpecificTriggerFor(ctx, "fork-run", local, 0); err != nil || tr.ID != "fork-run" {
-		t.Fatalf("unmetered claim of the untrusted trigger = %+v, %v", tr, err)
-	}
-	claimed, err := st.ClaimedRunFor(ctx, "fork-run", local, time.Now())
-	if err != nil || !claimed.Untrusted {
-		t.Fatalf("ClaimedRunFor(fork-run) = %+v, %v; want untrusted", claimed, err)
+	if seen, _ := st.GitHubAppDeliverySeen(ctx, "digest-1"); seen {
+		t.Fatal("a digest past its retention was kept")
 	}
 }

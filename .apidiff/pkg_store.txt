@@ -109,8 +109,6 @@ const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 type ClaimedRun struct {
 	Team     Team
 	Pipeline string
-
-	Untrusted bool
 }
 const CloudStorageRateMicroPerGBDay = 833_333
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
@@ -556,7 +554,6 @@ var ErrTokenRevoked = errors.New("token is revoked or expired")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
-var ErrUntrustedRun = errors.New("store: this run is untrusted; only the team's own machines run it")
 var ErrUnverifiedEmail = errors.New("store: a sign-in needs a verified email")
 var ErrUserNotFound = errors.New("user not found")
 type Event struct {
@@ -726,6 +723,7 @@ var FreeTierQuota = StorageQuota{
 	MaxBytesPerMonth: 1 << 30,
 	MaxObjectsPerRun: 1000,
 }
+const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
 type GitHubAppInstallation struct {
 	Team           Team
 	InstallationID int64
@@ -748,10 +746,8 @@ type GitHubAppTrigger struct {
 	Pipeline       string
 	Push           bool
 	PullRequest    bool
-
-	ForkPullRequests bool
-	CreatedBy        string
-	CreatedAt        time.Time
+	CreatedBy      string
+	CreatedAt      time.Time
 }
 type GitHubRepo struct {
 	Owner string
@@ -1454,6 +1450,7 @@ func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, er
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
+func (s *Store) ConsumeGitHubAppConnectState(ctx context.Context, nonce string, expires, now time.Time) (bool, error)
 func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (s *Store) CoordinatorID(ctx context.Context) (string, error)
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
@@ -1548,6 +1545,7 @@ func (s *Store) GetSecretForPipeline(name, pipeline string) (*Secret, error)
 func (s *Store) GetSecretForRun(name, pipeline string) (*Secret, error)
 func (s *Store) GetSecretRow(name, pipeline string) (*Secret, error)
 func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error)
+func (s *Store) GitHubAppDeliverySeen(ctx context.Context, digest string) (bool, error)
 func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope, runID string) (bool, error)
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
@@ -1624,6 +1622,7 @@ func (s *Store) RecordCreditGrant(
 ) (CreditGrantResult, error)
 func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
+func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
@@ -1840,7 +1839,6 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error
 func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error
-func (t *Tenant) RunUntrusted(ctx context.Context, runID string) (bool, error)
 func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error)
 func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
@@ -1929,8 +1927,6 @@ type Trigger struct {
 	WebhookReplayKey string
 
 	Team Team
-
-	Untrusted bool
 }
 func (t Trigger) IsFinished() bool
 type TriggerClaimFence struct {

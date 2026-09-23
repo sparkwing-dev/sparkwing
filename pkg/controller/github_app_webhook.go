@@ -89,7 +89,10 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	case "installation":
 		s.handleGitHubAppInstallationEvent(w, r, env, delivery)
 	case "installation_repositories":
-		githubAppIgnored(w, "the repositories an installation covers are read from GitHub when a token is minted")
+		// safety: the covering answers kept for a minute are dropped, so a
+		// repository removed on GitHub starts nothing from the next delivery on.
+		s.githubApp.forgetCovering()
+		githubAppIgnored(w, "the repositories an installation covers are read from GitHub when a run starts or a token is minted")
 	case "push", "pull_request":
 		s.handleGitHubAppRunEvent(w, r, event, delivery, env, body)
 	default:
@@ -136,12 +139,16 @@ type githubAppPushPayload struct {
 	Pusher  struct {
 		Name string `json:"name"`
 	} `json:"pusher"`
+	Repository struct {
+		PushedAt json.RawMessage `json:"pushed_at"`
+	} `json:"repository"`
 }
 
 type githubAppPullRequestPayload struct {
 	Number      int `json:"number"`
 	PullRequest struct {
-		Head struct {
+		UpdatedAt string `json:"updated_at"`
+		Head      struct {
 			Ref  string            `json:"ref"`
 			SHA  string            `json:"sha"`
 			Repo *githubAppRepoRef `json:"repo"`
@@ -162,8 +169,26 @@ type githubAppIntake struct {
 	branch string
 	sha    string
 	env    map[string]string
-	fork   bool
+	// at is when GitHub says the event happened, zero when the payload
+	// does not say.
+	at     time.Time
 	prInfo *sparkwing.PullRequest
+}
+
+// githubPushedAt reads a push payload's repository.pushed_at, which GitHub
+// writes as Unix seconds in push events and as a timestamp elsewhere.
+func githubPushedAt(raw json.RawMessage) time.Time {
+	var secs int64
+	if json.Unmarshal(raw, &secs) == nil && secs > 0 {
+		return time.Unix(secs, 0)
+	}
+	var stamp string
+	if json.Unmarshal(raw, &stamp) == nil {
+		if at, err := time.Parse(time.RFC3339, stamp); err == nil {
+			return at
+		}
+	}
+	return time.Time{}
 }
 
 func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githubAppIntake, string, error) {
@@ -176,7 +201,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		if err := json.Unmarshal(body, &p); err != nil {
 			return githubAppIntake{}, "", err
 		}
-		if p.Deleted {
+		if p.Deleted || strings.Trim(p.After, "0") == "" {
 			return githubAppIntake{}, "branch deleted", nil
 		}
 		branch, ok := strings.CutPrefix(p.Ref, "refs/heads/")
@@ -184,7 +209,9 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 			return githubAppIntake{}, "not a branch push", nil
 		}
 		base["GITHUB_BEFORE"], base["GITHUB_AFTER"] = p.Before, p.After
-		return githubAppIntake{user: p.Pusher.Name, branch: branch, sha: p.After, env: base}, "", nil
+		return githubAppIntake{
+			user: p.Pusher.Name, branch: branch, sha: p.After, env: base, at: githubPushedAt(p.Repository.PushedAt),
+		}, "", nil
 	}
 	if _, built := defaultPullRequestActions[env.Action]; !built {
 		return githubAppIntake{}, "pull_request action " + env.Action + " starts nothing", nil
@@ -194,6 +221,11 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		return githubAppIntake{}, "", err
 	}
 	pr := p.PullRequest
+	// safety: a head repository that is gone or is not the base repository is
+	// someone else's code, whatever the branch is called, and nothing runs it.
+	if pr.Head.Repo == nil || pr.Base.Repo == nil || pr.Head.Repo.ID != pr.Base.Repo.ID {
+		return githubAppIntake{}, githubAppForkReason, nil
+	}
 	if !githubCommit(pr.Head.SHA) {
 		return githubAppIntake{}, "the pull request names no head commit", nil
 	}
@@ -202,22 +234,37 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	base[sparkwing.EnvPRAction] = env.Action
 	base[sparkwing.EnvPRBaseRef], base[sparkwing.EnvPRBaseSHA] = pr.Base.Ref, pr.Base.SHA
 	base[sparkwing.EnvPRHeadRef], base[sparkwing.EnvPRHeadSHA] = pr.Head.Ref, pr.Head.SHA
-	// safety: a head repository that is gone or is not the base repository is
-	// someone else's code, whatever the branch is called.
-	fork := pr.Head.Repo == nil || pr.Base.Repo == nil || pr.Head.Repo.ID != pr.Base.Repo.ID
+	// safety: an unreadable updated_at leaves the time zero, which skips only
+	// the binding-age check; the digest still refuses a replay.
+	updated, err := time.Parse(time.RFC3339, pr.UpdatedAt)
+	if err != nil {
+		updated = time.Time{}
+	}
 	return githubAppIntake{
-		user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, fork: fork,
+		user: pr.User.Login, branch: pr.Head.Ref, sha: pr.Head.SHA, env: base, at: updated,
 		prInfo: sparkwing.PullRequestFromEnv(base),
 	}, "", nil
 }
 
+const githubAppForkReason = "pull requests from forks are not run"
+
+// githubAppClockSkew is how far GitHub's clock may run behind this
+// controller's before a delivery reads as older than its binding.
+const githubAppClockSkew = time.Minute
+
+func githubAppDeliveryDigest(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request, event, delivery string, env githubAppDelivery, body []byte) {
+	ctx := r.Context()
 	repo, ok := store.ParseGitHubRepo(env.Repository.FullName)
 	if !ok || env.Repository.ID <= 0 || env.Installation.ID <= 0 {
 		githubAppIgnored(w, "the delivery names no repository and installation")
 		return
 	}
-	in, err := s.store.AsOperator().GitHubAppInstallationTeam(r.Context(), env.Installation.ID)
+	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		githubAppIgnored(w, "no team holds this installation")
 		return
@@ -230,14 +277,13 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		githubAppIgnored(w, "the installation is suspended")
 		return
 	}
-	tenant, err := s.tenantForTeam(r.Context(), in.Team)
-	if err != nil {
-		s.writeInternalError(w, r, "github app team", err)
+	tenant, err := s.tenantForTeam(ctx, in.Team)
+	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		githubAppIgnored(w, "no team holds this installation")
 		return
 	}
-	subs, err := tenant.GitHubAppTriggersFor(r.Context(), env.Installation.ID, env.Repository.ID)
 	if err != nil {
-		s.writeInternalError(w, r, "github app triggers", err)
+		s.writeInternalError(w, r, "github app team", err)
 		return
 	}
 	intake, skip, err := githubAppIntakeFor(event, env, body)
@@ -245,42 +291,113 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode %s payload: %w", event, err))
 		return
 	}
+	if skip == githubAppForkReason {
+		s.logger.Info("github app fork pull request ignored", "team", string(in.Team), "repo", repo.Slug(),
+			"installation_id", env.Installation.ID, "delivery", delivery)
+	}
 	if skip != "" {
 		githubAppIgnored(w, skip)
 		return
 	}
+	// safety: an event from before this team held the installation was meant
+	// for whoever held it then, so a replay of it after a move starts nothing.
+	if !intake.at.IsZero() && intake.at.Add(githubAppClockSkew).Before(in.CreatedAt) {
+		githubAppIgnored(w, "the event predates this team's connection of the installation")
+		return
+	}
+	subs, err := tenant.GitHubAppTriggersFor(ctx, env.Installation.ID, env.Repository.ID)
+	if err != nil {
+		s.writeInternalError(w, r, "github app triggers", err)
+		return
+	}
 	var wanted []store.GitHubAppTrigger
 	for _, sub := range subs {
-		switch {
-		case event == "push" && !sub.Push, event == "pull_request" && !sub.PullRequest:
-		case intake.fork && !sub.ForkPullRequests:
-		default:
+		if (event == "push" && sub.Push) || (event == "pull_request" && sub.PullRequest) {
 			wanted = append(wanted, sub)
 		}
 	}
 	if len(wanted) == 0 {
-		reason := "no pipeline of this team subscribes to " + event + " on " + repo.Slug()
-		if intake.fork {
-			reason = "no pipeline of this team runs pull requests from forks of " + repo.Slug()
-		}
-		githubAppIgnored(w, reason)
+		githubAppIgnored(w, "no pipeline of this team subscribes to "+event+" on "+repo.Slug())
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(in.Team, "github-app", repo.Slug()), "github app "+event) {
+	// safety: the digest is of the signed body and is kept for every team, so
+	// a redelivery spends no run budget and a replay after the installation
+	// moves teams starts nothing in the new one.
+	digest := githubAppDeliveryDigest(body)
+	seen, err := s.store.GitHubAppDeliverySeen(ctx, digest)
+	if err != nil {
+		s.writeInternalError(w, r, "github app delivery", err)
+		return
+	}
+	if seen {
+		s.writeGitHubAppDuplicate(w, r, tenant, wanted, delivery, body)
+		return
+	}
+	// safety: GitHub's answer is read again at run creation, so a repository
+	// removed from the installation, or moved to another, starts nothing here.
+	gh, covered, err := s.githubApp.coveringInstallation(ctx, repo, time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
+		return
+	}
+	if !covered || gh.ID != env.Installation.ID || gh.SuspendedAt != nil {
+		githubAppIgnored(w, "the installation no longer covers "+repo.Slug())
 		return
 	}
 	resp := githubAppWebhookResp{Status: "dispatched"}
+	shed := 0
 	for _, sub := range wanted {
+		// safety: each run spends one of the team's budget, so a repository
+		// with many subscriptions, or a team with many repositories, cannot
+		// multiply what one delivery or one hour creates.
+		if refusal := s.triggerFloodRefusal(ctx, githubAppFloodKey(in.Team), "github app "+event); refusal != nil {
+			if len(resp.Runs) == 0 {
+				refusal.write(w)
+				return
+			}
+			shed++
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: sub.Pipeline, Status: "shed"})
+			continue
+		}
 		run, err := s.startGitHubAppRun(r, tenant, sub, intake, repo, delivery, body)
 		if err != nil {
-			s.writeInternalError(w, r, "github app run", err)
+			writeIdentityError(w, s, r, "github app run", err)
 			return
 		}
 		resp.Runs = append(resp.Runs, run)
 	}
+	// safety: a delivery that shed a run is not recorded, so GitHub's redelivery
+	// can still start it; the runs it did start answer as duplicates.
+	if shed == 0 {
+		if err := s.store.RecordGitHubAppDelivery(ctx, digest, delivery, time.Now()); err != nil {
+			s.logger.Warn("github app delivery not recorded", "delivery", delivery, "err", err)
+		}
+	}
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
-		"repo", repo.Slug(), "sha", intake.sha, "fork", intake.fork, "runs", len(resp.Runs), "delivery", delivery)
+		"repo", repo.Slug(), "sha", intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
+}
+
+// githubAppFloodKey is the budget App deliveries spend: the team's own, the
+// one its API submissions spend.
+func githubAppFloodKey(team store.Team) string {
+	return "team:" + string(team)
+}
+
+func (s *Server) writeGitHubAppDuplicate(w http.ResponseWriter, r *http.Request, tenant *store.Tenant,
+	wanted []store.GitHubAppTrigger, delivery string, body []byte,
+) {
+	resp := githubAppWebhookResp{Status: "duplicate"}
+	for _, sub := range wanted {
+		run := githubAppRun{Pipeline: sub.Pipeline, Status: "duplicate"}
+		existing, err := tenant.FindTriggerByWebhookReplay(r.Context(),
+			githubAppReplayKey(tenant.Team(), sub.Pipeline, body), delivery+"/"+sub.Pipeline)
+		if err == nil && existing != nil {
+			run.RunID = existing.ID
+		}
+		resp.Runs = append(resp.Runs, run)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) startGitHubAppRun(
@@ -303,7 +420,7 @@ func (s *Server) startGitHubAppRun(
 		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
 		GithubOwner: repo.Owner, GithubRepo: repo.Name,
 		WebhookDelivery: delivery + "/" + sub.Pipeline, WebhookReplayKey: replayKey,
-		Untrusted: in.fork, CreatedAt: time.Now(),
+		CreatedAt: time.Now(),
 	})
 	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 		existing, ferr := tenant.FindTriggerByWebhookReplay(ctx, replayKey, delivery+"/"+sub.Pipeline)

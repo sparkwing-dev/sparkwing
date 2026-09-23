@@ -1837,13 +1837,7 @@ var migrationRequirements = map[int][]string{
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
 	51: {teamScopedUserKeysRequirement},
-	54: {untrustedRunsRequirement},
 }
-
-// safety: v54 marks a fork's pull request run untrusted, and a binary predating
-// it would read no mark and hand that run secrets and a metered runner, so it
-// refuses the store instead.
-const untrustedRunsRequirement = "untrusted-runs"
 
 // safety: v48 renames two columns, so a binary predating it writes the names
 // that are gone; both halves are declared rather than left additive.
@@ -5596,7 +5590,7 @@ func (s *Store) readClaimCandidates(
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
 	if warm.metered {
-		classClause = ` AND credit_cpu_class <= ?` + untrustedNodeClause
+		classClause = ` AND credit_cpu_class <= ?`
 		args = append(args, warm.warmCores)
 	}
 	scopeClause := ""
@@ -6591,11 +6585,6 @@ type Trigger struct {
 	// return it so the runner that executes the run can place its work
 	// on nodes no other team's work shares.
 	Team Team `json:"team,omitempty"`
-	// Untrusted marks a run of code nobody in the team wrote, a pull
-	// request from a fork: it reads no secret, gets no cache grant, and no
-	// metered or GitHub Actions runner claims it. The store writes it and
-	// [Tenant.RunUntrusted] reads it back.
-	Untrusted bool `json:"-"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -6714,25 +6703,17 @@ func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) err
 	if t.RepoInherited {
 		repoInheritedInt = 1
 	}
-	untrusted, err := inheritsUntrustedTx(ctx, tx, team, t)
-	if err != nil {
-		return err
-	}
-	untrustedInt := 0
-	if untrusted {
-		untrustedInt = 1
-	}
-	_, err = tx.ExecContext(
+	_, err := tx.ExecContext(
 		ctx, `
 INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
 		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-		              idempotency_key, webhook_delivery, webhook_replay_key, untrusted)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              idempotency_key, webhook_delivery, webhook_replay_key)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
-		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey, untrustedInt,
+		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
 	)
 	if err != nil && isUniqueViolation(err) {
 		if t.WebhookReplayKey != "" && strings.Contains(err.Error(), triggerWebhookReplayKeyColumn) {
@@ -7170,13 +7151,6 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
 	if err != nil {
 		return nil, err
-	}
-	excludeUntrusted, err := s.untrustedExcluded(ctx, claimant)
-	if err != nil {
-		return nil, err
-	}
-	if excludeUntrusted {
-		teamClause += untrustedTriggerClause
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7866,13 +7840,6 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
 	if err != nil {
 		return nil, err
-	}
-	excludeUntrusted, err := s.untrustedExcluded(ctx, claimant)
-	if err != nil {
-		return nil, err
-	}
-	if excludeUntrusted {
-		teamClause += untrustedTriggerClause
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
