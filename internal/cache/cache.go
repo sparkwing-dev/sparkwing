@@ -255,6 +255,17 @@ func New(cfg Config) (*Server, error) {
 		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
 			store.Bucket(), store.Prefix())
 		blobQuota = newBlobQuota(store, cfg)
+		// safety: the count holds teams to their share, so it is restored
+		// before the handler exists; a cache that cannot count its bucket
+		// does not start, rather than admit uploads against an empty count.
+		if cfg.GrantKey != "" {
+			rctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			err := store.Restore(rctx, cfg.UsageReconcile)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("cache: count the blob store before serving: %w", err)
+			}
+		}
 	}
 
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
@@ -354,9 +365,12 @@ func (s *Server) Run(ctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			blobStore.Maintain(ctx, s.cfg.UsageReconcile, 5*time.Minute, func(op string, err error) {
-				log.Printf("warning: blob store %s: %v", op, err)
-			})
+			report := func(op string, err error) { log.Printf("warning: blob store %s: %v", op, err) }
+			if s.cfg.GrantKey != "" {
+				blobStore.Keep(ctx, s.cfg.UsageReconcile, 5*time.Minute, report)
+				return
+			}
+			blobStore.Maintain(ctx, s.cfg.UsageReconcile, 5*time.Minute, report)
 		}()
 	}
 	measureStore(ctx)

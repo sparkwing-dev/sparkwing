@@ -160,3 +160,24 @@ func writeQuotaRefusal(w http.ResponseWriter, err error) {
 	}
 	http.Error(w, err.Error(), status)
 }
+
+// RestoreArchive restores the archive's per-team count and measures the
+// volume, so the log share is judged against what the service already holds.
+// ServeWith calls it before listening whenever the service authenticates
+// teams, and refuses to start when it fails.
+func (s *Server) RestoreArchive(ctx context.Context) error {
+	a := s.archive
+	if a == nil {
+		return nil
+	}
+	if err := a.store.Restore(ctx, a.opts.UsageReconcile); err != nil {
+		return err
+	}
+	if err := s.MeasureVolumeUsage(ctx); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.restored = true
+	a.mu.Unlock()
+	return nil
+}

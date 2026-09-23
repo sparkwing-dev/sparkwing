@@ -34,7 +34,7 @@ func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 
 // newBlobServerWith lets configure change the config before New, and also
 // returns the handler so a test can serve a request it built itself.
-func newBlobServerWith(t *testing.T, token string, configure func(*Config)) (*httptest.Server, *s3.Client, http.Handler) {
+func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.Client)) (*httptest.Server, *s3.Client, http.Handler) {
 	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
@@ -81,7 +81,7 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config)) (*ht
 	c.GrantKey = testGrantKey(token)
 	c.BlobStore = "s3://" + blobTestBucket + "/cache"
 	if configure != nil {
-		configure(&c)
+		configure(&c, raw)
 	}
 	s, err := New(c)
 	if err != nil {

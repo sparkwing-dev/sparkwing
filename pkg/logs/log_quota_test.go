@@ -3,13 +3,19 @@ package logs
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
 // An allowance of 1600 bytes leaves a free team's logs a 300-byte share.
@@ -137,5 +143,48 @@ func TestARestoredRunIsCountedOnce(t *testing.T) {
 	}
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a2/build", "Bearer a", line(100)); code != http.StatusNoContent {
 		t.Fatalf("the last 100 bytes with the run restored = %d %s", code, body)
+	}
+}
+
+// A logs service that holds teams to a share counts its archive before it
+// serves, so the first append after a start is judged against what the
+// archive already holds.
+func TestTheLogsServiceCountsItsArchiveBeforeItServes(t *testing.T) {
+	f := newLogQuotaFixture(t)
+	if _, err := f.raw.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String(archiveBucket), Key: aws.String("logs/teams/team-a/runs/old/build.log"),
+		Body: strings.NewReader(strings.Repeat("o", 300)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.srv.RestoreArchive(context.Background()); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if code, _ := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(1)); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a byte past what the archive already holds, right after start = %d, want 413", code)
+	}
+}
+
+// A logs service that cannot count its archive refuses to start rather than
+// serve appends against an empty count.
+func TestALogsServiceThatCannotCountItsArchiveRefusesToStart(t *testing.T) {
+	fake := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(fake.Close)
+	store, err := teamblob.New(teamblob.Options{
+		Bucket: archiveBucket, Prefix: "logs", ReconcileAtStart: true,
+		Client: s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
+			Credentials: credentials.NewStaticCredentialsProvider("test", "test", "")}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	err = ServeWith(ctx, ServeOptions{
+		Root: t.TempDir(), Addr: "127.0.0.1:0", ControllerURL: "http://controller.invalid",
+		Archive: &ArchiveOptions{Store: store},
+	})
+	if err == nil || !strings.Contains(err.Error(), "count") {
+		t.Fatalf("ServeWith with an unlistable archive = %v, want a refusal to start naming the count", err)
 	}
 }

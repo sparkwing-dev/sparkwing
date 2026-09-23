@@ -393,17 +393,22 @@ func (s *Store) Restore(ctx context.Context, every time.Duration) error {
 	return errors.Join(loadErr, s.Reconcile(ctx))
 }
 
-// Maintain restores the saved count at start, reconciles when nothing
-// was saved or the last reconcile is older than every, saves the count
-// every saveEvery while it changes, and reconciles every every. It
-// returns when ctx is done, saving once more on the way out. Errors go
-// to report and never stop the loop.
+// Maintain is [Store.Restore] followed by [Store.Keep], for a service
+// whose count gates nothing until it is restored.
 func (s *Store) Maintain(ctx context.Context, every, saveEvery time.Duration, report func(op string, err error)) {
+	if err := s.Restore(ctx, every); err != nil && report != nil {
+		report("restore usage", err)
+	}
+	s.Keep(ctx, every, saveEvery, report)
+}
+
+// Keep saves the count every saveEvery while it changes and reconciles
+// every every, from a count [Store.Restore] already restored. It returns
+// when ctx is done, saving once more on the way out. Errors go to report
+// and never stop the loop.
+func (s *Store) Keep(ctx context.Context, every, saveEvery time.Duration, report func(op string, err error)) {
 	if report == nil {
 		report = func(string, error) {}
-	}
-	if err := s.Restore(ctx, every); err != nil {
-		report("restore usage", err)
 	}
 	last := s.usage.ReconciledAt()
 	if last.IsZero() {

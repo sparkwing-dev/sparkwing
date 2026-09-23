@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,9 +11,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
 // tierController answers the cache's storage tier route for each team, as
@@ -45,7 +49,7 @@ func newQuotaServer(t *testing.T) (*httptest.Server, *s3.Client, http.Handler, s
 		"paying": {Tier: storagequota.TierFunded, AllowanceBytes: 4096},
 		"none":   {Tier: storagequota.TierNone, AllowanceBytes: 4096},
 	})
-	srv, raw, h := newBlobServerWith(t, token, func(c *Config) { c.ControllerURL = controller })
+	srv, raw, h := newBlobServerWith(t, token, func(c *Config, _ *s3.Client) { c.ControllerURL = controller })
 	return srv, raw, h, token
 }
 
@@ -149,5 +153,51 @@ func TestTheCacheShareBindsOnlyFreeTeams(t *testing.T) {
 	if code, body := send(t, srv, http.MethodPut, "/cache/small", grantFor(t, token, "none"), "x"); code != http.StatusPaymentRequired ||
 		!strings.Contains(body, "join the waitlist") {
 		t.Fatalf("a team with no slot = %d %q, want 402", code, body)
+	}
+}
+
+// A cache that holds teams to a share lists its bucket before it serves, so
+// the first upload after a start is judged against what the bucket holds
+// rather than an empty count.
+func TestACacheCountsItsBucketBeforeItServes(t *testing.T) {
+	const token = "operator-token"
+	controller := tierController(t, token, map[string]storagequota.Standing{
+		"free": {Tier: storagequota.TierFree, AllowanceBytes: 4096},
+	})
+	srv, _, _ := newBlobServerWith(t, token, func(c *Config, raw *s3.Client) {
+		c.ControllerURL = controller
+		if _, err := raw.PutObject(context.Background(), &s3.PutObjectInput{
+			Bucket: aws.String(blobTestBucket), Key: aws.String("cache/teams/free/cache/old.tar.gz"),
+			Body: strings.NewReader(strings.Repeat("o", 3000)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if code, _ := send(t, srv, http.MethodPut, "/cache/new", grantFor(t, token, "free"), strings.Repeat("n", 100)); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("100 bytes past what the bucket already holds, right after start = %d, want 413", code)
+	}
+}
+
+// A cache that holds teams to a share and cannot count its bucket refuses to
+// start rather than serve with an empty count.
+func TestACacheThatCannotCountItsBucketRefusesToStart(t *testing.T) {
+	const token = "operator-token"
+	fake := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(fake.Close)
+	savedOpen, savedStore, savedQuota := openBlobStore, blobStore, blobQuota
+	t.Cleanup(func() { openBlobStore, blobStore, blobQuota = savedOpen, savedStore, savedQuota })
+	openBlobStore = func(context.Context, string) (*teamblob.Store, error) {
+		return teamblob.New(teamblob.Options{
+			Bucket: blobTestBucket, Prefix: "cache", ReconcileAtStart: true,
+			Client: s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
+				Credentials: credentials.NewStaticCredentialsProvider("test", "test", "")}),
+		})
+	}
+	root := t.TempDir()
+	c := DefaultConfig()
+	c.DataDir, c.ProxyDir, c.SSHKeyDir = root, root+"/proxy", root+"/no-ssh-key"
+	c.APIToken, c.GrantKey, c.BlobStore = token, testGrantKey(token), "s3://"+blobTestBucket+"/cache"
+	if _, err := New(c); err == nil || !strings.Contains(err.Error(), "count") {
+		t.Fatalf("New with an unlistable bucket = %v, want a refusal to start naming the count", err)
 	}
 }

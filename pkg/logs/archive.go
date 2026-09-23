@@ -95,6 +95,7 @@ type archive struct {
 	quota *storagequota.Quota
 
 	mu        sync.Mutex
+	restored  bool
 	absent    map[string]time.Time
 	failures  int
 	retryAt   time.Time
@@ -822,9 +823,15 @@ func (s *Server) startArchive(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	go a.store.Maintain(ctx, a.opts.UsageReconcile, 5*time.Minute, func(op string, err error) {
-		s.logger.Error("logs archive", "op", op, "err", err)
-	})
+	report := func(op string, err error) { s.logger.Error("logs archive", "op", op, "err", err) }
+	a.mu.Lock()
+	restored := a.restored
+	a.mu.Unlock()
+	if restored {
+		go a.store.Keep(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
+	} else {
+		go a.store.Maintain(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
+	}
 	if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-logs"), "logs", a.quota); err != nil {
 		s.logger.Error("logs archive", "op", "register free storage metric", "err", err)
 	}

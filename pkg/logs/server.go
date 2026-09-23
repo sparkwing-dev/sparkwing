@@ -480,6 +480,17 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	if opts.Archive != nil {
 		s.WithArchive(*opts.Archive)
 	}
+	// safety: with teams to hold to their log share, the count is restored
+	// before the listener opens, and a service that cannot count its archive
+	// does not start rather than admit appends against an empty count.
+	if opts.Archive != nil && opts.ControllerURL != "" {
+		rctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err := s.RestoreArchive(rctx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("logs: count the archive before serving: %w", err)
+		}
+	}
 	s.StartSweeper(ctx)
 	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
 	srv := &http.Server{
