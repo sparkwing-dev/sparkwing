@@ -20,14 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **Kubernetes runner:** Job CPU and memory requests now follow the pipeline's
-  resource pin or measured profile, with small defaults, instead of the billed
-  class. A request larger than every matching node's allocatable capacity
-  fails before Job creation. Credits still reserve the class rate for at least
-  20 seconds per started node.
-
 ### Added
 
 - **runner:** an off-cluster agent reads the cache the controller announces
@@ -812,6 +804,12 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **Kubernetes runner:** Job CPU and memory requests now follow the pipeline's
+  resource pin or measured profile, with small defaults, instead of the billed
+  class. A request larger than every matching node's allocatable capacity
+  fails before Job creation. Credits still reserve the class rate for at least
+  20 seconds per started node.
 
 - **dashboard:** activity rows keep their height while a run's detail pane
   closes. The queue status dot pulses when the daemon status changes, the
