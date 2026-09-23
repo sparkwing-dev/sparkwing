@@ -123,7 +123,10 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request) bool
 	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
 		return true
 	}
-	key := s.runnerBudgetKey(r)
+	key, ok := s.runnerBudgetKey(w, r)
+	if !ok {
+		return false
+	}
 	if s.idlePolls.Allow(key, now) {
 		return true
 	}

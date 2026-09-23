@@ -276,13 +276,18 @@ process id, an enrolled agent its name), not one per poll: a value that
 changed per request would buy a fresh budget on every claim and grow the
 controller's bucket table at the fleet's poll rate.
 
-**What this bounds is a cooperating runner.** On those three claim routes
-the identity is the runner's own word, so a holder of a valid token that
-varies it gets a fresh budget each time. The budget stops a runaway loop
-and keeps one misbehaving runner in a shared-token fleet from spending
-its peers' claim budget; it is not a defence against an authenticated
-caller who means harm. The per-token budget below is what bounds that
-caller, and the token itself is the control that ends it -- revoke it.
+On those three claim routes the identity is the runner's own word, so a
+holder of a valid token that varies it gets a fresh budget each time.
+`--runners-per-token` (default 64) caps how many such names one caller --
+its team for a signed-up team, its token in the operator's team -- may hold
+at once. A name counts until it has gone unused for ten minutes, a name
+already held keeps working, and a new name past the cap is answered `429`
+naming the cap and counted under
+`sparkwing_principal_throttled_total{route_class="runner_names"}`. So varying
+the name multiplies a caller's budget at most that many times. Size the cap
+above the largest fleet that shares one token. The per-token budget below
+bounds the caller's total, and the token itself is the control that ends it
+-- revoke it.
 
 A runner too old to send an identity shares one bucket with its peers on
 those routes, so during a rolling upgrade a shared-token fleet is

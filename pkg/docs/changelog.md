@@ -600,6 +600,15 @@ unlock.
   every team. The queue view now lists only the runners the caller's team
   advertised, and the per-principal counts go to `admin` callers only.
 
+- **controller:** one caller holds at most `--runners-per-token` runner names
+  The claim routes budget each runner by the name it sends, so a caller that
+  varied the name got a fresh claim, heartbeat and idle-poll budget each time.
+  A caller -- its team for a signed-up team, its token in the operator's team --
+  now holds at most `--runners-per-token` (default 64) names at once, a name
+  counting until it goes unused for ten minutes; a new name past the cap is
+  answered `429` naming the cap. Runner names a route derives from its path
+  are not counted.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 
