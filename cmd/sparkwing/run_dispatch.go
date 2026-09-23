@@ -623,7 +623,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		cacheURL := bincache.CacheURL()
 		seedErr := seedWorkingTreeSnapshot(runProfile, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
 		if seedErr != nil {
-			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, seedErr)
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w (%v)", pipelineName, seedErr, bincache.ErrWorkspaceNeedsCache)
 		}
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
@@ -632,14 +632,12 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 				snapshot.Baseline.Ref, snapshot.Baseline.SHA)
 		}
 	} else if repoURL != "" {
-		discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
-		services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
-		cancelDiscovery()
 		repoDir, cwdErr := os.Getwd()
 		if cwdErr != nil {
-			fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", cwdErr)
-		} else {
-			seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, cwdErr)
+		}
+		if err := offerTriggerSource(runProfile, repoDir, repoURL, sha); err != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, err)
 		}
 	}
 
@@ -673,50 +671,76 @@ func seedWorkingTreeSnapshot(runProfile *profile.Profile, cacheURL, repoURL stri
 	return controllerErr
 }
 
-func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) {
-	if cacheURL != "" {
-		refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := bincache.RefreshRepo(refreshContext, cacheURL, bincache.CacheToken(), repoURL)
-		cancel()
-		if err == nil {
-			return
-		}
-		seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		seedErr := bincache.SeedRepo(seedContext, cacheURL, bincache.CacheToken(), repoURL, repoDir, sha)
-		seedCancel()
-		if seedErr == nil {
-			return
-		}
-		fmt.Fprintf(os.Stderr,
-			"sparkwing run: gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-			err, seedErr)
-		return
+// offerTriggerSource makes sure a runner can fetch the commit a trigger
+// records. A commit already on origin needs nothing: a team runner fetches it
+// from there, and the git cache is only asked to refresh. Any other commit has
+// to reach the cache through a seed, which only the operator may write, so a
+// refused seed fails the trigger rather than leaving a run no runner can fetch.
+func offerTriggerSource(runProfile *profile.Profile, repoDir, repoURL, sha string) error {
+	discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
+	services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
+	cancelDiscovery()
+	if commitOnOrigin(repoDir, sha) {
+		_ = refreshTriggerSource(runProfile, services.CachePod, repoURL)
+		return nil
 	}
-
-	refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err := bincache.RefreshRepoViaController(refreshContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
-	cancel()
+	err := seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
 	if err == nil {
-		return
+		return nil
+	}
+	return fmt.Errorf("commit %s is not on origin, and the git cache did not take it (%v): "+
+		"push your commit; team runs fetch from the remote", shortSHA(sha), err)
+}
+
+// commitOnOrigin reports whether a remote-tracking branch of origin contains
+// sha, which is what this checkout knows of what has been pushed.
+func commitOnOrigin(repoDir, sha string) bool {
+	if sha == "" {
+		return false
+	}
+	out, err := exec.Command("git", "-C", repoDir, "for-each-ref", "--count=1", "--contains", sha,
+		"--format=%(refname)", "refs/remotes/origin/").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+func refreshTriggerSource(runProfile *profile.Profile, cacheURL, repoURL string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if cacheURL != "" {
+		return bincache.RefreshRepo(ctx, cacheURL, bincache.CacheToken(), repoURL)
+	}
+	return bincache.RefreshRepoViaController(ctx, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
+}
+
+// seedTriggerSource refreshes the git cache's copy of repoURL and, when that
+// fails, pushes sha into it from repoDir. The error says why neither worked.
+func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) error {
+	err := refreshTriggerSource(runProfile, cacheURL, repoURL)
+	if err == nil {
+		return nil
 	}
 	seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	seedErr := bincache.SeedRepoViaController(seedContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, repoDir, sha)
-	seedCancel()
-	if seedErr == nil {
-		return
+	defer seedCancel()
+	var seedErr error
+	if cacheURL != "" {
+		seedErr = bincache.SeedRepo(seedContext, cacheURL, bincache.CacheToken(), repoURL, repoDir, sha)
+	} else {
+		seedErr = bincache.SeedRepoViaController(seedContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, repoDir, sha)
 	}
-	if isHTTPNotFound(seedErr) {
-		return
+	if seedErr == nil {
+		return nil
 	}
 	if discoveryErr != nil {
-		fmt.Fprintf(os.Stderr,
-			"sparkwing run: service discovery failed (%v), controller gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-			discoveryErr, err, seedErr)
-		return
+		return fmt.Errorf("service discovery failed (%v), gitcache refresh failed (%v), seed failed (%w)", discoveryErr, err, seedErr)
 	}
-	fmt.Fprintf(os.Stderr,
-		"sparkwing run: controller gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-		err, seedErr)
+	return fmt.Errorf("gitcache refresh failed (%v), seed failed (%w)", err, seedErr)
 }
 
 func isHTTPNotFound(err error) bool {
