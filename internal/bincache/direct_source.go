@@ -163,9 +163,29 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	if err := directCheckout(ctx, root, remote, branch, sha, checkout, opts); err != nil {
 		return "", err
 	}
+	return directSparkwingDir(checkout)
+}
+
+// directSparkwingDir is the checkout's .sparkwing directory. A repository can
+// commit .sparkwing as a symlink to any path on the runner, which the build
+// would then compile and run, so only a real directory inside the checkout
+// counts.
+func directSparkwingDir(checkout string) (string, error) {
 	candidate := filepath.Join(checkout, ".sparkwing")
-	if fi, statErr := os.Stat(candidate); statErr != nil || !fi.IsDir() {
+	fi, err := os.Lstat(candidate)
+	if err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("fetched tree has no .sparkwing directory under %s", checkout)
+	}
+	realCheckout, err := filepath.EvalSymlinks(checkout)
+	if err != nil {
+		return "", fmt.Errorf("direct source: %w", err)
+	}
+	realCandidate, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("direct source: %w", err)
+	}
+	if rel, relErr := filepath.Rel(realCheckout, realCandidate); relErr != nil || rel != ".sparkwing" {
+		return "", fmt.Errorf("fetched .sparkwing resolves outside the checkout %s", checkout)
 	}
 	return candidate, nil
 }

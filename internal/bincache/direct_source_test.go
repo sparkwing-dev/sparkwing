@@ -577,3 +577,49 @@ func TestDirectCheckoutEvictsOlderMirrorsPastTheTotalSize(t *testing.T) {
 		t.Fatalf("mirrors a=%v b=%v, want a evicted to fit b under the total", mirrorExists(root, a), mirrorExists(root, b))
 	}
 }
+
+func TestDirectSparkwingDirRefusesASymlinkedSparkwing(t *testing.T) {
+	outside := t.TempDir()
+	writeTestFile(t, filepath.Join(outside, "main.go"), "package main\n")
+	for name, target := range map[string]string{
+		"absolute":  outside,
+		"relative":  "..",
+		"in a tree": "pipelines",
+	} {
+		t.Run(name, func(t *testing.T) {
+			remote, sha := directTestRepo(t, func(work string) {
+				writeTestFile(t, filepath.Join(work, "pipelines", "main.go"), "package main\n")
+				if err := os.Symlink(target, filepath.Join(work, ".sparkwing")); err != nil {
+					t.Fatal(err)
+				}
+			})
+			dest := filepath.Join(t.TempDir(), "run")
+			if err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly); err != nil {
+				t.Fatal(err)
+			}
+			if dir, err := directSparkwingDir(dest); err == nil {
+				t.Fatalf("directSparkwingDir accepted a .sparkwing symlink to %s: %s", target, dir)
+			}
+		})
+	}
+}
+
+func TestDirectSparkwingDirAcceptsACheckoutReachedThroughASymlink(t *testing.T) {
+	remote, sha := directTestRepo(t, sparkwingTree(t))
+	real := t.TempDir()
+	dest := filepath.Join(real, "run")
+	if err := directCheckout(context.Background(), t.TempDir(), remote, "main", sha, dest, httpOnly); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := directSparkwingDir(filepath.Join(link, "run"))
+	if err != nil {
+		t.Fatalf("directSparkwingDir: %v", err)
+	}
+	if want := filepath.Join(link, "run", ".sparkwing"); dir != want {
+		t.Fatalf("directSparkwingDir = %s, want %s", dir, want)
+	}
+}
