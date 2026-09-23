@@ -687,6 +687,13 @@ unlock.
 
 ### Fixed
 
+- **controller:** a team cannot be deleted while money is in flight for it.
+  `DELETE /api/v1/team`, the operator's `DELETE /api/v1/teams/{team}` and an
+  account deletion that would delete a team answer 409 while the team has an
+  unexpired, unpaid credit checkout ("wait for the checkout to expire or
+  complete") or an unreleased dispute hold ("contact support"). A payment that
+  completed after the purge found no team to credit, and a purge erased the
+  rows a dispute is about.
 - **controller:** an agent built before cache grants fetches an operator run's
   source through `/api/v1/runs/{id}/gitcache` again when no webhook delivery
   created the run, such as one `sparkwing run` submitted. The proxy answered

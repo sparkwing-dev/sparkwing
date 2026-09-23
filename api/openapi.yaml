@@ -2065,7 +2065,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409":
-          description: The account is the last owner of teams that have other members.
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
           content:
             application/json:
               schema:
@@ -2096,6 +2096,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
 
   /api/v1/users:
     get:
@@ -4626,7 +4627,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
         "409":
-          description: The account is the last owner of teams that have other members.
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
           content:
             application/json:
               schema:
@@ -4812,7 +4813,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: This is the owner's only team.}
+        "409": {description: "This is the owner's only team, or the team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
 
   /api/v1/team/members:
     get:

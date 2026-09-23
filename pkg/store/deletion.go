@@ -32,6 +32,13 @@ var (
 	// ErrDeletionLeaseLost reports a purge step taken by a purger that no
 	// longer holds the deletion's lease, because another replica took it.
 	ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
+	// ErrOpenCheckout refuses deleting a team with an unexpired, unpaid
+	// checkout, because its payment would land after the team is gone.
+	ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
+		"wait for the checkout to expire or complete, then delete the team")
+	// ErrTeamFrozen refuses deleting a team held over a disputed payment,
+	// because the hold and the ledger it points at are the dispute's record.
+	ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
 )
 
 // LastOwnerError refuses an account deletion that would leave teams with
@@ -207,6 +214,29 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 	return del, revoked, tx.Commit()
 }
 
+// safety: a payment that completes after the purge finds no team to credit,
+// and a hold's rows are the dispute's record, so either keeps the team until
+// it clears.
+func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
+	var open int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
+		string(team), now.UnixNano()).Scan(&open); err != nil {
+		return err
+	}
+	if open > 0 {
+		return ErrOpenCheckout
+	}
+	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	if freeze.Frozen {
+		return ErrTeamFrozen
+	}
+	return nil
+}
+
 // markForDeletionTx records the deletion and closes every way into the team
 // before any row is removed: members leave (their sessions move to a team
 // they still hold, or end), every token is revoked, open invitations are
@@ -218,6 +248,9 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
 		return nil, fmt.Errorf("%w: the default team holds every single-team install's rows", ErrInvalidInput)
+	}
+	if err := refuseDeletionWithMoneyInFlightTx(ctx, tx, t.team, now); err != nil {
+		return nil, err
 	}
 	at := now.UTC().Unix()
 	if _, err := tx.ExecContext(ctx, `

@@ -83,7 +83,7 @@ func (s *Server) handleDeleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	del, revoked, err := t.RequestDeletion(r.Context(), p.AccountID, time.Now())
-	if errors.Is(err, store.ErrOnlyTeam) {
+	if errors.Is(err, store.ErrOnlyTeam) || moneyInFlight(err) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
@@ -187,6 +187,9 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, accountID
 	res, err := s.store.DeleteAccount(r.Context(), accountID, time.Now())
 	var lastOwner *store.LastOwnerError
 	switch {
+	case moneyInFlight(err):
+		writeError(w, http.StatusConflict, err)
+		return
 	case errors.As(err, &lastOwner):
 		body := lastOwnerRefusalJSON{
 			Error: "hand ownership of these teams to another member, or delete them, first",
@@ -221,6 +224,9 @@ func (s *Server) handleOperatorDeleteTeam(w http.ResponseWriter, r *http.Request
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", r.PathValue("team")))
+		return
+	case moneyInFlight(err):
+		writeError(w, http.StatusConflict, err)
 		return
 	case errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
@@ -466,4 +472,10 @@ func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
 		return fmt.Errorf("delete cache tree: %w", err)
 	}
 	return nil
+}
+
+// moneyInFlight reports a deletion refused while a checkout may still be paid
+// or a dispute hold stands; each error names its own remedy.
+func moneyInFlight(err error) bool {
+	return errors.Is(err, store.ErrOpenCheckout) || errors.Is(err, store.ErrTeamFrozen)
 }

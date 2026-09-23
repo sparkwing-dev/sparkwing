@@ -72,12 +72,16 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	}
 	acmeToken := seedTeam(t, st, acme, owner.Account.ID, "run-acme")
 	keepToken := seedTeam(t, st, tenant(t, st, "keep"), owner.Account.ID, "run-keep")
-	// safety: billing rows are tenant-owned, so a checkout still open and a
-	// dispute hold go with the team rather than outliving it.
-	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); err != nil {
+	// safety: billing rows are tenant-owned, so an expired checkout and a
+	// released dispute hold go with the team rather than outliving it; open
+	// ones refuse the deletion, see TestTeamDeletionWaitsForOpenCheckoutsAndDisputeHolds.
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now.Add(-2*time.Hour), time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_acme", "", "dispute opened", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReleaseCreditFreezes(ctx, "acme", "", now); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"credit_checkouts", "credit_freezes"} {

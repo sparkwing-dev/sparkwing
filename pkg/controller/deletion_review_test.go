@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,4 +113,44 @@ func TestDeleteAccountOwningTheDefaultTeamIsABadRequest(t *testing.T) {
 func storageWithLogsToken(ts controller.TeamStorage, token string) controller.TeamStorage {
 	ts.LogsToken = token
 	return ts
+}
+
+// Deleting a team with money in flight answers 409 with the remedy, from the
+// owner's route and the operator's, and neither closes the team.
+func TestDeleteTeamRefusesAnOpenCheckoutOrADisputeHold(t *testing.T) {
+	_, _, ts := newStorageFakes(t)
+	f := newDeletionFixture(t, ts)
+	owner := f.user("o", "olga@example.com")
+	f.createTeam(&owner, "acme")
+	acme, err := f.store.ForTeam(context.Background(), "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.OpenCreditCheckout(context.Background(), store.MicroCreditsPerCredit, time.Now(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var refused struct {
+		Error string `json:"error"`
+	}
+	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "acme"}, &refused); code != http.StatusConflict ||
+		!strings.Contains(refused.Error, "wait for the checkout to expire or complete") {
+		t.Fatalf("deleting a team with an open checkout = %d %q, want 409 naming the remedy", code, refused.Error)
+	}
+	if code := f.call("DELETE", "/api/v1/teams/acme", "Bearer "+f.admin, nil, &refused); code != http.StatusConflict {
+		t.Fatalf("the operator deleting it = %d, want 409", code)
+	}
+
+	f.createTeam(&owner, "held")
+	if _, err := f.store.HoldTeamForDispute(context.Background(), "held", "dp_held", "", "dispute opened", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("DELETE", "/api/v1/team", owner.auth, map[string]string{"confirm_slug": "held"}, &refused); code != http.StatusConflict ||
+		!strings.Contains(refused.Error, "contact support") {
+		t.Fatalf("deleting a held team = %d %q, want 409 naming the remedy", code, refused.Error)
+	}
+	var mine []teamDeletionBody
+	f.call("GET", "/api/v1/me/team-deletions", owner.auth, nil, &mine)
+	if len(mine) != 0 {
+		t.Fatalf("a refused deletion was recorded: %+v", mine)
+	}
 }
