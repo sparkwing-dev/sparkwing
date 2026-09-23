@@ -113,8 +113,10 @@ func DirectRepoURLFromGitHub(fullName string) string {
 // .sparkwing directory. Fetched objects stay in a mirror under the Sparkwing
 // home keyed by the remote, so a later run of the same repository fetches only
 // what it lacks. An empty sha takes the tip of branch.
-func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string) (string, error) {
-	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, defaultDirectOptions())
+func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDir string, cred DirectCredential) (string, error) {
+	opts := defaultDirectOptions()
+	opts.githubToken = cred.GitHubToken
+	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
 }
 
 // directOptions bound a direct fetch. A nil lookup skips the address check,
@@ -127,6 +129,7 @@ type directOptions struct {
 	fetchTimeout   time.Duration
 	maxMirrors     int
 	maxMirrorBytes int64
+	githubToken    string
 }
 
 func defaultDirectOptions() directOptions {
@@ -143,6 +146,13 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	remote, sha, err := ValidateDirectSource(repoURL, sha)
 	if err != nil {
 		return "", err
+	}
+	if opts.githubToken != "" {
+		tokenRemote := githubTokenRemote(remote)
+		if tokenRemote == "" {
+			return "", errors.New("direct source: a GitHub source token fetches only a github.com repository")
+		}
+		remote = tokenRemote
 	}
 	if sha == "" {
 		if branch == "" {
@@ -236,6 +246,12 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 
 	fetchEnv := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+opts.protocols, "GIT_TERMINAL_PROMPT=0")
 	localEnv := directLocalGitEnv(fetchEnv)
+	// safety: only the fetch sees the token; every command that touches the
+	// mirror or the checkout runs with localEnv, which reads no config from the
+	// environment at all.
+	if opts.githubToken != "" {
+		fetchEnv = withGitHubToken(fetchEnv, opts.githubToken)
+	}
 	run := func(ctx context.Context, env []string, args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Env = env

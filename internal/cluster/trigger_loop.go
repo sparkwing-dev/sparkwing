@@ -260,7 +260,12 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	case direct && workspaceSource:
 		fetchErr = bincache.ErrWorkspaceNeedsCache
 	case direct:
-		sparkwingDir, fetchErr = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir)
+		cred, credErr := bincache.DirectCredentialFor(ctx, opts.ControllerURL, opts.Token, trigger.ID, repoURL)
+		if credErr != nil {
+			logger.Warn("trigger loop: no source token; fetching with this machine's credentials",
+				"run_id", trigger.ID, "err", credErr)
+		}
+		sparkwingDir, fetchErr = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, cred)
 	case workspaceSource:
 		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)

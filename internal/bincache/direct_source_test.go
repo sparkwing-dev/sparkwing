@@ -88,7 +88,7 @@ func TestValidateDirectSourceRefusesAnythingButAFullCommitID(t *testing.T) {
 func TestFetchPipelineSourceDirectRefusesABranchThatIsAnOption(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	_, err := FetchPipelineSourceDirect(context.Background(), "https://github.com/o/r.git",
-		"--upload-pack=touch", "", filepath.Join(t.TempDir(), "run"))
+		"--upload-pack=touch", "", filepath.Join(t.TempDir(), "run"), DirectCredential{})
 	if err == nil || !strings.Contains(err.Error(), "not a branch name") {
 		t.Fatalf("err = %v, want a branch-name refusal", err)
 	}

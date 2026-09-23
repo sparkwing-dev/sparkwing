@@ -100,7 +100,12 @@ func runNodeRemote(
 	var err error
 	switch {
 	case direct:
-		sparkwingDir, err = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, trigger.GitSHA, workDir)
+		cred, credErr := bincache.DirectCredentialFor(ctx, controllerURL, token, runID, repoURL)
+		if credErr != nil {
+			logger.Warn("runNodeRemote: no source token; fetching with this machine's credentials",
+				"run_id", runID, "node_id", nodeID, "err", credErr)
+		}
+		sparkwingDir, err = bincache.FetchPipelineSourceDirect(ctx, repoURL, branch, trigger.GitSHA, workDir, cred)
 	case workspaceSource:
 		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
