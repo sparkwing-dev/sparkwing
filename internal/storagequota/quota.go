@@ -125,27 +125,41 @@ func (q *Quota) Observe(team string, s Standing) {
 	q.standings[team] = cachedStanding{Standing: s, at: q.opts.Now()}
 }
 
-// safety: a lookup that fails keeps the last answer, and a team never
-// answered for is free, so an outage of the controller never lifts a limit.
+// MaxFundedAge is how long a funded answer lifts a team's limit without a
+// fresh one.
+const MaxFundedAge = 5 * time.Minute
+
+// safety: a lookup that fails keeps the last answer, a team never answered
+// for is free, and a funded answer older than MaxFundedAge reads free, so an
+// outage of the controller never lifts a limit for long; a none answer, the
+// strictest, is kept whatever its age.
 func (q *Quota) standing(ctx context.Context, team string) Standing {
 	q.mu.Lock()
 	cached, ok := q.standings[team]
 	q.mu.Unlock()
-	if ok && (q.opts.Lookup == nil || q.opts.Now().Sub(cached.at) < q.opts.TTL) {
-		return cached.Standing
-	}
-	if q.opts.Lookup == nil {
-		return freeDefault
-	}
-	got, err := q.opts.Lookup(ctx, team)
-	if err != nil {
-		if ok {
-			return cached.Standing
+	now := q.opts.Now()
+	if ok && q.opts.Lookup != nil && now.Sub(cached.at) >= q.opts.TTL {
+		got, err := q.opts.Lookup(ctx, team)
+		if err == nil {
+			q.Observe(team, got)
+			return got
 		}
-		return freeDefault
 	}
-	q.Observe(team, got)
-	return got
+	if !ok {
+		if q.opts.Lookup == nil {
+			return freeDefault
+		}
+		got, err := q.opts.Lookup(ctx, team)
+		if err != nil {
+			return freeDefault
+		}
+		q.Observe(team, got)
+		return got
+	}
+	if cached.Tier == TierFunded && now.Sub(cached.at) >= MaxFundedAge {
+		return Standing{Tier: TierFree, AllowanceBytes: cached.AllowanceBytes}
+	}
+	return cached.Standing
 }
 
 // Reserve admits n bytes for team or refuses them. The caller writes, then

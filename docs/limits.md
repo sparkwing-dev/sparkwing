@@ -40,9 +40,10 @@ archive's, and only deleting them gives the room back.
 The cache asks the controller each team's tier with its operator token,
 `GET /internal/teams/{team}/storage-tier`, and trusts the answer for a minute.
 The logs service reads the same tier off the claim check it already makes for
-every append. A lookup that fails keeps the last answer, and a team never
-answered for is held to the default free share, so an outage of the
-controller never lifts a limit. A team that buys credits is unblocked within a
+every append. A lookup that fails keeps the last answer, except that a funded
+answer older than five minutes reads as free; a team never answered for is
+held to the default free share, so an outage of the controller never lifts a
+limit for more than five minutes. A team that buys credits is unblocked within a
 minute.
 
 `GET /api/v1/storage` shows a signed-up caller its team's tier, allowance,

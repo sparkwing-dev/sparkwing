@@ -209,3 +209,40 @@ func TestSharesSplitTheAllowance(t *testing.T) {
 		t.Fatalf("shares of 1 GiB = %d, %d, %d", storagequota.CacheShare(a), storagequota.LogShare(a), storagequota.EventShare(a))
 	}
 }
+
+// A funded answer outlives a controller outage only briefly: once it is five
+// minutes old and a refresh fails, the team is held to the free share. A team
+// the controller last answered none stays refused.
+func TestAStaleFundedStandingFallsBackToFreeDuringAnOutage(t *testing.T) {
+	used := &counts{used: map[string]int64{}}
+	l := &lookups{answers: map[string]storagequota.Standing{
+		"paying": {Tier: storagequota.TierFunded, AllowanceBytes: 100},
+		"none":   {Tier: storagequota.TierNone, AllowanceBytes: 100},
+	}}
+	c := &clock{now: time.Now()}
+	q := newQuota(used, l, c)
+	ctx := context.Background()
+	for _, team := range []string{"paying", "none"} {
+		if release, err := q.Reserve(ctx, team, 1); err == nil {
+			release()
+		}
+	}
+	l.mu.Lock()
+	l.fail = true
+	l.mu.Unlock()
+
+	c.now = c.now.Add(2 * time.Minute)
+	if _, err := q.Reserve(ctx, "paying", 1000); err != nil {
+		t.Fatalf("a funded team two minutes into an outage: %v", err)
+	}
+	c.now = c.now.Add(4 * time.Minute)
+	if _, err := q.Reserve(ctx, "paying", 1000); err == nil {
+		t.Fatal("a funded standing six minutes stale still lifted the limit")
+	}
+	if _, err := q.Reserve(ctx, "paying", 100); err != nil {
+		t.Fatalf("a stale funded team inside the free share: %v", err)
+	}
+	if _, err := q.Reserve(ctx, "none", 1); !errors.Is(err, storagequota.ErrPaused) {
+		t.Fatalf("a team last answered none, during the outage = %v, want ErrPaused", err)
+	}
+}
