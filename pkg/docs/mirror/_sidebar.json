@@ -41,6 +41,7 @@
         "threat-model",
         "auth",
         "oidc",
+        "limits",
         "hooks",
         "crons",
         "api",

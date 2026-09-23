@@ -74,6 +74,10 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 		Masked:    masked,
 		Shared:    req.Shared,
 	}, time.Now().UTC()); err != nil {
+		if errors.Is(err, store.ErrSecretLimit) {
+			writeError(w, http.StatusRequestEntityTooLarge, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

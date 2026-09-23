@@ -76,6 +76,7 @@ func (s *Server) runStorageMaintenance(ctx context.Context, interval time.Durati
 }
 
 func (s *Server) maintainStorage(ctx context.Context) {
+	s.seedCloudRetention(ctx)
 	settings, err := s.store.StorageSettings(ctx)
 	if err != nil {
 		s.logger.Error("storage settings read failed", "err", err)
@@ -94,6 +95,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
+	s.maintainTeamStorage(ctx, now)
 	s.billRetainedStorage(ctx, now)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {
@@ -245,6 +247,7 @@ type storageStateJSON struct {
 	Alarm    bool                `json:"alarm"`
 	Quotas   []storageQuotaJSON  `json:"quotas,omitempty"`
 	Teams    []storageTeamJSON   `json:"largest_teams,omitempty"`
+	Team     *teamStandingJSON   `json:"team,omitempty"`
 }
 
 func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +287,10 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 			RetainedBytes: retained,
 		},
 		Alarm: alarm,
+	}
+	if out.Team, err = s.callerStorageStanding(r); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if admin {
 		if sampled {

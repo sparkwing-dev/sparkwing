@@ -53,11 +53,9 @@ func configureIdentity(srv *controller.Server, f identityFlags, logger *slog.Log
 		return fmt.Errorf("--signup-gate: %w", err)
 	}
 	srv.WithSignUpWaitlist(gate == store.SignUpWaitlist)
-	// hack: the storage pass that reports the free tier is being redesigned; once the server
-	// implements FreeTierSource itself, this wires it with no further change here.
-	if src, ok := any(srv).(controller.FreeTierSource); ok {
-		srv.WithFreeTier(src)
-	}
+	// safety: the server counts the free-team slots itself, so a multi-team
+	// controller's gate always reads the free tier and never treats it as open.
+	srv.WithFreeTier(srv)
 	srv.CheckFreeTierSource()
 
 	google, err := providerConfigured("Google", "google", f.GoogleClientID, f.GoogleClientSecret)

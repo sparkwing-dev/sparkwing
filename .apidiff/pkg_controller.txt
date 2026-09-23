@@ -56,6 +56,7 @@ type Cipher interface {
 	Open(envelope string) (string, error)
 }
 const ClaimPollInterval = 500 * time.Millisecond
+const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
@@ -82,6 +83,7 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
+const FreeRunLimitRetryAfterSeconds = 3600
 const FreeTierClosed FreeTierState = "closed"
 type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
 func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
@@ -295,6 +297,7 @@ func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
 func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
 func (s *Server) Shutdown(ctx context.Context) error
+func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAssistedRunScope(runID string) *Server
@@ -352,6 +355,11 @@ type SourceTokenResponse struct {
 	Repository string
 }
 const StorageMaintenanceInterval = time.Hour
+type StorageTierResponse struct {
+	Team           string
+	Tier           storagequota.Tier
+	AllowanceBytes int64
+}
 const TeamDeletionInterval = time.Minute
 type TeamStorage struct {
 	LogsURL   string

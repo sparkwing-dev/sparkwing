@@ -32,6 +32,20 @@ type FreeTierSource interface {
 	SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 }
 
+// SignUpFreeTier reports the free tier closed once every free-team slot is
+// taken, and open while one is left. A slot count it cannot read is an
+// error, never open, so a sign-up gate reading it fails closed.
+func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error) {
+	taken, limit, err := s.store.FreeSlots(ctx)
+	if err != nil {
+		return FreeTierUnreadable, fmt.Errorf("read free-team slots: %w", err)
+	}
+	if taken >= limit {
+		return FreeTierClosed, nil
+	}
+	return FreeTierOpen, nil
+}
+
 // FreeTierFunc adapts a function to [FreeTierSource].
 type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
 

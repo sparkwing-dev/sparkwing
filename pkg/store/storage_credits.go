@@ -589,15 +589,17 @@ type retainedRun struct {
 
 // safety: a run still writing its own history keeps every byte of it, and a
 // zero cutoff means the customer's own ceiling rather than the drain, so the
-// age bound applies only when one was given.
+// age bound applies only when one was given. The bound is measured from when
+// a run finished, so a long run is not drained the moment it ends.
 func (s *Store) oldestRetainedRuns(
 	ctx context.Context, h storageHolder, before time.Time,
 ) (_ []retainedRun, err error) {
 	query := `
 SELECT u.run_id, u.bytes
   FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + ` AND r.created_at < ?
- ORDER BY r.created_at ASC, u.run_id ASC
+ WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + `
+   AND r.finished_at IS NOT NULL AND r.finished_at < ?
+ ORDER BY r.finished_at ASC, u.run_id ASC
  LIMIT ?`
 	bound := int64(math.MaxInt64)
 	if !before.IsZero() {
@@ -639,9 +641,18 @@ func (s *Store) expireRunStorage(ctx context.Context, principal, runID string) (
 	if err != nil {
 		return 0, err
 	}
+	var held sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT bytes FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
+		principal, runID).Scan(&held); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM storage_run_usage WHERE principal = ? AND run_id = ?`,
 		principal, runID); err != nil {
+		return 0, err
+	}
+	if err := addFreeEventBytesTx(ctx, tx, team, -held.Int64); err != nil {
 		return 0, err
 	}
 	if err := dropSpentStorageWatermarkTx(ctx, tx, team, principal); err != nil {

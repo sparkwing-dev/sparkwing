@@ -233,6 +233,11 @@ func run(args []string) error {
 			"s3://bucket/prefix. It is read on the reconciliation interval and never "+
 			"served, so the controller exposes none of it. Empty counts only the writes "+
 			"this process makes (env: SPARKWING_OBJECT_STORE_URL)")
+	freeTeamSlots := fs.Int64("free-team-slots", store.DefaultFreeTeamSlots,
+		"teams without credits that may hold a free-tier slot on a multi-team controller. A team takes "+
+			"one when it first starts a run and keeps it until the team is deleted, so free storage never "+
+			"passes this many allowances; a team with neither credits nor a slot is refused. Lowering it "+
+			"takes no slot back")
 	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
 		"listings one bucket measurement may spend before it stops and reports itself "+
 			"incomplete. Each listing covers a thousand objects, so the default bounds a "+
@@ -509,6 +514,15 @@ func run(args []string) error {
 		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
 		return err
 	}
+	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
+		return err
+	}
+	if *freeTeamSlots < 0 {
+		return fmt.Errorf("--free-team-slots must not be negative; pass 0 to admit no team without credits")
+	}
+	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
+		return fmt.Errorf("--free-team-slots: %w", err)
+	}
 	// The license decides whether an empty tokens table may serve
 	// unauthenticated, so auth is resolved after it is installed.
 	srv.EnableAuthFromStore()
@@ -755,6 +769,19 @@ func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey,
 			"the operator token could otherwise mint a grant for any team")
 	}
 	return nil
+}
+
+// checkMultiTeamObjectStore refuses to start a multi-team controller with no
+// object store. A free team is held to its allowance only by the counters the
+// cache and logs services keep over the object store; the disk-backed cache
+// and log volume enforce no allowance at all.
+func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) error {
+	if !srv.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
+		return nil
+	}
+	return errors.New("the license allows more than one team, so an object store is required: set --bucket-store " +
+		"(or SPARKWING_OBJECT_STORE_URL) to the s3:// store the cache (--blob-store) and the logs service " +
+		"(--archive-store) keep their objects in, because free-tier allowances are enforced only there")
 }
 
 // safety: a multi-team controller holds other people's credentials, so it

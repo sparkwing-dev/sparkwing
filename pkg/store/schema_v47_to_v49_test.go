@@ -33,6 +33,7 @@ func downgradeToV47(t *testing.T, st *store.Store) {
 		`DROP INDEX IF EXISTS ` + store.TriggerWebhookDeliveryIndexName,
 		`DROP INDEX IF EXISTS ` + store.TriggerWebhookReplayKeyIndexName,
 		`DROP INDEX IF EXISTS idx_credit_grants_team_reference`,
+		`DROP INDEX IF EXISTS idx_triggers_team_created`,
 	}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)

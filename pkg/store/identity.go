@@ -111,7 +111,7 @@ const RunnerTokenLifetime = 90 * 24 * time.Hour
 // life, their personal space included, because each team is a tenant the
 // deployment pays to hold and a deleted team's slug is never reused.
 // Deleting a team does not give the creation back.
-const MaxCreatedTeams = 10
+const MaxCreatedTeams = 3
 
 // Identity errors. Callers map these onto status codes.
 var (
@@ -714,7 +714,9 @@ func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, dis
 		return TeamInfo{}, ErrWaitlisted
 	}
 	if created >= MaxCreatedTeams {
-		return TeamInfo{}, ErrTeamLimit
+		return TeamInfo{}, fmt.Errorf(
+			"%w: one user creates at most %d teams, the personal team included, and this user has created %d",
+			ErrTeamLimit, MaxCreatedTeams, created)
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, now); err != nil {
 		return TeamInfo{}, err

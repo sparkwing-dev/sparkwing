@@ -36,6 +36,8 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		// safety: cloud providers fetch OIDC metadata and keys unauthenticated; both answer 404 without a key.
 		"GET /.well-known/openid-configuration": true,
 		"GET /.well-known/jwks.json":            true,
+		// safety: the cache proves itself with its operator token, which the handler checks itself.
+		"GET /internal/teams/{team}/storage-tier": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {

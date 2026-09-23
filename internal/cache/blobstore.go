@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
@@ -41,10 +42,29 @@ var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, erro
 		return nil, err
 	}
 	return teamblob.New(teamblob.Options{
-		Bucket: bucket,
-		Prefix: prefix,
-		Client: client,
+		Bucket:           bucket,
+		Prefix:           prefix,
+		Client:           client,
+		TeamObjectMaxAge: teamBlobMaxAge,
+		// safety: a cache that verifies grants holds teams to their share
+		// over the count, so it lists the bucket at start rather than trust
+		// a saved count a crash left behind.
+		ReconcileAtStart: grantKey != "",
 	})
+}
+
+// TeamBlobMaxAge is how long a team's binary, dependency archive or
+// artifact lasts after it was last written. The daily reconcile deletes it
+// in the listing it already makes, so the running count stays exact.
+const TeamBlobMaxAge = 30 * 24 * time.Hour
+
+// safety: the operator's own runs write under its team's namespace too, and a
+// self-hosted install keeps them as long as it keeps its volume trees.
+func teamBlobMaxAge(team string) time.Duration {
+	if team == authwire.OperatorTeam {
+		return 0
+	}
+	return TeamBlobMaxAge
 }
 
 // blobScratchDir stages a binary upload whose digest must be known
@@ -158,11 +178,19 @@ func writeBinHeaders(w http.ResponseWriter, o teamblob.Object) bool {
 	return true
 }
 
+// maxBinBytes caps one binary upload.
+const maxBinBytes = 100 << 20
+
 // putBinBlob stages the body on the volume to learn its digest, then
 // writes it with the digest as object metadata, so a reader gets both
 // from one request.
 func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) {
-	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBinBytes)
+	release, body, ok := reserveBlobWrite(w, r, team, r.ContentLength, maxBinBytes)
+	if !ok {
+		return
+	}
+	defer release()
 	if err := os.MkdirAll(blobScratchDir(), 0o700); err != nil {
 		http.Error(w, "write error", http.StatusInternalServerError)
 		return
@@ -180,9 +208,11 @@ func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) 
 		}
 	}()
 	sum := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, sum), r.Body)
+	n, err := io.Copy(io.MultiWriter(tmp, sum), body)
 	if err != nil {
-		http.Error(w, "read error", http.StatusBadRequest)
+		if !quotaCut(w, err, "binary") {
+			http.Error(w, "read error", http.StatusBadRequest)
+		}
 		return
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
@@ -291,8 +321,16 @@ func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, siz
 		blobError(w, "put "+what, err)
 		return 0, false
 	}
-	wr, err := blobStore.Put(r.Context(), team, rel, r.Body, teamblob.PutOptions{Size: size, ContentType: contentType})
+	release, body, ok := reserveBlobWrite(w, r, team, size, limit)
+	if !ok {
+		return 0, false
+	}
+	defer release()
+	wr, err := blobStore.Put(r.Context(), team, rel, body, teamblob.PutOptions{Size: size, ContentType: contentType})
 	if err != nil {
+		if quotaCut(w, err, what) {
+			return 0, false
+		}
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			http.Error(w, fmt.Sprintf("%s exceeds the %d byte upload limit", what, limit), http.StatusRequestEntityTooLarge)

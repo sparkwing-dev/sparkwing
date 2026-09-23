@@ -2015,9 +2015,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyGitHubAppMigrationSQLite(ctx, tx)
 	case 55:
 		return applyDeletionMigrationSQLite(ctx, tx)
-	// safety: v56 and v57 are allocated to billing and storage quotas, which
-	// land separately; these steps keep the ladder gapless until they do.
-	case 56, 57:
+	case 56:
+		return applyFreeSlotsMigrationSQLite(ctx, tx)
+	// safety: v57 is allocated to billing, which lands separately; this step
+	// keeps the ladder gapless until it does.
+	case 57:
 		return nil
 	case 58:
 		return applySignUpGateMigrationSQLite(ctx, tx)
@@ -2396,9 +2398,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyGitHubAppMigrationPostgres(ctx, tx)
 	case 55:
 		return applyDeletionMigrationPostgres(ctx, tx)
-	// safety: v56 and v57 are allocated to billing and storage quotas, which
-	// land separately; these steps keep the ladder gapless until they do.
-	case 56, 57:
+	case 56:
+		return applyFreeSlotsMigrationPostgres(ctx, tx)
+	// safety: v57 is allocated to billing, which lands separately; this step
+	// keeps the ladder gapless until it does.
+	case 57:
 		return nil
 	case 58:
 		return applySignUpGateMigrationPostgres(ctx, tx)
@@ -6701,6 +6705,9 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 }
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
+	if err := admitFreeTeamRunTx(ctx, tx, team, time.Now()); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status

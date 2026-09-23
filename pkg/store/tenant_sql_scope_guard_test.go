@@ -84,6 +84,11 @@ var reviewedUnscopedSQL = map[string]string{
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).usageRuns": "counts every team's runs per week for the operator's usage metrics, " +
 		"which report totals across teams and name none",
+	"(*Store).expiredRetainedRuns": "the retention window is the deployment's, so the sweep finds every team's " +
+		"expired runs and releases each against the team read off its own row",
+	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
+		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
+	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 }

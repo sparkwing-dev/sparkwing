@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -56,6 +58,9 @@ const (
 	// DefaultArchiveInterval is how often the archiver looks for idle
 	// runs. Looking walks the volume and sends no request.
 	DefaultArchiveInterval = time.Minute
+	// DefaultArchiveRetention is the retention a logs service with an
+	// archive starts with when the operator named none.
+	DefaultArchiveRetention = 30 * 24 * time.Hour
 	// DefaultPruneInterval is how often retention lists the day index,
 	// one LIST request when nothing has expired.
 	DefaultPruneInterval = time.Hour
@@ -84,7 +89,13 @@ type archive struct {
 	opts  ArchiveOptions
 	locks sync.Map // runID -> *runLock
 
+	volume *volumeUsage
+	// quota holds each team's appends to its log share, counted over the
+	// store and the volume.
+	quota *storagequota.Quota
+
 	mu        sync.Mutex
+	restored  bool
 	absent    map[string]time.Time
 	failures  int
 	retryAt   time.Time
@@ -142,11 +153,14 @@ func (s *Server) WithArchive(opts ArchiveOptions) *Server {
 	if opts.PruneInterval <= 0 {
 		opts.PruneInterval = DefaultPruneInterval
 	}
+	volume := &volumeUsage{teams: map[string]int64{}}
 	s.archive = &archive{
 		store:   opts.Store,
 		opts:    opts,
 		absent:  map[string]time.Time{},
 		backoff: objectguard.Backoff{Base: 30 * time.Second, Max: maxArchiveBackoff},
+		volume:  volume,
+		quota:   newLogQuota(opts.Store, volume),
 	}
 	return s
 }
@@ -809,10 +823,22 @@ func (s *Server) startArchive(ctx context.Context) {
 	if a == nil {
 		return
 	}
-	go a.store.Maintain(ctx, a.opts.UsageReconcile, 5*time.Minute, func(op string, err error) {
-		s.logger.Error("logs archive", "op", op, "err", err)
-	})
+	report := func(op string, err error) { s.logger.Error("logs archive", "op", op, "err", err) }
+	a.mu.Lock()
+	restored := a.restored
+	a.mu.Unlock()
+	if restored {
+		go a.store.Keep(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
+	} else {
+		go a.store.Maintain(ctx, a.opts.UsageReconcile, 5*time.Minute, report)
+	}
+	if err := storagequota.RegisterMetric(otelutil.Meter("sparkwing-logs"), "logs", a.quota); err != nil {
+		s.logger.Error("logs archive", "op", "register free storage metric", "err", err)
+	}
 	go func() {
+		if err := s.MeasureVolumeUsage(ctx); err != nil {
+			s.logger.Error("logs archive", "op", "measure volume usage", "err", err)
+		}
 		t := time.NewTicker(a.opts.Interval)
 		defer t.Stop()
 		for {
@@ -822,6 +848,9 @@ func (s *Server) startArchive(ctx context.Context) {
 			case now := <-t.C:
 				if n, err := s.ArchiveOnce(ctx, now); err != nil {
 					s.logger.Error("logs archive", "op", "archive", "archived", n, "err", err)
+				}
+				if err := s.MeasureVolumeUsage(ctx); err != nil {
+					s.logger.Error("logs archive", "op", "measure volume usage", "err", err)
 				}
 				a.mu.Lock()
 				due := now.Sub(a.lastPrune) >= a.opts.PruneInterval

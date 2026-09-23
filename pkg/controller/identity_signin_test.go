@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,13 +140,20 @@ func TestAccountSessionsStopWithoutALicense(t *testing.T) {
 func TestTeamCreationIsCappedPerUser(t *testing.T) {
 	f := newIdentityFixture(t)
 	s := sessionAuth(f.signIn(person("g-c", "cap@example.com", "Cap")).SessionID)
-	for i := 2; i <= store.MaxCreatedTeams; i++ {
+	// The personal team is the first of three.
+	for i := 2; i <= 3; i++ {
 		if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": fmt.Sprintf("cap-team-%d", i)}, nil); code != http.StatusCreated {
 			t.Fatalf("team %d = %d", i, code)
 		}
 	}
-	if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": "cap-overflow"}, nil); code != http.StatusForbidden {
-		t.Fatalf("team past the cap = %d, want 403", code)
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": "cap-overflow"}, &refusal); code != http.StatusForbidden {
+		t.Fatalf("fourth team = %d, want 403", code)
+	}
+	if !strings.Contains(refusal.Error, "at most 3 teams") {
+		t.Fatalf("refusal = %q, want it to name the cap of 3 teams", refusal.Error)
 	}
 }
 

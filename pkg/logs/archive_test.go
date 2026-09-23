@@ -21,6 +21,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -132,6 +133,13 @@ type archiveFixture struct {
 
 func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 	t.Helper()
+	return newArchiveFixtureWith(t, retention, nil)
+}
+
+// newArchiveFixtureWith has the fake controller answer each team's claim
+// checks with the storage tier standings names for it.
+func newArchiveFixtureWith(t *testing.T, retention time.Duration, standings map[string]storagequota.Standing) *archiveFixture {
+	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
@@ -164,6 +172,10 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 		if r.URL.Path == "/api/v1/auth/whoami" {
 			_ = json.NewEncoder(w).Encode(p)
 			return
+		}
+		if s, ok := standings[p.Team]; ok {
+			w.Header().Set(storagequota.TierHeader, string(s.Tier))
+			w.Header().Set(storagequota.AllowanceHeader, fmt.Sprint(s.AllowanceBytes))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))

@@ -168,6 +168,7 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/quotas/{principal}` | `admin` |
 | `PUT` | `/api/v1/storage/quotas/{principal}/allowance` | `admin` |
 | `PUT` | `/api/v1/storage/settings` | `admin` |
+| `PUT` | `/api/v1/storage/teams/{team}/free-slot` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
@@ -215,6 +216,7 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
 | `DELETE` | `/api/v1/webhooks/github/bindings` | `admin` |
 | `POST` | `/api/v1/webhooks/github/bindings` | `admin` |
+| `GET` | `/internal/teams/{team}/storage-tier` | `public` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github-app` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |

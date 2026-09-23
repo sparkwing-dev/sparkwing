@@ -37,6 +37,8 @@ type counting struct {
 	failOn map[string]error
 	// keepKey makes a batch delete report the matching keys as failed.
 	keepKey func(key string) bool
+	// afterList runs once a listing has answered, before the caller sees it.
+	afterList func(in *s3.ListObjectsV2Input)
 }
 
 func (c *counting) note(op string) error {
@@ -129,7 +131,11 @@ func (c *counting) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input,
 	if err := c.note("ListObjectsV2"); err != nil {
 		return nil, err
 	}
-	return c.Client.ListObjectsV2(ctx, in, o...)
+	out, err := c.Client.ListObjectsV2(ctx, in, o...)
+	if c.afterList != nil {
+		c.afterList(in)
+	}
+	return out, err
 }
 
 func (c *counting) CreateMultipartUpload(ctx context.Context, in *s3.CreateMultipartUploadInput, o ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
@@ -585,5 +591,111 @@ func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 	}
 	if u := f.store.Usage().Team("team-a"); u.Objects != 2 {
 		t.Fatalf("a refused batch moved the count: %+v", u)
+	}
+}
+
+// A store with a maximum age deletes a team's old objects in the reconcile's
+// own listing, and the count drops with them; the operator's objects stay.
+func TestReconcileExpiresOldTeamObjects(t *testing.T) {
+	ctx := context.Background()
+	clock := time.Now()
+	f := newFixture(t, teamblob.Options{
+		TeamObjectMaxAge: func(team string) time.Duration {
+			if team == "keeper" {
+				return 0
+			}
+			return time.Hour
+		},
+		Now: func() time.Time { return clock },
+	})
+	put(t, f.store, "team-a", "artifacts/run-1/old.txt", "old!")
+	put(t, f.store, "keeper", "artifacts/run-1/old.txt", "kept")
+	put(t, f.store, "", "bins/operator", "kept")
+
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 4 || got.Objects != 1 {
+		t.Fatalf("a fresh object after reconcile = %+v, want it kept", got)
+	}
+	clock = clock.Add(2 * time.Hour)
+	f.client.reset()
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 0 || got.Objects != 0 {
+		t.Fatalf("team-a after its object aged out = %+v, want nothing", got)
+	}
+	if objs, err := f.store.List(ctx, "team-a", "artifacts/"); err != nil || len(objs) != 0 {
+		t.Fatalf("team-a still lists %v, %v", objs, err)
+	}
+	if _, err := f.store.Head(ctx, "", "bins/operator"); err != nil {
+		t.Fatalf("the operator's object was expired: %v", err)
+	}
+	if got := f.store.Usage().Team("keeper"); got.Objects != 1 {
+		t.Fatalf("a team with no maximum age = %+v, want its object kept", got)
+	}
+	if n := f.client.count("DeleteObjects"); n != 1 {
+		t.Fatalf("expiry sent %d batch deletes, want one", n)
+	}
+}
+
+// A process that crashed between saves leaves a saved count behind its
+// writes. With ReconcileAtStart the next process lists the store at start
+// and counts them; without it the saved count stands until the next
+// scheduled reconcile.
+func TestRestoreReconcilesAtStartWhenAsked(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, teamblob.Options{})
+	put(t, f.store, "team-a", "cache/saved", "12345")
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SaveUsage(ctx); err != nil {
+		t.Fatal(err)
+	}
+	put(t, f.store, "team-a", "cache/unsaved", "1234567890")
+
+	for _, c := range []struct {
+		atStart bool
+		want    int64
+	}{{false, 5}, {true, 15}} {
+		next, err := teamblob.New(teamblob.Options{Bucket: bucket, Prefix: "svc", Client: f.client, ReconcileAtStart: c.atStart})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := next.Restore(ctx, 24*time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if got := next.Usage().Team("team-a").Bytes; got != c.want {
+			t.Errorf("reconcile at start %v: team-a = %d bytes, want %d", c.atStart, got, c.want)
+		}
+	}
+}
+
+// A write that lands after the reconcile listed its team but before the
+// reconcile replaced the count must survive the replacement.
+func TestAPutDuringTheReconcileListingIsNeverLost(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t, teamblob.Options{})
+	put(t, f.store, "team-a", "cache/listed", "12345")
+	var once sync.Once
+	f.client.afterList = func(in *s3.ListObjectsV2Input) {
+		if in.Delimiter == nil && strings.Contains(aws.ToString(in.Prefix), "teams/team-a/") {
+			once.Do(func() { put(t, f.store, "team-a", "cache/late", "1234567890") })
+		}
+	}
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes < 15 || got.Objects < 2 {
+		t.Fatalf("team-a after a put during the listing = %+v, want both objects counted", got)
+	}
+	f.client.afterList = nil
+	if err := f.store.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.store.Usage().Team("team-a"); got.Bytes != 15 || got.Objects != 2 {
+		t.Fatalf("team-a after a quiet reconcile = %+v, want exactly 15 bytes in 2 objects", got)
 	}
 }

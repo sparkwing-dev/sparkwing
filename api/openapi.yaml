@@ -4054,6 +4054,37 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
+  /api/v1/storage/teams/{team}/free-slot:
+    parameters:
+      - in: path
+        name: team
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: admin
+      tags: [storage]
+      summary: Grant a team a free-tier slot.
+      description: |
+        Admits a team without credits to the free tier whether or not a slot
+        is left, which is how an operator admits a team once every one of
+        `--free-team-slots` is taken. The slot lasts until the team is
+        deleted. The answer is the team's tier and the allowance its
+        per-store shares are cut from.
+      responses:
+        "200":
+          description: The team's storage tier.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/controller.StorageTierResponse
+                properties:
+                  team: {type: string}
+                  tier: {type: string, enum: [funded, free, none]}
+                  allowance_bytes: {type: integer, format: int64}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
@@ -5630,6 +5661,19 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
 
+  /internal/teams/{team}/storage-tier:
+    parameters:
+      - in: path
+        name: team
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: public
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -6339,6 +6383,19 @@ components:
         alarm: {type: boolean, description: Whether the last size sample passed the alarm size.}
         quotas: {type: array, description: Every team with a quota row; admin only., items: {$ref: "#/components/schemas/StorageQuota"}}
         largest_teams: {type: array, description: The month's heaviest teams; admin only., items: {$ref: "#/components/schemas/StorageTeamUsage"}}
+        team: {$ref: "#/components/schemas/TeamStorageStanding"}
+    TeamStorageStanding:
+      x-sparkwing-go-type: pkg/controller.teamStandingJSON
+      type: object
+      description: "A signed-up caller's own team on a multi-team controller: its free-tier standing and the per-store shares of its allowance."
+      properties:
+        team: {type: string}
+        tier: {type: string, enum: [funded, free, none], description: "funded stores without a byte limit; free holds a free-tier slot; none has neither credits nor a slot."}
+        allowance_bytes: {type: integer, format: int64, description: "The whole free allowance the shares are cut from."}
+        cache_share_bytes: {type: integer, format: int64, description: "Three quarters of the allowance, what the cache holds a free team to."}
+        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the logs service holds a free team to."}
+        event_share_bytes: {type: integer, format: int64, description: "One sixteenth of the allowance, what the team's run events are held to."}
+        event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
     ComputeLimits:
       x-sparkwing-go-type: pkg/controller.computeLimitsJSON
       type: object

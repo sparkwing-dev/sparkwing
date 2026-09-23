@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -300,5 +303,26 @@ func TestTheCacheDailyCapRefusesEveryDownloadPastIt(t *testing.T) {
 	if got.header.Get("Retry-After") == "" || !strings.Contains(string(got.body), egress.FlagDailyCapBytes) {
 		t.Fatalf("the refusal carries Retry-After %q and body %q, want both naming the reset and the flag",
 			got.header.Get("Retry-After"), got.body)
+	}
+}
+
+// With a bucket, the day's egress total survives a restart: a cache that
+// restarts mid-day resumes the spent amount rather than a fresh daily cap.
+func TestARestartMidDayKeepsTheSpentEgress(t *testing.T) {
+	var cfg Config
+	newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) {
+		c.EgressDailyCapBytes = 1000
+		cfg = *c
+	})
+	egressMeter.Record(BearerPrincipal, egress.ClassArtifact, 600)
+	if err := flushEgressDay(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	egressMeter = nil
+	if _, err := New(cfg); err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if got := egressMeter.State().GlobalDayBytes; got != 600 {
+		t.Fatalf("day total after a restart = %d, want the 600 spent before it", got)
 	}
 }

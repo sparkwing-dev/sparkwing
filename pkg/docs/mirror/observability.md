@@ -689,6 +689,12 @@ measurement that finds the store back under its ceiling thaws it.
 warning on health without refusing anything. The chart carries all of
 these as `cache.limits.*` and `logs.limits.*`.
 
+Both services also export `sparkwing_free_storage_used_bytes{store="cache"}`
+and `{store="logs"}`: the bytes teams without credits hold there, writes in
+flight included, read from the same counts that hold each team to its share
+of the free allowance ([Tenant limits](limits.md)). The free-team slot count
+bounds that sum, so alert on it when `--free-team-slots` oversubscribes.
+
 Neither service waits out the interval to recover. Deleting a run with
 `DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
 `--retention`, starts a fresh measurement of the log store, so appends
@@ -818,9 +824,12 @@ resumes the month rather than handing everyone a fresh budget and resumes
 the day rather than reopening the daily cap, and no response costs a
 store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
-on every tick. The logs service and the cache count in memory alone: they
-park nothing for a flush that will never come, and their counters start
-over on a restart.
+on every tick. A cache with `--blob-store` keeps its own total for the
+UTC day as one small object, `egress/<date>.json` in the bucket's operator
+namespace, written at most once a minute and at shutdown and read back at
+start, so a restart mid-day keeps the daily cap spent. A cache without a
+bucket and the logs service count in memory alone: their counters are per
+process and start over on a restart.
 
 Read the controller's meter, including the principals that have
 downloaded the most this month, with `GET /api/v1/egress` on an `admin`
