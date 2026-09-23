@@ -332,21 +332,32 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		return
 	}
 
-	if payload.Deleted {
+	if payload.Deleted || strings.Trim(payload.After, "0") == "" {
+		reason := "branch deleted"
+		if strings.HasPrefix(payload.Ref, "refs/tags/") {
+			reason = "tag deleted"
+		}
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status": "ignored",
-			"reason": "branch deleted",
+			"reason": reason,
 		})
 		return
 	}
-	branch, ok := strings.CutPrefix(payload.Ref, "refs/heads/")
-	if !ok {
+	branch, isBranch := strings.CutPrefix(payload.Ref, "refs/heads/")
+	tag, isTag := strings.CutPrefix(payload.Ref, "refs/tags/")
+	if (!isBranch && !isTag) || (isBranch && branch == "") || (isTag && tag == "") {
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status": "ignored",
-			"reason": "non-branch ref",
+			"reason": "non-branch or tag ref",
 			"ref":    payload.Ref,
 		})
 		return
+	}
+	if !isBranch {
+		branch = ""
+	}
+	if !isTag {
+		tag = ""
 	}
 
 	runID := newRunID()
@@ -359,7 +370,13 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		"GITHUB_REPOSITORY":          payload.Repository.FullName,
 		"GITHUB_BEFORE":              payload.Before,
 		"GITHUB_AFTER":               payload.After,
+		"GITHUB_REF":                 payload.Ref,
 		sparkwing.EnvGitHubEventName: githubEventPush,
+	}
+	if isTag {
+		triggerEnv["GITHUB_REF_TYPE"], triggerEnv["GITHUB_TAG"] = "tag", tag
+	} else {
+		triggerEnv["GITHUB_REF_TYPE"] = "branch"
 	}
 	owner, repoName := "", ""
 	if parts := strings.SplitN(payload.Repository.FullName, "/", 2); len(parts) == 2 {

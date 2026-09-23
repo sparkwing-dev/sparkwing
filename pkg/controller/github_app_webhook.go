@@ -167,6 +167,7 @@ type githubAppPullRequestPayload struct {
 type githubAppIntake struct {
 	user   string
 	branch string
+	tag    string
 	sha    string
 	env    map[string]string
 	// at is when GitHub says the event happened, zero when the payload
@@ -202,15 +203,32 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 			return githubAppIntake{}, "", err
 		}
 		if p.Deleted || strings.Trim(p.After, "0") == "" {
+			if strings.HasPrefix(p.Ref, "refs/tags/") {
+				return githubAppIntake{}, "tag deleted", nil
+			}
 			return githubAppIntake{}, "branch deleted", nil
 		}
-		branch, ok := strings.CutPrefix(p.Ref, "refs/heads/")
-		if !ok || !githubCommit(p.After) {
-			return githubAppIntake{}, "not a branch push", nil
+		branch, isBranch := strings.CutPrefix(p.Ref, "refs/heads/")
+		tag, isTag := strings.CutPrefix(p.Ref, "refs/tags/")
+		if (!isBranch && !isTag) || (isBranch && branch == "") || (isTag && tag == "") || !githubCommit(p.After) {
+			return githubAppIntake{}, "not a branch or tag push", nil
+		}
+		if !isBranch {
+			branch = ""
+		}
+		if !isTag {
+			tag = ""
 		}
 		base["GITHUB_BEFORE"], base["GITHUB_AFTER"] = p.Before, p.After
+		base["GITHUB_REF"] = p.Ref
+		base[sparkwing.EnvGitHubEventName] = githubEventPush
+		if isTag {
+			base["GITHUB_REF_TYPE"], base["GITHUB_TAG"] = "tag", tag
+		} else {
+			base["GITHUB_REF_TYPE"] = "branch"
+		}
 		return githubAppIntake{
-			user: p.Pusher.Name, branch: branch, sha: p.After, env: base, at: githubPushedAt(p.Repository.PushedAt),
+			user: p.Pusher.Name, branch: branch, tag: tag, sha: p.After, env: base, at: githubPushedAt(p.Repository.PushedAt),
 		}, "", nil
 	}
 	if _, built := defaultPullRequestActions[env.Action]; !built {
@@ -319,7 +337,8 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	}
 	var wanted []store.GitHubAppTrigger
 	for _, sub := range subs {
-		if (event == "push" && sub.Push) || (event == "pull_request" && sub.PullRequest) {
+		if (event == "push" && ((intake.tag != "" && sub.Tags) || (intake.tag == "" && sub.Push))) ||
+			(event == "pull_request" && sub.PullRequest) {
 			wanted = append(wanted, sub)
 		}
 	}

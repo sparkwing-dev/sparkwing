@@ -22,6 +22,8 @@ unlock.
 
 ### Added
 
+- **controller:** GitHub App subscriptions can select tag pushes with `tags: true`; the default remains branch pushes only. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`. Operator GitHub webhooks also accept tag pushes. Store schema v63 adds the default-off subscription column.
+
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
   and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the

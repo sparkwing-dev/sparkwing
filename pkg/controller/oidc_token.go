@@ -185,6 +185,9 @@ func oidcClaimsFor(claimed store.ClaimedRun, run *store.Run, trig *store.Trigger
 		// safety: a pull request's head branch may share a protected branch's
 		// name, so its ref names the pull request and never refs/heads/.
 		c.Ref = "refs/pull/" + pullNumber(trig.TriggerEnv) + "/head"
+	case c.Trigger == oidcTriggerPush && trig != nil && trig.TriggerEnv["GITHUB_REF_TYPE"] == "tag" &&
+		trig.TriggerEnv["GITHUB_TAG"] != "" && trig.TriggerEnv["GITHUB_REF"] == "refs/tags/"+trig.TriggerEnv["GITHUB_TAG"]:
+		c.Ref = trig.TriggerEnv["GITHUB_REF"]
 	case branch != "":
 		c.Ref = "refs/heads/" + branch
 	}
