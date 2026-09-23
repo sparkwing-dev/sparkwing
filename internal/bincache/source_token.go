@@ -277,15 +277,24 @@ const credentialFD = 3
 
 // safety: the helper answers only git's get, from the inherited pipe, so a
 // store or erase writes the credential nowhere; the empty helper before it
-// drops every helper the ambient config names for the scope.
-const credentialHelper = `!f() { test "$1" != get || cat <&3; }; f`
+// drops every helper the ambient config names for the scope. It reads one
+// username and password line pair per ask, byte by byte as the shell reads
+// a pipe, so each of several git processes gets a whole pair.
+const credentialHelper = `!f() { test "$1" = get || return 0; IFS= read -r u <&3 && IFS= read -r p <&3 && printf '%s\n%s\n' "$u" "$p"; }; f`
 
 // withPipeCredential scopes the pipe's credential to scope in git config
 // carried by the environment. The config names only the helper; the
 // credential itself travels on [credentialFD].
 func withPipeCredential(env []string, scope string) []string {
+	key := "credential." + strings.TrimRight(scope, "/") + ".helper"
+	return withGitConfig(env, key, "", key, credentialHelper)
+}
+
+// withGitConfig appends key/value pairs to the git config the environment
+// carries (GIT_CONFIG_COUNT), after any it already carries.
+func withGitConfig(env []string, pairs ...string) []string {
 	count := 0
-	out := make([]string, 0, len(env)+5)
+	out := make([]string, 0, len(env)+len(pairs)+1)
 	for _, item := range env {
 		name, value, _ := strings.Cut(item, "=")
 		if name == "GIT_CONFIG_COUNT" {
@@ -296,24 +305,23 @@ func withPipeCredential(env []string, scope string) []string {
 		}
 		out = append(out, item)
 	}
-	key := "credential." + strings.TrimRight(scope, "/") + ".helper"
-	for _, value := range []string{"", credentialHelper} {
+	for i := 0; i+1 < len(pairs); i += 2 {
 		idx := strconv.Itoa(count)
-		out = append(out, "GIT_CONFIG_KEY_"+idx+"="+key, "GIT_CONFIG_VALUE_"+idx+"="+value)
+		out = append(out, "GIT_CONFIG_KEY_"+idx+"="+pairs[i], "GIT_CONFIG_VALUE_"+idx+"="+pairs[i+1])
 		count++
 	}
 	return append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(count))
 }
 
 // credentialPipe is the read end a fetch inherits as [credentialFD], already
-// holding the credential and closed for writing, so the helper reads it once
-// and then sees the end.
-func credentialPipe(username, secret string) (*os.File, error) {
+// holding the credential answers times over and closed for writing, so the
+// helper reads one per ask and then sees the end.
+func credentialPipe(username, secret string, times int) (*os.File, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
-	_, werr := io.WriteString(w, "username="+username+"\npassword="+secret+"\n")
+	_, werr := io.WriteString(w, strings.Repeat("username="+username+"\npassword="+secret+"\n", max(times, 1)))
 	cerr := w.Close()
 	if werr != nil || cerr != nil {
 		_ = r.Close()

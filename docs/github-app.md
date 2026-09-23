@@ -3,7 +3,7 @@
 The Sparkwing GitHub App connects a team to the GitHub repositories it controls. An installation proves control: GitHub lets only an account's owner install an App on it, so a binding from an installation to a team is something a team member cannot claim for a repository they do not administer. With an installation bound, a team gets:
 
 - push and pull request runs from the App's webhook, for the pipelines the team subscribes to each repository;
-- source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`;
+- source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories the pipeline declares in `source.extra_repos` ([extra repositories](git-credentials.md#extra-repositories));
 - commit statuses on the commits those runs build.
 
 A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out only tokens restricted to a single repository.

@@ -209,3 +209,42 @@ func TestRotateGitCredentialSecretsRewritesEveryTeam(t *testing.T) {
 		}
 	}
 }
+
+// The first declaration of a run's source.extra_repos binds it; a later one
+// must name the same set, and another team cannot declare for the run.
+func TestDeclareRunExtraReposBindsTheFirstDeclaration(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "run-1", Pipeline: "build"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, declared, err := acme.RunExtraRepos(ctx, "run-1"); err != nil || declared {
+		t.Fatalf("before any declaration = %v, %v; want undeclared", declared, err)
+	}
+	held, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"Acme/Lib", "acme/proto", "acme/lib"})
+	if err != nil || len(held) != 2 || held[0] != "acme/lib" || held[1] != "acme/proto" {
+		t.Fatalf("declare = %v, %v; want the two repositories, folded and sorted", held, err)
+	}
+	if _, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/proto", "acme/lib"}); err != nil {
+		t.Fatalf("the same set again = %v", err)
+	}
+	if _, err := acme.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/lib", "acme/proto", "acme/secrets"}); !errors.Is(err, store.ErrExtraReposDiffer) {
+		t.Fatalf("a wider set = %v, want ErrExtraReposDiffer", err)
+	}
+	if _, err := other.DeclareRunExtraRepos(ctx, "run-1", []string{"acme/secrets"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another team's declaration = %v, want ErrNotFound", err)
+	}
+	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "run-2", Pipeline: "build"}); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := acme.DeclareRunExtraRepos(ctx, "run-2", nil); err != nil || len(held) != 0 {
+		t.Fatalf("an empty declaration = %v, %v", held, err)
+	}
+	if _, declared, err := acme.RunExtraRepos(ctx, "run-2"); err != nil || !declared {
+		t.Fatalf("after an empty declaration = %v, %v; want declared", declared, err)
+	}
+	if _, err := acme.DeclareRunExtraRepos(ctx, "run-2", []string{"acme/lib"}); !errors.Is(err, store.ErrExtraReposDiffer) {
+		t.Fatalf("widening an empty declaration = %v, want ErrExtraReposDiffer", err)
+	}
+}

@@ -26,6 +26,40 @@ when the controller releases nothing, it fetches with the machine's own git
 config and credentials, and only from the repositories its list names. See
 [local-execution.md](local-execution.md#what-a-laptop-runner-trusts).
 
+## Extra repositories
+
+A pipeline whose checkout needs more of the team's private GitHub
+repositories, such as submodules, declares them in its entry of
+`.sparkwing/sparkwing.yaml`:
+
+```yaml
+pipelines:
+  - name: build
+    entrypoint: Build
+    source:
+      extra_repos: [acme/proto, acme/vendor-lib]
+```
+
+At most 10, as `owner/name`, all of the run repository's owner. By default a
+token reads only the run's repository, because a token for every repository
+of the installation would let a compromised pipeline read all of them.
+
+Right after it fetches the run's source, and before it compiles anything, the
+runner declares the list with `POST /api/v1/runs/{id}/source-declaration`.
+The first declaration binds the run: a later one naming a different set is
+refused, so pipeline code, which holds the same runner token afterwards,
+cannot widen it. When the list is not empty and the checkout has a
+`.gitmodules`, the runner asks for an App token that also reads the declared
+repositories, which the controller mints only when the installation covering
+the run's repository covers each of them, and runs
+`git submodule update --init --recursive --depth 1`. `url.insteadOf` rewrites
+a submodule's ssh URL on the credential's host to https, so the one token
+serves every submodule. When no installation covers the run, the team's
+stored github.com credential serves the submodules the same way, rewritten to
+its transport. `extra_repos` applies only to a run of a GitHub repository; a
+run of another host that declares any fails. A runner fetching with the
+machine's own credentials leaves submodules out.
+
 ## Store a credential
 
 A team owner stores one credential per host, under **Team > Git

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -421,4 +422,69 @@ func selectGitCredentialsTx(ctx context.Context, tx *storeTx) (_ []GitCredential
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// triggerSourceExtraReposCols holds the source.extra_repos a run's runner
+// declared, comma-separated; NULL until the first declaration.
+var triggerSourceExtraReposCols = map[string]string{
+	"source_extra_repos": "TEXT",
+}
+
+// ErrExtraReposDiffer refuses a declaration of a run's source.extra_repos
+// that differs from the one the run already holds.
+var ErrExtraReposDiffer = errors.New("store: the run already declared a different source.extra_repos")
+
+// DeclareRunExtraRepos binds runID's source.extra_repos to repos the first
+// time it is called for the run, and returns what the run holds. Every later
+// declaration must name the same set, so pipeline code that runs after the
+// runner's own declaration cannot widen it. ErrNotFound when the team has no
+// trigger runID.
+func (t *Tenant) DeclareRunExtraRepos(ctx context.Context, runID string, repos []string) ([]string, error) {
+	declared := strings.Join(normalizeExtraRepos(repos), ",")
+	if _, err := t.s.exec(ctx, `
+		UPDATE triggers SET source_extra_repos = ?
+		WHERE team = ? AND id = ? AND source_extra_repos IS NULL`, declared, string(t.team), runID); err != nil {
+		return nil, err
+	}
+	held, ok, err := t.RunExtraRepos(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || strings.Join(held, ",") != declared {
+		return held, ErrExtraReposDiffer
+	}
+	return held, nil
+}
+
+// RunExtraRepos returns the source.extra_repos runID declared, and whether
+// it declared any list at all. ErrNotFound when the team has no trigger
+// runID.
+func (t *Tenant) RunExtraRepos(ctx context.Context, runID string) ([]string, bool, error) {
+	var held sql.NullString
+	err := t.s.queryRow(ctx, `SELECT source_extra_repos FROM triggers WHERE team = ? AND id = ?`,
+		string(t.team), runID).Scan(&held)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, notFound("trigger", runID)
+	}
+	if err != nil || !held.Valid {
+		return nil, false, err
+	}
+	if held.String == "" {
+		return []string{}, true, nil
+	}
+	return strings.Split(held.String, ","), true, nil
+}
+
+func normalizeExtraRepos(repos []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(repos))
+	for _, r := range repos {
+		r = strings.ToLower(strings.TrimSpace(r))
+		if r != "" && !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

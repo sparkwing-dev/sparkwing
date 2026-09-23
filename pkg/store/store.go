@@ -2030,6 +2030,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	case 60:
 		return applyCreditCheckoutMigrationSQLite(ctx, tx)
 	case 61:
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerSourceExtraReposCols); err != nil {
+			return err
+		}
 		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTableSQLite)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2421,6 +2424,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	case 60:
 		return applyCreditCheckoutMigrationPostgres(ctx, tx)
 	case 61:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerSourceExtraReposCols); err != nil {
+			return err
+		}
 		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTablePostgres)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)

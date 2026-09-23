@@ -265,6 +265,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 			ControllerURL: opts.ControllerURL, RunnerToken: opts.Token, RunID: trigger.ID,
 			RepoURL: repoURL, Branch: branch, SHA: sha, WorkDir: workDir,
 			OwnerCredentials: !opts.AllowRepos.Empty(),
+			ExtraRepos:       orchestrator.PipelineExtraRepos(trigger.Pipeline),
 		}, logger)
 	case workspaceSource:
 		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,

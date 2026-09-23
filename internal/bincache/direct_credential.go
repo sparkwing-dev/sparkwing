@@ -28,6 +28,9 @@ type RunSource struct {
 	// releases none. Every other runner fetches only with what the
 	// controller releases for the run.
 	OwnerCredentials bool
+	// ExtraRepos reads the run pipeline's source.extra_repos from the
+	// fetched checkout. Nil skips the declaration and submodules.
+	ExtraRepos func(checkout string) ([]string, error)
 }
 
 // FetchRunSourceDirect resolves the run's source credential and checks out
@@ -36,14 +39,22 @@ type RunSource struct {
 // the team stored for the repository's host. When it releases none, a runner
 // without OwnerCredentials fails with the controller's remedy, and a runner
 // with them fetches with the machine's own credentials.
+//
+// After the fetch, and before anything compiles, the runner declares the
+// pipeline's source.extra_repos to the controller, which binds the run to
+// them. When the pipeline declares any and the checkout has submodules, the
+// runner checks them out with the run's credential, widened to the declared
+// repositories when it is an App token.
 func FetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logger) (string, error) {
 	return fetchRunSourceDirect(ctx, src, logger, func(cred DirectCredential) (string, error) {
 		return FetchPipelineSourceDirect(ctx, src.RepoURL, src.Branch, src.SHA, src.WorkDir, cred)
+	}, func(checkout string, cred DirectCredential) error {
+		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, defaultDirectOptions())
 	})
 }
 
 func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logger,
-	fetch func(DirectCredential) (string, error),
+	fetch func(DirectCredential) (string, error), submodules func(string, DirectCredential) error,
 ) (string, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
@@ -59,7 +70,39 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 			"run_id", src.RunID, "reason", err.Error())
 		cred = DirectCredential{}
 	}
-	return fetch(cred)
+	sparkwingDir, err := fetch(cred)
+	if err != nil || src.ExtraRepos == nil {
+		return sparkwingDir, err
+	}
+	checkout := filepath.Dir(sparkwingDir)
+	declared, err := src.ExtraRepos(checkout)
+	if err != nil {
+		return "", fmt.Errorf("direct source: read source.extra_repos: %w", err)
+	}
+	held, err := DeclareSourceExtraRepos(ctx, src.ControllerURL, src.RunnerToken, src.RunID, declared)
+	if errors.Is(err, errDeclarationRouteAbsent) {
+		return sparkwingDir, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("direct source: %w", err)
+	}
+	if len(held) == 0 || !hasGitmodules(checkout) {
+		return sparkwingDir, nil
+	}
+	if cred.Empty() {
+		logger.Info("direct source: source.extra_repos needs a credential the controller released; submodules left out",
+			"run_id", src.RunID)
+		return sparkwingDir, nil
+	}
+	if cred.Kind == CredentialGitHubApp {
+		if cred, err = RequestDirectCredential(ctx, src.ControllerURL, src.RunnerToken, src.RunID, held); err != nil {
+			return "", fmt.Errorf("direct source: credential for source.extra_repos: %w", err)
+		}
+	}
+	if err := submodules(checkout, cred); err != nil {
+		return "", err
+	}
+	return sparkwingDir, nil
 }
 
 // credentialRemote fits remote to the transport cred authenticates: the https

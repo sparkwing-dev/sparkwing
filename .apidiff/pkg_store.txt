@@ -561,6 +561,7 @@ var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already ac
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
+var ErrExtraReposDiffer = errors.New("store: the run already declared a different source.extra_repos")
 var ErrFingerprintMismatch = errors.New("store: the fingerprint is not the host key this credential pinned")
 var ErrFreeRunLimit = errors.New("free run limit reached")
 var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
@@ -2027,6 +2028,7 @@ func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
 func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
 func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
+func (t *Tenant) DeclareRunExtraRepos(ctx context.Context, runID string, repos []string) ([]string, error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitCredential(ctx context.Context, host string) error
@@ -2116,6 +2118,7 @@ func (t *Tenant) ResolveCronDue(ctx context.Context, id string, cursor time.Time
 func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
 func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, now time.Time) error
 func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error
+func (t *Tenant) RunExtraRepos(ctx context.Context, runID string) ([]string, bool, error)
 func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error)
 func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error

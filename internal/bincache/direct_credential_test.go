@@ -131,7 +131,7 @@ func TestCloudRunnerHasNoMachineCredentialFallback(t *testing.T) {
 		}, nil, func(cred DirectCredential) (string, error) {
 			fetched, used = true, cred
 			return "sparkwing", nil
-		})
+		}, nil)
 		switch {
 		case !owner && (err == nil || fetched):
 			t.Fatalf("an unfenced runner fetched (err=%v, fetched=%v); want a refusal before any fetch", err, fetched)

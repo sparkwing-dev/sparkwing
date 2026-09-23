@@ -76,7 +76,7 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 		cmd := exec.Command("git", "-C", mirror, "fetch", "--quiet", "--depth", "1", "--", remote, "refs/heads/main")
 		cmd.Env = env
 		if pipeTok != "" {
-			cred, err := credentialPipe("x-access-token", pipeTok)
+			cred, err := credentialPipe("x-access-token", pipeTok, 1)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -108,6 +108,7 @@ func runNodeRemote(
 			ControllerURL: controllerURL, RunnerToken: token, RunID: runID,
 			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
 			OwnerCredentials: ownerFenced,
+			ExtraRepos:       PipelineExtraRepos(run.Pipeline),
 		}, logger)
 	case workspaceSource:
 		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,

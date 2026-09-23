@@ -220,6 +220,16 @@ unlock.
   Values are sealed under the secrets key and resealed by
   `POST /api/v1/secrets/rotate`. Schema 61 adds the tables. See
   [Team git credentials](docs/git-credentials.md).
+- **config + runner:** `source.extra_repos` in a pipeline entry names up to 10
+  more GitHub repositories of the run repository's owner that the run's App
+  token also reads. The runner declares them with
+  `POST /api/v1/runs/{id}/source-declaration` before compiling anything, the
+  first declaration binds the run, and when the checkout has submodules the
+  runner checks them out with a token widened to the declared repositories,
+  rewriting ssh submodule URLs to https through `url.insteadOf`. The
+  controller mints it only when the installation covering the run's
+  repository covers each one. See
+  [Team git credentials](docs/git-credentials.md#extra-repositories).
 - **runner:** `sparkwing-runner agent --allow-repo`, and `allow_repos` in
   `agent.yaml`, make an agent claim only those repositories and fetch their
   source directly, with the credential the controller releases or else the

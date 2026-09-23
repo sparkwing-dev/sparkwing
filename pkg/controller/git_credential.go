@@ -3,11 +3,14 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -38,9 +41,88 @@ const (
 )
 
 type gitCredentialReq struct {
-	// ExtraRepos is the pipeline's declared source.extra_repos, as
-	// owner/name slugs.
+	// ExtraRepos names repositories of the run's declared
+	// source.extra_repos, as owner/name, that the App token also reads.
 	ExtraRepos []string `json:"extra_repos,omitempty"`
+}
+
+// SourceDeclaration is a run's declared source.extra_repos, which the
+// runner reads from the pipeline's config at the run's commit.
+type SourceDeclaration struct {
+	ExtraRepos []string `json:"extra_repos"`
+}
+
+// handleRunSourceDeclaration binds the run's source.extra_repos the first
+// time a runner holding its claim declares them.
+//
+// safety: the runner declares right after it fetches the run's source and
+// before it compiles or runs anything, so pipeline code, which holds the
+// same runner token later, cannot widen what the App token may read.
+func (s *Server) handleRunSourceDeclaration(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	var req SourceDeclaration
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	src, ok := s.claimedRunSource(w, r, runID)
+	if !ok {
+		return
+	}
+	extra, err := parseExtraRepos(src.trigger, req.ExtraRepos)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	slugs := make([]string, 0, len(extra))
+	for _, x := range extra {
+		slugs = append(slugs, x.Slug())
+	}
+	held, err := src.tenant.DeclareRunExtraRepos(r.Context(), runID, slugs)
+	if errors.Is(err, store.ErrExtraReposDiffer) {
+		writeError(w, http.StatusConflict, errors.New("run "+runID+" already declared source.extra_repos ["+
+			strings.Join(held, ", ")+"]"))
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "declare source", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, SourceDeclaration{ExtraRepos: held})
+}
+
+// parseExtraRepos reads a declared source.extra_repos: at most
+// pipelines.MaxExtraRepos owner/name repositories, all of the run's GitHub
+// repository's owner, since one installation token reads one account's.
+func parseExtraRepos(trigger *store.Trigger, raw []string) ([]store.GitHubRepo, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > pipelines.MaxExtraRepos {
+		return nil, fmt.Errorf("source.extra_repos names %d repositories, at most %d", len(raw), pipelines.MaxExtraRepos)
+	}
+	repo, ok := runGitHubRepo(trigger)
+	if !ok {
+		return nil, errors.New("source.extra_repos applies only to a run of a GitHub repository")
+	}
+	seen := map[string]bool{}
+	var out []store.GitHubRepo
+	for _, slug := range raw {
+		x, ok := store.ParseGitHubRepo(slug)
+		if !ok {
+			return nil, fmt.Errorf("source.extra_repos entry %q is not an owner/name repository", slug)
+		}
+		if !strings.EqualFold(x.Owner, repo.Owner) {
+			return nil, fmt.Errorf("source.extra_repos entry %s is not of %s, the run repository's owner", x.Slug(), repo.Owner)
+		}
+		key := strings.ToLower(x.Slug())
+		if key == strings.ToLower(repo.Slug()) || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, x)
+	}
+	return out, nil
 }
 
 // handleRunGitCredential resolves the one credential a run's source is
@@ -66,9 +148,14 @@ func (s *Server) handleRunGitCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	host, _, _ := strings.Cut(identity, "/")
+	extra, err := s.declaredExtraRepos(r, src, req.ExtraRepos)
+	if err != nil {
+		writeError(w, http.StatusForbidden, err)
+		return
+	}
 	if s.githubApp != nil {
 		if repo, ok := runGitHubRepo(src.trigger); ok {
-			tok, failure := s.runAppToken(r, src, repo, nil)
+			tok, failure := s.runAppToken(r, src, repo, extra)
 			if failure == nil {
 				writeJSON(w, http.StatusOK, GitCredentialResponse{
 					Kind: gitCredentialGitHubApp, Host: "github.com", Token: tok.Token, ExpiresAt: tok.ExpiresAt,
@@ -158,6 +245,29 @@ func (s *Server) releaseTeamGitCredential(w http.ResponseWriter, r *http.Request
 		Kind: released.Kind, Host: released.Host, Username: released.Username, Secret: secret,
 		KnownHosts: released.KnownHosts,
 	})
+}
+
+// declaredExtraRepos is the part of the run's declared source.extra_repos
+// a request asks the App token to read too, refusing any repository the run
+// did not declare.
+func (s *Server) declaredExtraRepos(r *http.Request, src claimedRunSource, asked []string) ([]store.GitHubRepo, error) {
+	if len(asked) == 0 {
+		return nil, nil
+	}
+	extra, err := parseExtraRepos(src.trigger, asked)
+	if err != nil {
+		return nil, err
+	}
+	held, declared, err := src.tenant.RunExtraRepos(r.Context(), src.trigger.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, x := range extra {
+		if !declared || !slices.Contains(held, strings.ToLower(x.Slug())) {
+			return nil, errors.New("run " + src.trigger.ID + " did not declare " + x.Slug() + " in source.extra_repos")
+		}
+	}
+	return extra, nil
 }
 
 // receivesTeamGitCredentials reports whether the runner token prefix is a

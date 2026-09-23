@@ -146,12 +146,22 @@ func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.G
 	names := []string{repo.Name}
 	slugs := []string{repo.Slug()}
 	for _, x := range extra {
-		// safety: an installation token covers one account's repositories, so
-		// an extra repository of another owner could never ride on it.
-		if !strings.EqualFold(x.Owner, repo.Owner) {
+		// safety: the token is minted from the installation that covers the
+		// run's repository, so every extra repository must be covered by that
+		// same installation of the team's, not merely by some installation.
+		xinst, covered, err := s.teamInstallationFor(r.Context(), src.tenant, x)
+		if err != nil {
+			s.logger.Warn("source token installation", "run_id", runID, "repository", x.Slug(), "err", err.Error())
 			return SourceTokenResponse{}, &sourceFailure{
-				status: http.StatusBadRequest,
-				err:    errors.New("source.extra_repos names " + x.Slug() + ", which another account than " + repo.Owner + " owns"),
+				status: http.StatusBadGateway,
+				err:    errors.New("GitHub could not be reached to find the installation of " + x.Slug()),
+			}
+		}
+		if !covered || xinst.InstallationID != inst.InstallationID {
+			return SourceTokenResponse{}, &sourceFailure{
+				status: http.StatusForbidden,
+				err: errors.New("source.extra_repos names " + x.Slug() + ", which the installation covering " +
+					repo.Slug() + " does not cover"),
 			}
 		}
 		names = append(names, x.Name)

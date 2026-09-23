@@ -330,7 +330,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 		}
 		var extra []*os.File
 		if pipeCred {
-			cred, err := credentialPipe(opts.cred.Username, opts.cred.Secret)
+			cred, err := credentialPipe(opts.cred.Username, opts.cred.Secret, fetchCredentialAsks)
 			if err != nil {
 				return fmt.Errorf("source credential pipe: %w", err)
 			}

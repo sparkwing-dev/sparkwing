@@ -5432,6 +5432,49 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/runs/{id}/source-declaration:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Declare the run pipeline's source.extra_repos, binding the run to them.
+      description: >-
+        For a runner holding a live node or trigger claim on the run, right after it fetches the run's source and before it compiles anything. The first declaration binds the run; a later one that names a different set answers 409, so pipeline code holding the same runner token cannot widen what the App token reads. The repositories are owner/name, at most 10, all of the run's GitHub repository's owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.SourceDeclaration
+              type: object
+              required: [extra_repos]
+              properties:
+                extra_repos:
+                  type: array
+                  maxItems: 10
+                  items: {type: string}
+      responses:
+        "200":
+          description: The list the run holds, folded to lower case and sorted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.SourceDeclaration
+                type: object
+                required: [extra_repos]
+                properties:
+                  extra_repos:
+                    type: array
+                    items: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The run already declared a different set.}
+
   /api/v1/runs/{id}/git-credential:
     parameters:
       - in: path
@@ -5456,7 +5499,7 @@ paths:
                   type: array
                   maxItems: 10
                   items: {type: string}
-                  description: The pipeline's declared source.extra_repos as owner/name, which an App token also reads when the installation covers them.
+                  description: Repositories of the run's declared source.extra_repos, as owner/name, that the App token also reads; each must be declared and covered by the installation that covers the run's repository, or the route answers 403.
       responses:
         "200":
           description: Credential released.
