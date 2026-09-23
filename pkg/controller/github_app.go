@@ -674,8 +674,18 @@ func (s *Server) githubAppCommitStatus(ctx context.Context, trigger *store.Trigg
 // installation may be when a run is created or a token minted.
 const coveringTTL = time.Minute
 
+// liveCoveringInstallation asks GitHub which installation covers repo,
+// bypassing the cache, or answers false when none does.
+func (a *githubAppState) liveCoveringInstallation(ctx context.Context, repo store.GitHubRepo) (githubapp.Installation, bool, error) {
+	inst, err := a.client.RepositoryInstallation(ctx, repo.Owner, repo.Name)
+	if errors.Is(err, githubapp.ErrNotInstalled) {
+		return githubapp.Installation{}, false, nil
+	}
+	return inst, err == nil, err
+}
+
 // coveringInstallation answers the installation GitHub reports covers repo,
-// or false when none does.
+// or false when none does, from an answer at most [coveringTTL] old.
 func (a *githubAppState) coveringInstallation(ctx context.Context, repo store.GitHubRepo, now time.Time) (githubapp.Installation, bool, error) {
 	key := strings.ToLower(repo.Slug())
 	a.mu.Lock()

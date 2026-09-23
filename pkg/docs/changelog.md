@@ -30,11 +30,13 @@ unlock.
   second), and a connect state finishes one flow across replicas and restarts.
   `POST /webhooks/github-app` verifies the App's signature, routes by
   installation, and starts runs for the pipelines the team subscribed with
-  `PUT /api/v1/team/github-app/triggers`, once GitHub confirms the installation
-  still covers the repository. Pull requests from forks are never run. A
+  `PUT /api/v1/team/github-app/triggers`, once GitHub, asked on each delivery,
+  confirms the installation still covers the repository. Pull requests from
+  forks, and events with no readable time, are never run. A
   delivery's signed body is remembered for every team, so a redelivery or a
   replay after the installation moves teams starts nothing, and each run a
-  delivery creates spends one of the team's hourly runs.
+  delivery creates spends one of the team's hourly runs; a redelivery spends
+  only on the runs it has not started.
   `POST /api/v1/runs/{id}/source-token` gives a claim holder one live
   `contents: read` installation token for the run's repository, and App runs
   report commit statuses as the installation. Configure with

@@ -234,8 +234,8 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	base[sparkwing.EnvPRAction] = env.Action
 	base[sparkwing.EnvPRBaseRef], base[sparkwing.EnvPRBaseSHA] = pr.Base.Ref, pr.Base.SHA
 	base[sparkwing.EnvPRHeadRef], base[sparkwing.EnvPRHeadSHA] = pr.Head.Ref, pr.Head.SHA
-	// safety: an unreadable updated_at leaves the time zero, which skips only
-	// the binding-age check; the digest still refuses a replay.
+	// safety: an unreadable updated_at leaves the time zero, and the caller
+	// refuses an undated event.
 	updated, err := time.Parse(time.RFC3339, pr.UpdatedAt)
 	if err != nil {
 		updated = time.Time{}
@@ -300,8 +300,15 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	// safety: an event from before this team held the installation was meant
-	// for whoever held it then, so a replay of it after a move starts nothing.
-	if !intake.at.IsZero() && intake.at.Add(githubAppClockSkew).Before(in.CreatedAt) {
+	// for whoever held it then, so a replay of it after a move starts nothing,
+	// and an event whose time cannot be read cannot show it is not one.
+	if intake.at.IsZero() {
+		s.logger.Info("github app undated event ignored", "team", string(in.Team), "event", event,
+			"repo", repo.Slug(), "delivery", delivery)
+		githubAppIgnored(w, "the event carries no time this controller can read")
+		return
+	}
+	if intake.at.Add(githubAppClockSkew).Before(in.CreatedAt) {
 		githubAppIgnored(w, "the event predates this team's connection of the installation")
 		return
 	}
@@ -333,9 +340,10 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		s.writeGitHubAppDuplicate(w, r, tenant, wanted, delivery, body)
 		return
 	}
-	// safety: GitHub's answer is read again at run creation, so a repository
-	// removed from the installation, or moved to another, starts nothing here.
-	gh, covered, err := s.githubApp.coveringInstallation(ctx, repo, time.Now())
+	// safety: GitHub is asked on every delivery rather than through the cache
+	// the token route keeps, because a cached answer lags a removal that no
+	// installation_repositories delivery has reached this replica for yet.
+	gh, covered, err := s.githubApp.liveCoveringInstallation(ctx, repo)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation"))
 		return
@@ -347,11 +355,18 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	resp := githubAppWebhookResp{Status: "dispatched"}
 	shed := 0
 	for _, sub := range wanted {
+		// safety: a run this delivery already started answers without spending,
+		// so a redelivery after a partial shed pays only for what was shed.
+		if existing, err := tenant.FindTriggerByWebhookReplay(ctx,
+			githubAppReplayKey(tenant.Team(), sub.Pipeline, body), delivery+"/"+sub.Pipeline); err == nil && existing != nil {
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: sub.Pipeline, RunID: existing.ID, Status: "duplicate"})
+			continue
+		}
 		// safety: each run spends one of the team's budget, so a repository
 		// with many subscriptions, or a team with many repositories, cannot
 		// multiply what one delivery or one hour creates.
 		if refusal := s.triggerFloodRefusal(ctx, githubAppFloodKey(in.Team), "github app "+event); refusal != nil {
-			if len(resp.Runs) == 0 {
+			if !githubAppStartedAny(resp.Runs) {
 				refusal.write(w)
 				return
 			}
@@ -376,6 +391,15 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 	s.logger.Info("github app delivery accepted", "team", string(in.Team), "event", event,
 		"repo", repo.Slug(), "sha", intake.sha, "runs", len(resp.Runs), "shed", shed, "delivery", delivery)
 	writeJSON(w, http.StatusAccepted, resp)
+}
+
+func githubAppStartedAny(runs []githubAppRun) bool {
+	for _, run := range runs {
+		if run.RunID != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // githubAppFloodKey is the budget App deliveries spend: the team's own, the

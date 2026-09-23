@@ -327,7 +327,7 @@ func pushPayload(installation, repoID int64, repo, sha string) map[string]any {
 	return map[string]any{
 		"ref": "refs/heads/main", "before": strings.Repeat("0", 40), "after": sha,
 		"installation": map[string]any{"id": installation},
-		"repository":   map[string]any{"id": repoID, "full_name": repo},
+		"repository":   map[string]any{"id": repoID, "full_name": repo, "pushed_at": time.Now().Unix()},
 		"pusher":       map[string]any{"name": "olga"},
 	}
 }
@@ -338,9 +338,10 @@ func prPayload(installation, repoID int64, repo string, headRepoID int64) map[st
 		"installation": map[string]any{"id": installation},
 		"repository":   map[string]any{"id": repoID, "full_name": repo},
 		"pull_request": map[string]any{
-			"head": map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"id": headRepoID, "full_name": "x/y"}},
-			"base": map[string]any{"ref": "main", "sha": strings.Repeat("1", 40), "repo": map[string]any{"id": repoID, "full_name": repo}},
-			"user": map[string]any{"login": "contributor"},
+			"updated_at": time.Now().UTC().Format(time.RFC3339),
+			"head":       map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{"id": headRepoID, "full_name": "x/y"}},
+			"base":       map[string]any{"ref": "main", "sha": strings.Repeat("1", 40), "repo": map[string]any{"id": repoID, "full_name": repo}},
+			"user":       map[string]any{"login": "contributor"},
 		},
 	}
 }
@@ -615,6 +616,53 @@ func TestGitHubAppPushOfNoCommitIsIgnored(t *testing.T) {
 	}
 }
 
+// An event whose time cannot be read cannot be held to the binding's age, so
+// it starts nothing.
+func TestGitHubAppUndatedEventIsIgnored(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", map[string]any{"push": true, "pull_request": true})
+	push := pushPayload(7, 701, "acme/widgets", headSHA)
+	delete(push["repository"].(map[string]any), "pushed_at")
+	if _, out := f.deliver("push", push, ""); out["status"] != "ignored" {
+		t.Fatalf("push without pushed_at = %v, want ignored", out)
+	}
+	pr := prPayload(7, 701, "acme/widgets", 701)
+	pr["pull_request"].(map[string]any)["updated_at"] = "yesterday"
+	if _, out := f.deliver("pull_request", pr, ""); out["status"] != "ignored" {
+		t.Fatalf("pull request with an unreadable updated_at = %v, want ignored", out)
+	}
+	if n := len(f.triggers(olga.team)); n != 0 {
+		t.Fatalf("undated events started %d runs", n)
+	}
+	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "dispatched" {
+		t.Fatalf("control: a dated push = %v, want dispatched", out)
+	}
+}
+
+// A redelivery of a partly shed delivery spends allowance only on the runs it
+// did not start the first time.
+func TestGitHubAppRedeliveryChargesOnlyShedRuns(t *testing.T) {
+	f := newAppFixture(t)
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.subscribe(olga, "acme/widgets", "build", nil)
+	f.subscribe(olga, "acme/widgets", "test", nil)
+	push := pushPayload(7, 701, "acme/widgets", headSHA)
+	if _, out := f.deliver("push", push, ""); !slices.Equal(runStatuses(out), []string{"dispatched", "shed"}) {
+		t.Fatalf("first delivery = %v, want one run and one shed", out)
+	}
+	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	if code, out := f.deliver("push", push, ""); code != http.StatusAccepted || !slices.Equal(runStatuses(out), []string{"duplicate", "dispatched"}) {
+		t.Fatalf("redelivery with one run of allowance = %d %v, want the shed run started", code, out)
+	}
+	if n := len(f.triggers(olga.team)); n != 2 {
+		t.Fatalf("the team has %d runs, want 2", n)
+	}
+}
+
 func runStatuses(out map[string]any) []string {
 	runs, _ := out["runs"].([]any)
 	var got []string
@@ -700,12 +748,9 @@ func TestGitHubAppRunNeedsTheRepositoryStillCovered(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
+	// The subscription read GitHub's answer moments ago, and no
+	// installation_repositories delivery arrives to drop it.
 	f.app.SetRepos(7, githubapptest.Repo{ID: 702, FullName: "acme/plans", Private: true})
-	if code, _ := f.deliver("installation_repositories", map[string]any{
-		"action": "removed", "installation": map[string]any{"id": 7},
-	}, ""); code != http.StatusAccepted {
-		t.Fatalf("installation_repositories = %d", code)
-	}
 	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "ignored" {
 		t.Fatalf("push to a repository the installation no longer covers = %v, want ignored", out)
 	}

@@ -68,13 +68,14 @@ A delivery starts nothing, and is acknowledged with the reason, when:
 - it is a pull request from a fork (see below);
 - it is a push of no commit: a deleted branch, or an `after` of all zeros;
 - the event is older than the team's binding of the installation, going by the push's `repository.pushed_at` or the pull request's `updated_at`, so an event meant for the installation's previous team does not run in the next one;
-- GitHub no longer reports the installation as covering the repository. The controller asks GitHub when a run is created and keeps the answer for a minute; an `installation_repositories` delivery drops what it kept.
+- the event carries no such time, or one the controller cannot read, since nothing then shows it is not older than the binding;
+- GitHub no longer reports the installation as covering the repository. The controller asks GitHub on every delivery that would start a run, never from a cached answer.
 
 The controller remembers the digest of every signed body that started runs, for 90 days and for every team. A delivery with the same body answers 200 with status `duplicate` and the runs it started in the current team, before it is counted against any cap, so GitHub's redelivery and a replay after the installation moves teams start nothing. Within a team, each trigger's replay key (a digest of the pipeline and the signed body) and delivery key (the delivery id and pipeline) still refuse a second copy of a run.
 
-Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered, so a redelivery once the budget refills starts only what was shed.
+Each run a delivery creates spends one of the team's hourly runs (`--max-runs-per-principal-hour`, see [security](security.md)), from the same budget the team's API submissions spend. When the budget runs out before the first run, the delivery answers 429 with `Retry-After`. When it runs out partway, the runs already created stand, the rest are listed with status `shed`, and the delivery is not remembered. A redelivery answers the runs it already started as `duplicate` without spending anything, and spends the budget only on the runs that were shed.
 
-`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next run or token.
+`installation` deliveries keep the binding current: `deleted` unbinds, `suspend` and `unsuspend` mark it. The repositories an installation covers are read from GitHub when they matter, not stored, so adding or removing a repository on GitHub takes effect on the next delivery. The source-token route, which serves a run that already exists, keeps GitHub's answer for up to a minute, and an `installation_repositories` delivery drops what it kept.
 
 ### Pull requests from forks
 
