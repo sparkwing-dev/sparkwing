@@ -623,7 +623,7 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		cacheURL := bincache.CacheURL()
 		seedErr := seedWorkingTreeSnapshot(runProfile, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
 		if seedErr != nil {
-			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w (%v)", pipelineName, seedErr, bincache.ErrWorkspaceNeedsCache)
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w (%w)", pipelineName, seedErr, bincache.ErrWorkspaceNeedsCache)
 		}
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
@@ -681,10 +681,12 @@ func offerTriggerSource(runProfile *profile.Profile, repoDir, repoURL, sha strin
 	services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
 	cancelDiscovery()
 	if commitOnOrigin(repoDir, sha) {
-		_ = refreshTriggerSource(runProfile, services.CachePod, repoURL)
+		if err := refreshTriggerSource(runProfile, services.CachePod, repoURL); err != nil {
+			slog.Default().Debug("git cache refresh skipped; the runner fetches the pushed commit itself", "error", err)
+		}
 		return nil
 	}
-	err := seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
+	_, err := seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
 	if err == nil {
 		return nil
 	}
@@ -720,11 +722,12 @@ func refreshTriggerSource(runProfile *profile.Profile, cacheURL, repoURL string)
 }
 
 // seedTriggerSource refreshes the git cache's copy of repoURL and, when that
-// fails, pushes sha into it from repoDir. The error says why neither worked.
-func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) error {
-	err := refreshTriggerSource(runProfile, cacheURL, repoURL)
-	if err == nil {
-		return nil
+// fails, pushes sha into it from repoDir. The error says why neither worked,
+// and absent reports a seed refused because this controller has no cache.
+func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) (absent bool, err error) {
+	refreshErr := refreshTriggerSource(runProfile, cacheURL, repoURL)
+	if refreshErr == nil {
+		return false, nil
 	}
 	seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer seedCancel()
@@ -735,12 +738,13 @@ func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryEr
 		seedErr = bincache.SeedRepoViaController(seedContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, repoDir, sha)
 	}
 	if seedErr == nil {
-		return nil
+		return false, nil
 	}
+	absent = cacheURL == "" && isHTTPNotFound(seedErr)
 	if discoveryErr != nil {
-		return fmt.Errorf("service discovery failed (%v), gitcache refresh failed (%v), seed failed (%w)", discoveryErr, err, seedErr)
+		return absent, fmt.Errorf("service discovery failed (%w), gitcache refresh failed (%w), seed failed (%w)", discoveryErr, refreshErr, seedErr)
 	}
-	return fmt.Errorf("gitcache refresh failed (%v), seed failed (%w)", err, seedErr)
+	return absent, fmt.Errorf("gitcache refresh failed (%w), seed failed (%w)", refreshErr, seedErr)
 }
 
 func isHTTPNotFound(err error) bool {

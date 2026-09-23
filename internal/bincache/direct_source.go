@@ -86,8 +86,8 @@ func sshIdentityAvailable() bool {
 	if err != nil {
 		return false
 	}
-	keys, _ := filepath.Glob(filepath.Join(home, ".ssh", "id_*"))
-	return len(keys) > 0
+	keys, err := filepath.Glob(filepath.Join(home, ".ssh", "id_*"))
+	return err == nil && len(keys) > 0
 }
 
 // DirectRepoURLFromGitHub is the remote a direct runner fetches for a GitHub
@@ -155,12 +155,12 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest, protoc
 	if err != nil {
 		return fmt.Errorf("direct source: open mirror lock: %w", err)
 	}
+	// safety: closing the file releases the lock.
 	defer func() { _ = lock.Close() }()
 	// safety: fetch, shallow bookkeeping and worktree registration all write the mirror.
 	if _, err := cacheLock(lock, cacheLockExclusive); err != nil {
 		return fmt.Errorf("direct source: lock mirror: %w", err)
 	}
-	defer func() { _ = cacheUnlock(lock) }()
 
 	env := append(directGitEnv(os.Environ()), "GIT_ALLOW_PROTOCOL="+protocols, "GIT_TERMINAL_PROMPT=0")
 	git := func(args ...string) (string, error) {
