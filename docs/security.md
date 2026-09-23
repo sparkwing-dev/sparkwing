@@ -901,7 +901,10 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
-  the matches it found with `"truncated": true`. Search also requires
+  the matches it found with `"truncated": true` and a `reason` naming the
+  limit. Archived runs are scanned from their object-store logs without
+  restoring the run to the local volume. The archive's recorded team is
+  checked before reading a log object. Search also requires
   `run_id`; a query without one is refused with `400` rather than
   walking every stored run.
 

@@ -260,3 +260,55 @@ func TestSearch_LongLineReportsTruncation(t *testing.T) {
 		t.Errorf("truncated=false after a line past the scanner buffer hid %d matches", 2-body.Total)
 	}
 }
+
+func TestSearch_ArchivedRunWithoutRestoring(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-archived/node-a", "Bearer a", "rare archived needle\nsecond needle\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	if n, err := f.srv.ArchiveOnce(t.Context(), time.Now().Add(DefaultArchiveIdle+time.Minute)); err != nil || n != 1 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	if f.onVolume("run-archived") {
+		t.Fatal("run remained on disk after archive")
+	}
+	direct := httptest.NewRecorder()
+	f.srv.handleSearch(direct, httptest.NewRequest(http.MethodGet, "/api/v1/logs/search?q=needle&run_id=run-archived", nil))
+	var directBody SearchResponse
+	if err := json.Unmarshal(direct.Body.Bytes(), &directBody); err != nil {
+		t.Fatal(err)
+	}
+	if directBody.Total != 2 {
+		t.Fatalf("archived search handler missed log lines: %+v", directBody)
+	}
+	code, raw := f.do(t, http.MethodGet, "/api/v1/logs/search?q=needle&run_id=run-archived", "Bearer a", "")
+	var body SearchResponse
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK || body.Total != 2 || body.Results[0].Content != "rare archived needle" {
+		t.Fatalf("archived search = %d %+v", code, body)
+	}
+	if f.onVolume("run-archived") {
+		t.Fatal("search restored an archived run to disk")
+	}
+	code, raw = f.do(t, http.MethodGet, "/api/v1/logs/search?q=needle&run_id=run-archived", "Bearer b", "")
+	if code != http.StatusNotFound || strings.Contains(raw, "needle") {
+		t.Fatalf("cross-team search = %d %s", code, raw)
+	}
+}
+
+func TestSearch_ArchivedByteBudgetReason(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	f.srv.WithLimits(Limits{SearchMaxBytes: 20})
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-budget/node-a", "Bearer a", "needle one\nneedle two\nneedle three\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	if n, err := f.srv.ArchiveOnce(t.Context(), time.Now().Add(DefaultArchiveIdle+time.Minute)); err != nil || n != 1 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	code, raw := f.do(t, http.MethodGet, "/api/v1/logs/search?q=needle&run_id=run-budget", "Bearer a", "")
+	if code != http.StatusOK || !strings.Contains(raw, `"truncated":true`) || !strings.Contains(raw, `"reason":"byte budget"`) {
+		t.Fatalf("budget response = %d %s", code, raw)
+	}
+}

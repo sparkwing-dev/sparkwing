@@ -449,9 +449,11 @@ export interface RunsGrepResponse {
   runs: Record<string, Run>;
   total: number;
   runs_scanned: number;
+  runs_matching: number;
 }
 
 export interface RunsGrepOpts {
+  runIDs?: string[];
   pipelines?: string[];
   excludePipelines?: string[];
   statuses?: string[];
@@ -470,6 +472,7 @@ export async function searchRunsGrep(
   opts: RunsGrepOpts = {},
 ): Promise<RunsGrepResponse> {
   const params = new URLSearchParams({ q: query });
+  for (const id of opts.runIDs ?? []) params.append("run_id", id);
   for (const p of opts.pipelines ?? []) params.append("pipeline", p);
   for (const p of opts.excludePipelines ?? []) params.append("npipeline", p);
   for (const s of opts.statuses ?? []) params.append("status", s);
@@ -486,7 +489,7 @@ export async function searchRunsGrep(
     cache: "no-store",
   }).catch(() => null);
   if (!res || !res.ok) {
-    return { query, matches: [], runs: {}, total: 0, runs_scanned: 0 };
+    return { query, matches: [], runs: {}, total: 0, runs_scanned: 0, runs_matching: 0 };
   }
   return res.json();
 }
@@ -708,6 +711,7 @@ export interface LogSearchResponse {
   results: LogSearchResult[];
   total: number;
   truncated?: boolean;
+  reason?: string;
 }
 
 export function getLogsUrl(): string {

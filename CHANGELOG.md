@@ -844,6 +844,13 @@ unlock.
 
 ### Fixed
 
+- **logs + dashboard:** log search reads archived runs from the object store
+  without restoring them, reports the reason when a search budget stops a
+  scan, and keeps archived runs scoped to their team. The runs Search view
+  applies its active filters before reading logs, scans newest runs until its
+  match limit, and reports how many matching runs it searched. Outcome words
+  show a pointer to the Status filter.
+
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
   the defined pipelines and, when known, the repository revision. It appears

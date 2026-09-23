@@ -288,3 +288,48 @@ func TestRunsGrep_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 		t.Errorf("expected the one match before the over-long line, got %d", body.Total)
 	}
 }
+
+func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
+	var read []string
+	b := &fakeBackend{
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{ID: "included"}, {ID: "filtered-out"}}, nil
+		},
+		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
+		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
+			read = append(read, runID)
+			return []byte(`{"msg":"needle"}` + "\n"), nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&run_id=included", nil)
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, req)
+	if len(read) != 1 || read[0] != "included" {
+		t.Fatalf("log endpoints called for %v, want only included", read)
+	}
+	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) {
+		t.Fatalf("response: %s", rec.Body.String())
+	}
+}
+
+func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
+	var read []string
+	b := &fakeBackend{
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{ID: "newest"}, {ID: "older"}}, nil
+		},
+		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
+		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
+			read = append(read, runID)
+			return []byte(`{"msg":"needle"}` + "\n"), nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
+	if len(read) != 1 || read[0] != "newest" {
+		t.Fatalf("read %v, want newest only", read)
+	}
+	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) || !strings.Contains(rec.Body.String(), `"runs_matching":2`) {
+		t.Fatalf("response: %s", rec.Body.String())
+	}
+}

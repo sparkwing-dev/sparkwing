@@ -1115,43 +1115,51 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		if len(branches) > 0 || len(shaPrefixes) > 0 {
 			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
 		}
-		type work struct {
-			run    *store.Run
-			nodeID string
+		if ids, specified := r.URL.Query()["run_id"]; specified {
+			allowed := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				allowed[id] = true
+			}
+			kept := runs[:0]
+			for _, run := range runs {
+				if allowed[run.ID] {
+					kept = append(kept, run)
+				}
+			}
+			runs = kept
 		}
-		var units []work
+		var matches []match
+		total := 0
+		truncated := false
+		searched := 0
+		runsMeta := make(map[string]*store.Run)
 		for _, run := range runs {
+			if r.Context().Err() != nil || (maxMatches > 0 && len(matches) >= maxMatches) {
+				truncated = true
+				break
+			}
 			nodes, err := b.ListNodes(r.Context(), run.ID)
 			if err != nil {
+				truncated = true
 				continue
 			}
-			for _, n := range nodes {
-				units = append(units, work{run: run, nodeID: n.NodeID})
-			}
-		}
-		const fanout = 8
-		sem := make(chan struct{}, fanout)
-		type unitResult struct {
-			matches   []match
-			count     int
-			truncated bool
-		}
-		results := make([]unitResult, len(units))
-		var wg sync.WaitGroup
-		for i, u := range units {
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(i int, u work) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				content, err := b.ReadNodeLog(r.Context(), u.run.ID, u.nodeID, backend.ReadOpts{})
-				if err != nil || len(content) == 0 {
-					return
+			searched++
+			for _, node := range nodes {
+				if maxMatches > 0 && len(matches) >= maxMatches {
+					truncated = true
+					break
+				}
+				content, err := b.ReadNodeLog(r.Context(), run.ID, node.NodeID, backend.ReadOpts{})
+				if err != nil {
+					truncated = true
+					continue
+				}
+				if len(content) == 0 {
+					continue
 				}
 				sc := bufio.NewScanner(bytes.NewReader(content))
 				sc.Buffer(make([]byte, 1<<16), 1<<20)
 				displayLine := 0
-				var local unitResult
 				for sc.Scan() {
 					d := parseDisplayLine(sc.Text())
 					if !d.show {
@@ -1161,52 +1169,25 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 					if !strings.Contains(strings.ToLower(d.body), needle) {
 						continue
 					}
-					local.count++
-					if maxMatches == 0 || local.count <= maxMatches {
-						local.matches = append(local.matches, match{
-							RunID:    u.run.ID,
-							Pipeline: u.run.Pipeline,
-							NodeID:   u.nodeID,
-							StepID:   d.step,
-							Line:     displayLine,
-							Content:  d.body,
-						})
+					total++
+					matches = append(matches, match{RunID: run.ID, Pipeline: run.Pipeline, NodeID: node.NodeID, StepID: d.step, Line: displayLine, Content: d.body})
+					runsMeta[run.ID] = store.RedactedRun(run)
+					if maxMatches > 0 && len(matches) >= maxMatches {
+						truncated = true
+						break
 					}
 				}
-				local.truncated = errors.Is(sc.Err(), bufio.ErrTooLong)
-				results[i] = local
-			}(i, u)
-		}
-		wg.Wait()
-		var matches []match
-		total := 0
-		truncated := false
-		hitRuns := map[string]bool{}
-		for _, res := range results {
-			total += res.count
-			truncated = truncated || res.truncated
-			for _, m := range res.matches {
-				hitRuns[m.RunID] = true
-			}
-			matches = append(matches, res.matches...)
-		}
-		runIndex := make(map[string]*store.Run, len(runs))
-		for _, run := range runs {
-			runIndex[run.ID] = run
-		}
-		runsMeta := make(map[string]*store.Run, len(hitRuns))
-		for id := range hitRuns {
-			if run := runIndex[id]; run != nil {
-				runsMeta[id] = store.RedactedRun(run)
+				truncated = truncated || errors.Is(sc.Err(), bufio.ErrTooLong)
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"query":        q,
-			"matches":      matches,
-			"runs":         runsMeta,
-			"total":        total,
-			"runs_scanned": len(runs),
-			"truncated":    truncated,
+			"query":         q,
+			"matches":       matches,
+			"runs":          runsMeta,
+			"total":         total,
+			"runs_scanned":  searched,
+			"runs_matching": len(runs),
+			"truncated":     truncated,
 		})
 	}
 }
