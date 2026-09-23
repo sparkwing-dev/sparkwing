@@ -16,8 +16,21 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func meteringTestLicense(t *testing.T) *license.License {
+	t.Helper()
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	raw := licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMetering}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	return license.Resolve(raw, pub, now, nil)
+}
 
 func scrapeRegistry(t *testing.T) string {
 	t.Helper()
@@ -467,7 +480,7 @@ func TestSamplersFillTheOperationalSeries(t *testing.T) {
 		t.Fatalf("grant: %v", err)
 	}
 
-	srv := New(st, nil)
+	srv := New(st, nil).WithLicense(meteringTestLicense(t))
 	api := httptest.NewServer(srv.Handler())
 	t.Cleanup(api.Close)
 	claimWithLabels(t, api.URL, "pool-a", []string{"zone=b"})
@@ -608,7 +621,7 @@ func TestSettleFinishedNodeClearsTheWindowForAnUnmeteredFinisher(t *testing.T) {
 
 	// safety: the request carries no credential at all, which is the shape a
 	// revoked or un-metered finisher presents to this path.
-	srv := New(st, nil)
+	srv := New(st, nil).WithLicense(meteringTestLicense(t))
 	srv.settleFinishedNode(httptest.NewRequest(http.MethodPost, "/finish", nil), "run-window", "node-a")
 
 	after, err := st.NodeSettlement(ctx, "run-window", "node-a")

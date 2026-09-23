@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import TeamShell, {
   Panel,
+  Notice,
   buttonClass,
   errorText,
   inputClass,
@@ -34,13 +35,13 @@ import {
   storagePrice,
   vcpuHourPrice,
 } from "@/lib/billing";
-import { unixSecondsISO } from "@/lib/teams";
+import { billingEnabled, unixSecondsISO } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
 
 export default function BillingPage() {
   return (
     <Suspense>
-      <TeamShell>{() => <BillingRoute />}</TeamShell>
+      <TeamShell>{(_, caps) => billingEnabled(caps) ? <BillingRoute /> : <Notice>Billing is not enabled on this controller.</Notice>}</TeamShell>
     </Suspense>
   );
 }

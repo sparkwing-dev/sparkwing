@@ -53,7 +53,7 @@ async function mockController(page: Page, mock: Mock = {}) {
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/capabilities") {
       await route.fulfill({
-        json: { mode: "cluster", teams: { enabled: true } },
+        json: { mode: "cluster", teams: { enabled: true }, billing: { enabled: true } },
       });
     } else if (path === "/api/v1/me") {
       const team = { slug: "acme", display_name: "Acme", role };

@@ -116,6 +116,9 @@ func (s *Server) maintainStorage(ctx context.Context) {
 // Two passes cannot bill one interval whatever their clocks say, because the
 // store moves each team's watermark by compare-and-set.
 func (s *Server) billRetainedStorage(ctx context.Context, now time.Time) {
+	if !s.Metering() {
+		return
+	}
 	swept, err := s.store.SweepStorageAllowance(ctx, now)
 	if err != nil {
 		s.logger.Error("expiring storage above the allowance failed", "err", err)

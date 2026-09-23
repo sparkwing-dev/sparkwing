@@ -57,8 +57,9 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"teams": map[string]bool{"enabled": true},
-			"auth":  map[string][]string{"providers": {"google", "github"}},
+			"teams":   map[string]bool{"enabled": true},
+			"billing": map[string]bool{"enabled": true},
+			"auth":    map[string][]string{"providers": {"google", "github"}},
 		})
 	case "/api/v1/auth/bootstrap-needed":
 		_ = json.NewEncoder(w).Encode(map[string]bool{"needed": false})
@@ -493,7 +494,7 @@ func TestCapabilitiesCarryTheControllersTeamsAndProviders(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&caps); err != nil {
 		t.Fatal(err)
 	}
-	if caps.Teams == nil || !caps.Teams.Enabled || caps.Auth == nil || len(caps.Auth.Providers) != 2 || caps.Auth.Providers[0] != "google" || caps.Auth.Providers[1] != "github" {
+	if caps.Teams == nil || !caps.Teams.Enabled || caps.Billing == nil || !caps.Billing.Enabled || caps.Auth == nil || len(caps.Auth.Providers) != 2 || caps.Auth.Providers[0] != "google" || caps.Auth.Providers[1] != "github" {
 		t.Fatalf("capabilities = %+v, want teams enabled and google and github offered", caps)
 	}
 

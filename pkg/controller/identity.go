@@ -62,6 +62,11 @@ func (s *Server) MultiTeam() bool {
 	return s.identity.license.Allows(license.FeatureMultiTeam, time.Now())
 }
 
+// Metering reports whether the signed license grants credit billing.
+func (s *Server) Metering() bool {
+	return s.identity.license.Allows(license.FeatureMetering, time.Now())
+}
+
 func (s *Server) signInProviders() []string {
 	out := []string{}
 	if !s.MultiTeam() {
@@ -85,9 +90,14 @@ type capabilitiesAuth struct {
 
 type capabilitiesResp struct {
 	Teams     capabilitiesTeams      `json:"teams"`
+	Billing   capabilitiesBilling    `json:"billing"`
 	Auth      capabilitiesAuth       `json:"auth"`
 	Claims    capabilitiesClaims     `json:"claims"`
 	GitHubApp *capabilitiesGitHubApp `json:"github_app,omitempty"`
+}
+
+type capabilitiesBilling struct {
+	Enabled bool `json:"enabled"`
 }
 
 type capabilitiesGitHubApp struct {
@@ -107,6 +117,7 @@ type capabilitiesClaims struct {
 func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	var resp capabilitiesResp
 	resp.Teams.Enabled = s.MultiTeam()
+	resp.Billing.Enabled = s.Metering()
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
 	if s.githubApp != nil {

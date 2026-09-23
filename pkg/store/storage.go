@@ -645,15 +645,21 @@ func (s *Store) chargeStorageTx(
 	if principal == "" || runID == "" || (bytes <= 0 && objects <= 0) {
 		return nil
 	}
-	rate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
-	if err != nil {
-		return err
+	var rate int64
+	var team Team
+	var free bool
+	if !creditMeteringDisabled(ctx) {
+		var err error
+		rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
+		if err != nil {
+			return err
+		}
+		team, err = creditTeamForRunTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		free = holdsFreeAllowance(team)
 	}
-	team, err := creditTeamForRunTx(ctx, tx, runID)
-	if err != nil {
-		return err
-	}
-	free := holdsFreeAllowance(team)
 	if free {
 		if err := admitFreeEventsTx(ctx, tx, team, principal, bytes, now); err != nil {
 			return err

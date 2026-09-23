@@ -621,6 +621,13 @@ unlock.
 
 ### Changed
 
+- **controller + dashboard (Breaking):** credit and billing routes, metered
+  tokens, claim charges, and storage billing require a signed `metering`
+  license. Existing signed `multi-team` licenses also grant metering.
+  Self-hosted controllers without either feature run claims and storage tiers
+  without credit limits, and the dashboard hides Billing. See
+  [Metering needs a signed license](docs/migrations/_unreleased.md#metering-needs-a-signed-license).
+
 - **cli + controller:** on a multi-team controller, `sparkwing run --on`
   and `sparkwing crons install` no longer call the cache's `/git/refresh`
   and `/sync/seed`, which take the cache's operator token and answered a

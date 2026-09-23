@@ -635,9 +635,12 @@ func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
-// safety: a token the operator never marked metered is never charged, so an
-// install with no metered token behaves as it did before the ledger existed.
+// safety: a stored marker may outlive its license, so the controller checks
+// the license before treating that token as a billable claimant.
 func (s *Server) meteredTokenPrefix(r *http.Request) string {
+	if !s.Metering() {
+		return ""
+	}
 	prefix := claimIdentity(r).TokenPrefix
 	if prefix == "" {
 		return ""
@@ -659,9 +662,8 @@ func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
 		return
 	}
 	s.settleNodeLedger(r, runID, nodeID, settlement)
-	// safety: an open window means the ledger priced this node as cloud work,
-	// whatever the credential says now, so a token un-metered mid-run is not
-	// counted under both placements.
+	// safety: an earlier licensed charge window must not also count as local
+	// work when the license expires before this node finishes.
 	if settlement.Metering == store.MeteringFree && !settlement.ChargeWindowOpen {
 		addLocalNodeSeconds(settlement.Seconds)
 	}
@@ -741,7 +743,7 @@ func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
 // keeps a node in the reservation index, so it is released whatever the
 // finishing principal presents.
 func (s *Server) settleNodeLedger(r *http.Request, runID, nodeID string, settlement store.NodeSettlement) {
-	if !settlement.ChargeWindowOpen {
+	if !s.Metering() || !settlement.ChargeWindowOpen {
 		return
 	}
 	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, settlement.ClaimTokenPrefix, time.Now())

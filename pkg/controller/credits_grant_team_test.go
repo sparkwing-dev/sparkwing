@@ -3,6 +3,10 @@ package controller_test
 import (
 	"net/http"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 )
 
 type creditBalance struct {
@@ -52,7 +56,13 @@ func TestCreditsGrant_FundsTheTeamTheOperatorNames(t *testing.T) {
 }
 
 func TestCreditsGrant_ASingleTeamControllerStillFundsDefault(t *testing.T) {
-	f := newIdentityFixtureWith(t, fixtureOpts{})
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	raw := licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMetering}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub})
 	admin := "Bearer " + f.admin
 	if code := f.call("POST", "/api/v1/credits/grants", admin,
 		map[string]any{"kind": "free", "amount_micro": int64(1_000_000)}, nil); code != http.StatusCreated {
