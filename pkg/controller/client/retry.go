@@ -87,7 +87,7 @@ func transientExecutionStartError(err error) bool {
 	var netErr net.Error
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
-		errors.As(err, &netErr) && (netErr.Timeout() || netErr.Temporary())
+		errors.As(err, &netErr) && netErr.Timeout()
 }
 
 func retryAfter(resp *http.Response) (time.Duration, bool) {
