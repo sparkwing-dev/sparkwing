@@ -286,14 +286,19 @@ func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
 	if err != nil {
 		return err
 	}
-	step, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	// safety: a value the guard reader cannot parse reads as unset there, so
 	// it is left for the operator rather than guessed at.
-	if err != nil || step <= 0 {
+	step, parsed := wholeCreditSetting(raw)
+	if !parsed || step <= 0 {
 		return nil
 	}
 	return setCreditSettingTx(ctx, tx, key,
 		formatCreditSetting(min(step*creditUnitScale, RunnerScaleMaxStepCredits)))
+}
+
+func wholeCreditSetting(raw string) (int64, bool) {
+	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return v, err == nil
 }
 
 func duplicateTeamGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
