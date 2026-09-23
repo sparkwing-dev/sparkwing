@@ -65,7 +65,9 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			})
 			return
 		}
-		now := time.Now()
+		// safety: Round(0) drops the monotonic reading, so the ttl and the
+		// expiry below are both wall-clock arithmetic and cannot drift apart.
+		now := time.Now().Round(0)
 		ttl := authwire.CacheGrantTTL
 		if p != nil && !p.Expires.IsZero() {
 			ttl = min(ttl, p.Expires.Sub(now))
@@ -81,10 +83,15 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		expiresAt := now.Add(ttl)
+		// safety: a grant never outlives the credential that asked for it.
+		if p != nil && !p.Expires.IsZero() && expiresAt.After(p.Expires) {
+			expiresAt = p.Expires
+		}
 		writeJSON(w, http.StatusOK, CacheGrantResponse{
 			Grant:     grant,
 			Team:      string(team),
-			ExpiresAt: now.Add(ttl).UTC(),
+			ExpiresAt: expiresAt.UTC(),
 		})
 	})
 }
