@@ -594,6 +594,12 @@ unlock.
   sends the browser's address so the controller budgets each browser, and an
   OAuth sign-in ends the session the browser held before.
 
+- **controller:** the queue view and compute limits name only the caller's own runners
+  `GET /api/v1/queue/state` listed every team's runners by name, and
+  `GET /api/v1/compute-limits` counted claimed runners per principal across
+  every team. The queue view now lists only the runners the caller's team
+  advertised, and the per-principal counts go to `admin` callers only.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 
