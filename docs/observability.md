@@ -336,12 +336,15 @@ Cloud, GitHub Actions, and cluster execution use distinct icons; unknown
 locations leave the space empty. Node names use the available row width and
 keep their full name in a tooltip.
 Selecting a node shows every durable execution attempt, including the executor
-kind and name, timestamps, outcome, and retry link when the controller recorded
-one. A recorded platform appears with its attempt; a missing platform remains
-unknown. The dashboard reads this history from explicit public execution
-attribution. The controller derives the current claim's display site from its
-credential and holder without changing stored execution history. Older records
-without enough attribution show no location icon.
+kind and name, timestamps, outcome, and retry link. In-process trigger nodes
+record the trigger claimant. Claimed nodes record the selected runner or the
+claim holder; Kubernetes Jobs record their pod hostname; GitHub Actions jobs
+record the repository and workflow run ID. Local runs record the machine
+hostname. Metered runner attempts record cloud placement. The controller also
+derives execution sites for older attempts from stored claim holders and, while
+the claim still matches, the credential. A recorded platform appears with its
+attempt; a missing platform remains unknown. The panel says unknown only when
+the stored attempt and matching claim have no usable executor identity.
 
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the

@@ -715,6 +715,8 @@ type ExecutionStart struct {
 	ExecutorKind string
 
 	ExecutorID string
+
+	ExecutorName string
 }
 type Executor struct {
 	Name             string
@@ -918,6 +920,7 @@ const GitHubRunnerPrincipalPrefix = "github:"
 type GitHubRunnerPush struct {
 	Branch string
 	SHA    string
+	RunID  string
 }
 type GitHubRunnerScope struct {
 	Team Team
@@ -2052,6 +2055,7 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (s *Store) TriggerClaimFenceIsLive(ctx context.Context, runID string, claimant ClaimIdentity, generation int64, now time.Time) (bool, error)
 func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error)
+func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation int64) (principal string, metered bool, err error)
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)

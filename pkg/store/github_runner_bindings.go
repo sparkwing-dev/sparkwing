@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS github_runner_bindings (
 
 var githubRunnerBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerBindingsTableSQLite)
 
-// github_runner_credentials records the push each GitHub Actions credential
-// was minted for, keyed by the token's prefix.
+// github_runner_credentials records the push and workflow run each GitHub
+// Actions credential was minted for, keyed by the token's prefix.
 const githubRunnerCredentialsTableSQLite = `
 CREATE TABLE IF NOT EXISTS github_runner_credentials (
     team       TEXT NOT NULL,
@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS github_runner_credentials (
 )`
 
 var githubRunnerCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerCredentialsTableSQLite)
+
+var githubRunnerRunCols = map[string]string{"run_id": "TEXT NOT NULL DEFAULT ''"}
 
 // applyGitHubRunnerBindingsMigration creates the bindings and credentials
 // tables. It is a step of the identity migration rather than a schema version
@@ -232,11 +234,12 @@ const MaxGitHubRunnerCredentials = 20
 // [MaxGitHubRunnerCredentials] live GitHub Actions credentials.
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 
-// GitHubRunnerPush is the push a GitHub Actions job's ID token was issued
-// for: a branch and the commit on it.
+// GitHubRunnerPush is the branch, commit, and workflow run named by a GitHub
+// Actions job's ID token.
 type GitHubRunnerPush struct {
 	Branch string
 	SHA    string
+	RunID  string
 }
 
 // MintGitHubRunnerCredential mints a runner credential for principal bound to
@@ -319,8 +322,8 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 		return "", nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_runner_credentials (team, prefix, branch, sha, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		string(t.team), tok.Prefix, push.Branch, push.SHA, tok.ExpiresAt.UTC().Unix()); err != nil {
+		INSERT INTO github_runner_credentials (team, prefix, branch, sha, run_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		string(t.team), tok.Prefix, push.Branch, push.SHA, push.RunID, tok.ExpiresAt.UTC().Unix()); err != nil {
 		return "", nil, err
 	}
 	return raw, tok, tx.Commit()
@@ -331,8 +334,8 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error) {
 	var push GitHubRunnerPush
 	err := t.s.queryRow(ctx,
-		`SELECT branch, sha FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
-		string(t.team), prefix).Scan(&push.Branch, &push.SHA)
+		`SELECT branch, sha, run_id FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
+		string(t.team), prefix).Scan(&push.Branch, &push.SHA, &push.RunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GitHubRunnerPush{}, ErrNotFound
 	}

@@ -138,6 +138,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	65: {githubAppTriggerTagsCols},
 	66: {githubAppTriggerPatternsCols},
 	67: {githubAppBranchFilterCols},
+	// safety: v68 adds a defaulted github_runner_credentials column an older
+	// binary never names, so an older binary keeps writing the migrated
+	// database.
+	68: {githubRunnerRunCols},
 }
 
 func columnSpecMaps() []map[string]string {

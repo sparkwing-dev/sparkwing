@@ -29,6 +29,12 @@ unlock.
   all-branches behavior. The dashboard edits both filters. Schema 67 adds the
   stored filters. Set `branches` for any deploy pipeline subscribed to push.
   Tag pushes follow the `tags` patterns alone.
+- **execution history (Breaking):** node attempts record the executor for trigger-owned,
+  pooled, Kubernetes Job, GitHub Actions, local, and metered cloud execution.
+  Older attempts derive a site from matching claim credentials and holders when
+  available. GitHub Actions attempts include the repository and workflow run
+  ID. Schema 68 adds `github_runner_credentials.run_id`. See
+  [Execution attribution migration](docs/migrations/execution-attribution.md).
 
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
