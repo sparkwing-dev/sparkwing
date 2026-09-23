@@ -32,6 +32,7 @@ type secretJSON struct {
 }
 
 func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
 	var req secretSetReq
 	if err := decodeJSONLimit(r, &req, maxSecretJSONBody); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -90,17 +91,16 @@ func validateSecretName(tn *store.Tenant, name, pipeline string) error {
 }
 
 func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
 	sec, tn, ok := s.readSecretForCaller(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
-	// safety: a browser session holds no run, so a masked value would only
-	// ever be displayed; its value leaves the controller to a runner or a token.
-	if p, authed := PrincipalFromContext(r.Context()); authed && p.session != "" && sec.Masked {
+	if p, authed := PrincipalFromContext(r.Context()); authed && sec.Masked && !maskedValueReadable(p) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:      "write_only",
 			Principal: p.label(),
-			Message:   "a masked secret's value is never returned to a dashboard session",
+			Message:   "a masked secret's value is returned only to the operator's bearer token or to a runner's claimed run",
 		})
 		return
 	}
@@ -120,6 +120,25 @@ func (s *Server) handleGetSecret(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: sec.CreatedAt.Unix(),
 		UpdatedAt: sec.UpdatedAt.Unix(),
 	})
+}
+
+// safety: a masked value leaves the controller only for the operator's admin
+// bearer or a runner's claim-bound read; a session holds no run and would only
+// display it, and a team owner manages the row without reading it back.
+func maskedValueReadable(p *Principal) bool {
+	if p.session != "" {
+		return false
+	}
+	if p.HasScope(ScopeAdmin) {
+		return true
+	}
+	// safety: readSecretForCaller resolves every other caller through its claimed run.
+	return !p.HasScope(ScopeTeamAdmin)
+}
+
+func noStoreSecrets(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 }
 
 func (s *Server) openStoredSecret(team store.Team, sec *store.Secret) (string, error) {
@@ -229,6 +248,7 @@ func (s *Server) claimedRunForReader(r *http.Request, runID string) (claimed sto
 }
 
 func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
 	tn, ok := s.requestTenant(w, r)
 	if !ok {
 		return
@@ -266,6 +286,7 @@ func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
 	name := r.PathValue("name")
 	tn, ok := s.requestTenant(w, r)
 	if !ok {
@@ -285,6 +306,7 @@ func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request) {
 // safety: a row held as plaintext and one sealed under the previous key both
 // come out under the current key, so dropping the previous key loses nothing.
 func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
 	if s.secretsCipher == nil {
 		writeError(w, http.StatusBadRequest,
 			errors.New("secrets cipher: no key configured, so there is nothing to rotate to"))

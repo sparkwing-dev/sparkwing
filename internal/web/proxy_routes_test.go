@@ -148,6 +148,31 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 	}
 }
 
+func TestProxy_SecretsResponsesAreNoStore(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/secrets"},
+		{http.MethodPost, "/api/v1/secrets"},
+		{http.MethodDelete, "/api/v1/secrets/API_KEY"},
+	} {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			t.Parallel()
+			handler, _ := proxyTestDashboard(t, []string{controller.ScopeTeamAdmin, controller.ScopeRunsRead})
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, proxyTestRequest(test.method, test.path))
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", got)
+			}
+			if got := rec.Header().Get("Pragma"); got != "no-cache" {
+				t.Errorf("Pragma = %q, want no-cache", got)
+			}
+		})
+	}
+}
+
 func TestProxyRoutes_ScopesMatchControllerRegistrations(t *testing.T) {
 	t.Parallel()
 	registered := controllerRouteScopes(t)

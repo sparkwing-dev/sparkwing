@@ -623,8 +623,21 @@ func controllerProxy(controllerURL, token string, loginRequired, forwardSession 
 				pr.Out.Header.Set("Authorization", "Bearer "+token)
 			}
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			// safety: a variable's value rides this response, so no browser or
+			// intermediary cache may keep it even if the controller omits the header.
+			if resp.Request != nil && isSecretsPath(resp.Request.URL.Path) {
+				resp.Header.Set("Cache-Control", "no-store")
+				resp.Header.Set("Pragma", "no-cache")
+			}
+			return nil
+		},
 	}
 	return proxy
+}
+
+func isSecretsPath(path string) bool {
+	return path == "/api/v1/secrets" || strings.HasPrefix(path, "/api/v1/secrets/")
 }
 
 func notImplementedHandler(w http.ResponseWriter, _ *http.Request) {

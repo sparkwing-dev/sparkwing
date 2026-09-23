@@ -1,13 +1,18 @@
 package controller_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 type listedSecret struct {
@@ -139,5 +144,95 @@ func TestSecrets_ListOpensAVariablesEnvelope(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `"value":"us-west-2"`) || strings.Contains(string(body), "supersecret") {
 		t.Errorf("list = %s, want the variable's plaintext and no secret value", body)
+	}
+}
+
+func secretsRequest(t *testing.T, f *tenancyFixture, method, path, auth string, body any) (int, string, http.Header) {
+	t.Helper()
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), method, f.url+path, rd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", auth)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(raw), resp.Header
+}
+
+// A team owner's bearer manages rows like its session does and reads no
+// masked value back; the operator's admin bearer still does, which is what
+// `sparkwing secret get --profile` runs on.
+func TestSecrets_MaskedValuesReachOnlyTheOperatorBearer(t *testing.T) {
+	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	now := time.Now().UTC()
+	ownerRaw, _, err := f.teamA.CreateToken(context.Background(), "a-owner", store.TokenKindUser,
+		[]string{controller.ScopeRunsRead, controller.ScopeTeamAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerToken := "Bearer " + ownerRaw
+	adminRaw, _, err := f.st.CreateToken("ops", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminToken := "Bearer " + adminRaw
+	unmasked := false
+	for _, row := range []map[string]any{
+		{"name": "DEPLOY_KEY", "value": "hunter2", "shared": true},
+		{"name": "REGION", "value": "us-west-2", "shared": true, "masked": unmasked},
+	} {
+		if code, _, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", ownerToken, row); code != http.StatusNoContent {
+			t.Fatalf("owner bearer POST %v = %d", row["name"], code)
+		}
+	}
+	code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/DEPLOY_KEY", ownerToken, nil)
+	if code != http.StatusForbidden || !strings.Contains(body, "write_only") || strings.Contains(body, "hunter2") {
+		t.Errorf("team owner bearer GET masked secret = %d: %s, want 403 write_only", code, body)
+	}
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/REGION", ownerToken, nil); code != http.StatusOK || !strings.Contains(body, "us-west-2") {
+		t.Errorf("team owner bearer GET variable = %d: %s", code, body)
+	}
+
+	if code, _, _ := secretsRequest(t, f, "POST", "/api/v1/secrets", adminToken,
+		map[string]any{"name": "OPS_KEY", "value": "ops-value", "shared": true}); code != http.StatusNoContent {
+		t.Fatalf("operator POST = %d", code)
+	}
+	if code, body, _ := secretsRequest(t, f, "GET", "/api/v1/secrets/OPS_KEY", adminToken, nil); code != http.StatusOK || !strings.Contains(body, "ops-value") {
+		t.Errorf("operator bearer GET masked secret = %d: %s, want its value", code, body)
+	}
+}
+
+func TestSecrets_EveryResponseIsNoStore(t *testing.T) {
+	f := newTenancyFixture(t, openSQLiteBindingStore(t))
+	for _, req := range []struct {
+		method, path string
+		body         any
+	}{
+		{"POST", "/api/v1/secrets", map[string]any{"name": "DEPLOY_KEY", "value": "v", "shared": true}},
+		{"GET", "/api/v1/secrets", nil},
+		{"GET", "/api/v1/secrets/DEPLOY_KEY", nil},
+		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", nil},
+		{"DELETE", "/api/v1/secrets/DEPLOY_KEY", nil},
+	} {
+		code, _, h := secretsRequest(t, f, req.method, req.path, f.ownerA, req.body)
+		if h.Get("Cache-Control") != "no-store" || h.Get("Pragma") != "no-cache" {
+			t.Errorf("%s %s = %d with Cache-Control %q, Pragma %q", req.method, req.path, code,
+				h.Get("Cache-Control"), h.Get("Pragma"))
+		}
 	}
 }

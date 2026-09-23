@@ -2298,10 +2298,11 @@ paths:
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
-        A dashboard session gets `403` with error `write_only` for a masked
-        row, owners included; it may read an unmasked variable. A bearer
-        token reads values as before: a runner through the run it has
-        claimed, and an operator or team owner token by name.
+        A masked row's value goes only to the operator's bearer token and to
+        a runner reading through the run it has claimed. Every other caller,
+        a dashboard session or a team owner's token included, gets `403`
+        with error `write_only`; it may still read an unmasked variable.
+        Every secrets response carries `Cache-Control: no-store`.
       responses:
         "200":
           description: Secret.

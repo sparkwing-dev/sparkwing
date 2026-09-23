@@ -578,12 +578,14 @@ unlock.
 
 ### Security
 
-- **controller:** `GET /api/v1/secrets/{name}` answers a dashboard session
-  `403` with error `write_only` for a masked secret, team owners and the
-  operator's password session included. A session still reads an unmasked
-  variable. Bearer tokens are unchanged: a runner reads through its claimed
-  run, and an operator or team owner token reads by name, so `sparkwing secret
-  get --profile` and `SPARKWING_SECRETS_PROFILE` keep working.
+- **controller:** `GET /api/v1/secrets/{name}` returns a masked secret's
+  value only to the operator's `admin` bearer token and to a runner reading
+  through its claimed run. A dashboard session, the operator's password
+  session and a `team.admin` bearer get `403` with error `write_only`, and
+  still read an unmasked variable. `sparkwing secret get --profile` keeps
+  working on an operator token. Every secrets response, and the dashboard's
+  proxy of `/api/v1/secrets`, now sends `Cache-Control: no-store` and
+  `Pragma: no-cache`.
 
 - **runner (Breaking):** a runner without the git cache builds only the
   repositories its owner allows. It fetched, compiled and ran pipeline code
