@@ -589,15 +589,17 @@ type retainedRun struct {
 
 // safety: a run still writing its own history keeps every byte of it, and a
 // zero cutoff means the customer's own ceiling rather than the drain, so the
-// age bound applies only when one was given.
+// age bound applies only when one was given. The bound is measured from when
+// a run finished, so a long run is not drained the moment it ends.
 func (s *Store) oldestRetainedRuns(
 	ctx context.Context, h storageHolder, before time.Time,
 ) (_ []retainedRun, err error) {
 	query := `
 SELECT u.run_id, u.bytes
   FROM storage_run_usage u JOIN runs r ON r.id = u.run_id
- WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + ` AND r.created_at < ?
- ORDER BY r.created_at ASC, u.run_id ASC
+ WHERE r.team = ? AND u.principal = ? AND r.` + runTerminalIn + `
+   AND r.finished_at IS NOT NULL AND r.finished_at < ?
+ ORDER BY r.finished_at ASC, u.run_id ASC
  LIMIT ?`
 	bound := int64(math.MaxInt64)
 	if !before.IsZero() {

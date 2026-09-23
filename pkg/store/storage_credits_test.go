@@ -18,7 +18,7 @@ func seedRetainedRun(t *testing.T, st *store.Store, principal, runID string, byt
 	t.Helper()
 	seedRunWithNode(t, st, runID, "n", "success")
 	if _, err := st.DB().Exec(storetest.Rebind(st,
-		`UPDATE runs SET created_at = ? WHERE id = ?`), created.UnixNano(), runID); err != nil {
+		`UPDATE runs SET created_at = ?, finished_at = ? WHERE id = ?`), created.UnixNano(), created.UnixNano(), runID); err != nil {
 		t.Fatalf("backdate run %s: %v", runID, err)
 	}
 	if _, err := st.DB().Exec(storetest.Rebind(st,
@@ -570,6 +570,35 @@ func TestASpentBalanceDrainsToTheFreeAllowanceOutsideTheRetentionWindow(t *testi
 	if got := countRows(t, st,
 		`SELECT COUNT(*) FROM storage_run_usage WHERE run_id = 'inside'`); got != 1 {
 		t.Fatalf("the run inside the window lost its bytes for non-payment")
+	}
+}
+
+// The drain's window is measured from when a run finished. A run created
+// before the window that finished inside it keeps its bytes; a drain keyed
+// on creation would take a run that just ended.
+func TestASpentBalanceDrainsByWhenARunFinished(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	chargeableTeam(t, st, "acme", store.CloudStorageRateMicroPerGBDay, 0)
+	if err := st.SetStorageSettings(ctx, store.StorageSettings{EventRetentionDays: 30}); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	seedRetainedRun(t, st, "acme", "expired", gib, now.Add(-40*24*time.Hour))
+	seedRetainedRun(t, st, "acme", "long", gib, now.Add(-40*24*time.Hour))
+	if _, err := st.DB().Exec(storetest.Rebind(st, `UPDATE runs SET finished_at = ? WHERE id = 'long'`),
+		now.Add(-24*time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	swept, err := st.SweepStorageAllowance(ctx, now)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if swept.Runs != 1 || swept.Bytes != gib {
+		t.Fatalf("swept %+v, want only the run that finished past the window", swept)
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM storage_run_usage WHERE run_id = 'long'`); got != 1 {
+		t.Fatal("a run that finished inside the window lost its bytes for non-payment")
 	}
 }
 
