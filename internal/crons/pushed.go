@@ -40,6 +40,7 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 	keep := make(map[string]bool, len(push.Entries))
 	for _, entry := range push.Entries {
 		entry.RepoPath = push.RepoURL
+		entry.Team = s.team()
 		if entry.Name == "" {
 			entry.Name = store.CronScheduleDefaultName
 		}

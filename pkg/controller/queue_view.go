@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -51,6 +52,10 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, rh := range s.runnerHeadroom.list(now, runnerHeadroomStale) {
+		// safety: a runner's name is its team's to know.
+		if store.NormalizeTeam(rh.Team) != store.NormalizeTeam(tenant.Team()) {
+			continue
+		}
 		qs.Runners = append(qs.Runners, wingwire.RunnerHeadroom{
 			Name:        rh.Name,
 			Cores:       rh.Cores,

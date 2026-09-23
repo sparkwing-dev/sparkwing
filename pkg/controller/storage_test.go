@@ -379,3 +379,68 @@ func TestHealthPublishesTheAlarmAndNoSizes(t *testing.T) {
 		t.Fatalf("health status = %q, want ok; the alarm must not degrade a working controller", health.Status)
 	}
 }
+
+// A runner's principal name is whatever an editor typed, so two teams can
+// both run "agent:eddie". Storage is charged to the writer's team, so one
+// team's writes never spend a quota or a month another team is held to.
+func TestStorageChargesTheTeamNotAPrincipalNameAnotherTeamShares(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{Principal: "agent:eddie", MaxBytesPerMonth: 1 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
+		t.Fatal(err)
+	}
+	tenantB, err := st.ForTeam(ctx, "team-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _, err := tenantB.CreateToken(ctx, "agent:eddie", store.TokenKindRunner, []string{
+		controller.ScopeNodesClaim, controller.ScopeRunsState, controller.ScopeRunsRead, controller.ScopeLogsWrite,
+	}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenantB.CreateRun(ctx, store.Run{ID: "run-b", Pipeline: "p", Status: "running", StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-b", NodeID: "only", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-b", "only"); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	t.Cleanup(ts.Close)
+	n, err := client.NewWithToken(ts.URL, nil, runner).ClaimNode(ctx, "runner:eddie:1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim node: %+v, %v", n, err)
+	}
+	f := storageFixture{url: ts.URL, store: st, fence: store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}}
+	if code, body := f.request(t, http.MethodPost, "/api/v1/runs/run-b/events", runner, eventBody("12345678"), true); code != http.StatusOK {
+		t.Fatalf("team B's event = %d %s, want 200", code, body)
+	}
+	month := store.StorageMonth(time.Now().UTC())
+	usage, err := st.StorageUsageFor(ctx, "agent:eddie", "", month)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.MonthBytes != 0 {
+		t.Fatalf("team B's write spent %d bytes of the operator's agent:eddie month", usage.MonthBytes)
+	}
+	if err := st.SetStorageQuota(ctx, store.StorageQuota{Principal: "team:team-b", MaxBytesPerMonth: 4}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.request(t, http.MethodPost, "/api/v1/runs/run-b/events", runner, eventBody("12345678"), true); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("team B past its own team's month = %d %s, want 413", code, body)
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 var (
@@ -100,9 +101,11 @@ func (s *Server) handleGitcacheGit(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: serving a cache entry hands out repository access under a credential
-// the controller holds, so it is bound to a signed webhook delivery and to a
-// repository an operator connected to that pipeline. A trigger's own
-// repository fields are whatever its submitter typed.
+// the controller holds, and every team shares a mirror named for its URL, so it
+// is bound to a signed webhook delivery in the operator's team and to a
+// repository the operator connected to that pipeline. Another team's delivery
+// proves only that it knows a secret it chose, and a trigger's own repository
+// fields are whatever its submitter typed.
 func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Request, name, repoURL string) bool {
 	runID := r.PathValue("id")
 	if runID == "" {
@@ -123,6 +126,10 @@ func (s *Server) claimedGitcacheRepoAllowed(w http.ResponseWriter, r *http.Reque
 	tenant, err := s.tenantFor(r)
 	if err != nil {
 		http.Error(w, "resolve claimed run source", http.StatusForbidden)
+		return false
+	}
+	if tenant.Team() != store.DefaultTeam {
+		http.Error(w, "the cache serves only the operator's connected repositories", http.StatusForbidden)
 		return false
 	}
 	bindings, err := tenant.ListGitHubWebhookBindings(r.Context(), trigger.Pipeline)

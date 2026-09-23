@@ -29,7 +29,7 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 			redirectOrUnauth(w, r)
 			return
 		}
-		sess, err := controllerResolveSession(r.Context(), authControllerURL(opts), cookie.Value)
+		sess, err := resolveDashboardSession(r.Context(), opts, cookie.Value)
 		if err != nil {
 			if errors.Is(err, errInvalidControllerSession) {
 				clearSessionCookies(w, cookiesSecure(opts))

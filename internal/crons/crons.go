@@ -45,9 +45,20 @@ const scheduleIDHexLen = 12
 // sha256(repoPath + NUL + pipeline + NUL + name) for any other. The lone
 // schedule of a pipeline keeps the id it had before entries carried names.
 func ScheduleID(repoPath, pipeline, name string) string {
+	return TeamScheduleID(store.DefaultTeam, repoPath, pipeline, name)
+}
+
+// TeamScheduleID is [ScheduleID] for a schedule armed in team. The operator's
+// team keeps the ids [ScheduleID] names; any other team's seed also carries the
+// team, because an id is unique across the store and two teams may arm the
+// same repository, pipeline and name.
+func TeamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 	seed := repoPath + "\x00" + pipeline
 	if name != "" && name != store.CronScheduleDefaultName {
 		seed += "\x00" + name
+	}
+	if team = store.NormalizeTeam(team); team != "" && team != store.DefaultTeam {
+		seed = "team\x00" + string(team) + "\x00" + seed
 	}
 	sum := sha256.Sum256([]byte(seed))
 	return ScheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
@@ -119,10 +130,12 @@ type Declared struct {
 	// entry declares none.
 	Name    string
 	Trigger pipelines.ScheduleTrigger
+	// Team is the team the entry arms in; empty is the operator's.
+	Team store.Team
 }
 
 // ID is the schedule id this entry arms under.
-func (d Declared) ID() string { return ScheduleID(d.RepoPath, d.Pipeline, d.Name) }
+func (d Declared) ID() string { return TeamScheduleID(d.Team, d.RepoPath, d.Pipeline, d.Name) }
 
 // DisplayName is what an operator types and reads for this entry.
 func (d Declared) DisplayName() string { return displayName(d.RepoPath, d.Pipeline, d.Name) }
@@ -277,6 +290,14 @@ func (s *Service) schedules() ScheduleStore {
 		return s.Schedules
 	}
 	return s.Store
+}
+
+// team is the team s arms in: the one its Schedules names, or the operator's.
+func (s *Service) team() store.Team {
+	if t, ok := s.Schedules.(interface{ Team() store.Team }); ok {
+		return t.Team()
+	}
+	return store.DefaultTeam
 }
 
 func (s *Service) now() time.Time {

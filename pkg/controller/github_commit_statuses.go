@@ -180,6 +180,17 @@ func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string
 	if !ok {
 		return nil, githubCommitStatus{}, false
 	}
+	// safety: another team's delivery was signed with a secret that team chose,
+	// which proves nothing about the repository it names, so only the operator's
+	// team spends the controller's token.
+	operator, err := s.tenantForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		s.logger.Warn("github commit status team lookup failed", "run_id", runID, "err", err)
+		return nil, githubCommitStatus{}, false
+	}
+	if owned, err := operator.OwnsRun(ctx, runID); err != nil || !owned {
+		return nil, githubCommitStatus{}, false
+	}
 	return reporter, status, true
 }
 

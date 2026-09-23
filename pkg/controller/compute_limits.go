@@ -123,6 +123,11 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 		},
 		Budgets: s.requestBudgetsView(),
 	}
+	// safety: the per-principal counts name every team's runners, so only the
+	// operator reads them.
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && !p.HasScope(ScopeAdmin) {
+		out.Usage.ByPrincipal = nil
+	}
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)
 		out.Limits[name] = v

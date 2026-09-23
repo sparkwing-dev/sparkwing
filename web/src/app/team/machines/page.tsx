@@ -105,6 +105,9 @@ function Machines({ me }: { me: Me }) {
                     {t.prefix}
                     {t.created_by ? ` · by ${t.created_by}` : ""}
                     {t.created_at ? ` · ${fmtDateTime(t.created_at)}` : ""}
+                    {t.expires_at
+                      ? ` · expires ${fmtDateTime(new Date(t.expires_at * 1000).toISOString())}`
+                      : ""}
                   </div>
                 </div>
                 {t.last_used_at ? (

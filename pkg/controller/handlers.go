@@ -765,7 +765,9 @@ func validateSubmittedRepoSlug(env map[string]string) error {
 	return errors.New("trigger.env GITHUB_REPOSITORY must be an owner/name slug")
 }
 
-// safety: the commit-status reporter spends the controller's GitHub token on whatever these name.
+// safety: the commit-status reporter spends the controller's GitHub token on
+// whatever these name, and only a delivery signed by an operator's binding is
+// trusted to name them.
 func refuseForgedGitHubProvenance(ctx context.Context, source string, env map[string]string) error {
 	p, ok := PrincipalFromContext(ctx)
 	if !ok || p.HasScope(ScopeAdmin) {
@@ -1588,12 +1590,17 @@ func (s *Server) rejectEnrolledLegacyClaim(r *http.Request) error {
 	}
 }
 
-func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
+func (s *Server) recordAdvertisedHeadroom(r *http.Request, holderID string, h *claimHeadroom) {
 	if h == nil {
 		return
 	}
+	team := store.DefaultTeam
+	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && store.NormalizeTeam(p.Team) != "" {
+		team = store.NormalizeTeam(p.Team)
+	}
 	name, _ := holderName(holderID)
 	s.runnerHeadroom.record(name, runnerHeadroom{
+		Team:        team,
 		Cores:       h.Cores,
 		MemoryBytes: h.MemoryBytes,
 		QueueDepth:  h.QueueDepth,
@@ -1704,7 +1711,7 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
 		return
 	}
-	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
+	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
 	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
 	s.runnerPresence.record(claimer, body.Labels, body.Capacity, time.Now())
 	n, err := s.store.ClaimNextReadyNode(s.placementContext(r.Context(), claimer),
@@ -2109,7 +2116,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
-	s.recordAdvertisedHeadroom(body.HolderID, body.Headroom)
+	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	claimCtx := store.WithNodeClaimFence(r.Context(), fence)
 	if err := s.store.HeartbeatNodeClaim(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease); err != nil {

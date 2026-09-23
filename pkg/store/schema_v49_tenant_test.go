@@ -24,10 +24,26 @@ func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 			t.Fatalf("narrow %s back to the v49 key: %v", table, err)
 		}
 	}
-	stmts := []string{`DROP INDEX idx_runs_team_started`}
+	stmts := []string{
+		`DROP INDEX idx_runs_team_started`,
+		// safety: v52 leads these keys with the team, so they go back to the
+		// v47 keys around the column drop.
+		`DROP INDEX IF EXISTS idx_cron_schedules_repo_pipeline_name`,
+		`DROP INDEX IF EXISTS ` + store.TriggerIdempotencyIndexName,
+		`DROP INDEX IF EXISTS ` + store.TriggerWebhookDeliveryIndexName,
+		`DROP INDEX IF EXISTS ` + store.TriggerWebhookReplayKeyIndexName,
+	}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)
 	}
+	stmts = append(stmts, `CREATE UNIQUE INDEX idx_cron_schedules_repo_pipeline_name
+    ON cron_schedules(repo_path, pipeline, schedule_name)`,
+		`CREATE UNIQUE INDEX `+store.TriggerIdempotencyIndexName+`
+    ON triggers(pipeline, idempotency_key) WHERE idempotency_key != ''`,
+		`CREATE UNIQUE INDEX `+store.TriggerWebhookDeliveryIndexName+`
+    ON triggers(webhook_delivery) WHERE webhook_delivery != ''`,
+		`CREATE UNIQUE INDEX `+store.TriggerWebhookReplayKeyIndexName+`
+    ON triggers(webhook_replay_key) WHERE webhook_replay_key != ''`)
 	stmts = append(stmts, `DROP TABLE teams`,
 		`DELETE FROM sparkwing_schema_version WHERE version >= 49`,
 		`DELETE FROM sparkwing_requirements WHERE name = 'team-scoped-user-keys'`)

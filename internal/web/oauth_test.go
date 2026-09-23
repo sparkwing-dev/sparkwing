@@ -26,6 +26,8 @@ type identityController struct {
 
 	mu         sync.Mutex
 	teams      bool
+	account    bool
+	logouts    []string
 	starts     []map[string]string
 	exchanges  []map[string]string
 	upstream   []string
@@ -63,6 +65,7 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/auth/oauth/google/start", "/api/v1/auth/oauth/github/start":
 		body := decode()
 		body["path"] = r.URL.Path
+		body["x-forwarded-for"] = r.Header.Get("X-Forwarded-For")
 		c.starts = append(c.starts, body)
 		_ = json.NewEncoder(w).Encode(oauthStartResp{
 			AuthorizeURL: fakeAuthorizeURL, State: fakeOAuthState, Verifier: fakeVerifier,
@@ -77,12 +80,19 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 			"active_team": map[string]string{"slug": "ada", "display_name": "Ada's space", "role": "owner"},
 		})
 	case "/api/v1/auth/session":
-		_ = json.NewEncoder(w).Encode(sessionResp{
+		resp := sessionResp{
 			Principal: "user:ada@example.com",
 			Scopes:    []string{"runs.read"},
 			CSRFToken: "csrf-" + strings.TrimPrefix(r.Header.Get("Authorization"), "Session "),
 			ExpiresAt: time.Now().Add(time.Hour).Unix(),
-		})
+		}
+		if c.account {
+			resp.UserID, resp.Team = "u1", "ada"
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	case "/api/v1/auth/logout":
+		c.logouts = append(c.logouts, decode()["session_id"])
+		w.WriteHeader(http.StatusNoContent)
 	default:
 		c.upstream = append(c.upstream, r.Method+" "+r.URL.Path)
 		c.upstreamAZ = append(c.upstreamAZ, r.Header.Get("Authorization"))

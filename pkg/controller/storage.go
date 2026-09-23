@@ -177,11 +177,17 @@ func writeStorageWriteRefusal(w http.ResponseWriter, logger interface{ Warn(stri
 
 // safety: the team a write is charged to comes from the authenticated
 // principal and never from the request, so no caller can spend another's
-// allowance.
+// allowance. A signed-up team names its own principals, so two teams can both
+// hold "agent:eddie"; its writes are charged to "team:<slug>" instead. The
+// operator's team keeps one account per principal, as a self-hosted install
+// always has.
 func chargedPrincipal(r *http.Request) string {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p == nil {
 		return ""
+	}
+	if team := store.NormalizeTeam(p.Team); team != "" && team != store.DefaultTeam {
+		return "team:" + string(team)
 	}
 	return p.Name
 }

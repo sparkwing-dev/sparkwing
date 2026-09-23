@@ -553,6 +553,76 @@ unlock.
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
 
+- **controller:** only the operator binds a GitHub repository to a webhook (Breaking)
+  `POST` and `DELETE /api/v1/webhooks/github/bindings` admitted `team.admin`,
+  and nothing proved a team controlled the repository it named. A team that
+  bound another organization's repository with a secret it chose could sign
+  deliveries for it, have the controller post a commit status to that
+  repository with its own GitHub token, and read the operator's cached mirror
+  of it. The routes require `admin` again. A binding stored in any team other
+  than the operator's posts no commit status and opens no Git cache mirror.
+
+- **controller:** a runner token goes with the membership that minted it
+  Removing a member left the runner tokens they minted working, and those
+  tokens never expired and carried `secrets.read` and `nodes.claim`, so a
+  removed editor's machine kept reading the team's pipeline secrets. Removing a
+  member now revokes every token they minted in that team, and demoting one to
+  `reader` revokes their runner tokens, in the same transaction as the role
+  change. A team runner token expires 90 days after it is minted, and
+  `GET /api/v1/team/runner-tokens` reports `expires_at`.
+  `store.Tenant.RemoveMember` and `SetMemberRole` take the time and return the
+  revoked prefixes. `docs/auth.md` now states that an editor can use the
+  secrets the team's pipelines read.
+
+- **controller:** a webhook delivery spends its own team's flood budget
+  The hourly run cap keyed a GitHub delivery on the repository alone, so one
+  team spending its budget for `owner/name` shed another team's deliveries
+  for the same repository. The key now carries the team whose binding signed
+  the delivery.
+
+- **controller:** another team's webhook binding leaves the operator's document alone
+  A binding in any team for a pipeline and repository shut out the
+  `GITHUB_WEBHOOK_BINDINGS` document's secret for that repository, and let a
+  delivery signed by the document's secret skip the document's allow-list.
+  Only the operator's own binding now replaces the document's secret, and a
+  delivery skips the allow-list only when the binding whose secret signed it
+  names the repository.
+
+- **store:** schedule, idempotency, delivery and replay keys are unique per team
+  The unique indexes on `cron_schedules (repo_path, pipeline, schedule_name)`,
+  `triggers (pipeline, idempotency_key)`, `triggers (webhook_delivery)` and
+  `triggers (webhook_replay_key)` predated the team column. One team arming a
+  repository, pipeline and name refused every other team the same schedule and
+  answered `409` naming it, and a delivery id or signed body one team held
+  refused it to the rest. Schema 52 rebuilds all four to lead with the team.
+  A schedule armed in any team but the operator's also takes an id seeded
+  with its team, so two teams' schedules for one repository never share an
+  id; the operator's ids are unchanged.
+
+- **controller:** a signed-up team's storage is charged to its team
+  Storage quotas and monthly usage were keyed on the writing principal's name,
+  and an editor chooses a runner's name, so a team running `agent:eddie`
+  spent the quota and month of every other team's `agent:eddie`. A write from
+  any team but the operator's is now charged to `team:<slug>`; the operator's
+  team keeps one account per principal.
+
+- **dashboard:** account sessions need a dashboard that forwards every read
+  A dashboard started with `--profile` or `--state` checked only that the
+  controller knew a session and then served the operator's own store, and it
+  offered Google and GitHub sign-in whenever the controller was multi-team, so
+  any self-signup could read the operator's runs. Such a dashboard now treats
+  an account session as signed out, hides the provider buttons and answers the
+  sign-in routes `404`; account sign-in needs `--controller`. Also:
+  `/api/v1/health/services` refuses a session holding no role, OAuth start
+  sends the browser's address so the controller budgets each browser, and an
+  OAuth sign-in ends the session the browser held before.
+
+- **controller:** the queue view and compute limits name only the caller's own runners
+  `GET /api/v1/queue/state` listed every team's runners by name, and
+  `GET /api/v1/compute-limits` counted claimed runners per principal across
+  every team. The queue view now lists only the runners the caller's team
+  advertised, and the per-principal counts go to `admin` callers only.
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

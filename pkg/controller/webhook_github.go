@@ -270,7 +270,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	team, verified := s.verifiedGitHubTeam(resolved, r.Header.Get("X-Hub-Signature-256"), body, pipeline)
+	signer, verified := s.verifiedGitHubCandidate(resolved, r.Header.Get("X-Hub-Signature-256"), body, pipeline)
 	if !verified {
 		writeError(w, http.StatusUnauthorized, errors.New("signature mismatch"))
 		return
@@ -284,7 +284,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// safety: 404 rather than 403 so the status cannot be walked to enumerate the binding table.
-	if !resolved.bound && !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
+	if !signer.bound && !s.githubWebhookRepoAllowed(pipeline, claimedRepo) {
 		s.logger.Warn("github webhook rejected",
 			"pipeline", pipeline, "repo", claimedRepo, "reason", "repository not bound to pipeline")
 		writeError(w, http.StatusNotFound, errGitHubWebhookUnbound)
@@ -304,7 +304,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "pong"})
 		return
 	case "push", "pull_request":
-		tenant, err := s.tenantForTeam(r.Context(), team)
+		tenant, err := s.tenantForTeam(r.Context(), signer.team)
 		if err != nil {
 			s.writeInternalError(w, r, "github webhook team handle", err)
 			return
@@ -373,7 +373,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github push") {
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github push") {
 		return
 	}
 
@@ -501,7 +501,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(pipeline, payload.Repository.FullName), "github pull_request") {
+	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github pull_request") {
 		return
 	}
 
@@ -572,19 +572,21 @@ func (s *Server) githubDeliveryAlreadyRan(w http.ResponseWriter, r *http.Request
 		return false
 	}
 	s.logger.Warn("github delivery deduplicated",
-		"principal", githubFloodKey(pipeline, ""), "pipeline", pipeline, "delivery", delivery,
+		"principal", githubFloodKey(tenant.Team(), pipeline, ""), "pipeline", pipeline, "delivery", delivery,
 		"reason", "the delivery id or body digest already started a run", "run_id", existing.ID)
 	writeJSON(w, http.StatusConflict, triggerResp{RunID: existing.ID, Status: "duplicate"})
 	return true
 }
 
-// safety: a delivery carries no principal, so the repository it names is the
-// closest thing it has to an owner and a delivery naming none falls back to its pipeline.
-func githubFloodKey(pipeline, repo string) string {
+// safety: a delivery carries no principal, so the team whose binding signed it
+// and the repository it names are the closest thing it has to an owner, and a
+// delivery naming none falls back to its pipeline. The team keeps one team's
+// deliveries from spending another's bucket for the same repository.
+func githubFloodKey(team store.Team, pipeline, repo string) string {
 	if repo != "" {
-		return "github:" + strings.ToLower(repo)
+		return "github-delivery:" + string(team) + ":" + strings.ToLower(repo)
 	}
-	return "github-pipeline:" + pipeline
+	return "github-pipeline:" + string(team) + ":" + pipeline
 }
 
 func verifyGitHubSignature(header string, body []byte, secret string) bool {

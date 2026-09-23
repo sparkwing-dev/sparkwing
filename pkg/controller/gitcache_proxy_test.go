@@ -454,3 +454,85 @@ func TestGitcacheProxy_AllowsSlowWorkspaceUploadBeyondDefaultDeadline(t *testing
 		t.Fatalf("status/body/cache body = %d/%q/%q", resp.StatusCode, body, gotBody)
 	}
 }
+
+// A signed delivery proves only that the sender knows the binding's secret,
+// and a team chose its own secret, so a team's binding for a repository opens
+// none of the operator's mirror of it: the mirror's name is the URL's digest,
+// the same for every team.
+func TestGitcacheProxy_ATeamBindingOpensNoMirror(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "cache-secret")
+	repoURL := "git@github.com:victim/app.git"
+	cacheName := sourceurl.ClaimedRepoNameFromURL(repoURL)
+	var cacheRequests []string
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cacheRequests = append(cacheRequests, r.Method+" "+r.URL.RequestURI())
+		_, _ = w.Write([]byte("refs"))
+	}))
+	defer cache.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := st.AsOperator().CreateTeam(ctx, "attacker"); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := st.ForTeam(ctx, "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _, err := tenant.CreateToken(ctx, "attacker-runner", store.TokenKindRunner,
+		[]string{controller.ScopeNodesClaim}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
+		Pipeline: "build", Repo: "victim/app", Secret: "attacker-chosen",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: "run-attacker", Pipeline: "build", Status: "running", CreatedAt: now,
+		Repo: "victim/app", RepoURL: repoURL, WebhookDelivery: "delivery-1",
+	}, store.Run{
+		ID: "run-attacker", Pipeline: "build", Status: "running", StartedAt: now,
+		DeclaredRepo: "victim/app", RepoURL: repoURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-attacker", NodeID: "compile", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-attacker", "compile"); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl := controller.New(st, nil).WithCacheURL(cache.URL).EnableAuthFromStore()
+	srv := httptest.NewServer(ctrl.Handler())
+	defer srv.Close()
+	claimed, err := client.NewWithToken(srv.URL, nil, runner).
+		ClaimNode(ctx, "agent:attacker-runner:1", nil, time.Minute, nil)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimNode = %+v, %v", claimed, err)
+	}
+	req, err := http.NewRequest(http.MethodGet,
+		srv.URL+"/api/v1/runs/run-attacker/gitcache/git/"+cacheName+"/info/refs?service=git-upload-pack", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+runner)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a team-bound run reading the shared mirror = %d, want 403", resp.StatusCode)
+	}
+	if len(cacheRequests) != 0 {
+		t.Fatalf("cache requests = %v, want none", cacheRequests)
+	}
+}

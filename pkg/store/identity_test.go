@@ -73,10 +73,10 @@ func TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, joiner.Account.ID, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant(t, st, joiner.PersonalTeam).RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID); !errors.Is(err, store.ErrLastOwner) {
+	if _, err := tenant(t, st, joiner.PersonalTeam).RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID, time.Now()); !errors.Is(err, store.ErrLastOwner) {
 		t.Fatalf("last owner leaving their space = %v, want ErrLastOwner", err)
 	}
-	if err := own.RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID); err != nil {
+	if _, err := own.RemoveMember(ctx, joiner.Account.ID, joiner.Account.ID, time.Now()); err != nil {
 		t.Fatalf("leave: %v", err)
 	}
 	again := signIn(t, st, "j", "joiner@example.com")
@@ -141,16 +141,16 @@ func TestIdentityRolesCannotEscalateOrOrphanATeam(t *testing.T) {
 	if _, err := st.AcceptInvitation(ctx, ed.Account.ID, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := tn.SetMemberRole(ctx, ed.Account.ID, ed.Account.ID, store.RoleOwner); !errors.Is(err, store.ErrRoleAboveOwn) {
+	if _, err := tn.SetMemberRole(ctx, ed.Account.ID, ed.Account.ID, store.RoleOwner, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor promoting self = %v, want ErrRoleAboveOwn", err)
 	}
 	if _, err := tn.CreateInvitation(ctx, ed.Account.ID, "z@example.com", store.RoleOwner, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor inviting an owner = %v, want ErrRoleAboveOwn", err)
 	}
-	if err := tn.SetMemberRole(ctx, owner.Account.ID, owner.Account.ID, store.RoleReader); !errors.Is(err, store.ErrLastOwner) {
+	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, owner.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrLastOwner) {
 		t.Fatalf("last owner demoting self = %v, want ErrLastOwner", err)
 	}
-	if err := tn.RemoveMember(ctx, ed.Account.ID, owner.Account.ID); !errors.Is(err, store.ErrRoleAboveOwn) {
+	if _, err := tn.RemoveMember(ctx, ed.Account.ID, owner.Account.ID, time.Now()); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor removing the owner = %v, want ErrRoleAboveOwn", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestIdentityTeamScopedWritesMissAnotherTeam(t *testing.T) {
 	if toks, err := tb.RunnerTokens(ctx, time.Now()); err != nil || len(toks) != 1 || toks[0].CreatedBy != b.Account.ID {
 		t.Fatalf("team b lists %+v (%v)", toks, err)
 	}
-	if err := ta.SetMemberRole(ctx, a.Account.ID, b.Account.ID, store.RoleReader); !errors.Is(err, store.ErrNotMember) {
+	if _, err := ta.SetMemberRole(ctx, a.Account.ID, b.Account.ID, store.RoleReader, time.Now()); !errors.Is(err, store.ErrNotMember) {
 		t.Fatalf("team a re-roling team b's owner = %v, want ErrNotMember", err)
 	}
 }
@@ -423,5 +423,74 @@ func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
 	}
 	if err := tn.DeleteInvitation(ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("withdrawing twice = %v, want ErrNotFound", err)
+	}
+}
+
+func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	owner := signIn(t, st, "o", "owner@example.com")
+	ed := signIn(t, st, "e", "ed@example.com")
+	tn := tenant(t, st, owner.PersonalTeam)
+	inv, err := tn.CreateInvitation(ctx, owner.Account.ID, "ed@example.com", store.RoleEditor, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AcceptInvitation(ctx, ed.Account.ID, inv.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	mint := func(name, by string) string {
+		t.Helper()
+		_, tok, err := tn.CreateRunnerToken(ctx, name, []string{"nodes.claim"}, by, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok.Prefix
+	}
+	live := func() map[string]bool {
+		t.Helper()
+		toks, err := tn.RunnerTokens(ctx, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, tok := range toks {
+			out[tok.Prefix] = true
+		}
+		return out
+	}
+	kept := mint("agent:owner", owner.Account.ID)
+	first := mint("agent:ed-1", ed.Account.ID)
+
+	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleOwner, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if !live()[first] {
+		t.Fatal("a promotion revoked the member's runner token")
+	}
+	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleEditor, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleReader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked) != 1 || revoked[0] != first || live()[first] {
+		t.Fatalf("demotion to reader revoked %v, live %v; want only %s", revoked, live(), first)
+	}
+
+	if _, err := tn.SetMemberRole(ctx, owner.Account.ID, ed.Account.ID, store.RoleEditor, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second := mint("agent:ed-2", ed.Account.ID)
+	revoked, err = tn.RemoveMember(ctx, owner.Account.ID, ed.Account.ID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked) != 1 || revoked[0] != second || live()[second] {
+		t.Fatalf("removal revoked %v, live %v; want only %s", revoked, live(), second)
+	}
+	if !live()[kept] {
+		t.Fatal("removing a member revoked another member's runner token")
 	}
 }
