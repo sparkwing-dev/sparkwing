@@ -34,9 +34,6 @@ func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server {
 	return s
 }
 
-// counterCaller is who called a counter route: the cache, whose operator
-// token may name any team, or a principal holding logs.write, which the logs
-// service forwards and which names only its own team's log store.
 type counterCaller struct {
 	service bool
 	team    store.Team
@@ -67,8 +64,6 @@ func (s *Server) counterCaller(w http.ResponseWriter, r *http.Request) (counterC
 	return counterCaller{team: store.NormalizeTeam(p.Team)}, true
 }
 
-// may reports whether c may count team's kind, answering the request when
-// it may not.
 func (c counterCaller) may(w http.ResponseWriter, team string, kind store.StorageKind) bool {
 	if !teamblob.ValidTeam(team) {
 		writeError(w, http.StatusBadRequest, errors.New("not a team slug"))
@@ -95,8 +90,6 @@ type storageReserveReq struct {
 	UpTo  bool              `json:"up_to"`
 }
 
-// handleStorageReserve holds room in a team's store before a write reads
-// one byte of its body.
 func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 	caller, ok := s.counterCaller(w, r)
 	if !ok {
@@ -139,7 +132,6 @@ type storageCommitReq struct {
 	Bytes       int64             `json:"bytes"`
 }
 
-// handleStorageCommit moves a reservation into what the team stores.
 func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	caller, ok := s.counterCaller(w, r)
 	if !ok {
@@ -175,7 +167,6 @@ type storageReleaseReq struct {
 	Reservation string `json:"reservation"`
 }
 
-// handleStorageRelease gives back a reservation whose write stored nothing.
 func (s *Server) handleStorageRelease(w http.ResponseWriter, r *http.Request) {
 	caller, ok := s.counterCaller(w, r)
 	if !ok {
@@ -209,8 +200,6 @@ type downloadChargeReq struct {
 	Record bool   `json:"record"`
 }
 
-// handleDownloadCharge charges a download to its team's UTC day before the
-// cache sends it, and refuses it with 429 past the team's cap.
 func (s *Server) handleDownloadCharge(w http.ResponseWriter, r *http.Request) {
 	caller, ok := s.counterCaller(w, r)
 	if !ok {
@@ -251,8 +240,6 @@ func (s *Server) handleDownloadCharge(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleEgressTotals keeps a service's day and month egress totals, so a
-// restarted cache resumes its daily cap.
 func (s *Server) handleEgressTotals(w http.ResponseWriter, r *http.Request) {
 	caller, ok := s.counterCaller(w, r)
 	if !ok {
@@ -278,8 +265,6 @@ func (s *Server) handleEgressTotals(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGrantFreeSlot admits a team to the free tier whether or not a slot
-// is free.
 func (s *Server) handleGrantFreeSlot(w http.ResponseWriter, r *http.Request) {
 	team := store.Team(r.PathValue("team"))
 	err := s.store.GrantFreeSlot(r.Context(), team, time.Now())

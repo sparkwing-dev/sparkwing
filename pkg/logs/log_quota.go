@@ -10,28 +10,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
-// A free team's logs are held to their share of the allowance by the
-// controller, which counts what every team stores. An append reserves the
-// bytes it will store with the caller's own credential, writes, and commits
-// what it wrote; an append that writes nothing releases its reservation.
-
-// logReservation is one append's hold on its team's log share. The zero
-// value holds nothing and finishes as a no-op.
 type logReservation struct {
 	counter *storagequota.Client
 	auth    string
 	res     storagequota.Reservation
-	// stored is what the append wrote; finish commits it, or releases the
-	// reservation when it is zero.
-	stored int64
+	stored  int64
 }
 
-// reserveLogBytes holds n bytes of team's log share, and answers the
-// request itself when it may not: 413 past the share, 402 for a team with
-// neither credits nor a slot, and 503 when the controller cannot count a
-// team it has not answered funded for recently. The operator's team is not
-// counted, and neither is any team of a service without an archive, which
-// has no free tier to hold.
+// safety: the operator's team is never counted, and neither is a service without an
+// archive, which has no free tier; a controller that cannot count answers 503.
 func (s *Server) reserveLogBytes(w http.ResponseWriter, r *http.Request, team string, n int64) (*logReservation, bool) {
 	if s.archive == nil || s.counter == nil || storagequota.Exempt(team) {
 		return &logReservation{}, true
@@ -49,9 +36,8 @@ func (s *Server) reserveLogBytes(w http.ResponseWriter, r *http.Request, team st
 	return &logReservation{counter: s.counter, auth: auth, res: res}, true
 }
 
-// finish commits what the append stored, or releases the reservation. It
-// outlives the request's context, because a client that hangs up after the
-// write must not leave its bytes uncounted.
+// safety: the commit outlives the request, so a client that hangs up after the write
+// leaves no bytes uncounted.
 func (l *logReservation) finish(ctx context.Context, logger *slog.Logger) {
 	if l.counter == nil {
 		return

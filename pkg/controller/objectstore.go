@@ -186,8 +186,6 @@ func (s *Server) measureHolder() string {
 	return "controller"
 }
 
-// bucketMeasured reports whether this controller was pointed at a bucket,
-// which it then measures whether or not a ceiling holds it.
 func (s *Server) bucketMeasured() bool {
 	return s.bucketUsageStore != nil || s.artifactStore != nil
 }

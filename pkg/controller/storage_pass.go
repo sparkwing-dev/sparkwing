@@ -15,8 +15,6 @@ import (
 // service's buckets to reconcile every team's stored bytes.
 const StoragePassEvery = time.Hour
 
-// cacheObjectMaxAge is how long a team's binary, dependency archive or
-// artifact lasts after it was last written.
 const cacheObjectMaxAge = 30 * 24 * time.Hour
 
 // CacheObjectMaxAge is how long the storage pass keeps team's cache
@@ -29,7 +27,6 @@ func CacheObjectMaxAge(team string) time.Duration {
 	return cacheObjectMaxAge
 }
 
-// storagePass is what the hourly pass lists and what it last found.
 type storagePass struct {
 	stores map[store.StorageKind]*teamblob.Store
 
@@ -70,9 +67,8 @@ func (s *Server) RunStoragePass(ctx context.Context) (bool, error) {
 	return ran, err
 }
 
-// storagePassOnce releases expired reservations, reconciles each store's
-// counts from one listing, and drops download and egress days past their
-// window. A store whose listing failed keeps its counts.
+// safety: a store whose listing failed keeps its counts rather than taking a partial
+// listing for the whole.
 func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	now := time.Now()
 	var errs []error
@@ -138,7 +134,6 @@ func (s *Server) runStoragePass(ctx context.Context) {
 	}
 }
 
-// storagePassHealth names a pass whose last run failed.
 func (s *Server) storagePassHealth() (map[string]any, []string) {
 	p := s.storagePass
 	if p == nil {

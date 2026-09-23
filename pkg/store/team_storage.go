@@ -9,18 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
-
-// The cache and the logs service hold each free team to its share of the
-// allowance by asking the controller, which counts every team's stored bytes
-// here. A write reserves its size before one byte moves, commits what it
-// stored once it is done, and releases the reservation when it fails, all
-// against one row per team and store that the reserve locks, so writers on
-// any number of processes see each other's reservations. The storage pass
-// replaces the stored-bytes count with a listing of the bucket on a schedule
-// of hours.
 
 // StorageKind names the store a [TeamStorageUsage] row counts.
 type StorageKind string
@@ -229,10 +218,7 @@ UPDATE team_storage SET reserved_bytes = reserved_bytes + ?, updated_at = ? WHER
 	return out, tx.Commit()
 }
 
-// lockTeamStorageTx creates the team's row for kind if it has none, locks it
-// until the transaction ends, drops the reservations that expired, and
-// reports what the row holds. Every change to a row goes through here first,
-// so the lock orders them.
+// safety: every change to a team_storage row locks it here first, so the lock orders them.
 func lockTeamStorageTx(ctx context.Context, tx *storeTx, team Team, kind StorageKind, now time.Time) (used, reserved int64, err error) {
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO team_storage (team, store, used_bytes, reserved_bytes, committed_bytes, reconciled_at, updated_at)
@@ -282,9 +268,7 @@ func reservationTx(ctx context.Context, tx *storeTx, team Team, id string) (rese
 	return r, err == nil, err
 }
 
-// dropReservationTx deletes reservation id and gives its bytes back to the
-// row the caller already locked. A reservation some other call already
-// dropped gives nothing back twice.
+// safety: a reservation another call already dropped gives nothing back twice.
 func dropReservationTx(ctx context.Context, tx *storeTx, id string, r reservationRow) error {
 	res, err := tx.ExecContext(ctx, `DELETE FROM storage_reservations WHERE id = ? AND team = ?`, id, string(r.team))
 	if err != nil {
@@ -387,32 +371,41 @@ func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now ti
 // reports how many rows it unblocked. A reserve drops its own team's expired
 // reservations as it goes; this catches the rows nobody reserves against.
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error) {
-	rows, err := s.query(ctx, `SELECT DISTINCT team, store FROM storage_reservations WHERE expires_at <= ?`, now.UnixNano())
+	keys, err := s.expiredReservationRows(ctx, now)
 	if err != nil {
-		return 0, err
-	}
-	type key struct{ team, kind string }
-	var keys []key
-	for rows.Next() {
-		var k key
-		if err := rows.Scan(&k.team, &k.kind); err != nil {
-			_ = rows.Close()
-			return 0, err
-		}
-		keys = append(keys, k)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return 0, err
 	}
 	for _, k := range keys {
 		if err := s.inTx(ctx, func(tx *storeTx) error {
-			_, _, err := lockTeamStorageTx(ctx, tx, Team(k.team), StorageKind(k.kind), now)
+			_, _, err := lockTeamStorageTx(ctx, tx, k.team, k.kind, now)
 			return err
 		}); err != nil {
 			return 0, err
 		}
 	}
 	return len(keys), nil
+}
+
+type storageRow struct {
+	team Team
+	kind StorageKind
+}
+
+func (s *Store) expiredReservationRows(ctx context.Context, now time.Time) (_ []storageRow, err error) {
+	rows, err := s.query(ctx, `SELECT DISTINCT team, store FROM storage_reservations WHERE expires_at <= ?`, now.UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []storageRow
+	for rows.Next() {
+		var team, kind string
+		if err := rows.Scan(&team, &kind); err != nil {
+			return nil, err
+		}
+		out = append(out, storageRow{Team(team), StorageKind(kind)})
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
@@ -428,13 +421,13 @@ func (s *Store) inTx(ctx context.Context, fn func(*storeTx) error) (err error) {
 }
 
 // TeamStorage reports what team holds in each store the controller counts.
-func (s *Store) TeamStorage(ctx context.Context, team Team) (map[StorageKind]TeamStorageUsage, error) {
+func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error) {
 	rows, err := s.query(ctx, `SELECT store, used_bytes, reserved_bytes, reconciled_at FROM team_storage WHERE team = ?`,
 		string(NormalizeTeam(team)))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	out := map[StorageKind]TeamStorageUsage{}
 	for rows.Next() {
 		var kind string
@@ -454,12 +447,12 @@ func (s *Store) TeamStorage(ctx context.Context, team Team) (map[StorageKind]Tea
 // StorageMarks reports every team's running total of committed bytes in
 // kind. The storage pass takes it before it lists the bucket and hands it to
 // [Store.ReconcileStorage], which keeps what was committed in between.
-func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (map[Team]int64, error) {
+func (s *Store) StorageMarks(ctx context.Context, kind StorageKind) (_ map[Team]int64, err error) {
 	rows, err := s.query(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ?`, string(kind))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer closeRowsInto(rows, &err)
 	out := map[Team]int64{}
 	for rows.Next() {
 		var team string
@@ -495,24 +488,12 @@ ON CONFLICT (team, store) DO NOTHING`, string(team), string(kind), now.UnixNano(
 			return err
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ? ORDER BY team`+tx.forUpdate(), string(kind))
+	committed, err := lockCommittedTx(ctx, tx, kind)
 	if err != nil {
 		return err
 	}
-	counted := map[Team]int64{}
-	for rows.Next() {
-		var team string
-		var committed int64
-		if err := rows.Scan(&team, &committed); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		counted[Team(team)] = max(listed[Team(team)]+committed-marks[Team(team)], 0)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	for team, used := range counted {
+	for team, total := range committed {
+		used := max(listed[team]+total-marks[team], 0)
 		if _, err := tx.ExecContext(ctx, `
 UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE team = ? AND store = ?`,
 			used, now.UnixNano(), now.UnixNano(), string(team), string(kind)); err != nil {
@@ -520,6 +501,24 @@ UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE 
 		}
 	}
 	return tx.Commit()
+}
+
+func lockCommittedTx(ctx context.Context, tx *storeTx, kind StorageKind) (_ map[Team]int64, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ? ORDER BY team`+tx.forUpdate(), string(kind))
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	out := map[Team]int64{}
+	for rows.Next() {
+		var team string
+		var n int64
+		if err := rows.Scan(&team, &n); err != nil {
+			return nil, err
+		}
+		out[Team(team)] = n
+	}
+	return out, rows.Err()
 }
 
 // DownloadCharge asks to serve a team's download.
@@ -560,9 +559,8 @@ type DownloadCapError struct {
 }
 
 func (e *DownloadCapError) Error() string {
-	return fmt.Sprintf("%s: team %s downloaded %s of its %s on %s and this download is %s; %s",
-		ErrDownloadCap, e.Team, egress.FormatBytes(e.UsedBytes), egress.FormatBytes(e.CapBytes), e.Day,
-		egress.FormatBytes(e.RequestedBytes), e.Remedy)
+	return fmt.Sprintf("%s: team %s downloaded %d of its %d bytes on %s and this download is %d; %s",
+		ErrDownloadCap, e.Team, e.UsedBytes, e.CapBytes, e.Day, e.RequestedBytes, e.Remedy)
 }
 
 // Unwrap reports [ErrDownloadCap].
@@ -612,8 +610,8 @@ INSERT INTO team_download_day (team, day, bytes, updated_at) VALUES (?, ?, 0, ?)
 	if !c.Record && out.CapBytes > 0 && used+max(c.Bytes, 1) > out.CapBytes {
 		remedy := "the cap resets at midnight UTC"
 		if out.Tier == TeamTierFree && c.FundedCapBytes > c.FreeCapBytes {
-			remedy = fmt.Sprintf("add credits to the team to raise it to %s a day, or wait for midnight UTC",
-				egress.FormatBytes(c.FundedCapBytes))
+			remedy = fmt.Sprintf("add credits to the team to raise it to %d bytes a day, or wait for midnight UTC",
+				c.FundedCapBytes)
 		}
 		return DownloadCharged{}, &DownloadCapError{
 			Team: string(team), Day: day, UsedBytes: used, CapBytes: out.CapBytes, RequestedBytes: c.Bytes,

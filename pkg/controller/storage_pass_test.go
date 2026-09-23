@@ -21,8 +21,6 @@ import (
 
 const passBucket = "sparkwing-data"
 
-// listHook runs after each listing the storage pass makes, so a test can
-// land a write while the pass is part way through the bucket.
 type listHook struct {
 	*s3.Client
 	mu    sync.Mutex
@@ -146,8 +144,6 @@ func TestTheStoragePassReconcilesAndKeepsWritesInFlight(t *testing.T) {
 		t.Errorf("beta's cache = %d, want 0: the bucket holds none of it", got)
 	}
 
-	// Negative control: a second pass inside the window does not run, so
-	// replicas share one listing an hour.
 	b.hook.after = nil
 	if ran, err := f.srv.RunStoragePass(context.Background()); err != nil || ran {
 		t.Fatalf("a second pass inside the window = %t, %v; want it skipped", ran, err)

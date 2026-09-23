@@ -94,8 +94,6 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	return srv, raw, s.handler
 }
 
-// fakeController stands in for the controller's counter routes, answering
-// only token, with share bytes per free team and a daily download cap.
 func fakeController(t *testing.T, token string, share, downloadCap int64) (*storagequotatest.Controller, string) {
 	t.Helper()
 	ctl := storagequotatest.New(share, downloadCap)
@@ -105,8 +103,6 @@ func fakeController(t *testing.T, token string, share, downloadCap int64) (*stor
 	return ctl, srv.URL
 }
 
-// saveCounter restores the package's counter when the test ends, because
-// New replaces it.
 func saveCounter(t *testing.T) {
 	t.Helper()
 	saved, savedAuth := counter, counterAuth

@@ -271,7 +271,6 @@ func TestPutReportsWhatItAddsAndMeasureListsEachNamespaceOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Root, teams/, team-a, team-b and the operator's bins/: five listings.
 	if n := f.client.count("ListObjectsV2"); n != 5 {
 		t.Fatalf("measure listed %d times, want 5", n)
 	}

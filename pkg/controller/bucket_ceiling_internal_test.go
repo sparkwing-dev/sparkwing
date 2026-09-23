@@ -132,7 +132,6 @@ func TestAFailedBucketMeasurementReachesHealth(t *testing.T) {
 	if bucket["measurement_incomplete"] != true || len(problems) == 0 || !strings.Contains(strings.Join(problems, "\n"), "measure") {
 		t.Fatalf("health after a failed measurement = %v %v, want it incomplete with a problem", summary, problems)
 	}
-	// Negative control: a controller with no bucket reports none.
 	if summary, problems := objectStoreHealth(false); summary["ceiling"] != nil || len(problems) != 0 {
 		t.Fatalf("health with no bucket = %v %v", summary, problems)
 	}

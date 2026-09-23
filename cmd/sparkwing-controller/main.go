@@ -964,8 +964,6 @@ func envMeasurePages() int {
 	return n
 }
 
-// openTeamStore opens raw's team-namespaced store for the storage pass, or
-// none for an empty raw.
 func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Duration) (*teamblob.Store, error) {
 	if raw == "" {
 		return nil, nil

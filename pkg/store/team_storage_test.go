@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// freeTeam registers team, gives it a free-tier slot by starting a run, and
-// returns it.
 func freeTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	tenant := teamHandle(t, st, team)
@@ -154,10 +152,6 @@ func TestReserveTiers(t *testing.T) {
 	}
 }
 
-// race runs attempt from writers goroutines at once, after warming the
-// connection pool so the attempts overlap rather than queue behind new
-// connections, and reports how many succeeded. Any error other than one
-// refused reports through t.
 func race(t *testing.T, writers int, attempt func() error, refused func(error) bool) int {
 	t.Helper()
 	var wg sync.WaitGroup
@@ -186,6 +180,8 @@ func race(t *testing.T, writers int, attempt func() error, refused func(error) b
 	return won
 }
 
+// safety: a warm pool lets racing attempts overlap rather than queue behind new
+// connections, which serialized them and hid the race.
 func warmPool(t *testing.T, st *store.Store, n int) {
 	t.Helper()
 	var wg sync.WaitGroup
@@ -231,7 +227,6 @@ func TestReserveRaceForTheLastBytesAdmitsExactlyOne(t *testing.T) {
 			t.Fatalf("round %d: reserved after the race = %d, want the whole 12 KiB share", round, got.ReservedBytes)
 		}
 	}
-	// Negative control: one writer alone takes the last 4 KiB.
 	freeTeam(t, st, "alone")
 	if _, err := reserve(st, "alone", store.StorageCache, 8<<10, now); err != nil {
 		t.Fatal(err)
@@ -396,7 +391,7 @@ func TestReconcileKeepsWritesCommittedWhileListing(t *testing.T) {
 	now := time.Now()
 	commit := func(team store.Team, n int64) {
 		t.Helper()
-		res, err := reserve(st, team, store.StorageCache, n, now)
+		res, err := st.ReserveStorage(ctx, store.StorageReserve{Team: team, Kind: store.StorageCache, Bytes: n, Now: now})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,8 +405,6 @@ func TestReconcileKeepsWritesCommittedWhileListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Written while the listing ran: team-a's lands after its prefix was
-	// listed, and team-c is new.
 	commit("team-a", 7)
 	commit("team-c", 5)
 	listed := map[store.Team]int64{"team-a": 300}
@@ -423,7 +416,6 @@ func TestReconcileKeepsWritesCommittedWhileListing(t *testing.T) {
 			t.Errorf("%s used = %d, want %d", team, got.UsedBytes, want)
 		}
 	}
-	// Negative control: the logs rows were not listed and move not at all.
 	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 0 {
 		t.Errorf("logs row after a cache reconcile = %+v", got)
 	}

@@ -85,10 +85,8 @@ type Server struct {
 	externalURL  string
 	oidc         oidcState
 
-	cacheURL   string
-	cacheToken string
-	// downloadFree and downloadFunded cap what one team downloads through
-	// the cache in a UTC day.
+	cacheURL                     string
+	cacheToken                   string
 	downloadFree, downloadFunded int64
 
 	teamStorage        TeamStorage

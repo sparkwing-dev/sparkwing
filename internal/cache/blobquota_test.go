@@ -15,8 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 )
 
-// newQuotaServer is a cache in front of a controller that holds a free team
-// to a 3072-byte cache share.
 func newQuotaServer(t *testing.T) (*httptest.Server, *s3.Client, http.Handler, *storagequotatest.Controller, string) {
 	t.Helper()
 	const token = "operator-token"

@@ -100,10 +100,18 @@ func (c *Controller) tier(team string) storagequota.Tier {
 	return storagequota.TierFree
 }
 
+// safety: an encode that fails answers 500, so a caller never decodes a
+// half-written body as an empty answer.
+func writeJSON(w http.ResponseWriter, v any) {
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
 func refuse(w http.ResponseWriter, status int, format string, args ...any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf(format, args...)})
+	writeJSON(w, map[string]string{"error": fmt.Sprintf(format, args...)})
 }
 
 func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +164,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := fmt.Sprintf("sr_%d", c.next)
 		c.holds[id] = hold{key: k, bytes: max(granted, 0)}
 		c.reserved[k] += max(granted, 0)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, map[string]any{
 			"reservation": id, "tier": tier, "granted_bytes": max(granted, 0),
 			"unlimited": tier == storagequota.TierFunded && req.UpTo && req.Bytes <= 0,
 		})
@@ -182,13 +190,13 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		c.days[req.Team] += req.Bytes
-		_ = json.NewEncoder(w).Encode(map[string]any{"tier": tier, "day_bytes": c.days[req.Team], "cap_bytes": c.DownloadCap})
+		writeJSON(w, map[string]any{"tier": tier, "day_bytes": c.days[req.Team], "cap_bytes": c.DownloadCap})
 	case "/internal/egress/totals":
 		t := req.EgressTotals
 		c.egress[t.Day] = max(c.egress[t.Day], t.DayBytes)
 		c.egress[t.Month] = max(c.egress[t.Month], t.MonthBytes)
 		t.DayBytes, t.MonthBytes = c.egress[t.Day], c.egress[t.Month]
-		_ = json.NewEncoder(w).Encode(t)
+		writeJSON(w, t)
 	default:
 		http.NotFound(w, r)
 	}

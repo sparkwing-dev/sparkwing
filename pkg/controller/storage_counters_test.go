@@ -177,7 +177,7 @@ func TestTheDownloadChargeRouteHoldsTheDailyCap(t *testing.T) {
 		t.Fatal(code)
 	}
 	charge := func(bytes int64) (int, http.Header) {
-		req, err := http.NewRequest("POST", f.url+"/internal/downloads/charge",
+		req, err := http.NewRequest(http.MethodPost, f.url+"/internal/downloads/charge",
 			strings.NewReader(fmt.Sprintf(`{"team":"first","bytes":%d}`, bytes)))
 		if err != nil {
 			t.Error(err)

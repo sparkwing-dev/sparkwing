@@ -41,10 +41,8 @@ const maxAppendRequestBytes = 4 << 20
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
-	root   string
-	logger *slog.Logger
-	// counter asks the controller to count each team's log bytes; nil
-	// without a controller.
+	root     string
+	logger   *slog.Logger
 	counter  *storagequota.Client
 	dirMode  os.FileMode
 	fileMode os.FileMode

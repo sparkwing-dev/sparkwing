@@ -93,9 +93,7 @@ func (s *Store) measure(ctx context.Context, prefix string) (Tally, error) {
 	return t, nil
 }
 
-// measureTeam measures one team's namespace and, with a maximum age set,
-// deletes the objects older than it in the same listing. What the store
-// confirmed deleted leaves the tally; an object it refused stays in it.
+// safety: only deletions the store confirmed leave the tally; an object it refused stays in it.
 func (s *Store) measureTeam(ctx context.Context, team, prefix string) (Tally, Tally, error) {
 	var t Tally
 	var expired []sizedKey
@@ -120,7 +118,6 @@ func (s *Store) measureTeam(ctx context.Context, team, prefix string) (Tally, Ta
 	return t, Tally{Bytes: d.Bytes, Objects: d.Objects}, err
 }
 
-// children lists the next level of prefixes under prefix.
 func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {
 	var out []string
 	var token *string

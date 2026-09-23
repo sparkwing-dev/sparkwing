@@ -12,9 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
-// counter asks the controller to count what each team stores in the bucket
-// and downloads through the cache; nil without --controller, which leaves
-// every team uncounted. counterAuth is the cache's own bearer.
+// safety: nil without --controller, which leaves every team uncounted.
 var (
 	counter     *storagequota.Client
 	counterAuth string
@@ -47,8 +45,6 @@ func (s *shareReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// blobReservation is one upload's hold on its team's cache share. The zero
-// value holds nothing and finishes as a no-op.
 type blobReservation struct {
 	res     storagequota.Reservation
 	counted bool
@@ -56,15 +52,12 @@ type blobReservation struct {
 	added   int64
 }
 
-// stored records what the write added to the bucket, the size difference
-// for an overwrite.
 func (b *blobReservation) stored(added int64) {
 	b.wrote, b.added = true, added
 }
 
-// finish commits what the write added, or releases the reservation when
-// nothing was written. It outlives the request's context, because an
-// upload whose client hung up after the object landed still holds bytes.
+// safety: the commit outlives the request, because an upload whose client hung up after
+// the object landed still holds its bytes.
 func (b *blobReservation) finish(ctx context.Context) {
 	if !b.counted {
 		return

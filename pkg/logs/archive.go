@@ -802,8 +802,6 @@ func (s *Server) localWrittenSinceArchive(root *os.Root, runID string) (bool, er
 	return writtenSinceArchive(readRunMeta(root, runID), files), nil
 }
 
-// startArchive runs the archiver and retention over the archive for the
-// life of ctx.
 func (s *Server) startArchive(ctx context.Context) {
 	a := s.archive
 	if a == nil {

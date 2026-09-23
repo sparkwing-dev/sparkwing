@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 )
 
-// newTeamEgressServer is a cache in front of a controller that caps a free
-// team at two 60-byte downloads a day.
 func newTeamEgressServer(t *testing.T) (*httptest.Server, *storagequotatest.Controller, string) {
 	t.Helper()
 	const token = "operator-token"

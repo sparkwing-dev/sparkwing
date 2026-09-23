@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
-// fakeController answers the counter routes with whatever its fields say.
 type fakeController struct {
 	mu     sync.Mutex
 	status int

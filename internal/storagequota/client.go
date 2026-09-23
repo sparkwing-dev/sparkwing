@@ -230,7 +230,7 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 	// #nosec G704 -- the origin is operator configuration and the body names a checked team slug
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 == 2 {
@@ -238,7 +238,7 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 			return nil
 		}
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(out); err != nil {
-			return fmt.Errorf("%w: %s answered unreadably: %v", ErrUnavailable, path, err)
+			return fmt.Errorf("%w: %s answered unreadably: %w", ErrUnavailable, path, err)
 		}
 		return nil
 	}
@@ -249,8 +249,11 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 	case http.StatusPaymentRequired:
 		return &QuotaError{Message: msg, Paused: true}
 	case http.StatusTooManyRequests:
-		secs, _ := strconv.ParseInt(resp.Header.Get("Retry-After"), 10, 64)
-		return &DownloadCapError{Message: msg, RetryAfter: time.Duration(max(secs, 1)) * time.Second}
+		secs, err := strconv.ParseInt(resp.Header.Get("Retry-After"), 10, 64)
+		if err != nil || secs < 1 {
+			secs = 1
+		}
+		return &DownloadCapError{Message: msg, RetryAfter: time.Duration(secs) * time.Second}
 	}
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("%w: %s answered %d: %s", ErrUnavailable, path, resp.StatusCode, msg)
@@ -259,7 +262,10 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 }
 
 func readError(resp *http.Response) string {
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	if err != nil {
+		return fmt.Sprintf("answered %d and the body could not be read: %v", resp.StatusCode, err)
+	}
 	var body errorBody
 	if json.Unmarshal(raw, &body) == nil && body.Error != "" {
 		return body.Error

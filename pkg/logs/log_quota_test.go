@@ -101,7 +101,6 @@ func TestAppendsFailClosedWhileTheControllerCannotCount(t *testing.T) {
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-op/build", "Bearer admin", line(10)); code != http.StatusNoContent {
 		t.Fatalf("the operator's append with the counter down = %d %s", code, body)
 	}
-	// Negative control: the same append goes through once the counter answers.
 	counter.SetDown(false)
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(10)); code != http.StatusNoContent {
 		t.Fatalf("a free team's append with the counter back = %d %s", code, body)

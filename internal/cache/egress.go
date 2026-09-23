@@ -72,16 +72,15 @@ func metered(class egress.Class, next http.HandlerFunc) http.HandlerFunc {
 		}
 		charged := &chargedWriter{ResponseWriter: w, ctx: r.Context(), team: team}
 		egressMeter.Handle(charged, r, principal, class, next)
-		charged.settle()
+		charged.settle(r.Context())
 	}
 }
 
 var errDownloadRefused = errors.New("the team's download was refused before its body")
 
-// chargedWriter charges a team's download to its UTC day when the response
-// starts. A response that names its length is charged that length whole,
-// and refused past the cap before one byte is sent; one that streams is
-// checked for room when it starts and charged what it sent when it ends.
+// safety: a response that names its length is charged whole before its first byte, so
+// downloads racing for a team's last bytes cannot both start; a stream is checked for room
+// when it starts and charged what it sent when it ends.
 type chargedWriter struct {
 	http.ResponseWriter
 	ctx       context.Context
@@ -134,13 +133,11 @@ func (c *chargedWriter) Flush() {
 
 func (c *chargedWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
 
-// settle charges a streamed response what it sent, which the cap already
-// admitted it to start.
-func (c *chargedWriter) settle() {
+func (c *chargedWriter) settle(ctx context.Context) {
 	if !c.streaming || c.sent == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := counter.ChargeDownload(ctx, counterAuth, c.team, c.sent, true); err != nil {
 		// #nosec G706 -- the team is a checked slug

@@ -135,8 +135,6 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 	return newArchiveFixtureWith(t, retention, nil)
 }
 
-// newArchiveFixtureWith has counter, when set, answer the controller's
-// storage counter routes.
 func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.Handler) *archiveFixture {
 	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())

@@ -9,10 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
-// The cache's egress totals live in memory, so without a controller every
-// restart reopens the daily cap and restarts the month's count. With one,
-// the day's and the month's totals are kept in the controller's database,
-// written at most once a minute and at shutdown, and read back at start.
+// safety: the meter counts in memory, so the controller keeps its day and month totals
+// for a restart to resume rather than reopen the daily cap.
 const egressDayFlushEvery = time.Minute
 
 const egressService = "cache"
@@ -29,8 +27,6 @@ func flushEgressDay(ctx context.Context) error {
 	})
 }
 
-// restoreEgressDay loads today's and this month's stored totals into the
-// meter, so a restart resumes the day's cap and the month's count.
 func restoreEgressDay(ctx context.Context) error {
 	if counter == nil || egressMeter == nil {
 		return nil

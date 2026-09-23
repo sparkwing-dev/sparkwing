@@ -44,8 +44,8 @@ func TestSchemaV59_RestatesTheRunnerScaleStepInTheNewCredit(t *testing.T) {
 			if got := readStepSetting(t, upgraded); got != tc.want {
 				t.Fatalf("step after upgrade = %q, want %q", got, tc.want)
 			}
-			if v, err := upgraded.CurrentSchemaVersion(ctx); err != nil || v != 60 || v != store.ExpectedSchemaVersion() {
-				t.Fatalf("schema after upgrade = %d, %v; want 60", v, err)
+			if v, err := upgraded.CurrentSchemaVersion(ctx); err != nil || v != store.ExpectedSchemaVersion() {
+				t.Fatalf("schema after upgrade = %d, %v; want %d", v, err, store.ExpectedSchemaVersion())
 			}
 			_ = upgraded.Close()
 
