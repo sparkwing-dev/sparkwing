@@ -20,18 +20,6 @@ unlock.
 
 ## [Unreleased]
 
-### Fixed
-
-- **warm-pool + controller:** externally executed nodes share one status poll
-  per run with bounded backoff. Run and trigger heartbeats and node touch
-  requests stay available when a token's request budget is exhausted, so
-  polling cannot cause the controller to reap an active run.
-- **controller:** GitHub Actions runner credentials claim only signed GitHub
-  push deliveries for their repository, branch and commit. A retry, child run,
-  pull request or manually submitted trigger with matching Git fields is
-  refused. GitHub App pushes record their event name for this check. Unbinding
-  a repository during credential exchange now stops or revokes the credential.
-
 ### Added
 
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
@@ -857,6 +845,15 @@ unlock.
 
 ### Fixed
 
+- **warm-pool + controller:** externally executed nodes share one status poll
+  per run with bounded backoff. Run and trigger heartbeats and node touch
+  requests stay available when a token's request budget is exhausted, so
+  polling cannot cause the controller to reap an active run.
+- **controller:** GitHub Actions runner credentials claim only signed GitHub
+  push deliveries for their repository, branch and commit. A retry, child run,
+  pull request or manually submitted trigger with matching Git fields is
+  refused. GitHub App pushes record their event name for this check. Unbinding
+  a repository during credential exchange now stops or revokes the credential.
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
   the defined pipelines and, when known, the repository revision. It appears
