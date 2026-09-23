@@ -17,16 +17,22 @@ const OperatorScope = "admin"
 // like [OperatorScope], so no token minted through a [Tenant] carries it.
 const LogsDeleteScope = "logs.delete"
 
-// ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope] or
-// [LogsDeleteScope], which no team's token may carry.
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin or logs.delete scope")
+// CreditsGrantScope records paid grants and reversals for any team. It is
+// the operator's like [OperatorScope], so no token minted through a [Tenant]
+// carries it.
+const CreditsGrantScope = "credits.grant"
 
-// safety: admin is the deployment operator's scope, and a membership never grants it, so no path that
-// mints into a team may either, the default team included; the operator's own tokens are minted through *Store.
+// ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope],
+// [LogsDeleteScope] or [CreditsGrantScope], which no team's token may carry.
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete or credits.grant scope")
+
+// safety: admin and credits.grant are the deployment operator's scopes, and a membership never grants
+// them, so no path that mints into a team may either, the default team included; the operator's own
+// tokens are minted through *Store.
 func refuseAdminScope(scopes []string) error {
 	if slices.ContainsFunc(scopes, func(s string) bool {
 		s = strings.TrimSpace(s)
-		return s == OperatorScope || s == LogsDeleteScope
+		return s == OperatorScope || s == LogsDeleteScope || s == CreditsGrantScope
 	}) {
 		return ErrAdminScopeOnTeamToken
 	}

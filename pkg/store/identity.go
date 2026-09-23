@@ -953,10 +953,21 @@ func checkTeamRoomTx(ctx context.Context, tx *storeTx, team Team, limit int) err
 		string(team), string(team), CreditGrantPaid, CreditGrantReversal).Scan(&members, &paid); err != nil {
 		return err
 	}
-	if paid <= 0 && members >= limit {
-		return ErrTeamFull
+	if members < limit {
+		return nil
 	}
-	return nil
+	// safety: a team held over a disputed payment is held to the free member
+	// limit, because the payment that lifted it may be taken back.
+	if paid > 0 {
+		freeze, err := teamCreditFreezeTx(ctx, tx, team)
+		if err != nil {
+			return err
+		}
+		if !freeze.Frozen {
+			return nil
+		}
+	}
+	return ErrTeamFull
 }
 
 // SetActiveTeam records team as the account's sticky team. The account must be

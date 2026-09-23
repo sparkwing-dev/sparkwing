@@ -3734,9 +3734,9 @@ paths:
       tags: [credits]
       summary: Read the prepaid credit balance, the rate, and the recent burn.
       description: |
-        Cloud runner time is prepaid. Amounts are micro-credits: a million
-        of them is one credit, and a hundred credits is one dollar, so a
-        ten dollar top-up is a thousand credits. The balance is the sum of
+        Cloud runner time is prepaid. One credit is one vCPU-second and
+        20,000 credits is one dollar; amounts are micro-credits, 5,000 to the
+        credit, so a ten dollar top-up is 200,000 credits. The balance is the sum of
         grants less the sum of charges, computed in SQL. `rate_micro_per_second`
         prices one cloud runner second, `grace_seconds` is how long a node runs
         past its claim reservation on an empty balance, and `burn_micro` is what the last
@@ -3751,7 +3751,7 @@ paths:
 
   /api/v1/credits/grants:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: credits.grant
       tags: [credits]
       summary: Add free or paid credits to the ledger, or reverse a paid grant.
       description: |
@@ -3769,12 +3769,28 @@ paths:
         negative `amount_micro`, its own `reference` (the refund id, so
         partial refunds each land), and `reverses` naming the paid grant's
         reference. A reversal whose `reverses` matches no paid grant is
-        refused, and one that takes the balance below zero stops new
-        metered claims.
+        refused, as is one that with the reversals already written would take
+        back more than the payment paid; one that takes the balance below
+        zero stops new metered claims. A reversal may omit `team`: the
+        payment it reverses was granted to exactly one team, and the
+        reversal lands there.
 
         A replay must carry the terms it carried the first time: a request
         naming a `kind` and `reference` another grant holds under a different
         `amount_micro` or `reverses` is refused with 409.
+
+        A new `free` grant that would lift the team's balance above $5,000
+        is refused with 409 and `"code": "balance_cap"`, naming the balance,
+        the amount and the cap. A `paid` grant is never refused by the cap,
+        because its payment already went through and the cap was held when
+        its checkout opened; it is at most one purchase, $500, and names the
+        Checkout Session it settles in `checkout`. A replay of a grant
+        already written is answered as usual, so a redelivered payment still
+        succeeds.
+
+        A caller holding only the checkout service's scope records `paid`
+        grants and is answered 403 for any other kind; a `free` grant or a
+        reversal is the operator's.
       requestBody:
         required: true
         content:
@@ -3793,10 +3809,124 @@ paths:
               schema: {$ref: "#/components/schemas/CreditGrant"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409":
-          description: Another grant holds this kind and reference under different terms.
+          description: >-
+            Another grant holds this kind and reference under different terms, or the grant would lift the balance above the cap (`balance_cap`, with `balance_micro`, `cap_micro` and `amount_micro`).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/credits/reversals:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Take back what a payment still has on the ledger.
+      description: |
+        Writes one `reversal` of what the paid grant carrying `payment_id`
+        still has, less what earlier reversals of it took back, in the team
+        the payment funded. The balance may go below zero, which stops the
+        team's new metered claims. `reference` names the reversal, such as
+        `refund:<payment id>` for an operator's refund or the dispute id for
+        a lost chargeback; a repeat under it answers 200 with the reversal
+        already written, and a payment already taken back whole answers 200
+        with no `grant`. The controller never moves money: an operator's
+        refund is issued in the Stripe dashboard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.reversePaymentReq
+              type: object
+              required: [payment_id, reference]
+              properties:
+                payment_id: {type: string, description: The payment id the paid grant carries as its reference.}
+                reference: {type: string, description: This reversal's own reference.}
+      responses:
+        "200":
+          description: The reversal this reference already wrote, or nothing left to take back.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PaymentReversal"}
+        "201":
+          description: The reversal written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PaymentReversal"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No paid grant carries the payment id.}
+        "409": {description: "The reference already names a reversal of another payment, or a dispute held for another payment (`dispute_conflict`)."}
+
+  /api/v1/credits/freezes:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Hold a team's cloud usage for a dispute, or release holds.
+      description: |
+        A hold is one per dispute, and a team is held while any of its holds
+        stands: its metered claims are refused with 402 and
+        `"code": "credits_frozen"`, so no new cloud work starts, while work
+        already running finishes. A hold names the team by `payment_id`, a
+        payment it made, or by `team`, and names the `dispute_id`. A dispute
+        is bound to the payment and team its first hold named: holding it
+        again for them, released or not, writes nothing, and holding it for
+        another payment is refused with 409.
+        `release` lifts the hold of `dispute_id`, or every hold on the team
+        when no dispute is named. Naming a team and releasing are the
+        operator's; the checkout service holds by payment and never releases.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.creditFreezeReq
+              type: object
+              properties:
+                payment_id: {type: string}
+                team: {type: string}
+                dispute_id: {type: string, description: The dispute the hold is for.}
+                reason: {type: string}
+                release: {type: boolean, description: "Lift the dispute's hold, or every hold on the team."}
+      responses:
+        "200":
+          description: The team's holds as they now stand.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.creditFreezeJSON
+                type: object
+                required: [team, frozen, disputes]
+                properties:
+                  team: {type: string}
+                  frozen: {type: boolean}
+                  disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
+                  released: {type: integer, format: int64, description: How many holds a release lifted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
+        "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
+
+  /api/v1/credits/units:
+    get:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Read the units the ledger prices in.
+      description: >-
+        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with.
+      responses:
+        "200":
+          description: The ledger's units.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.creditUnitsJSON
+                type: object
+                required: [micro_per_credit, credits_per_dollar, micro_per_cent]
+                properties:
+                  micro_per_credit: {type: integer, format: int64}
+                  credits_per_dollar: {type: integer, format: int64}
+                  micro_per_cent: {type: integer, format: int64}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/credits/history:
     get:
@@ -5674,6 +5804,121 @@ paths:
       responses:
         default: {description: Undescribed.}
 
+  /api/v1/team/billing:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Read the active team's balance, prices, recent usage and grants.
+      description: >-
+        Any member of the active team reads it. One credit is one vCPU-second and `credits_per_dollar` of them make a dollar; amounts are micro-credits, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them.
+      responses:
+        "200":
+          description: Team billing.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.teamBillingJSON
+                type: object
+                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, checkout_enabled, can_purchase, usage, grants]
+                properties:
+                  team: {type: string}
+                  balance_micro: {type: integer, format: int64}
+                  balance_cap_micro: {type: integer, format: int64, description: The most a team's balance may hold.}
+                  frozen: {type: boolean, description: "True while the team's cloud usage is held over a payment dispute; its metered claims are refused."}
+                  micro_per_credit: {type: integer, format: int64}
+                  credits_per_dollar: {type: integer, format: int64}
+                  min_billable_seconds: {type: integer, format: int64, description: The least one node or trigger step is billed for.}
+                  purchase_min_cents: {type: integer, format: int64}
+                  purchase_max_cents: {type: integer, format: int64}
+                  rate_table:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.creditRateJSON
+                      type: object
+                      required: [cores, micro_per_second]
+                      properties:
+                        cores: {type: integer, format: int64}
+                        micro_per_second: {type: integer, format: int64}
+                  storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Zero when retained storage is not billed."}
+                  storage_free_allowance_bytes: {type: integer, format: int64}
+                  storage_charged_micro: {type: integer, format: int64}
+                  checkout_enabled: {type: boolean}
+                  can_purchase: {type: boolean}
+                  usage:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.teamBillingUsageJSON
+                      type: object
+                      required: [run_id, seconds, amount_micro, last_charged_at]
+                      properties:
+                        run_id: {type: string}
+                        seconds: {type: integer, format: int64}
+                        amount_micro: {type: integer, format: int64}
+                        last_charged_at: {type: integer, format: int64, description: Unix seconds.}
+                  grants:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.teamBillingGrantJSON
+                      type: object
+                      required: [id, kind, amount_micro, created_at]
+                      properties:
+                        id: {type: string}
+                        kind: {type: string, enum: [free, paid, reversal]}
+                        amount_micro: {type: integer, format: int64}
+                        reference: {type: string}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/billing/checkout:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Open a Stripe Checkout page to buy credits for the active team.
+      description: >-
+        An owner of the active team buys between `purchase_min_cents` and `purchase_max_cents`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.teamCheckoutReq
+              type: object
+              required: [amount_cents]
+              properties:
+                amount_cents: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The Stripe Checkout page.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.teamCheckoutJSON
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        "400": {description: "The amount is outside the purchase range (`amount_out_of_range`) or the body is malformed."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: The purchase, with the checkouts still open, would lift the balance above the cap.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
+                type: object
+                required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [balance_cap]}
+                  balance_micro: {type: integer, format: int64}
+                  open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
+                  cap_micro: {type: integer, format: int64}
+                  amount_micro: {type: integer, format: int64}
+        "502": {description: The checkout service or Stripe did not open a session.}
+        "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
+
 components:
   securitySchemes:
     bearerToken:
@@ -6592,15 +6837,28 @@ components:
         amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
-        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller; defaults to the default team otherwise."}
+        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller except on a reversal, which lands in the team its payment was granted to; defaults to the default team otherwise."}
+        checkout: {type: string, description: "Checkout Session id a paid grant settles, so the checkout it opened stops counting against the team's balance cap."}
+    PaymentReversal:
+      x-sparkwing-go-type: pkg/controller.reversePaymentJSON
+      type: object
+      required: [team, payment_id, paid_micro, reversed_micro, balance_micro, created]
+      properties:
+        team: {type: string, description: The team the payment funded.}
+        payment_id: {type: string}
+        paid_micro: {type: integer, format: int64, description: What the payment granted.}
+        reversed_micro: {type: integer, format: int64, description: What the payment's reversals have taken back in total.}
+        balance_micro: {type: integer, format: int64, description: "The team's balance afterwards, which may be negative."}
+        created: {type: boolean, description: Whether this call wrote the reversal.}
+        grant: {$ref: "#/components/schemas/CreditGrant"}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object
-      description: A claim or heartbeat the credit balance could not pay for.
+      description: A claim or heartbeat the credit balance could not pay for, or a claim for a team whose cloud usage is held.
       required: [error, code, balance_micro, required_micro]
       properties:
         error: {type: string}
-        code: {type: string, description: Always insufficient_credits.}
+        code: {type: string, enum: [insufficient_credits, credits_frozen], description: "credits_frozen when the team is held over a payment dispute."}
         balance_micro: {type: integer, format: int64}
         required_micro: {type: integer, format: int64}
     CreateTokenRequest:

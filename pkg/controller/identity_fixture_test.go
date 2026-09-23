@@ -46,6 +46,8 @@ type fixtureOpts struct {
 	// configure adds to the server before it starts serving.
 	configure func(*controller.Server)
 	logger    *slog.Logger
+
+	checkoutURL, checkoutToken string
 }
 
 func multiTeamLicense(t *testing.T) (string, ed25519.PublicKey) {
@@ -84,7 +86,8 @@ func newIdentityFixtureWith(t *testing.T, o fixtureOpts) *identityFixture {
 	srv := controller.New(st, o.logger).EnableAuthFromStore().
 		WithLicense(license.Resolve(o.license, key, time.Now(), nil)).
 		WithGoogleSignIn(googleauth.New(iss.Config()), []string{dashRedirect}).
-		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect})
+		WithGitHubSignIn(githubauth.New(gh.Config()), []string{dashRedirect}).
+		WithBillingCheckout(o.checkoutURL, o.checkoutToken)
 	if o.configure != nil {
 		o.configure(srv)
 	}

@@ -15,7 +15,7 @@ func TestRenderCreditStateSeparatesStorageFromRunnerTime(t *testing.T) {
 		BalanceMicro:              900_000_000,
 		GrantedMicro:              1_000_000_000,
 		ChargedMicro:              100_000_000,
-		StorageChargedMicro:       1_666_666,
+		StorageChargedMicro:       666_666,
 		StorageRateMicroPerGBDay:  store.CloudStorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: 1 << 30,
 		MicroPerCredit:            store.MicroCreditsPerCredit,
@@ -23,7 +23,7 @@ func TestRenderCreditStateSeparatesStorageFromRunnerTime(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"STORAGE CHARGED", "1.66 credits", "STORAGE RATE", "0.833333", "1073741824"} {
+	for _, want := range []string{"STORAGE CHARGED", "133.33 credits", "STORAGE RATE", "66.666600", "1073741824"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("credit state output is missing %q:\n%s", want, out)
 		}
@@ -46,7 +46,7 @@ func TestRenderCreditStateSaysWhenStorageIsNotBilled(t *testing.T) {
 func TestCreditSettingsBodyCarriesTheStorageFlags(t *testing.T) {
 	t.Parallel()
 	fs := creditSettingsFlagSet(t, []string{
-		"--storage-rate-micro-per-gb-day", "833333",
+		"--storage-rate-micro-per-gb-day", "333333",
 		"--storage-free-allowance-bytes", "1073741824",
 	})
 	body, err := creditSettingsBody(fs, creditSettingsFlags{
@@ -55,7 +55,7 @@ func TestCreditSettingsBodyCarriesTheStorageFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("body: %v", err)
 	}
-	if len(body) != 2 || body["storage_rate_micro_per_gb_day"] != int64(833_333) ||
+	if len(body) != 2 || body["storage_rate_micro_per_gb_day"] != int64(333_333) ||
 		body["storage_free_allowance_bytes"] != int64(1<<30) {
 		t.Fatalf("body = %v, want the two storage settings alone", body)
 	}

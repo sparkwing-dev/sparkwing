@@ -77,7 +77,7 @@ const RunnerScaleWindow = 30 * 24 * time.Hour
 const (
 	// RunnerScaleMaxStepCredits is the largest step runner_scale_step_credits
 	// may declare, ten million dollars of credit.
-	RunnerScaleMaxStepCredits = 1_000_000_000
+	RunnerScaleMaxStepCredits = 10_000_000 * CreditsPerDollar
 	// RunnerScaleMaxRunners is the largest runner count runner_scale_base and
 	// runner_scale_ceiling may declare.
 	RunnerScaleMaxRunners = 1_000_000

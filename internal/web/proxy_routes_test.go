@@ -237,6 +237,7 @@ func controllerRouteScopes(t *testing.T) map[string][]string {
 		"ScopeApprovalsWrite": controller.ScopeApprovalsWrite,
 		"ScopeTeamAdmin":      controller.ScopeTeamAdmin,
 		"ScopeAdmin":          controller.ScopeAdmin,
+		"ScopeCreditsGrant":   controller.ScopeCreditsGrant,
 	})
 }
 

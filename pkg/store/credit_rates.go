@@ -47,13 +47,15 @@ func CPUClassMemoryBytes(cores int64) int64 {
 	return cores * cpuClassMemoryBytesPerCore
 }
 
-// safety: these are GitHub Actions' Linux x64 rates carried to the second,
-// which is the comparison every customer makes. The four-core entry is the
-// single rate setting under another name, so it follows that setting.
+// safety: a credit is one vCPU-second, so each class costs its core count in
+// credits a second and the ladder is a multiplication rather than a price
+// list. A class priced off that line is a price change made here, never a
+// change to what a credit is. The four-core entry is the single rate setting
+// under another name, so it follows that setting.
 var defaultCreditRates = []CreditRate{
-	{Cores: 2, MicroPerSecond: 10_000},
+	{Cores: 2, MicroPerSecond: 2 * MicroCreditsPerCredit},
 	{Cores: CreditRateBaseClassCores, MicroPerSecond: DefaultCreditRateMicro},
-	{Cores: 8, MicroPerSecond: 36_667},
+	{Cores: 8, MicroPerSecond: 8 * MicroCreditsPerCredit},
 }
 
 const metaKeyCreditRateTable = "credit_rate_table"
@@ -214,8 +216,9 @@ func (t CreditRateTable) Sorted() CreditRateTable {
 }
 
 // DefaultCreditRateTable is the ladder an installation that never set a table
-// bills: GitHub Actions' Linux x64 rates, with the four-core class priced at
-// rate because the single rate setting is that class under another name.
+// bills: each class at its core count in credits a second, with the four-core
+// class priced at rate because the single rate setting is that class under
+// another name.
 func DefaultCreditRateTable(rate int64) CreditRateTable {
 	out := make(CreditRateTable, 0, len(defaultCreditRates))
 	for _, entry := range defaultCreditRates {

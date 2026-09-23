@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 58
+const expectedSchemaVersion = 60
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2017,12 +2017,18 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyDeletionMigrationSQLite(ctx, tx)
 	case 56:
 		return applyFreeSlotsMigrationSQLite(ctx, tx)
-	// safety: v57 is allocated to billing, which lands separately; this step
-	// keeps the ladder gapless until it does.
+	// safety: v57 is reserved and intentionally empty.
 	case 57:
 		return nil
 	case 58:
 		return applySignUpGateMigrationSQLite(ctx, tx)
+	case 59:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
+		return applyCreditUnitMigration(ctx, tx)
+	case 60:
+		return applyCreditCheckoutMigrationSQLite(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2400,12 +2406,18 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyDeletionMigrationPostgres(ctx, tx)
 	case 56:
 		return applyFreeSlotsMigrationPostgres(ctx, tx)
-	// safety: v57 is allocated to billing, which lands separately; this step
-	// keeps the ladder gapless until it does.
+	// safety: v57 is reserved and intentionally empty.
 	case 57:
 		return nil
 	case 58:
 		return applySignUpGateMigrationPostgres(ctx, tx)
+	case 59:
+		if err := addColumnsTx(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
+		return applyCreditUnitMigration(ctx, tx)
+	case 60:
+		return applyCreditCheckoutMigrationPostgres(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -5783,7 +5795,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, queued); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -6075,7 +6087,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, execution_started_at, credit_charged_through FROM nodes
+		`SELECT run_id, node_id, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
@@ -6083,18 +6095,17 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	var pairs [][2]string
-	var unstarted [][2]string
+	var lapsed []expiredClaim
 	for rows.Next() {
-		var rid, nid string
-		var started sql.NullInt64
-		var chargeWindow int64
-		if err := rows.Scan(&rid, &nid, &started, &chargeWindow); err != nil {
+		var rid, nid, prefix string
+		var chargeWindow, lease int64
+		if err := rows.Scan(&rid, &nid, &chargeWindow, &lease, &prefix); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
-		if !started.Valid && chargeWindow != 0 {
-			unstarted = append(unstarted, [2]string{rid, nid})
+		if chargeWindow != 0 {
+			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, tokenPrefix: prefix, leaseNS: lease})
 		}
 	}
 	_ = rows.Close()
@@ -6104,29 +6115,26 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if len(pairs) == 0 {
 		return nil, nil
 	}
-	if len(unstarted) > 0 {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	for _, claim := range lapsed {
+		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
 			return nil, err
 		}
-		for _, pair := range unstarted {
-			team, err := creditTeamForRunTx(ctx, tx, pair[0])
-			if err != nil {
-				return nil, err
-			}
-			if _, err := refundUnstartedReservationTx(ctx, tx, team, pair[0], pair[1], now); err != nil {
-				return nil, err
-			}
-		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-		        credit_charged_through = 0
-		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND `+nodeNotDone,
-		now); err != nil {
-		return nil, err
+	// safety: only the rows this pass selected, locked and settled are
+	// cleared. On Postgres the select skips a row another transaction holds,
+	// and clearing every expired claim would clear that one too once its
+	// holder let go, dropping the tail nobody settled.
+	for _, pair := range pairs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+			        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+			        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+			        credit_charged_through = 0
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
+			    AND lease_expires_at < ? AND `+nodeNotDone,
+			pair[0], pair[1], now); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

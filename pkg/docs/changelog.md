@@ -205,6 +205,40 @@ unlock.
 
 - **web:** a waitlisted user sees a waitlist page in place of the team views,
   with any invitations it can accept.
+- **controller:** team billing. `GET /api/v1/team/billing` gives any member of
+  the active team its balance, the price table, recent usage grouped by run,
+  and its purchases and grants. `POST /api/v1/team/billing/checkout` lets an
+  owner buy $5 to $500 of credits: the controller takes the team from the
+  owner's session and asks the hosted checkout service at `--billing-url`
+  (`SPARKWING_BILLING_URL`, authenticated with `SPARKWING_BILLING_TOKEN`) to
+  open a Stripe Checkout Session, and answers with the page to send the owner
+  to. A controller with no billing URL sells no credits. A `reversal` grant
+  may omit `team` and lands in the team its payment funded. See
+  [Buying credits](docs/auth.md#buying-credits).
+
+- **credits:** refunds and chargebacks. Purchases are final, so a refund is
+  the operator's: `sparkwing cluster credits refund --payment <pi_...>` takes
+  back what the purchase still has on the ledger through
+  `POST /api/v1/credits/reversals` and prints the Stripe dashboard page to
+  issue the money back from; the controller never moves money. The whole
+  purchase is reversed even when spent, so the balance may go negative. A team
+  is held per dispute with `POST /api/v1/credits/freezes` or
+  `sparkwing cluster credits freeze`: while any hold stands its metered claims
+  are refused with 402 and `"code": "credits_frozen"`, and Team -> Billing
+  says it is paused. The checkout service holds a team when a dispute opens on
+  its purchase, and reverses the purchase and holds the team when the dispute
+  is lost; it never releases a hold, which is the operator's, by dispute or by
+  team. A dispute is bound to the payment its first hold names, and a hold or
+  reversal naming it for another payment answers 409 `dispute_conflict`.
+  `GET /api/v1/team/billing` gains `frozen`. Schema v60 adds
+  `credit_freezes`. See
+  [Buying credits](docs/auth.md#buying-credits).
+
+- **web:** Team -> Billing shows the team's balance against its $5,000 cap,
+  the price of each class in credits and dollars from the controller's rate
+  table, the minimum billable seconds, recent usage by run and the team's
+  purchases. An owner buys credits there and is sent to Stripe Checkout; the
+  page says that purchases are final and credits never expire.
 
 - **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
   /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
@@ -364,6 +398,20 @@ unlock.
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
+- **cache:** the cache accepts a cache grant, a bearer a multi-team
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`, reads
+  only public `https` mirrors registered under their URL-derived name, and is
+  refused on registration (403), seeding, refresh, archive, upload and admin
+  routes. A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -483,6 +531,47 @@ unlock.
   bucket before it serves and refuses to start when it cannot.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 30 days.
+- **credits (Breaking):** one credit is one vCPU-second and a dollar buys
+  20,000 of them, $0.18 a vCPU-hour. The ledger still stores micro-credits and
+  a dollar is still 100,000,000 of them, so every balance, grant and charge
+  keeps its dollar value; `micro_per_credit` reads 5,000 and
+  `credits_per_dollar` 20,000, and a client that hardcoded 100 renders balances
+  200 times too small. The default ladder bills each class its core count in
+  credits a second, so the eight-core class moves from 36,667 to 40,000
+  micro-credits a second. Schema v59 multiplies a stored
+  `runner_scale_step_credits` by 200 so the step keeps its dollar value.
+  `sparkwing cluster credits grant --amount` counts the new credit.
+
+- **credits (Breaking):** every metered node and trigger step bills at least
+  20 seconds on every class. `MinBillableSeconds` replaces
+  `CreditClaimFloorSeconds`: a claim reserves 20 seconds at its class rather
+  than 60, and once billing starts the reservation is consumed rather than
+  refunded, so a node that runs four seconds pays for twenty. A claim that
+  never starts is still refunded whole. `Store.CreditClaimFloorMicro` is
+  removed.
+
+- **credits:** a metered node bills from the moment the machine that runs it
+  starts work to its finish, so fetching the source and compiling the
+  pipeline are billed; queueing and provisioning are not. A runner claiming
+  from the queue or accepting an offer bills from its claim, and a node a
+  dispatcher claims before creating its Job bills from the pod's first claim
+  renewal, which `run-node` now sends as the pod starts, or its execution
+  start. A node the platform stops before its execution starts
+  (`queue_timeout`, `logs_auth`, `logs_dropped`) gets back everything its claim
+  billed, as does a dispatcher's claim whose pod never started; a lost runner
+  or lease is billed to the lease's end, and any other end before execution
+  keeps its setup billed. Schema v59 adds
+  `nodes.credit_billing_from`.
+
+- **credits:** a team's balance holds at most $5,000, held when a checkout
+  opens: the balance plus the team's checkouts still open plus the purchase
+  must fit, or the checkout is refused with 409, `"code": "balance_cap"` and
+  `open_micro`. A checkout counts until its payment is granted or its session
+  expires. A `paid` grant is never refused by the cap, because its payment
+  already went through, and is at most one $500 purchase; it names its
+  Checkout Session in `checkout`. A new `free` grant is still refused when
+  it and the open checkouts would pass the cap. A reversal may not take back
+  more than its payment paid. Schema v60 adds `credit_checkouts`.
 
 - **store:** a credit grant's reference is unique within its team rather than
   across the deployment, so two teams can each hold a `free` grant named
@@ -616,6 +705,15 @@ unlock.
   records carry its version. `min_binary_version` and each requirement's
   `added_by_version` read `(devel)` even from a tagged build, because only the
   CLI told the store which version was running.
+- **credits:** a metered node whose runner stopped renewing now pays for the
+  seconds between its last charge and its lease's end, under the per-charge
+  cap, when the reaper or agent-loss recovery clears its claim, whether or not
+  execution had started. Those seconds used to go unbilled, and a lease lost
+  before execution used to be refunded whole although its machine had run.
+  On Postgres the reaper now clears only the claims it selected and settled,
+  so a claim another transaction held during the pass keeps its claim for the
+  next pass rather than being cleared unsettled.
+
 - **runner:** a pooled runner whose node fails before it starts, for example
   a pipeline that does not compile, finishes the node as failed with that
   error. The node used to stay claimed until its three-minute lease lapsed and
@@ -767,6 +865,11 @@ unlock.
   working on an operator token. Every secrets response, and the dashboard's
   proxy of `/api/v1/secrets`, now sends `Cache-Control: no-store` and
   `Pragma: no-cache`.
+- **controller:** a `credits.grant` scope for the hosted checkout service. It
+  records `paid` grants only on `POST /api/v1/credits/grants`, reverses and
+  holds by payment, and reads `GET /api/v1/credits/units`, and every other
+  route refuses it; only the operator mints it, and no team's token may carry
+  it. The checkout service no longer needs the controller's admin token.
 
 - **runner (Breaking):** a runner without the git cache builds only the
   repositories its owner allows. It fetched, compiled and ran pipeline code

@@ -48,7 +48,7 @@ func TestCreditsGrantRouteIsIdempotentByReference(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	body := map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": 1000 * store.MicroCreditsPerCredit,
+		"amount_micro": 1000 * store.MicroCreditsPerCent,
 		"reference":    "pi_route",
 	}
 
@@ -78,14 +78,14 @@ func TestCreditsGrantRouteReversesAPaidGrant(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	if status, _ := postGrant(t, f, map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": 1000 * store.MicroCreditsPerCredit,
+		"amount_micro": 1000 * store.MicroCreditsPerCent,
 		"reference":    "pi_refunded",
 	}); status != http.StatusCreated {
 		t.Fatalf("paid grant status = %d, want 201", status)
 	}
 	status, reversal := postGrant(t, f, map[string]any{
 		"kind":         store.CreditGrantReversal,
-		"amount_micro": -400 * store.MicroCreditsPerCredit,
+		"amount_micro": -400 * store.MicroCreditsPerCent,
 		"reference":    "re_refunded",
 		"reverses":     "pi_refunded",
 	})
@@ -101,13 +101,13 @@ func TestCreditsGrantRouteReversesAPaidGrant(t *testing.T) {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		t.Fatalf("decode state: %v", err)
 	}
-	if want := int64(600 * store.MicroCreditsPerCredit); state.BalanceMicro != want {
+	if want := int64(600 * store.MicroCreditsPerCent); state.BalanceMicro != want {
 		t.Errorf("balance = %d, want %d", state.BalanceMicro, want)
 	}
-	if want := int64(400 * store.MicroCreditsPerCredit); state.ReversedMicro != want {
+	if want := int64(400 * store.MicroCreditsPerCent); state.ReversedMicro != want {
 		t.Errorf("reversed = %d, want %d", state.ReversedMicro, want)
 	}
-	if want := int64(1000 * store.MicroCreditsPerCredit); state.GrantedMicro != want {
+	if want := int64(1000 * store.MicroCreditsPerCent); state.GrantedMicro != want {
 		t.Errorf("granted = %d, want the payment %d", state.GrantedMicro, want)
 	}
 }
@@ -116,7 +116,7 @@ func TestCreditsGrantRouteRefusesAnUnbackedOrPositiveReversal(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	if status, _ := postGrant(t, f, map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": 100 * store.MicroCreditsPerCredit,
+		"amount_micro": 100 * store.MicroCreditsPerCent,
 		"reference":    "pi_known",
 	}); status != http.StatusCreated {
 		t.Fatalf("paid grant status = %d, want 201", status)
@@ -175,7 +175,7 @@ func TestCreditsGrantRouteRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 	f := newCreditsFixture(t, false)
 	body := map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": 1000 * store.MicroCreditsPerCredit,
+		"amount_micro": 1000 * store.MicroCreditsPerCent,
 		"reference":    "pi_terms",
 	}
 	if status, _ := postGrant(t, f, body); status != http.StatusCreated {
@@ -186,7 +186,7 @@ func TestCreditsGrantRouteRefusesOneReferenceUnderDifferentTerms(t *testing.T) {
 	}
 	changed := map[string]any{
 		"kind":         store.CreditGrantPaid,
-		"amount_micro": 999 * store.MicroCreditsPerCredit,
+		"amount_micro": 999 * store.MicroCreditsPerCent,
 		"reference":    "pi_terms",
 	}
 	status, _ := creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin, changed)

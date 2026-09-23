@@ -108,12 +108,18 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v56 adds the free_slots table and an index, and nothing older
 	// reads them, so an older binary keeps writing the migrated database.
 	56: nil,
-	// safety: v57 holds the place of billing.
+	// safety: v57 is reserved and intentionally empty.
 	57: nil,
 	// safety: v58 adds an account's waitlist stamp with a default of never
 	// waitlisted, so an older binary keeps creating and reading accounts; an
 	// account it creates is admitted, as it would have been before the gate.
 	58: {accountWaitlistCols},
+	// safety: v59 adds one defaulted node column an older binary never names
+	// and rewrites one setting's value in place, so an older binary keeps
+	// writing the migrated database; a node it claims bills from execution
+	// start, as it always did.
+	59: {nodesCreditBillingCols},
+	60: nil,
 }
 
 func columnSpecMaps() []map[string]string {

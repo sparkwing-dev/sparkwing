@@ -136,8 +136,14 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	if err != nil {
 		return StorageStanding{}, err
 	}
+	// safety: a team held over a disputed payment may not keep what that
+	// payment bought, so it stores as an unfunded team does.
+	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	if err != nil {
+		return StorageStanding{}, err
+	}
 	switch {
-	case balance > 0:
+	case balance > 0 && !freeze.Frozen:
 	case events.Valid:
 		out.Tier = TeamTierFree
 	default:

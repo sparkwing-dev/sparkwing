@@ -72,6 +72,19 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	}
 	acmeToken := seedTeam(t, st, acme, owner.Account.ID, "run-acme")
 	keepToken := seedTeam(t, st, tenant(t, st, "keep"), owner.Account.ID, "run-keep")
+	// safety: billing rows are tenant-owned, so a checkout still open and a
+	// dispute hold go with the team rather than outliving it.
+	if _, err := acme.OpenCreditCheckout(ctx, store.MicroCreditsPerCredit, now, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.HoldTeamForDispute(ctx, "acme", "dp_acme", "", "dispute opened", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"credit_checkouts", "credit_freezes"} {
+		if n := countWhere(t, st, table, "team = 'acme'"); n == 0 {
+			t.Fatalf("seeding left no %s row to purge", table)
+		}
+	}
 
 	if _, _, err := acme.RequestDeletion(ctx, member.Account.ID, now); !errors.Is(err, store.ErrRoleAboveOwn) {
 		t.Fatalf("editor deleting the team = %v, want ErrRoleAboveOwn", err)

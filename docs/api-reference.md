@@ -38,11 +38,14 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
-| `POST` | `/api/v1/credits/grants` | `admin` |
+| `POST` | `/api/v1/credits/freezes` | `credits.grant` |
+| `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
+| `POST` | `/api/v1/credits/reversals` | `credits.grant` |
 | `GET` | `/api/v1/credits/settings` | `runs.read` |
 | `PUT` | `/api/v1/credits/settings` | `admin` |
 | `GET` | `/api/v1/credits/teams/{team}` | `admin` |
+| `GET` | `/api/v1/credits/units` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.control` |
 | `PUT` | `/api/v1/crons/repos` | `runs.control` |
@@ -171,6 +174,8 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/storage/teams/{team}/free-slot` | `admin` |
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
+| `GET` | `/api/v1/team/billing` | `runs.read` |
+| `POST` | `/api/v1/team/billing/checkout` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `DELETE` | `/api/v1/team/cli-tokens/{prefix}` | `runs.read` |

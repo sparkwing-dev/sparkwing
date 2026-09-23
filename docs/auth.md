@@ -26,11 +26,11 @@ is the only thing that decides whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
-A claim by a metered token reserves its first minute inside the claim's own
-transaction. The reservation is what makes the check safe when several runners
-poll at once: each one's spend is visible to the next before either claim
-commits, so a balance that covers one minute hands out one node, not one per
-runner. When the balance cannot cover the reservation,
+A claim by a metered token reserves the minimum billable time, 20 seconds at
+the node's class, inside the claim's own transaction. The reservation is what
+makes the check safe when several runners poll at once: each one's spend is
+visible to the next before either claim commits, so a balance that covers one
+minimum hands out one node, not one per runner. When the balance cannot cover the reservation,
 `POST /api/v1/nodes/claim` answers `402` with `"code": "insufficient_credits"`,
 the node stays ready, the run records a `credits_blocked` event, and the runner
 keeps polling.
@@ -47,24 +47,43 @@ in the runner-bundle chart.
 
 The trigger step itself, the planning and orchestration the holder runs on
 the claiming pool, is billed too. A metered `k8s` or `warm` claim reserves
-the cheapest class's first minute inside the claim's transaction, the same
-way a node claim does, so claims racing for a balance that covers one minute
-start one run; the rest answer `402` and their triggers stay pending. The
+the cheapest class's minimum inside the claim's transaction, the same way a
+node claim does, so claims racing for a balance that covers one minimum start
+one run; the rest answer `402` and their triggers stay pending. The
 claim does not say how large the pool is, so the step is billed at the
 cheapest class. When the claim ends, the step is billed for the wall time
-since the claim: a finish inside the minute refunds the unused tail, one past
-it bills the rest, and a lapsed lease is billed through the lease's end
+since the claim: a finish inside the minimum pays the minimum, one past it
+bills the rest, and a lapsed lease is billed through the lease's end
 rather than through the reap. A claim requeued before its run started is
 refunded whole. These ledger rows carry the run id and an empty node id.
 
-The live claim's fenced execution acknowledgement starts billing immediately
-before the node body runs. Claiming, queueing, provisioning, image pulls and
-runner startup do not consume the reservation. A heartbeat after execution
-starts charges the seconds since the previous charge, and the finish charges
-the tail the last heartbeat missed and refunds whatever is left. A finish or
-expired claim before execution refunds the complete reservation, so a node
-that runs for four seconds pays for four seconds. Two bounds apply. No single
-charge bills more than the charge cap (30 seconds by default), so a controller
+Billing runs from the moment the machine that executes a node starts work on
+it to the node's finish, so fetching the source and compiling the pipeline are
+billed; queueing and provisioning are not. A runner that claims work from the
+queue or accepts an offer is that machine, so its node bills from the claim.
+A dispatcher that claims a node and then creates a Kubernetes Job for it
+claims before the pod exists, so that node bills from the pod's first claim
+renewal, which the pod sends as it starts, or from its execution start if that
+comes first. A heartbeat charges the seconds since the previous charge, and
+the finish charges the tail the last heartbeat missed. Every node that starts
+pays at least the minimum: the reservation is consumed rather than refunded,
+so a node that runs for four seconds pays for twenty, and one that runs for a
+minute pays for a minute.
+
+A node whose machine never started gets its reservation back: a pod that never
+came up, a claim reaped before its pod renewed it. A node the platform stops
+before its execution starts gets back everything its claim billed, setup
+included. That covers no machine of the class coming free (`queue_timeout`)
+and a log service that refused or dropped the node's writes (`logs_auth`,
+`logs_dropped`). A runner that stops renewing its claim, before or after
+execution starts, ran until its lease ran out: when the reaper or agent-loss
+recovery clears the claim, the seconds since its last charge are billed to the
+lease's end, under the per-charge cap. Any other end before
+execution is the pipeline's own and keeps its setup billed: a compile error, a
+source fetch the repository refused, a cancellation, an out-of-memory kill. A
+platform failure after execution starts is billed like any other finish.
+
+Two bounds apply. No single charge bills more than the charge cap (30 seconds by default), so a controller
 outage or a stalled heartbeat loop does not bill the gap it left behind. A
 node that is requeued -- its lease reaped, its runner lost, or its attempt
 reset for a retry -- releases its charge window, so the next attempt starts a
@@ -83,11 +102,13 @@ marks none bills nothing.
 
 ## Credits
 
-Cloud runner time is prepaid. Amounts are stored in micro-credits: a million
-micro-credits is one credit, and a hundred credits is one dollar, so a ten
-dollar top-up is a thousand credits. At the default rate a cloud runner second
-costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
-hour, so ten dollars buys just under fourteen hours.
+Cloud runner time is prepaid. One credit is one second of one vCPU, and
+20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
+Amounts are stored in micro-credits, 5,000 to the credit, so a dollar is
+100,000,000 micro-credits and a cent is 1,000,000. A class costs its core count
+in credits a second: a four-core second is 4 credits, a minute 240, an hour
+14,400 ($0.72), so ten dollars (200,000 credits) buys just under fourteen
+four-core hours.
 
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
@@ -98,13 +119,13 @@ when the class is chosen, failing the node with `unpriced_cpu_class` and a
 `credits_unpriced_class` event naming both sizes, rather than reserving credits
 for a node no claim can pay for.
 
-An installation that never set a table bills the default ladder, which carries
-GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
-4-core 20,000, 8-core 36,667. `credit_rate_micro_per_second` is the four-core
+An installation that never set a table bills the default ladder, each class at
+its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
+8-core 40,000. `credit_rate_micro_per_second` is the four-core
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
-`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
+`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=40000` sets
 the ladder and needs `admin`. A stored table this build cannot read is an error
 on every credit read rather than a silent return to the flat rate.
 
@@ -125,6 +146,75 @@ to the table never reprices a charge already written.
 cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
 --amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
 lists every movement newest first.
+
+## Buying credits
+
+A team owner buys credits from the dashboard's Team -> Billing page, and any
+member reads the balance, the price table, usage by run and the team's
+purchases there, from `GET /api/v1/team/billing`. A purchase is between $5 and
+$500. Purchases are final and credits never expire.
+
+The Stripe Checkout Session is created on the server, never in the browser,
+so no caller chooses the team a payment funds. The dashboard posts only the
+amount to `POST /api/v1/team/billing/checkout`, which needs an owner of the
+active team. The controller takes the team from that session, refuses an
+amount outside the range, and asks the hosted checkout service at
+`--billing-url` (`SPARKWING_BILLING_URL`), authenticated with
+`SPARKWING_BILLING_TOKEN`, to open a session for that team. The browser is
+sent to the page it returns. When Stripe confirms the payment, the checkout
+service verifies the webhook and grants the credits to the team the session
+names through `POST /api/v1/credits/grants`, keyed on the payment id so a
+redelivered webhook grants once. The service holds a token carrying only
+`credits.grant`, which the operator mints with
+`sparkwing cluster tokens create --type service --principal checkout-service --scope credits.grant`; it records paid
+grants, holds by payment, and reads the ledger's units, and every
+other route refuses it. A controller with no `--billing-url` sells no credits
+and answers the checkout route with `503` and
+`"code": "checkout_unavailable"`.
+
+A team's balance holds at most $5,000, and the cap is held when a checkout
+opens. The controller adds the balance, every checkout of the team still
+open and the new purchase, and refuses the purchase before any session opens
+when they pass the cap, with `409` and `"code": "balance_cap"` naming the
+balance, the open checkouts (`open_micro`), the amount and the cap. A checkout
+counts from the moment it opens until its payment is granted or its session
+expires, about half an hour later, so two owners racing for the last room
+cannot both open one. The grant that follows a verified payment is never
+refused by the cap, because the money has already moved; the balance can pass
+the cap only by a payment settled after its session expired. A `paid` grant is
+at most one purchase, $500. The grant route still refuses an operator's `free`
+grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
+
+Purchases are final, so a refund is the operator's decision and is made by
+hand. `sparkwing cluster credits refund --payment <pi_...>` takes back what the
+purchase still has on the ledger, in the team it funded, through
+`POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
+the operator then issues the money back. The controller never moves money, and
+a refund issued in Stripe alone changes nothing on the ledger. The whole
+purchase is reversed even when its credits were spent, so the balance can go
+below zero and the team's metered claims stop until it is funded again. A
+reversal never takes back more than its payment paid, and running the refund
+twice reverses once.
+
+A chargeback holds the team. Holds are one per dispute, and a team is held
+while any of its holds stands: its metered claims are refused with `402` and
+`"code": "credits_frozen"` while work already running finishes, and
+Team -> Billing says so. When Stripe reports a dispute opened on a purchase,
+the checkout service logs an alert (`alert=chargeback_opened`) and holds the
+team the payment funded through `POST /api/v1/credits/freezes`. A dispute
+lost reverses the purchase the way a refund does and holds the team too, so a
+lost dispute holds it even when Stripe delivered the close before the open. A
+dispute won logs `alert=dispute_won` and changes nothing: the checkout service
+never releases a team, because one dispute's outcome says nothing about
+another's. The operator releases with
+`sparkwing cluster credits freeze --dispute <dp_...> --release` for one hold
+or `--team <slug> --release` for every hold on the team. Replaying any
+dispute event changes nothing, and a replayed hold never undoes a release. A
+dispute is bound to the one payment and team its first hold named: a hold or
+a lost-dispute reversal that names the same dispute for another payment is
+refused with `409` and `"code": "dispute_conflict"` and logged as
+`alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
+so no claim that read the team as not held commits after the hold.
 
 ## Retained storage
 
@@ -163,8 +253,8 @@ The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
 toward zero, so a fraction of a micro-credit is never billed and truncation
 forgives at most one micro-credit per team per pass. Three gibibytes retained
 against a one-gibibyte free allowance for one day is two gibibyte-days, which
-at 833,333 micro-credits a gibibyte-day is 1,666,666 micro-credits, or 25
-credits a gibibyte-month, GitHub's $0.25.
+at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
+is 2,000 credits a gibibyte-month, the published $0.10.
 
 The charge is a `storage` row naming the team, the bytes it billed and the
 interval it covered, so `sparkwing cluster credits show` and `credits history`
@@ -279,7 +369,7 @@ none behaves as it did before the guards existed.
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
 | `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most a billion; zero turns scaling off | the controller's ledger |
+| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | the controller's ledger |
 | `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
@@ -307,8 +397,10 @@ Every scaling setting is zero by default, which holds each principal to the
 static `max_concurrent_runners`, and the rule applies only while that guard is
 set. Scaling only ever raises that guard: a ceiling below it is ignored.
 `runner_scale_base` and `runner_scale_ceiling` are capped at a million runners
-and `runner_scale_step_credits` at a billion credits, so a typo cannot mint a
-cap.
+and `runner_scale_step_credits` at 200 billion credits, ten million dollars, so
+a typo cannot mint a cap. The step is written in whole credits, so schema v59
+multiplied a step written when a credit was a cent by 200, keeping its dollar
+value.
 
 `free` credit earns nothing and a payment ages out after 30 days. A refund is a
 `reversal` grant naming the payment's reference, and it is matched to that
@@ -369,6 +461,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's

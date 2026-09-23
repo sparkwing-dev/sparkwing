@@ -104,14 +104,14 @@ func TestSchemaV35UpgradesRealV34PostgresShape(t *testing.T) {
 	if got := readSchemaVersion(t, up.DB()); got != store.ExpectedSchemaVersion() {
 		t.Fatalf("schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
-	if _, err := up.GrantCredits(ctx, store.CreditGrantPaid, store.MicroCreditsPerCredit, "pay_pg", "root"); err != nil {
+	if _, err := up.GrantCredits(ctx, store.CreditGrantPaid, store.MicroCreditsPerCent, "pay_pg", "root"); err != nil {
 		t.Fatalf("grant on the migrated Postgres store: %v", err)
 	}
 	balance, err := up.CreditBalanceMicro(ctx)
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	if balance != store.MicroCreditsPerCredit {
+	if balance != store.MicroCreditsPerCent {
 		t.Fatalf("balance = %d, want one credit", balance)
 	}
 }

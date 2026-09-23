@@ -170,18 +170,22 @@ sparkwing cluster concurrency --namespace deploy-prod --profile prod
 
 Inspect and top up the prepaid credit balance
 
-Cloud runner time is prepaid. One hundred credits is one dollar,
-so a ten dollar top-up is a thousand credits. The balance is
-grants minus charges: a claim reserves a minute of cloud runner
-time before it is granted, heartbeats charge the seconds they
-cover, and the finish refunds whatever of the reservation the
-node did not use. Runners the operator did not mark metered are
-never charged.
+Cloud runner time is prepaid. One credit is one vCPU-second and
+20,000 credits is one dollar, so a ten dollar top-up is 200,000
+credits. The balance is
+grants minus charges: a claim reserves the 20-second minimum of
+cloud runner time before it is granted, heartbeats charge the
+seconds they cover, and the finish bills the tail. A node pays at
+least the minimum, so the reservation is consumed rather than
+refunded once the node starts. Runners the operator did not mark
+metered are never charged.
 
 ### Subcommands
 
 - `show` -- Print the balance, the rate table, and the recent burn
 - `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
+- `refund` -- Take a refunded purchase's credits back and print where to refund it in Stripe
+- `freeze` -- Hold or release a team's cloud usage
 - `history` -- List grants and charges, newest first
 - `settings` -- Read or set the credit rate table, the grace period, and the charge cap
 - `allowance` -- Read or set how many retained bytes a team keeps
@@ -193,7 +197,7 @@ never charged.
 sparkwing cluster credits show --profile prod
 
 # Load ten dollars
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod
 ```
 
 ## `sparkwing cluster credits allowance`
@@ -236,26 +240,67 @@ sparkwing cluster credits allowance --profile prod
 sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
 ```
 
+## `sparkwing cluster credits freeze`
+
+Hold or release a team's cloud usage
+
+A hold is one per dispute, and a team is held while any of its
+holds stands: its metered claims are refused, so no new cloud work
+starts, while work already running finishes. The checkout service
+holds the team a disputed payment funded when the dispute opens or
+is lost, and never releases one; the operator decides, whatever the
+dispute's outcome. Release one dispute's hold with --dispute, or
+every hold on a team with --team. Name the team by slug or by a
+payment it made. Requires the admin scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--team SLUG` | Team to hold or release |
+| `--payment ID` | Name the team by a payment it made instead of by slug |
+| `--dispute ID` | Dispute the hold is for; required when holding, and on a release names the one hold to lift |
+| `--reason TEXT` | Why the team is held |
+| `--release` | Release the dispute's hold, or every hold on the team |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Hold a team by hand
+sparkwing cluster credits freeze --team acme --dispute ops-review-1 --reason 'suspected fraud' --profile prod
+
+# Release one dispute's hold
+sparkwing cluster credits freeze --dispute dp_123 --release --profile prod
+
+# Release every hold on a team
+sparkwing cluster credits freeze --team acme --release --profile prod
+```
+
 ## `sparkwing cluster credits grant`
 
 Add free or paid credits to the ledger, or reverse a paid grant
 
 Adds credits and records who added them, which kind they are, and
-the payment they came from. One hundred credits is one dollar.
+the payment they came from. One credit is one vCPU-second and
+20,000 credits is one dollar.
 A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
 empty balance. A reference is the payment id: granting it twice
 returns the first grant rather than adding the credits again. A
-reversal takes a refunded payment back out with a negative
-amount, its own reference (the refund id) and --reverses naming
-the paid grant's reference. Requires the admin scope.
+paid grant is at most one $500 purchase; a free grant may not lift
+a team's balance past $5,000. A reversal takes part of a payment
+back out with a negative amount, its own reference and --reverses
+naming the paid grant's reference, and never more than the
+payment paid; refund a whole purchase with
+`sparkwing cluster credits refund`. Requires the admin scope.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--kind KIND` | Grant kind: free \| paid \| reversal (required) |
-| `--amount N` | Credits to add, negative on a reversal; 100 credits is one dollar (required) |
+| `--amount N` | Credits to add, negative on a reversal; 20,000 credits is one dollar (required) |
 | `--reference REF` | Payment id or operator note recorded with the grant; granting the same one twice returns the first grant |
 | `--reverses REF` | Reference of the paid grant a reversal takes back |
 | `--team SLUG` | Team whose balance the grant funds; required on a multi-team controller |
@@ -265,13 +310,13 @@ the paid grant's reference. Requires the admin scope.
 
 ```sh
 # Load ten dollars against a payment
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
+sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod
 
-# Hand out trial credits
-sparkwing cluster credits grant --kind free --amount 500 --profile prod
+# Hand out five dollars of credits
+sparkwing cluster credits grant --kind free --amount 100000 --profile prod
 
-# Take a refunded payment back out
-sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod
+# Take part of a payment back out
+sparkwing cluster credits grant --kind reversal --amount -200000 --reference re_9 --reverses pay_12345 --profile prod
 ```
 
 ## `sparkwing cluster credits history`
@@ -303,6 +348,34 @@ sparkwing cluster credits history --profile prod
 
 # Sum today's charges
 sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
+```
+
+## `sparkwing cluster credits refund`
+
+Take a refunded purchase's credits back and print where to refund it in Stripe
+
+Purchases are final, so a refund is the operator's decision and
+is made by hand. This takes back what the purchase still has on
+the ledger, in the team it funded, and prints the Stripe dashboard
+page where the operator issues the money back; the controller never
+moves money itself. The balance may go below zero when the credits
+were already spent, which stops the team's metered work until it is
+funded again. Running it twice takes the credits back once, and a
+purchase a lost chargeback already reversed has nothing left to
+take. Requires the admin scope.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--payment ID` | Stripe payment intent id of the purchase (pi_...), the reference its paid grant carries (required) |
+| `--profile NAME` | Profile name (required) |
+
+### Examples
+
+```sh
+# Refund a purchase
+sparkwing cluster credits refund --payment pi_3Nxyz --profile prod
 ```
 
 ## `sparkwing cluster credits settings`

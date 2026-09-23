@@ -152,18 +152,23 @@ VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		return err
 	}
 	startedAt := now.UnixNano()
-	paidThrough := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
-	// safety: only the first exact fenced attempt may move the reservation to
-	// its execution boundary; a replay must preserve the original boundary.
+	paidThrough := now.Add(MinBillableSeconds * time.Second).UnixNano()
+	// safety: billing starts here only for a claim whose machine had not yet
+	// begun, a dispatched pod that never renewed its claim; one already billing
+	// keeps its window, so setup stays billed and a replay moves nothing.
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
 	   SET attempts_consumed = ?,
 	       credit_charged_through = CASE
-	           WHEN execution_started_at IS NULL AND credit_charged_through != 0 THEN ?
+	           WHEN credit_billing_from = 0 AND credit_charged_through != 0 THEN ?
 	           ELSE credit_charged_through
+	       END,
+	       credit_billing_from = CASE
+	           WHEN credit_billing_from = 0 AND credit_charged_through != 0 THEN ?
+	           ELSE credit_billing_from
 	       END,
 	       execution_started_at = COALESCE(execution_started_at, ?)
 	 WHERE run_id = ? AND node_id = ? AND claim_generation = ? AND attempts_consumed = ?`,
-		start.AttemptOrdinal, paidThrough, startedAt, runID, nodeID, generation, consumed)
+		start.AttemptOrdinal, paidThrough, startedAt, startedAt, runID, nodeID, generation, consumed)
 	if err != nil {
 		return err
 	}

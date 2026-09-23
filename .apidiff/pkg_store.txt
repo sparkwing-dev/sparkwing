@@ -119,7 +119,7 @@ type ClaimedRun struct {
 	Team     Team
 	Pipeline string
 }
-const CloudStorageRateMicroPerGBDay = 833_333
+const CloudStorageRateMicroPerGBDay = 10 * MicroCreditsPerCent / 30
 const ComputeLimitConcurrentRunners = "max_concurrent_runners"
 const ComputeLimitCronSeconds = "min_cron_interval_seconds"
 type ComputeLimitError struct {
@@ -230,6 +230,14 @@ const CostSourceFloor CostSource = "floor"
 const CostSourceMeasured CostSource = "measured"
 const CostSourceMeasuring CostSource = "measuring"
 const CostSourcePin CostSource = "pin"
+type CreditBalanceCapError struct {
+	BalanceMicro int64
+	OpenMicro    int64
+	AmountMicro  int64
+	CapMicro     int64
+}
+func (e *CreditBalanceCapError) Error() string
+func (e *CreditBalanceCapError) Unwrap() error
 type CreditCharge struct {
 	ID string
 
@@ -265,7 +273,6 @@ type CreditChargeResult struct {
 }
 const CreditChargeStorage = "storage"
 const CreditChargeUsage = "usage"
-const CreditClaimFloorSeconds = 60
 type CreditGrant struct {
 	ID string
 
@@ -286,6 +293,8 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
+
+	Checkout string
 }
 type CreditGrantResult struct {
 	Grant   CreditGrant
@@ -311,6 +320,8 @@ type CreditLedgerTotals struct {
 
 	SettledSeconds int64
 }
+const CreditPurchaseMaxCents = 50_000
+const CreditPurchaseMinCents = 500
 type CreditRate struct {
 	Cores          int64
 	MicroPerSecond int64
@@ -322,6 +333,14 @@ func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, err
 func (t CreditRateTable) RateFor(cores int64) int64
 func (t CreditRateTable) Sorted() CreditRateTable
 func (t CreditRateTable) Validate() error
+type CreditReversal struct {
+	Team          Team
+	PaidMicro     int64
+	ReversedMicro int64
+	BalanceMicro  int64
+	Grant         *CreditGrant
+	Created       bool
+}
 type CreditSettings struct {
 	RateMicroPerSecond int64
 
@@ -372,7 +391,8 @@ type CreditState struct {
 	BurnMicro                 int64
 	ExhaustedAt               *time.Time
 }
-const CreditsPerDollar = 100
+const CreditsGrantScope = "credits.grant"
+const CreditsPerDollar = 20_000
 type CronDeclaration struct {
 	Cron         string
 	TZ           string
@@ -491,7 +511,7 @@ const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
-const DefaultCreditRateMicro = 20_000
+const DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
 const DefaultFreeAllowanceBytes int64 = 1 << 30
@@ -521,7 +541,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin or logs.delete scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete or credits.grant scope")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
@@ -531,9 +551,11 @@ var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens a
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
 var ErrDeletionLeaseLost = errors.New("store: this purger no longer holds the team deletion's lease")
+var ErrDisputeConflict = errors.New("credits: the dispute is already held for another payment")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrDuplicateWebhookDelivery = errors.New("store: webhook delivery already accepted")
 var ErrEmailMismatch = errors.New("store: invitation is addressed to another email")
@@ -566,6 +588,7 @@ var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
+var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
@@ -577,6 +600,7 @@ var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
 var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrUnknownPayment = errors.New("credits: no paid grant carries this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
 var ErrUnknownToken = errors.New("unknown token")
 var ErrUnpricedCPUClass = errors.New("credits: cpu request above the largest priced class")
@@ -840,6 +864,8 @@ type InsufficientCreditsError struct {
 
 	RunID  string
 	NodeID string
+
+	Frozen bool
 }
 func (e *InsufficientCreditsError) Error() string
 func (e *InsufficientCreditsError) Unwrap() error
@@ -917,6 +943,7 @@ const MaxRunnerTokensPerTeam = 10
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
+const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -936,7 +963,9 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
-const MicroCreditsPerCredit = 1_000_000
+const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
+const MicroCreditsPerCredit = 5_000
+const MinBillableSeconds = 20
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
@@ -1292,6 +1321,12 @@ type Run struct {
 }
 func (r Run) RedactedForDisplay() Run
 func (r Run) SecretArgNames() []string
+type RunCreditUsage struct {
+	RunID         string
+	Seconds       int64
+	AmountMicro   int64
+	LastChargedAt time.Time
+}
 type RunFilter struct {
 	Pipelines      []string
 	Statuses       []string
@@ -1338,7 +1373,7 @@ type RunnerPresence struct {
 	AllowRepos RepoFilter
 }
 const RunnerScaleMaxRunners = 1_000_000
-const RunnerScaleMaxStepCredits = 1_000_000_000
+const RunnerScaleMaxStepCredits = 10_000_000 * CreditsPerDollar
 const RunnerScaleWindow = 30 * 24 * time.Hour
 const RunnerTokenLifetime = 90 * 24 * time.Hour
 type RunsBands struct {
@@ -1624,7 +1659,6 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error
 func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) error
 func (s *Store) CreateUser(name, password string, scopes []string, now time.Time) (*User, error)
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error)
-func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error)
 func (s *Store) CreditGraceSeconds(ctx context.Context) (int64, error)
 func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, err error)
 func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error)
@@ -1645,6 +1679,7 @@ func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
+func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
 func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Executor) error
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)
@@ -1701,6 +1736,9 @@ func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, n
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error)
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error)
+func (s *Store) HoldTeamForDispute(
+	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
+) (_ bool, err error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
 func (s *Store) ListCreditCharges(ctx context.Context, limit int) (_ []CreditCharge, err error)
@@ -1746,6 +1784,8 @@ func (s *Store) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
+func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error)
+func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) PrepareExecutorClaimForRun(ctx context.Context, claimant ClaimIdentity, executorName, runID string) (*ExecutorClaimPreparation, error)
 func (s *Store) PrepareNextExecutorClaim(ctx context.Context, claimant ClaimIdentity, executorName string) (*ExecutorClaimPreparation, error)
@@ -1776,6 +1816,7 @@ func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
@@ -1795,6 +1836,7 @@ func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time,
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error)
 func (s *Store) ResolveSignIn(ctx context.Context, p SignInProfile, c SignUpConditions, now time.Time) (SignInResult, error)
 func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (WaiterResolution, error)
+func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, createdBy string) (_ CreditReversal, err error)
 func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool, error)
 func (s *Store) RevokeToken(prefix string, now time.Time) error
 func (s *Store) RotateSecretValues(ctx context.Context, reseal func(Team, Secret) (string, error)) (rotated int, err error)
@@ -1879,6 +1921,10 @@ type TableSize struct {
 	Bytes int64
 }
 type Team string
+type TeamCreditFreeze struct {
+	Frozen   bool
+	Disputes []string
+}
 type TeamDeletion struct {
 	Team        Team
 	State       string
@@ -1916,6 +1962,7 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 func (t *Tenant) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
+func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
@@ -1940,13 +1987,16 @@ func (t *Tenant) CreateTokenWith(
 func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error
 func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error)
+func (t *Tenant) CreditFreeze(ctx context.Context) (_ TeamCreditFreeze, err error)
 func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error)
+func (t *Tenant) CreditUsageByRun(ctx context.Context, limit int) (_ []RunCreditUsage, err error)
 func (t *Tenant) DeleteCronSchedule(ctx context.Context, id string) (err error)
 func (t *Tenant) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (n int, err error)
 func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64, pipeline string) error
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
+func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) error
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error
@@ -1995,6 +2045,7 @@ func (t *Tenant) Members(ctx context.Context) (_ []Membership, err error)
 func (t *Tenant) MintGitHubRunnerCredential(
 	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)
+func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error)
 func (t *Tenant) OwnedRunIDs(ctx context.Context, ids []string) (_ map[string]bool, err error)
 func (t *Tenant) OwnsRun(ctx context.Context, id string) (bool, error)
 func (t *Tenant) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)

@@ -37,6 +37,7 @@ func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
 func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
+const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
@@ -50,6 +51,8 @@ type CacheGrantResponse struct {
 	Team      string
 	ExpiresAt time.Time
 }
+const CheckoutAmountCode = "amount_out_of_range"
+const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
 	Seal(plain string) (string, error)
 
@@ -60,6 +63,7 @@ const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
@@ -72,6 +76,7 @@ const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+const DisputeConflictCode = "dispute_conflict"
 const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
@@ -267,6 +272,7 @@ type RunRequest struct {
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"
+const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
@@ -302,6 +308,7 @@ func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server

@@ -17,6 +17,8 @@ import (
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
+		"the payment reverses it in that team; a payment id is unique across teams",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
 		"the asker is no answer; it is the read every other claim predicate is built from",
 	"(*Store).readClaimCandidates": "the team predicate comes from claimTeamWhere at run time; " +
@@ -91,6 +93,10 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
+	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
+		"another team is refused; a dispute id is unique across teams",
+	"(*Store).DisputeTeam": "asks which team a dispute's hold is on, so an operator's release that names only the " +
+		"dispute answers with that team; a dispute id is unique across teams",
 }
 
 // safety: this list shrinks and never grows; porting a family deletes

@@ -81,7 +81,7 @@ func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
 		t.Fatalf("set allowance: %v", err)
 	}
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1_000*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		1_000*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	seedRetainedRuns(t, f.store, "acme", 100, 1<<30)
@@ -167,7 +167,7 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 	}
 
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,
@@ -191,7 +191,7 @@ func TestStorageMaintenanceBillsRetainedBytesAndReportsThemOnCreditsShow(t *test
 		t.Fatalf("set the storage rate: %v", err)
 	}
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,

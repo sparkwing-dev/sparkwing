@@ -93,7 +93,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	seedClaimedNode(t, s, "run-billed", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	if len(charges) != 1 || charges[0].Kind != store.CreditChargeReservation {
 		t.Fatalf("charges after a named claim = %+v, want one reservation", charges)
 	}
-	if want := int64(store.CreditClaimFloorSeconds) * unpinnedNodeRateMicro; charges[0].AmountMicro != want {
+	if want := int64(store.MinBillableSeconds) * unpinnedNodeRateMicro; charges[0].AmountMicro != want {
 		t.Fatalf("reservation = %d, want %d", charges[0].AmountMicro, want)
 	}
 

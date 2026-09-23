@@ -129,6 +129,7 @@ type Server struct {
 	githubRunners githubRunnerConfig
 
 	githubApp *githubAppState
+	checkout  *billingCheckout
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -1094,9 +1095,14 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
 	mux.Handle("PUT /api/v1/storage/teams/{team}/free-slot", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGrantFreeSlot)))
 
+	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
+	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
-	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("POST /api/v1/credits/reversals", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
+	mux.Handle("POST /api/v1/credits/freezes", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
+	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))

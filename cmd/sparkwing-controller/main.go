@@ -87,6 +87,10 @@ func run(args []string) error {
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
 			"where to watch runs. Empty disables the announcement.")
+	billingURL := fs.String("billing-url", os.Getenv("SPARKWING_BILLING_URL"),
+		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
+			"when a team owner buys credits; the controller authenticates with "+
+			"SPARKWING_BILLING_TOKEN. Empty sells no credits.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
@@ -444,6 +448,11 @@ func run(args []string) error {
 			"%d pipelines refusing every repository, %d repository secrets\n",
 		wh.Pipelines, wh.Repos, wh.DenyAll, wh.RepoSecrets)
 
+	if strings.TrimSpace(*billingURL) != "" && os.Getenv("SPARKWING_BILLING_TOKEN") == "" {
+		return errors.New("--billing-url is set but SPARKWING_BILLING_TOKEN is empty; " +
+			"the checkout service refuses a controller without its token")
+	}
+
 	srv := controller.New(st, nil).
 		WithTrustedProxyCIDRs(trustedProxyCIDRs).
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
@@ -452,6 +461,7 @@ func run(args []string) error {
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
+		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
 		WithCacheURL(*cacheURL).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).

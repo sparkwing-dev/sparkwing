@@ -2187,17 +2187,19 @@ time and is refused when the balance cannot cover it.`,
 var cmdCredits = Command{
 	Path:     "sparkwing cluster credits",
 	Synopsis: "Inspect and top up the prepaid credit balance",
-	Description: `Cloud runner time is prepaid. One hundred credits is one dollar,
-so a ten dollar top-up is a thousand credits. The balance is
-grants minus charges: a claim reserves a minute of cloud runner
-time before it is granted, heartbeats charge the seconds they
-cover, and the finish refunds whatever of the reservation the
-node did not use. Runners the operator did not mark metered are
-never charged.`,
-	SubcommandOrder: []string{"show", "grant", "history", "settings", "allowance"},
+	Description: `Cloud runner time is prepaid. One credit is one vCPU-second and
+20,000 credits is one dollar, so a ten dollar top-up is 200,000
+credits. The balance is
+grants minus charges: a claim reserves the 20-second minimum of
+cloud runner time before it is granted, heartbeats charge the
+seconds they cover, and the finish bills the tail. A node pays at
+least the minimum, so the reservation is consumed rather than
+refunded once the node starts. Runners the operator did not mark
+metered are never charged.`,
+	SubcommandOrder: []string{"show", "grant", "refund", "freeze", "history", "settings", "allowance"},
 	Examples: []Example{
 		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
-		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
+		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod"},
 	},
 }
 
@@ -2257,26 +2259,77 @@ var cmdCreditsGrant = Command{
 	Path:     "sparkwing cluster credits grant",
 	Synopsis: "Add free or paid credits to the ledger, or reverse a paid grant",
 	Description: `Adds credits and records who added them, which kind they are, and
-the payment they came from. One hundred credits is one dollar.
+the payment they came from. One credit is one vCPU-second and
+20,000 credits is one dollar.
 A grant that lifts the balance above zero lets metered runners
 claim again and stops the cancellation of nodes running on an
 empty balance. A reference is the payment id: granting it twice
 returns the first grant rather than adding the credits again. A
-reversal takes a refunded payment back out with a negative
-amount, its own reference (the refund id) and --reverses naming
-the paid grant's reference. Requires the admin scope.`,
+paid grant is at most one $500 purchase; a free grant may not lift
+a team's balance past $5,000. A reversal takes part of a payment
+back out with a negative amount, its own reference and --reverses
+naming the paid grant's reference, and never more than the
+payment paid; refund a whole purchase with
+` + "`sparkwing cluster credits refund`" + `. Requires the admin scope.`,
 	Flags: []FlagSpec{
 		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid | reversal", Required: true, Group: "Input"},
-		{Name: "amount", Argument: "N", Desc: "Credits to add, negative on a reversal; 100 credits is one dollar", Required: true, Group: "Input"},
+		{Name: "amount", Argument: "N", Desc: "Credits to add, negative on a reversal; 20,000 credits is one dollar", Required: true, Group: "Input"},
 		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant; granting the same one twice returns the first grant", Group: "Input"},
 		{Name: "reverses", Argument: "REF", Desc: "Reference of the paid grant a reversal takes back", Group: "Input"},
 		{Name: "team", Argument: "SLUG", Desc: "Team whose balance the grant funds; required on a multi-team controller", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
-		{"Hand out trial credits", "sparkwing cluster credits grant --kind free --amount 500 --profile prod"},
-		{"Take a refunded payment back out", "sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod"},
+		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 200000 --reference pay_12345 --profile prod"},
+		{"Hand out five dollars of credits", "sparkwing cluster credits grant --kind free --amount 100000 --profile prod"},
+		{"Take part of a payment back out", "sparkwing cluster credits grant --kind reversal --amount -200000 --reference re_9 --reverses pay_12345 --profile prod"},
+	},
+}
+
+var cmdCreditsRefund = Command{
+	Path:     "sparkwing cluster credits refund",
+	Synopsis: "Take a refunded purchase's credits back and print where to refund it in Stripe",
+	Description: `Purchases are final, so a refund is the operator's decision and
+is made by hand. This takes back what the purchase still has on
+the ledger, in the team it funded, and prints the Stripe dashboard
+page where the operator issues the money back; the controller never
+moves money itself. The balance may go below zero when the credits
+were already spent, which stops the team's metered work until it is
+funded again. Running it twice takes the credits back once, and a
+purchase a lost chargeback already reversed has nothing left to
+take. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "payment", Argument: "ID", Desc: "Stripe payment intent id of the purchase (pi_...), the reference its paid grant carries", Required: true, Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Refund a purchase", "sparkwing cluster credits refund --payment pi_3Nxyz --profile prod"},
+	},
+}
+
+var cmdCreditsFreeze = Command{
+	Path:     "sparkwing cluster credits freeze",
+	Synopsis: "Hold or release a team's cloud usage",
+	Description: `A hold is one per dispute, and a team is held while any of its
+holds stands: its metered claims are refused, so no new cloud work
+starts, while work already running finishes. The checkout service
+holds the team a disputed payment funded when the dispute opens or
+is lost, and never releases one; the operator decides, whatever the
+dispute's outcome. Release one dispute's hold with --dispute, or
+every hold on a team with --team. Name the team by slug or by a
+payment it made. Requires the admin scope.`,
+	Flags: []FlagSpec{
+		{Name: "team", Argument: "SLUG", Desc: "Team to hold or release", Group: "Input"},
+		{Name: "payment", Argument: "ID", Desc: "Name the team by a payment it made instead of by slug", Group: "Input"},
+		{Name: "dispute", Argument: "ID", Desc: "Dispute the hold is for; required when holding, and on a release names the one hold to lift", Group: "Input"},
+		{Name: "reason", Argument: "TEXT", Desc: "Why the team is held", Group: "Input"},
+		{Name: "release", Desc: "Release the dispute's hold, or every hold on the team", Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
+	},
+	Examples: []Example{
+		{"Hold a team by hand", "sparkwing cluster credits freeze --team acme --dispute ops-review-1 --reason 'suspected fraud' --profile prod"},
+		{"Release one dispute's hold", "sparkwing cluster credits freeze --dispute dp_123 --release --profile prod"},
+		{"Release every hold on a team", "sparkwing cluster credits freeze --team acme --release --profile prod"},
 	},
 }
 

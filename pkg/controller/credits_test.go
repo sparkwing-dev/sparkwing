@@ -128,7 +128,7 @@ func setNodeChargeWindow(t *testing.T, st *store.Store, runID, nodeID string, at
 		`UPDATE nodes SET credit_charged_through = ?,
 		 execution_started_at = COALESCE(execution_started_at, ?)
 		 WHERE run_id = ? AND node_id = ?`,
-		at.UnixNano(), at.Add(-store.CreditClaimFloorSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
+		at.UnixNano(), at.Add(-store.MinBillableSeconds*time.Second).UnixNano(), runID, nodeID); err != nil {
 		t.Fatalf("rewind the charge window: %v", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestCredits_MeteredTriggerClaimRefusedOnAnEmptyBalance(t *testing.T) {
 func TestCredits_MeteredTriggerClaimRefusesInProcessNodes(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCredit, "", "operator"); err != nil {
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
@@ -298,7 +298,7 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.runner)
@@ -360,11 +360,7 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
-	floor, err := f.store.CreditClaimFloorMicro(ctx)
-	if err != nil {
-		t.Fatalf("floor: %v", err)
-	}
-	floor = unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	floor := unpinnedNodeRateMicro * store.MinBillableSeconds
 	// safety: exactly one reservation, so the first heartbeat past it spends
 	// the balance.
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, floor, "", "root"); err != nil {
@@ -438,17 +434,16 @@ func TestCredits_HeartbeatCancelsTheNodeAfterTheGracePeriod(t *testing.T) {
 	}
 }
 
-// A node that finishes between heartbeats pays for the seconds it ran and
-// nothing more, because the finish settles the tail and refunds the rest of
-// the claim reservation.
-func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
+// A node that finishes between heartbeats and inside its reservation pays the
+// minimum billable seconds, because the finish consumes the reservation.
+func TestCredits_NodeFinishSettlesAShortNodeAtTheMinimum(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	before, err := f.store.CreditBalanceMicro(ctx)
@@ -469,11 +464,11 @@ func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
 	})
 
-	// safety: the claim reserved through claim+60s; placing that instant 56
-	// seconds out is a node claimed four seconds ago, finishing before the
-	// first heartbeat would have fired.
+	// safety: the claim reserved through claim plus the minimum; placing that
+	// instant four seconds short of it is a node claimed four seconds ago,
+	// finishing before the first heartbeat would have fired.
 	setNodeChargeWindow(t, f.store, "run-brief", "build",
-		time.Now().Add(time.Duration(store.CreditClaimFloorSeconds-4)*time.Second))
+		time.Now().Add(time.Duration(store.MinBillableSeconds-4)*time.Second))
 	if err := c.StartNode(claimCtx, "run-brief", "build"); err != nil {
 		t.Fatalf("start node: %v", err)
 	}
@@ -485,10 +480,8 @@ func TestCredits_NodeFinishSettlesTheLedgerToItsRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
-	spent := before - after
-	want := int64(4) * unpinnedNodeRateMicro
-	if diff := spent - want; diff > unpinnedNodeRateMicro || diff < -unpinnedNodeRateMicro {
-		t.Fatalf("spent %d for four seconds of work, want %d within one second", spent, want)
+	if spent, want := before-after, int64(store.MinBillableSeconds)*unpinnedNodeRateMicro; spent != want {
+		t.Fatalf("spent %d for four seconds of work, want the minimum, %d", spent, want)
 	}
 }
 
@@ -536,7 +529,7 @@ func TestCredits_RoutesShowGrantAndHistory(t *testing.T) {
 	}
 
 	status, body = creditsRequest(t, http.MethodPost, f.url+"/api/v1/credits/grants", f.admin,
-		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCredit, "reference": "pay_9"})
+		map[string]any{"kind": "paid", "amount_micro": 1000 * store.MicroCreditsPerCent, "reference": "pay_9"})
 	if status != http.StatusCreated {
 		t.Fatalf("grant = %d: %s", status, body)
 	}
@@ -970,7 +963,7 @@ func TestCredits_HistoryNamesTheClassAndRateEachChargeWasBilledAt(t *testing.T) 
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1076,7 +1069,7 @@ func TestCredits_AClaimAboveTheLargestClassFailsTheNode(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1123,7 +1116,7 @@ func TestCredits_AClaimsOwnCPUFigureDoesNotLowerTheBill(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1182,7 +1175,7 @@ func TestCredits_TheClaimResponseCarriesTheBilledClass(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if status, _ := creditSettings(t, f, http.MethodPut, map[string]any{
@@ -1235,7 +1228,7 @@ func TestCredits_ANamedClaimThatDoesNotSizeToClassIsRefused(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{
@@ -1271,7 +1264,7 @@ func TestCredits_AWarmClaimPassesOverAClassAboveTheWarmPool(t *testing.T) {
 	f := newCreditsFixture(t, true)
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if err := f.store.CreateRun(ctx, store.Run{

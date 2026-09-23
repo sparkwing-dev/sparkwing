@@ -161,7 +161,7 @@ func TestClaimNodeByID_MeteredTokenReservesAndSettles(t *testing.T) {
 	f.readyNode(t, "run-1", "build")
 	ctx := context.Background()
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("GrantCredits: %v", err)
 	}
 	c := client.NewWithToken(f.url, nil, f.token)
@@ -201,7 +201,7 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 			f := newNamedClaimFixture(t, store.TokenOptions{Metered: true})
 			f.readyNode(t, "run-1", "build")
 			ctx := context.Background()
-			granted := int64(100 * store.MicroCreditsPerCredit)
+			granted := int64(100 * store.MicroCreditsPerCent)
 			if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
 				granted, "pay_"+outcome, "admin"); err != nil {
 				t.Fatalf("GrantCredits: %v", err)
@@ -231,7 +231,7 @@ func TestClaimNodeByID_FinishBeforeExecutionRefundsTheReservation(t *testing.T) 
 				t.Fatalf("ListCreditCharges: %v", err)
 			}
 			if len(charges) != 2 || charges[0].Kind != store.CreditChargeRefund ||
-				charges[0].Seconds != -int64(store.CreditClaimFloorSeconds) {
+				charges[0].Seconds != -int64(store.MinBillableSeconds) {
 				t.Fatalf("charges = %+v, want the reservation and its complete refund", charges)
 			}
 		})

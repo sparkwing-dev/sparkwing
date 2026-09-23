@@ -99,6 +99,11 @@ const (
 	// service when it deletes a team. It reads nothing, and no team's token
 	// may carry it.
 	ScopeLogsDelete = "logs.delete"
+	// ScopeCreditsGrant is the hosted checkout service's scope. It records a
+	// paid grant for a verified payment, reverses a payment, holds or releases
+	// the team a payment funded, and reads the ledger's units, and reaches
+	// nothing else. Only the operator mints it; no team's token may carry it.
+	ScopeCreditsGrant = "credits.grant"
 )
 
 var allScopes = []string{
@@ -116,6 +121,7 @@ var allScopes = []string{
 	ScopeTeamAdmin,
 	ScopeAdmin,
 	ScopeLogsDelete,
+	ScopeCreditsGrant,
 }
 
 // safety: the table is the whole grant a membership carries, and ScopeAdmin
