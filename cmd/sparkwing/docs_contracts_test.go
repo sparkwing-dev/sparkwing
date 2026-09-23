@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -212,6 +213,29 @@ func TestEnvVarWalkReadsNestedPackagesAndSkipsNestedModules(t *testing.T) {
 	want := "SPARKWING_NESTED_VAR,SPARKWING_ROOT_VAR"
 	if got := strings.Join(names, ","); got != want {
 		t.Fatalf("envVarsRead found %q, want %q", got, want)
+	}
+}
+
+func TestEnvVarWalkSkipsTrackedFilesDeletedFromWorktree(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fake\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n\nimport \"os\"\n\nvar a = os.Getenv(\"SPARKWING_REMOVED\")\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSnapshotGit(t, root, "init", "--quiet")
+	runSnapshotGit(t, root, "add", "-A")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	names, dynamic, err := envVarsRead(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 0 || len(dynamic) != 0 {
+		t.Fatalf("deleted file contributed env reads: names=%v dynamic=%v", names, dynamic)
 	}
 }
 
@@ -512,7 +536,13 @@ files:
 				continue files
 			}
 		}
-		out = append(out, filepath.Join(root, path))
+		fullPath := filepath.Join(root, path)
+		if _, err := os.Stat(fullPath); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		out = append(out, fullPath)
 	}
 	sort.Strings(out)
 	return out, nil

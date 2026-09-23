@@ -1298,6 +1298,14 @@ unlock.
   `Date` as milliseconds, so every created, last-seen and expiry date read as
   January 1970.
 
+### Removed
+
+- **cli (Breaking):** the public CLI no longer provides `sparkwing cluster
+  credits`, `sparkwing cluster tokens set-metered`, or `--metered` on token
+  creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
+  credit and metering operations. The controller's credit and token routes
+  remain available to that tool. See the [migration guide](docs/migrations/_unreleased.md#cloud-operator-commands-leave-the-public-cli).
+
 ## [v0.60.0] - 2026-09-21
 ### Added
 

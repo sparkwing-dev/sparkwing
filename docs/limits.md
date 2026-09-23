@@ -20,9 +20,8 @@ See [Runner classes](auth.md#runner-classes).
 ## Free storage allowance
 
 A team without credits keeps a free storage allowance of one gibibyte unless
-the operator writes another with
-`sparkwing cluster credits settings --storage-free-allowance-bytes N`. The
-allowance is split into three fixed shares, one per store. The controller
+the Sparkwing Cloud operator writes another with the private `sparkwing-ops`
+tool. The allowance is split into three fixed shares, one per store. The controller
 counts every team's bytes in its database, and each store asks it for room
 before it writes:
 
@@ -99,15 +98,8 @@ keeps writing inside its shares after the slots run out; a team with neither a
 slot nor credits is refused its runs with `402`:
 `free storage is paused; buy credits or join the waitlist`.
 
-An operator admits a team whatever the slot count with
-`PUT /api/v1/storage/teams/{team}/free-slot` (scope `admin`):
-
-```bash
-curl -sS -X PUT "$CONTROLLER/api/v1/storage/teams/acme/free-slot" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier as
+Sparkwing Cloud operators admit a team through the private `sparkwing-ops`
+tool. To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier as
 closed once every slot is taken.
 
 A multi-team controller refuses to start without `--bucket-store`, because the

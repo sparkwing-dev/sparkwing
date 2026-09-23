@@ -1,5 +1,18 @@
 # Migrating to the next release
 
+## Cloud operator commands leave the public CLI
+
+Sparkwing Cloud operators switch credit, storage allowance, refund, freeze,
+and token metering operations to the private `sparkwing-ops` CLI. The public
+`sparkwing cluster credits` group and `sparkwing cluster tokens set-metered`
+command are removed. Public `sparkwing cluster tokens create` no longer accepts
+`--metered`; create or mark metered runner tokens with the private tool.
+
+Self-hosted token and runner administration and object-store controls stay in
+`sparkwing`.
+The controller's HTTP routes are unchanged, and team owners still see their
+own billing in the dashboard.
+
 ## Upgrading a controller from v0.60.0
 
 v0.60.0 runs schema v47. This release migrates the database to v66 when the
