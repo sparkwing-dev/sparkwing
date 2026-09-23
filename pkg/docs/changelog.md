@@ -405,6 +405,10 @@ unlock.
 
 ### Fixed
 
+- **runner:** a pooled runner whose node fails before it starts, for example
+  a pipeline that does not compile, finishes the node as failed with that
+  error. The node used to stay claimed until its three-minute lease lapsed and
+  then report a lost runner instead of the cause.
 - **controller:** cancelling a run no runner has claimed finishes it as
   `cancelled` at once. The cancel only flagged the trigger, so the run stayed
   `pending` and the runner that later claimed it fetched source and started.

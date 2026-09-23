@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type PoolLoopConfig struct {
@@ -577,7 +578,7 @@ func executePooledNode(
 	}()
 
 	grant := requestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
-	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
+	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
 		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
@@ -585,10 +586,39 @@ func executePooledNode(
 	if err != nil {
 		logger.Error(source+" setup failure",
 			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
+		failPooledNodeSetup(ctx, ctrl, n, holderID, err, source, logger)
 		return
 	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
+}
+
+// runPooledNodeOnce is the node execution a pooled claim runs; tests
+// replace it to inject a setup failure.
+var runPooledNodeOnce = orchestrator.RunNodeOnce
+
+// poolSetupFinishTimeout bounds the finish a setup failure sends.
+const poolSetupFinishTimeout = 10 * time.Second
+
+// failPooledNodeSetup finishes a claimed node as failed with the setup
+// error, under the node's claim fence, so the run reports the real cause at
+// once instead of waiting out the claim lease. A runner shutting down leaves
+// the node alone, because its lease lapsing is what hands the node to
+// another runner.
+func failPooledNodeSetup(ctx context.Context, ctrl *client.Client, n *store.Node, holderID string, setupErr error, source string, logger *slog.Logger) {
+	if ctx.Err() != nil {
+		return
+	}
+	finishCtx, cancel := context.WithTimeout(store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: holderID, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}), poolSetupFinishTimeout)
+	defer cancel()
+	msg := source + " could not start the node: " + setupErr.Error()
+	if err := ctrl.FinishNodeWithReason(finishCtx, n.RunID, n.NodeID, string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); err != nil {
+		logger.Warn(source+" could not finish the node after its setup failed; its lease will lapse",
+			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
+	}
 }
 
 // requestRunCacheGrant returns the grant a claimed run's cache traffic carries,
