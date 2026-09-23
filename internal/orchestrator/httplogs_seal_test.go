@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -158,5 +159,41 @@ func TestHTTPLogs_ServiceWithoutSealsCostsOneRequest(t *testing.T) {
 	}
 	if got := seals.Load(); got != 1 {
 		t.Fatalf("seal requests = %d, want 1", got)
+	}
+}
+
+// A writer that skips its seal says why, so a log that reads cut off or
+// unconfirmed can be traced to the runner that let it.
+func TestHTTPLogs_SkippedSealWarnsWithTheReason(t *testing.T) {
+	_, _, url := sealFixture(t)
+	var out strings.Builder
+	logger := slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	ctx := store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{
+		HolderID: "holder", MembershipID: "membership", ReservationID: "reservation", ClaimGeneration: 3,
+	})
+	nlog, err := orchestrator.NewHTTPLogs(url, nil, logger).OpenNodeLog(ctx, "run", "node", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "waiting for a slot"})
+	if err := nlog.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "level=WARN") || !strings.Contains(out.String(), "before learning its execution attempt") {
+		t.Fatalf("skipped seal logged %q", out.String())
+	}
+
+	// Negative control: a writer that seals logs nothing.
+	out.Reset()
+	nlog, err = orchestrator.NewHTTPLogs(url, nil, logger).OpenNodeLog(context.Background(), "run", "other", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "hello"})
+	if err := nlog.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("a sealed log warned: %q", out.String())
 	}
 }

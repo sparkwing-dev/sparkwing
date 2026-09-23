@@ -151,6 +151,17 @@ dropping. The service tracks received numbers in memory, so a logs
 service that restarts mid-stream trusts every number the stream sent
 before the restart.
 
+A node's lines are written by the pipeline binary, which is built against
+the SDK version the pipeline's `go.mod` pins, not by the runner that
+claimed the node. When a pooled agent or a Kubernetes Job runs the node, the
+runner carries every line the pipeline binary writes, so it numbers the
+lines of a binary that does not and seals them once the binary exits on its
+own; a binary killed by a signal or cancelled is left unsealed and reads
+`cut_off`. A line the binary gives up on after the logs service refused it
+counts as dropped. A pipeline binary that runs its nodes itself, the
+in-process trigger runner, writes straight to the logs service, so on an
+SDK without seals those nodes read `unconfirmed` until the pin moves.
+
 ## Failure excerpts
 
 A node that fails while running a command records a bounded excerpt of

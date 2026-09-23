@@ -164,6 +164,8 @@ const httpNodeLogFinishTimeout = 10 * time.Second
 
 const httpNodeLogPendingLimit = 4 << 20
 
+var logStoreWithoutSealsOnce sync.Once
+
 type numberedLine struct {
 	seq     int64
 	payload []byte
@@ -442,14 +444,28 @@ func (l *httpNodeLog) Close() error {
 // claim was refused, or that never learned its attempt, sent nothing the
 // service could file and seals nothing.
 func (l *httpNodeLog) seal(ctx context.Context) {
+	skip := func(reason string) {
+		l.logger.Warn("node log not sealed; "+reason,
+			"run_id", l.runID, "node_id", l.nodeID, "stream", l.stream, "lines", l.seq)
+	}
 	sealer, ok := l.client.(logSealer)
 	if !ok {
+		// safety: a store without seals says so once per process, not once
+		// per node, because every node of the process shares it.
+		logStoreWithoutSealsOnce.Do(func() {
+			skip(fmt.Sprintf("the %T log store keeps no seals, so readers report completeness as unknown", l.client))
+		})
 		return
 	}
 	l.mu.Lock()
 	ordinal, fatal, dropped := l.attempt, l.fatal, int64(l.dropCount)
 	l.mu.Unlock()
-	if fatal != nil || (l.requiresAttempt && ordinal == 0) {
+	if fatal != nil {
+		skip(fmt.Sprintf("the logs service refused this node's appends (%v), so readers will see its log as cut off", fatal))
+		return
+	}
+	if l.requiresAttempt && ordinal == 0 {
+		skip("the node closed its log before learning its execution attempt, so its lines were never sent")
 		return
 	}
 	seal := logs.Seal{

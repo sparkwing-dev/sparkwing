@@ -43,6 +43,8 @@ type remoteExecutionBroker struct {
 	artifact       storage.ArtifactStore
 	controllerHost string
 	logsHost       string
+	logsURL        string
+	logSeal        childLogSeal
 }
 
 func startRemoteExecutionBroker(
@@ -79,6 +81,8 @@ func startRemoteExecutionBroker(
 	if logsTarget != nil {
 		b.logs = httputil.NewSingleHostReverseProxy(logsTarget)
 		b.logsHost = logsTarget.Host
+		b.logsURL = logsURL
+		b.logSeal.init()
 	}
 	b.controller.ErrorHandler = executionBrokerProxyError(logger)
 	if b.logs != nil {
@@ -154,6 +158,10 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if logsRequest {
 		r.Host = b.logsHost
+		if b.isChildLogAppend(r) {
+			b.forwardChildLogAppend(w, r)
+			return
+		}
 		b.logs.ServeHTTP(w, r)
 		return
 	}
