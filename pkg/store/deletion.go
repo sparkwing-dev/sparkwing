@@ -543,11 +543,12 @@ func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, er
 		var a Account
 		var verified int
 		var active string
-		var created int64
-		if err := rows.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created); err != nil {
+		var created, waitlisted int64
+		if err := rows.Scan(&a.ID, &a.Email, &verified, &a.Name, &active, &created, &waitlisted); err != nil {
 			return Account{}, err
 		}
 		a.EmailVerified, a.ActiveTeam, a.CreatedAt = verified == 1, Team(active), time.Unix(created, 0).UTC()
+		a.Waitlisted = waitlisted != 0
 		found = append(found, a)
 	}
 	if err := rows.Err(); err != nil {
