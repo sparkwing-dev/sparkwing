@@ -45,7 +45,7 @@ Only a team owner connects, and only as a signed-in account with a linked GitHub
 2. GitHub returns the browser to the setup URL with `installation_id`, `setup_action` and `state`. The dashboard checks `state` against its cookie, keeps `installation_id` in the cookie, and sends the browser to `authorize_url`.
 3. GitHub returns the browser to the callback with `code` and `state`. The dashboard checks `state` again and calls `POST /api/v1/team/github-app/connect/complete {state, verifier, code, installation_id, redirect_uri}`.
 
-The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The browser withholds the `SameSite=Strict` session cookie from GitHub's return, so the callback keeps the code in the flow cookie and moves on from a page on the dashboard's own origin, whose request carries the session that `connect/complete` runs as. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
+The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the dashboard origin before `connect/complete` uses the session. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
 
 When an administrator changes repository access on GitHub outside a connect flow,
 GitHub returns to the setup URL with `setup_action=update`. The dashboard serves

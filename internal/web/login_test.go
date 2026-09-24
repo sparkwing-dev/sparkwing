@@ -244,7 +244,11 @@ func assertPersistentAuthCookies(t *testing.T, cookies []*http.Cookie) {
 		if cookie == nil {
 			t.Fatalf("%s was not refreshed", name)
 		}
-		if cookie.MaxAge != int(30*24*time.Hour/time.Second) || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.Domain != "" {
+		wantSameSite := http.SameSiteStrictMode
+		if name == sessionCookieName {
+			wantSameSite = http.SameSiteLaxMode
+		}
+		if cookie.MaxAge != int(30*24*time.Hour/time.Second) || !cookie.Secure || cookie.SameSite != wantSameSite || cookie.Path != "/" || cookie.Domain != "" {
 			t.Errorf("%s persistence or security attributes = MaxAge %d, Secure %t, SameSite %d, Path %q, Domain %q", name, cookie.MaxAge, cookie.Secure, cookie.SameSite, cookie.Path, cookie.Domain)
 		}
 		if name == sessionCookieName && !cookie.HttpOnly {

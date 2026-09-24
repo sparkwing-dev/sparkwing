@@ -328,9 +328,8 @@ func controllerErrorMessage(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
-// safety: the session cookie is SameSite=Strict, and a browser withholds it from
-// the redirect that ends a navigation the provider started. A page on this origin that
-// moves on by itself makes the next request same-site, so the cookie rides it.
+// safety: the provider returns through this origin before the browser follows
+// the vetted next path, so the session never rides an untrusted redirect target.
 var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html>
 <html lang="en">
 <head>

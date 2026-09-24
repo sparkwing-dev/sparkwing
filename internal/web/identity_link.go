@@ -104,9 +104,8 @@ func identityLinkHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// safety: the session cookie is SameSite=Strict and a browser withholds it from the provider's
-// return, so the callback keeps the code in the flow cookie and moves on from a page on this
-// origin, whose next request carries the session the controller checks the state against.
+// safety: the callback keeps the provider code in the flow cookie and resumes
+// on this origin before checking the account-link state against the session.
 func identityLinkCallback(w http.ResponseWriter, r *http.Request, provider oauthProvider, flow oauthFlow, secure bool) {
 	query := r.URL.Query()
 	if query.Get("error") != "" {

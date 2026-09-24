@@ -525,7 +525,7 @@ func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
 	})
 	setCSRFCookie(w, sess.CSRFToken, secure, maxAge)

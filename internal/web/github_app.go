@@ -162,9 +162,8 @@ func githubAppSetupHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// safety: the session cookie is SameSite=Strict and a browser withholds it from GitHub's return,
-// so the callback keeps the code in the flow cookie and moves on from a page on this origin,
-// whose next request carries the session.
+// safety: the callback keeps GitHub's code in the flow cookie and resumes on
+// this origin before using the session to connect the installation.
 func githubAppCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
