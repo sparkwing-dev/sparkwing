@@ -182,7 +182,7 @@ file. Other syntax and workflow checks remain active.
 - **Why the whole-tree vet, test and lint are in neither hook:** the house
   standard puts them in the pre-commit chain, and this repo runs them in `gate`
   on purpose. The broad tier takes 12 to 24 minutes through the shared
-  admission daemon (the Postgres suite 401 s, the race tests 401 s, the full
+  admission daemon (the Postgres suite 656 s, the race tests 401 s, the full
   unit suite 315 s, lint 117 s), a hook that long is a hook everyone passes
   `--no-verify`, and it loses the fast-forward race whenever a co-maintainer
   lands first. Hosted CI runs `gate` and `pre-release` on every pull request
@@ -405,8 +405,9 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
-  the first run downloads the Postgres binaries.
+  thirty-minute timeout. The Go package has a fixed 15-minute timeout because
+  1,076 passing tests took 656 seconds against a private Postgres with seven
+  workers. The first run may also download the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
