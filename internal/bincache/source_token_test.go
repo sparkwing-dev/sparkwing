@@ -82,6 +82,14 @@ func TestGitHubTokenReachesOnlyTheFetch(t *testing.T) {
 			}
 			defer func() { _ = cred.Close() }()
 			cmd.ExtraFiles = []*os.File{cred}
+		} else {
+			// safety: FD 3 can be inherited as an open channel, so this case needs EOF.
+			empty, err := os.Open(os.DevNull)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = empty.Close() }()
+			cmd.ExtraFiles = []*os.File{empty}
 		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
