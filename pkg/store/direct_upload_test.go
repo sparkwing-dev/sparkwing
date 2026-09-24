@@ -97,11 +97,18 @@ func TestSourceBundleOneRunAndRetention(t *testing.T) {
 		orphan.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
 		t.Fatalf("expired orphan source bound to a run: %v", err)
 	}
-	if err := tn.FinishRun(t.Context(), "run-source", "pending", ""); err != nil {
+	// A row written before terminal-status validation can carry this invalid pair.
+	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st,
+		`UPDATE runs SET finished_at = ? WHERE id = ? AND team = ?`),
+		time.Now().UnixNano(), "run-source", "team-source"); err != nil {
 		t.Fatal(err)
 	}
 	if rows, err := st.ClaimExpiredSourceBundles(t.Context(), time.Now().Add(25*time.Hour)); err != nil || len(rows) != 1 {
 		t.Fatalf("nonterminal source with a finish timestamp was claimed: %v, %v", rows, err)
+	}
+	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st,
+		`UPDATE runs SET finished_at = NULL WHERE id = ? AND team = ?`), "run-source", "team-source"); err != nil {
+		t.Fatal(err)
 	}
 	if err := tn.FinishRun(t.Context(), "run-source", "success", ""); err != nil {
 		t.Fatal(err)

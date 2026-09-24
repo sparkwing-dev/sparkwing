@@ -32,7 +32,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		ID:           "src-run",
 		Pipeline:     "deploy",
 		Args:         map[string]string{"env": "prod", "tag": "v1"},
-		Status:       "failed",
+		Status:       "running",
 		GitBranch:    "main",
 		GitSHA:       "abc123",
 		DeclaredRepo: "owner/repo-a",
