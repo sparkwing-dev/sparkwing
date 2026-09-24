@@ -354,7 +354,7 @@ func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud
 	if err != nil {
 		return Upload{}, err
 	}
-	return s.CommittedObject(ctx, team, key)
+	return s.CommittedObjectFor(ctx, team, key, cloud)
 }
 
 // CommitUpload publishes a verified and copied upload exactly once. The

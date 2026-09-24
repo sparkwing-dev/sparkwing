@@ -361,6 +361,29 @@ func TestDataDownloadRejectsInvalidGrant(t *testing.T) {
 	}
 }
 
+func TestCloudGrantCannotSignLocalBinary(t *testing.T) {
+	s, grant, _ := downloadFixture(t)
+	issued, err := authwire.VerifyCacheGrant("grant-key", grant, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetTokenMetered(t.Context(), issued.Claim.TokenPrefix, true); err != nil {
+		t.Fatal(err)
+	}
+	key := "bin/01234567-89abcdef/" + strings.Repeat("a", 64)
+	_, err = s.store.DB().ExecContext(t.Context(), `INSERT INTO data_objects
+		(team, key, store, size, sha256, principal, provenance, committed_at)
+		VALUES ('team-a', ?, 'cache', 1, ?, 'laptop', 'local', ?)`,
+		key, strings.Repeat("a", 64), time.Now().UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, _ := callDownload(t, s, grant, "bin/01234567-89abcdef", false)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("local binary signed for cloud grant: %d", response.Code)
+	}
+}
+
 func TestDataDownloadSignsOnlyGrantsTeamAndChargesAtSigning(t *testing.T) {
 	s, grant, head := downloadFixture(t)
 	bad, _ := callDownload(t, s, grant, "teams/team-b/bins/abc", false)
