@@ -280,7 +280,10 @@ func (c *Client) Grep(ctx context.Context, runID, nodeID, pattern string, maxMat
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if err != nil {
+			return nil, fmt.Errorf("logs grep %d: read error response: %w", resp.StatusCode, err)
+		}
 		return nil, fmt.Errorf("logs grep %d: %s", resp.StatusCode, bytes.TrimSpace(body))
 	}
 	var matches []GrepLine
