@@ -101,8 +101,8 @@ file. Other syntax and workflow checks remain active.
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
   a 40-minute execution deadline, which gives the dispatcher 41 minutes with
-  its drain margin. Pre-release declares a 90-minute execution deadline, which
-  gives the dispatcher 91 minutes. Their shared hosted job allows 95 minutes,
+  its drain margin. Pre-release declares a 75-minute execution deadline, which
+  gives the dispatcher 76 minutes. Their shared hosted job allows 80 minutes,
   leaving five minutes beyond the longer node deadline for setup and cleanup.
   These are liveness boundaries, not claims that either check normally takes
   that long. A failed hosted canonical run gets
@@ -120,10 +120,17 @@ file. Other syntax and workflow checks remain active.
   the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
   Left in, the step always times out, which is a check that cannot pass.
   `pre-release` runs it instead, as `race-store`, and no release ships past it.
-  A prior pre-release run without `race-store` took 13m03s. Adding its 35m48s
-  measured cost gives about 48m51s before cache and load variance, above the
-  old 45-minute hosted limit. The store race command allows up to 75 minutes,
-  followed by later release checks under the 90-minute node deadline.
+  That step compiles one race-enabled `pkg/store` test binary, lists its top-level
+  Test, Example and Fuzz names, sorts them and assigns each exactly once across
+  four processes. Every shard runs with `GOMAXPROCS=1`; the separate
+  `pkg/store/internal/storetest` package runs once. The step stops sibling
+  processes on a failure and retains each shard's output in the run log.
+  A complete local run on 16 logical CPUs covered 1,075 top-level names in
+  27m20s; its four shards took 21m45s, 23m15s, 23m40s and 27m20s. A prior
+  pre-release run without this step took 13m03s, so 40m23s is a local estimate
+  for the whole release check, not a hosted measurement. Hosted four-core CPU
+  and memory use still need verification. Each shard has a 55-minute test
+  timeout, followed by later checks under the 75-minute node deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries

@@ -684,6 +684,10 @@ unlock.
 
 ### Changed
 
+- **release checks:** The `pkg/store` race suite compiles once and runs every
+  top-level test across four bounded processes, with each test assigned to one
+  shard. The separate store test-helper package still runs once. A local run of
+  1,075 tests finished in 27m20s; hosted timing remains unmeasured.
 - **controller + dashboard (Breaking):** credit and billing routes, metered
   tokens, claim charges, and storage billing require a signed `metering`
   license. Existing signed `multi-team` licenses also grant metering.
