@@ -887,6 +887,9 @@ unlock.
 - **controller:** Fleet groups claim-mode agents with a plain `holder_prefix`
   under one stable name and uses their own idle polls for liveness. An unrelated
   credential cannot keep a stale claim's agent marked live.
+- **dashboard:** Fleet shows a low 24-hour run success rate as a separate
+  recent-run warning linked to failed Runs. Controller and service probes stay
+  Healthy when that is their only problem; dependency failures remain Degraded.
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.
 

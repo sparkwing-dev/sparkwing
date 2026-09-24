@@ -332,6 +332,9 @@ It also shows what admission is doing with the machine:
   identity; idle polls from the credential that made its stored claim refresh
   liveness. Polls from another credential cannot keep that claim live. The
   headroom observation time remains separate from last claim or poll activity.
+  Fleet presents the controller's rolling run-failure warning separately from
+  service health. Database, object-store, auth, and slow-response problems
+  still degrade their service; the controller health API keeps its own status.
 
 The run node list and DAG show a small location icon for known execution sites.
 Hover or focus the icon to see the runner or repository. Machine, Sparkwing

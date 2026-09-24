@@ -132,13 +132,33 @@ export default function ClusterPage() {
     };
   }, [agents]);
 
-  const maxLatency = Math.max(1, ...services.map((s) => s.latency_ms));
+  const recentRunFailures = services.flatMap((svc) =>
+    svc.name === "controller"
+      ? (svc.problems ?? []).filter((problem) => problem.startsWith("runs: "))
+      : [],
+  );
+  const serviceProbes = services.map((svc) => {
+    if (svc.name !== "controller") return svc;
+    const problems = (svc.problems ?? []).filter(
+      (problem) => !problem.startsWith("runs: "),
+    );
+    return {
+      ...svc,
+      problems,
+      status:
+        svc.status === "degraded" && recentRunFailures.length > 0 &&
+        !svc.error && problems.length === 0
+          ? "ok"
+          : svc.status,
+    };
+  });
+  const maxLatency = Math.max(1, ...serviceProbes.map((s) => s.latency_ms));
   const overall =
-    services.length === 0
+    serviceProbes.length === 0
       ? "unknown"
-      : services.every((s) => s.status === "ok")
+      : serviceProbes.every((s) => s.status === "ok")
         ? "ok"
-        : services.some((s) => s.status === "down")
+        : serviceProbes.some((s) => s.status === "down")
           ? "down"
           : "degraded";
 
@@ -158,18 +178,32 @@ export default function ClusterPage() {
         busy={fleetTotals.busy}
       />
 
+      {recentRunFailures.length > 0 && (
+        <section className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4 text-sm">
+          <h2 className="font-medium text-amber-300">Recent run failures</h2>
+          {recentRunFailures.map((problem) => (
+            <p key={problem} className="mt-1 text-xs font-mono text-amber-200">
+              {problem}
+            </p>
+          ))}
+          <Link href="/runs?status=failed" className="inline-block mt-2 text-xs text-[var(--accent)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
+            View failed runs
+          </Link>
+        </section>
+      )}
+
       <SectionHeader title="Services" hint="/api/v1/health/services" />
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-6">
         {!loaded ? (
           <div className="text-xs text-[var(--muted)]">Loading...</div>
-        ) : services.length === 0 ? (
+        ) : serviceProbes.length === 0 ? (
           <div className="text-xs text-[var(--muted)]">
             No services configured. Pass --controller and --logs to
             sparkwing-web to populate this list.
           </div>
         ) : (
           <div className="space-y-3">
-            {services.map((svc) => (
+            {serviceProbes.map((svc) => (
               <ServiceRow key={svc.name} svc={svc} maxLatency={maxLatency} />
             ))}
           </div>
