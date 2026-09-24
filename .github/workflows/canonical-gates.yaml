@@ -21,7 +21,7 @@ jobs:
   gate:
     name: Canonical / ${{ matrix.gate }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 95
     strategy:
       fail-fast: false
       matrix:

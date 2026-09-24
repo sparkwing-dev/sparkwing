@@ -101,9 +101,11 @@ file. Other syntax and workflow checks remain active.
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
   a 40-minute execution deadline, which gives the dispatcher 41 minutes with
-  its drain margin inside the hosted job's 45 minutes. This is a liveness
-  boundary for the long test and change-sensitive post-test fanout, not a claim
-  that every gate completes in 40 minutes. A failed hosted canonical run gets
+  its drain margin. Pre-release declares a 90-minute execution deadline, which
+  gives the dispatcher 91 minutes. Their shared hosted job allows 95 minutes,
+  leaving five minutes beyond the longer node deadline for setup and cleanup.
+  These are liveness boundaries, not claims that either check normally takes
+  that long. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
@@ -117,8 +119,12 @@ file. Other syntax and workflow checks remain active.
   over 828 tests rather than a few, so there is nothing to trim that fits it:
   the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
   Left in, the step always times out, which is a check that cannot pass.
-  `pre-release` runs it instead, as `race-store`, where nothing bounds it to
-  30 minutes and no release ships past it. A Go step's own parallelism depends on who else holds the
+  `pre-release` runs it instead, as `race-store`, and no release ships past it.
+  A prior pre-release run without `race-store` took 13m03s. Adding its 35m48s
+  measured cost gives about 48m51s before cache and load variance, above the
+  old 45-minute hosted limit. The store race command allows up to 75 minutes,
+  followed by later release checks under the 90-minute node deadline.
+  A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
   one gate and is discarded after it, so it holds nothing back for a neighbor
