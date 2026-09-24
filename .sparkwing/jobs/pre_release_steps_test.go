@@ -7,9 +7,24 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+func TestPreReleasePlanAllowsStoreRace(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	if err := (&PreRelease{}).Plan(t.Context(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-release"}); err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	nodes := plan.Nodes()
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want one", len(nodes))
+	}
+	if got, want := nodes[0].TimeoutDuration(), 90*time.Minute; got != want {
+		t.Fatalf("pre-release node timeout = %s, want %s for the 75m store race and later checks", got, want)
+	}
+}
 
 func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 	plan := sparkwing.NewPlan()

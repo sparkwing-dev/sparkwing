@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -43,8 +45,17 @@ func TestCloudRunnerFetchesWithTheTeamsDeployKey(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
 
 	origins, record := t.TempDir(), t.TempDir()
-	marker := filepath.Join(t.TempDir(), "ran")
-	sha := makeKeyCheckOrigin(t, filepath.Join(origins, "acme", "private.git"), filepath.Join(record, "keypath"), marker)
+	result := make(chan string, 1)
+	resultSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		result <- string(body)
+	}))
+	t.Cleanup(resultSrv.Close)
+	sha := makeKeyCheckOrigin(t, filepath.Join(origins, "acme", "private.git"), filepath.Join(record, "keypath"), resultSrv.URL)
 	stubSSH(t, origins, record)
 	const host, repoURL = "git.example.invalid", "ssh://git@git.example.invalid/acme/private.git"
 
@@ -100,21 +111,15 @@ func TestCloudRunnerFetchesWithTheTeamsDeployKey(t *testing.T) {
 			MaxConcurrent: 1,
 		})
 	}()
-	deadline := time.After(2 * time.Minute)
-	for {
-		if got, err := os.ReadFile(marker); err == nil && len(got) > 0 {
-			if string(got) != "key-gone" {
-				t.Fatalf("the pipeline saw %q, want the deploy key gone before it ran", got)
-			}
-			break
+	select {
+	case got := <-result:
+		if got != "key-gone" {
+			t.Fatalf("the pipeline saw %q, want the deploy key gone before it ran", got)
 		}
-		select {
-		case err := <-loopDone:
-			t.Fatalf("trigger loop stopped before the pipeline ran: %v", err)
-		case <-deadline:
-			t.Fatal("the pipeline never ran from the ssh source")
-		case <-time.After(50 * time.Millisecond):
-		}
+	case err := <-loopDone:
+		t.Fatalf("trigger loop stopped before the pipeline ran: %v", err)
+	case <-ctx.Done():
+		t.Fatal("the pipeline never ran from the ssh source")
 	}
 	stopLoop()
 	if err := <-loopDone; err != nil {
@@ -169,10 +174,9 @@ func storeDeployKey(t *testing.T, ctx context.Context, tn *store.Tenant, cipher 
 	return pemKey
 }
 
-// makeKeyCheckOrigin is a repository whose pipeline, when it runs, writes
-// "key-gone" to marker if the deploy key file named in keypathFile no longer
-// exists, and "key-present" if it does.
-func makeKeyCheckOrigin(t *testing.T, bare, keypathFile, marker string) string {
+// safety: the callback arrives after the pipeline checks the key file, so
+// receiving it proves the credential lifetime without polling the filesystem.
+func makeKeyCheckOrigin(t *testing.T, bare, keypathFile, callbackURL string) string {
 	t.Helper()
 	work := t.TempDir()
 	pipeline := filepath.Join(work, ".sparkwing")
@@ -184,6 +188,7 @@ func makeKeyCheckOrigin(t *testing.T, bare, keypathFile, marker string) string {
 import (
 	"os"
 	"strings"
+	"net/http"
 )
 
 func main() {
@@ -195,11 +200,13 @@ func main() {
 	if _, err := os.Stat(strings.TrimSpace(string(raw))); err == nil {
 		state = "key-present"
 	}
-	if err := os.WriteFile(%q, []byte(state), 0o644); err != nil {
+	resp, err := http.Post(%q, "text/plain", strings.NewReader(state))
+	if err != nil {
 		os.Exit(1)
 	}
+	resp.Body.Close()
 }
-`, keypathFile, marker)
+`, keypathFile, callbackURL)
 	files := map[string]string{"go.mod": "module example.com/pipeline\n\ngo 1.22\n", "main.go": main}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(pipeline, name), []byte(body), 0o644); err != nil {

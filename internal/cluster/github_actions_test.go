@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -49,8 +50,8 @@ func TestGitHubActionsCredentialAsksForTheControllerAudienceAndNamesTheTeam(t *t
 	if cred.Token != "swr_x" || cred.Repository != "acme/widgets" {
 		t.Fatalf("credential = %+v", cred)
 	}
-	if left := time.Until(githubClaimDeadline(cred)); left > 50*time.Minute || left < 49*time.Minute {
-		t.Fatalf("claims stop %s from now, want ten minutes before the credential expires", left)
+	if got := githubClaimDeadline(cred).Unix(); got != expires-int64((10*time.Minute)/time.Second) {
+		t.Fatalf("claims stop at %d, want ten minutes before credential expiry %d", got, expires)
 	}
 	if _, err := githubActionsCredential(context.Background(), srv.Client(), srv.URL, "other"); err == nil ||
 		!strings.Contains(err.Error(), "400") {
@@ -114,40 +115,90 @@ func TestGitHubActionsRunnerClaimsTriggersInProcess(t *testing.T) {
 }
 
 func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
-	responses := []claimResp{{node: fakeNode("a")}}
-	for range 100000 {
-		responses = append(responses, claimResp{})
-	}
-	stub := &stubClaimer{responses: responses}
-	release := make(chan struct{})
-	exec := func(ctx context.Context, n *store.Node, holderID string) { <-release }
-	cfg := normalizePoolLoopConfig(PoolLoopConfig{
-		ControllerURL: "http://stub", HolderPrefix: "test", MaxConcurrent: 2,
-		PollInterval: time.Millisecond, IdleExit: 20 * time.Millisecond, SourceName: "test runner",
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger())
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		var running atomic.Bool
+		polling := make(chan time.Time, 100)
+		responses := []claimResp{{node: fakeNode("a")}}
+		for range 100000 {
+			responses = append(responses, claimResp{})
+		}
+		stub := &stubClaimer{responses: responses, observe: func() {
+			if running.Load() {
+				select {
+				case polling <- time.Now():
+				default:
+				}
+			}
+		}}
+		release := make(chan struct{})
+		released := false
+		releaseNode := func() {
+			if !released {
+				close(release)
+				released = true
+			}
+		}
+		defer releaseNode()
+		started := make(chan struct{})
+		exec := func(ctx context.Context, n *store.Node, holderID string) {
+			running.Store(true)
+			close(started)
+			<-release
+		}
+		cfg := normalizePoolLoopConfig(PoolLoopConfig{
+			ControllerURL: "http://stub", HolderPrefix: "test", MaxConcurrent: 2,
+			PollInterval: time.Millisecond, IdleExit: 20 * time.Millisecond, SourceName: "test runner",
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = runPoolLoop(ctx, cfg, stub, exec, nil, discardLogger())
+		}()
 
-	time.Sleep(80 * time.Millisecond)
-	before := stub.calls.Load()
-	time.Sleep(40 * time.Millisecond)
-	if after := stub.calls.Load(); after == before {
-		t.Fatal("the loop stopped polling while a node was still held")
-	}
-	close(release)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the loop did not exit after the held node finished and the queue stayed empty")
-	}
-	if ctx.Err() != nil {
-		t.Fatal("the loop ran until cancelled instead of exiting when idle")
-	}
+		select {
+		case <-started:
+		case <-done:
+			t.Fatal("the loop exited before its claimed node started")
+		case <-ctx.Done():
+			t.Fatal("the claimed node never started")
+		}
+		heldAt := time.Now()
+		held, stopHeld := context.WithTimeout(ctx, 3*cfg.IdleExit)
+		defer stopHeld()
+		<-held.Done()
+		synctest.Wait()
+		if ctx.Err() != nil {
+			t.Fatal("the loop stopped before the held node passed idle exit")
+		}
+		select {
+		case <-done:
+			t.Fatal("the loop exited while a node was still held")
+		default:
+		}
+		latestPoll := time.Time{}
+		for len(polling) > 0 {
+			latestPoll = <-polling
+		}
+		if !latestPoll.After(heldAt.Add(2 * cfg.IdleExit)) {
+			t.Fatal("the loop stopped polling before the held node passed idle exit")
+		}
+		releaseNode()
+		exitCtx, stopExit := context.WithTimeout(context.Background(), 2*time.Second)
+		defer stopExit()
+		select {
+		case <-done:
+		case <-exitCtx.Done():
+			t.Fatal("the loop did not exit after the held node finished and the queue stayed empty")
+		}
+		if exitCtx.Err() != nil {
+			t.Fatal("the loop reached the idle-exit deadline before it stopped")
+		}
+		if ctx.Err() != nil {
+			t.Fatal("the loop ran until cancelled instead of exiting when idle")
+		}
+	})
 }
 
 func TestRunPoolLoop_ClaimUntilStopsNewClaims(t *testing.T) {

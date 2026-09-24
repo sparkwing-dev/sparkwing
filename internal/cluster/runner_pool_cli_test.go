@@ -19,6 +19,7 @@ type stubClaimer struct {
 	responses []claimResp
 	calls     atomic.Int64
 	capacity  atomic.Pointer[client.ClaimCapacity]
+	observe   func()
 }
 
 type claimResp struct {
@@ -31,6 +32,9 @@ func (s *stubClaimer) ClaimNodeWithCapacity(ctx context.Context, holderID string
 ) (*store.Node, error) {
 	s.capacity.Store(capacity)
 	idx := int(s.calls.Add(1)) - 1
+	if s.observe != nil {
+		s.observe()
+	}
 	if idx >= len(s.responses) {
 		<-ctx.Done()
 		return nil, ctx.Err()

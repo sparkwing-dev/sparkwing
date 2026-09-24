@@ -316,9 +316,9 @@ because their callers are unauthenticated and would share one bucket.
 
 ## Per-token request budget
 
-`--requests-per-token-minute` bounds ordinary requests one token can reach,
-keyed on the token prefix alone. It is the guard that binds a caller
-varying the runner it says it is: on the two claim routes the runner name
+`--requests-per-token-minute` bounds ordinary and signed-data requests,
+keyed by signed-up team or by token prefix in the operator's team. It binds
+a caller varying the runner it says it is: on the two claim routes the runner name
 is the caller's own word, so the per-runner budgets above bound a runaway
 loop rather than a holder of a valid token who means harm. The agent
 liveness routes above are spared here too. Past the budget a request answers

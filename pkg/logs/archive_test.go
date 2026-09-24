@@ -596,7 +596,7 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 		t.Fatalf("append = %d %s", code, body)
 	}
 	f.client.reset()
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, f.http.URL+"/api/v1/logs/live/build/stream", nil)
 	req.Header.Set("Authorization", "Bearer a")
@@ -633,18 +633,19 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 	}()
 	want := func(text string) {
 		t.Helper()
-		deadline := time.After(time.Second)
+		lineCtx, stopLine := context.WithTimeout(ctx, time.Second)
+		defer stopLine()
 		for {
 			select {
 			case l, ok := <-lines:
 				if !ok {
-					t.Fatalf("stream ended before %q", text)
+					t.Fatalf("stream ended before %q: %v", text, ctx.Err())
 				}
 				if l == text {
 					return
 				}
-			case <-deadline:
-				t.Fatalf("%q did not arrive within a second", text)
+			case <-lineCtx.Done():
+				t.Fatalf("stream did not deliver %q: %v", text, lineCtx.Err())
 			}
 		}
 	}

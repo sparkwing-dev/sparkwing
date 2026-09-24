@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
@@ -37,13 +38,12 @@ func TestAMirrorCloneReachesTheStoreCount(t *testing.T) {
 	measureStore(t.Context())
 	before := storeCeiling.State().Bytes
 
-	if out, err := cloneMirror(upstream, filepath.Join(repoDir, "upstream.git")); err != nil {
-		t.Fatalf("clone: %v %s", err, out)
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for storeCeiling.State().Bytes == before && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if out, err := cloneMirror(upstream, filepath.Join(repoDir, "upstream.git")); err != nil {
+			t.Fatalf("clone: %v %s", err, out)
+		}
+		synctest.Wait()
+	})
 	if got := storeCeiling.State().Bytes; got <= before {
 		t.Fatalf("store count after a mirror clone = %d, want it past the %d before", got, before)
 	}

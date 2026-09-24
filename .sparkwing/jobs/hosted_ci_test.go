@@ -190,7 +190,7 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	}
 }
 
-func TestCanonicalWorkflowLeavesRoomAroundTheGateDeadline(t *testing.T) {
+func TestCanonicalWorkflowLeavesRoomAroundWorkDeadlines(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
@@ -206,6 +206,9 @@ func TestCanonicalWorkflowLeavesRoomAroundTheGateDeadline(t *testing.T) {
 	}
 	if room := time.Duration(minutes)*time.Minute - gateRunTimeout; room < 5*time.Minute {
 		t.Fatalf("canonical workflow leaves %s around the %s gate deadline, want at least 5m for setup and cleanup", room, gateRunTimeout)
+	}
+	if room := time.Duration(minutes)*time.Minute - preReleaseRunTimeout; room < 5*time.Minute {
+		t.Fatalf("canonical workflow leaves %s around the pre-release deadline, want at least 5m for setup and cleanup", room)
 	}
 }
 
