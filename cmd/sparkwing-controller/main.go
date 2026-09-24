@@ -583,6 +583,7 @@ func run(args []string) error {
 			if privateKey != "" {
 				return errors.New("set only one of SPARKWING_CLOUDFRONT_PRIVATE_KEY and SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE")
 			}
+			// #nosec G703 -- the operator configures this private-key file path
 			keyBytes, err := os.ReadFile(keyFile)
 			if err != nil {
 				return fmt.Errorf("CloudFront private key file: %w", err)
