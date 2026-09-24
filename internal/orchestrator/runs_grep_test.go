@@ -57,6 +57,39 @@ func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
 	}
 }
 
+func TestRunGrepRemoteUsesAnnouncedLogsService(t *testing.T) {
+	logs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/logs/archived/build" || r.Header.Get("Authorization") != "Bearer test-token" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("needle in archived log\n"))
+	}))
+	t.Cleanup(logs.Close)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/services":
+			_ = json.NewEncoder(w).Encode(map[string]string{"logs": logs.URL})
+		case "/api/v1/runs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{{ID: "archived", Pipeline: "build", Status: "failed"}}})
+		case "/api/v1/runs/archived/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "archived", NodeID: "build"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(controller.Close)
+	var output bytes.Buffer
+	err := RunGrepRemote(context.Background(), controller.URL, controller.URL, "test-token",
+		GrepOpts{Pattern: "needle", Quiet: true}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(output.String()); got != "archived" {
+		t.Fatalf("matching archived run = %q, want archived", got)
+	}
+}
+
 func writeLogFile(t *testing.T, path string, lines []string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

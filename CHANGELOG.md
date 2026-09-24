@@ -889,7 +889,8 @@ unlock.
 ### Fixed
 
 - **CLI:** `runs grep` applies branch and SHA prefix filters before its run
-  limit, so newer unrelated runs do not hide an older matching log.
+  limit, so newer unrelated runs do not hide an older matching log. It reads
+  the controller's announced logs service when that service has a separate URL.
 
 - **runner:** A trigger that fails setup before pipeline dispatch now records a
   failed run with an operator troubleshooting step instead of remaining pending
