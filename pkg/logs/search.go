@@ -101,7 +101,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				s.searchArchive(w, r, runFilter, nodeFilter, strings.ToLower(q), limit, budget, &resp)
 				return
 			}
-			writeJSONResponse(w, http.StatusOK, resp)
+			http.Error(w, "run not found", http.StatusNotFound)
 			return
 		}
 		s.storeError(w, "read run dir", err)
@@ -166,7 +166,7 @@ func (s *Server) searchArchive(w http.ResponseWriter, r *http.Request, runID, no
 	}
 	idx, err := s.readRunIndex(ctx, runID)
 	if errors.Is(err, teamblob.ErrNotFound) {
-		writeJSONResponse(w, http.StatusOK, resp)
+		http.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {

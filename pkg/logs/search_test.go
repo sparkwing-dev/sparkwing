@@ -105,11 +105,8 @@ func TestSearch_EmptyLogsVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	var body SearchResponse
-	_ = json.Unmarshal(data, &body)
-	if body.Total != 0 {
-		t.Fatalf("expected zero results, got %+v", body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d want 404", resp.StatusCode)
 	}
 }
 
@@ -296,6 +293,33 @@ func TestSearch_ArchivedRunWithoutRestoring(t *testing.T) {
 	if code != http.StatusNotFound || strings.Contains(raw, "needle") {
 		t.Fatalf("cross-team search = %d %s", code, raw)
 	}
+}
+
+func TestSearch_UnknownAndOtherTeamRunsAreIndistinguishable(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-private/node-a", "Bearer a", "needle\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	check := func(stage string) {
+		t.Helper()
+		var unknown string
+		for _, runID := range []string{"run-missing", "run-private"} {
+			code, body := f.do(t, http.MethodGet, "/api/v1/logs/search?q=needle&run_id="+runID, "Bearer b", "")
+			if code != http.StatusNotFound {
+				t.Errorf("%s %s: status = %d, want 404", stage, runID, code)
+			}
+			if runID == "run-missing" {
+				unknown = body
+			} else if body != unknown {
+				t.Errorf("%s: unknown and private responses differ: %q != %q", stage, unknown, body)
+			}
+		}
+	}
+	check("local")
+	if n, err := f.srv.ArchiveOnce(t.Context(), time.Now().Add(DefaultArchiveIdle+time.Minute)); err != nil || n != 1 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	check("archive")
 }
 
 func TestSearch_ArchivedByteBudgetReason(t *testing.T) {

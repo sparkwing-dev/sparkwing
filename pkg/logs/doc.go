@@ -36,6 +36,8 @@
 // append whose control-byte share runs past BinaryRatio is dropped with
 // [BinaryDropMarker], and a search stopped by a budget reports Truncated
 // on its [SearchResponse].
+// A search for a missing run returns the same 404 as a run outside the
+// caller's team, including when the run has been archived.
 //
 // # One service per process
 //

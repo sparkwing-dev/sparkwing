@@ -865,6 +865,15 @@ unlock.
   Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
   for its claimed node while the controller keeps keys within the runner's team.
   Runner credentials can cancel a waiter on a run they claim.
+- **dashboard:** A GitHub App repository access update returns to the signed-in
+  team's GitHub tab and confirms the update instead of showing sign-in.
+
+- **controller:** Execution-start rejects executor names over 128 bytes and
+  removes terminal escapes from names shown in attempt history.
+
+- **logs:** A log search returns the same 404 for an unknown run and a run
+  outside the caller's team, whether logs are local or archived.
+
 - **warm-pool + controller:** externally executed nodes share one status poll
   per run with bounded backoff. Run and trigger heartbeats and node touch
   requests stay available when a token's request budget is exhausted, so

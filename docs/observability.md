@@ -23,6 +23,8 @@ events carry node requirements, the round priority target, safe executor
 display fields (`executor_name`, `executor_kind`, and `executor_location`), and
 effective scores. Events never carry a credential, token prefix, principal,
 holder, membership ID, internal controller or executor ID, or reservation ID.
+An execution-start request accepts at most 128 bytes for `executor_name`.
+Attempt display names strip terminal escapes and inline control characters.
 
 | Event | Meaning |
 |---|---|

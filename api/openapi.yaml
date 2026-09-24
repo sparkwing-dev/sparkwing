@@ -3303,7 +3303,7 @@ paths:
                   description: The host a locally executed node ran on. It is the attempt's executor id and its display name.
                 executor_name:
                   type: string
-                  description: The Kubernetes Job pod or trigger runner a claimed attempt ran on. Ignored for GitHub Actions credentials, whose attempts name the repository and workflow run.
+                  description: At most 128 UTF-8 bytes. The Kubernetes Job pod or trigger runner a claimed attempt ran on. Ignored for GitHub Actions credentials, whose attempts name the repository and workflow run.
       responses:
         "204": {description: Attempt started. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}

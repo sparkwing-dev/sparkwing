@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,7 +75,11 @@ func TestMeteredTriggerOwnedAttemptRecordsCloudHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.AcknowledgeNodeExecutionStart(fenced, trigger.ID, "inline", identity,
-		store.ExecutionStart{ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1, ExecutorName: "cloud-pod-1"}); err != nil {
+		store.ExecutionStart{ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1, ExecutorName: strings.Repeat("x", 129)}); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("long executor name = %v, want invalid input", err)
+	}
+	if err := s.AcknowledgeNodeExecutionStart(fenced, trigger.ID, "inline", identity,
+		store.ExecutionStart{ClaimGeneration: trigger.ClaimSeq, AttemptOrdinal: 1, ExecutorName: "\x1b[31mcloud-pod-1\x1b[0m\n"}); err != nil {
 		t.Fatal(err)
 	}
 	attempts, err := s.ListNodeExecutionAttempts(ctx, trigger.ID, "inline")
