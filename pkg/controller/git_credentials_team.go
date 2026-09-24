@@ -36,9 +36,8 @@ type GitCredentialJSON struct {
 }
 
 type gitCredentialPutReq struct {
-	Host string `json:"host"`
-	Kind string `json:"kind"`
-	// Port is the ssh port the host key is read from; 22 when empty.
+	Host       string `json:"host"`
+	Kind       string `json:"kind"`
 	Port       int    `json:"port,omitempty"`
 	PrivateKey string `json:"private_key,omitempty"`
 	Username   string `json:"username,omitempty"`
@@ -112,10 +111,7 @@ func (s *Server) handleListGitCredentials(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"credentials": out})
 }
 
-// handlePutGitCredential stores, or replaces, the team's credential for a
-// host. An ssh key is stored with the host key the controller reads from
-// the host now, and is released only after the owner confirms that key's
-// fingerprint.
+// safety: A stored SSH key is released only after its owner confirms the fetched host-key fingerprint.
 func (s *Server) handlePutGitCredential(w http.ResponseWriter, r *http.Request) {
 	noStoreSecrets(w)
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
@@ -277,9 +273,7 @@ type runnerGitCredentialsReq struct {
 	Enabled bool `json:"enabled"`
 }
 
-// handleSetRunnerGitCredentials opts one of the team's runner tokens in to,
-// or out of, receiving the team's git credentials. A cloud runner receives
-// them without it.
+// safety: Owner opt-in controls machine access to team credentials; metered cloud runners do not need it.
 func (s *Server) handleSetRunnerGitCredentials(w http.ResponseWriter, r *http.Request) {
 	p, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
@@ -318,8 +312,6 @@ func validGitCredentialHost(host string) bool {
 	return true
 }
 
-// credentialProtocolValue is a username or token that fits one line of
-// git's credential protocol.
 func credentialProtocolValue(v string) bool {
 	if v == "" || len(v) > 1024 {
 		return false
@@ -356,12 +348,7 @@ func (s *Server) scanHostKey(ctx context.Context, host string, port int) (ssh.Pu
 
 var errHostKeyRead = errors.New("host key read")
 
-// scanHostKey reads host's ssh host key the way ssh-keyscan does: it opens
-// an ssh handshake, keeps the key the server presents, and hangs up before
-// authenticating.
-//
-// safety: an owner names the host, so it is held to the runner's own rule
-// for where a fetch may go, and the controller never probes its own network.
+// safety: An owner-named host cannot make the controller probe its own network.
 func scanHostKey(ctx context.Context, host string, port int) (ssh.PublicKey, error) {
 	var d net.Dialer
 	return scanHostKeyVia(ctx, host, port, net.DefaultResolver.LookupIPAddr, d.DialContext)
@@ -398,8 +385,6 @@ func scanHostKeyVia(ctx context.Context, host string, port int, lookup sourceurl
 	return readHostKey(ctx, conn, net.JoinHostPort(host, strconv.Itoa(port)))
 }
 
-// readHostKey runs the handshake on conn, which it closes, as the ssh client
-// of addr.
 func readHostKey(ctx context.Context, conn net.Conn, addr string) (_ ssh.PublicKey, err error) {
 	defer func() {
 		if cerr := conn.Close(); cerr != nil && !errors.Is(cerr, net.ErrClosed) && err == nil {
@@ -434,7 +419,6 @@ func readHostKey(ctx context.Context, conn net.Conn, addr string) (_ ssh.PublicK
 	return nil, err
 }
 
-// perMinuteLimiter counts each key's calls in the current minute.
 type perMinuteLimiter struct {
 	mu   sync.Mutex
 	seen map[string]*perMinuteWindow
@@ -445,7 +429,6 @@ type perMinuteWindow struct {
 	calls int
 }
 
-// allow reports whether key may ask again, at most perMin times a minute.
 func (l *perMinuteLimiter) allow(key string, perMin int, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

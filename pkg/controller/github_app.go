@@ -911,12 +911,10 @@ func (s *Server) githubAppCheckUpdate(ctx context.Context, trigger *store.Trigge
 	}, true
 }
 
-// coveringTTL bounds how stale GitHub's answer for a repository's
-// installation may be when a run is created or a token minted.
+// perf: Reuse a covering installation briefly rather than call GitHub for every run.
 const coveringTTL = time.Minute
 
-// liveCoveringInstallation asks GitHub which installation covers repo,
-// bypassing the cache, or answers false when none does.
+// safety: Bypass the cache when verifying which installation can issue a token for this repository.
 func (a *githubAppState) liveCoveringInstallation(ctx context.Context, repo store.GitHubRepo) (githubapp.Installation, bool, error) {
 	inst, err := a.client.RepositoryInstallation(ctx, repo.Owner, repo.Name)
 	if errors.Is(err, githubapp.ErrNotInstalled) {
@@ -925,8 +923,6 @@ func (a *githubAppState) liveCoveringInstallation(ctx context.Context, repo stor
 	return inst, err == nil, err
 }
 
-// coveringInstallation answers the installation GitHub reports covers repo,
-// or false when none does, from an answer at most [coveringTTL] old.
 func (a *githubAppState) coveringInstallation(ctx context.Context, repo store.GitHubRepo, now time.Time) (githubapp.Installation, bool, error) {
 	key := strings.ToLower(repo.Slug())
 	a.mu.Lock()

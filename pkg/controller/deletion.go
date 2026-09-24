@@ -160,8 +160,6 @@ func (s *Server) handleDeleteMe(w http.ResponseWriter, r *http.Request) {
 	s.deleteAccount(w, r, acct.ID, "self")
 }
 
-// handleOperatorDeleteAccount carries out a deletion request that reached
-// the operator by mail. The path names the account by id or by email.
 func (s *Server) handleOperatorDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	ref := strings.TrimSpace(r.PathValue("account"))
 	id := ref
@@ -264,8 +262,7 @@ var teamPurgeDelay = 2 * max(tokenCacheTTL, tenantCacheTTL)
 // the tree is deleted once more after the longest-lived grant has lapsed.
 const teamRecheckDelay = authwire.CacheGrantTTL + time.Hour
 
-// teamDeletionLease bounds how long one replica holds a deletion it stopped
-// working on before another may take it.
+// safety: A stopped replica keeps a deletion lease only until another can resume it.
 const teamDeletionLease = 5 * time.Minute
 
 // ProcessTeamDeletions does, as of now, the work every team deletion has
@@ -408,9 +405,6 @@ func (s *Server) purgeTeamLogs(ctx context.Context, team store.Team, runIDs []st
 	return nil
 }
 
-// deleteRemote sends one DELETE to an operator-configured service and wants
-// a 2xx back: 204 from a run or cache delete, 200 with a count from the logs
-// service's team purge.
 func deleteRemote(ctx context.Context, target, bearer string) error {
 	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
@@ -437,7 +431,6 @@ func deleteRemote(ctx context.Context, target, bearer string) error {
 	return nil
 }
 
-// errRemoteNotFound marks a DELETE the remote service answered 404.
 var errRemoteNotFound = errors.New("remote answered 404")
 
 // safety: the logs service lets an admin bearer delete and read every team's
@@ -474,8 +467,7 @@ func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
 	return nil
 }
 
-// moneyInFlight reports a deletion refused while a checkout may still be paid
-// or a dispute hold stands; each error names its own remedy.
+// safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.
 func moneyInFlight(err error) bool {
 	return errors.Is(err, store.ErrOpenCheckout) || errors.Is(err, store.ErrTeamFrozen)
 }

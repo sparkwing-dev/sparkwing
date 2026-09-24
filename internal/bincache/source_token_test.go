@@ -26,9 +26,7 @@ func gitRun(t *testing.T, env []string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// authGitServer serves dir's repositories over smart http and answers 401 to
-// any request without the basic credential x-access-token:tok. seen counts the
-// requests that carried it.
+// bug: The fixture rejects unauthenticated requests so token scoping is observable.
 func authGitServer(t *testing.T, dir, tok string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	backend := filepath.Join(strings.TrimSpace(gitRun(t, os.Environ(), "--exec-path")), "git-http-backend")

@@ -29,11 +29,8 @@ type Client struct {
 	runnerIdentity atomic.Pointer[string]
 
 	triggerNodeRunner string
-	// allowRepos is sent as allow_repos on every trigger and node claim when
-	// non-nil and the controller advertises the field; see [Client.WithAllowRepos].
+	// bug: Old controllers reject allow_repos, so send it only after capability discovery.
 	allowRepos []string
-	// repoFilter caches whether the controller advertises allow_repos:
-	// repoFilterUnknown until a capabilities read answers.
 	repoFilter atomic.Int32
 
 	pollAdvice atomic.Int64
@@ -913,7 +910,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	parentNodeID string,
 	retryOf string,
 	source string,
-	_ string, // the controller attributes the run to this client's credential
+	_ string, // safety: The controller attributes the run to this client's credential, not a caller-provided principal.
 	repo string,
 	branch string,
 	triggerEnv map[string]string,

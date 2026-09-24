@@ -225,13 +225,9 @@ type createGrantReq struct {
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
 	Reverses    string `json:"reverses,omitempty"`
-	// Team names the team whose balance the grant funds. The operator names
-	// it because the grant route is the operator's, so the caller's own team
-	// is never the one a payment was for. A reversal may leave it empty: the
-	// payment it reverses belongs to exactly one team, and that is the team.
+	// safety: The operator names the funded team; a reversal inherits its original payment's team.
 	Team string `json:"team,omitempty"`
-	// Checkout names the payment session a paid grant settles, so the
-	// checkout it opened stops counting against the team's balance cap.
+	// safety: Settling a checkout releases that session's hold on the team balance cap.
 	Checkout string `json:"checkout,omitempty"`
 }
 
@@ -243,7 +239,6 @@ func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
 	s.writeCreditState(w, r, tenant)
 }
 
-// handleTeamCreditsShow is the operator's read of one team's balance by slug.
 func (s *Server) handleTeamCreditsShow(w http.ResponseWriter, r *http.Request) {
 	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
 	if !ok {
@@ -252,8 +247,7 @@ func (s *Server) handleTeamCreditsShow(w http.ResponseWriter, r *http.Request) {
 	s.writeCreditState(w, r, tenant)
 }
 
-// namedTenant resolves a team the operator names, answering 404 for one that
-// is not registered.
+// safety: An unregistered team must read as not found, never as an empty operator balance.
 func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
 	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
 	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {

@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// withKeyRoots points the key directory at roots, each on a tmpfs only when
-// tmpfs says so, for the length of the test.
 func withKeyRoots(t *testing.T, tmpfs bool, roots ...string) {
 	t.Helper()
 	prevRoots, prevTmpfs := keyRootCandidates, onTmpfs
@@ -66,7 +64,7 @@ func TestSweepSSHKeyDirsRemovesOnlyLeftovers(t *testing.T) {
 	withKeyRoots(t, true, root)
 	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey(t), KnownHosts: testKnownHosts}
 
-	// A crash drops the lock with the process; the directory and key stay.
+	// bug: A crash drops the lock but leaves the key directory behind.
 	crashed := filepath.Join(root, "sparkwing-git-crashed")
 	if err := os.Mkdir(crashed, 0o700); err != nil {
 		t.Fatal(err)

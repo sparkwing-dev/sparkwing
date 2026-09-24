@@ -120,8 +120,6 @@ func TestDashboardBranchTriggerRunsOnADirectSourceRunner(t *testing.T) {
 	e.awaitSuccess(triggered.RunID)
 }
 
-// sh runs command in dir the way a person runs it in a terminal, with home
-// as the private home directory, feeding it stdin, and returns stdout.
 func (e *directSourceE2E) sh(home, dir, stdin, command string) string {
 	t := e.t
 	t.Helper()
@@ -205,8 +203,7 @@ func (e *directSourceE2E) trigger(pipeline string) string {
 	return triggered.RunID
 }
 
-// startRunner runs command the way a person pastes it into a shell. exec env
-// hands the process to the runner, so stopping it stops the runner itself.
+// safety: The runner process inherits the test env, so stopping it also stops its work.
 func (e *directSourceE2E) startRunner(name, command string) {
 	t := e.t
 	t.Logf("%s: %s", name, redactToken(command))

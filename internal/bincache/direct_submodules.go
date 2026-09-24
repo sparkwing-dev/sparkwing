@@ -10,9 +10,7 @@ import (
 	"strings"
 )
 
-// fetchCredentialAsks is how many times a pipe answers git's credential
-// helper: one fetch asks once or twice, and a submodule update asks once
-// per submodule it fetches.
+// safety: Each submodule fetch may ask the inherited credential pipe again.
 const fetchCredentialAsks = 32
 
 func hasGitmodules(checkout string) bool {
@@ -20,11 +18,7 @@ func hasGitmodules(checkout string) bool {
 	return err == nil && fi.Mode().IsRegular()
 }
 
-// directSubmodules checks out the submodules of checkout with cred, which
-// the controller released for the run. An ssh submodule URL on the
-// credential's host is rewritten to https for a token, and an https one to
-// ssh for a deploy key, so the one credential serves them all. Like the
-// fetch, it reads none of the machine's git config and runs no hook.
+// safety: Submodules use only the released host credential, without host git config or hooks.
 func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCredential, opts directOptions) (err error) {
 	defer func() { err = redactCredential(err, cred) }()
 	if cred.Empty() {

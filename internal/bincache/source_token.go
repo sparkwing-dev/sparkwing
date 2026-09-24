@@ -19,8 +19,7 @@ import (
 // team stored no git credential for its host. Its message names both remedies.
 var ErrNoSourceCredential = errors.New("the controller holds no source credential for this run")
 
-// errCredentialRouteAbsent reports a controller from before the git-credential
-// route, which answers a plain 404 for it.
+// bug: A controller predating the git-credential route answers a plain 404, distinct from no credential.
 var errCredentialRouteAbsent = errors.New("the controller serves no git-credential route")
 
 // Kinds of [DirectCredential] the controller releases.
@@ -57,15 +56,13 @@ type DirectCredential struct {
 // Empty reports the zero credential.
 func (c DirectCredential) Empty() bool { return c.Kind == "" }
 
-// gitCredentialBody is the controller's answer on the git-credential route.
 type gitCredentialBody struct {
-	Kind       string `json:"kind"`
-	Host       string `json:"host"`
-	Token      string `json:"token"`
-	Username   string `json:"username"`
-	Secret     string `json:"secret"`
-	KnownHosts string `json:"known_hosts"`
-	// ExtraRepositories is the team owner's list for the run's repository.
+	Kind              string   `json:"kind"`
+	Host              string   `json:"host"`
+	Token             string   `json:"token"`
+	Username          string   `json:"username"`
+	Secret            string   `json:"secret"`
+	KnownHosts        string   `json:"known_hosts"`
 	ExtraRepositories []string `json:"extra_repositories"`
 	Error             string   `json:"error"`
 	Message           string   `json:"message"`
@@ -192,7 +189,6 @@ func (c DirectCredential) validate() error {
 	return nil
 }
 
-// maxExtraRepositories is the controller's cap on an owner's list.
 const maxExtraRepositories = 10
 
 func validRepoSlug(slug string) bool {
@@ -220,8 +216,6 @@ func validCredentialHost(host string) bool {
 	return !strings.HasPrefix(host, "-") && !strings.HasPrefix(host, ".")
 }
 
-// plainCredentialValue is a username or token that fits one line of git's
-// credential protocol.
 func plainCredentialValue(v string) bool {
 	if v == "" || len(v) > 1024 {
 		return false
@@ -295,27 +289,17 @@ func plainToken(tok string) bool {
 	return true
 }
 
-// credentialFD is the descriptor the fetch inherits the credential on: the
-// first of exec.Cmd.ExtraFiles.
 const credentialFD = 3
 
-// safety: the helper answers only git's get, from the inherited pipe, so a
-// store or erase writes the credential nowhere; the empty helper before it
-// drops every helper the ambient config names for the scope. It reads one
-// username and password line pair per ask, byte by byte as the shell reads
-// a pipe, so each of several git processes gets a whole pair.
+// safety: The pipe answers only git get requests; store and erase persist nothing, and ambient helpers are cleared.
 const credentialHelper = `!f() { test "$1" = get || return 0; IFS= read -r u <&3 && IFS= read -r p <&3 && printf '%s\n%s\n' "$u" "$p"; }; f`
 
-// withPipeCredential scopes the pipe's credential to scope in git config
-// carried by the environment. The config names only the helper; the
-// credential itself travels on [credentialFD].
+// safety: Git config names the pipe helper, but the credential itself stays on the inherited descriptor.
 func withPipeCredential(env []string, scope string) []string {
 	key := "credential." + strings.TrimRight(scope, "/") + ".helper"
 	return withGitConfig(env, key, "", key, credentialHelper)
 }
 
-// withGitConfig appends key/value pairs to the git config the environment
-// carries (GIT_CONFIG_COUNT), after any it already carries.
 func withGitConfig(env []string, pairs ...string) []string {
 	count := 0
 	out := make([]string, 0, len(env)+len(pairs)+1)
@@ -337,9 +321,7 @@ func withGitConfig(env []string, pairs ...string) []string {
 	return append(out, "GIT_CONFIG_COUNT="+strconv.Itoa(count))
 }
 
-// credentialPipe is the read end a fetch inherits as [credentialFD], already
-// holding the credential answers times over and closed for writing, so the
-// helper reads one per ask and then sees the end.
+// safety: Each git process consumes its own whole credential answer from the inherited pipe.
 func credentialPipe(username, secret string, times int) (*os.File, error) {
 	r, w, err := os.Pipe()
 	if err != nil {

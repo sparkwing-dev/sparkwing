@@ -2,5 +2,5 @@
 
 package bincache
 
-// isTmpfs is false off Linux, where the runner knows no tmpfs to trust.
+// safety: Off Linux, no tmpfs root is known to this runner.
 func isTmpfs(string) bool { return false }

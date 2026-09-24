@@ -20,9 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// directProtocols is every transport a direct fetch may use. git checks it
-// after insteadOf rewriting, so an ambient url.*.insteadOf cannot reach
-// file://, ext:: or a local path either.
+// safety: Git checks these protocols after insteadOf rewriting, blocking ambient redirects to local transports.
 const directProtocols = "https:ssh"
 
 var directCommitRE = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -117,10 +115,8 @@ func FetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	return fetchPipelineSourceDirect(ctx, repoURL, branch, sha, workDir, opts)
 }
 
-// directOptions bound a direct fetch. A nil lookup skips the address check,
-// which only a test serving from loopback wants; a zero fetchTimeout leaves the
-// fetch to ctx, and a zero cap is no cap. maxMirrorBytes bounds all mirrors
-// under one Sparkwing home together.
+// safety: Only loopback tests may skip address validation; production fetches keep it and both caps.
+// A zero timeout leaves ctx in charge, while the byte cap covers all mirrors under one home.
 type directOptions struct {
 	protocols      string
 	lookup         sourceurl.Lookup
@@ -128,8 +124,7 @@ type directOptions struct {
 	maxMirrors     int
 	maxMirrorBytes int64
 	cred           DirectCredential
-	// keyTmpfsOnly refuses to write a released deploy key anywhere but a
-	// tmpfs, as a cloud runner must.
+	// safety: Cloud runners cannot write released deploy keys to disk.
 	keyTmpfsOnly bool
 }
 
@@ -173,10 +168,7 @@ func fetchPipelineSourceDirect(ctx context.Context, repoURL, branch, sha, workDi
 	return directSparkwingDir(checkout)
 }
 
-// directSparkwingDir is the checkout's .sparkwing directory. A repository can
-// commit .sparkwing as a symlink to any path on the runner, which the build
-// would then compile and run, so only a real directory inside the checkout
-// counts.
+// safety: A repository may commit .sparkwing as a symlink outside the checkout; never compile or run it.
 func directSparkwingDir(checkout string) (string, error) {
 	candidate := filepath.Join(checkout, ".sparkwing")
 	fi, err := os.Lstat(candidate)
@@ -209,9 +201,7 @@ func directMirrorPath(root, remote string) string {
 	return filepath.Join(root, fmt.Sprintf("%x.git", sum[:16]))
 }
 
-// directMirrorKey folds the spellings every forge treats as one repository,
-// host case and a trailing ".git" or "/", so they share one mirror. The path
-// keeps its case, which some servers honor.
+// safety: Forge-equivalent host spellings share a mirror, while path case remains significant.
 func directMirrorKey(remote string) string {
 	trimPath := func(path string) string {
 		return strings.TrimSuffix(strings.TrimRight(path, "/"), ".git")
@@ -379,9 +369,7 @@ func directCheckout(ctx context.Context, root, remote, branch, sha, dest string,
 	return nil
 }
 
-// directGitEnv keeps the ambient git config and credentials but drops the
-// variables that would point every command at some other repository or trace
-// what it sends.
+// safety: Drop git variables that redirect every command or trace credentials during a direct fetch.
 func directGitEnv(base []string) []string {
 	out := make([]string, 0, len(base))
 	for _, item := range base {
@@ -402,16 +390,11 @@ func directGitEnv(base []string) []string {
 	return out
 }
 
-// directSSHOptions keep an ssh fetch from prompting, trusting a host key it
-// has not seen, or lending the fetched host this process's agent or ports.
+// safety: SSH must neither prompt nor lend the fetched host this process's agent or ports.
 const directSSHOptions = " -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o ClearAllForwardings=yes"
 
-// directSSHCommand is the GIT_SSH_COMMAND a fetch runs: the ssh command git
-// would otherwise have picked from env and configured (core.sshCommand), in
-// git's own order, with directSSHOptions appended. ssh keeps the first value
-// it reads for an option, so an -o the user's own command already passes wins;
-// a non-OpenSSH program such as plink fails on the options rather than
-// running unhardened.
+// safety: Git's configured SSH command may set options first; ssh keeps those first values.
+// Unsupported clients fail on the appended restrictions rather than running without them.
 func directSSHCommand(env []string, configured string) string {
 	lookup := func(key string) string {
 		value := ""
@@ -437,11 +420,7 @@ func directSSHCommand(env []string, configured string) string {
 	return base + directSSHOptions
 }
 
-// directLocalGitEnv is fetchEnv for every git command that touches only the
-// mirror or the checkout. A fetched tree's .gitattributes can name any filter
-// driver, and the ambient config may define one with a smudge or process
-// command, so these commands read no system, global or environment config at
-// all rather than trying to name every key that runs something.
+// safety: A fetched .gitattributes may invoke ambient filter commands, so local git work reads no host config.
 func directLocalGitEnv(fetchEnv []string) []string {
 	out := make([]string, 0, len(fetchEnv)+3)
 	for _, item := range fetchEnv {
@@ -494,10 +473,7 @@ func TriggerRepoURL(repoURL, githubRepository, githubOwner, githubRepo string, d
 	return sourceurl.ValidateCloneURL(raw)
 }
 
-// directEnforceCaps keeps the mirrors under root within opts' count and byte
-// caps, removing the least recently used ones no run holds. git cannot bound
-// what a fetch writes, so a mirror that alone exceeds the byte cap is removed
-// after the fetch and its checkout refused.
+// safety: Git cannot cap fetch writes, so an oversized mirror is removed and its checkout refused afterward.
 func directEnforceCaps(root, own string, opts directOptions, git func(...string) (string, error)) error {
 	if opts.maxMirrors <= 0 && opts.maxMirrorBytes <= 0 {
 		return nil
@@ -552,9 +528,7 @@ func directEnforceCaps(root, own string, opts directOptions, git func(...string)
 	return nil
 }
 
-// directEvict removes mirror unless a checkout holds its lock or a run's
-// worktree still points into it. The lock file stays: unlinking it while
-// another checkout waits on it would let a third lock a fresh file beside it.
+// safety: Keep a mirror's lock file while another checkout may wait on it, or a third process could bypass that lock.
 func directEvict(mirror string, git func(...string) (string, error)) bool {
 	lock, err := fssecure.OpenFile(mirror+".lock", os.O_CREATE|os.O_RDWR)
 	if err != nil {

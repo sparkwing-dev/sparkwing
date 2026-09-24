@@ -43,11 +43,8 @@ type githubAppCheckPayload struct {
 	} `json:"sender"`
 }
 
-// handleGitHubAppCheckEvent re-runs what a person asks GitHub to re-run:
-// check_run rerequested runs that check run's pipeline again, and
-// check_suite rerequested runs each subscribed pipeline with its own prior
-// App run on this repository and commit, copying that run's branch and pull
-// request when its event remains subscribed.
+// safety: A suite rerequest starts only subscribed pipelines with a prior App run on that commit;
+// that run supplies branch and pull-request context.
 func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Request, event, delivery string, env githubAppDelivery, body []byte) {
 	switch {
 	case env.Action == "rerequested":
@@ -167,7 +164,6 @@ func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger)
 	return githubAppSubscribes(sub, event, action, run.TriggerEnv, run.GitBranch)
 }
 
-// githubAppRerunIntake is a re-run of anchor, asked for by user.
 func githubAppRerunIntake(anchor *store.Trigger, user string) githubAppIntake {
 	env := make(map[string]string, len(anchor.TriggerEnv))
 	for k, v := range anchor.TriggerEnv {

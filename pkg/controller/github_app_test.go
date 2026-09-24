@@ -32,11 +32,9 @@ const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
 
 type appFixture struct {
 	*identityFixture
-	app *githubapptest.GitHub
-	srv *controller.Server
-	// logs holds what every replica logs.
-	logs *syncBuffer
-	// replica starts another controller over the same store and App.
+	app     *githubapptest.GitHub
+	srv     *controller.Server
+	logs    *syncBuffer
 	replica func() (*controller.Server, string)
 }
 
@@ -1349,8 +1347,7 @@ func TestGitHubAppRunNeedsTheRepositoryStillCovered(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	f.subscribe(olga, "acme/widgets", "build", nil)
-	// The subscription read GitHub's answer moments ago, and no
-	// installation_repositories delivery arrives to drop it.
+	// bug: The cached subscription is recent, and no installation_repositories delivery has invalidated it.
 	f.app.SetRepos(7, githubapptest.Repo{ID: 702, FullName: "acme/plans", Private: true})
 	if _, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); out["status"] != "ignored" {
 		t.Fatalf("push to a repository the installation no longer covers = %v, want ignored", out)

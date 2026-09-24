@@ -670,8 +670,7 @@ func writeAuthError(w http.ResponseWriter, status int, body authErrorBody) {
 	writeJSON(w, status, body)
 }
 
-// credentialEnd is the earlier of a token's expiry and its scheduled
-// revocation, or zero when it has neither.
+// safety: Revocation before expiry must close the credential grant early.
 func credentialEnd(expires, revoked *time.Time) time.Time {
 	var end time.Time
 	for _, at := range []*time.Time{expires, revoked} {

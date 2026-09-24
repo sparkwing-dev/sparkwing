@@ -62,8 +62,7 @@ func (s *Server) handleRunSourceToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// claimedRunSource is the run a caller holding a live claim on runID asks a
-// source credential for, or false once the refusal is written.
+// safety: A source credential is released only to a caller holding this run's live claim.
 type claimedRunSource struct {
 	claimed store.ClaimedRun
 	tenant  *store.Tenant
@@ -104,13 +103,11 @@ func (s *Server) claimedRunSource(w http.ResponseWriter, r *http.Request, runID 
 	return claimedRunSource{claimed: claimed, tenant: tenant, trigger: trigger}, true
 }
 
-// sourceFailure is a refusal a source credential route answers with.
 type sourceFailure struct {
 	status     int
 	err        error
 	retryAfter time.Duration
-	// notCovered marks the refusal that lets the git-credential route go on
-	// to the team's stored credential.
+	// bug: An uncovered App repository may still use the team's stored host credential.
 	notCovered bool
 }
 
@@ -121,10 +118,7 @@ func (f *sourceFailure) write(w http.ResponseWriter) {
 	writeError(w, f.status, f.err)
 }
 
-// runAppToken mints the run's App token, read-only and restricted to repo
-// and the extra repositories a team owner listed for it, all of which one
-// installation the run's team holds must cover now, not only when the list
-// was set.
+// safety: One held installation must cover the run repository and owner-listed extras when the token is minted.
 func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.GitHubRepo, extra []store.GitHubRepo) (SourceTokenResponse, *sourceFailure) {
 	runID := src.trigger.ID
 	notCovered := func(slug string) *sourceFailure {
