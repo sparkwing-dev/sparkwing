@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import MarkdownBody from "@/components/MarkdownBody";
 import PipelineOverview from "@/components/PipelineOverview";
@@ -341,6 +342,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
   const [showNewRun, setShowNewRun] = useState(false);
+  useEffect(() => {
+    if (!showNewRun) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setShowNewRun(false);
+      }
+    };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [showNewRun]);
   const [pendingLogFocus, setPendingLogFocus] = useState<{
     nodeID: string;
     stepID: string | null;
@@ -667,14 +679,18 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   selectedNodeRef.current = selectedNode;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (showNewRun) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
+      const scrollPane = t?.closest<HTMLElement>(".pane-scrollbar");
       if (
         tag === "INPUT" ||
         tag === "TEXTAREA" ||
         tag === "SELECT" ||
         t?.closest('button, a, [role="button"], [role="link"]') ||
-        t?.closest(".pane-scrollbar") ||
+        (scrollPane &&
+          scrollPane.getAttribute("aria-label") !== "Runs pane" &&
+          scrollPane.getAttribute("aria-label") !== "Nodes pane") ||
         t?.isContentEditable
       )
         return;
@@ -778,7 +794,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selectNode]);
+  }, [selectNode, showNewRun]);
 
   useEffect(() => {
     if (!focusedRun) return;
@@ -834,6 +850,26 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {showNewRun && typeof document !== "undefined" && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowNewRun(false);
+          }}
+        >
+          <div role="dialog" aria-modal="true" aria-label="Start a run" className="w-full max-w-2xl max-h-[calc(100vh-2rem)] overflow-y-auto shadow-2xl">
+            <TriggerForm
+              onTriggered={() => {
+                toast("Run submitted", "success");
+                window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));
+                refresh();
+              }}
+              onClose={() => setShowNewRun(false)}
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
       <div
         ref={filterRef}
         className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
@@ -851,11 +887,9 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  if (runsCollapsed && !showNewRun) setColumnsMode("expanded");
-                  setShowNewRun(!showNewRun);
-                }}
+                onClick={() => setShowNewRun(true)}
                 aria-expanded={showNewRun}
+                aria-haspopup="dialog"
                 className="text-[10px] px-2 py-1 rounded border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors shrink-0"
               >
                 + Start a run
@@ -1109,19 +1143,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             </div>
           ) : (
           <>
-          {showNewRun && (
-            <div className="p-3 border-b border-[var(--border)] shrink-0">
-              <TriggerForm
-                onTriggered={() => {
-                  window.dispatchEvent(
-                    new CustomEvent("sparkwing:runs-changed"),
-                  );
-                  refresh();
-                }}
-                onClose={() => setShowNewRun(false)}
-              />
-            </div>
-          )}
           <div className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
