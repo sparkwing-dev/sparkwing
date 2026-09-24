@@ -36,7 +36,10 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 		t.Fatal(err)
 	}
 	prefix := "it-direct-" + hex.EncodeToString(suffix[:])
-	cfg, err := config.LoadDefaultConfig(t.Context())
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	httpClient := &http.Client{Transport: transport}
+	t.Cleanup(transport.CloseIdleConnections)
+	cfg, err := config.LoadDefaultConfig(t.Context(), config.WithHTTPClient(httpClient))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +122,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 		for k, v := range upload.Headers {
 			req.Header.Set(k, v)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +163,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 	if signed.SHA256 != digest || signed.Size != int64(len(body)) {
 		t.Fatalf("signed object = %+v", signed)
 	}
-	get, err := http.Get(signed.URL)
+	get, err := httpClient.Get(signed.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
