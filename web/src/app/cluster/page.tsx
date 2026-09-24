@@ -157,8 +157,8 @@ export default function ClusterPage() {
       />
 
       <div className="mb-4 flex flex-wrap gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <span>Queued nodes <strong>{queue?.waiters?.length ?? "—"}</strong></span>
-        <span>Running nodes <strong>{queue?.holders?.length ?? "—"}</strong></span>
+        <span>Queued nodes <strong>{queue ? queue.waiters?.length ?? 0 : "—"}</strong></span>
+        <span>Running nodes <strong>{queue ? queue.holders?.length ?? 0 : "—"}</strong></span>
         <span>Active slots <strong>{fleetTotals.activeSlots ?? "—"}</strong></span>
         <Link href="/runs" className="text-[var(--accent)] hover:underline">View runs</Link>
       </div>
