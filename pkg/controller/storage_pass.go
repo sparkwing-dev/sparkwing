@@ -19,7 +19,7 @@ const cacheObjectMaxAge = store.DirectCacheMaxAge
 
 // CacheObjectMaxAge is how long the storage pass keeps cache objects in every
 // team namespace and the operator token's root namespace.
-func CacheObjectMaxAge(_ string) time.Duration {
+func CacheObjectMaxAge(team string) time.Duration {
 	return cacheObjectMaxAge
 }
 

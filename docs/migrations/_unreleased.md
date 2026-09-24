@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Default and operator cache expires after 30 days
+
+Before starting an upgraded controller with `--cache-blob-store`, back up or
+export its `cache/` object-store prefix to a separate location. Include both
+`cache/teams/default/` and the operator token's root objects under
+`cache/{bins,cache,artifacts}/`. Verify the copy before starting the new
+controller. A database backup alone cannot recover deleted object bytes.
+
+The controller starts its storage pass at startup. Its first successful pass
+deletes cache objects last written more than 30 days ago in every team
+namespace and the operator token's root. Reads do not extend the age. It
+also removes expired default-team direct-object rows, so copying S3 bytes
+back alone does not restore their signed-download visibility. Keep the
+object and database backups together if rollback or recovery is needed.
+Controllers without `--cache-blob-store` do not run this object-store pass.
+
 ## Cloud operator commands leave the public CLI
 
 Sparkwing Cloud operators switch credit, storage allowance, refund, freeze,
