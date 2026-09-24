@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 70
+const expectedSchemaVersion = 71
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1443,9 +1443,14 @@ const cronSchedulesUniqueIndex = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
     ON cron_schedules(repo_path, pipeline, schedule_name);`
 
+const cronGitHubIdentityIndex = `CREATE INDEX IF NOT EXISTS idx_cron_schedules_github_identity
+    ON cron_schedules(team, github_installation_id, github_repository_id);`
+
 const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     id            TEXT PRIMARY KEY,
     repo_path     TEXT NOT NULL,
+    github_installation_id INTEGER NOT NULL DEFAULT 0,
+    github_repository_id INTEGER NOT NULL DEFAULT 0,
     pipeline      TEXT NOT NULL,
     -- 'default' when the repository declares a single schedule for the pipeline.
     schedule_name TEXT NOT NULL DEFAULT 'default',
@@ -1837,6 +1842,7 @@ var migrationRequirements = map[int][]string{
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
 	51: {teamScopedUserKeysRequirement},
+	71: {"github-app-cron-identity-v1"},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -2053,6 +2059,15 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return ensureColumnsSQLite(ctx, tx, "github_app_triggers", githubAppTriggerOptionCols)
 	case 70:
 		return applyDirectUploadMigration(ctx, tx)
+	case 71:
+		if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", map[string]string{
+			"github_installation_id": "INTEGER NOT NULL DEFAULT 0",
+			"github_repository_id":   "INTEGER NOT NULL DEFAULT 0",
+		}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2466,6 +2481,15 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "github_app_triggers", githubAppTriggerOptionCols)
 	case 70:
 		return applyDirectUploadMigration(ctx, tx)
+	case 71:
+		if err := addColumnsTx(ctx, tx, "cron_schedules", map[string]string{
+			"github_installation_id": "BIGINT NOT NULL DEFAULT 0",
+			"github_repository_id":   "BIGINT NOT NULL DEFAULT 0",
+		}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

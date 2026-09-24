@@ -487,6 +487,90 @@ func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, r
 	return commit.SHA, nil
 }
 
+// RepositoryFileSnapshot reads one file at the current default-branch head
+// with a token restricted to this repository and contents:read. Found is false
+// only when GitHub confirms the file is absent at that commit.
+type RepositoryFileSnapshot struct {
+	RepositoryID  int64
+	DefaultBranch string
+	HeadSHA       string
+	Content       []byte
+	Found         bool
+}
+
+func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owner, repo, file string) (RepositoryFileSnapshot, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return RepositoryFileSnapshot{}, err
+	}
+	root := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
+	auth := "Bearer " + tok.Token
+	var meta struct {
+		ID            int64  `json:"id"`
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := c.getJSON(ctx, root, auth, &meta); err != nil {
+		return RepositoryFileSnapshot{}, err
+	}
+	if meta.ID <= 0 || meta.DefaultBranch == "" {
+		return RepositoryFileSnapshot{}, errors.New("githubapp: repository has no id or default branch")
+	}
+	var head struct {
+		SHA string `json:"sha"`
+	}
+	if err := c.getJSON(ctx, root+"/commits/"+url.PathEscape(meta.DefaultBranch), auth, &head); err != nil {
+		return RepositoryFileSnapshot{}, err
+	}
+	if len(head.SHA) != 40 {
+		return RepositoryFileSnapshot{}, errors.New("githubapp: default branch did not resolve to a commit")
+	}
+	out := RepositoryFileSnapshot{RepositoryID: meta.ID, DefaultBranch: meta.DefaultBranch, HeadSHA: head.SHA}
+	var content struct {
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	filePath := strings.TrimPrefix(file, "/")
+	if filePath == "" || strings.Contains(filePath, "..") || strings.ContainsAny(filePath, "?#") {
+		return RepositoryFileSnapshot{}, errors.New("githubapp: invalid repository file path")
+	}
+	err = c.getJSON(ctx, root+"/contents/"+filePath+"?ref="+url.QueryEscape(head.SHA), auth, &content)
+	if errors.Is(err, errNotFound) {
+		return out, nil
+	}
+	if err != nil {
+		return RepositoryFileSnapshot{}, err
+	}
+	if content.Encoding != "base64" {
+		return RepositoryFileSnapshot{}, errors.New("githubapp: repository file is not base64 encoded")
+	}
+	out.Content, err = base64.StdEncoding.DecodeString(content.Content)
+	if err != nil {
+		return RepositoryFileSnapshot{}, fmt.Errorf("githubapp: decode repository file: %w", err)
+	}
+	out.Found = true
+	return out, nil
+}
+
+// RepositoryIDThroughAlias reads a GitHub clone URL's owner/name with a token
+// restricted to currentRepo. GitHub may redirect an old repository name to
+// its current name; an unreadable answer is not proof that it is another repo.
+func (c *Client) RepositoryIDThroughAlias(ctx context.Context, installation int64, currentRepo, owner, name string) (int64, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{currentRepo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return 0, err
+	}
+	var repo struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name), "Bearer "+tok.Token, &repo); err != nil {
+		return 0, err
+	}
+	if repo.ID <= 0 {
+		return 0, errors.New("githubapp: repository lookup returned no id")
+	}
+	return repo.ID, nil
+}
+
 // permissionsNotGranted reports whether a refused token request names
 // permissions the installation has not granted, which GitHub answers with 422
 // like a repository the installation does not cover.

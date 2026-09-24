@@ -366,7 +366,37 @@ sentence status prints when any is non-zero.
 ## Controller schedules
 
 An entry declared `where: controller` fires from a controller, not from any
-host. A host arms nothing for it; it pushes it:
+host. A host arms nothing for it. When the repository is connected to the
+Sparkwing GitHub App, a push of its current default-branch head automatically
+arms its controller entries; no Team switch or CLI command is needed. The App
+reads `.sparkwing/sparkwing.yaml` at that commit with a token restricted to the
+repository and `contents: read`. A later default-branch push that removes an
+entry withdraws it, while an unreadable or invalid config leaves the last
+armed schedules in place. Tags, pull requests, other branches and old pushes
+do not change controller schedules. Scheduled runs still pass the team's
+credit and admission checks when they fire.
+
+Auto-arming checks the live default-branch head before writing, and one
+controller serializes those checks and writes. Controllers sharing a store do
+not serialize each other; use one controller for GitHub App cron auto-arming
+until store-level ordering is available.
+
+App-managed schedules carry GitHub's installation and repository ids. A rename
+updates their clone URL without restarting their pause, cursor or history.
+Removing a repository from an installation, uninstalling the App or moving the
+repository to another team's installation withdraws the former binding's
+schedules. Manually pushed schedules keep their URL identity; an App schedule
+that would duplicate one is refused until the owner disarms the manual row.
+The controller checks GitHub's repository id for old clone URLs that may
+redirect after a rename. If GitHub cannot prove a manual GitHub URL names a
+different repository, auto-arming refuses it rather than risking two fires.
+These cleanups depend on signed GitHub deliveries or a later verified push;
+an undelivered removal notice can leave an old row armed until one arrives.
+If GitHub cannot list an installation's repositories during a removal notice,
+the controller withdraws that installation's App schedules until a later
+verified push can arm them again.
+
+For a repository without the App connection, an operator can push entries:
 
 ```bash
 sparkwing crons install --profile prod --repo ~/code/my-app

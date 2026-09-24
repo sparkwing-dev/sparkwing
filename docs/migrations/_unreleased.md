@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Schema 71: GitHub App cron identity
+
+Back up the controller's PostgreSQL database or SQLite `state.db` before
+starting the upgraded controller. Schema 71 adds installation and repository
+identity to App-managed cron schedules. Existing local and manually pushed
+schedules keep their URL identity; no URL or `armed_by` value is used to guess
+an App identity. The first upgraded start records the
+`github-app-cron-identity-v1` requirement, so an older controller refuses this
+database rather than ticking schedules without the App removal safeguards.
+
+To roll back to a schema-70 controller, stop every controller, restore the
+database backup taken before this upgrade, then start the older build. Do not
+delete the version or requirement row from a live schema-71 database: that
+would leave App schedule identities in a shape the older controller cannot
+manage safely.
+
 ## Default and operator cache expires after 30 days
 
 Before starting an upgraded controller with `--cache-blob-store`, back up or
@@ -31,7 +47,7 @@ own billing in the dashboard.
 
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v69 when the
+v0.60.0 runs schema v47. This release migrates the database to v71 when the
 controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
@@ -43,7 +59,7 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 69`,
+5. Verify: the startup line reads `runs-store schema 71`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.

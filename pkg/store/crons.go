@@ -62,9 +62,11 @@ type CronSchedule struct {
 	ID string `json:"id"`
 	// Team owns the schedule and every run it fires. It stays off the wire,
 	// because a caller only ever reads its own team's schedules.
-	Team     Team   `json:"-"`
-	RepoPath string `json:"repo_path"`
-	Pipeline string `json:"pipeline"`
+	Team                 Team   `json:"-"`
+	RepoPath             string `json:"repo_path"`
+	GitHubInstallationID int64  `json:"-"`
+	GitHubRepositoryID   int64  `json:"-"`
+	Pipeline             string `json:"pipeline"`
 	// Name distinguishes several schedules of one pipeline;
 	// [CronScheduleDefaultName] when the pipeline declares one.
 	Name    string `json:"name"`
@@ -223,7 +225,7 @@ const (
 	metaKeyCronLastTickError   = "crons.last_tick_error"
 )
 
-const cronScheduleInsertColumns = `id, repo_path, pipeline, schedule_name, cron, tz, overlap, catch_up_ns,
+const cronScheduleInsertColumns = `id, repo_path, github_installation_id, github_repository_id, pipeline, schedule_name, cron, tz, overlap, catch_up_ns,
        where_, git_branch, args, locked_ref, locked_binary, locked_digest, paused, declared,
        armed_at, armed_by, updated_at, cursor_at, last_fired_at, last_run_id, last_outcome, next_due_at`
 
@@ -266,6 +268,10 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 	if sched.ID == "" || sched.RepoPath == "" || sched.Pipeline == "" {
 		return CronSchedule{}, false, fmt.Errorf("ArmCronSchedule: id, repo_path and pipeline required")
 	}
+	if (sched.GitHubInstallationID == 0) != (sched.GitHubRepositoryID == 0) ||
+		sched.GitHubInstallationID < 0 || sched.GitHubRepositoryID < 0 {
+		return CronSchedule{}, false, errors.New("ArmCronSchedule: GitHub installation and repository ids must both be positive or both zero")
+	}
 	if sched.Name == "" {
 		sched.Name = CronScheduleDefaultName
 	}
@@ -292,10 +298,21 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 	defer rollbackUnlessDone(tx, &err)
 
 	var id string
-	err = tx.QueryRowContext(ctx,
-		`SELECT id FROM cron_schedules
+	if sched.GitHubRepositoryID > 0 {
+		err = tx.QueryRowContext(ctx,
+			`SELECT id FROM cron_schedules WHERE team = ? AND id = ?`+tx.forUpdate(),
+			string(t.team), sched.ID).Scan(&id)
+	} else {
+		var existingGitHubID int64
+		err = tx.QueryRowContext(ctx,
+			`SELECT id, github_repository_id FROM cron_schedules
           WHERE team = ? AND repo_path = ? AND pipeline = ? AND schedule_name = ?`+tx.forUpdate(),
-		string(t.team), sched.RepoPath, sched.Pipeline, sched.Name).Scan(&id)
+			string(t.team), sched.RepoPath, sched.Pipeline, sched.Name).Scan(&id, &existingGitHubID)
+		if err == nil && existingGitHubID > 0 {
+			return CronSchedule{}, false, fmt.Errorf("%w: an App schedule already owns %s %s/%s", ErrCronScheduleTaken,
+				sched.RepoPath, sched.Pipeline, sched.Name)
+		}
+	}
 	created = errors.Is(err, sql.ErrNoRows)
 	if err != nil && !created {
 		return CronSchedule{}, false, err
@@ -312,7 +329,8 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 INSERT INTO cron_schedules (team, `+cronScheduleInsertColumns+`)
 VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
 			string(t.team),
-			id, sched.RepoPath, sched.Pipeline, sched.Name, sched.Cron, sched.TZ, sched.Overlap,
+			id, sched.RepoPath, sched.GitHubInstallationID, sched.GitHubRepositoryID,
+			sched.Pipeline, sched.Name, sched.Cron, sched.TZ, sched.Overlap,
 			int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 			sched.LockedRef, sched.LockedBinary, sched.LockedDigest,
 			boolToInt(sched.Paused), 1,
@@ -328,15 +346,21 @@ VALUES (?, `+cronScheduleInsertPlaceholders+`)`,
 		}
 	} else if _, err := tx.ExecContext(ctx, `
 UPDATE cron_schedules
-   SET cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, git_branch = ?, args = ?,
+   SET repo_path = ?, github_installation_id = ?, github_repository_id = ?,
+       cron = ?, tz = ?, overlap = ?, catch_up_ns = ?, where_ = ?, git_branch = ?, args = ?,
        locked_ref = ?, locked_binary = ?, locked_digest = ?, declared = 1,
        armed_by = CASE WHEN armed_by = '' THEN ? ELSE armed_by END,
        updated_at = ?, next_due_at = ?
  WHERE team = ? AND id = ?`,
+		sched.RepoPath, sched.GitHubInstallationID, sched.GitHubRepositoryID,
 		sched.Cron, sched.TZ, sched.Overlap, int64(sched.CatchUp), sched.Where, sched.GitBranch, args,
 		sched.LockedRef, sched.LockedBinary, sched.LockedDigest, sched.ArmedBy,
 		now.UnixNano(), nullNanos(sched.NextDueAt), string(t.team), id,
 	); err != nil {
+		if isUniqueViolation(err) {
+			return CronSchedule{}, false, fmt.Errorf("%w: %s %s/%s", ErrCronScheduleTaken,
+				sched.RepoPath, sched.Pipeline, sched.Name)
+		}
 		return CronSchedule{}, false, err
 	}
 	stored, err = getCronScheduleTx(ctx, tx, t.team, id)
@@ -432,6 +456,55 @@ func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declare
 	return t.s.updateCronSchedule(ctx, id,
 		`UPDATE cron_schedules SET declared = ?, updated_at = ? WHERE team = ? AND id = ?`,
 		boolToInt(declared), now.UnixNano(), string(t.team), id)
+}
+
+// WithdrawGitHubCronRepository stops only this team's App schedules for one
+// installation and repository, keeping their cursor, overrides and history.
+func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error) {
+	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ? AND declared = 1`,
+		now.UnixNano(), string(t.team), installationID, repositoryID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// WithdrawGitHubCronInstallation stops every App schedule this installation
+// armed for the team without touching manually pushed rows.
+func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error) {
+	res, err := t.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+		now.UnixNano(), string(t.team), installationID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// WithdrawOtherGitHubCronBindings stops App schedules for a repository that
+// another team or installation used before the verified current binding.
+func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error) {
+	res, err := o.s.exec(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE github_repository_id = ? AND github_repository_id > 0
+		  AND (team != ? OR github_installation_id != ?) AND declared = 1`,
+		now.UnixNano(), repositoryID, string(team), installationID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// RenameGitHubCronRepository changes the clone URL under a stable App schedule
+// identity, so a rename keeps its history and no second schedule appears.
+func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error {
+	_, err := t.s.exec(ctx, `UPDATE cron_schedules SET repo_path = ?, updated_at = ?
+		WHERE team = ? AND github_installation_id = ? AND github_repository_id = ?`,
+		repoURL, now.UnixNano(), string(t.team), installationID, repositoryID)
+	if isUniqueViolation(err) {
+		return fmt.Errorf("%w: a schedule already uses %s", ErrCronScheduleTaken, repoURL)
+	}
+	return err
 }
 
 // SetCronScheduleNextDue republishes a default-team schedule's next instant.
@@ -851,7 +924,8 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	var overrideCron, overrideTZ, overrideOverlap, overrideArgs, overrideBase sql.NullString
 	var team string
 	if err := scan(
-		&sched.ID, &sched.RepoPath, &sched.Pipeline, &sched.Name,
+		&sched.ID, &sched.RepoPath, &sched.GitHubInstallationID, &sched.GitHubRepositoryID,
+		&sched.Pipeline, &sched.Name,
 		&sched.Cron, &sched.TZ, &sched.Overlap, &catchUpNS, &sched.Where, &sched.GitBranch, &args,
 		&sched.LockedRef, &sched.LockedBinary, &sched.LockedDigest,
 		&paused, &declared,

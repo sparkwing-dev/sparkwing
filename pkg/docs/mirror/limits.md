@@ -162,7 +162,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Cloud runner time | only an operator-metered token claims cloud capacity, and each claim needs credits | `pkg/store/credits.go` |
 | Nodes per run | `max_global_nodes_per_run` when the operator sets it | `pkg/store/compute_limits.go` |
 | Live log buffers in controller memory | per-node, total and node-count caps | `cmd/sparkwing-controller/main.go` |
-| Cron schedules | 20 per repository and 10 repositories per team | `pkg/controller/crons.go` |
+| Cron schedules | 20 per repository and 10 declared repositories per team; withdrawn rows keep history without using a slot | `pkg/controller/crons.go` |
 | Cron fire history | 200 per schedule | `pkg/store/crons.go` |
 | Secrets | 100 per team, 128 KiB each as stored | `pkg/store/secrets.go` |
 | Runner tokens | 10 live per team, each expiring after 90 days | `pkg/store/identity.go` |
