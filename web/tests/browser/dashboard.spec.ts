@@ -26,6 +26,36 @@ const runningRun = {
   finished_at: undefined,
 };
 
+test("keeps activity rows exactly two lines with long metadata and errors", async ({ page }) => {
+  const longRun = {
+    ...finishedRun,
+    id: "run-20260827-long",
+    repo: `owner/${"repository".repeat(15)}`,
+    pipeline: "pipeline".repeat(18),
+    git_branch: "feature/".repeat(20),
+    trigger_source: "trigger".repeat(15),
+    error: "failure detail ".repeat(80),
+    status: "failed",
+  };
+  await installMockAPI(page, { runs: [longRun, finishedRun] });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/runs");
+    const long = page.locator('[data-run-id="run-20260827-long"]').first();
+    const short = page.locator('[data-run-id="run-20260827-001"]').first();
+    await expect(long).toBeVisible();
+    await expect(short).toBeVisible();
+    const sizes = await Promise.all([long, short].map((row) => row.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      overflow: el.scrollHeight - el.clientHeight,
+    }))));
+    expect(sizes[0].height).toBe(sizes[1].height);
+    expect(sizes[0].height).toBe(56);
+    expect(sizes[0].overflow).toBeLessThanOrEqual(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+  }
+});
+
 const finishedDetail = {
   run: finishedRun,
   nodes: [

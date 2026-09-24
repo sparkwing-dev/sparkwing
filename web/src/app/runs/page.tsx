@@ -1137,7 +1137,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     setFocusedColumn("runs");
                     selectRun(isActive ? null : r.id);
                   }}
-                  className={`px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                  className={`h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
@@ -2181,7 +2181,7 @@ const FullRunRow = memo(function FullRunRow({
 
   const meta = (
     <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
-      <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
         <FilterableValue
           facet="status"
           value={r.status}
@@ -2197,8 +2197,9 @@ const FullRunRow = memo(function FullRunRow({
           value={repo}
           ctx={ctx}
           tooltip={`Repo: ${repo}`}
+          className="min-w-0"
         >
-          <span className="text-cyan-400/70 shrink-0">{repo}</span>
+          <span className="block min-w-0 truncate text-cyan-400/70">{repo}</span>
         </FilterableValue>
         <span className="text-[var(--muted)] shrink-0">/</span>
         <FilterableValue
@@ -2206,8 +2207,9 @@ const FullRunRow = memo(function FullRunRow({
           value={r.pipeline}
           ctx={ctx}
           tooltip={`Pipeline: ${r.pipeline}`}
+          className="min-w-0"
         >
-          <span className="font-medium text-violet-300 truncate">
+          <span className="block min-w-0 truncate font-medium text-violet-300">
             {r.pipeline}
           </span>
         </FilterableValue>
@@ -2217,9 +2219,10 @@ const FullRunRow = memo(function FullRunRow({
             value={r.git_branch}
             ctx={ctx}
             tooltip={`Branch: ${r.git_branch}`}
+            className="min-w-0"
           >
-            <span className="text-amber-400/70 shrink-0">
-              ⎇ {truncate(r.git_branch, 40)}
+            <span className="block min-w-0 truncate text-amber-400/70">
+              ⎇ {r.git_branch}
             </span>
           </FilterableValue>
         )}
@@ -2241,8 +2244,9 @@ const FullRunRow = memo(function FullRunRow({
             value={r.trigger_source}
             ctx={ctx}
             tooltip={`Trigger: ${r.trigger_source}`}
+            className="min-w-0"
           >
-            <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
+            <span className="block min-w-0 truncate font-mono text-[10px] text-[var(--muted)]">
               {r.trigger_source}
             </span>
           </FilterableValue>
@@ -2251,7 +2255,7 @@ const FullRunRow = memo(function FullRunRow({
           <AttemptsDropdown currentRunID={r.id} dense />
         )}
       </div>
-      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
+      <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0 overflow-hidden whitespace-nowrap">
         {fmtDatePrefix(r.started_at) && (
           <span className="text-[var(--foreground)] shrink-0">
             {fmtDatePrefix(r.started_at)}
@@ -2305,7 +2309,7 @@ const FullRunRow = memo(function FullRunRow({
   );
 
   return (
-    <div className="grid grid-cols-[minmax(16rem,32rem)_minmax(0,1fr)] gap-6 items-start">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-start min-w-0 overflow-hidden">
       {meta}
       <div className="min-w-0 text-[11px] font-mono">
         {r.error ? (
@@ -2314,7 +2318,7 @@ const FullRunRow = memo(function FullRunRow({
               <span className="whitespace-pre-wrap break-words">{r.error}</span>
             }
           >
-            <div className="text-red-400 line-clamp-2 break-words">
+            <div className="text-red-400 truncate">
               error: {r.error}
             </div>
           </Tooltip>
@@ -2331,7 +2335,7 @@ const FullRunRow = memo(function FullRunRow({
               </ul>
             }
           >
-            <div className="text-cyan-300/90 line-clamp-2 break-words">
+            <div className="text-cyan-300/90 truncate">
               {(r.annotations && r.annotations.length > 0
                 ? r.annotations
                 : [r.top_annotation]
@@ -2388,18 +2392,18 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
       }
     >
       <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
-        <div className="flex items-center gap-1 min-w-0">
+        <div className="flex items-center gap-1 min-w-0 overflow-hidden whitespace-nowrap">
           <span
             className={`inline-block align-middle w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)} ${styleFor("status", r.status)}`}
           />
           <span
-            className={`text-cyan-400/70 shrink-0 ${styleFor("repo", repo)}`}
+            className={`text-cyan-400/70 min-w-0 truncate ${styleFor("repo", repo)}`}
           >
             {repoShort}
           </span>
           <span className="text-[var(--muted)] shrink-0">/</span>
           <span
-            className={`font-medium text-violet-300 shrink-0 ${styleFor("pipeline", r.pipeline)}`}
+            className={`font-medium text-violet-300 min-w-0 truncate ${styleFor("pipeline", r.pipeline)}`}
           >
             {pipelineShort}
           </span>
@@ -2407,7 +2411,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             <>
               <span className="text-[var(--muted)] shrink-0">/</span>
               <span
-                className={`text-amber-400/70 shrink-0 ${styleFor("branch", r.git_branch!)}`}
+                className={`text-amber-400/70 min-w-0 truncate ${styleFor("branch", r.git_branch!)}`}
               >
                 {branchShort}
               </span>
@@ -2417,7 +2421,7 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
             <AttemptsDropdown currentRunID={r.id} dense />
           )}
         </div>
-        <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0">
+        <div className="flex items-center gap-1.5 font-mono tabular-nums text-[var(--muted)] min-w-0 overflow-hidden whitespace-nowrap">
           {r.trigger_source ? (
             <span className="text-[10px] text-[var(--muted)] shrink-0 w-2.5 text-center uppercase">
               {r.trigger_source.charAt(0)}
