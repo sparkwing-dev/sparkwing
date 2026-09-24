@@ -79,50 +79,62 @@ func TestClaimedUnknownPipelineFailsVisibly(t *testing.T) {
 	}
 }
 
-func TestClaimedDefinedPipelineSetupFailureFailsPendingRun(t *testing.T) {
+func TestClaimedDefinedPipelineSetupFailureFailsRun(t *testing.T) {
 	registerRemotePipelines(t)
-	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
-	ctx := context.Background()
-	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	srv := orchestrator.NewControllerServer(t, st, nil)
-	t.Cleanup(srv.Close)
-	cli := client.New(srv.URL, nil)
-	const id = "defined-setup-failure"
-	if err := st.CreateTrigger(ctx, store.Trigger{
-		ID: id, Pipeline: "remote-ok", CreatedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.CreateRun(ctx, store.Run{
-		ID: id, Pipeline: "remote-ok", Status: "pending", StartedAt: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	trigger, err := st.ClaimNextTrigger(ctx, 0)
-	if err != nil || trigger == nil {
-		t.Fatalf("claim trigger: %v, %+v", err, trigger)
-	}
-	orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{},
-		orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trigger)
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "pending run", pending: true},
+		{name: "run absent", pending: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
+			ctx := context.Background()
+			st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			srv := orchestrator.NewControllerServer(t, st, nil)
+			t.Cleanup(srv.Close)
+			cli := client.New(srv.URL, nil)
+			const id = "defined-setup-failure"
+			if err := st.CreateTrigger(ctx, store.Trigger{
+				ID: id, Pipeline: "remote-ok", CreatedAt: time.Now(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.pending {
+				if err := st.CreateRun(ctx, store.Run{
+					ID: id, Pipeline: "remote-ok", Status: "pending", StartedAt: time.Now(),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			trigger, err := st.ClaimNextTrigger(ctx, 0)
+			if err != nil || trigger == nil {
+				t.Fatalf("claim trigger: %v, %+v", err, trigger)
+			}
+			orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{},
+				orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trigger)
 
-	run, err := cli.GetRun(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") ||
-		strings.Contains(run.Error, "secret-should-not-be-shown") {
-		t.Fatalf("setup failure run = status %q, error %q", run.Status, run.Error)
-	}
-	gotTrigger, err := cli.GetTrigger(ctx, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotTrigger.Status != "failed" {
-		t.Fatalf("setup failure trigger status = %q, want failed", gotTrigger.Status)
+			run, err := cli.GetRun(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") ||
+				strings.Contains(run.Error, "secret-should-not-be-shown") {
+				t.Fatalf("setup failure run = status %q, error %q", run.Status, run.Error)
+			}
+			gotTrigger, err := cli.GetTrigger(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if gotTrigger.Status != "failed" {
+				t.Fatalf("setup failure trigger status = %q, want failed", gotTrigger.Status)
+			}
+		})
 	}
 }
 
