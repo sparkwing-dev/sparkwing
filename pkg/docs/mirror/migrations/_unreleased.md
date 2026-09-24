@@ -1,5 +1,14 @@
 # Migrating to the next release
 
+## Batched log append protocol
+
+Upgrade the logs service before runners and pipeline binaries. New writers
+send several newline-delimited records in one append and include the first
+and last sequence numbers. An older logs service accepts the body but counts
+only the first sequence number, so finished batched logs can appear
+incomplete. The upgraded logs service accepts old single-line appends during
+the rollout. No config or data migration is needed.
+
 ## Schema 71: GitHub App cron identity
 
 Back up the controller's PostgreSQL database or SQLite `state.db` before

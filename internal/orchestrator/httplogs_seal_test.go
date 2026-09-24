@@ -84,20 +84,45 @@ func TestHTTPLogs_SealReportsLinesTheRunnerDropped(t *testing.T) {
 		t.Fatal(err)
 	}
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "one"})
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
 	failAppends.Store(true)
-	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "lost"})
+	for range 3 {
+		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "lost"})
+	}
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
 	failAppends.Store(false)
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "three"})
 	if err := nlog.Close(); err != nil {
 		t.Fatal(err)
 	}
 	got := verdict(t, client, "run", "node")
-	if got.State != logs.StateIncomplete || got.MissingLines != 1 {
-		t.Fatalf("verdict = %+v, want incomplete with 1 missing", got)
+	if got.State != logs.StateIncomplete || got.MissingLines != 3 {
+		t.Fatalf("verdict = %+v, want incomplete with 3 missing", got)
 	}
 	r, _ := client.ReadSeals(context.Background(), "run", "node")
-	if s := r.Streams[0]; s.Seal.Dropped != 1 || s.Missing != 1 || len(s.Gaps) != 1 || s.Gaps[0].From != 2 {
+	if s := r.Streams[0]; s.Seal.Dropped != 3 || s.Missing != 3 || len(s.Gaps) != 1 || s.Gaps[0].From != 2 || s.Gaps[0].To != 4 {
 		t.Fatalf("stream = %+v seal = %+v", s, s.Seal)
+	}
+}
+
+func TestHTTPLogs_EncodingLossDoesNotMarkTheGapReceived(t *testing.T) {
+	client, _, url := sealFixture(t)
+	nlog, err := orchestrator.NewHTTPLogs(url, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Msg: "before"})
+	nlog.Emit(sparkwing.LogRecord{Attrs: map[string]any{"bad": make(chan int)}})
+	nlog.Emit(sparkwing.LogRecord{Msg: "after"})
+	if err := nlog.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := verdict(t, client, "run", "node"); got.State != logs.StateIncomplete || got.MissingLines != 1 {
+		t.Fatalf("encoding gap = %+v", got)
 	}
 }
 

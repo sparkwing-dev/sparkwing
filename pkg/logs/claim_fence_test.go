@@ -94,6 +94,10 @@ func TestLogs_StaleNodeClaimCannotAppendAfterRetryAward(t *testing.T) {
 	if err := logClient.Append(staleCtx, "source", "build", []byte("stale\n")); !errors.Is(err, logs.ErrClaimConflict) {
 		t.Fatalf("stale append = %v, want ErrClaimConflict", err)
 	}
+	staleBatch := logs.WithAppendSequenceRange(staleCtx, "stale-batch", 1, 2)
+	if err := logClient.Append(staleBatch, "source", "build", []byte("stale one\nstale two\n")); !errors.Is(err, logs.ErrClaimConflict) {
+		t.Fatalf("stale batch append = %v, want ErrClaimConflict", err)
+	}
 	if err := logClient.Seal(staleCtx, "source", "build", logs.Seal{Stream: "stale", FinalSeq: 1, Lines: 1}); !errors.Is(err, logs.ErrClaimConflict) {
 		t.Fatalf("stale seal = %v, want ErrClaimConflict", err)
 	}

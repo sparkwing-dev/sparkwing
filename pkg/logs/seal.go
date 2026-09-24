@@ -30,6 +30,7 @@ import (
 const (
 	LogStreamHeader = "X-Sparkwing-Log-Stream"
 	LogSeqHeader    = "X-Sparkwing-Log-Seq"
+	LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
 )
 
 // SealGrace is how long after a node finishes a reader waits for the
@@ -247,6 +248,7 @@ type appendSequenceKey struct{}
 type appendSequence struct {
 	stream string
 	seq    int64
+	end    int64
 }
 
 // WithAppendSequence numbers the append made with the returned context:
@@ -254,7 +256,12 @@ type appendSequence struct {
 // that numbers its appends seals the stream with [Client.Seal] when it
 // finishes.
 func WithAppendSequence(ctx context.Context, stream string, seq int64) context.Context {
-	return context.WithValue(ctx, appendSequenceKey{}, appendSequence{stream: stream, seq: seq})
+	return WithAppendSequenceRange(ctx, stream, seq, seq)
+}
+
+// WithAppendSequenceRange numbers consecutive newline-delimited records in one append.
+func WithAppendSequenceRange(ctx context.Context, stream string, first, last int64) context.Context {
+	return context.WithValue(ctx, appendSequenceKey{}, appendSequence{stream: stream, seq: first, end: last})
 }
 
 func appendSequenceFromContext(ctx context.Context) (appendSequence, bool) {
@@ -353,7 +360,8 @@ func writeResponseError(op string, resp *http.Response) error {
 
 func appendSequenceFromRequest(r *http.Request) (appendSequence, bool, error) {
 	stream, rawSeq := r.Header.Get(LogStreamHeader), r.Header.Get(LogSeqHeader)
-	if stream == "" && rawSeq == "" {
+	rawEnd := r.Header.Get(LogSeqEndHeader)
+	if stream == "" && rawSeq == "" && rawEnd == "" {
 		return appendSequence{}, false, nil
 	}
 	if !streamIDPattern.MatchString(stream) {
@@ -363,7 +371,14 @@ func appendSequenceFromRequest(r *http.Request) (appendSequence, bool, error) {
 	if err != nil || seq < 1 {
 		return appendSequence{}, false, errors.New("log sequence must be a positive integer")
 	}
-	return appendSequence{stream: stream, seq: seq}, true, nil
+	end := seq
+	if rawEnd != "" {
+		end, err = strconv.ParseInt(rawEnd, 10, 64)
+		if err != nil || end < seq || end-seq >= 256 {
+			return appendSequence{}, false, errors.New("log sequence range must contain 1-256 consecutive records")
+		}
+	}
+	return appendSequence{stream: stream, seq: seq, end: end}, true, nil
 }
 
 // sealRecord is one line of a node's seal file. The file is append-only,
@@ -560,6 +575,92 @@ func (ts *sealTrackers) snapshot(key string) (streamTracker, bool) {
 	return cp, true
 }
 
+type rangeState uint8
+
+const (
+	rangeFresh rangeState = iota
+	rangeDuplicate
+	rangeOverlap
+)
+
+// safety: a confirmed range is answered before its retry can consume quota or append bytes.
+// The node append lock held by the caller keeps this decision adjacent to observeSequence.
+func (s *Server) numberedRangeState(runID, nodeID string, seq appendSequence) rangeState {
+	s.seals.mu.Lock()
+	defer s.seals.mu.Unlock()
+	t := s.seals.m[trackerKey(runID, nodeID, seq.stream)]
+	if t == nil || seq.seq > t.highest {
+		return rangeFresh
+	}
+	if t.missing == 0 {
+		if seq.end <= t.highest {
+			return rangeDuplicate
+		}
+		return rangeOverlap
+	}
+	var represented int64
+	for _, gap := range t.gaps {
+		length := gap.To - gap.From + 1
+		if length > t.missing-represented {
+			return rangeOverlap
+		}
+		represented += length
+	}
+	if represented != t.missing {
+		return rangeOverlap
+	}
+	received := int64(0)
+	for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+		n := seq.seq + offset
+		if n > t.highest {
+			continue
+		}
+		missing := false
+		for _, gap := range t.gaps {
+			if n >= gap.From && n <= gap.To {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			received++
+		}
+	}
+	if received == 0 {
+		return rangeFresh
+	}
+	if received == seq.end-seq.seq+1 {
+		return rangeDuplicate
+	}
+	return rangeOverlap
+}
+
+// safety: an append can land before its new attempt's open record fails;
+// a confirmed retry repairs that metadata without writing the body twice.
+func (s *Server) ensureSequenceOpenRecord(root *os.Root, runID, nodeID, file, stream string) error {
+	recs, err := readSealRecords(root, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	rel := sealFileRel(runID, file)
+	for _, rec := range recs {
+		if rec.Kind == recordOpen && rec.Stream == stream && rec.File == rel {
+			return nil
+		}
+	}
+	if err := s.appendSealRecord(root, runID, nodeID, sealRecord{
+		Kind: recordOpen, File: rel, Stream: stream, At: time.Now(),
+	}); err != nil {
+		return err
+	}
+	s.seals.mu.Lock()
+	if t := s.seals.m[trackerKey(runID, nodeID, stream)]; t != nil {
+		t.files[rel] = true
+	}
+	s.seals.mu.Unlock()
+	return nil
+}
+
 // observeSequence records one numbered append. The caller holds the
 // node's append lock, so the seal file and the tracker change together.
 func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq appendSequence) error {
@@ -570,7 +671,9 @@ func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq 
 	t := s.seals.m[key]
 	opened := false
 	if t != nil {
-		t.observe(seq.seq, now)
+		for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+			t.observe(seq.seq+offset, now)
+		}
 		opened = t.files[rel]
 		t.files[rel] = true
 	}
@@ -602,7 +705,9 @@ func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq 
 		}
 		t.files[rel] = true
 	}
-	t.observe(seq.seq, now)
+	for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+		t.observe(seq.seq+offset, now)
+	}
 	s.seals.put(key, t, now)
 	return nil
 }

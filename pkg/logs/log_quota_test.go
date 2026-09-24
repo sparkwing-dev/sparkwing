@@ -215,3 +215,22 @@ func TestASealSettlesTheRunsLogBlock(t *testing.T) {
 		t.Fatalf("after the seal the controller counts %d used, %d reserved; want the line committed and nothing held", used, reserved)
 	}
 }
+
+func TestRetriedRangeDoesNotSettleExtraQuota(t *testing.T) {
+	counter := storagequotatest.New(1<<20, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	path := "/api/v1/logs/run-a/build"
+	body := "one\ntwo\n"
+	headers := map[string]string{LogStreamHeader: "range", LogSeqHeader: "1", LogSeqEndHeader: "2"}
+	for range 2 {
+		if code, response := f.send(t, http.MethodPost, path, "Bearer a", body, headers); code != http.StatusNoContent {
+			t.Fatalf("range append = %d %s", code, response)
+		}
+	}
+	if code := f.seal(t, "Bearer a", "run-a", "build", Seal{Stream: "range", FinalSeq: 2, Lines: 2}); code != http.StatusNoContent {
+		t.Fatalf("seal = %d", code)
+	}
+	if used, reserved := counter.Held("team-a", storagequota.KindLogs); used != int64(len(body)) || reserved != 0 {
+		t.Fatalf("quota = %d used, %d reserved; want one copy", used, reserved)
+	}
+}

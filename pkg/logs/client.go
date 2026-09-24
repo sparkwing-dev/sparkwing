@@ -203,6 +203,9 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 	if seq, ok := appendSequenceFromContext(ctx); ok {
 		req.Header.Set(LogStreamHeader, seq.stream)
 		req.Header.Set(LogSeqHeader, fmt.Sprint(seq.seq))
+		if seq.end != seq.seq {
+			req.Header.Set(LogSeqEndHeader, fmt.Sprint(seq.end))
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

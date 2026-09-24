@@ -654,6 +654,10 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
+	if numbered && seq.end > seq.seq && (len(body) == 0 || body[len(body)-1] != '\n' || int64(bytes.Count(body, []byte{'\n'})) != seq.end-seq.seq+1) {
+		http.Error(w, "log sequence range does not match newline-delimited records", http.StatusBadRequest)
+		return
+	}
 	if len(body) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -671,6 +675,38 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	lock := s.appendNodeLock(runID, nodeID)
 	lock.Lock()
 	defer lock.Unlock()
+	_, status, err := s.validateAppendClaim(r, runID, nodeID)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if numbered && seq.end > seq.seq {
+		state := s.numberedRangeState(runID, nodeID, seq)
+		if state != rangeFresh {
+			if err := s.ensureRunDir(root, runID); err != nil {
+				s.storeError(w, "create run dir", err)
+				return
+			}
+			if err := s.labelRun(r, root, runID); err != nil {
+				if errors.Is(err, errRunOfAnotherTeam) {
+					http.Error(w, err.Error(), http.StatusForbidden)
+					return
+				}
+				s.storeError(w, "label run", err)
+				return
+			}
+			if state == rangeDuplicate {
+				if err := s.ensureSequenceOpenRecord(root, runID, nodeID, name, seq.stream); err != nil {
+					s.storeError(w, "confirm log sequence", err)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				http.Error(w, "log sequence range partially overlaps received records", http.StatusUnprocessableEntity)
+			}
+			return
+		}
+	}
 
 	binaryDrop := false
 	if looksBinary(body, s.limits.BinaryRatio) {
@@ -688,12 +724,6 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	// safety: every refusal from here on gives back what planAppend
 	// reserved against the run, so a refused append costs the run nothing.
 	refuse := func() { rt.unreserve(int64(len(plan.write))) }
-	_, status, err := s.validateAppendClaim(r, runID, nodeID)
-	if err != nil {
-		refuse()
-		http.Error(w, err.Error(), status)
-		return
-	}
 	// safety: a numbered line counts as received once its claim is checked,
 	// even when a cap stores none of it, because the writer delivered it.
 	observe := func() error {

@@ -13,7 +13,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"slices"
 	"sync"
 	"time"
 
@@ -133,6 +132,7 @@ type httpNodeLog struct {
 	attempt         int
 	pending         []numberedLine
 	pendingBytes    int
+	flushTimer      *time.Timer
 
 	// stream names this writer's numbered appends; seq, sentBytes and
 	// digest cover every line it numbered, delivered or not, and go into
@@ -163,6 +163,9 @@ var httpNodeLogDropCooldown = 5 * time.Second
 const httpNodeLogFinishTimeout = 10 * time.Second
 
 const httpNodeLogPendingLimit = 4 << 20
+const httpNodeLogBatchLines = 256
+const httpNodeLogBatchBytes = 64 << 10
+const httpNodeLogTailDelay = 100 * time.Millisecond
 
 var logStoreWithoutSealsOnce sync.Once
 
@@ -220,9 +223,16 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	payload, err := json.Marshal(&rec)
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
+	l.mu.Lock()
+	closed, fatal = l.closed, l.fatal
+	l.mu.Unlock()
+	if closed || fatal != nil {
+		return
+	}
 	if err != nil {
 		// safety: a record no encoder will take never reaches the store, the same
 		// loss as an append that never lands, so it still takes a number.
+		l.flushBuffered(l.ctx)
 		l.number(nil)
 		l.mu.Lock()
 		l.dropCount++
@@ -286,6 +296,12 @@ func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
 		l.mu.Unlock()
 		return nil
 	}
+	old := l.attempt
+	l.mu.Unlock()
+	if old > 0 && old != ordinal {
+		l.flushBuffered(l.ctx)
+	}
+	l.mu.Lock()
 	l.attempt = ordinal
 	l.mu.Unlock()
 	return l.Fatal()
@@ -294,7 +310,7 @@ func (l *httpNodeLog) BindExecutionAttempt(ordinal int) error {
 func (l *httpNodeLog) FlushExecutionAttempt() error {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
-	l.appendWithRetry(numberedLine{})
+	l.flushBuffered(l.ctx)
 	return l.Fatal()
 }
 
@@ -302,10 +318,6 @@ func (l *httpNodeLog) appendWithRetry(line numberedLine) {
 	l.mu.Lock()
 	ordinal := l.attempt
 	if l.requiresAttempt && ordinal == 0 {
-		if len(line.payload) == 0 {
-			l.mu.Unlock()
-			return
-		}
 		if l.pendingBytes+len(line.payload) > httpNodeLogPendingLimit {
 			if l.fatal == nil {
 				l.fatal = errors.New("pre-execution log buffer exceeded 4 MiB")
@@ -313,8 +325,43 @@ func (l *httpNodeLog) appendWithRetry(line numberedLine) {
 			l.mu.Unlock()
 			return
 		}
-		l.pending = append(l.pending, numberedLine{seq: line.seq, payload: slices.Clone(line.payload)})
-		l.pendingBytes += len(line.payload)
+	}
+	l.pending = append(l.pending, line)
+	l.pendingBytes += len(line.payload)
+	ready := ordinal > 0 || !l.requiresAttempt
+	l.mu.Unlock()
+	if !ready {
+		return
+	}
+	if len(l.pending) >= httpNodeLogBatchLines || l.pendingBytes >= httpNodeLogBatchBytes {
+		l.flushBuffered(l.ctx)
+		return
+	}
+	if l.flushTimer == nil {
+		var timer *time.Timer
+		timer = time.AfterFunc(httpNodeLogTailDelay, func() {
+			l.writeMu.Lock()
+			defer l.writeMu.Unlock()
+			if l.flushTimer != timer {
+				return
+			}
+			l.mu.Lock()
+			closed := l.closed
+			l.mu.Unlock()
+			if closed {
+				return
+			}
+			l.flushBuffered(l.ctx)
+		})
+		l.flushTimer = timer
+	}
+}
+
+// safety: writeMu spans the flush so a timer, Close or attempt rebind cannot reorder lines across attempt files.
+func (l *httpNodeLog) flushBuffered(ctx context.Context) {
+	l.mu.Lock()
+	ordinal := l.attempt
+	if l.requiresAttempt && ordinal == 0 {
 		l.mu.Unlock()
 		return
 	}
@@ -322,33 +369,53 @@ func (l *httpNodeLog) appendWithRetry(line numberedLine) {
 	l.pending = nil
 	l.pendingBytes = 0
 	l.mu.Unlock()
-	for _, buffered := range pending {
-		l.appendBoundWithRetry(ordinal, buffered)
+	if l.flushTimer != nil {
+		l.flushTimer.Stop()
+		l.flushTimer = nil
+	}
+	for len(pending) > 0 {
+		count, size := 0, 0
+		for count < len(pending) && count < httpNodeLogBatchLines {
+			if count > 0 && pending[count].seq != pending[count-1].seq+1 {
+				break
+			}
+			if count > 0 && size+len(pending[count].payload) > httpNodeLogBatchBytes {
+				break
+			}
+			size += len(pending[count].payload)
+			count++
+		}
+		batch := pending[:count]
+		pending = pending[count:]
+		l.appendBoundWithRetry(ctx, ordinal, batch)
 		if l.Fatal() != nil {
 			return
 		}
 	}
-	if len(line.payload) == 0 {
-		l.collectFlushLosses()
-		return
-	}
-	l.appendBoundWithRetry(ordinal, line)
 	l.collectFlushLosses()
 }
 
-func (l *httpNodeLog) appendBoundWithRetry(ordinal int, line numberedLine) {
-	if l.dropSuppressed() {
+func (l *httpNodeLog) appendBoundWithRetry(ctx context.Context, ordinal int, batch []numberedLine) {
+	if l.dropSuppressed(len(batch)) {
 		return
+	}
+	var payload []byte
+	for _, line := range batch {
+		payload = append(payload, line.payload...)
 	}
 	var lastErr error
 	for retry := 0; retry < httpNodeLogRetryAttempts; retry++ {
+		if ctx.Err() != nil {
+			lastErr = ctx.Err()
+			break
+		}
 		if retry > 0 && httpNodeLogRetryBackoff > 0 {
 			backoff := objectguard.Backoff{Base: httpNodeLogRetryBackoff, Max: httpNodeLogRetryMaxBackoff}
 			time.Sleep(backoff.Delay(retry - 1))
 		}
-		attemptCtx := logs.WithAppendSequence(withAttempt(l.ctx, ordinal), l.stream, line.seq)
-		ctx, cancel := context.WithTimeout(attemptCtx, 5*time.Second)
-		err := l.client.Append(ctx, l.runID, l.nodeID, line.payload)
+		attemptCtx := logs.WithAppendSequenceRange(withAttempt(ctx, ordinal), l.stream, batch[0].seq, batch[len(batch)-1].seq)
+		requestCtx, cancel := context.WithTimeout(attemptCtx, 5*time.Second)
+		err := l.client.Append(requestCtx, l.runID, l.nodeID, payload)
 		cancel()
 		if err == nil {
 			return
@@ -371,7 +438,7 @@ func (l *httpNodeLog) appendBoundWithRetry(ordinal int, line numberedLine) {
 		}
 	}
 	l.mu.Lock()
-	l.dropCount++
+	l.dropCount += len(batch)
 	if l.dropReason == "" && lastErr != nil {
 		l.dropReason = lastErr.Error()
 	}
@@ -394,13 +461,13 @@ func withAttempt(ctx context.Context, ordinal int) context.Context {
 	return ctx
 }
 
-func (l *httpNodeLog) dropSuppressed() bool {
+func (l *httpNodeLog) dropSuppressed(lines int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.suppressUntil.IsZero() || !time.Now().Before(l.suppressUntil) {
 		return false
 	}
-	l.dropCount++
+	l.dropCount += lines
 	return true
 }
 
@@ -422,6 +489,7 @@ func (l *httpNodeLog) Close() error {
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, httpNodeLogFinishTimeout)
 	defer cancel()
+	l.flushBuffered(ctx)
 	if l.live != nil {
 		if lerr := l.live.Close(); lerr != nil {
 			l.logger.Warn(
