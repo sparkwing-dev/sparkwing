@@ -1983,6 +1983,10 @@ func (s *Server) handleAcknowledgeNodeExecutionStart(w http.ResponseWriter, r *h
 	}
 	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
 	err := s.store.AcknowledgeNodeExecutionStart(r.Context(), runID, nodeID, claimIdentity(r), body)
+	if errors.Is(err, store.ErrInvalidInput) {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if errors.Is(err, store.ErrLockHeld) {
 		writeError(w, http.StatusConflict, err)
 		return

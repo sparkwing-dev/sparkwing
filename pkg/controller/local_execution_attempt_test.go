@@ -100,3 +100,14 @@ func TestExecutionAttempt_LocalDaemonStillRequiresAnExecutorID(t *testing.T) {
 		t.Fatalf("execution-start status=%d body=%s, want 400 naming executor_id", status, body)
 	}
 }
+
+func TestExecutionStartRejectsLongExecutorName(t *testing.T) {
+	st := localAttemptStore(t)
+	srv := httptest.NewServer(controller.New(st, nil).WithLocalExecution().Handler())
+	defer srv.Close()
+	status, body := postJSONWithStatus(t, srv.URL+"/api/v1/runs/run-1/nodes/build/execution-start",
+		map[string]any{"attempt_ordinal": 1, "executor_kind": "local", "executor_id": "host", "executor_name": strings.Repeat("x", 129)})
+	if status != http.StatusBadRequest || !strings.Contains(body, "executor_name") {
+		t.Fatalf("execution-start status=%d body=%s, want 400 naming executor_name", status, body)
+	}
+}

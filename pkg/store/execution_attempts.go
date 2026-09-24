@@ -5,9 +5,26 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
+
+const maxExecutionExecutorNameLen = 128
+
+var executorNameEscape = regexp.MustCompile("\\x1b(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\x07]*(?:\\x07|\\x1b\\\\)|.)")
+
+func safeExecutorName(name string) string {
+	name = executorNameEscape.ReplaceAllString(name, "")
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, name))
+}
 
 type ExecutionStart struct {
 	HolderID        string `json:"holder_id"`
@@ -88,6 +105,10 @@ func githubAttemptExecutor(ctx context.Context, tx *storeTx, runID, principal, p
 }
 
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error {
+	if len(start.ExecutorName) > maxExecutionExecutorNameLen {
+		return fmt.Errorf("%w: executor_name exceeds %d bytes", ErrInvalidInput, maxExecutionExecutorNameLen)
+	}
+	start.ExecutorName = safeExecutorName(start.ExecutorName)
 	if triggerFence, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
 		if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 			return ErrLockHeld
