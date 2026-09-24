@@ -229,6 +229,8 @@ file. Other syntax and workflow checks remain active.
   findings may recommend either existing package or a focused shared package.
   Store the API key as the masked `TYPESAFE_API_KEY` Sparkwing secret. Use
   `--dry-run` to inspect every bounded request without a key or network call.
+  Jev skips symlinked Go candidates and refuses changed files or invariant
+  config reached through a symlink, so a request reads only checkout files.
   Findings are advisory; configuration, analysis, transport, and
   response-schema failures fail the run. Cached exact requests can be read
   without the key.

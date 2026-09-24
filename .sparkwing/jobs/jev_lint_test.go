@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ type service struct{}
 func (s *service) ValidateOrder(order string, strict bool) error {
 	return checkOrder(order, strict)
 }
+
 `)
 	functions, err := parseJevLintFunctions("sample/service.go", source)
 	if err != nil {
@@ -40,6 +42,102 @@ func (s *service) ValidateOrder(order string, strict bool) error {
 	}
 	if _, ok := fn.CallTokens["check"]; !ok {
 		t.Errorf("call tokens omit check: %v", fn.CallTokens)
+	}
+}
+
+func TestJevLintIgnoresSymlinkedGoCandidatesOutsideCheckout(t *testing.T) {
+	root := t.TempDir()
+	private := filepath.Join(t.TempDir(), "private.go")
+	if err := os.WriteFile(private, []byte("package private\nfunc PrivateSetting() string { return \"fake private marker\" }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(private, filepath.Join(root, "linked.go")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "regular.go"), []byte("package regular\nfunc Safe() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	functions, err := collectCurrentGoFunctions(root, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(functions) != 1 || functions[0].Path != "regular.go" {
+		t.Fatalf("Go candidates included a symlink or lost the regular file: %+v", functions)
+	}
+}
+
+func TestJevLintRefusesUntrackedSymlinkBeforeBuildingTypeSafeRequest(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "--quiet")
+	runGit("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "base")
+	private := filepath.Join(t.TempDir(), "private.go")
+	content := "package private\n" + strings.Repeat("// fake private line\n", 110) +
+		"func PrivateSetting() string { return \"fake private marker\" }\n"
+	if err := os.WriteFile(private, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(private, filepath.Join(root, "linked.go")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	change, err := collectJevLintChange(t.Context(), root, "HEAD", []string{"linked.go"}, []string{"linked.go"})
+	if err == nil {
+		if change != nil && strings.Contains(newJevLintChangeRequest(*change).State.Change.Diff, "fake private marker") {
+			t.Fatal("private source outside checkout would enter a TypeSafe request")
+		}
+		t.Fatal("changed symlink was accepted")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("changed symlink refusal = %v", err)
+	}
+}
+
+func TestJevLintReadStaysInsideCheckoutAcrossParentSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "regular"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(outside, "private.go")
+	if err := os.WriteFile(private, []byte("package private\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "regular", "safe.go"), []byte("package safe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "linked-dir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(private, filepath.Join(root, "linked.go")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	for _, path := range []string{"linked-dir/private.go", "linked.go"} {
+		if _, err := readJevLintFile(root, path); err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("read %q = %v, want symlink refusal", path, err)
+		}
+	}
+	if body, err := readJevLintFile(root, "regular/safe.go"); err != nil || string(body) != "package safe\n" {
+		t.Fatalf("regular checkout file = %q, %v", body, err)
+	}
+}
+
+func TestJevLintInvariantConfigRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	private := filepath.Join(t.TempDir(), "private.yaml")
+	if err := os.WriteFile(private, []byte("version: 1\ninvariants: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(private, filepath.Join(root, "invariants.yaml")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := readJevLintInvariants(root, "invariants.yaml"); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked invariant config = %v, want refusal", err)
 	}
 }
 
@@ -365,7 +463,7 @@ invariants:
 	if err := os.WriteFile(filename, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readJevLintInvariants(filename); err == nil || !strings.Contains(err.Error(), "field surprise") {
+	if _, err := readJevLintInvariants(filepath.Dir(filename), filepath.Base(filename)); err == nil || !strings.Contains(err.Error(), "field surprise") {
 		t.Fatalf("read error = %v", err)
 	}
 }
