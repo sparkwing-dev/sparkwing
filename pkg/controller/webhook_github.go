@@ -391,7 +391,8 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		return
 	}
 
-	if err := tenant.CreateTrigger(r.Context(), store.Trigger{
+	now := time.Now()
+	if err := tenant.CreateTriggerWithRun(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
 		TriggerSource:   trigger.Source,
@@ -405,10 +406,17 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		WebhookDelivery: delivery,
 		// safety: the delivery id is an unsigned header, so the digest of the signed body is what refuses a replay.
 		WebhookReplayKey: githubWebhookReplayKey(pipeline, body),
-		CreatedAt:        time.Now(),
+		CreatedAt:        now,
+	}, store.Run{
+		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
+		GitBranch: g.Branch, GitSHA: g.SHA, DeclaredRepo: g.Repo,
+		GithubOwner: owner, GithubRepo: repoName, CreatedAt: now, StartedAt: now,
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 			s.writeGitHubDuplicate(w, r, tenant, pipeline, delivery, body)
+			return
+		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
@@ -519,7 +527,8 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := tenant.CreateTrigger(r.Context(), store.Trigger{
+	now := time.Now()
+	if err := tenant.CreateTriggerWithRun(r.Context(), store.Trigger{
 		ID:              runID,
 		Pipeline:        pipeline,
 		TriggerSource:   trigger.Source,
@@ -533,10 +542,17 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 		WebhookDelivery: delivery,
 		// safety: the delivery id is an unsigned header, so the digest of the signed body is what refuses a replay.
 		WebhookReplayKey: githubWebhookReplayKey(pipeline, body),
-		CreatedAt:        time.Now(),
+		CreatedAt:        now,
+	}, store.Run{
+		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
+		GitBranch: g.Branch, GitSHA: g.SHA, DeclaredRepo: g.Repo,
+		GithubOwner: owner, GithubRepo: repoName, CreatedAt: now, StartedAt: now,
 	}); err != nil {
 		if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 			s.writeGitHubDuplicate(w, r, tenant, pipeline, delivery, body)
+			return
+		}
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))

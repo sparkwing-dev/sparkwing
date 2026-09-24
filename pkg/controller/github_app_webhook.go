@@ -838,6 +838,9 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		}
 		run, err := s.startGitHubAppRun(r, tenant, plan, repo, delivery, body)
 		if err != nil {
+			if s.writeComputeLimitRefusal(w, r, "", "", err) {
+				return
+			}
 			writeIdentityError(w, s, r, "github app run", err)
 			return
 		}
@@ -900,12 +903,17 @@ func (s *Server) startGitHubAppRun(
 		triggerEnv[k] = v
 	}
 	trigger := sparkwing.TriggerInfo{Source: "github", User: in.user, PullRequest: in.prInfo}
-	err := tenant.CreateTrigger(ctx, store.Trigger{
+	now := time.Now()
+	err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: runID, Pipeline: pipeline, TriggerSource: trigger.Source, TriggerUser: trigger.User,
 		TriggerEnv: triggerEnv, GitBranch: in.branch, GitSHA: in.sha, Repo: repo.Slug(),
 		GithubOwner: repo.Owner, GithubRepo: repo.Name, GithubRepoID: repo.ID,
 		WebhookDelivery: delivery + "/" + pipeline, WebhookReplayKey: replayKey,
-		CreatedAt: time.Now(),
+		CreatedAt: now,
+	}, store.Run{
+		ID: runID, Pipeline: pipeline, Status: "pending", TriggerSource: trigger.Source,
+		GitBranch: in.branch, GitSHA: in.sha, DeclaredRepo: repo.Slug(),
+		GithubOwner: repo.Owner, GithubRepo: repo.Name, CreatedAt: now, StartedAt: now,
 	})
 	if errors.Is(err, store.ErrDuplicateWebhookDelivery) {
 		run := githubAppRun{Pipeline: pipeline, Status: "duplicate"}

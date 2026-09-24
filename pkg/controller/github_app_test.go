@@ -568,6 +568,14 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 	if len(got) != 1 || got[0].Pipeline != "build" || got[0].GitSHA != headSHA || got[0].GithubRepo != "widgets" {
 		t.Fatalf("olga's triggers = %+v", got)
 	}
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := team.GetRun(t.Context(), got[0].ID)
+	if err != nil || run.Status != "pending" {
+		t.Fatalf("app run = (%+v, %v), want a pending run alongside the trigger", run, err)
+	}
 	if got[0].TriggerEnv["GITHUB_EVENT_NAME"] != "push" {
 		t.Fatalf("app push event = %q, want push", got[0].TriggerEnv["GITHUB_EVENT_NAME"])
 	}
@@ -584,6 +592,34 @@ func TestGitHubAppPushRunsOnlyInTheInstallationsTeam(t *testing.T) {
 
 	if code, out := f.deliver("push", pushPayload(99, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "ignored" {
 		t.Fatalf("push through an unbound installation = %d %v", code, out)
+	}
+}
+
+func TestGitHubAppRunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	if err := f.store.CreateRun(t.Context(), store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SetComputeLimit(t.Context(), store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+		t.Fatal(err)
+	}
+	payload := pushPayload(7, 701, "acme/widgets", headSHA)
+	if code, out := f.deliver("push", payload, ""); code != http.StatusTooManyRequests || out["code"] != controller.ComputeLimitRefusedCode {
+		t.Fatalf("limited app webhook = %d %v, want compute-limit 429", code, out)
+	}
+	if got := f.triggers(olga.team); len(got) != 0 {
+		t.Fatalf("limited app webhook left triggers: %+v", got)
+	}
+	if err := f.store.SetComputeLimit(t.Context(), store.ComputeLimitGlobalRunsPerHour, 0); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := f.deliver("push", payload, ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("retry after quota clears = %d %v, want dispatched", code, out)
 	}
 }
 

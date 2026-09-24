@@ -3637,7 +3637,7 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
+	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
 		return err
 	}
 	// safety: the team is in the conflict guard, not the conflict target,

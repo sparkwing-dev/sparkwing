@@ -543,9 +543,13 @@ func TestPendingTriggerCanSignBinaryDownloadWhileClaimIsLive(t *testing.T) {
 	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'pending' WHERE id = ?`, "run-1"); err != nil {
 		t.Fatal(err)
 	}
-	rec, _ := callDownload(t, s, grant, "bins/abc", false)
+	rec, signed := callDownload(t, s, grant, "bins/abc", false)
 	if rec.Code != http.StatusOK || len(head.keys) != 1 {
 		t.Fatalf("pending trigger binary GET = %d, heads=%v: %s", rec.Code, head.keys, rec.Body.String())
+	}
+	u, err := url.Parse(signed.URL)
+	if err != nil || !strings.Contains(u.Path, "/cache/teams/team-a/bins/abc") || u.Query().Get("X-Amz-Expires") != "60" {
+		t.Fatalf("pending trigger S3 URL = %q, err=%v", signed.URL, err)
 	}
 	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
 		t.Fatal(err)

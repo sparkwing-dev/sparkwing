@@ -273,6 +273,43 @@ func TestRunsPerHourGuardRefusesAMeteredPrincipalPastTheCap(t *testing.T) {
 	}
 }
 
+func TestRunsPerHourGuardChecksFirstAttributionOfPendingRun(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	claimant := meteredClaimant(t, s, "agent:cloud")
+	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
+	if err := createRunAs(t, s, claimant.Principal, "run-first"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.CreateTriggerWithRun(ctx,
+		store.Trigger{ID: "run-pending", Pipeline: "demo", CreatedAt: now},
+		store.Run{ID: "run-pending", Pipeline: "demo", Status: "pending", CreatedAt: now, StartedAt: now},
+	); err != nil {
+		t.Fatal(err)
+	}
+	limitRefusal(t, createRunAs(t, s, claimant.Principal, "run-pending"), store.ComputeLimitRunsPerHour)
+	run, err := s.GetRun(ctx, "run-pending")
+	if err != nil || run.Status != "pending" {
+		t.Fatalf("refused run = (%+v, %v), want pending", run, err)
+	}
+	var principal string
+	if err := s.DB().QueryRow(`SELECT created_principal FROM runs WHERE id = 'run-pending'`).Scan(&principal); err != nil || principal != "" {
+		t.Fatalf("refused run principal = %q, %v, want empty", principal, err)
+	}
+	rewindRunCreation(t, s, "run-first", now.Add(-2*time.Hour))
+	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 1)
+	if err := createRunAs(t, s, claimant.Principal, "run-pending"); err != nil {
+		t.Fatalf("first attribution after budget clears: %v", err)
+	}
+	if err := createRunAs(t, s, claimant.Principal, "run-pending"); err != nil {
+		t.Fatalf("same claimant repeating the create: %v", err)
+	}
+	if err := s.DB().QueryRow(`SELECT created_principal FROM runs WHERE id = 'run-pending'`).Scan(&principal); err != nil || principal != claimant.Principal {
+		t.Fatalf("attributed run principal = %q, %v, want %q", principal, err, claimant.Principal)
+	}
+}
+
 func TestGlobalRunsPerHourGuardCountsEveryPrincipal(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()

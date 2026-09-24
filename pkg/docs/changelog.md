@@ -108,7 +108,7 @@ unlock.
   artifacts carry the node's grant rather than one from its environment. A
   `--gitcache` naming a cache directly is kept, and a controller that mints no
   grant leaves the node on its previous path. See
-  [Operator Discovery](docs/gitcache.md#operator-discovery).
+  [Cache grants](docs/gitcache.md#cache-grants).
 
 - **cache:** `--metrics-addr` (`SPARKWING_METRICS_ADDR`) moves `/metrics`,
   and the proxy's `/stats`, off the main listener onto a port of their own,
@@ -913,6 +913,10 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **controller:** GitHub webhook and GitHub App runs now enter the pending run
+  state when their triggers are accepted, allowing claimed warm runners to
+  fetch signed cache binaries before the pipeline starts.
 
 - **controller + web (Breaking):** Browser sign-in cookies now survive restarts for 30 days.
   Controller sessions expire after seven idle days or 30 days from sign-in,

@@ -533,7 +533,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 	return nil
 }
 
-func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal string, now time.Time) error {
+func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID, principal string, now time.Time) error {
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -541,12 +541,24 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, runID, principal str
 	if limits.RunsPerHour <= 0 && limits.GlobalRunsPerHour <= 0 {
 		return nil
 	}
-	present, err := rowPresentTx(ctx, tx, `SELECT 1 FROM runs WHERE id = ?`, runID)
-	if err != nil || present {
-		return err
-	}
 	if err := lockComputeGuardsTx(ctx, tx); err != nil {
 		return err
+	}
+	owner, present, err := runOwnerTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if present {
+		if owner != team {
+			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, runID)
+		}
+		createdBy, err := runPrincipalTx(ctx, tx, runID)
+		if err != nil || createdBy != "" || principal == "" {
+			return err
+		}
+		// safety: a pending run already spent the global slot; its first claimant still
+		// spends a metered principal's hourly slot before it takes ownership.
+		return runsPerHourRefusal(ctx, tx, ComputeLimits{RunsPerHour: limits.RunsPerHour}, principal, now)
 	}
 	return runsPerHourRefusal(ctx, tx, limits, principal, now)
 }

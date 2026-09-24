@@ -150,6 +150,10 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTrigger: %v", err)
 	}
+	run, err := st.GetRun(context.Background(), decoded.RunID)
+	if err != nil || run.Status != "pending" {
+		t.Fatalf("GetRun = (%+v, %v), want a pending run alongside the trigger", run, err)
+	}
 	if tr.Pipeline != "sample-app-build" {
 		t.Errorf("pipeline=%q want sample-app-build", tr.Pipeline)
 	}
@@ -176,6 +180,31 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	}
 	if tr.TriggerEnv["GITHUB_EVENT_NAME"] != "push" {
 		t.Errorf("env[GITHUB_EVENT_NAME]=%q want push, the signed event an OIDC push subject rests on", tr.TriggerEnv["GITHUB_EVENT_NAME"])
+	}
+}
+
+func TestWebhookGitHub_RunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
+	ts, st := newWebhookServer(t, testWebhookSecret)
+	ctx := t.Context()
+	if err := st.CreateRun(ctx, store.Run{ID: "existing", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetComputeLimit(ctx, store.ComputeLimitGlobalRunsPerHour, 1); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"ref":"refs/heads/main","after":"abc123def456abc123def456abc123def456abcd","repository":{"full_name":"acme/sample-app"},"pusher":{"name":"alice"}}`)
+	url := ts.URL + "/webhooks/github/sample-app-build"
+	first := postWebhook(t, url, "push", body, signWebhook(testWebhookSecret, body))
+	if first.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("limited webhook = %d, want 429", first.StatusCode)
+	}
+	expectNoTrigger(t, st)
+	if err := st.SetComputeLimit(ctx, store.ComputeLimitGlobalRunsPerHour, 0); err != nil {
+		t.Fatal(err)
+	}
+	retry := postWebhook(t, url, "push", body, signWebhook(testWebhookSecret, body))
+	if retry.StatusCode != http.StatusAccepted {
+		t.Fatalf("retry after quota clears = %d, want 202", retry.StatusCode)
 	}
 }
 
@@ -289,6 +318,10 @@ func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 			tr, err := st.GetTrigger(context.Background(), decoded.RunID)
 			if err != nil {
 				t.Fatalf("GetTrigger: %v", err)
+			}
+			run, err := st.GetRun(context.Background(), decoded.RunID)
+			if err != nil || run.Status != "pending" {
+				t.Fatalf("GetRun = (%+v, %v), want a pending run alongside the trigger", run, err)
 			}
 			if tr.Pipeline != "pr-gate" {
 				t.Errorf("pipeline=%q want pr-gate", tr.Pipeline)
