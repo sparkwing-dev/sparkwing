@@ -49,10 +49,12 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 		return err
 	}
 	if sourceKey != "" {
+		// safety: an unused source remains bindable for its full day after
+		// commit, including when its pending reservation is already old.
 		res, err := tx.ExecContext(ctx, `UPDATE uploads SET run_id = ?
             WHERE team = ? AND key = ? AND principal = ? AND claim_prefix = ?
-              AND committed_at > 0 AND run_id = '' AND expires_at > ?`,
-			r.ID, string(t.team), sourceKey, principal, tokenPrefix, trig.CreatedAt.UnixNano())
+			  AND committed_at > ? AND run_id = ''`,
+			r.ID, string(t.team), sourceKey, principal, tokenPrefix, trig.CreatedAt.Add(-sourceBundleRetention).UnixNano())
 		if err != nil {
 			return err
 		}

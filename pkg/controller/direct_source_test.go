@@ -101,16 +101,13 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	}
 	t.Setenv(authwire.CacheGrantKeyEnv, "source-test-grant-key")
 	runnerRaw, runner, err := team.CreateToken(t.Context(), "source-runner", store.TokenKindRunner,
-		[]string{controller.ScopeTriggersClaim}, time.Hour, time.Now())
+		[]string{controller.ScopeTriggersClaim, controller.ScopeNodesClaim}, time.Hour, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed',
 		claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`,
 		runner.Principal, runner.Prefix, time.Now().Add(time.Hour).UnixNano(), started.RunID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'running' WHERE id = ?`, started.RunID); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := authwire.MintClaimCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), user.team, started.RunID,
@@ -126,6 +123,32 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 		map[string]string{"kind": "source", "key": key}, &download); code != http.StatusOK ||
 		!strings.Contains(download.URL, "/cache/teams/"+user.team+"/local/"+key) {
 		t.Fatalf("claim source download = %d, URL %q", code, download.URL)
+	}
+	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
+		map[string]string{"kind": "artifact", "key": "artifacts/blobs/" + digest}, nil); code != http.StatusForbidden {
+		t.Fatalf("pending run signed an artifact = %d, want 403", code)
+	}
+	if err := f.store.CreateNode(t.Context(), store.Node{RunID: started.RunID, NodeID: "compile", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	node, err := f.store.ClaimNamedNode(t.Context(), store.ClaimIdentity{Principal: runner.Principal, TokenPrefix: runner.Prefix},
+		started.RunID, "compile", "source-runner", time.Hour, store.NamedClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeGrant, err := authwire.MintClaimCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), user.team, started.RunID,
+		time.Now(), time.Hour, &authwire.CacheClaim{
+			Kind: "node", NodeID: "compile",
+			HolderID: node.ClaimedBy, MembershipID: node.ClaimMembershipID,
+			ReservationID: node.ReservationID, Generation: node.ClaimGeneration,
+			Principal: runner.Principal, TokenPrefix: runner.Prefix,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+nodeGrant,
+		map[string]string{"kind": "source", "key": key}, nil); code != http.StatusForbidden {
+		t.Fatalf("pending node claim signed source = %d, want 403", code)
 	}
 	if code := f.call(http.MethodPost, "/api/v1/triggers", "Bearer "+raw, map[string]any{
 		"pipeline": "build", "trigger": map[string]any{
@@ -182,6 +205,14 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	}
 	if code := f.call(http.MethodPost, "/api/v1/triggers", "Bearer "+bobRaw, requestTrigger, nil); code != http.StatusUnprocessableEntity {
 		t.Fatalf("other team's source trigger = %d, want 422", code)
+	}
+	if _, err := f.store.DB().ExecContext(t.Context(),
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`, time.Now().Add(-time.Minute).UnixNano(), started.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call(http.MethodPost, "/api/v1/data/download", "Bearer "+grant,
+		map[string]string{"kind": "source", "key": key}, nil); code != http.StatusForbidden {
+		t.Fatalf("expired trigger claim signed its source = %d, want 403", code)
 	}
 	if err := team.FinishRun(t.Context(), started.RunID, "failed", "test failure"); err != nil {
 		t.Fatal(err)

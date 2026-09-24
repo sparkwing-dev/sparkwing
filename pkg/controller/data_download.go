@@ -85,7 +85,7 @@ type dataDownloadRequest struct {
 	Key  string `json:"key"`
 }
 
-func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant) error {
+func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingSource bool) error {
 	if grant.Claim == nil {
 		return errors.New("cache grant has no claim")
 	}
@@ -94,7 +94,10 @@ func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGr
 		return err
 	}
 	run, err := team.GetRun(ctx, grant.Run)
-	if err != nil || run.Status != "running" || run.FinishedAt != nil {
+	// safety: the trigger fetches its bound source before dispatch changes
+	// the run from pending to running. Other objects still need a running run.
+	pendingSource := allowPendingSource && grant.Claim.Kind == "trigger" && run != nil && run.Status == "pending"
+	if err != nil || run == nil || (run.Status != "running" && !pendingSource) || run.FinishedAt != nil {
 		return errors.New("cache grant run or claim is not live")
 	}
 	claim := grant.Claim
@@ -147,7 +150,7 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
 			return "", nil, false
 		}
-		if err := s.verifyLiveDataGrant(r.Context(), grant); err != nil {
+		if err := s.verifyLiveDataGrant(r.Context(), grant, kind == "source"); err != nil {
 			writeError(w, http.StatusForbidden, err)
 			return "", nil, false
 		}

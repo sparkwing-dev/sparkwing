@@ -90,6 +90,13 @@ func TestSourceBundleOneRunAndRetention(t *testing.T) {
 	if rows, err := st.ExpiredSourceBundles(t.Context(), now.Add(25*time.Hour)); err != nil || len(rows) != 1 || rows[0].ID != orphan.ID {
 		t.Fatalf("orphan expiry with pending run = %v, %v", rows, err)
 	}
+	late := now.Add(25 * time.Hour)
+	if err := tn.CreateSourceTriggerWithRun(t.Context(),
+		store.Trigger{ID: "run-too-late", Pipeline: "build", CreatedAt: late},
+		store.Run{ID: "run-too-late", Pipeline: "build", Status: "pending", CreatedAt: late, StartedAt: late},
+		orphan.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
+		t.Fatalf("expired orphan source bound to a run: %v", err)
+	}
 	if err := tn.FinishRun(t.Context(), "run-source", "success", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +141,37 @@ func TestSourceReserveAcquiresOnlyOneFreeTeamSlotBeforeAnyRun(t *testing.T) {
 	var runs int
 	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team = 'source-a'`).Scan(&runs); err != nil || runs != 0 {
 		t.Fatalf("pretrigger source charged %d runs, %v", runs, err)
+	}
+}
+
+func TestSourceCanBindForTwentyFourHoursAfterCommit(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 1<<30)
+	tn := freeTeam(t, st, "team-source")
+	reservedAt := time.Now().Add(-25 * time.Hour)
+	committedAt := reservedAt.Add(23 * time.Hour)
+	digest := strings.Repeat("a", 64)
+	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: "team-source", Kind: store.StorageCache,
+		Key: "sources/" + digest + "/" + strings.Repeat("1", 32), Size: 10,
+		SHA256: digest, Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local", Now: reservedAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitUpload(t.Context(), u.Team, u.ID, u.Principal, committedAt); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if rows, err := st.ExpiredSourceBundles(t.Context(), now); err != nil || len(rows) != 0 {
+		t.Fatalf("two-hour-old committed source expired: %v, %v", rows, err)
+	}
+	err = tn.CreateSourceTriggerWithRun(t.Context(),
+		store.Trigger{ID: "run-late", Pipeline: "build", CreatedAt: now},
+		store.Run{ID: "run-late", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now},
+		u.Key, "owner", "swu_owner")
+	if err != nil {
+		t.Fatalf("source still within 24 hours after commit could not bind: %v", err)
 	}
 }
 

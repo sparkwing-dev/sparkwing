@@ -101,7 +101,7 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 		return directCaller{}, false
 	}
-	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant) != nil {
+	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant, false) != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
