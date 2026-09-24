@@ -15,7 +15,6 @@ import (
 
 const testSHA1 = "0123456789abcdef0123456789abcdef01234567"
 
-// httpOnly fetches from the plain-http test server with no address check, since it listens on loopback.
 var httpOnly = directOptions{protocols: "http"}
 
 func TestValidateDirectSourceRefusesUnsafeRemotes(t *testing.T) {
@@ -119,8 +118,6 @@ func TestDirectFetchURLUsesHTTPSForGitHubWithoutAnSSHIdentity(t *testing.T) {
 	}
 }
 
-// directTestRemote serves a bare repository over the smart http transport,
-// which is the https code path without a certificate.
 func directTestRemote(t *testing.T) (remote, oldSHA, tipSHA string) {
 	t.Helper()
 	repoParent := t.TempDir()
@@ -219,9 +216,7 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// directTestRepo serves a one-commit repository whose tree populate writes,
-// built without the ambient git config so a test's hostile config reaches only
-// the code under test.
+// bug: The fixture ignores ambient git config so hostile config reaches only the code under test.
 func directTestRepo(t *testing.T, populate func(work string)) (remote, sha string) {
 	t.Helper()
 	repoParent := t.TempDir()
@@ -301,8 +296,6 @@ func TestDirectCheckoutRunsNoFilterDriverTheTreeNames(t *testing.T) {
 	}
 }
 
-// fakeSSH is an ssh stand-in that appends its argv to the returned file, one
-// argument per line, and fails.
 func fakeSSH(t *testing.T) (program, argsFile string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -467,8 +460,6 @@ func sparkwingTree(t *testing.T) func(string) {
 	return func(work string) { writeTestFile(t, filepath.Join(work, ".sparkwing", "marker"), "v1") }
 }
 
-// checkoutAndRelease checks remote out and removes the run directory, as a
-// finished run does, leaving only the mirror behind.
 func checkoutAndRelease(t *testing.T, root, remote, sha string, opts directOptions) {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "run")

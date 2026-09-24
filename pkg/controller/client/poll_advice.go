@@ -75,14 +75,10 @@ const (
 	repoFilterAbsent
 )
 
-// capabilitiesReadTimeout bounds the one capabilities read, so a slow answer
-// delays a claim rather than holding it.
+// perf: A slow capabilities read may delay one claim, not hold it indefinitely.
 const capabilitiesReadTimeout = 5 * time.Second
 
-// claimAllowRepos is the list a claim carries, or nil when there is none or
-// the controller does not advertise the field. A read that fails leaves the
-// answer unknown and this claim without the list, and the next claim asks
-// again.
+// bug: A failed capabilities read is not cached as unsupported; the next claim rechecks.
 func (c *Client) claimAllowRepos(ctx context.Context) []string {
 	if c.allowRepos == nil {
 		return nil
@@ -135,8 +131,6 @@ func (c *Client) readRepoFilterCapability(ctx context.Context) (advertised, know
 	return caps.Claims.AllowRepos, true
 }
 
-// meteredInProcessNodesCode is the code the controller answers a metered
-// trigger claim with when it names no node runner that claims each node.
 const meteredInProcessNodesCode = "metered_inprocess_nodes"
 
 // RunnerIdentity reports the identity this client sends, or the empty string

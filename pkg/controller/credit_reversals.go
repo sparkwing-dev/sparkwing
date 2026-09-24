@@ -17,8 +17,7 @@ type creditUnitsJSON struct {
 	MicroPerCent     int64 `json:"micro_per_cent"`
 }
 
-// handleCreditUnits answers the units the ledger prices in, so the checkout
-// service converts a payment into the micro-credits this controller means.
+// safety: Checkout and ledger must agree on the micro-credit unit before converting a payment.
 func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, creditUnitsJSON{
 		MicroPerCredit:   store.MicroCreditsPerCredit,
@@ -29,9 +28,7 @@ func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 
 type reversePaymentReq struct {
 	PaymentID string `json:"payment_id"`
-	// Reference names this reversal, such as "refund:<payment id>" for an
-	// operator's refund or the dispute id for a lost chargeback; a repeat
-	// under it returns the reversal already written.
+	// safety: A reversal reference is its idempotency key for refunds and chargebacks.
 	Reference string `json:"reference"`
 }
 
@@ -45,9 +42,7 @@ type reversePaymentJSON struct {
 	Grant         *creditGrantJSON `json:"grant,omitempty"`
 }
 
-// handleReversePayment takes back what a payment still has on the ledger, in
-// the team it funded. An operator's refund and a lost chargeback both come
-// here; the balance may go below zero, which stops the team's metered work.
+// safety: A refund or lost chargeback may make the funded team's balance negative and stop metered work.
 func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 	var req reversePaymentReq
 	if err := decodeJSON(r, &req); err != nil {
@@ -93,17 +88,13 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 }
 
 type creditFreezeReq struct {
-	// PaymentID names the team by a payment it made, which is how the
-	// checkout service names a disputed team. Team names it directly and is
-	// the operator's alone.
+	// safety: A payment identifies its team; naming a team directly is reserved for the operator.
 	PaymentID string `json:"payment_id,omitempty"`
 	Team      string `json:"team,omitempty"`
-	// DisputeID names the hold: a hold is one per dispute, and a release of
-	// one dispute leaves the team's other holds in place.
+	// safety: Each dispute owns one hold, so releasing it leaves other holds intact.
 	DisputeID string `json:"dispute_id,omitempty"`
 	Reason    string `json:"reason,omitempty"`
-	// Release lifts the named dispute's hold, or every hold on the team when
-	// no dispute is named. Only the operator releases.
+	// safety: Only the operator may release all holds by omitting a dispute ID.
 	Release bool `json:"release,omitempty"`
 }
 
@@ -114,8 +105,7 @@ type creditFreezeJSON struct {
 	Released int64    `json:"released,omitempty"`
 }
 
-// handleCreditFreeze holds a team's cloud usage for a dispute, or releases
-// holds. A held team's metered claims are refused while any hold stands.
+// safety: Any remaining dispute hold blocks the team's metered claims.
 func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 	var req creditFreezeReq
 	if err := decodeJSON(r, &req); err != nil {

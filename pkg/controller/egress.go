@@ -191,9 +191,7 @@ func (s *Server) egressHealth() (map[string]any, []string) {
 		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
 }
 
-// egressDayPrincipal names the row holding this controller's total for one
-// UTC day. Its month column carries the day, "2006-01-02", which no
-// principal's month row can share.
+// safety: A day-shaped period cannot collide with the same service's month-shaped row.
 const egressDayPrincipal = "(day)"
 
 // safety: a restarted controller that started the month or the day over

@@ -129,8 +129,7 @@ func CronIdempotencyKey(scheduleID string, due time.Time) string {
 	return scheduleID + "@" + due.UTC().Format(time.RFC3339)
 }
 
-// cronService is the tick's service, which evaluates every team's schedules
-// and launches each in its own team.
+// safety: Each tick launches a schedule in its own team, never the service's team.
 func (s *Server) cronService() *crons.Service {
 	return s.cronServiceFor(nil, "")
 }

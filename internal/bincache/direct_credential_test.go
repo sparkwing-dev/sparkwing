@@ -206,10 +206,7 @@ func TestReleasedCredentialFetchReadsNoAmbientCredential(t *testing.T) {
 	}
 }
 
-// sshRecorder is an ssh stand-in named ssh on PATH. It records its argv, its
-// environment, the key file's mode and body, and the pinned known_hosts, then
-// serves the repository under root the way sshd would run git-upload-pack.
-// With echoKey set it prints the key to stderr and fails instead.
+// bug: The SSH stand-in can echo a key so the redaction boundary is exercised.
 func sshRecorder(t *testing.T, root string, echoKey bool) (record string) {
 	t.Helper()
 	bin, record := t.TempDir(), t.TempDir()

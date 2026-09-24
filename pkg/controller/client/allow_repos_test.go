@@ -12,8 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-// repoClaimController serves claims the way a controller does: it decodes the
-// body strictly, so a controller that predates allow_repos answers 400.
+// bug: A controller predating allow_repos rejects that claim field with 400.
 type repoClaimController struct {
 	mu         sync.Mutex
 	caps       string

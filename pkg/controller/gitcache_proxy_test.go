@@ -359,8 +359,7 @@ func TestGitcacheProxy_ClaimedRunnerReadsOnlyItsRunSource(t *testing.T) {
 			}
 		})
 	}
-	// The operator's CLI runs have no webhook delivery, and an agent built
-	// before cache grants reads their source here.
+	// bug: Old agents still read this route, while operator CLI runs have no webhook delivery.
 	resp := request(http.MethodGet, "/api/v1/runs/run-typed/gitcache/git/"+
 		cacheName+"/info/refs?service=git-upload-pack", owner, "")
 	_ = resp.Body.Close()

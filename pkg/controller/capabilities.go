@@ -48,12 +48,7 @@ func safeArtifactKey(key string) bool {
 	return storage.SafeArtifactKey(key) == nil
 }
 
-// artifactKeyReadable holds the shared artifact store to the team boundary. A
-// key under runs/<id>/ belongs to that run and is read only by its team,
-// answering 404 like any other team's run. Every other key is content
-// addressed and names no run, so nothing proves which team it belongs to;
-// only the operator reads those here, and a node stages its own artifacts
-// through its claim rather than this route.
+// safety: Run artifact keys resolve to their owner team; unowned content-addressed keys stay operator-only.
 func (s *Server) artifactKeyReadable(w http.ResponseWriter, r *http.Request, key string) bool {
 	if runID, ok := strings.CutPrefix(key, "runs/"); ok {
 		runID, _, _ = strings.Cut(runID, "/")

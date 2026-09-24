@@ -231,14 +231,11 @@ type githubAppIntake struct {
 	tag    string
 	sha    string
 	env    map[string]string
-	// at is when GitHub says the event happened, zero when the payload
-	// does not say.
 	at     time.Time
 	prInfo *sparkwing.PullRequest
 }
 
-// githubPushedAt reads a push payload's repository.pushed_at, which GitHub
-// writes as Unix seconds in push events and as a timestamp elsewhere.
+// bug: GitHub push payloads use Unix seconds; other deliveries may use timestamps.
 func githubPushedAt(raw json.RawMessage) time.Time {
 	var secs int64
 	if json.Unmarshal(raw, &secs) == nil && secs > 0 {
@@ -408,8 +405,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 
 const githubAppForkReason = "pull requests from forks are not run"
 
-// githubAppClockSkew is how far GitHub's clock may run behind this
-// controller's before a delivery reads as older than its binding.
+// safety: A delayed GitHub clock may not make a valid delivery look older than its binding.
 const githubAppClockSkew = time.Minute
 
 func githubAppDeliveryDigest(body []byte) string {
@@ -417,8 +413,7 @@ func githubAppDeliveryDigest(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// githubAppBinding resolves the team holding the installation a delivery
-// names. When no team holds it, it answers the delivery and returns false.
+// safety: Installation identity selects the owning team before a delivery may start work.
 func (s *Server) githubAppBinding(w http.ResponseWriter, r *http.Request, env githubAppDelivery) (store.GitHubAppInstallation, *store.Tenant, store.GitHubRepo, bool) {
 	ctx := r.Context()
 	repo, ok := store.ParseGitHubRepo(env.Repository.FullName)
@@ -757,14 +752,12 @@ func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env m
 	return false
 }
 
-// githubAppPlannedRun is one run a delivery would start.
 type githubAppPlannedRun struct {
 	pipeline string
 	intake   githubAppIntake
 }
 
-// startGitHubAppRuns starts planned, the runs a delivery bound to in asks
-// for, once per signed body and within the team's run budget.
+// safety: A signed App delivery starts its budgeted run set only once.
 func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in store.GitHubAppInstallation,
 	tenant *store.Tenant, env githubAppDelivery, repo store.GitHubRepo, event, delivery string, body []byte,
 	planned []githubAppPlannedRun,
@@ -871,8 +864,7 @@ func githubAppStartedAny(runs []githubAppRun) bool {
 	return false
 }
 
-// githubAppFloodKey is the budget App deliveries spend: the team's own, the
-// one its API submissions spend.
+// safety: App deliveries spend their owning team's existing submission budget.
 func githubAppFloodKey(team store.Team) string {
 	return "team:" + string(team)
 }

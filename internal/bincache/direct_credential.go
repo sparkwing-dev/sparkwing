@@ -86,9 +86,7 @@ func fetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 	return sparkwingDir, nil
 }
 
-// credentialRemote fits remote to the transport cred authenticates: the https
-// form for a token, the ssh form for a deploy key. It refuses a remote on any
-// host but the one the credential is bound to.
+// safety: A released credential may authenticate only its bound host and transport.
 func credentialRemote(remote string, cred DirectCredential) (string, error) {
 	if cred.Empty() {
 		return remote, nil
@@ -131,8 +129,7 @@ func githubTokenRemote(remote string) string {
 	return ""
 }
 
-// credentialScope is the URL prefix git hands a pipe credential to: the
-// remote's own scheme and host, so no other server is ever answered.
+// safety: Git receives the pipe credential only for the remote's scheme and host.
 func credentialScope(remote string) (string, error) {
 	u, err := url.Parse(remote)
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -141,10 +138,7 @@ func credentialScope(remote string) (string, error) {
 	return u.Scheme + "://" + u.Host + "/", nil
 }
 
-// credentialFetchEnv is the environment of a fetch that presents a released
-// credential: localEnv, which reads no system, global or environment git
-// config, less every ssh agent, askpass and ssh program the machine names.
-// Nothing of the machine's own can then answer for the fetch.
+// safety: A released-credential fetch cannot read host git config, agents, askpass, or SSH commands.
 func credentialFetchEnv(localEnv []string) []string {
 	out := make([]string, 0, len(localEnv))
 	for _, item := range localEnv {
@@ -159,18 +153,11 @@ func credentialFetchEnv(localEnv []string) []string {
 	return out
 }
 
-// directSSHKeyOptions pin an ssh fetch to the released deploy key and the
-// host key its owner confirmed: no other identity, agent, config file or
-// known_hosts entry takes part.
+// safety: Only the released deploy key and owner-confirmed host key may authenticate this fetch.
 const directSSHKeyOptions = " -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none" +
 	" -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no"
 
-// writeSSHCredential writes cred's key and pinned host key into a fresh
-// private directory and returns it, the GIT_SSH_COMMAND that uses them, and
-// the cleanup that removes the directory. The directory is on a tmpfs where
-// the machine has one; with tmpfsOnly, which a cloud runner sets, it is
-// refused rather than written to a disk. A lock held on the directory until
-// the cleanup tells a starting runner's sweep that the key is still in use.
+// safety: Cloud keys stay on tmpfs; the directory lock keeps a live fetch out of the cleanup sweep.
 func writeSSHCredential(cred DirectCredential, tmpfsOnly bool) (dir, command string, cleanup func() error, err error) {
 	root, err := sshKeyRoot(tmpfsOnly)
 	if err != nil {
@@ -225,8 +212,6 @@ const (
 	keyDirLockName = "lock"
 )
 
-// keyRootCandidates are where a released deploy key may be written, in
-// order of preference; onTmpfs reports which are memory-backed.
 var (
 	keyRootCandidates = func() []string {
 		roots := []string{"/dev/shm"}
@@ -238,9 +223,7 @@ var (
 	onTmpfs = isTmpfs
 )
 
-// sshKeyRoot is the first key root on a tmpfs, so the key never reaches a
-// disk. Without one, tmpfsOnly refuses, and otherwise the key goes to the
-// temporary directory.
+// safety: A cloud runner refuses a disk-backed key root.
 func sshKeyRoot(tmpfsOnly bool) (string, error) {
 	for _, dir := range keyRootCandidates() {
 		if fi, err := os.Stat(dir); err == nil && fi.IsDir() && onTmpfs(dir) {
@@ -290,9 +273,7 @@ func SweepSSHKeyDirs() (int, error) {
 	return removed, errors.Join(errs...)
 }
 
-// keyDirInUse reports whether a live fetch holds dir's lock. A directory
-// with no lock file is in use only in the moment between its creation and
-// the lock's, so one older than a minute is a leftover.
+// safety: A new unlocked key directory may still be awaiting its lock; only one older than a minute is stale.
 func keyDirInUse(dir string, fi os.FileInfo) bool {
 	lock, err := os.Open(filepath.Join(dir, keyDirLockName))
 	if err != nil {
@@ -307,10 +288,7 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// redactCredential replaces every trace of cred's secret in err's text: the
-// whole value and, for a key, each of its lines. It is the backstop for a
-// transport that echoes what it was handed into the output an error carries
-// to logs and to the run's failure message.
+// safety: Transport errors can echo key lines into logs and run failures.
 func redactCredential(err error, cred DirectCredential) error {
 	if err == nil || cred.Secret == "" {
 		return err
@@ -328,8 +306,6 @@ func redactCredential(err error, cred DirectCredential) error {
 	return errors.New(redacted)
 }
 
-// credentialFragments are the pieces of secret a log could carry apart from
-// the whole: each line of a multi-line key long enough to be key material.
 func credentialFragments(secret string) []string {
 	out := []string{secret}
 	for _, line := range strings.Split(secret, "\n") {

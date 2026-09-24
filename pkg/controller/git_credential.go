@@ -34,20 +34,12 @@ type GitCredentialResponse struct {
 	KnownHosts string `json:"known_hosts,omitempty"`
 }
 
-// Kinds of [GitCredentialResponse].
 const (
 	gitCredentialGitHubApp = "github_app"
 )
 
-// handleRunGitCredential resolves the one credential a run's source is
-// fetched with, in a fixed order: the team's GitHub App token when an
-// installation the team holds covers the repository, else the git credential
-// the team stored for the repository's host, else a refusal that names the
-// remedy. A runner never falls back to credentials of its own.
-//
-// safety: the App token reads the run's repository and only the extra
-// repositories a team owner listed for it in the controller. Nothing the
-// runner sends, and so nothing in the fetched tree, widens it.
+// safety: Source fetches use the team's App token or host credential, never the runner's own keys.
+// The read-only App token's repository set comes from the owner, not the fetched tree.
 func (s *Server) handleRunGitCredential(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	src, ok := s.claimedRunSource(w, r, runID)
@@ -86,12 +78,8 @@ func (s *Server) handleRunGitCredential(w http.ResponseWriter, r *http.Request) 
 	s.releaseTeamGitCredential(w, r, src, identity, host, extra)
 }
 
-// safety: a team credential leaves the controller only for a runner that
-// holds a live claim on a run of the credential's team (claimedRunSource),
-// whose source is on the credential's host (the lookup is by that host), and
-// that is a cloud runner or a machine the team's owner opted in. The release
-// and its audit row are one transaction, so a deleted credential is never
-// released and none is released unrecorded.
+// safety: Only a live same-team claim on the credential's host may receive it.
+// The release and audit record commit together.
 func (s *Server) releaseTeamGitCredential(w http.ResponseWriter, r *http.Request, src claimedRunSource, identity, host string, extra []store.GitHubRepo) {
 	ctx := r.Context()
 	runID := src.trigger.ID
@@ -168,9 +156,7 @@ func (s *Server) releaseTeamGitCredential(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// receivesTeamGitCredentials reports whether the runner token prefix is a
-// cloud runner, whose claims the ledger meters, or a machine the team's owner
-// opted in.
+// safety: Cloud runner claims are metered; machines need the owner's opt-in before receiving team git credentials.
 func (s *Server) receivesTeamGitCredentials(ctx context.Context, t *store.Tenant, prefix string) (bool, error) {
 	if prefix == "" {
 		return false, nil
@@ -193,8 +179,7 @@ func noSourceCredentialRemedy(identity, host string) string {
 		"an SSH deploy key or an HTTPS token"
 }
 
-// noSourceCredentialCode is the error code a runner reads as "nothing to
-// fetch with", apart from the plain 404 of a controller without the route.
+// bug: No credential differs from a pre-route controller's plain 404.
 const noSourceCredentialCode = "no_source_credential"
 
 func writeNoSourceCredential(w http.ResponseWriter, message string) {

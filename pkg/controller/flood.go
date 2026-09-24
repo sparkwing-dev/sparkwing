@@ -91,7 +91,6 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 	return false
 }
 
-// floodRefusal is why a submission was shed and how long its sender waits.
 type floodRefusal struct {
 	status int
 	wait   time.Duration
@@ -106,8 +105,6 @@ func (f *floodRefusal) write(w http.ResponseWriter) {
 	writeRetryAfter(w, f.wait, f.msg)
 }
 
-// triggerFloodRefusal spends one run of key's hourly budget, or answers why
-// the submission is shed. A nil answer admits it.
 func (s *Server) triggerFloodRefusal(ctx context.Context, key, source string) *floodRefusal {
 	f := s.flood
 	if f == nil {

@@ -12,13 +12,10 @@ import (
 	"time"
 )
 
-// billingCheckoutTimeout bounds the call to the checkout service, which waits
-// on Stripe, so an owner's click fails in seconds rather than hanging.
+// perf: Bound the Stripe-facing checkout call so an owner click cannot hang.
 const billingCheckoutTimeout = 15 * time.Second
 
-// billingCheckout is the hosted checkout service that opens Stripe Checkout
-// Sessions. The controller names the team from the signed-in principal and
-// the service never sees a browser, so no caller-typed team reaches a payment.
+// safety: The checkout service receives the signed-in team, never a browser-supplied team.
 type billingCheckout struct {
 	url   string
 	token string
@@ -42,12 +39,9 @@ func (s *Server) WithBillingCheckout(url, token string) *Server {
 	return s
 }
 
-// errCheckoutRefused is a checkout service answer outside the success range.
 var errCheckoutRefused = errors.New("the checkout service refused the session")
 
-// checkoutSession is the payment page the checkout service opened: where to
-// send the owner, the session's id, which the paid grant names, and when
-// Stripe stops accepting payment on it.
+// safety: The paid grant names the Stripe session, which stops accepting payment at its expiry.
 type checkoutSession struct {
 	URL       string
 	ID        string

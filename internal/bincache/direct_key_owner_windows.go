@@ -2,6 +2,5 @@ package bincache
 
 import "os"
 
-// ownedByThisUser trusts the per-user temporary directory on Windows, the
-// only key root there.
+// safety: Windows has only a per-user temporary key root to trust.
 func ownedByThisUser(os.FileInfo) bool { return true }

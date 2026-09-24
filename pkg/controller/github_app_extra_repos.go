@@ -12,8 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// githubAppExtraReposJSON is a team owner's list of the further repositories
-// a run of Repository's App token also reads.
+// safety: Only the team owner may expand the App token beyond its run repository.
 type githubAppExtraReposJSON struct {
 	Repository string   `json:"repository"`
 	ExtraRepos []string `json:"extra_repos"`
@@ -86,8 +85,7 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, githubAppExtraReposJSON{Repository: strings.ToLower(repo.Slug()), ExtraRepos: saved})
 }
 
-// extraReposCovered checks that one installation the team holds covers repo
-// and every one of extras, answering the status to refuse with otherwise.
+// safety: One held installation must cover both the run repository and every extra repository.
 func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo store.GitHubRepo, extras []string) (int, error) {
 	inst, found, err := s.teamInstallationFor(ctx, t, repo)
 	if err != nil {
@@ -114,7 +112,6 @@ func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo st
 	return 0, nil
 }
 
-// ownerExtraRepos is the list a team owner set for repo, parsed.
 func ownerExtraRepos(ctx context.Context, t *store.Tenant, repo store.GitHubRepo) ([]store.GitHubRepo, error) {
 	slugs, err := t.GitHubAppExtraRepos(ctx, repo.Slug())
 	if err != nil {

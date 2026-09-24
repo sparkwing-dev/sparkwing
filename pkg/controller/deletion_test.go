@@ -22,8 +22,6 @@ type teamDeletionBody struct {
 	LastError string `json:"last_error"`
 }
 
-// storageFake stands in for the logs and cache services, recording each
-// delete it is asked for and answering with status.
 type storageFake struct {
 	mu       sync.Mutex
 	status   int
@@ -80,7 +78,6 @@ func newDeletionFixture(t *testing.T, ts controller.TeamStorage) *identityFixtur
 	return f
 }
 
-// createTeam makes a team owned by u and switches u's session to it.
 func (f *identityFixture) createTeam(u *signedIn, slug string) {
 	f.t.Helper()
 	if code := f.call("POST", "/api/v1/teams", u.auth, map[string]string{"slug": slug, "display_name": slug}, nil); code != http.StatusCreated {
@@ -103,8 +100,7 @@ func (f *identityFixture) seedRun(team store.Team, id string) {
 	}
 }
 
-// afterCacheWindow is a pass time past the window in which another replica
-// may still write through a tenant handle it cached before the request.
+// bug: A cached tenant handle may still write until this window passes.
 func afterCacheWindow() time.Time { return time.Now().Add(5 * time.Minute) }
 
 func TestDeleteTeamClosesItAtOnceAndThePassRemovesItsStorage(t *testing.T) {
@@ -314,7 +310,6 @@ func TestOperatorDeletesAnAccountByEmailAndATeamBySlug(t *testing.T) {
 	}
 }
 
-// mailFake records what the controller asked it to send.
 type mailFake struct {
 	mu   sync.Mutex
 	sent []mailer.Message

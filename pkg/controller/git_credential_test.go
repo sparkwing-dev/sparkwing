@@ -28,8 +28,6 @@ func (f *appFixture) gitCredential(auth, runID string) (gitCredentialAnswer, int
 	return out, code
 }
 
-// runWork creates a run of owner's team from repoURL with one ready node,
-// and returns a fresh runner token of the team holding the node's claim.
 func (f *appFixture) runWork(owner signedIn, runID, repoURL string) (auth, prefix string) {
 	f.t.Helper()
 	ctx := context.Background()

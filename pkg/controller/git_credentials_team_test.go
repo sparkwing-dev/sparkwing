@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-// credFixture is an appFixture whose controller seals secrets and reads a
-// fixed ssh host key instead of dialing a host.
 type credFixture struct {
 	*appFixture
 	hostKey ssh.PublicKey
@@ -74,8 +72,6 @@ func (f *credFixture) put(who signedIn, body map[string]any) (controller.GitCred
 	return out, code
 }
 
-// cloudRun is a run of owner's team from repoURL, claimed by a cloud runner:
-// one whose token the operator meters.
 func (f *credFixture) cloudRun(owner signedIn, runID, repoURL string) string {
 	f.t.Helper()
 	auth, prefix := f.runWork(owner, runID, repoURL)
