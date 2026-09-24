@@ -15,6 +15,8 @@ after a Go change, `bash bin/install.sh && bash bin/dev-restart.sh`.
 Pages live under `src/app/` -- the dashboard home is `src/app/page.tsx`,
 with sibling routes for runs, queue, cluster, analytics and the docs guide.
 Shared UI is in `src/components/`. Edits hot-reload.
+Home shows a short setup guide while fewer than five runs are in its overview
+window. Its empty attention state links to Runs.
 On the runs Activity view, closing a detail pane keeps the run list compact
 until the pane finishes expanding, so row heights stay steady.
 

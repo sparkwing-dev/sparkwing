@@ -705,10 +705,13 @@ test("renders the empty production dashboard and passes accessibility smoke", as
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Setup docs" })).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(page.getByText("No completed deploys yet.")).toBeVisible();
   await expect(
-    page.getByText("Nothing needs attention. Services healthy, no pending approvals."),
+    page.getByText("Everything looks good here."),
   ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Browse runs" })).toHaveCount(2);
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa"])

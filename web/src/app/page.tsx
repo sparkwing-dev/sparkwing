@@ -133,6 +133,8 @@ export default function Home() {
             />
           </div>
 
+          {runs.length < 5 && <GettingStarted />}
+
           <NeedsAttention
             approvals={approvals}
             degraded={degraded}
@@ -376,6 +378,25 @@ function LastDeployCard({ run }: { run: Run | null }) {
   );
 }
 
+function GettingStarted() {
+  return (
+    <section className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h2 className="text-sm font-semibold">Get started</h2>
+      <ol className="mt-2 list-decimal list-inside space-y-1 text-sm text-[var(--muted)]">
+        <li>Add a pipeline to your repository.</li>
+        <li>Trigger a run.</li>
+        <li>Follow its result in Runs.</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-indigo-300">
+        <a href="https://sparkwing.dev/docs/" target="_blank" rel="noopener noreferrer" className="hover:underline">
+          Setup docs ↗
+        </a>
+        <Link href="/runs" className="hover:underline">Browse runs →</Link>
+      </div>
+    </section>
+  );
+}
+
 function NeedsAttention({
   approvals,
   degraded,
@@ -403,11 +424,14 @@ function NeedsAttention({
       </div>
       {nothing ? (
         <Panel>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-400" />
-            <span className="text-sm">
-              No service issues or pending approvals.
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-sm">
+              <span className="w-2 h-2 rounded-full bg-green-400" />
+              Everything looks good here.
             </span>
+            <Link href="/runs" className="text-sm text-indigo-300 hover:underline">
+              Browse runs →
+            </Link>
           </div>
         </Panel>
       ) : (
