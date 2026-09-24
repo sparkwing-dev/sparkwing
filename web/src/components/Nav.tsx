@@ -23,6 +23,12 @@ const tabs: Tab[] = [
 ];
 
 const teamTab: Tab = { href: "/team", label: "Team" };
+const cloudTabs: Tab[] = [
+  { href: "/", label: "Home" },
+  { href: "/runs", label: "Runs" },
+  { href: "/cluster", label: "Compute" },
+  { href: "/crons", label: "Crons" },
+];
 
 const APPROVALS_POLL_MS = 10_000;
 
@@ -33,14 +39,12 @@ export default function Nav() {
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
   const team = useTeamState();
-  const admissionTabs =
+  const visibleTabs =
     team.status === "single-team"
       ? tabs
-      : tabs.filter((tab) => tab.href !== "/queue" && tab.href !== "/capacity");
-  const visibleTabs =
-    team.status === "ready"
-      ? [...admissionTabs.slice(0, -1), teamTab, admissionTabs[admissionTabs.length - 1]]
-      : admissionTabs;
+      : team.status === "ready"
+        ? [...cloudTabs, teamTab]
+        : cloudTabs;
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +61,7 @@ export default function Nav() {
   }, []);
 
   return (
-    <div className="flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
+    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
       <Link
         href="/"
         prefetch={false}
@@ -70,14 +74,14 @@ export default function Nav() {
       </Link>
       <VersionPill />
       <TeamSwitcher />
-      <div className="flex items-center gap-1 flex-1 ml-4">
+      <div className="order-last sm:order-none flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0 overflow-x-auto ml-0 sm:ml-4 whitespace-nowrap">
         {visibleTabs.map((tab) => {
           const active = tab.external
             ? false
             : tab.href === "/"
               ? pathname === "/"
               : pathname.startsWith(tab.href);
-          const className = `px-3 py-2 text-sm border-b-2 transition-colors ${
+          const className = `shrink-0 px-3 py-2 text-sm border-b-2 transition-colors ${
             active
               ? "border-[var(--accent)] text-[var(--foreground)]"
               : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"

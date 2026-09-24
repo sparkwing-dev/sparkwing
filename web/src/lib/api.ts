@@ -335,6 +335,17 @@ export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
   return body.runs || [];
 }
 
+export interface ControllerQueueState {
+  resources?: Array<{ key: string; capacity: number; held: number }>;
+  holders?: Array<{ run_id: string }>;
+  waiters?: Array<{ run_id: string; position: number }>;
+}
+
+export async function getControllerQueueState(): Promise<ControllerQueueState | null> {
+  const res = await authFetch(`${API_URL}/api/v1/queue/state`, { cache: "no-store" }).catch(() => null);
+  return res?.ok ? res.json() : null;
+}
+
 export async function getRunAttempts(runID: string): Promise<Run[]> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/attempts`, {
     cache: "no-store",

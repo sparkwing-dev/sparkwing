@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   type Agent,
+  type ControllerQueueState,
   type ServiceStatus,
   getAgents,
+  getControllerQueueState,
   getServiceHealth,
 } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
@@ -87,15 +89,17 @@ function typeBadge(kind: string): { label: string; cls: string } {
 export default function ClusterPage() {
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [queue, setQueue] = useState<ControllerQueueState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [expandedAgent, setExpandedAgent] = useState<Record<string, boolean>>(
     {},
   );
 
   const refresh = useCallback(async () => {
-    const [svc, ag] = await Promise.all([getServiceHealth(), getAgents()]);
+    const [svc, ag, qs] = await Promise.all([getServiceHealth(), getAgents(), getControllerQueueState()]);
     setServices(svc);
     setAgents(ag);
+    setQueue(qs);
     setLoaded(true);
   }, []);
 
@@ -139,7 +143,7 @@ export default function ClusterPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
       <div className="flex items-baseline justify-between mb-4">
-        <h1 className="text-xl font-bold">Fleet</h1>
+        <h1 className="text-xl font-bold">Compute</h1>
         <span className="text-[10px] font-mono text-[var(--muted)]">
           refresh every {POLL_MS / 1000}s
         </span>
@@ -151,6 +155,13 @@ export default function ClusterPage() {
         fleet={fleetTotals.total}
         busy={fleetTotals.busy}
       />
+
+      <div className="mb-4 flex flex-wrap gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
+        <span>Queued nodes <strong>{queue?.waiters?.length ?? "—"}</strong></span>
+        <span>Running nodes <strong>{queue?.holders?.length ?? "—"}</strong></span>
+        <span>Active slots <strong>{fleetTotals.activeSlots ?? "—"}</strong></span>
+        <Link href="/runs" className="text-[var(--accent)] hover:underline">View runs</Link>
+      </div>
 
       {recentRunFailures.length > 0 && (
         <section className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4 text-sm">
