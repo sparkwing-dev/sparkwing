@@ -263,6 +263,7 @@ var tenantTables = []string{
 	"runs",
 	"secrets",
 	"sessions",
+	"storage_commit_receipts",
 	"storage_month_usage",
 	"storage_quotas",
 	"storage_reservations",
@@ -283,7 +284,7 @@ var keyedAtCreation = []string{
 	"credit_checkouts", "credit_freezes", "free_slots", "git_credential_machines", "git_credential_releases",
 	"git_credentials", "github_app_extra_repos", "github_app_installations", "github_app_triggers",
 	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
-	"storage_reservations", "team_download_day", "team_storage",
+	"storage_commit_receipts", "storage_reservations", "team_download_day", "team_storage",
 	"uploads", "data_objects",
 	"team_build_trust",
 }

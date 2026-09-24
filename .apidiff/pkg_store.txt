@@ -1968,6 +1968,7 @@ func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (in
 func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
+func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)

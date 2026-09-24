@@ -83,6 +83,9 @@ func (s *Server) maintainStorage(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
+		s.logger.Error("prune storage commit receipts failed", "err", err)
+	}
 	if settings.RetentionOn() {
 		swept, serr := s.store.SweepRetention(ctx, now)
 		switch {

@@ -16,8 +16,9 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneExpiredUploads":      "the hourly storage pass releases expired pending uploads for every team",
+	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
+	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
+	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
 	"(*Store).PruneExpiredCacheObjects": "the controller's leased hourly storage pass deletes expired cache rows " +
 		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +

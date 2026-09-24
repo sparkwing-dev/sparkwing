@@ -27,6 +27,7 @@ type Client struct {
 }
 func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) error
 func (c *Client) DeleteRun(ctx context.Context, runID string) error
+func (c *Client) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error)
 func (c *Client) Read(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadFilter) ([]byte, error)
 func (c *Client) ReadRun(ctx context.Context, runID string) ([]byte, error)
@@ -63,6 +64,10 @@ var ErrSealRefused = errors.New("logs seal refused")
 type Gap struct {
 	From int64
 	To   int64
+}
+type GrepLine struct {
+	LineNo int
+	Line   string
 }
 type Limits struct {
 	MaxNodeBytes int64

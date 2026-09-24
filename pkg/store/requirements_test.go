@@ -235,6 +235,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"executor-offer-arbitration-v1",
 		"github-app-cron-identity-v1",
 		"pipeline-scoped-secrets",
+		"storage-commit-receipts-v1",
 		"team-scoped-user-keys",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
@@ -286,6 +287,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"pipeline-scoped-secrets",
 		"repo-scoped-secrets",
 		"session-token-digest",
+		"storage-commit-receipts-v1",
 		"team-scoped-user-keys",
 		"unique-token-prefix",
 	}
