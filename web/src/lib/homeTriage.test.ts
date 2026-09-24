@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Run } from "./api";
-import { latestFailedPipelines } from "./homeTriage";
+import { latestFailedPipelines, recentPipelineTriage } from "./homeTriage";
 
 function run(id: string, repo: string, branch: string, status: string, minute: number): Run {
   return {
@@ -11,6 +11,22 @@ function run(id: string, repo: string, branch: string, status: string, minute: n
 }
 
 describe("Home latest failed pipelines", () => {
+  it("shows a recovery only when the previous finished result failed", () => {
+    const rows = [
+      run("old-green", "owner/app", "main", "success", 1),
+      run("red", "app", "main", "failed", 2),
+      run("green", "owner/app", "main", "success", 3),
+      run("retry", "owner/app", "main", "running", 4),
+      run("cancelled", "owner/app", "main", "cancelled", 5),
+      run("feature-red", "owner/app", "feature/demo", "failed", 6),
+      run("feature-green", "owner/app", "feature/demo", "success", 7),
+      run("steady-green", "owner/other", "main", "success", 8),
+    ];
+    assert.deepEqual(recentPipelineTriage(rows, false).recovered.map((r) => r.latest.id), ["green"]);
+    assert.deepEqual(recentPipelineTriage(rows, true).recovered.map((r) => r.latest.id), ["feature-green", "green"]);
+    assert.deepEqual(recentPipelineTriage([...rows, run("newer-green", "owner/app", "main", "success", 9)], false).recovered, []);
+  });
+
   it("clears a default-branch failure after a newer success and joins a unique repo alias", () => {
     const rows = [
       run("red", "product", "main", "failed", 1),

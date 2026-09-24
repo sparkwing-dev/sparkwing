@@ -1,6 +1,6 @@
 import type { Run } from "./api";
 
-export interface FailedPipeline {
+export interface PipelineTriage {
   key: string;
   repo: string;
   pipeline: string;
@@ -30,10 +30,10 @@ function repoIdentity(run: Run): string {
   return `${host || "github.com"}/${path}`;
 }
 
-export function latestFailedPipelines(
+export function recentPipelineTriage(
   runs: Run[],
   includeFeatureBranches: boolean,
-): FailedPipeline[] {
+): { failed: PipelineTriage[]; recovered: PipelineTriage[] } {
   const fullByShort = new Map<string, Set<string>>();
   for (const run of runs) {
     const repo = repoIdentity(run);
@@ -44,7 +44,7 @@ export function latestFailedPipelines(
     fullByShort.set(short, full);
   }
 
-  const groups = new Map<string, FailedPipeline>();
+  const groups = new Map<string, PipelineTriage>();
   for (const run of runs) {
     const branch = run.git_branch || "";
     const defaultBranch = branch === "main" || branch === "master";
@@ -66,14 +66,23 @@ export function latestFailedPipelines(
       });
     }
   }
-  return [...groups.values()]
+  const sorted = [...groups.values()]
     .map((group) => {
       group.runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
-      group.latest = group.runs.find((run) =>
-        run.status === "success" || run.status === "failed",
-      ) || group.runs[0];
+      group.latest = group.runs.find((run) => run.status === "success" || run.status === "failed") || group.runs[0];
       return group;
     })
-    .filter((group) => group.latest.status === "failed")
     .sort((a, b) => Date.parse(b.latest.started_at) - Date.parse(a.latest.started_at));
+  return {
+    failed: sorted.filter((group) => group.latest.status === "failed"),
+    recovered: sorted.filter((group) => {
+      if (group.latest.status !== "success") return false;
+      const completed = group.runs.filter((run) => run.status === "success" || run.status === "failed");
+      return completed[1]?.status === "failed";
+    }),
+  };
+}
+
+export function latestFailedPipelines(runs: Run[], includeFeatureBranches: boolean): PipelineTriage[] {
+  return recentPipelineTriage(runs, includeFeatureBranches).failed;
 }

@@ -28,7 +28,7 @@ import {
 } from "@/lib/timeFormat";
 import Tooltip from "@/components/Tooltip";
 import { Sparkline } from "@/components/PipelineOverview";
-import { latestFailedPipelines } from "@/lib/homeTriage";
+import { recentPipelineTriage } from "@/lib/homeTriage";
 
 const POLL_MS = 15000;
 const OVERVIEW_RUN_LIMIT = 1000;
@@ -90,8 +90,8 @@ export default function Home() {
     [runs],
   );
 
-  const failedPipelines = useMemo(
-    () => latestFailedPipelines(runs, includeFeatureBranches),
+  const { failed: failedPipelines, recovered: recoveredPipelines } = useMemo(
+    () => recentPipelineTriage(runs, includeFeatureBranches),
     [runs, includeFeatureBranches],
   );
 
@@ -138,10 +138,17 @@ export default function Home() {
             />
           </div>
 
+          <NeedsAttention
+            approvals={approvals}
+            degraded={degraded}
+            runWarnings={runWarnings}
+            running={running.length}
+          />
+
           <section className="mb-5">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
-                Latest failed pipelines
+                Recently Failed Pipelines <span className="font-normal normal-case tracking-normal">({includeFeatureBranches ? "all branches" : "default branch"})</span>
               </h2>
               <label className="flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer">
                 <input
@@ -150,14 +157,11 @@ export default function Home() {
                   onChange={(event) => setIncludeFeatureBranches(event.target.checked)}
                   className="accent-violet-500"
                 />
-                Include feature branches
+                All branches
               </label>
             </div>
-            <p className="mb-2 text-[11px] text-[var(--muted)]">
-              Latest main/master run per repository and pipeline in recent history.
-            </p>
             {failedPipelines.length === 0 ? (
-              <Panel><span className="text-sm text-[var(--muted)]">No latest runs failed in this window.</span></Panel>
+              <Panel><span className="text-sm text-[var(--muted)]">No recently failed pipelines.</span></Panel>
             ) : (
               <div className="space-y-2">
                 {failedPipelines.map(({ key, repo, pipeline, branch, latest, runs: history }) => (
@@ -185,14 +189,36 @@ export default function Home() {
             )}
           </section>
 
-          <LastDeployCard run={overview.lastDeploy} />
+          <details className="mb-5 group">
+            <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--muted)] mb-2">
+              <h2 className="inline">Recently Recovered Pipelines <span className="font-normal normal-case tracking-normal">({includeFeatureBranches ? "all branches" : "default branch"})</span></h2>
+              <span className="ml-2 font-mono font-normal">{recoveredPipelines.length}</span>
+            </summary>
+            {recoveredPipelines.length === 0 ? (
+              <Panel><span className="text-sm text-[var(--muted)]">No recently recovered pipelines.</span></Panel>
+            ) : (
+              <div className="space-y-2">
+                {recoveredPipelines.map(({ key, repo, pipeline, branch, latest, runs: history }) => (
+                  <Link
+                    key={key}
+                    href={`/runs?run=${encodeURIComponent(latest.id)}`}
+                    className="block rounded-lg border border-green-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
+                  >
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
+                        {repo.replace(/^github\.com\//, "")} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      </span>
+                      <Sparkline runs={history.slice(0, 30)} />
+                      <span className="text-[11px] font-mono text-green-400">passed</span>
+                      <span className="text-[11px] font-mono text-[var(--muted)]">{fmtAgo(latest.started_at)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </details>
 
-          <NeedsAttention
-            approvals={approvals}
-            degraded={degraded}
-            runWarnings={runWarnings}
-            running={running.length}
-          />
+          <LastDeployCard run={overview.lastDeploy} />
         </>
       )}
     </div>

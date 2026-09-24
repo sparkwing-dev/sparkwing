@@ -66,11 +66,17 @@ test("Home shows the latest default-branch failure and optional feature failures
     ],
   });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Latest failed pipelines" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Needs attention" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recently Failed Pipelines (default branch)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recently Recovered Pipelines (default branch)" })).toBeVisible();
+  await expect(page.locator('a[href="/runs?run=new-green"]')).toBeHidden();
+  await page.getByText("Recently Recovered Pipelines (default branch)").click();
+  await expect(page.locator('a[href="/runs?run=new-green"]')).toBeVisible();
   await expect(page.getByText("current failure reason")).toBeVisible();
   await expect(page.getByText("old failure")).toHaveCount(0);
   await expect(page.getByText("feature failure reason")).toHaveCount(0);
-  await page.getByRole("checkbox", { name: "Include feature branches" }).check();
+  await page.getByRole("checkbox", { name: "All branches" }).check();
+  await expect(page.getByRole("heading", { name: "Recently Failed Pipelines (all branches)" })).toBeVisible();
   await expect(page.getByText("feature failure reason")).toBeVisible();
 });
 
