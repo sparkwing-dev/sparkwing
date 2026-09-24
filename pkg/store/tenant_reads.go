@@ -57,8 +57,8 @@ SELECT run_id, status, claimed_by, claim_token_prefix,
 		}
 		if started > 0 {
 			claim.StartedAt = time.Unix(0, started)
+			claim.LastSeen = claim.StartedAt
 		}
-		claim.LastSeen = time.Unix(0, max(started, expires))
 		out = append(out, claim)
 	}
 	return out, rows.Err()

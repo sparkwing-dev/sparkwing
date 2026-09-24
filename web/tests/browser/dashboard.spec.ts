@@ -1662,7 +1662,7 @@ test("separates fleet policy, observations, and current activity", async ({
         last_seen: new Date().toISOString(),
         status: "idle",
         active_jobs: [],
-        max_concurrent: 0,
+        max_concurrent: 2,
       },
     ],
   });
@@ -1680,6 +1680,7 @@ test("separates fleet policy, observations, and current activity", async ({
   await expect(configured.getByText("20 (ceiling 80)")).toBeVisible();
   await expect(observed.getByText("3 cores / 6.0 GiB")).toBeVisible();
   await expect(observed.getByText("headroom observed", { exact: true })).toBeVisible();
+  await expect(observed.getByText("last heartbeat", { exact: true })).toBeVisible();
   await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
   await expect(activity.getByText("2", { exact: true })).toBeVisible();
   await expect(
@@ -1687,6 +1688,8 @@ test("separates fleet policy, observations, and current activity", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: /old-pool/ }).click();
+  const legacyObserved = page.getByRole("button", { name: /old-pool/ }).locator("..").getByRole("region", { name: "Observed liveness" });
+  await expect(legacyObserved.getByText("last observed", { exact: true })).toBeVisible();
   await expect(
     page.getByText(
       "Configuration unavailable. This executor was inferred from recent activity.",

@@ -246,11 +246,15 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 		h, ok := byHolder[key]
 		if !ok {
+			lastSeenNs := int64(0)
+			if !claim.LastSeen.IsZero() {
+				lastSeenNs = claim.LastSeen.UnixNano()
+			}
 			h = &holderInfo{
 				name:        name,
 				kind:        kind,
 				tokenPrefix: claim.TokenPrefix,
-				lastSeenNs:  claim.LastSeen.UnixNano(),
+				lastSeenNs:  lastSeenNs,
 				activeRuns:  map[string]struct{}{},
 			}
 			byHolder[key] = h
@@ -258,8 +262,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		if claim.TokenPrefix != h.tokenPrefix {
 			continue
 		}
-		if seen := claim.LastSeen.UnixNano(); seen > h.lastSeenNs {
-			h.lastSeenNs = seen
+		if !claim.LastSeen.IsZero() {
+			if seen := claim.LastSeen.UnixNano(); seen > h.lastSeenNs {
+				h.lastSeenNs = seen
+			}
 		}
 		if claim.Status != "done" {
 			h.activeRuns[claim.RunID] = struct{}{}
@@ -281,10 +287,12 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			Type:          h.kind,
 			Location:      "unknown",
 			Labels:        map[string]string{},
-			LastSeen:      time.Unix(0, h.lastSeenNs).UTC().Format(time.RFC3339),
 			Status:        status,
 			ActiveJobs:    active,
 			MaxConcurrent: 0,
+		}
+		if h.lastSeenNs > 0 {
+			agent.LastSeen = time.Unix(0, h.lastSeenNs).UTC().Format(time.RFC3339)
 		}
 		if presence, ok := s.runnerPresence.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Capabilities = presence.Labels

@@ -29,7 +29,8 @@ describe("fleet presentation", () => {
   });
 
   it("separates registered policy from legacy activity", () => {
-    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "registered");
+    assert.equal(fleetRegistration(agent({ active_slots: 0, max_concurrent: 2 })), "registered");
+    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "legacy");
     assert.equal(fleetRegistration(agent({ max_concurrent: 0 })), "legacy");
   });
 

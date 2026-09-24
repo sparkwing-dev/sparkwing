@@ -1011,6 +1011,7 @@ type LegacyAgentClaim struct {
 	Status      string
 	ClaimedBy   string
 	TokenPrefix string
+	StartedAt   time.Time
 	LastSeen    time.Time
 }
 const LogsDeleteScope = "logs.delete"

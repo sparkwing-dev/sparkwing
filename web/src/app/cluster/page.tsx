@@ -555,7 +555,7 @@ function AgentRow({
             <div className="grid grid-cols-2 gap-3">
               <KV label="status" value={agent.status || "unknown"} />
               <KV
-                label="last heartbeat"
+                label={registration === "legacy" ? "last observed" : "last heartbeat"}
                 value={relativeTime(agent.last_seen)}
               />
               <KV

@@ -242,6 +242,10 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	if len(takeover.ActiveJobs) != 1 || takeover.ActiveJobs[0] != "run-b" {
 		t.Fatalf("latest credential's active runs = %v, want only run-b", takeover.ActiveJobs)
 	}
+	claimedSeen, err := time.Parse(time.RFC3339, takeover.LastSeen)
+	if err != nil || claimedSeen.After(time.Now()) {
+		t.Fatalf("claim observed in the future: %q, %v", takeover.LastSeen, err)
+	}
 	first, err := st.GetNode(ctx, "run-a", "work")
 	if err != nil {
 		t.Fatal(err)
@@ -258,6 +262,10 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	renewed := list()
 	if len(renewed.ActiveJobs) != 1 || renewed.ActiveJobs[0] != "run-b" {
 		t.Fatalf("older credential's lease renewal changed display owner: %v", renewed.ActiveJobs)
+	}
+	renewedSeen, err := time.Parse(time.RFC3339, renewed.LastSeen)
+	if err != nil || renewedSeen.After(time.Now()) {
+		t.Fatalf("heartbeat observed in the future: %q, %v", renewed.LastSeen, err)
 	}
 }
 
