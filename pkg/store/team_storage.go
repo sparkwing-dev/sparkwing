@@ -532,7 +532,7 @@ ON CONFLICT (team, store) DO NOTHING`, string(team), string(kind), now.UnixNano(
 		return err
 	}
 	for team, total := range committed {
-		used := max(listed[team]+total-marks[team], 0)
+		used := max(listed[team]+max(total-marks[team], 0), 0)
 		if _, err := tx.ExecContext(ctx, `
 UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE team = ? AND store = ?`,
 			used, now.UnixNano(), now.UnixNano(), string(team), string(kind)); err != nil {

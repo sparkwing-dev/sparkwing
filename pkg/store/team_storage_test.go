@@ -310,6 +310,37 @@ func TestCommitOfAShrinkingOverwriteNeverGoesNegative(t *testing.T) {
 	}
 }
 
+func TestShrinkingOverwriteSeenDuringListingKeepsListedBytes(t *testing.T) {
+	st := storetest.Open(t)
+	freeTeam(t, st, "team-a")
+	ctx := context.Background()
+	now := time.Now()
+	first, err := reserve(st, "team-a", store.StorageCache, 100, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitStorage(ctx, store.StorageCommit{ID: first.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 100, Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	marks, err := st.StorageMarks(ctx, store.StorageCache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwrite, err := reserve(st, "team-a", store.StorageCache, 20, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitStorage(ctx, store.StorageCommit{ID: overwrite.ID, Team: "team-a", Kind: store.StorageCache, Bytes: -80, Now: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReconcileStorage(ctx, store.StorageCache, map[store.Team]int64{"team-a": 20}, marks, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageCache).UsedBytes; got != 20 {
+		t.Fatalf("listed shrink used %d bytes, want 20", got)
+	}
+}
+
 // A commit is scoped to the team that names it: another team's reservation
 // id drops nothing of that team's and counts only for the committer.
 func TestCommitNamingAnotherTeamsReservationTouchesOnlyTheCommitter(t *testing.T) {
