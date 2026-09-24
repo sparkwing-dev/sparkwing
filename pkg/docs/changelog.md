@@ -916,7 +916,7 @@ unlock.
 
 - **jev-lint:** Root-confined reads keep symlinked Go files and changed paths
   from adding source outside the checkout to a TypeSafe request. A changed
-  symlink now fails before any request is made.
+  symlink or path swap now fails before any request is made.
 
 - **controller:** Run completion accepts only `success`, `failed`, or
   `cancelled`. An identical retry keeps the original finish time; a

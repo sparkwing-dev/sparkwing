@@ -127,6 +127,53 @@ func TestJevLintReadStaysInsideCheckoutAcrossParentSymlinks(t *testing.T) {
 	}
 }
 
+func TestJevLintReadRefusesPathSwapsAfterCheck(t *testing.T) {
+	for _, name := range []string{"parent", "file"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, dir := range []string{"path", "decoy"} {
+				if err := os.Mkdir(filepath.Join(root, dir), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for path, body := range map[string]string{
+				"path/asset.go":   "package safe\n",
+				"path/private.go": "package private\n",
+				"decoy/asset.go":  "package private\n",
+			} {
+				if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink("decoy", filepath.Join(root, "symlink-probe")); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+			afterCheck := func(component string) {
+				switch {
+				case name == "parent" && component == "path":
+					if err := os.Rename(filepath.Join(root, "path"), filepath.Join(root, "saved-path")); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink("decoy", filepath.Join(root, "path")); err != nil {
+						t.Fatal(err)
+					}
+				case name == "file" && component == filepath.Join("path", "asset.go"):
+					if err := os.Rename(filepath.Join(root, "path", "asset.go"), filepath.Join(root, "path", "saved.go")); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Symlink("private.go", filepath.Join(root, "path", "asset.go")); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			body, err := readJevLintFileWithHook(root, filepath.Join("path", "asset.go"), afterCheck)
+			if err == nil || strings.Contains(string(body), "package private") {
+				t.Fatalf("source changed after check: error=%v", err)
+			}
+		})
+	}
+}
+
 func TestJevLintInvariantConfigRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	private := filepath.Join(t.TempDir(), "private.yaml")

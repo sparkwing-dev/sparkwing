@@ -671,6 +671,10 @@ func setJevLintModule(functions []jevLintFunction, module string) {
 // safety: Jev sends source to an external service, so a checkout path must
 // neither follow a symlink nor escape its root between the check and read.
 func readJevLintFile(root, relative string) (_ []byte, err error) {
+	return readJevLintFileWithHook(root, relative, nil)
+}
+
+func readJevLintFileWithHook(root, relative string, afterCheck func(string)) (_ []byte, err error) {
 	if relative == "" || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
 		return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
 	}
@@ -678,30 +682,72 @@ func readJevLintFile(root, relative string) (_ []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+	roots := []*os.Root{dir}
 	defer func() {
-		if closeErr := dir.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
+		for i := len(roots) - 1; i >= 0; i-- {
+			if closeErr := roots[i].Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 		}
 	}()
 	parts := strings.Split(filepath.ToSlash(relative), "/")
-	current := ""
+	current, checkedPath := dir, ""
 	for i, part := range parts {
 		if part == "" || part == "." || part == ".." {
 			return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
 		}
-		current = filepath.Join(current, part)
-		info, err := dir.Lstat(current)
+		checkedPath = filepath.Join(checkedPath, part)
+		info, err := current.Lstat(part)
 		if err != nil {
 			return nil, err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("jev-lint: symlink in checkout path %q", relative)
 		}
-		if i == len(parts)-1 && !info.Mode().IsRegular() {
+		if afterCheck != nil {
+			afterCheck(checkedPath)
+		}
+		if i < len(parts)-1 {
+			if !info.IsDir() {
+				return nil, fmt.Errorf("jev-lint: checkout path %q has a non-directory parent", relative)
+			}
+			child, err := current.OpenRoot(part)
+			if err != nil {
+				return nil, err
+			}
+			roots = append(roots, child)
+			opened, err := child.Stat(".")
+			if err != nil {
+				return nil, err
+			}
+			if !os.SameFile(info, opened) {
+				return nil, fmt.Errorf("jev-lint: checkout path %q changed during read", relative)
+			}
+			current = child
+			continue
+		}
+		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("jev-lint: checkout path %q is not a regular file", relative)
 		}
+		file, err := current.Open(part)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
+		}()
+		opened, err := file.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if !os.SameFile(info, opened) {
+			return nil, fmt.Errorf("jev-lint: checkout path %q changed during read", relative)
+		}
+		return io.ReadAll(file)
 	}
-	return dir.ReadFile(relative)
+	return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
 }
 
 func collectCurrentGoFunctions(root string, moduleDirs []string) ([]jevLintFunction, error) {
