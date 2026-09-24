@@ -3598,6 +3598,9 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) 
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
 	}
+	if r.FinishedAt != nil && !isTerminalRunStatus(r.Status) {
+		return fmt.Errorf("%w: a non-terminal run cannot have finished_at", ErrInvalidInput)
+	}
 	if err := s.assertRunMutationFenceTx(ctx, tx, team, r.ID); err != nil {
 		return err
 	}
@@ -3672,7 +3675,7 @@ ON CONFLICT(id) DO UPDATE SET
     invocation_json   = excluded.invocation_json,
     last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
-WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`'`,
+WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND runs.finished_at IS NULL`,
 		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
@@ -3725,7 +3728,42 @@ func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, err
 const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ?`
+ WHERE id = ? AND NOT (` + runTerminalIn + `)`
+
+func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg string, team Team) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
+	stmt := finishRunStmt
+	args := []any{status, errMsg, time.Now().UnixNano(), runID}
+	lookup := `SELECT status, error FROM runs WHERE id = ?`
+	lookupArgs := []any{runID}
+	if team != "" {
+		stmt += ` AND team = ?`
+		args = append(args, string(team))
+		lookup += ` AND team = ?`
+		lookupArgs = append(lookupArgs, string(team))
+	}
+	res, err := tx.ExecContext(ctx, stmt, args...)
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed != 0 {
+		return err
+	}
+	var priorStatus, priorError string
+	err = tx.QueryRowContext(ctx, lookup, lookupArgs...).Scan(&priorStatus, &priorError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if priorStatus == status && priorError == errMsg {
+		return nil
+	}
+	return fmt.Errorf("%w: run %s already finished as %s", ErrInvalidInput, runID, priorStatus)
+}
 
 // FinishRun marks a run terminal with the given status and optional error.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
@@ -3737,8 +3775,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, DefaultTeam); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3748,6 +3785,9 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
 func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
 	if len(runIDs) == 0 {
 		return nil
 	}
@@ -6988,6 +7028,9 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
+	if !isTerminalRunStatus(status) {
+		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
@@ -7007,8 +7050,7 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 		return false, nil
 	}
 
-	if _, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, ""); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

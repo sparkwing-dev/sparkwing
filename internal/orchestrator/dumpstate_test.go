@@ -58,7 +58,7 @@ func TestDumpRunState_RoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.FinishRun(ctx, runID, "succeeded", "non-fatal warning"); err != nil {
+	if err := st.FinishRun(ctx, runID, "success", "non-fatal warning"); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 	if err := st.TouchRunHeartbeat(ctx, runID); err != nil {

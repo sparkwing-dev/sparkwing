@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -101,5 +102,41 @@ func TestAPendingRunStampedTerminalCarriesAFinishTime(t *testing.T) {
 	if run.FinishedAt == nil {
 		t.Fatal("a pending run moved to a terminal status carries no finish time; this is the path " +
 			"a dispatch failure takes, so the claim it belongs to is never closed out")
+	}
+}
+
+func TestCreateRunDoesNotReopenAnAlreadyFinishedPendingRow(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	ended := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "legacy-pending-finish", Pipeline: "p", Status: "pending", StartedAt: ended,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx,
+		storetest.Rebind(s, `UPDATE runs SET finished_at = ? WHERE id = ?`),
+		ended.UnixNano(), "legacy-pending-finish"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "legacy-pending-finish", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.GetRun(ctx, "legacy-pending-finish")
+	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
+		t.Fatalf("finished pending row reopened: %+v, %v", run, err)
+	}
+}
+
+func TestCreateRunRejectsFinishedAtOnNonTerminalRow(t *testing.T) {
+	s := storetest.Open(t)
+	ended := time.Now()
+	err := s.CreateRun(t.Context(), store.Run{
+		ID: "bad-finished-pending", Pipeline: "p", Status: "pending", StartedAt: ended, FinishedAt: &ended,
+	})
+	if !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("finished pending create = %v, want invalid input", err)
 	}
 }

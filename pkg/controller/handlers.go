@@ -153,6 +153,10 @@ func (s *Server) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
+		if errors.Is(err, store.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		if errors.Is(err, store.ErrSecretInputHash) {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -229,6 +233,10 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	if err := tenant.FinishRun(r.Context(), runID, body.Status, body.Error); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
+			return
+		}
+		if errors.Is(err, store.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
