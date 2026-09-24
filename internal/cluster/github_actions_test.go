@@ -165,7 +165,7 @@ func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
 			t.Fatal("the claimed node never started")
 		}
 		heldAt := time.Now()
-		held, stopHeld := context.WithTimeout(ctx, 2*cfg.IdleExit)
+		held, stopHeld := context.WithTimeout(ctx, 3*cfg.IdleExit)
 		defer stopHeld()
 		<-held.Done()
 		synctest.Wait()
@@ -181,7 +181,7 @@ func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
 		for len(polling) > 0 {
 			latestPoll = <-polling
 		}
-		if latestPoll.Before(heldAt.Add(cfg.IdleExit)) {
+		if !latestPoll.After(heldAt.Add(2 * cfg.IdleExit)) {
 			t.Fatal("the loop stopped polling before the held node passed idle exit")
 		}
 		releaseNode()

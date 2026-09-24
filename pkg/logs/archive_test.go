@@ -633,6 +633,8 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 	}()
 	want := func(text string) {
 		t.Helper()
+		lineCtx, stopLine := context.WithTimeout(ctx, time.Second)
+		defer stopLine()
 		for {
 			select {
 			case l, ok := <-lines:
@@ -642,8 +644,8 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 				if l == text {
 					return
 				}
-			case <-ctx.Done():
-				t.Fatalf("stream did not deliver %q: %v", text, ctx.Err())
+			case <-lineCtx.Done():
+				t.Fatalf("stream did not deliver %q: %v", text, lineCtx.Err())
 			}
 		}
 	}
