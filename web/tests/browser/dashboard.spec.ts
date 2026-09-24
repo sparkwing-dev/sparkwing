@@ -968,6 +968,25 @@ test("shows an empty DAG canvas with the error for a run that never planned", as
   await expect(empty).toContainText("daemon build differs from this client");
 });
 
+test("explains a historical trigger that ended before dispatch", async ({ page }) => {
+  const failed = {
+    ...finishedRun,
+    status: "failed",
+    error: "reaped: trigger consumer finished without dispatching the pipeline",
+  };
+  await installMockAPI(page, {
+    runs: [failed],
+    details: { [failed.id]: { run: failed, nodes: [] } },
+  });
+  await page.goto(`/runs?run=${failed.id}`);
+  await expect(page.getByText("No node started. The trigger worker ended before dispatching the pipeline.")).toBeVisible();
+  await expect(page.getByText(/Rerun this pipeline/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Fleet" }).last()).toHaveAttribute("href", "/cluster");
+  await expect(page.getByText(failed.id, { exact: true }).last()).toBeVisible();
+  await page.getByText("Technical error").click();
+  await expect(page.getByText(failed.error, { exact: true })).toBeVisible();
+});
+
 test("keeps the selected run when an older detail request finishes late", async ({
   page,
 }) => {

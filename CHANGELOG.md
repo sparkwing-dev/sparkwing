@@ -886,6 +886,9 @@ unlock.
 
 ### Fixed
 
+- **dashboard:** A historical trigger that ended before dispatch shows plain
+  retry, Fleet and run-ID sharing steps in the Runs summary. Its stored error
+  stays available under Technical error.
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.
 
