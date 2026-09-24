@@ -213,6 +213,29 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 		liveSeen.Before(now.Add(-5*time.Second)) {
 		t.Fatalf("live legacy agent = %+v, time error %v", live, err)
 	}
+	ready := func(id string) {
+		if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: id, NodeID: "work", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.MarkNodeReady(ctx, id, "work"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ready("run-a")
+	if got := claim(owner, "moonborn:1790249256598651003"); got != http.StatusOK {
+		t.Fatalf("owner claim = %d", got)
+	}
+	ready("run-b")
+	if got := claim(other, "moonborn:1790249256598651004"); got != http.StatusOK {
+		t.Fatalf("other claim = %d", got)
+	}
+	takeover := list()
+	if len(takeover.ActiveJobs) != 1 || takeover.ActiveJobs[0] != "run-b" {
+		t.Fatalf("latest credential's active runs = %v, want only run-b", takeover.ActiveJobs)
+	}
 }
 
 func TestAgents_LegacyHeadroomIncludesControllerObservationTime(t *testing.T) {
