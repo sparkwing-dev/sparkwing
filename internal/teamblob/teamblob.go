@@ -93,10 +93,9 @@ type Options struct {
 	MultipartThreshold int64
 	// MaxListPages defaults to DefaultMaxListPages.
 	MaxListPages int
-	// TeamObjectMaxAge, when set, makes [Store.Measure] delete every
-	// object of a team last written longer ago than the age it answers for
-	// that team, in the listing it already makes. Zero keeps the team's
-	// objects; the operator's own namespace is never expired.
+	// TeamObjectMaxAge, when set, makes [Store.Measure] delete objects last
+	// written longer ago than the age it answers for each team. An empty
+	// team names the operator root. Zero keeps that namespace's objects.
 	TeamObjectMaxAge func(team string) time.Duration
 	// Now defaults to time.Now.
 	Now func() time.Time

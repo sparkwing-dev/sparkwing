@@ -17,13 +17,9 @@ const StoragePassEvery = time.Hour
 
 const cacheObjectMaxAge = store.DirectCacheMaxAge
 
-// CacheObjectMaxAge is how long the storage pass keeps team's cache
-// objects: thirty days after each was last written, and forever for the
-// operator's own team, whose runs write under its namespace too.
-func CacheObjectMaxAge(team string) time.Duration {
-	if team == string(store.DefaultTeam) {
-		return 0
-	}
+// CacheObjectMaxAge is how long the storage pass keeps cache objects in every
+// team namespace and the operator token's root namespace.
+func CacheObjectMaxAge(_ string) time.Duration {
 	return cacheObjectMaxAge
 }
 

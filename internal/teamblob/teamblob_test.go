@@ -581,9 +581,8 @@ func TestPrefixDeleteCountsOnlyConfirmedDeletions(t *testing.T) {
 	}
 }
 
-// A store with a maximum age deletes a team's old objects in the
-// measurement's own listing, and leaves them out of the tally; the
-// operator's objects stay.
+// A store with a maximum age deletes old team and operator-root objects in
+// the measurement's own listing. A team whose policy returns zero stays.
 func TestMeasureExpiresOldTeamObjects(t *testing.T) {
 	ctx := context.Background()
 	clock := time.Now()
@@ -615,19 +614,19 @@ func TestMeasureExpiresOldTeamObjects(t *testing.T) {
 	if got := m.Teams["team-a"]; got.Bytes != 0 || got.Objects != 0 {
 		t.Fatalf("team-a after its object aged out = %+v, want nothing", got)
 	}
-	if m.Expired != (teamblob.Tally{Bytes: 4, Objects: 1}) {
-		t.Fatalf("expired = %+v, want team-a's one object", m.Expired)
+	if m.Expired != (teamblob.Tally{Bytes: 8, Objects: 2}) {
+		t.Fatalf("expired = %+v, want team and operator objects", m.Expired)
 	}
 	if objs, err := f.store.List(ctx, "team-a", "artifacts/"); err != nil || len(objs) != 0 {
 		t.Fatalf("team-a still lists %v, %v", objs, err)
 	}
-	if _, err := f.store.Head(ctx, "", "bins/operator"); err != nil {
-		t.Fatalf("the operator's object was expired: %v", err)
+	if _, err := f.store.Head(ctx, "", "bins/operator"); !errors.Is(err, teamblob.ErrNotFound) {
+		t.Fatalf("the old operator object survived: %v", err)
 	}
 	if got := m.Teams["keeper"]; got.Objects != 1 {
 		t.Fatalf("a team with no maximum age = %+v, want its object kept", got)
 	}
-	if n := f.client.count("DeleteObjects"); n != 1 {
-		t.Fatalf("expiry sent %d batch deletes, want one", n)
+	if n := f.client.count("DeleteObjects"); n != 2 {
+		t.Fatalf("expiry sent %d batch deletes, want two", n)
 	}
 }

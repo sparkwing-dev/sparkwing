@@ -684,6 +684,12 @@ unlock.
 
 ### Changed
 
+- **controller:** The hourly storage pass deletes cache objects older than
+  30 days for the default team and the operator token's cache root, as it
+  already does for other teams. It also removes expired direct-object rows for
+  the default team. Existing older cache objects leave on the first successful
+  storage pass after upgrade.
+
 - **controller + dashboard (Breaking):** credit and billing routes, metered
   tokens, claim charges, and storage billing require a signed `metering`
   license. Existing signed `multi-team` licenses also grant metering.
