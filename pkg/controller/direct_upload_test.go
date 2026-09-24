@@ -129,6 +129,51 @@ func claimedUploadGrant(t *testing.T, f *appFixture, team, runID, prefix string)
 	return "Bearer " + grant
 }
 
+func TestPendingTriggerCanCommitBinaryCacheUpload(t *testing.T) {
+	client, _ := directS3(t)
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		return s.WithDirectUploads(client, "bucket", "cache")
+	})
+	owner := f.ghUser(655, "trigger-owner")
+	_, prefix := f.runWork(owner, "run-pending-cache", "https://github.com/acme/widgets.git")
+	token, err := f.store.LookupTokenByPrefix(prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'pending' WHERE id = ?`, "run-pending-cache"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`,
+		token.Principal, prefix, time.Now().Add(time.Hour).UnixNano(), "run-pending-cache"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
+	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", owner.team, "run-pending-cache", time.Now(), time.Hour,
+		&authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("compiled binary")
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	key := "bin/01234567-89abcdef/" + digest
+	var reserved controller.DirectUploadResponse
+	if code := f.call("POST", "/api/v1/data/upload", "Bearer "+grant,
+		map[string]any{"kind": "binary", "key": key, "size": len(body), "sha256": digest, "run_id": "run-pending-cache"}, &reserved); code != http.StatusOK {
+		t.Fatalf("pending trigger reserve = %d", code)
+	}
+	if _, err := client.PutObject(t.Context(), &s3.PutObjectInput{
+		Bucket: aws.String("bucket"), Key: aws.String("pending/" + reserved.UploadID),
+		Body: bytes.NewReader(body), ChecksumSHA256: aws.String(base64.StdEncoding.EncodeToString(sum[:])),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("POST", "/api/v1/data/commit", "Bearer "+grant,
+		map[string]any{"upload_id": reserved.UploadID, "run_id": "run-pending-cache"}, nil); code != http.StatusNoContent {
+		t.Fatalf("pending trigger commit = %d", code)
+	}
+}
+
 func TestDirectUploadChecksumAndVisibility(t *testing.T) {
 	client, objects := directS3(t)
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {

@@ -515,6 +515,49 @@ func TestDataDownloadRejectsUnboundCacheGrant(t *testing.T) {
 	}
 }
 
+func TestPendingTriggerCanSignBinaryDownloadWhileClaimIsLive(t *testing.T) {
+	s, grant, head := downloadFixture(t)
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'pending' WHERE id = ?`, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := callDownload(t, s, grant, "bins/abc", false)
+	if rec.Code != http.StatusOK || len(head.keys) != 1 {
+		t.Fatalf("pending trigger binary GET = %d, heads=%v: %s", rec.Code, head.keys, rec.Body.String())
+	}
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ = callDownload(t, s, grant, "bins/abc", false)
+	if rec.Code != http.StatusForbidden || len(head.keys) != 1 {
+		t.Fatalf("stale pending trigger binary GET = %d, heads=%v", rec.Code, head.keys)
+	}
+}
+
+func TestPendingTriggerCanReserveBinaryUpload(t *testing.T) {
+	s, grant, _ := downloadFixture(t)
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'pending' WHERE id = ?`, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
+	s.WithDirectUploads(client, "bucket", "cache")
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"binary","key":"bin/01234567-89abcdef/`+strings.Repeat("a", 64)+`","size":4,"sha256":"`+strings.Repeat("a", 64)+`","run_id":"run-1"}`))
+	request.Header.Set("Authorization", "Bearer "+grant)
+	request.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pending trigger binary PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	artifact := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"artifact","key":"artifacts/blobs/`+strings.Repeat("a", 64)+`","size":4,"sha256":"`+strings.Repeat("a", 64)+`","run_id":"run-1"}`))
+	artifact.Header.Set("Authorization", "Bearer "+grant)
+	artifact.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, artifact)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("pending trigger artifact PUT = %d, want 403", rec.Code)
+	}
+}
+
 func TestCacheGrantSigningBindsLiveTriggerGeneration(t *testing.T) {
 	s, boundGrant, _ := downloadFixture(t)
 	issued, err := authwire.VerifyCacheGrant("grant-key", boundGrant, time.Now())

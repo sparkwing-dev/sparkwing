@@ -83,7 +83,7 @@ type directCaller struct {
 }
 
 // safety: A signing grant must name an exact live claim so pooled token reuse cannot revive an old claimant.
-func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID string) (directCaller, bool) {
+func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID string, allowPendingTrigger bool) (directCaller, bool) {
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || token == "" {
 		writeError(w, http.StatusUnauthorized, errors.New("a bearer is required"))
@@ -101,7 +101,7 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 		return directCaller{}, false
 	}
-	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant, false) != nil {
+	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant, allowPendingTrigger) != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
@@ -201,7 +201,7 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "source" {
 		caller, ok = s.directSourceCaller(w, r)
 	} else {
-		caller, ok = s.directCaller(w, r, req.RunID)
+		caller, ok = s.directCaller(w, r, req.RunID, req.Kind == "binary")
 	}
 	if !ok {
 		return
@@ -280,7 +280,8 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(scheme, "Bearer") && !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
 		caller, ok = s.directSourceCaller(w, r)
 	} else {
-		caller, ok = s.directCaller(w, r, req.RunID)
+		// safety: a pending trigger can commit only an upload reserved through the binary path.
+		caller, ok = s.directCaller(w, r, req.RunID, true)
 	}
 	if !ok {
 		return
