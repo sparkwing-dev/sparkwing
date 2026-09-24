@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -309,6 +312,46 @@ func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) {
 		t.Fatalf("response: %s", rec.Body.String())
+	}
+}
+
+func TestRunsGrep_FindsOlderBranchMatchBeyondRecentRuns(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	base := time.Now().Add(-time.Hour)
+	if err := st.CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", StartedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 201 {
+		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &fakeBackend{
+		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.ListRuns(ctx, f) },
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "hello"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
+	}
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&branch=rare&limit=200", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Matches []struct {
+			RunID string `json:"run_id"`
+		} `json:"matches"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Matches) != 1 || body.Matches[0].RunID != "older-match" {
+		t.Fatalf("branch search matches = %+v, want older-match", body.Matches)
 	}
 }
 

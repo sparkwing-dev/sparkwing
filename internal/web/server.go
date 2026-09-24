@@ -1093,9 +1093,10 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			}
 		}
 		filter := store.RunFilter{
-			Pipelines: r.URL.Query()["pipeline"],
-			Statuses:  r.URL.Query()["status"],
-			Limit:     runLimit,
+			Pipelines:   r.URL.Query()["pipeline"],
+			Statuses:    r.URL.Query()["status"],
+			GitBranches: r.URL.Query()["branch"],
+			Limit:       runLimit,
 		}
 		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 			if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
