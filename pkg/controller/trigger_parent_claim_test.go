@@ -106,6 +106,19 @@ func TestTriggerParentClaim_NodeClaimCreatesRunAndAwaitChild(t *testing.T) {
 	}
 }
 
+func TestWorkingTreeParentCannotAdmitChildWithoutItsOwnSource(t *testing.T) {
+	f := newParentClaimFixture(t)
+	if _, err := f.store.DB().ExecContext(t.Context(),
+		`UPDATE runs SET trigger_source = 'pipeline-working-tree@laptop' WHERE id = 'parent'`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := store.WithNodeClaimFence(t.Context(), f.ownerFence)
+	if created, err := f.owner.CreateTrigger(ctx, parentTriggerRequest("parent", "build")); err == nil ||
+		!strings.Contains(err.Error(), "from the checkout") {
+		t.Fatalf("working-tree child = %+v, %v, want reupload guidance", created, err)
+	}
+}
+
 func TestTriggerParentClaim_TriggerClaimCreatesChild(t *testing.T) {
 	f := newParentClaimFixture(t)
 	now := time.Now().UTC()

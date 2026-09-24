@@ -50,6 +50,93 @@ func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
 	}
 }
 
+func TestSourceBundleOneRunAndRetention(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 1<<30)
+	tn := freeTeam(t, st, "team-source")
+	now := time.Now()
+	newSource := func(nonce string) store.Upload {
+		t.Helper()
+		digest := strings.Repeat("a", 64)
+		u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: "team-source", Kind: store.StorageCache, Key: "sources/" + digest + "/" + nonce,
+			Size: 10, SHA256: digest, Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local", Now: now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CommitUpload(t.Context(), u.Team, u.ID, u.Principal, now); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	orphan := newSource(strings.Repeat("1", 32))
+	bound := newSource(strings.Repeat("2", 32))
+	if err := tn.CreateSourceTriggerWithRun(t.Context(),
+		store.Trigger{ID: "run-source", Pipeline: "build", TriggerSource: "pipeline-working-tree@test", CreatedAt: now},
+		store.Run{ID: "run-source", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now},
+		bound.Key, "owner", "swu_owner"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.CreateSourceTriggerWithRun(t.Context(),
+		store.Trigger{ID: "run-reuse", Pipeline: "build", CreatedAt: now},
+		store.Run{ID: "run-reuse", Pipeline: "build", Status: "pending", CreatedAt: now, StartedAt: now},
+		bound.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
+		t.Fatalf("second source bind = %v", err)
+	}
+	if rows, err := st.ExpiredSourceBundles(t.Context(), now.Add(23*time.Hour)); err != nil || len(rows) != 0 {
+		t.Fatalf("premature source expiry = %v, %v", rows, err)
+	}
+	if rows, err := st.ExpiredSourceBundles(t.Context(), now.Add(25*time.Hour)); err != nil || len(rows) != 1 || rows[0].ID != orphan.ID {
+		t.Fatalf("orphan expiry with pending run = %v, %v", rows, err)
+	}
+	if err := tn.FinishRun(t.Context(), "run-source", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := st.ExpiredSourceBundles(t.Context(), time.Now().Add(25*time.Hour)); err != nil || len(rows) != 2 {
+		t.Fatalf("terminal source expiry = %v, %v", rows, err)
+	}
+	if err := st.DeleteSourceBundleRows(t.Context(), bound); err != nil {
+		t.Fatal(err)
+	}
+	if exists, err := st.SourceBoundToRun(t.Context(), "team-source", bound.Key, "run-source"); err != nil || exists {
+		t.Fatalf("deleted source bind = %t, %v", exists, err)
+	}
+}
+
+func TestSourceReserveAcquiresOnlyOneFreeTeamSlotBeforeAnyRun(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 1<<30)
+	if err := st.SetFreeTeamSlots(t.Context(), 1); err != nil {
+		t.Fatal(err)
+	}
+	teamHandle(t, st, "source-a")
+	teamHandle(t, st, "source-b")
+	request := store.UploadRequest{
+		Team: "source-a", Kind: store.StorageCache,
+		Key: "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("1", 32), Size: 10,
+		SHA256: strings.Repeat("a", 64), Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local",
+	}
+	if _, err := st.ReserveUpload(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	request.Key = "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("2", 32)
+	if _, err := st.ReserveUpload(t.Context(), request); err != nil {
+		t.Fatalf("same team took a second slot: %v", err)
+	}
+	if taken, _, err := st.FreeSlots(t.Context()); err != nil || taken != 1 {
+		t.Fatalf("slots = %d, %v", taken, err)
+	}
+	request.Team = "source-b"
+	if _, err := st.ReserveUpload(t.Context(), request); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("new team pretrigger upload with no slot = %v", err)
+	}
+	var runs int
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runs WHERE team = 'source-a'`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatalf("pretrigger source charged %d runs, %v", runs, err)
+	}
+}
+
 func TestPruneExpiredCacheObjectsIncludesDefaultTeam(t *testing.T) {
 	st := storetest.Open(t)
 	old := time.Now().Add(-31 * 24 * time.Hour)

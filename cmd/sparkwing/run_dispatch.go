@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,9 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -534,14 +537,14 @@ func triggerSource(prefix string) string {
 func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source string, flags runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
 	branch, sha, repositorySlug, repoURL := detectRemoteGit()
-	if repoURL == "" {
+	if repoURL == "" && !workingTree {
 		return nil, fmt.Errorf("pipeline trigger %q: no git origin detected from cwd. "+
 			"The cluster runner needs a repository URL to clone the pipeline source. "+
 			"Run from inside a checkout with an origin remote", pipelineName)
 	}
 	if repositorySlug != "" {
 		repoURL = bincache.RepoURLFromGitHub(repositorySlug)
-	} else {
+	} else if repoURL != "" {
 		var err error
 		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 		if err != nil {
@@ -614,11 +617,11 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	}
 
 	if snapshot != nil {
-		cacheURL := bincache.CacheURL()
-		seedErr := seedWorkingTreeSnapshot(runProfile, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
-		if seedErr != nil {
-			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w (%w)", pipelineName, seedErr, bincache.ErrWorkspaceNeedsCache)
+		key, uploadErr := uploadSourceBundle(runProfile, snapshot)
+		if uploadErr != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, uploadErr)
 		}
+		request.Trigger.Env[bincache.SourceBundleObjectEnvKey] = key
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
 		if snapshot.Baseline.SHA != "" {
@@ -643,55 +646,46 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	return response, nil
 }
 
-func seedWorkingTreeSnapshot(runProfile *profile.Profile, cacheURL, repoURL string, snapshot *worktreeSnapshot, directTimeout, controllerTimeout time.Duration) error {
-	var directErr error
-	if cacheURL != "" {
-		contextValue, cancel := context.WithTimeout(context.Background(), directTimeout)
-		directErr = bincache.SeedWorkspaceBundle(contextValue, cacheURL, bincache.CacheToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
-		cancel()
-		if directErr == nil {
-			return nil
-		}
+func uploadSourceBundle(runProfile *profile.Profile, snapshot *worktreeSnapshot) (string, error) {
+	f, err := os.Open(snapshot.BundlePath)
+	if err != nil {
+		return "", err
 	}
-	contextValue, cancel := context.WithTimeout(context.Background(), controllerTimeout)
-	controllerErr := bincache.SeedWorkspaceBundleViaController(contextValue, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
-	cancel()
-	if controllerErr == nil {
-		return nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	if directErr != nil {
-		return errors.Join(fmt.Errorf("direct cache: %w", directErr), fmt.Errorf("controller proxy: %w", controllerErr))
+	digest := hex.EncodeToString(h.Sum(nil))
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
 	}
-	return controllerErr
+	key := "sources/" + digest + "/" + hex.EncodeToString(nonce[:])
+	transport := &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	data := directdata.New(runProfile.ControllerURL(), runProfile.ControllerToken(), "", transport)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	available, err := data.SourceAvailable(ctx)
+	if err != nil {
+		return "", fmt.Errorf("check direct source support: %w", err)
+	}
+	if !available {
+		return "", errors.New("controller does not support direct source bundles; upgrade it before --working-tree")
+	}
+	if err := data.Upload(ctx, "source", key, f, snapshot.BundleSize, digest); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
-// offerTriggerSource makes sure a runner can fetch the commit a trigger
-// records. A commit already on origin needs nothing: a team runner fetches it
-// from there, and the git cache is only asked to refresh. Any other commit has
-// to reach the cache through a seed, which only the operator may write, so a
-// refused seed fails the trigger rather than leaving a run no runner can fetch.
-func offerTriggerSource(runProfile *profile.Profile, repoDir, repoURL, sha string) error {
-	discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
-	services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
-	cancelDiscovery()
-	if !cacheOperatorRoutesOpen(services) {
-		if commitOnOrigin(repoDir, sha) {
-			return nil
-		}
-		return fmt.Errorf("commit %s is not on origin: push your commit; team runs fetch from the remote", shortSHA(sha))
+// safety: a durable remote fetch cannot depend on a cache seed from this shell;
+// working-tree submissions upload a separately bound source bundle.
+func offerTriggerSource(_ *profile.Profile, repoDir, _, sha string) error {
+	if !commitOnOrigin(repoDir, sha) {
+		return fmt.Errorf("commit %s is not on origin: push your commit or trigger with --working-tree", shortSHA(sha))
 	}
-	if commitOnOrigin(repoDir, sha) {
-		if err := refreshTriggerSource(runProfile, services.CachePod, repoURL); err != nil {
-			slog.Default().Debug("git cache refresh skipped; the runner fetches the pushed commit itself", "error", err)
-		}
-		return nil
-	}
-	_, err := seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("commit %s is not on origin, and the git cache did not take it (%v): "+
-		"push your commit; team runs fetch from the remote", shortSHA(sha), err)
+	return nil
 }
 
 // commitOnOrigin reports whether a remote-tracking branch of origin contains
@@ -710,58 +704,6 @@ func shortSHA(sha string) string {
 		return sha[:12]
 	}
 	return sha
-}
-
-func refreshTriggerSource(runProfile *profile.Profile, cacheURL, repoURL string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if cacheURL != "" {
-		return bincache.RefreshRepo(ctx, cacheURL, bincache.CacheToken(), repoURL)
-	}
-	return bincache.RefreshRepoViaController(ctx, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
-}
-
-// seedTriggerSource refreshes the git cache's copy of repoURL and, when that
-// fails, pushes sha into it from repoDir. The error says why neither worked,
-// and absent reports a seed refused because this controller has no cache.
-func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) (absent bool, err error) {
-	refreshErr := refreshTriggerSource(runProfile, cacheURL, repoURL)
-	if refreshErr == nil {
-		return false, nil
-	}
-	seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer seedCancel()
-	var seedErr error
-	if cacheURL != "" {
-		seedErr = bincache.SeedRepo(seedContext, cacheURL, bincache.CacheToken(), repoURL, repoDir, sha)
-	} else {
-		seedErr = bincache.SeedRepoViaController(seedContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, repoDir, sha)
-	}
-	if seedErr == nil {
-		return false, nil
-	}
-	absent = cacheURL == "" && isHTTPNotFound(seedErr)
-	if discoveryErr != nil {
-		return absent, fmt.Errorf("service discovery failed (%w), gitcache refresh failed (%w), seed failed (%w)", discoveryErr, refreshErr, seedErr)
-	}
-	return absent, fmt.Errorf("gitcache refresh failed (%w), seed failed (%w)", refreshErr, seedErr)
-}
-
-// cacheOperatorRoutesOpen reports whether this shell may refresh and seed the
-// git cache. Both routes take the cache's operator token, which a member of a
-// multi-team controller's team never holds, and a cache grant does not open
-// them either, so without the token the calls are skipped rather than refused.
-func cacheOperatorRoutesOpen(services discovery.Services) bool {
-	if !services.MultiTeam || bincache.CacheToken() != "" {
-		return true
-	}
-	slog.Default().Debug("git cache refresh and seed skipped: the controller serves more than one team and " +
-		authwire.CacheTokenEnv + " is unset; runners fetch the commit from origin")
-	return false
-}
-
-func isHTTPNotFound(err error) bool {
-	return err != nil && strings.HasPrefix(err.Error(), "404 ")
 }
 
 func detectRemoteGit() (branch, sha, repo, repoURL string) {

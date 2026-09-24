@@ -287,11 +287,11 @@ sparkwing run build-deploy
 ```
 sparkwing pipeline trigger build-deploy --profile <cluster>
   1. sparkwing resolves the profile -> controller URL
-  2. sparkwing refreshes or seeds the exact Git commit in the cache
+  2. sparkwing checks that the exact Git commit is on origin
   3. sparkwing POSTs the trigger with that commit SHA
   4. controller enqueues run
   5. a runner polls the controller and claims the run
-  6. runner clones the exact SHA from cache
+  6. runner fetches the exact SHA from origin
   7. runner compiles and runs the pipeline binary
   8. runner streams logs to logs service
   9. runner sends periodic heartbeats to controller to hold its claim
@@ -299,13 +299,11 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
   11. sparkwing pipeline trigger follows controller state and displays result
 ```
 
-`--working-tree` replaces step 2 with a mandatory synthetic-commit bundle
-seed. The trigger is not admitted if that upload fails. Off-cluster runners can
-read source through the controller's authenticated Git proxy, so they need only
-outbound HTTPS; a private direct cache remains an alternative, receives only
-the run's cache grant, and never receives the controller bearer.
-Login-enabled dashboard ingress exposes the
-same machine-bearer proxy path without browser-session authentication.
+`--working-tree` replaces steps 2 and 6 with a synthetic-commit bundle:
+the CLI reserves and uploads it directly to S3 before trigger admission, and
+the claimed runner requests a signed download for that run. A checkout needs
+no origin. The controller handles authorization and small control requests;
+it does not relay the source bytes.
 
 ### Git Push Trigger
 

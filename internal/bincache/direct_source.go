@@ -27,11 +27,6 @@ const directProtocols = "https:ssh"
 
 var directCommitRE = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
-// ErrWorkspaceNeedsCache reports a working-tree snapshot trigger on a runner
-// without the operator's cache: the snapshot commit exists only there.
-var ErrWorkspaceNeedsCache = errors.New("working-tree snapshots are served only by the operator's git cache; " +
-	"push your commit and trigger without --working-tree, since team runs fetch from the remote")
-
 // ValidateDirectSource checks what a direct fetch hands git: an https or ssh
 // remote with no credential in it (sourceurl.ValidateCloneURL refuses every
 // other scheme, a local path, userinfo on https and a leading dash), and a

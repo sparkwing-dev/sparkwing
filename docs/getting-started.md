@@ -421,8 +421,9 @@ sparkwing pipeline trigger <pipeline> --profile acme
 The first prompts for the token without echoing it and saves a profile named
 after the team. Run the second inside a checkout whose commit is pushed: the
 run records the checkout's `origin` repository and commit, and a team runner
-fetches that commit. `--working-tree` sends uncommitted changes instead, which
-needs a git cache on the controller. The token carries your role's scopes
+fetches that commit. `--working-tree` sends uncommitted changes as a direct source bundle. It
+works when the local checkout has no origin the cloud can reach. The CLI token
+needs `runs.write`; the bundle counts against the team's cache storage share. The token carries your role's scopes
 except team administration, so a reader's token only reads. It lapses after
 90 days, and leaving the team or dropping to `reader` revokes it.
 

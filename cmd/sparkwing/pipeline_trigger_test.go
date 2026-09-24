@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -25,14 +24,17 @@ import (
 var triggerTestGitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
 type triggerSpy struct {
-	mu             sync.Mutex
-	reqs           []string
-	bodies         [][]byte
-	failRefresh    bool
-	failSeed       bool
-	seedBodyBytes  int
-	seedRepoValues []string
-	seedSHAValues  []string
+	mu              sync.Mutex
+	reqs            []string
+	bodies          [][]byte
+	failRefresh     bool
+	failSeed        bool
+	seedBodyBytes   int
+	seedRepoValues  []string
+	seedSHAValues   []string
+	sourceKey       string
+	sourceBytes     []byte
+	sourceCommitted bool
 
 	runStatus string
 	runError  string
@@ -64,6 +66,32 @@ func (s *triggerSpy) handler() http.Handler {
 		s.mu.Unlock()
 
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/data/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]bool{"source": true, "upload": true, "download": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/data/upload":
+			var req struct {
+				Key string `json:"key"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			s.mu.Lock()
+			s.sourceKey = req.Key
+			s.mu.Unlock()
+			if s.failSeed {
+				http.Error(w, "upload refused", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"upload_id": "up-1", "url": "http://" + r.Host + "/source-object", "headers": map[string]string{}})
+		case r.Method == http.MethodPut && r.URL.Path == "/source-object":
+			body, _ := io.ReadAll(r.Body)
+			s.mu.Lock()
+			s.sourceBytes = body
+			s.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/data/commit":
+			s.mu.Lock()
+			s.sourceCommitted = len(s.sourceBytes) > 0
+			s.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gitcache/refresh":
 			if s.failRefresh {
 				http.Error(w, "refresh failed", http.StatusBadGateway)
@@ -133,7 +161,7 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
 	body := "profiles:\n" +
-		"  prod: { controller: { url: " + controllerURL + " } }\n" +
+		"  prod: { controller: { url: " + controllerURL + ", token: swu_test } }\n" +
 		"  laptop: { state: { type: sqlite } }\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
@@ -293,50 +321,30 @@ func TestPipelineTrigger_DetachAcceptsNonGitHubOrigin(t *testing.T) {
 	}
 }
 
-func TestPipelineTrigger_SeedsControllerGitcacheWhenRefreshFails(t *testing.T) {
-	spy := &triggerSpy{failRefresh: true}
-	srv := httptest.NewServer(spy.handler())
-	defer srv.Close()
-	writeTriggerProfiles(t, srv.URL)
-	origin := "https://git.example.com/acme/widgets.git"
-	withGitCheckout(t, origin, func() {
-		out := captureStdout(t, func() {
-			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {
-				t.Errorf("trigger: %v", err)
-			}
-		})
-		if strings.TrimSpace(out) != "run-test" {
-			t.Errorf("detach stdout = %q, want run id", out)
-		}
-	})
-
-	size, repos, shas := spy.seedStats()
-	if size == 0 {
-		t.Fatal("expected non-empty git bundle seed body")
-	}
-	if len(repos) != 1 || repos[0] != origin {
-		t.Fatalf("seed repos = %v, want [%s]", repos, origin)
-	}
-	if len(shas) != 1 || !triggerTestGitObjectRE.MatchString(shas[0]) {
-		t.Fatalf("seed shas = %v, want one git object id", shas)
-	}
-	reqs := spy.requests()
-	if !slices.Contains(reqs, "POST /api/v1/gitcache/refresh") {
-		t.Fatalf("expected refresh before seed; got %v", reqs)
-	}
-	if !slices.Contains(reqs, "POST /api/v1/gitcache/seed") {
-		t.Fatalf("expected seed fallback; got %v", reqs)
-	}
-}
-
-func TestPipelineTrigger_WorkingTreeSeedsBeforeAdmission(t *testing.T) {
-	t.Setenv("SPARKWING_GITCACHE_URL", "")
+func TestPipelineTrigger_PushedCommitDoesNotUsePublicCache(t *testing.T) {
 	spy := &triggerSpy{}
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
-	origin := "https://git.example.com/acme/widgets.git"
-	withGitCheckout(t, origin, func() {
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, req := range spy.requests() {
+		if strings.Contains(req, "/gitcache/") || strings.Contains(req, "/data/upload") {
+			t.Fatalf("pushed commit used cache or source upload: %v", spy.requests())
+		}
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeUploadsBeforeAdmissionWithoutOrigin(t *testing.T) {
+	spy := &triggerSpy{}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		runSnapshotGit(t, ".", "remote", "remove", "origin")
 		base := strings.TrimSpace(runSnapshotGit(t, ".", "rev-parse", "HEAD"))
 		if err := os.WriteFile("README.md", []byte("dirty\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -347,7 +355,7 @@ func TestPipelineTrigger_WorkingTreeSeedsBeforeAdmission(t *testing.T) {
 		stderr := captureStderr(t, func() {
 			_ = captureStdout(t, func() {
 				if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
-					t.Fatalf("trigger: %v", err)
+					t.Fatal(err)
 				}
 			})
 		})
@@ -355,35 +363,30 @@ func TestPipelineTrigger_WorkingTreeSeedsBeforeAdmission(t *testing.T) {
 			t.Fatalf("stderr = %q", stderr)
 		}
 	})
-
 	reqs := spy.requests()
-	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
-	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
-		t.Fatalf("seed must finish before trigger admission: %v", reqs)
+	commitAt, triggerAt := slices.Index(reqs, "POST /api/v1/data/commit"), slices.Index(reqs, "POST /api/v1/triggers")
+	if commitAt < 0 || triggerAt < 0 || commitAt >= triggerAt || !spy.sourceCommitted {
+		t.Fatalf("source must commit before trigger admission: %v", reqs)
 	}
-	if slices.Contains(reqs, "POST /api/v1/gitcache/refresh") {
-		t.Fatalf("working-tree trigger must not refresh the origin: %v", reqs)
+	if len(spy.sourceBytes) == 0 || !strings.HasPrefix(spy.sourceKey, "sources/") {
+		t.Fatalf("direct source = key %q, bytes %d", spy.sourceKey, len(spy.sourceBytes))
 	}
-	_, _, shas := spy.seedStats()
-	if len(shas) != 1 {
-		t.Fatalf("seed shas = %v", shas)
+	for _, req := range reqs {
+		if strings.Contains(req, "/gitcache/") {
+			t.Fatalf("legacy cache request: %v", reqs)
+		}
 	}
-	var req client.TriggerRequest
-	if err := json.Unmarshal(spy.bodies[0], &req); err != nil {
+	var request client.TriggerRequest
+	if err := json.Unmarshal(spy.bodies[0], &request); err != nil {
 		t.Fatal(err)
 	}
-	if req.Git.SHA != shas[0] {
-		t.Fatalf("trigger SHA = %q, seed SHA = %q", req.Git.SHA, shas[0])
-	}
-	if _, ok := req.Args["working-tree"]; ok {
-		t.Fatalf("working-tree flag leaked into pipeline args: %v", req.Args)
-	}
-	if !strings.HasPrefix(req.Trigger.Source, "pipeline-working-tree@") {
-		t.Fatalf("trigger source = %q", req.Trigger.Source)
+	if request.Git.RepoURL != "" || request.Trigger.Env["SPARKWING_SOURCE_BUNDLE_OBJECT"] != spy.sourceKey ||
+		!triggerTestGitObjectRE.MatchString(request.Git.SHA) {
+		t.Fatalf("source trigger = %+v", request)
 	}
 }
 
-func TestPipelineTrigger_WorkingTreeSeedFailureDoesNotAdmitTrigger(t *testing.T) {
+func TestPipelineTrigger_WorkingTreeUploadFailureDoesNotAdmitTrigger(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE_URL", "")
 	spy := &triggerSpy{failSeed: true}
 	srv := httptest.NewServer(spy.handler())
@@ -400,70 +403,6 @@ func TestPipelineTrigger_WorkingTreeSeedFailureDoesNotAdmitTrigger(t *testing.T)
 	})
 	if slices.Contains(spy.requests(), "POST /api/v1/triggers") {
 		t.Fatalf("failed seed admitted trigger: %v", spy.requests())
-	}
-}
-
-func TestPipelineTrigger_WorkingTreeFallsBackFromDirectCacheToController(t *testing.T) {
-	var directRequests int
-	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		directRequests++
-		http.Error(w, "direct unavailable", http.StatusBadGateway)
-	}))
-	defer direct.Close()
-	t.Setenv("SPARKWING_GITCACHE_URL", direct.URL)
-
-	spy := &triggerSpy{}
-	controllerServer := httptest.NewServer(spy.handler())
-	defer controllerServer.Close()
-	writeTriggerProfiles(t, controllerServer.URL)
-	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
-		if err := os.WriteFile("local.txt", []byte("dirty\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		_ = captureStdout(t, func() {
-			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
-				t.Fatalf("trigger: %v", err)
-			}
-		})
-	})
-	if directRequests != 1 {
-		t.Fatalf("direct seed requests = %d, want 1", directRequests)
-	}
-	reqs := spy.requests()
-	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
-	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
-		t.Fatalf("controller fallback must seed before admission: %v", reqs)
-	}
-}
-
-func TestSeedWorkingTreeSnapshot_ControllerFallbackGetsFreshDeadline(t *testing.T) {
-	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(60 * time.Millisecond)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer direct.Close()
-	var controllerRequests int
-	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		controllerRequests++
-		if r.URL.Query().Get("workspace") != "1" {
-			http.Error(w, "missing workspace marker", http.StatusBadRequest)
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer controller.Close()
-	bundle := filepath.Join(t.TempDir(), "snapshot.bundle")
-	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	snapshot := &worktreeSnapshot{BundlePath: bundle, SHA: strings.Repeat("a", 40), ManifestDigest: "sha256:" + strings.Repeat("b", 64)}
-	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: controller.URL, Token: "runner-token"}}
-	if err := seedWorkingTreeSnapshot(prof, direct.URL, "https://git.example.com/acme/widgets.git", snapshot, 20*time.Millisecond, time.Second); err != nil {
-		t.Fatal(err)
-	}
-	if controllerRequests != 1 {
-		t.Fatalf("controller fallback requests = %d, want 1", controllerRequests)
 	}
 }
 
@@ -725,6 +664,7 @@ func withGitCheckout(t *testing.T, origin string, fn func()) {
 	run("commit", "-m", "init")
 	run("branch", "-M", "main")
 	run("remote", "add", "origin", origin)
+	run("update-ref", "refs/remotes/origin/main", "HEAD")
 
 	old, err := os.Getwd()
 	if err != nil {

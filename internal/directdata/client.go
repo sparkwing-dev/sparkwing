@@ -41,32 +41,60 @@ func (c *Client) Available(ctx context.Context) (bool, error) {
 	if c.base == "" || c.bearer == "" || c.runID == "" {
 		return false, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/data/capabilities", nil)
-	if err != nil {
-		return false, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("data capabilities: %s", resp.Status)
-	}
 	var caps struct {
 		Upload   bool `json:"upload"`
 		Download bool `json:"download"`
+		Source   bool `json:"source"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&caps); err != nil {
+	if err := c.capabilities(ctx, &caps); err != nil {
+		if errors.Is(err, ErrUnavailable) {
+			return false, nil
+		}
 		return false, err
 	}
 	if !caps.Upload || !caps.Download {
 		return false, ErrUnavailable
 	}
 	return true, nil
+}
+
+// SourceAvailable is a hard capability gate for pretrigger source uploads.
+func (c *Client) SourceAvailable(ctx context.Context) (bool, error) {
+	if c.base == "" || c.bearer == "" {
+		return false, nil
+	}
+	var caps struct {
+		Source bool `json:"source"`
+	}
+	if err := c.capabilities(ctx, &caps); err != nil {
+		if errors.Is(err, ErrUnavailable) {
+			return false, nil
+		}
+		return false, err
+	}
+	return caps.Source, nil
+}
+
+func (c *Client) capabilities(ctx context.Context, caps any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/v1/data/capabilities", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrUnavailable
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("data capabilities: %s", resp.Status)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(caps); err != nil {
+		return err
+	}
+	return nil
 }
 
 type uploadAnswer struct {

@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -157,6 +158,10 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		writeError(w, http.StatusUnauthorized, errors.New("invalid download bearer"))
 		return "", nil, false
 	}
+	if kind == "source" {
+		writeError(w, http.StatusForbidden, errors.New("source downloads need the run's live claim grant"))
+		return "", nil, false
+	}
 	requiredScope := ScopeRunsRead
 	if kind == "log" {
 		requiredScope = ScopeLogsRead
@@ -182,7 +187,7 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 
 func downloadKind(kind string) store.StorageKind {
 	switch kind {
-	case "binary", "artifact":
+	case "binary", "artifact", "source":
 		return store.StorageCache
 	case "log":
 		return store.StorageLogs
@@ -224,6 +229,42 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 	var digest string
 	var objectKey string
 	switch {
+	case req.Kind == "source":
+		if grant == nil {
+			writeError(w, http.StatusForbidden, errors.New("source downloads need a live claim grant"))
+			return
+		}
+		trigger, findErr := s.store.GetTrigger(r.Context(), grant.Run)
+		if findErr != nil || trigger.Team != team || !strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") ||
+			req.Key != trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] {
+			writeError(w, http.StatusForbidden, errors.New("source bundle does not belong to this run"))
+			return
+		}
+		keyDigest, valid := store.SourceKeyDigest(req.Key)
+		if !valid {
+			writeError(w, http.StatusForbidden, errors.New("invalid source bundle key"))
+			return
+		}
+		bound, findErr := s.store.SourceBoundToRun(r.Context(), team, req.Key, grant.Run)
+		if findErr != nil || !bound {
+			writeError(w, http.StatusForbidden, errors.New("source bundle is not bound to this run"))
+			return
+		}
+		obj, findErr := s.store.CommittedObject(r.Context(), team, req.Key)
+		if errors.Is(findErr, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if findErr != nil {
+			s.writeInternalError(w, r, "read committed source bundle", findErr)
+			return
+		}
+		if obj.Kind != store.StorageCache || obj.Provenance != "local" || obj.SHA256 != keyDigest {
+			writeError(w, http.StatusForbidden, errors.New("source bundle is not committed for this run"))
+			return
+		}
+		objectSize, digest = obj.Size, obj.SHA256
+		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
 	case req.Kind == "binary" && strings.HasPrefix(req.Key, "bin/"):
 		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader)
 		if errors.Is(findErr, store.ErrNotFound) {

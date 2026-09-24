@@ -18,6 +18,7 @@ import (
 	"github.com/aws/smithy-go"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -26,7 +27,7 @@ func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "download": s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil)})
+	writeJSON(w, http.StatusOK, map[string]bool{"upload": true, "source": s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil), "download": s.dataDownloadURL() != "" && (!downloadViaIngress(r) || s.downloadCDN != nil)})
 }
 
 type directUploadS3 struct {
@@ -119,6 +120,32 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	}, true
 }
 
+func (s *Server) directSourceCaller(w http.ResponseWriter, r *http.Request) (directCaller, bool) {
+	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !strings.EqualFold(scheme, "Bearer") || token == "" {
+		writeError(w, http.StatusUnauthorized, errors.New("source upload needs a bearer"))
+		return directCaller{}, false
+	}
+	principal, err := s.authMiddleware().Authenticate(token)
+	if err != nil || principal == nil {
+		writeError(w, http.StatusUnauthorized, errors.New("invalid source upload bearer"))
+		return directCaller{}, false
+	}
+	if principal.Kind != store.TokenKindUser || (!principal.HasScope(ScopeRunsWrite) && !principal.HasScope(ScopeAdmin)) {
+		writeError(w, http.StatusForbidden, errors.New("source upload needs a user token with runs.write"))
+		return directCaller{}, false
+	}
+	team := store.NormalizeTeam(principal.Team)
+	if !teamblob.ValidTeam(string(team)) {
+		writeError(w, http.StatusForbidden, errors.New("source upload bearer names no team"))
+		return directCaller{}, false
+	}
+	if !s.allowDataRequest(w, r, team, principal.TokenPrefix) {
+		return directCaller{}, false
+	}
+	return directCaller{team: team, principal: principal.Name, claimPrefix: principal.TokenPrefix, provenance: "local"}, true
+}
+
 func (d *directUploadS3) pendingKey(id string) string { return "pending/" + id }
 func (d *directUploadS3) finalKey(u store.Upload) string {
 	return d.prefix + "/teams/" + string(u.Team) + "/" + u.Provenance + "/" + u.Key
@@ -131,6 +158,9 @@ func validDirectKey(kind, key, sha string) bool {
 		return ok && validBinaryInput(input) && key == "bin/"+input+"/"+sha
 	case "artifact":
 		return key == "artifacts/blobs/"+sha || key == "artifacts/manifests/"+sha
+	case "source":
+		digest, ok := store.SourceKeyDigest(key)
+		return ok && digest == sha
 	default:
 		return false
 	}
@@ -162,7 +192,17 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	caller, ok := s.directCaller(w, r, req.RunID)
+	if req.Kind == "source" && req.RunID != "" {
+		writeError(w, http.StatusBadRequest, errors.New("source uploads precede a run"))
+		return
+	}
+	var caller directCaller
+	var ok bool
+	if req.Kind == "source" {
+		caller, ok = s.directSourceCaller(w, r)
+	} else {
+		caller, ok = s.directCaller(w, r, req.RunID)
+	}
 	if !ok {
 		return
 	}
@@ -184,11 +224,12 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		SHA256: req.SHA256, Principal: caller.principal, ClaimPrefix: caller.claimPrefix, Provenance: caller.provenance,
 	})
 	if err != nil {
+		if s.writeComputeLimitRefusal(w, r, "", "", err) {
+			return
+		}
 		switch {
 		case errors.Is(err, store.ErrStorageQuota):
 			writeError(w, http.StatusRequestEntityTooLarge, err)
-		case errors.Is(err, store.ErrFreeStoragePaused):
-			writeError(w, http.StatusPaymentRequired, err)
 		case errors.Is(err, store.ErrObjectExists):
 			writeError(w, http.StatusConflict, err)
 		case errors.Is(err, store.ErrInvalidInput):
@@ -233,7 +274,14 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	caller, ok := s.directCaller(w, r, req.RunID)
+	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
+	var caller directCaller
+	var ok bool
+	if strings.EqualFold(scheme, "Bearer") && !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
+		caller, ok = s.directSourceCaller(w, r)
+	} else {
+		caller, ok = s.directCaller(w, r, req.RunID)
+	}
 	if !ok {
 		return
 	}
@@ -246,7 +294,8 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "read direct upload", err)
 		return
 	}
-	if u.RunID != caller.runID || u.Principal != caller.principal || u.ClaimPrefix != caller.claimPrefix || !time.Now().Before(u.ExpiresAt) {
+	if strings.HasPrefix(u.Key, "sources/") != (caller.runID == "") ||
+		u.RunID != caller.runID || u.Principal != caller.principal || u.ClaimPrefix != caller.claimPrefix || !time.Now().Before(u.ExpiresAt) {
 		writeError(w, http.StatusForbidden, errors.New("this claimant cannot commit the upload"))
 		return
 	}
@@ -295,7 +344,9 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 			if herr != nil || aws.ToInt64(previous.ContentLength) != u.Size ||
 				aws.ToString(previous.ChecksumSHA256) != base64.StdEncoding.EncodeToString(raw) ||
 				previous.Metadata["sha256"] != u.SHA256 || previous.Metadata["provenance"] != u.Provenance ||
-				previous.Metadata["uploader"] == "" {
+				previous.Metadata["uploader"] == "" ||
+				(strings.HasPrefix(u.Key, "sources/") &&
+					(previous.Metadata["uploader"] != u.Principal || previous.Metadata["upload-id"] != u.ID)) {
 				writeError(w, http.StatusConflict, store.ErrObjectExists)
 				return
 			}

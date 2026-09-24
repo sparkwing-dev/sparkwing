@@ -648,6 +648,7 @@ var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argu
 var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
+var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
@@ -1604,6 +1605,7 @@ type SkewError struct {
 	Requirements     []string
 }
 func (e *SkewError) Error() string
+func SourceKeyDigest(key string) (string, bool)
 type SpawnedChild struct {
 	ParentNodeID string
 	Pipeline     string
@@ -1837,6 +1839,7 @@ func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo s
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
+func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error)
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
@@ -1846,6 +1849,7 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireRetainedRuns(ctx context.Context, now time.Time) ([]TeamRetentionExpiry, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
+func (s *Store) ExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
@@ -2059,6 +2063,7 @@ func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) 
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID string) (bool, error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error)
@@ -2168,6 +2173,7 @@ func (t *Tenant) CreateRun(ctx context.Context, r Run) error
 func (t *Tenant) CreateRunnerToken(
 	ctx context.Context, principal string, scopes []string, createdBy string, now time.Time,
 ) (string, *Token, error)
+func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error
 func (t *Tenant) CreateToken(
 	ctx context.Context, principal, kind string, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error)

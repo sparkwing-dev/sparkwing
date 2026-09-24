@@ -750,28 +750,29 @@ type triggerResp struct {
 
 // safety: every other trigger_env key a run reads is controller-written, so an inbound copy forges it.
 var submittedTriggerEnvKeys = map[string]bool{
-	"GITHUB_REPOSITORY":             true,
-	"GITHUB_REF":                    true,
-	"GITHUB_REF_TYPE":               true,
-	"GITHUB_ACTION":                 true,
-	"GITHUB_LABEL":                  true,
-	"GITHUB_MERGED":                 true,
-	"GITHUB_TAG_NAME":               true,
-	"GITHUB_TAG":                    true,
-	sparkwing.EnvGitHubEventName:    true,
-	sparkwing.EnvPRNumber:           true,
-	sparkwing.EnvPRAction:           true,
-	sparkwing.EnvPRBaseRef:          true,
-	sparkwing.EnvPRBaseSHA:          true,
-	sparkwing.EnvPRHeadRef:          true,
-	sparkwing.EnvPRHeadSHA:          true,
-	"SPARKWING_START_AT":            true,
-	"SPARKWING_STOP_AT":             true,
-	"SPARKWING_ONLY":                true,
-	"SPARKWING_DRY_RUN":             true,
-	"SPARKWING_NO_CACHE":            true,
-	bincache.WorkspaceBaseRefEnvKey: true,
-	bincache.WorkspaceBaseSHAEnvKey: true,
+	"GITHUB_REPOSITORY":               true,
+	"GITHUB_REF":                      true,
+	"GITHUB_REF_TYPE":                 true,
+	"GITHUB_ACTION":                   true,
+	"GITHUB_LABEL":                    true,
+	"GITHUB_MERGED":                   true,
+	"GITHUB_TAG_NAME":                 true,
+	"GITHUB_TAG":                      true,
+	sparkwing.EnvGitHubEventName:      true,
+	sparkwing.EnvPRNumber:             true,
+	sparkwing.EnvPRAction:             true,
+	sparkwing.EnvPRBaseRef:            true,
+	sparkwing.EnvPRBaseSHA:            true,
+	sparkwing.EnvPRHeadRef:            true,
+	sparkwing.EnvPRHeadSHA:            true,
+	"SPARKWING_START_AT":              true,
+	"SPARKWING_STOP_AT":               true,
+	"SPARKWING_ONLY":                  true,
+	"SPARKWING_DRY_RUN":               true,
+	"SPARKWING_NO_CACHE":              true,
+	bincache.WorkspaceBaseRefEnvKey:   true,
+	bincache.WorkspaceBaseSHAEnvKey:   true,
+	bincache.SourceBundleObjectEnvKey: true,
 }
 
 var githubProvenanceEnvKeys = map[string]bool{
@@ -897,6 +898,33 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sourceKey := body.Trigger.Env[bincache.SourceBundleObjectEnvKey]
+	workspaceSource := strings.HasPrefix(body.Trigger.Source, "pipeline-working-tree@")
+	if workspaceSource {
+		sourceDigest, valid := store.SourceKeyDigest(sourceKey)
+		if body.Git.SHA == "" || !valid {
+			writeError(w, http.StatusBadRequest, errors.New("working-tree trigger needs a source bundle key and snapshot commit"))
+			return
+		}
+		obj, readErr := s.store.CommittedObject(r.Context(), tenant.Team(), sourceKey)
+		if errors.Is(readErr, store.ErrNotFound) {
+			writeError(w, http.StatusUnprocessableEntity, errors.New("source bundle is not committed for this team; upload it before triggering"))
+			return
+		}
+		if readErr != nil {
+			s.writeInternalError(w, r, "read committed source bundle", readErr)
+			return
+		}
+		principal, _ := PrincipalFromContext(r.Context())
+		if principal == nil || principal.Kind != store.TokenKindUser || obj.Principal != principal.Name ||
+			obj.Kind != store.StorageCache || obj.Provenance != "local" || obj.SHA256 != sourceDigest {
+			writeError(w, http.StatusForbidden, errors.New("source bundle is not owned by this submitter"))
+			return
+		}
+	} else if sourceKey != "" {
+		writeError(w, http.StatusBadRequest, errors.New("source bundles require a working-tree trigger"))
+		return
+	}
 	if body.RetryOf != "" {
 		// safety: retry_of joins the new run to the named run's attempt tree,
 		// which the attempts route serves whole, so it has to name the
@@ -944,7 +972,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 		if body.Git.Repo == "" {
 			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
-				body.Trigger.Source = parent.TriggerSource
+				writeError(w, http.StatusUnprocessableEntity, errors.New("cloud RunAndAwait cannot inherit a working-tree source bundle; run the child locally or rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
+				return
 			}
 			body.Git.Repo = parent.DeclaredRepo
 			body.Git.RepoURL = parent.RepoURL
@@ -988,6 +1017,8 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		RetryOf:       body.RetryOf,
 		RepoInherited: repoInherited,
 		At:            time.Now(),
+		SourceKey:     sourceKey,
+		SourceToken:   claimIdentity(r).TokenPrefix,
 	}
 
 	principal := s.floodKey(r, "pipeline:"+body.Pipeline)
@@ -1005,6 +1036,10 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.admitTrigger(triggerCtx, tenant, intake); err != nil {
 		release()
+		if errors.Is(err, store.ErrSourceAlreadyBound) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {
 			return
 		}
@@ -1053,6 +1088,8 @@ type triggerIntake struct {
 	// store.ErrDuplicateIdempotencyKey rather than starting a second run.
 	IdempotencyKey string
 	At             time.Time
+	SourceKey      string
+	SourceToken    string
 }
 
 // safety: every path that starts a run on this controller writes its three rows
@@ -1061,7 +1098,7 @@ type triggerIntake struct {
 func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIntake) error {
 	// safety: the trigger and the run it names are written together, so a guard
 	// that refuses the run leaves no trigger behind for a worker to claim.
-	if err := t.CreateTriggerWithRun(ctx, store.Trigger{
+	trig := store.Trigger{
 		ID:             in.RunID,
 		Pipeline:       in.Pipeline,
 		Args:           in.Args,
@@ -1080,7 +1117,8 @@ func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIn
 		RetryOf:        in.RetryOf,
 		RepoInherited:  in.RepoInherited,
 		IdempotencyKey: in.IdempotencyKey,
-	}, store.Run{
+	}
+	run := store.Run{
 		ID:            in.RunID,
 		Pipeline:      in.Pipeline,
 		Status:        "pending",
@@ -1096,8 +1134,18 @@ func (s *Server) admitTrigger(ctx context.Context, t *store.Tenant, in triggerIn
 		RetryOf:       in.RetryOf,
 		CreatedAt:     in.At,
 		StartedAt:     in.At,
-	}); err != nil {
+	}
+	var err error
+	if in.SourceKey != "" {
+		err = t.CreateSourceTriggerWithRun(ctx, trig, run, in.SourceKey, in.User, in.SourceToken)
+	} else {
+		err = t.CreateTriggerWithRun(ctx, trig, run)
+	}
+	if err != nil {
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) || errors.Is(err, store.ErrComputeLimit) {
+			return err
+		}
+		if errors.Is(err, store.ErrSourceAlreadyBound) {
 			return err
 		}
 		return fmt.Errorf("persist the trigger and its run: %w", err)

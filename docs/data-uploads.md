@@ -7,7 +7,7 @@ small requests and the storage ledger. `GET /api/v1/services` announces
 `GET /api/v1/data/capabilities`. Runners use the cache service on older
 controllers. An `fs://` artifact store uses its existing local byte path; it
 does not issue S3 or CloudFront URLs. This signing route serves claimed runners.
-It has no owner or CLI token path.
+Source bundles have a separate pretrigger user-token path described below.
 
 The runner must hold a live claim on `run_id` for each request and send a
 cache grant minted for that claim. The runner's raw token cannot sign uploads.
@@ -40,6 +40,22 @@ cloud tokens on trusted machines because that marker controls provenance.
    reservation can adopt it only when S3 reports the same size, checksum and
    provenance. The committed row keeps the original uploader from S3 metadata;
    the new reservation records who recovered it.
+
+For `kind: source`, a user token with `runs.write` may reserve and commit
+`sources/<bundle-sha256>/<random-submission-id>` before a run exists, with
+`run_id: ""`. The source takes a free-team slot without incrementing the run
+count; the later trigger uses that same slot. The controller atomically binds
+the committed upload row to exactly one run from the same team, uploader and
+token. Only that run's live trigger or node claim can sign a source download.
+A retry must upload a new bundle. `runs retry` and Cloud
+`RunAndAwait` children cannot inherit an older run's one-run bundle; both
+are refused before admission. Submit a new Cloud run from the checkout
+(`sparkwing run <pipeline> --profile <cloud-profile>`) to upload fresh bytes. A source consumes the cache share of the
+team's 1 GiB free allowance and is limited to 500 MiB. The hourly storage
+pass removes an unused source 24 hours after commit, or a bound source 24
+hours after the run finishes. Pending and running runs retain their sources until the bucket's absolute
+90-day lifecycle backstop, including unusually long active runs. It deletes S3 first, then removes the upload and object rows and reconciles
+the byte count.
 
 The bucket's one-day `pending/` lifecycle removes abandoned bytes. The
 controller's hourly storage pass releases expired reservations and removes

@@ -27,7 +27,7 @@ before it writes:
 
 | Store | Share | Counted by | Checked |
 |---|---|---|---|
-| Cache: compiled binaries, dependency archives, artifacts | 3/4, 768 MiB | the controller's `team_storage` row for the cache | before the upload's body is read |
+| Cache: compiled binaries, dependency archives, artifacts, source bundles | 3/4, 768 MiB | the controller's `team_storage` row for the cache | before the upload's body is read |
 | Logs: live runs on the volume and the archive | 3/16, 192 MiB | the controller's `team_storage` row for logs | after the node and run caps cut the append, before it is written |
 | Run events | 1/16, 64 MiB | the controller's per-team event bytes | in the transaction that appends the event |
 

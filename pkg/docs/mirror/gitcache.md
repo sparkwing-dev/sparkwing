@@ -107,17 +107,11 @@ via `GET /api/v1/services`; operator CLIs fetch it once per session
 and cache in-process.
 
 If `CACHE_POD_URL` is unset the announce endpoint returns 404. The
-profile health probe then reports a warning (`controller announced no
-cache pod URL`) instead of a pass, and eager-refresh falls back to the
-controller's gitcache proxy routes (`POST /api/v1/gitcache/refresh`,
-then a SHA-scoped bundle seed via `POST /api/v1/gitcache/seed`); if
-those also fail the CLI prints a note and the runner retries on a stale
-SHA. A multi-team controller answers `multi_team: true` from the same
-route, and there the CLI makes neither call unless the shell holds
-`SPARKWING_CACHE_TOKEN`: the cache's `/git/refresh` and `/sync/seed` take
-its operator token, which a team member never holds and a cache grant does
-not replace. It logs one debug line instead, runners fetch a pushed commit
-from origin, and a commit not on origin is refused with "push your commit".
+profile health probe reports a cache warning, but a normal Cloud pipeline
+trigger uses a pushed commit and its runner fetches from origin. The CLI
+does not refresh or seed the cache for pipeline triggers. `--working-tree`
+uploads its source bundle through the direct S3 path and works without a
+cloud-reachable origin.
 The controller serves the proxy routes only when started with
 `--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
 cache Service, so set both: `--cache-pod-url` for the
@@ -330,31 +324,24 @@ runner        -> cache /git/<name>           (clone at SHA)
 ```
 
 With `--working-tree`, the CLI captures tracked changes plus untracked
-non-ignored files as a deterministic synthetic child commit. It seeds that
-bundle before creating the trigger and never refreshes the origin for the
-synthetic SHA. Capture rejects conflicts, submodules, sparse or shallow
+non-ignored files as a deterministic synthetic child commit. It uploads that
+bundle directly to S3 before creating the trigger and never refreshes the
+origin for the synthetic SHA. Capture rejects conflicts, submodules, sparse or shallow
 checkouts, SHA-256 repositories, and configured Git content filters. The source
 repository is not mutated.
 The runner sees a clean detached checkout at the synthetic SHA rather than the
 laptop's staged-versus-unstaged split.
-Capture also records the commit HEAD shares with the origin default branch. The
-runner fetches that commit through the same cache, names it with the
-remote-tracking ref it had locally, and grafts the parentless snapshot commit
-onto it with a `refs/replace/` entry, so a step scoped by `git merge-base
-origin/main HEAD` reads the range the laptop would. `git rev-parse HEAD` still
-answers with the snapshot SHA. A checkout with no origin remote records no
-baseline, and a step that needs one reports the ref it cannot resolve. A source
-that advertises only the snapshot, which is what a local fleet run serves, has
-no baseline to give and the runner skips the fetch. A mirror that has not caught
-up yet is retried, and a baseline that stays unreachable is named in the run's
-log so the widened scope has a stated cause.
-The cache moves each accepted snapshot from the transient seed namespace into
-`refs/sparkwing-workspace/*` and retains at most 128 distinct workspace refs per
-repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is
-rejected before trigger admission when the repository is full; Sparkwing never
-evicts an admitted snapshot to make room. Treat those refs as retained
-unpublished source and keep the cache private. Before retrying a rejected
-upload, delete workspace refs that no admitted run needs.
+Capture also records the commit HEAD shares with the origin default branch
+when one exists. A runner with a reachable origin tries to fetch that baseline
+and graft the parentless snapshot onto it with a `refs/replace/` entry, so
+`git merge-base origin/main HEAD` can retain its local meaning. If the remote
+cannot serve the baseline, the runner logs the failure and keeps the snapshot
+usable. A checkout with no origin records no baseline; `git rev-parse HEAD`
+still answers with the snapshot SHA.
+Each Cloud snapshot has a unique S3 key bound to one run. The controller's
+hourly storage pass removes an orphan 24 hours after commit, or a bound
+snapshot 24 hours after the run finishes. A retry uploads a new object. This
+source path does not use cache workspace refs.
 
 The cache also exposes tarball-upload and ancestor-negotiation endpoints
 (`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
