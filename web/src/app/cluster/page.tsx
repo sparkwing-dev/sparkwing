@@ -137,7 +137,7 @@ export default function ClusterPage() {
     };
   }, [agents]);
 
-  const { recentRunFailures, serviceProbes, overall } = fleetServiceSummary(services);
+  const { serviceProbes, overall } = fleetServiceSummary(services);
   const maxLatency = Math.max(1, ...serviceProbes.map((s) => s.latency_ms));
 
   return (
@@ -157,25 +157,11 @@ export default function ClusterPage() {
       />
 
       <div className="mb-4 flex flex-wrap gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm">
-        <span>Queued nodes <strong>{queue ? queue.waiters?.length ?? 0 : "—"}</strong></span>
-        <span>Running nodes <strong>{queue ? queue.holders?.length ?? 0 : "—"}</strong></span>
-        <span>Active slots <strong>{fleetTotals.activeSlots ?? "—"}</strong></span>
+        <span>Queued nodes <strong>{queue ? queue.waiters?.length ?? 0 : "-"}</strong></span>
+        <span>Running nodes <strong>{queue ? queue.holders?.length ?? 0 : "-"}</strong></span>
+        <span>Active slots <strong>{fleetTotals.activeSlots ?? "-"}</strong></span>
         <Link href="/runs" className="text-[var(--accent)] hover:underline">View runs</Link>
       </div>
-
-      {recentRunFailures.length > 0 && (
-        <section className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4 text-sm">
-          <h2 className="font-medium text-amber-300">Recent run failures</h2>
-          {recentRunFailures.map((problem) => (
-            <p key={problem} className="mt-1 text-xs font-mono text-amber-200">
-              {problem}
-            </p>
-          ))}
-          <Link href="/runs?status=failed" className="inline-block mt-2 text-xs text-[var(--accent)] hover:underline focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
-            View failed runs
-          </Link>
-        </section>
-      )}
 
       <SectionHeader title="Services" hint="/api/v1/health/services" />
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-6">

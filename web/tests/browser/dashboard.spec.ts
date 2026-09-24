@@ -1871,35 +1871,18 @@ test("separates fleet policy, observations, and current activity", async ({
   await expect(page.getByText("not reported", { exact: true })).toBeVisible();
 });
 
-test("Fleet shows recent run failures separately from healthy services", async ({ page }) => {
-  const runProblem = "runs: 63% success over 154 (24h), 57 failed";
-  await installMockAPI(page, {
-    services: [
-      { name: "controller", url: "http://controller/health", status: "degraded", latency_ms: 7, checked_at: isoFromNow(0), problems: [runProblem] },
-      { name: "logs", url: "http://logs/health", status: "ok", latency_ms: 3, checked_at: isoFromNow(0) },
-    ],
-  });
-  await page.goto("/cluster");
-  await expect(page.getByText("All systems operational")).toBeVisible();
-  await expect(page.getByText("controller", { exact: true }).locator("..").getByText("Healthy")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent run failures" })).toBeVisible();
-  await expect(page.getByText(runProblem)).toBeVisible();
-  await expect(page.getByRole("link", { name: "View failed runs" })).toHaveAttribute("href", "/runs?status=failed");
-});
-
-test("Fleet retains dependency degradation alongside recent run failures", async ({ page }) => {
+test("Fleet shows dependency degradation", async ({ page }) => {
   await installMockAPI(page, {
     services: [{
       name: "controller", url: "http://controller/health", status: "degraded",
       latency_ms: 7, checked_at: isoFromNow(0),
-      problems: ["runs: 63% success over 154 (24h), 57 failed", "db: unavailable"],
+      problems: ["db: unavailable"],
     }],
   });
   await page.goto("/cluster");
   await expect(page.getByText("Degraded - at least one service is slow or partial")).toBeVisible();
   await expect(page.getByText("controller", { exact: true }).locator("..").getByText("Degraded")).toBeVisible();
   await expect(page.getByText("db: unavailable")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Recent run failures" })).toBeVisible();
 });
 
 test("keeps every public dashboard navigation target routable", async ({

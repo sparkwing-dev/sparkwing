@@ -25,17 +25,15 @@ function agent(fields: Partial<Agent>): Agent {
 }
 
 describe("fleet presentation", () => {
-  it("shows a controller run warning without degrading a healthy service", () => {
+  it("summarizes healthy and degraded services", () => {
     const controller: ServiceStatus = {
       name: "controller",
       url: "/health",
       status: "ok",
       latency_ms: 3,
       checked_at: "2026-09-24T00:00:00Z",
-      warning: "runs: 0% success over 20 (24h), 20 failed",
     };
     const summary = fleetServiceSummary([controller]);
-    assert.deepEqual(summary.recentRunFailures, [controller.warning]);
     assert.equal(summary.overall, "ok");
     assert.deepEqual(summary.serviceProbes, [controller]);
 

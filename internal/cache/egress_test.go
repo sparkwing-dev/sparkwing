@@ -289,10 +289,11 @@ func TestHealth_RepeatedReclonesSurfaceProblem(t *testing.T) {
 		t.Errorf("status: got %q, want degraded (%v)", resp.Status, resp.Problems)
 	}
 	joined := strings.Join(resp.Problems, "\n")
-	if !strings.Contains(joined, repoHash(repoURL)) ||
-		!strings.Contains(joined, "persistent fetch failure") ||
-		!strings.Contains(joined, "expensive") {
-		t.Errorf("health problems should name the repo and the fix, got: %v", resp.Problems)
+	if strings.Contains(joined, repoHash(repoURL)) || strings.Contains(joined, "cannot lock ref") {
+		t.Errorf("public health exposed repository details: %v", resp.Problems)
+	}
+	if !strings.Contains(joined, "gitcache: background fetch failing") {
+		t.Errorf("health omitted the generic fetch alarm: %v", resp.Problems)
 	}
 }
 

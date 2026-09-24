@@ -223,12 +223,11 @@ func TestLogsHealthReportsTheEgressAlarm(t *testing.T) {
 	if health.Egress["alarm"] != true || health.Status != "degraded" {
 		t.Fatalf("health = %+v, want a degraded status with the alarm up", health)
 	}
-	var named bool
-	for _, p := range health.Problems {
-		named = named || strings.Contains(p, "egress")
+	if len(health.Egress) != 2 || health.Egress["enabled"] != true {
+		t.Fatalf("public health exposed egress usage: %+v", health.Egress)
 	}
-	if !named {
-		t.Errorf("health problems = %v, want one naming egress", health.Problems)
+	if len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached" {
+		t.Errorf("public health exposed egress usage in problems: %v", health.Problems)
 	}
 }
 

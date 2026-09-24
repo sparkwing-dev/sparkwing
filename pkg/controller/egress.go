@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -166,29 +165,17 @@ func (s *Server) handleEgressState(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "egress": state})
 }
 
-// safety: the alarm is the deployment's bill crossing a daily threshold,
-// which no single request can answer for, so it reaches an operator as a
-// health problem and a warn line rather than as a refusal.
+// safety: public health reports the alarm without exposing usage or budget totals.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {
 		return map[string]any{"enabled": false}, nil
 	}
 	state := s.egress.State()
-	summary := map[string]any{
-		"enabled":                     true,
-		"alarm":                       state.Alarm,
-		"global_day_bytes":            state.GlobalDayBytes,
-		"global_month_bytes":          state.GlobalMonthBytes,
-		"daily_alarm_bytes":           state.DailyAlarmBytes,
-		"monthly_bytes_per_principal": state.MonthlyBytesPerPrincipal,
-		"refused_total":               state.Refused,
-	}
+	summary := map[string]any{"enabled": true, "alarm": state.Alarm}
 	if !state.Alarm {
 		return summary, nil
 	}
-	return summary, []string{fmt.Sprintf(
-		"egress: this controller has sent %s today, at or past the %s daily threshold",
-		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
+	return summary, []string{"egress: daily alarm threshold reached"}
 }
 
 // safety: A day-shaped period cannot collide with the same service's month-shaped row.

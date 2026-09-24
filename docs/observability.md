@@ -349,10 +349,10 @@ It also shows what admission is doing with the machine:
   credential's. Legacy `last_seen` is the most recent node start, live poll, or
   accepted claim heartbeat from that credential, never the future lease
   deadline. A busy runner's heartbeat does not advertise a free slot. The
-  headroom observation time stays separate. Home shows the controller's recent
-  run-failure warning apart from service health. Database, object-store, auth,
-  and slow-response problems
-  still degrade their service; the controller health API keeps its own status.
+  headroom observation time stays separate. Home reads its recently failed
+  pipelines from the caller's team-scoped runs. Database, object-store, auth,
+  and slow-response problems still degrade their service; the controller
+  health API keeps its own status.
 
 The run node list and DAG show a small location icon for known execution sites.
 Hover or focus the icon to see the runner or repository. Machine, Sparkwing
@@ -607,9 +607,9 @@ The controller reports its own budget on `GET /api/v1/health` under
 `object_store`, names every tripped class in `problems`, and exports the
 three `sparkwing_object_store_*` metrics above. The health summary names
 the classes and not their limits, because that route answers without a
-token. A state outbox that has given up replaying appears there too,
-under `object_store.stalled` and as a problem naming the path and when
-it stalled.
+token. A state outbox that has given up replaying sets
+`object_store.stalled` and adds a generic problem. Public health omits
+the stalled path and error; controller logs retain the details.
 
 Read a controller's budget, and clear a tripped one, with:
 
@@ -643,10 +643,9 @@ working, because deleting is how a store gets back under its ceiling.
 Each of the three reports `frozen`, `warning` and
 `measurement_incomplete` on its health route and raises a `problems`
 entry for each, so a frozen or warning store shows as degraded wherever
-health is read. The services also carry their counted bytes and objects
-and the time of the last measurement; the controller keeps its totals on
-the admin-scoped breaker route, because its health answers without a
-token.
+health is read. Public health reports flags and measurement time without
+stored byte or object totals. Detailed totals remain in service metrics
+and the admin-scoped controller breaker route.
 
 The three are independent: each measures the store it owns and freezes
 only its own writes, so no service waits on another to decide. The
@@ -865,7 +864,7 @@ controller, which knows who each bearer is.
 The cache's other refusal is `--egress-daily-cap-bytes`, the process-wide
 backstop: past it every metered download answers `429` with a
 `Retry-After` naming the wait until the UTC day rolls. Its health reports
-`egress.enforced: true` and `daily_cap_bytes` while that cap is set.
+`egress.enforced: true` while that cap is set, without usage or budget totals.
 
 A service running with auth off resolves every request to `anonymous`,
 which is one shared budget for the same reason; that is the laptop-local

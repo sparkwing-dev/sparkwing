@@ -12,8 +12,6 @@ const kindOrder: Record<string, number> = {
 };
 
 export function fleetServiceSummary(services: ServiceStatus[]) {
-  const controller = services.find((service) => service.name === "controller");
-  const recentRunFailures = controller?.warning ? [controller.warning] : [];
   const overall =
     services.length === 0
       ? "unknown"
@@ -22,7 +20,7 @@ export function fleetServiceSummary(services: ServiceStatus[]) {
         : services.some((service) => service.status === "down")
           ? "down"
           : "degraded";
-  return { recentRunFailures, serviceProbes: services, overall };
+  return { serviceProbes: services, overall };
 }
 
 export function sortFleetAgents(a: Agent, b: Agent): number {

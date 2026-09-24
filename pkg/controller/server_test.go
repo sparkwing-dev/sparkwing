@@ -3,6 +3,7 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,7 +57,7 @@ func TestController_Health(t *testing.T) {
 	}
 }
 
-func TestController_RecentRunFailuresWarnWithoutDegradingService(t *testing.T) {
+func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 	for i := range 20 {
@@ -76,8 +77,47 @@ func TestController_RecentRunFailuresWarnWithoutDegradingService(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning == "" {
-		t.Fatalf("historical failures classified as service health: %+v", body)
+	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning != "" {
+		t.Fatalf("public health exposed workload history: %+v", body)
+	}
+}
+
+func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateTrigger(t.Context(), store.Trigger{
+		ID: "stuck", Pipeline: "demo", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ClaimNextTrigger(t.Context(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(t.Context(), "UPDATE triggers SET claimed_at = ? WHERE id = ?", time.Now().Add(-time.Hour).UnixNano(), "stuck"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp := mustGet(t, srv.URL+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		Status   string   `json:"status"`
+		Problems []string `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "ok" || len(body.Problems) != 0 {
+		t.Fatalf("public health exposed trigger activity: %+v", body)
 	}
 }
 

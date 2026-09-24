@@ -459,27 +459,16 @@ func (fs *fetchState) problems() []string {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	var msgs []string
 	if fs.allFailing {
-		msgs = append(msgs, "All git fetches are failing -- SSH may be broken or the pod is resource-exhausted")
+		return []string{"gitcache: background fetch failing"}
 	}
-	for name, rs := range fs.repos {
-		repoName := strings.TrimSuffix(name, ".git")
-		if recent := recentReclones(rs.reclones); recent > 1 {
-			msgs = append(msgs, fmt.Sprintf(
-				"repo %s: recovery reclone ran %d times in 24h -- persistent fetch failure; investigate the underlying git error; recloning on every archive request is expensive",
-				repoName, recent))
+	for _, rs := range fs.repos {
+		if recentReclones(rs.reclones) > 1 ||
+			(rs.lastError != "" && time.Since(rs.lastErrorAt) <= 10*time.Minute) {
+			return []string{"gitcache: background fetch failing"}
 		}
-		if rs.lastError == "" {
-			continue
-		}
-		if time.Since(rs.lastErrorAt) > 10*time.Minute {
-			continue
-		}
-		msg := fmt.Sprintf("repo %s: %s", repoName, friendlyFetchError(rs.lastError))
-		msgs = append(msgs, msg)
 	}
-	return msgs
+	return nil
 }
 
 func recentReclones(at []time.Time) int {
@@ -490,28 +479,6 @@ func recentReclones(at []time.Time) int {
 		}
 	}
 	return n
-}
-
-func friendlyFetchError(raw string) string {
-	switch {
-	case strings.Contains(raw, "cannot fork"):
-		return "cannot fork SSH process -- pod is out of PIDs or memory"
-	case strings.Contains(raw, "Permission denied"):
-		return "SSH permission denied -- check that the SSH key has read access to this repo"
-	case strings.Contains(raw, "Host key verification failed"):
-		return "SSH host key verification failed -- known_hosts may be missing or stale"
-	case strings.Contains(raw, "Could not resolve hostname"):
-		return "DNS resolution failed -- check network connectivity"
-	case strings.Contains(raw, "Connection refused"):
-		return "SSH connection refused -- GitHub may be unreachable from this cluster"
-	case strings.Contains(raw, "timed out"):
-		return "git fetch timed out -- slow network or large repo"
-	default:
-		if len(raw) > 120 {
-			return raw[:120] + "..."
-		}
-		return raw
-	}
 }
 
 const keepWarmWindow = time.Hour
@@ -626,13 +593,24 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 
 	testPath := filepath.Join(proxyDir, ".health-check")
 	if err := os.WriteFile(testPath, []byte("ok"), 0o644); err != nil {
-		problems = append(problems, fmt.Sprintf("proxy: cache directory not writable: %v", err))
+		problems = append(problems, "proxy: cache directory not writable")
 	} else {
 		_ = os.Remove(testPath)
 	}
 
 	problems = append(problems, storeCeilingProblems()...)
-	resp["store_ceiling"] = storeCeilingState()
+	ceiling := storeCeiling.State()
+	ceilingSummary := map[string]any{
+		"enforced":               ceiling.Enforced,
+		"frozen":                 ceiling.Frozen,
+		"warning":                ceiling.Warning,
+		"thawed":                 ceiling.Thawed,
+		"measurement_incomplete": ceiling.Incomplete,
+	}
+	if !ceiling.ReconciledAt.IsZero() {
+		ceilingSummary["reconciled_at"] = ceiling.ReconciledAt.UTC().Format(time.RFC3339)
+	}
+	resp["store_ceiling"] = ceilingSummary
 	egressState, egressProblems := egressHealth()
 	problems = append(problems, egressProblems...)
 	resp["egress"] = egressState

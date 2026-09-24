@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"math"
 	"net/http"
@@ -173,29 +172,21 @@ func writeEgressRefusal(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusTooManyRequests)
 }
 
-// safety: the alarm is this pod's bill crossing a daily threshold, which
-// no single download can answer for, so it reaches an operator through
-// health and a warn line rather than as a refusal.
+// safety: public health reports the alarm without exposing usage or budget totals.
 func egressHealth() (map[string]any, []string) {
 	if egressMeter == nil {
 		return map[string]any{"enabled": false}, nil
 	}
 	state := egressMeter.State()
 	summary := map[string]any{
-		"enabled":            true,
-		"enforced":           state.DailyCapBytes > 0,
-		"alarm":              state.Alarm,
-		"global_day_bytes":   state.GlobalDayBytes,
-		"global_month_bytes": state.GlobalMonthBytes,
-		"daily_alarm_bytes":  state.DailyAlarmBytes,
-		"daily_cap_bytes":    state.DailyCapBytes,
+		"enabled":  true,
+		"enforced": state.DailyCapBytes > 0,
+		"alarm":    state.Alarm,
 	}
 	if !state.Alarm {
 		return summary, nil
 	}
-	return summary, []string{fmt.Sprintf(
-		"egress: this cache has sent %s today, at or past the %s daily threshold",
-		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
+	return summary, []string{"egress: daily alarm threshold reached"}
 }
 
 func logEgressBudgets(cfg egress.Config) {

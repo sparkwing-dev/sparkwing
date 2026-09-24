@@ -2721,6 +2721,7 @@ paths:
       x-sparkwing-scope: public
       tags: [health]
       summary: Process liveness probe.
+      description: Reports service availability without tenant workload counts.
       security: []
       responses:
         "200":

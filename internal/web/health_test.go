@@ -114,11 +114,10 @@ func TestProbeService_DegradedBodyAtHTTP200(t *testing.T) {
 		{
 			name: "controller degraded",
 			body: `{"status":"degraded","auth":"enabled","problems":` +
-				`["triggers: 3 claimed >30m without /done","runs: 61% success over 44 (24h), 17 failed"]}`,
+				`["db: unavailable"]}`,
 			wantStatus: "degraded",
 			wantProblems: []string{
-				"triggers: 3 claimed >30m without /done",
-				"runs: 61% success over 44 (24h), 17 failed",
+				"db: unavailable",
 			},
 		},
 		{
@@ -208,17 +207,6 @@ func TestHealthServices_DegradedBodyReachesTheResponse(t *testing.T) {
 	}
 	if len(svc.Problems) != 1 || svc.Problems[0] != "proxy: cache directory not writable" {
 		t.Fatalf("problems = %v, want the upstream problem", svc.Problems)
-	}
-}
-
-func TestControllerRecentRunWarningStaysSeparateFromServiceStatus(t *testing.T) {
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"status":"ok","recent_run_warning":"runs: 0% success over 20 (24h), 20 failed"}`)
-	}))
-	defer up.Close()
-	got := probeService(context.Background(), HealthService{Name: "controller", URL: up.URL}, "")
-	if got.Status != "ok" || got.Warning == "" || len(got.Problems) != 0 {
-		t.Fatalf("controller health and run warning = %+v", got)
 	}
 }
 

@@ -454,15 +454,14 @@ func TestHealthAndTheTopConsumersViewReportTheAlarm(t *testing.T) {
 	if health.Egress["alarm"] != true {
 		t.Fatalf("health egress = %+v, want the alarm up", health.Egress)
 	}
+	if len(health.Egress) != 2 || health.Egress["enabled"] != true {
+		t.Fatalf("public health exposed egress usage: %+v", health.Egress)
+	}
 	if health.Status != "degraded" {
 		t.Errorf("health status = %q, want degraded", health.Status)
 	}
-	var named bool
-	for _, p := range health.Problems {
-		named = named || strings.Contains(p, "egress")
-	}
-	if !named {
-		t.Errorf("health problems = %v, want one naming egress", health.Problems)
+	if len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached" {
+		t.Errorf("public health exposed egress usage in problems: %v", health.Problems)
 	}
 
 	view := f.get(t, "/api/v1/egress", f.adminToken)

@@ -15,11 +15,9 @@ const (
 const MaxBodyBytes = 1 << 16
 
 type Response struct {
-	Status           string   `json:"status"`
-	Problems         []string `json:"problems,omitempty"`
-	RecentRunWarning string   `json:"recent_run_warning,omitempty"`
-
-	Auth string `json:"auth,omitempty"`
+	Status   string   `json:"status"`
+	Problems []string `json:"problems,omitempty"`
+	Auth     string   `json:"auth,omitempty"`
 }
 
 func (r Response) Degraded() bool {

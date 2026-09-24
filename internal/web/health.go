@@ -25,7 +25,6 @@ type serviceStatus struct {
 	CheckedAt string   `json:"checked_at"`
 	Error     string   `json:"error,omitempty"`
 	Problems  []string `json:"problems,omitempty"`
-	Warning   string   `json:"warning,omitempty"`
 }
 
 func healthServicesHandler(services []HealthService, token string) http.HandlerFunc {
@@ -122,7 +121,6 @@ func applyHealthBody(status *serviceStatus, resp *http.Response) {
 	if err != nil {
 		return
 	}
-	status.Warning = body.RecentRunWarning
 	if !body.Degraded() {
 		return
 	}

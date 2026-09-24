@@ -3,7 +3,6 @@ package logs
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -152,27 +151,15 @@ func concurrencyCode(slot egress.Slot) string {
 	return EgressStreamLimitCode
 }
 
-// safety: the alarm is this process's bill crossing a daily threshold,
-// which no single read can answer for, so it reaches an operator as a
-// health problem and a warn line rather than as a refusal.
+// safety: public health reports the alarm without exposing usage or budget totals.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {
 		return map[string]any{"enabled": false}, nil
 	}
 	state := s.egress.State()
-	summary := map[string]any{
-		"enabled":                     true,
-		"alarm":                       state.Alarm,
-		"global_day_bytes":            state.GlobalDayBytes,
-		"global_month_bytes":          state.GlobalMonthBytes,
-		"daily_alarm_bytes":           state.DailyAlarmBytes,
-		"monthly_bytes_per_principal": state.MonthlyBytesPerPrincipal,
-		"refused_total":               state.Refused,
-	}
+	summary := map[string]any{"enabled": true, "alarm": state.Alarm}
 	if !state.Alarm {
 		return summary, nil
 	}
-	return summary, []string{fmt.Sprintf(
-		"egress: this service has sent %s today, at or past the %s daily threshold",
-		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
+	return summary, []string{"egress: daily alarm threshold reached"}
 }

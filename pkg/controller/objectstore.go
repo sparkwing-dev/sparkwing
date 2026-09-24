@@ -78,8 +78,8 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 func objectStoreHealth(bucket bool) (map[string]any, []string) {
 	limiter, err := objectguard.Shared()
 	if err != nil {
-		return map[string]any{"tripped": false, "error": err.Error()},
-			[]string{"object-store budget: " + err.Error()}
+		return map[string]any{"tripped": false},
+			[]string{"object-store budget unavailable"}
 	}
 	state := limiter.State()
 	summary := map[string]any{"tripped": state.Tripped, "enabled": state.Enabled}
@@ -125,11 +125,8 @@ func objectStoreHealth(bucket bool) (map[string]any, []string) {
 
 	stalls := objectguard.Stalls()
 	if len(stalls) > 0 {
-		summary["stalled"] = stalls
-	}
-	for _, st := range stalls {
-		problems = append(problems, fmt.Sprintf(
-			"object-store replay stalled since %s: %s", st.Since.Format(time.RFC3339), st.Path))
+		summary["stalled"] = true
+		problems = append(problems, "object-store replay stalled")
 	}
 	return summary, problems
 }

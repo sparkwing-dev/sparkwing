@@ -28,7 +28,6 @@ import (
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
-	var recentRunWarning string
 
 	authState := "disabled"
 	if s.auth != nil {
@@ -42,45 +41,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"problems": []string{"db: " + err.Error()},
 		})
 		return
-	}
-
-	if triggers, err := s.store.ListTriggers(r.Context(), store.TriggerFilter{
-		Statuses: []string{"claimed"},
-		Limit:    200,
-	}); err == nil {
-		stuck := 0
-		cutoff := time.Now().Add(-30 * time.Minute)
-		for _, t := range triggers {
-			if t.ClaimedAt != nil && !t.ClaimedAt.IsZero() && t.ClaimedAt.Before(cutoff) {
-				stuck++
-			}
-		}
-		if stuck > 0 {
-			problems = append(problems,
-				fmt.Sprintf("triggers: %d claimed >30m without /done", stuck))
-		}
-	}
-
-	if runs, err := s.store.ListRuns(r.Context(), store.RunFilter{
-		Since: time.Now().Add(-24 * time.Hour),
-		Limit: 500,
-	}); err == nil && len(runs) >= 20 {
-		success, failed := 0, 0
-		for _, run := range runs {
-			switch run.Status {
-			case "success":
-				success++
-			case "failed", "cancelled":
-				failed++
-			}
-		}
-		if total := success + failed; total > 0 {
-			rate := float64(success) / float64(total) * 100.0
-			if rate < 80.0 {
-				recentRunWarning = fmt.Sprintf("runs: %.0f%% success over %d (24h), %d failed",
-					rate, total, failed)
-			}
-		}
 	}
 
 	objectStore, objectStoreProblems := objectStoreHealth(s.bucketMeasured())
@@ -98,9 +58,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if storagePass != nil {
 		resp["storage_pass"] = storagePass
-	}
-	if recentRunWarning != "" {
-		resp["recent_run_warning"] = recentRunWarning
 	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
