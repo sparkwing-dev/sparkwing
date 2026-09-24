@@ -11,7 +11,7 @@ describe("completenessLine", () => {
         message:
           "logs cut off: the log stream ended without the runner's confirmation after line 1,234",
       }),
-      "— logs cut off: the log stream ended without the runner's confirmation after line 1,234 —",
+      "[logs cut off: the log stream ended without the runner's confirmation after line 1,234]",
     );
   });
 
@@ -23,7 +23,7 @@ describe("completenessLine", () => {
         missing_lines: 2,
         message: "logs incomplete: 2 lines missing",
       }),
-      "— logs incomplete: 2 lines missing —",
+      "[logs incomplete: 2 lines missing]",
     );
     assert.match(
       completenessLine({
@@ -32,7 +32,7 @@ describe("completenessLine", () => {
         message:
           "logs unconfirmed: this runner does not report whether its log is complete (3 lines stored)",
       }) ?? "",
-      /^— logs unconfirmed/,
+      /^\[logs unconfirmed/,
     );
   });
 

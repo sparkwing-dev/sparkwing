@@ -104,7 +104,7 @@ func TestSealedStreamWithAGapReadsIncomplete(t *testing.T) {
 		t.Fatalf("stream report = %+v", r.Streams)
 	}
 	got := r.Assess(done, late)
-	if got.State != StateIncomplete || got.MissingLines != 2 || got.SyntheticLine() != "— logs incomplete: 2 lines missing —" {
+	if got.State != StateIncomplete || got.MissingLines != 2 || got.SyntheticLine() != "[logs incomplete: 2 lines missing]" {
 		t.Fatalf("gapped stream = %+v %q", got, got.SyntheticLine())
 	}
 
@@ -164,7 +164,7 @@ func TestMissingSealReadsCutOffOnlyAfterTheGrace(t *testing.T) {
 	}
 
 	got := r.Assess(done, late)
-	want := fmt.Sprintf("— logs cut off: the log stream ended without the runner's confirmation after line %s —", groupDigits(r.Lines))
+	want := fmt.Sprintf("[logs cut off: the log stream ended without the runner's confirmation after line %s]", groupDigits(r.Lines))
 	if got.State != StateCutOff || got.SyntheticLine() != want {
 		t.Fatalf("after the grace = %+v %q", got, got.SyntheticLine())
 	}

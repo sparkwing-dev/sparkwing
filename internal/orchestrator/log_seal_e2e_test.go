@@ -79,7 +79,7 @@ func TestLogSeal_E2E_RunnerChildSealsOrIsCutOff(t *testing.T) {
 		{mode: "clean", run: "run-clean", wantState: logs.StateComplete},
 		{
 			mode: "killed", run: "run-killed", wantState: logs.StateCutOff,
-			wantLine: "— logs cut off: the log stream ended without the runner's confirmation after line 5 —",
+			wantLine: "[logs cut off: the log stream ended without the runner's confirmation after line 5]",
 		},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestLogSeal_E2E_RunnerChildSealsOrIsCutOff(t *testing.T) {
 				t.Fatalf("runs logs lost the log itself:\n%s", text)
 			}
 			lastLine := strings.TrimSpace(text[strings.LastIndex(strings.TrimSuffix(text, "\n"), "\n")+1:])
-			if tc.wantLine == "" && strings.Contains(text, "— logs") {
+			if tc.wantLine == "" && strings.Contains(text, "[logs") {
 				t.Fatalf("a sealed log drew a completeness line:\n%s", text)
 			}
 			if tc.wantLine != "" && lastLine != tc.wantLine {
