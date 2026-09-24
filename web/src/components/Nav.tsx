@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
@@ -28,6 +28,8 @@ const APPROVALS_POLL_MS = 10_000;
 
 export default function Nav() {
   const pathname = usePathname();
+  const router = useRouter();
+  const prefetchHome = () => router.prefetch("/");
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
   const team = useTeamState();
@@ -52,7 +54,14 @@ export default function Nav() {
 
   return (
     <div className="flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
-      <Link href="/" className="text-lg font-bold py-2">
+      <Link
+        href="/"
+        prefetch={false}
+        onMouseEnter={prefetchHome}
+        onFocus={prefetchHome}
+        onTouchStart={prefetchHome}
+        className="text-lg font-bold py-2"
+      >
         sparkwing
       </Link>
       <VersionPill />
@@ -96,8 +105,17 @@ export default function Nav() {
               </a>
             );
           }
+          const onIntent = () => router.prefetch(tab.href);
           return (
-            <Link key={tab.href} href={tab.href} className={className}>
+            <Link
+              key={tab.href}
+              href={tab.href}
+              prefetch={false}
+              onMouseEnter={onIntent}
+              onFocus={onIntent}
+              onTouchStart={onIntent}
+              className={className}
+            >
               {tab.label}
             </Link>
           );

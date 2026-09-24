@@ -1876,6 +1876,36 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toHaveCount(0);
 });
 
+test("navigation waits for a chosen tab before fetching other routes", async ({ page }) => {
+  await installMockAPI(page);
+  const targets = ["/queue", "/crons", "/capacity", "/cluster", "/analytics"];
+  const speculative = new Set<string>();
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!url.searchParams.has("_rsc")) return;
+    for (const target of targets) {
+      if (url.pathname === target || url.pathname.startsWith(`${target}/__next`)) {
+        speculative.add(target);
+      }
+    }
+  });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  expect([...speculative]).toEqual([]);
+
+  const crons = page.getByRole("link", { name: "Crons", exact: true });
+  await crons.hover();
+  await crons.click();
+  await expect(page).toHaveURL(/\/crons$/);
+  await page.waitForLoadState("networkidle");
+  expect([...speculative]).toEqual(["/crons"]);
+  const runs = page.getByRole("link", { name: "Runs", exact: true });
+  await runs.focus();
+  await runs.press("Enter");
+  await expect(page).toHaveURL(/\/runs$/);
+});
+
+
 test("promises no analytics section the product does not have", async ({
   page,
 }) => {
