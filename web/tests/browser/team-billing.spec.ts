@@ -96,12 +96,11 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   await expect(
     page.getByText(/\$1\.23 · a team balance holds up to \$5,000/),
   ).toBeVisible();
-  await expect(
-    page.getByText("$0.18 per vCPU-hour", { exact: false }),
-  ).toBeVisible();
   const twoCore = page.getByRole("row", { name: /2 vCPU/ });
-  await expect(twoCore).toContainText("120");
+  await expect(twoCore.getByRole("cell", { name: "2", exact: true })).toBeVisible();
   await expect(twoCore).toContainText("$0.36");
+  await expect(page.getByRole("columnheader", { name: "Credits / minute" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
   await expect(page.getByRole("link", { name: "run-abc" })).toHaveAttribute(
     "href",
     "/runs?run=run-abc",
@@ -174,7 +173,7 @@ test("a reader cannot buy and a returning payment reloads the balance", async ({
     page.getByRole("button", { name: "Buy credits" }),
   ).toBeDisabled();
   await expect(page.getByText("No runs have been charged yet.")).toBeVisible();
-  await expect(page.getByText("No purchases yet.")).toBeVisible();
+  await expect(page.getByText("No history yet.")).toBeVisible();
   await expect
     .poll(() => seen.billingReads, { timeout: 8_000 })
     .toBeGreaterThan(2);
