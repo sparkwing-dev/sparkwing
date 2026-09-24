@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -360,6 +361,65 @@ func TestSameBinaryCanBeCommittedByLocalAndCloudRunners(t *testing.T) {
 	}
 	if got, err := st.CommittedObjectFor(t.Context(), "team-a", key, true); err != nil || got.Provenance != "cloud" {
 		t.Fatalf("cloud object = %+v, %v", got, err)
+	}
+}
+
+func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: concurrent binary provenance expiry")
+	}
+	st := storetest.Open(t)
+	key := "bin/01234567-89abcdef/" + strings.Repeat("a", 64)
+	digest := strings.Repeat("a", 64)
+	insert := `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
+		VALUES ('team-a', ?, 'cache', 1, ?, 'runner', ?, ?)
+		ON CONFLICT DO NOTHING`
+	if _, err := st.DB().Exec(insert, key, digest, "local", time.Now().UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(insert, key, digest, "cloud", time.Now().UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true); err != nil || got.Provenance != "cloud" {
+		t.Fatalf("initial cloud lookup = %+v, %v", got, err)
+	}
+	done := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 2000 {
+			if _, err := st.DB().ExecContext(t.Context(),
+				`DELETE FROM data_objects WHERE team = 'team-a' AND key = ? AND provenance = 'cloud'`, key); err != nil {
+				done <- err
+				return
+			}
+			if _, err := st.DB().ExecContext(t.Context(), insert, key, digest, "cloud", time.Now().UnixNano()); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	defer wg.Wait()
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		default:
+		}
+		got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true)
+		switch {
+		case err == nil && got.Provenance == "cloud":
+		case err == nil:
+			t.Fatalf("untrusted cloud reader received %q binary", got.Provenance)
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatal(err)
+		}
 	}
 }
 
