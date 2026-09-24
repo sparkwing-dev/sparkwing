@@ -180,7 +180,9 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 				}
 				finishCancel()
 				if canFinish {
-					_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
+					if ferr := cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID); ferr != nil {
+						logger.Warn("trigger loop: FinishTrigger failed", "run_id", trigger.ID, "err", ferr)
+					}
 				}
 			}
 			if selfTerminate {

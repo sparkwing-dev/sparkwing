@@ -1,10 +1,12 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -253,6 +255,47 @@ func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
 	if finishRunGeneration != "7" || finishTriggerGeneration != "7" {
 		t.Fatalf("failure cleanup generations = run %q trigger %q, want 7 for both",
 			finishRunGeneration, finishTriggerGeneration)
+	}
+}
+
+func TestRunTriggerLoop_ReportsFailedTriggerFinish(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var claimed atomic.Bool
+	var finishAttempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+				Status: "claimed", ClaimSeq: 7,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+			finishAttempts.Add(1)
+			http.Error(w, "finish unavailable", http.StatusServiceUnavailable)
+			cancel()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	var logs bytes.Buffer
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if finishAttempts.Load() != 1 || !strings.Contains(logs.String(), "trigger loop: FinishTrigger failed") ||
+		!strings.Contains(logs.String(), "run_id=bad-source") || !strings.Contains(logs.String(), "finish unavailable") {
+		t.Fatalf("finish attempts = %d; missing claim-finish failure in logs: %s", finishAttempts.Load(), logs.String())
 	}
 }
 
