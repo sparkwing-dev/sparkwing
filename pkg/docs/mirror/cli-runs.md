@@ -547,8 +547,9 @@ Walks runs selected by pipeline, status, branch, SHA prefix, and since,
 then substring-greps every node's log. Those positive filters apply before
 the run limit. Exclusions and started-date bounds apply after fetching at
 most 1,000 runs. In cluster mode the grep runs server-side per (run, node),
-so only matching bytes come back over the wire. A controller-only profile
-uses the logs service the controller announces.
+so only matching lines and their original line numbers come back over the wire.
+An explicit profile logs URL is used directly; a controller-only profile
+requires the logs service URL the controller announces.
 
 CLI log text matching is case-sensitive and --max-matches caps each node.
 Dashboard Search matches text without case and caps its whole response.

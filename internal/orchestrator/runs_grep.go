@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,8 +17,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -97,16 +94,21 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 	if opts.Pattern == "" {
 		return errors.New("runs grep: PATTERN is required")
 	}
-	if controllerURL == "" || logsURL == "" {
-		return errors.New("runs grep: profile must carry both controller and logs URLs")
+	if controllerURL == "" {
+		return errors.New("runs grep: profile must carry a controller URL")
 	}
-	if logsURL == controllerURL {
-		if services, err := discovery.ServicesFor(ctx, controllerURL, token); err == nil && services.Logs != "" {
-			logsURL = services.Logs
+	if logsURL == "" {
+		services, err := discovery.ServicesFor(ctx, controllerURL, token)
+		if err != nil {
+			return fmt.Errorf("runs grep: discover logs service: %w", err)
 		}
+		if services.Logs == "" {
+			return errors.New("runs grep: controller announces no logs service; configure the profile's logs URL")
+		}
+		logsURL = services.Logs
 	}
 	c := client.NewWithToken(controllerURL, nil, token)
-	logc := sparkwinglogs.New(logsURL, nil, token).
+	logc := logs.NewClientWithToken(logsURL, nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	runs, err := c.ListRuns(ctx, store.RunFilter{
 		Limit:          grepFetchLimit(opts),
@@ -168,7 +170,7 @@ func scanLocalRuns(ctx context.Context, st *store.Store, paths Paths, runs []*st
 	return out, nil
 }
 
-func scanRemoteRuns(ctx context.Context, c *client.Client, logc storage.LogStore, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
+func scanRemoteRuns(ctx context.Context, c *client.Client, logc *logs.Client, runs []*store.Run, opts GrepOpts) ([]GrepMatch, error) {
 	var out []GrepMatch
 	for _, r := range runs {
 		if ctx.Err() != nil {
@@ -179,25 +181,12 @@ func scanRemoteRuns(ctx context.Context, c *client.Client, logc storage.LogStore
 			return out, fmt.Errorf("list nodes for %s: %w", r.ID, err)
 		}
 		for _, n := range nodes {
-			data, err := logc.Read(ctx, r.ID, n.NodeID, storage.ReadOpts{Grep: opts.Pattern})
+			matches, err := logc.Grep(ctx, r.ID, n.NodeID, opts.Pattern, opts.MaxMatches)
 			if err != nil {
 				return out, fmt.Errorf("read %s/%s: %w", r.ID, n.NodeID, err)
 			}
-			lineNo := 0
-			matchCount := 0
-			sc := bufio.NewScanner(bytes.NewReader(data))
-			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-			for sc.Scan() {
-				lineNo++
-				line := sc.Text()
-				if !strings.Contains(line, opts.Pattern) {
-					continue
-				}
-				out = append(out, GrepMatch{RunID: r.ID, NodeID: n.NodeID, LineNo: lineNo, Line: line})
-				matchCount++
-				if opts.MaxMatches > 0 && matchCount >= opts.MaxMatches {
-					break
-				}
+			for _, m := range matches {
+				out = append(out, GrepMatch{RunID: r.ID, NodeID: n.NodeID, LineNo: m.LineNo, Line: m.Line})
 			}
 		}
 	}

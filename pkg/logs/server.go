@@ -981,6 +981,13 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "open node log", err)
 		return
 	}
+	if filter.lineNumbers {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		if err := filter.writeNumbered(w, data); err != nil {
+			s.logger.Warn("write numbered log matches", "err", err)
+		}
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if filter.passThrough() {
@@ -993,15 +1000,30 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 }
 
 type logFilter struct {
-	tail  int
-	head  int
-	lines string
-	grep  string
+	tail        int
+	head        int
+	lines       string
+	grep        string
+	lineNumbers bool
+	maxMatches  int
 }
 
 func parseLogFilter(r *http.Request) (logFilter, error) {
 	q := r.URL.Query()
 	f := logFilter{lines: q.Get("lines"), grep: q.Get("grep")}
+	if raw := q.Get("line_numbers"); raw != "" {
+		if raw != "1" || f.grep == "" || f.lines != "" || q.Get("head") != "" || q.Get("tail") != "" {
+			return f, errors.New("line_numbers requires grep without other line filters")
+		}
+		f.lineNumbers = true
+	}
+	if raw := q.Get("max_matches"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || !f.lineNumbers {
+			return f, fmt.Errorf("invalid max_matches: %q", raw)
+		}
+		f.maxMatches = n
+	}
 	if v := q.Get("tail"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
@@ -1026,6 +1048,31 @@ func parseLogFilter(r *http.Request) (logFilter, error) {
 
 func (f logFilter) passThrough() bool {
 	return f.tail == 0 && f.head == 0 && f.lines == "" && f.grep == ""
+}
+
+func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
+	encoder := json.NewEncoder(w)
+	count := 0
+	needle := []byte(f.grep)
+	for lineNo := 1; len(data) > 0; lineNo++ {
+		line := data
+		if end := bytes.IndexByte(data, '\n'); end >= 0 {
+			line, data = data[:end], data[end+1:]
+		} else {
+			data = nil
+		}
+		if !bytes.Contains(line, needle) {
+			continue
+		}
+		if err := encoder.Encode(GrepLine{LineNo: lineNo, Line: string(line)}); err != nil {
+			return err
+		}
+		count++
+		if f.maxMatches > 0 && count >= f.maxMatches {
+			break
+		}
+	}
+	return nil
 }
 
 func (f logFilter) apply(data []byte) []byte {

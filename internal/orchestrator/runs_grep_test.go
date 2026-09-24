@@ -34,7 +34,7 @@ func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
 		case "/api/v1/runs/older-match/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: older.ID, NodeID: "build"}}})
 		case "/api/v1/logs/older-match/build":
-			_, _ = w.Write([]byte("needle in older log\n"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 1, "line": "needle in older log"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -63,7 +63,7 @@ func TestRunGrepRemoteUsesAnnouncedLogsService(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte("needle in archived log\n"))
+		_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 1, "line": "needle in archived log"})
 	}))
 	t.Cleanup(logs.Close)
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,13 +80,29 @@ func TestRunGrepRemoteUsesAnnouncedLogsService(t *testing.T) {
 	}))
 	t.Cleanup(controller.Close)
 	var output bytes.Buffer
-	err := RunGrepRemote(context.Background(), controller.URL, controller.URL, "test-token",
+	err := RunGrepRemote(context.Background(), controller.URL, "", "test-token",
 		GrepOpts{Pattern: "needle", Quiet: true}, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimSpace(output.String()); got != "archived" {
 		t.Fatalf("matching archived run = %q, want archived", got)
+	}
+}
+
+func TestRunGrepRemoteReportsMissingAnnouncedLogs(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			t.Cleanup(controller.Close)
+			var output bytes.Buffer
+			err := RunGrepRemote(context.Background(), controller.URL, "", "", GrepOpts{Pattern: "failure"}, &output)
+			if err == nil || !strings.Contains(err.Error(), "logs service") {
+				t.Fatalf("logs discovery error = %v", err)
+			}
+		})
 	}
 }
 

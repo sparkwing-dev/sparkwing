@@ -91,6 +91,23 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 	}
 }
 
+func TestLogs_GrepReportsOriginalLinesAndCapsMatches(t *testing.T) {
+	c, _, stop := newLogsServer(t)
+	defer stop()
+	ctx := context.Background()
+	if err := c.Append(ctx, "run-grep", "build", []byte("start\nfatal one\nFATAL other\nwaiting\nfatal two\nfatal three\n")); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := c.Grep(ctx, "run-grep", "build", "fatal", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || matches[0].LineNo != 2 || matches[0].Line != "fatal one" ||
+		matches[1].LineNo != 5 || matches[1].Line != "fatal two" {
+		t.Fatalf("numbered matches = %+v, want lines 2 and 5", matches)
+	}
+}
+
 func TestLogs_ReadRunConcatenates(t *testing.T) {
 	c, _, stop := newLogsServer(t)
 	defer stop()
