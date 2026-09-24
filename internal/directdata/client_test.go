@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -53,5 +54,21 @@ func TestPartialDirectCapabilitiesRefuseLegacyFallback(t *testing.T) {
 	available, err := New(controller.URL, "grant", "run", nil).Available(context.Background())
 	if available || !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("partial capabilities = %v, %v", available, err)
+	}
+}
+
+func TestSourceCapabilityRequiresExplicitAnnouncementBeforeRun(t *testing.T) {
+	var advertised atomic.Bool
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]bool{"upload": true, "download": true, "source": advertised.Load()})
+	}))
+	defer controller.Close()
+	client := New(controller.URL, "user-bearer", "", nil)
+	if ok, err := client.SourceAvailable(t.Context()); err != nil || ok {
+		t.Fatalf("old controller source support = %t, %v", ok, err)
+	}
+	advertised.Store(true)
+	if ok, err := client.SourceAvailable(t.Context()); err != nil || !ok {
+		t.Fatalf("new controller pretrigger support = %t, %v", ok, err)
 	}
 }

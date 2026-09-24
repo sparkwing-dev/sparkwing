@@ -35,7 +35,7 @@ func shouldRunRemote(trigger *store.Trigger, brokeredChild bool) bool {
 	if trigger == nil {
 		return false
 	}
-	return triggerGitHubRepository(trigger) != "" || trigger.RepoURL != ""
+	return strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") || triggerGitHubRepository(trigger) != "" || trigger.RepoURL != ""
 }
 
 func runNodeRemote(
@@ -73,7 +73,8 @@ func runNodeRemote(
 			return runner.Result{}, err
 		}
 	}
-	if repoURL == "" {
+	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
+	if repoURL == "" && !workspaceSource {
 		return runner.Result{},
 			fmt.Errorf("pipeline %q not registered locally, and trigger has no repo_url for remote fallback",
 				run.Pipeline)
@@ -86,10 +87,6 @@ func runNodeRemote(
 		branch = "main"
 	}
 
-	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
-	if direct && workspaceSource {
-		return runner.Result{}, bincache.ErrWorkspaceNeedsCache
-	}
 	logger.Info("runNodeRemote: fetching source",
 		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch,
 		"sha", trigger.GitSHA, "direct", direct)
@@ -104,15 +101,15 @@ func runNodeRemote(
 	var sparkwingDir string
 	var err error
 	switch {
+	case workspaceSource:
+		sparkwingDir, err = bincache.FetchSourceBundleDirect(ctx, controllerURL, cacheGrant, runID,
+			trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], trigger.GitSHA, repoURL, workDir)
 	case direct:
 		sparkwingDir, err = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
 			ControllerURL: controllerURL, RunnerToken: token, RunID: runID,
 			RepoURL: repoURL, Branch: branch, SHA: trigger.GitSHA, WorkDir: workDir,
 			OwnerCredentials: ownerFenced,
 		}, logger)
-	case workspaceSource:
-		sparkwingDir, err = bincache.FetchPipelineWorkspaceSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
-			repoURL, branch, trigger.GitSHA, workDir)
 	default:
 		sparkwingDir, err = bincache.FetchPipelineSourceWithCredentials(ctx, gcURL, controllerURL, token, cacheGrant,
 			repoURL, branch, trigger.GitSHA, workDir)
@@ -120,7 +117,7 @@ func runNodeRemote(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}
-	if workspaceSource {
+	if workspaceSource && repoURL != "" {
 		adoptNodeBaseline(ctx, trigger, filepath.Dir(sparkwingDir),
 			gcURL, bincache.GitcacheBearer(gcURL, controllerURL, token, cacheGrant), runID, nodeID, logger)
 	}

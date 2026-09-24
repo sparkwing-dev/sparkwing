@@ -24,6 +24,25 @@ only the first sequence number, so finished batched logs can appear
 incomplete. The upgraded logs service accepts old single-line appends during
 the rollout. No config or data migration is needed.
 
+## Direct source bundles
+
+Upgrade the controller, CLI and runner together before using Cloud
+`--working-tree`. An older controller has no source capability, and an older
+runner cannot read a source-bound trigger. Already pending working-tree
+triggers made through the old cache seed path must finish before replacing
+runners, or be retriggered with the new CLI. Rollback restores the old
+controller and runner pair; newly uploaded source bundles cannot run on it.
+A normal remote trigger now needs its commit pushed to origin. Use
+`--working-tree` for an unpushed commit or a checkout with no cloud-reachable
+origin. The CLI needs a user token with `runs.write` and a configured direct
+S3 cache store and signed downloads. Bundles take the team's cache storage
+share and are deleted 24 hours after the bound run finishes; retry uploads
+again. `runs retry` and Cloud `RunAndAwait` children of a working-tree
+run are refused before admission because they cannot inherit its one-run
+source. Submit a fresh run from the checkout with
+`sparkwing run <pipeline> --profile <cloud-profile>`. Local children and
+local retries are unchanged.
+
 ## Schema 71: GitHub App cron identity
 
 Back up the controller's PostgreSQL database or SQLite `state.db` before

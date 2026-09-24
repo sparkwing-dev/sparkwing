@@ -22,6 +22,14 @@ unlock.
 
 ### Added
 
+- **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads
+  one source bundle directly to S3 before creating a run, including from a Git
+  checkout with no cloud-reachable origin. The bundle counts against the team's
+  cache share, belongs to one run, and is removed 24 hours after that run
+  finishes (or 24 hours after commit when unused). Retry uploads again.
+  Normal remote triggers require a pushed commit; GitHub App crons remain
+  Git-backed and local working-tree runs are unchanged. Upgrade controller,
+  CLI and runners together. See [Direct source bundles](docs/migrations/_unreleased.md#direct-source-bundles).
 - **controller + GitHub App:** A push of the current default-branch head reads
   `.sparkwing/sparkwing.yaml` with a repository-scoped `contents: read` token
   and arms its `where: controller` schedules for the connected team. Removing

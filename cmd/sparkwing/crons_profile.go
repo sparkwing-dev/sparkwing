@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -356,10 +355,6 @@ func runCronsInstallProfile(profileName, root string, only []string, follow bool
 		report.SHA = sha
 	}
 
-	if len(push) > 0 && sha != "" {
-		seedCronsSource(remote.prof, root, repoURL, sha)
-	}
-
 	ctx, cancel := cronsRemoteContext()
 	defer cancel()
 	resp, err := remote.api.PutCronRepo(ctx, client.CronRepoRequest{
@@ -400,12 +395,12 @@ func checkPushableHead(root string, follow bool) error {
 			"crons install: %s has uncommitted edits; the controller clones the pushed commit, "+
 				"so they are not part of what fires\n", root)
 	}
-	remotes, known := gitRemoteBranchesContainingHead(root)
-	if !known || len(remotes) > 0 {
+	_, sha, _, _ := gitContextIn(root)
+	if commitOnOrigin(root, sha) {
 		return nil
 	}
 	return fmt.Errorf(
-		"crons install: %s is on a commit no remote branch carries, so every fire would fail at the clone. "+
+		"crons install: %s is on a commit no origin branch carries, so every fire would fail at the clone. "+
 			"Push the branch first, or use --follow to clone the tip of %s at each fire instead",
 		root, dashIfEmpty(gitBranchName(root)))
 }
@@ -416,19 +411,6 @@ func gitWorkingTreeDirty(root string) (dirty, known bool) {
 		return false, false
 	}
 	return strings.TrimSpace(string(out)) != "", true
-}
-
-func gitRemoteBranchesContainingHead(root string) (branches []string, known bool) {
-	out, err := exec.Command("git", "-C", root, "branch", "-r", "--contains", "HEAD").Output()
-	if err != nil {
-		return nil, false
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			branches = append(branches, name)
-		}
-	}
-	return branches, true
 }
 
 func gitBranchName(root string) string {
@@ -460,20 +442,6 @@ func selectDeclaredForPush(declared []crons.Declared, only []string, root string
 		out = append(out, matched...)
 	}
 	return out, nil
-}
-
-// safety: a seed that fails is a warning, not a failure: the cluster's trigger
-// loop fetches the commit itself when it finds the cache short.
-func seedCronsSource(prof *profile.Profile, repoDir, repoURL, sha string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	services, derr := discovery.ServicesFor(ctx, prof.ControllerURL(), prof.ControllerToken())
-	cancel()
-	if !cacheOperatorRoutesOpen(services) {
-		return
-	}
-	if absent, err := seedTriggerSource(prof, services.CachePod, derr, repoDir, repoURL, sha); err != nil && !absent {
-		fmt.Fprintf(os.Stderr, "sparkwing crons: %v; continuing; the runner fetches the commit itself\n", err)
-	}
 }
 
 func runCronsUninstallProfile(profileName, root, format string) error {

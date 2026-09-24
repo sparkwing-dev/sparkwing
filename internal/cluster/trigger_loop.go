@@ -239,7 +239,8 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		return awaitHeartbeat(), sourceErr
 	}
 	grant := orchestrator.RequestRunCacheGrant(ctx, opts.ControllerURL, opts.Token, trigger.ID, logger)
-	if repoURL == "" {
+	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
+	if repoURL == "" && !workspaceSource {
 		if BakedBinary == "" {
 			return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
 		}
@@ -262,21 +263,18 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	workspaceSource := strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@")
 	var sparkwingDir string
 	var fetchErr error
 	switch {
-	case direct && workspaceSource:
-		fetchErr = bincache.ErrWorkspaceNeedsCache
+	case workspaceSource:
+		sparkwingDir, fetchErr = bincache.FetchSourceBundleDirect(ctx, opts.ControllerURL, grant,
+			trigger.ID, trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey], sha, repoURL, workDir)
 	case direct:
 		sparkwingDir, fetchErr = bincache.FetchRunSourceDirect(ctx, bincache.RunSource{
 			ControllerURL: opts.ControllerURL, RunnerToken: opts.Token, RunID: trigger.ID,
 			RepoURL: repoURL, Branch: branch, SHA: sha, WorkDir: workDir,
 			OwnerCredentials: !opts.AllowRepos.Empty(),
 		}, logger)
-	case workspaceSource:
-		sparkwingDir, fetchErr = fetchPipelineWorkspaceSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
-			repoURL, branch, sha, workDir, logger, trigger.ID)
 	default:
 		sparkwingDir, fetchErr = fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, grant,
 			repoURL, branch, sha, workDir, logger, trigger.ID)
@@ -284,7 +282,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
-	if workspaceSource {
+	if workspaceSource && repoURL != "" {
 		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, logger)
 	}
 
@@ -388,10 +386,7 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	}
 }
 
-var (
-	fetchSourceFn          = bincache.FetchPipelineSourceWithCredentials
-	fetchWorkspaceSourceFn = bincache.FetchPipelineWorkspaceSourceWithCredentials
-)
+var fetchSourceFn = bincache.FetchPipelineSourceWithCredentials
 
 var (
 	triggerFetchMaxAttempts = 3
@@ -406,12 +401,6 @@ const notOurRefSubstr = "not our ref"
 func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
 	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
 		return fetchSourceFn(ctx, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir)
-	}, sha, logger, runID)
-}
-
-func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
-	return fetchPipelineSourceWithRetryFn(ctx, func() (string, error) {
-		return fetchWorkspaceSourceFn(ctx, gcURL, controllerURL, token, cacheGrant, repoURL, branch, sha, workDir)
 	}, sha, logger, runID)
 }
 

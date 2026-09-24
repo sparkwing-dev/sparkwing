@@ -671,12 +671,13 @@ credential vocabulary the detached-run environment filter uses. An operator send
 with `--allow-secret-file`, so the audit of what left the laptop is the command
 itself.
 
-`pipeline trigger --working-tree` may seed uncommitted source; the cache
-retains up to 128 workspace refs per repository and expires them after
-`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
-`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
-older working-tree run still finds its snapshot; archived refs are dropped
-after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+`pipeline trigger --working-tree` uploads one immutable source object per
+submission. The controller binds it to one run and signs reads only for that
+run's live claim. An unused upload expires 24 hours after commit; a bound
+upload stays through a queued or running run and expires 24 hours after that
+run finishes. A retry uploads a new bundle. Source bytes count against the
+team's cache storage share. The hourly storage pass deletes the S3 object
+before releasing its database row and quota.
 
 The cache's unauthenticated `/metrics` carries no per-repository label, so
 scraping it does not enumerate or confirm the mirror set.

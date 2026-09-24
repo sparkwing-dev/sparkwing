@@ -405,7 +405,7 @@ because the box paid for it.
 ```
 Your laptop:
   1. sparkwing resolves the origin, branch, and commit
-  2. sparkwing refreshes or seeds that commit, then POSTs the trigger
+  2. sparkwing requires a pushed commit, then POSTs the trigger
 
 Remote runner:
   3. Controller records the trigger; a polling runner claims it
@@ -593,8 +593,9 @@ deploy key the ssh form of an https remote. The
 runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
 and checks out each run in its own worktree. It refuses any remote that is not
 https or ssh, a remote that carries a credential, and a commit that is not a
-full hex object id. `sparkwing pipeline trigger` therefore needs a commit that
-is already pushed, and `--working-tree` needs the operator's cache.
+full hex object id. A normal `sparkwing pipeline trigger` therefore needs a commit already pushed.
+`--working-tree` uploads its exact source bundle to S3 before admission and
+needs no cloud-reachable Git origin.
 
 Only a fetch with the machine's own credentials reads the machine's git
 config, for its credential helpers, `insteadOf` rules and ssh command; a fetch

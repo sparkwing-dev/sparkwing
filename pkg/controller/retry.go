@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runretry"
@@ -31,6 +32,23 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	full := r.URL.Query().Get("full") == "1"
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	source, err := tenant.GetRun(r.Context(), srcID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "read retry source", err)
+		return
+	}
+	if strings.HasPrefix(source.TriggerSource, "pipeline-working-tree@") {
+		writeError(w, http.StatusUnprocessableEntity, errors.New("cloud working-tree retry needs a new source upload; rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
+		return
+	}
 	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "retry:"+srcID), "retry") {
 		return
 	}

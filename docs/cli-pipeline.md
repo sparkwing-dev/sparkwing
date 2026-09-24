@@ -969,9 +969,16 @@ payload -- same shape as 'sparkwing run'.
 
 --working-tree freezes tracked changes and untracked non-ignored
 files into an immutable Git snapshot, uploads it before admission,
-and runs that exact snapshot without pushing to the origin. It
-requires a complete SHA-1 repository; shallow and SHA-256 checkouts
-fail before upload.
+and runs that exact snapshot without pushing to the origin. The checkout
+needs no `origin`, but it needs a local HEAD commit and complete SHA-1 history;
+shallow and SHA-256 checkouts fail before upload. The CLI token needs
+`runs.write`. The bundle counts against the team's cache storage share and
+expires 24 hours after the run finishes, subject to the bucket's 90-day
+absolute backstop; a retry uploads again. Cloud
+`RunAndAwait` children and `runs retry` cannot inherit this one-run bundle.
+Run the child locally or submit a new Cloud run from the original checkout
+(`sparkwing run <pipeline> --profile <cloud-profile>`), which uploads a new
+bundle.
 
 A snapshot carrying a secret-shaped file is refused before upload:
 a dotenv, a key, keystore or certificate file, any text file

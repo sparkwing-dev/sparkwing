@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 // CreateTrigger writes a pending trigger into t's team.
@@ -24,6 +25,19 @@ func (t *Tenant) CreateTrigger(ctx context.Context, trig Trigger) error {
 // trigger behind for a worker to claim. It maps the same duplicate-key
 // errors [Tenant.CreateTrigger] does.
 func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) error {
+	return t.createTriggerWithRun(ctx, trig, r, "", "", "")
+}
+
+// CreateSourceTriggerWithRun binds an uploaded source once in the same
+// transaction that admits its run.
+func (t *Tenant) CreateSourceTriggerWithRun(ctx context.Context, trig Trigger, r Run, key, principal, tokenPrefix string) error {
+	if _, ok := SourceKeyDigest(key); !ok || principal == "" || tokenPrefix == "" {
+		return ErrInvalidInput
+	}
+	return t.createTriggerWithRun(ctx, trig, r, key, principal, tokenPrefix)
+}
+
+func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, sourceKey, principal, tokenPrefix string) error {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -34,6 +48,21 @@ func (t *Tenant) CreateTriggerWithRun(ctx context.Context, trig Trigger, r Run) 
 	}
 	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
 		return err
+	}
+	if sourceKey != "" {
+		// safety: a fresh clock at this update decides the one-day window;
+		// expires_at=0 is the storage pass's competing prune claim.
+		cutoff := time.Now().Add(-sourceBundleRetention).UnixNano()
+		res, err := tx.ExecContext(ctx, `UPDATE uploads SET run_id = ?
+            WHERE team = ? AND key = ? AND principal = ? AND claim_prefix = ?
+			  AND committed_at > ? AND run_id = '' AND expires_at != 0`,
+			r.ID, string(t.team), sourceKey, principal, tokenPrefix, cutoff)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			return ErrSourceAlreadyBound
+		}
 	}
 	return tx.Commit()
 }

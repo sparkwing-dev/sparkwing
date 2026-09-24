@@ -95,7 +95,10 @@ func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tall
 	err := s.walk(ctx, prefix, func(o types.Object) {
 		t.Bytes += aws.ToInt64(o.Size)
 		t.Objects++
-		if age > 0 && aws.ToTime(o.LastModified).Before(cutoff) {
+		// safety: the controller holds a source through its run; S3 LastModified
+		// cannot express that finish-based expiry.
+		isSource := team != "" && strings.HasPrefix(strings.TrimPrefix(aws.ToString(o.Key), prefix), "local/sources/")
+		if age > 0 && !isSource && aws.ToTime(o.LastModified).Before(cutoff) {
 			expired = append(expired, sizedKey{key: aws.ToString(o.Key), size: aws.ToInt64(o.Size)})
 		}
 	})

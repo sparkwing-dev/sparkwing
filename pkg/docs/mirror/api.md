@@ -35,6 +35,12 @@ Log downloads require a token with `logs.read` or `admin`. A run cache grant
 cannot sign log downloads, even for its own run. Revoking a claimant's token
 stops its cache grant from signing new URLs.
 
+A `source` download names the exact `sources/<sha256>/<submission-id>` key
+bound to the claim's run. User and raw runner bearers cannot sign it. A user
+token with `runs.write` may reserve and commit that source before triggering;
+the controller binds it to one run during trigger admission. See
+[Direct data uploads](data-uploads.md).
+
 The URL expires after 60 seconds and names one exact object. A request that
 reaches the controller through the in-cluster Service gets a regional S3
 presigned URL; a request through the public ingress gets a CloudFront signed

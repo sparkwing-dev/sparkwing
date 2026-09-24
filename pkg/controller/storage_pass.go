@@ -75,6 +75,22 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 		errs = append(errs, fmt.Errorf("prune expired uploads: %w", err))
 	}
 	for kind, bucket := range p.stores {
+		if kind == store.StorageCache {
+			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("list expired source bundles: %w", err))
+			} else {
+				for _, source := range expired {
+					if err := bucket.Delete(ctx, string(source.Team), "local/"+source.Key); err != nil {
+						errs = append(errs, fmt.Errorf("delete source bundle %s: %w", source.ID, err))
+						continue
+					}
+					if err := s.store.DeleteSourceBundleRows(ctx, source); err != nil {
+						errs = append(errs, fmt.Errorf("prune source bundle %s: %w", source.ID, err))
+					}
+				}
+			}
+		}
 		// safety: the marks are read before the listing, so what is committed
 		// while it runs is added back to what it finds.
 		marks, err := s.store.StorageMarks(ctx, kind)

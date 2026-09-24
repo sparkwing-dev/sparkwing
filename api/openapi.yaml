@@ -6603,14 +6603,15 @@ paths:
                 properties:
                   upload: {type: boolean}
                   download: {type: boolean}
+                  source: {type: boolean}
         "404": {description: Direct uploads are unavailable.}
 
   /api/v1/data/upload:
     post:
       x-sparkwing-scope: public
       tags: [artifacts]
-      summary: Reserve storage and sign a checksum-bound S3 PUT for a live claim.
-      description: Requires a cache grant minted for the exact live node or trigger claim. A raw runner token cannot sign.
+      summary: Reserve storage and sign a checksum-bound S3 PUT.
+      description: A binary or artifact requires a cache grant minted for an exact live claim. A source bundle requires a user bearer authorized to start runs before a run exists, and an empty run_id. A raw runner token cannot sign.
       requestBody:
         required: true
         content:
@@ -6620,7 +6621,7 @@ paths:
               type: object
               required: [kind, key, size, sha256, run_id]
               properties:
-                kind: {type: string, enum: [binary, artifact]}
+                kind: {type: string, enum: [binary, artifact, source]}
                 key: {type: string}
                 size: {type: integer, format: int64}
                 sha256: {type: string}
@@ -6649,7 +6650,7 @@ paths:
       x-sparkwing-scope: public
       tags: [artifacts]
       summary: Verify the pending S3 object and publish it under an immutable key.
-      description: Requires the same live claim-bound cache grant used to reserve the upload.
+      description: Requires the same live claim-bound cache grant, or for a pretrigger source bundle the same user bearer, used to reserve the upload.
       requestBody:
         required: true
         content:
@@ -6708,7 +6709,7 @@ paths:
       tags: [artifacts]
       summary: Sign a short-lived URL for one team object.
       description: >-
-        A cache grant signs binary and artifact downloads only while its exact issuing claim and claimant token remain active. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
       requestBody:
         required: true
         content:
@@ -6718,7 +6719,7 @@ paths:
               type: object
               required: [kind, key]
               properties:
-                kind: {type: string, enum: [binary, artifact, log]}
+                kind: {type: string, enum: [binary, artifact, source, log]}
                 key: {type: string, description: Team-relative object key.}
       responses:
         "200":
