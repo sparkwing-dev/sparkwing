@@ -44,8 +44,11 @@ other's reservations, and two writers racing for the last bytes of a share
 cannot both win. A reservation a crashed writer never settled expires after an
 hour. The cache calls these routes with its operator token and makes one
 reserve and one commit or release per object. The logs service forwards the
-appending caller's credential, which counts only its own team's logs, and
-reserves a 1 MiB block per team and run, or the room left when that is
+appending caller's credential, which counts only its own team's logs. A
+forwarded commit must name a reservation and a nonnegative byte count. The
+cache's operator token can commit a negative overwrite delta when an object
+shrinks. The logs service reserves a 1 MiB block per team and run, or the
+room left when that is
 smaller. Appends draw from the block without asking the controller. When a
 block runs out, the service commits what the run wrote and takes the next
 block in one call to the commit route (`next_bytes`); every minute it does

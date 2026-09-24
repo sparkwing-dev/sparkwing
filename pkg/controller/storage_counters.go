@@ -134,6 +134,10 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	if !caller.may(w, req.Team, req.Store) {
 		return
 	}
+	if !caller.service && (strings.TrimSpace(req.Reservation) == "" || req.Bytes < 0) {
+		writeError(w, http.StatusBadRequest, errors.New("a logs writer needs a reservation and nonnegative committed bytes"))
+		return
+	}
 	if !s.MultiTeam() {
 		if req.NextBytes > 0 {
 			writeJSON(w, http.StatusOK, store.StorageReservation{Tier: store.TeamTierFunded, Granted: req.NextBytes, Unlimited: true})

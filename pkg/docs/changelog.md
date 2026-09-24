@@ -897,6 +897,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** A storage listing that already sees a smaller overwritten
+  object keeps its listed size instead of applying the same shrink twice.
+
 - **web:** Navigation fetches a tab's route on hover, focus or touch instead of
   prefetching every visible tab on page load.
 
@@ -1193,6 +1196,10 @@ unlock.
   did.
 
 ### Security
+
+- **controller:** Forwarded `logs.write` credentials must name a reservation
+  and a nonnegative byte count when committing log storage. The cache's
+  operator credential still records negative overwrite deltas.
 
 - **controller:** Direct upload, commit and download signing spend the existing
   controller request budget after authentication. Grants from one team share

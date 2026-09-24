@@ -73,6 +73,43 @@ func logsWriter(t *testing.T, st *store.Store, team store.Team) string {
 	return "Bearer " + raw
 }
 
+func TestLogsWriterCommitRequiresReservationAndNonnegativeBytes(t *testing.T) {
+	f := freeTierFixture(t, 1)
+	teamAuth := freeTeamToken(t, f.store, "first")
+	if code := f.trigger(teamAuth); code != http.StatusAccepted {
+		t.Fatalf("trigger = %d", code)
+	}
+	writer := logsWriter(t, f.store, "first")
+	code, reservation := f.reserve(writer, "first", "logs", 100)
+	if code != http.StatusOK {
+		t.Fatalf("reserve = %d", code)
+	}
+	for _, req := range []map[string]any{
+		{"team": "first", "store": "logs", "reservation": "", "bytes": -100},
+		{"team": "first", "store": "logs", "reservation": "", "bytes": 100},
+		{"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": -1},
+		{"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": -1, "next_bytes": 1},
+	} {
+		if code := f.call("POST", "/internal/storage/commit", writer, req, nil); code != http.StatusBadRequest {
+			t.Fatalf("invalid logs commit %+v = %d", req, code)
+		}
+	}
+	if code := f.call("POST", "/internal/storage/commit", writer, map[string]any{
+		"team": "first", "store": "logs", "reservation": reservation.ID, "bytes": 100,
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("valid logs commit = %d", code)
+	}
+	if usage, err := f.store.TeamStorage(context.Background(), "first"); err != nil || usage[store.StorageLogs].UsedBytes != 100 {
+		t.Fatalf("logs usage = %+v, err = %v", usage, err)
+	}
+	const cache = "Bearer cache-token"
+	if code := f.call("POST", "/internal/storage/commit", cache, map[string]any{
+		"team": "first", "store": "cache", "bytes": -1,
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("cache service negative delta = %d", code)
+	}
+}
+
 // The cache reserves, commits and releases a team's storage with its
 // operator token. A team that took the last slot is held to its cache
 // share, the next team is refused as paused until the operator grants it a
