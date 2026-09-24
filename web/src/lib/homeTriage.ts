@@ -10,14 +10,24 @@ export interface FailedPipeline {
 }
 
 function repoIdentity(run: Run): string {
-  const raw = (run.github_owner && run.github_repo
+  const github = Boolean(run.github_owner && run.github_repo);
+  const raw = (github
     ? `${run.github_owner}/${run.github_repo}`
     : run.repo_url || run.repo || run.github_repo || "unknown");
-  let path = raw.replace(/^git@[^:]+:/, "");
-  if (/^https?:\/\//.test(path)) {
-    path = new URL(path).pathname;
+  let host = github ? "github.com" : "";
+  let path = raw;
+  const ssh = raw.match(/^git@([^:]+):(.+)$/);
+  if (ssh) {
+    host = ssh[1].toLowerCase();
+    path = ssh[2];
+  } else if (/^https?:\/\//.test(raw)) {
+    const url = new URL(raw);
+    host = url.hostname.toLowerCase();
+    path = url.pathname;
   }
-  return path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").toLowerCase();
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").toLowerCase();
+  if (!path.includes("/")) return path;
+  return `${host || "github.com"}/${path}`;
 }
 
 export function latestFailedPipelines(
@@ -60,7 +70,7 @@ export function latestFailedPipelines(
     .map((group) => {
       group.runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
       group.latest = group.runs.find((run) =>
-        run.status === "success" || run.status === "failed" || run.status === "cancelled",
+        run.status === "success" || run.status === "failed",
       ) || group.runs[0];
       return group;
     })

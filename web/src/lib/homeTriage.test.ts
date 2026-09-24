@@ -34,6 +34,7 @@ describe("Home latest failed pipelines", () => {
     const failed = run("failed", "owner/app", "main", "failed", 1);
     const retry = run("retry", "owner/app", "main", "running", 2);
     assert.deepEqual(latestFailedPipelines([failed, retry], false).map((r) => r.latest.id), ["failed"]);
+    assert.deepEqual(latestFailedPipelines([failed, { ...retry, status: "cancelled" }], false).map((r) => r.latest.id), ["failed"]);
     assert.deepEqual(latestFailedPipelines([failed, { ...retry, status: "success" }], false), []);
   });
 
@@ -41,5 +42,11 @@ describe("Home latest failed pipelines", () => {
     const ssh = { ...run("red", "app", "main", "failed", 1), repo_url: "git@github.com:owner/app.git" };
     const newer = { ...run("green", "app", "main", "success", 2), github_owner: "owner", github_repo: "app" };
     assert.deepEqual(latestFailedPipelines([ssh, newer], false), []);
+  });
+
+  it("keeps different Git hosts separate even with the same owner and repo", () => {
+    const gitlab = { ...run("gitlab-red", "app", "main", "failed", 1), repo_url: "https://gitlab.com/owner/app.git" };
+    const github = { ...run("github-green", "owner/app", "main", "success", 2), repo_url: "https://github.com/owner/app.git" };
+    assert.deepEqual(latestFailedPipelines([gitlab, github], false).map((r) => r.latest.id), ["gitlab-red"]);
   });
 });
