@@ -333,10 +333,12 @@ It also shows what admission is doing with the machine:
   liveness. Polls from another credential cannot keep that claim live. The
   most recently started claim owns a shared legacy display name; unstarted
   claims use stable credential order. Its active runs never mix with another
-  credential's. Legacy `last_seen` is the most recent node start or live poll,
-  never the future lease deadline. The headroom observation time stays separate.
-  Fleet presents the controller's rolling run-failure warning separately from
-  service health. Database, object-store, auth, and slow-response problems
+  credential's. Legacy `last_seen` is the most recent node start, live poll, or
+  accepted claim heartbeat from that credential, never the future lease
+  deadline. A busy runner's heartbeat does not advertise a free slot. The
+  headroom observation time stays separate. Home shows the controller's recent
+  run-failure warning apart from service health. Database, object-store, auth,
+  and slow-response problems
   still degrade their service; the controller health API keeps its own status.
 
 The run node list and DAG show a small location icon for known execution sites.

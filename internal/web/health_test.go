@@ -211,6 +211,17 @@ func TestHealthServices_DegradedBodyReachesTheResponse(t *testing.T) {
 	}
 }
 
+func TestControllerRecentRunWarningStaysSeparateFromServiceStatus(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"status":"ok","recent_run_warning":"runs: 0% success over 20 (24h), 20 failed"}`)
+	}))
+	defer up.Close()
+	got := probeService(context.Background(), HealthService{Name: "controller", URL: up.URL}, "")
+	if got.Status != "ok" || got.Warning == "" || len(got.Problems) != 0 {
+		t.Fatalf("controller health and run warning = %+v", got)
+	}
+}
+
 func TestDefaultServices_CacheIsProbedWhenConfigured(t *testing.T) {
 	got := defaultServices(HandlerOptions{
 		ControllerURL: "http://controller",

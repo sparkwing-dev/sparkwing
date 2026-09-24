@@ -28,6 +28,7 @@ import (
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
+	var recentRunWarning string
 
 	authState := "disabled"
 	if s.auth != nil {
@@ -76,9 +77,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		if total := success + failed; total > 0 {
 			rate := float64(success) / float64(total) * 100.0
 			if rate < 80.0 {
-				problems = append(problems,
-					fmt.Sprintf("runs: %.0f%% success over %d (24h), %d failed",
-						rate, total, failed))
+				recentRunWarning = fmt.Sprintf("runs: %.0f%% success over %d (24h), %d failed",
+					rate, total, failed)
 			}
 		}
 	}
@@ -98,6 +98,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if storagePass != nil {
 		resp["storage_pass"] = storagePass
+	}
+	if recentRunWarning != "" {
+		resp["recent_run_warning"] = recentRunWarning
 	}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
@@ -2240,6 +2243,7 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
+	s.runnerHeartbeats.record(presenceKey{tokenPrefix: fence.Claimant.TokenPrefix, name: presenceName(body.HolderID)}, time.Now())
 	w.WriteHeader(http.StatusNoContent)
 }
 

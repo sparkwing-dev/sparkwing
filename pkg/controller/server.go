@@ -121,9 +121,10 @@ type Server struct {
 
 	runnerHeadroom *runnerHeadroomRegistry
 
-	liveLogs       *liveLogs
-	runnerPresence *runnerPresenceRegistry
-	placement      placementPolicy
+	liveLogs         *liveLogs
+	runnerPresence   *runnerPresenceRegistry
+	runnerHeartbeats *runnerHeartbeatRegistry
+	placement        placementPolicy
 
 	assistedRunID string
 	draining      atomic.Bool
@@ -251,6 +252,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
 		liveLogs:            newLiveLogs(),
 		runnerPresence:      newRunnerPresenceRegistry(),
+		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
 		cronHolder:          defaultCronHolder(),
 		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,

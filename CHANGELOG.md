@@ -884,6 +884,11 @@ unlock.
 
 ### Fixed
 
+- **controller + dashboard:** A busy legacy agent's accepted claim heartbeats
+  keep Fleet's observed liveness fresh without offering a free slot. Recent
+  run failures appear as a separate Home warning and no longer mark a healthy
+  controller as degraded.
+
 - **controller:** Fleet groups claim-mode agents with a plain `holder_prefix`
   under one stable name and uses their own idle polls for liveness. An unrelated
   credential cannot keep a stale claim's agent marked live or mix its active

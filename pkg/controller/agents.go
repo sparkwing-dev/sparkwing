@@ -298,8 +298,12 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			agent.Capabilities = presence.Labels
 			agent.MaxConcurrent = presence.MaxConcurrent
 			if presence.UpdatedAt.UnixNano() > h.lastSeenNs {
+				h.lastSeenNs = presence.UpdatedAt.UnixNano()
 				agent.LastSeen = presence.UpdatedAt.UTC().Format(time.RFC3339)
 			}
+		}
+		if observed, ok := s.runnerHeartbeats.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now()); ok && observed.UnixNano() > h.lastSeenNs {
+			agent.LastSeen = observed.UTC().Format(time.RFC3339)
 		}
 		if hr, ok := s.runnerHeadroom.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Headroom = &AgentHeadroom{
