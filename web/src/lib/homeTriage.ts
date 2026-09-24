@@ -10,14 +10,12 @@ export interface FailedPipeline {
 }
 
 function repoIdentity(run: Run): string {
-  const raw = run.repo_url || (run.github_owner && run.github_repo
+  const raw = (run.github_owner && run.github_repo
     ? `${run.github_owner}/${run.github_repo}`
-    : run.repo || run.github_repo || "unknown");
-  let path = raw;
-  try {
-    path = new URL(raw).pathname;
-  } catch {
-    // Repo names and local paths are already path-like.
+    : run.repo_url || run.repo || run.github_repo || "unknown");
+  let path = raw.replace(/^git@[^:]+:/, "");
+  if (/^https?:\/\//.test(path)) {
+    path = new URL(path).pathname;
   }
   return path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").toLowerCase();
 }
@@ -61,7 +59,9 @@ export function latestFailedPipelines(
   return [...groups.values()]
     .map((group) => {
       group.runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
-      group.latest = group.runs[0];
+      group.latest = group.runs.find((run) =>
+        run.status === "success" || run.status === "failed" || run.status === "cancelled",
+      ) || group.runs[0];
       return group;
     })
     .filter((group) => group.latest.status === "failed")

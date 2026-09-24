@@ -29,4 +29,17 @@ describe("Home latest failed pipelines", () => {
     ];
     assert.deepEqual(latestFailedPipelines(rows, false).map((r) => r.latest.id), ["a"]);
   });
+
+  it("keeps a failed pipeline visible while a newer retry runs, then clears on success", () => {
+    const failed = run("failed", "owner/app", "main", "failed", 1);
+    const retry = run("retry", "owner/app", "main", "running", 2);
+    assert.deepEqual(latestFailedPipelines([failed, retry], false).map((r) => r.latest.id), ["failed"]);
+    assert.deepEqual(latestFailedPipelines([failed, { ...retry, status: "success" }], false), []);
+  });
+
+  it("normalizes SSH GitHub URLs and prefers verified owner/repo fields", () => {
+    const ssh = { ...run("red", "app", "main", "failed", 1), repo_url: "git@github.com:owner/app.git" };
+    const newer = { ...run("green", "app", "main", "success", 2), github_owner: "owner", github_repo: "app" };
+    assert.deepEqual(latestFailedPipelines([ssh, newer], false), []);
+  });
 });
