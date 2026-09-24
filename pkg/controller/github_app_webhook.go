@@ -553,7 +553,7 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	repoURL := "https://github.com/" + repo.Slug() + ".git"
 	svc := s.cronServiceFor(tenant, "github-app:"+strconv.FormatInt(in.InstallationID, 10))
-	if err := manualCronConflict(r.Context(), svc, repoURL, entries); err != nil {
+	if err := s.manualCronConflict(r.Context(), svc, in.InstallationID, repo, repoURL, entries); err != nil {
 		if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), in.InstallationID, repo.ID, time.Now()); werr != nil {
 			return http.StatusInternalServerError, "", fmt.Errorf("stop conflicting App schedule: %w", werr)
 		}
@@ -581,7 +581,9 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	return 0, "", nil
 }
 
-func manualCronConflict(ctx context.Context, svc *crons.Service, repoURL string, entries []crons.Declared) error {
+func (s *Server) manualCronConflict(ctx context.Context, svc *crons.Service, installationID int64,
+	repo store.GitHubRepo, repoURL string, entries []crons.Declared,
+) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -598,11 +600,36 @@ func manualCronConflict(ctx context.Context, svc *crons.Service, repoURL string,
 		return err
 	}
 	for _, row := range rows {
-		if row.GitHubRepositoryID != 0 || !want[row.Pipeline+"\x00"+row.Name] {
+		if row.GitHubRepositoryID != 0 || row.Where != store.CronWhereController || !want[row.Pipeline+"\x00"+row.Name] {
 			continue
 		}
-		if gotRepo, err := sourceurl.Identity(row.RepoPath); err == nil && gotRepo == wantRepo {
+		gotRepo, err := sourceurl.Identity(row.RepoPath)
+		if err != nil {
+			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming: %w",
+				row.Pipeline, row.Name, err)
+		}
+		if gotRepo == wantRepo {
 			return fmt.Errorf("a manually pushed schedule already owns %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
+		}
+		host, slug, ok := strings.Cut(gotRepo, "/")
+		if !ok {
+			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
+		}
+		if host != "github.com" && host != "github.com:443" && host != "ssh.github.com" {
+			continue
+		}
+		owner, name, ok := strings.Cut(slug, "/")
+		if !ok || owner == "" || name == "" {
+			return fmt.Errorf("cannot verify manually pushed schedule %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
+		}
+		id, err := s.githubApp.client.RepositoryIDThroughAlias(ctx, installationID, repo.Name, owner, name)
+		if err != nil {
+			return fmt.Errorf("cannot prove manually pushed schedule %s/%s is another repository; disarm it before App auto-arming: %w",
+				row.Pipeline, row.Name, err)
+		}
+		if id == repo.ID {
+			return fmt.Errorf("a manually pushed schedule at an older URL already owns %s/%s; disarm it before App auto-arming",
+				row.Pipeline, row.Name)
 		}
 	}
 	return nil

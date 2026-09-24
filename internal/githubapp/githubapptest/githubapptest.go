@@ -111,6 +111,7 @@ type GitHub struct {
 	tokens           map[string]*issuedToken
 	commits          map[string]string
 	files            map[string][]byte
+	aliases          map[string]string
 	failContents     int
 	failInstallRepos int
 	minted           []MintedToken
@@ -136,6 +137,7 @@ func New(t testing.TB) *GitHub {
 		tokens:    map[string]*issuedToken{},
 		commits:   map[string]string{},
 		files:     map[string][]byte{},
+		aliases:   map[string]string{},
 		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
@@ -201,6 +203,13 @@ func (g *GitHub) SetFile(repo, sha, path string, content []byte) {
 	g.files[key] = append([]byte(nil), content...)
 }
 
+// SetRepoAlias redirects oldName's metadata request to currentName.
+func (g *GitHub) SetRepoAlias(oldName, currentName string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.aliases[strings.ToLower(oldName)] = strings.ToLower(currentName)
+}
+
 // FailContents makes the next n file reads fail as a GitHub API error.
 func (g *GitHub) FailContents(n int) {
 	g.mu.Lock()
@@ -217,6 +226,13 @@ func (g *GitHub) FailInstallationRepositories(n int) {
 
 func (g *GitHub) handleRepoMetadata(w http.ResponseWriter, r *http.Request) {
 	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	g.mu.Lock()
+	alias := g.aliases[repo]
+	g.mu.Unlock()
+	if alias != "" {
+		http.Redirect(w, r, "/repos/"+alias, http.StatusMovedPermanently)
+		return
+	}
 	tok := g.installationToken(r)
 	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})

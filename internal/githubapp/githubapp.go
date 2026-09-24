@@ -551,6 +551,26 @@ func (c *Client) FileAtDefaultHead(ctx context.Context, installation int64, owne
 	return out, nil
 }
 
+// RepositoryIDThroughAlias reads a GitHub clone URL's owner/name with a token
+// restricted to currentRepo. GitHub may redirect an old repository name to
+// its current name; an unreadable answer is not proof that it is another repo.
+func (c *Client) RepositoryIDThroughAlias(ctx context.Context, installation int64, currentRepo, owner, name string) (int64, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{currentRepo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return 0, err
+	}
+	var repo struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(name), "Bearer "+tok.Token, &repo); err != nil {
+		return 0, err
+	}
+	if repo.ID <= 0 {
+		return 0, errors.New("githubapp: repository lookup returned no id")
+	}
+	return repo.ID, nil
+}
+
 // permissionsNotGranted reports whether a refused token request names
 // permissions the installation has not granted, which GitHub answers with 422
 // like a repository the installation does not cover.

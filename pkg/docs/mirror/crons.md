@@ -387,6 +387,9 @@ Removing a repository from an installation, uninstalling the App or moving the
 repository to another team's installation withdraws the former binding's
 schedules. Manually pushed schedules keep their URL identity; an App schedule
 that would duplicate one is refused until the owner disarms the manual row.
+The controller checks GitHub's repository id for old clone URLs that may
+redirect after a rename. If GitHub cannot prove a manual GitHub URL names a
+different repository, auto-arming refuses it rather than risking two fires.
 These cleanups depend on signed GitHub deliveries or a later verified push;
 an undelivered removal notice can leave an old row armed until one arrives.
 If GitHub cannot list an installation's repositories during a removal notice,

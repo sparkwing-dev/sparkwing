@@ -204,6 +204,69 @@ func TestGitHubAppCronRenameConflictStopsOldAppRow(t *testing.T) {
 	}
 }
 
+func TestGitHubAppCronRefusesManualScheduleAtOldRedirectedURL(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID: "crn_manual_old_url", RepoPath: "git@github.com:acme/widgets.git",
+		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
+		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.app.SetRepos(7, githubRepo(701, "acme/renamed"), githubRepo(702, "acme/plans"))
+	f.app.SetRepoAlias("acme/widgets", "acme/renamed")
+	f.app.SetCommit("acme/renamed", "main", headSHA)
+	f.app.SetFile("acme/renamed", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/renamed", headSHA, "refs/heads/main"), ""); code != http.StatusConflict {
+		t.Fatalf("manual schedule through old redirect = %d, want 409", code)
+	}
+	rows := appCronRows(t, f, olga.team)
+	if len(rows) != 1 || rows[0].GitHubRepositoryID != 0 || !rows[0].Declared {
+		t.Fatalf("old manual URL was duplicated or adopted: %+v", rows)
+	}
+	minted := f.app.Minted()
+	if len(minted) == 0 {
+		t.Fatal("manual URL comparison minted no token")
+	}
+	last := minted[len(minted)-1]
+	if len(last.Repositories) != 1 || last.Repositories[0] != "renamed" ||
+		len(last.Permissions) != 1 || last.Permissions["contents"] != "read" {
+		t.Fatalf("manual URL comparison token = %+v, want renamed with contents:read only", last)
+	}
+}
+
+func TestGitHubAppCronCannotProveManualGitHubURLDistinct(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
+		ID: "crn_manual_unreadable", RepoPath: "git@github.com:acme/old-name.git",
+		Pipeline: "nightly", Name: "default", Cron: "0 4 * * *", TZ: "UTC",
+		Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusConflict {
+		t.Fatalf("unverifiable manual URL = %d, want 409", code)
+	}
+	rows := appCronRows(t, f, olga.team)
+	if len(rows) != 1 || rows[0].GitHubRepositoryID != 0 {
+		t.Fatalf("unverifiable manual URL was duplicated or adopted: %+v", rows)
+	}
+}
+
 func githubRepo(id int64, fullName string) githubapptest.Repo {
 	return githubapptest.Repo{ID: id, FullName: fullName}
 }
