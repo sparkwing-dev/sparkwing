@@ -136,9 +136,6 @@ func TestGitHubRunnerExchangeNeedsBothSidesOfConsent(t *testing.T) {
 		len(cred.Labels) != 1 || cred.Labels[0] != controller.GitHubActionsLabel {
 		t.Fatalf("exchange = %d %+v", code, cred)
 	}
-	if left := time.Until(time.Unix(cred.ExpiresAt, 0)); left <= 0 || left > time.Hour {
-		t.Fatalf("credential lives %s, want at most an hour", left)
-	}
 	w := f.whoami("Bearer " + cred.Token)
 	if w.Team != owner.team || w.Principal != "github:42:Acme/Widgets" {
 		t.Fatalf("whoami = %+v", w)
@@ -146,6 +143,10 @@ func TestGitHubRunnerExchangeNeedsBothSidesOfConsent(t *testing.T) {
 	token, err := f.store.LookupToken(cred.Token, time.Now())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if token.ExpiresAt == nil || token.ExpiresAt.Unix() != cred.ExpiresAt ||
+		token.ExpiresAt.Sub(token.CreatedAt) <= 0 || token.ExpiresAt.Sub(token.CreatedAt) > time.Hour {
+		t.Fatalf("credential expiry = %d, stored token = %+v; want a live lifetime at most an hour", cred.ExpiresAt, token)
 	}
 	tenant, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
 	if err != nil {
