@@ -105,7 +105,7 @@ func TestAPendingRunStampedTerminalCarriesAFinishTime(t *testing.T) {
 	}
 }
 
-func TestCreateRunDoesNotReopenAnAlreadyFinishedPendingRow(t *testing.T) {
+func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	ended := time.Now().Add(-time.Hour).Truncate(time.Second)
@@ -127,6 +127,48 @@ func TestCreateRunDoesNotReopenAnAlreadyFinishedPendingRow(t *testing.T) {
 	run, err := s.GetRun(ctx, "legacy-pending-finish")
 	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
 		t.Fatalf("finished pending row reopened: %+v, %v", run, err)
+	}
+	if err := s.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("single finish = %v, want invalid input", err)
+	}
+	if err := s.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
+		t.Fatal(err)
+	}
+	tn, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("team single finish = %v, want invalid input", err)
+	}
+	if err := tn.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.GetRun(ctx, run.ID)
+	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
+		t.Fatalf("finished pending verdict rewritten: %+v, %v", run, err)
+	}
+}
+
+func TestFinishRunIdenticalRetryKeepsFinishTime(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	if err := s.CreateRun(ctx, store.Run{ID: "retry-finish", Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.GetRun(ctx, "retry-finish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.GetRun(ctx, "retry-finish")
+	if err != nil || again.Status != "success" || again.FinishedAt == nil || !again.FinishedAt.Equal(*first.FinishedAt) {
+		t.Fatalf("identical retry moved finish: %+v, %v", again, err)
 	}
 }
 

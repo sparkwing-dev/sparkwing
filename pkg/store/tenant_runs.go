@@ -97,7 +97,7 @@ func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE runs SET status = ?, error = ?, finished_at = ?
-			  WHERE team = ? AND id = ? AND status NOT IN ('success','failed','cancelled')`,
+			  WHERE team = ? AND id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`,
 			status, errMsg, now, string(t.team), runID); err != nil {
 			return err
 		}

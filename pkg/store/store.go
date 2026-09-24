@@ -3728,7 +3728,7 @@ func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, err
 const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ? AND NOT (` + runTerminalIn + `)`
+ WHERE id = ? AND finished_at IS NULL AND NOT (` + runTerminalIn + `)`
 
 func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg string, team Team) error {
 	if !isTerminalRunStatus(status) {
@@ -3798,7 +3798,7 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixNano()
 	for _, runID := range runIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
 			return err
 		}
 	}
