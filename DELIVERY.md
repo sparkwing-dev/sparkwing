@@ -124,7 +124,9 @@ file. Other syntax and workflow checks remain active.
   Test, Example and Fuzz names, sorts them and assigns each exactly once across
   four processes. Every shard runs with `GOMAXPROCS=1`; the separate
   `pkg/store/internal/storetest` package runs once. The step stops sibling
-  processes on a failure and retains each shard's output in the run log.
+  processes on a failure and retains each shard's output in the run log. It
+  gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
+  and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
   A complete local run on 16 logical CPUs covered 1,075 top-level names in
   27m20s; its four shards took 21m45s, 23m15s, 23m40s and 27m20s. A prior
   pre-release run without this step took 13m03s, so 40m23s is a local estimate

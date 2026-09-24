@@ -99,7 +99,23 @@ type storeRaceResult struct {
 	err    error
 }
 
-func runStoreRaceShards(ctx context.Context) (runErr error) {
+func storeRaceExec(ctx context.Context, home, name string, args ...string) *sparkwing.Cmd {
+	envArgs := make([]string, 0, 2*len(productTestUnset)+len(args)+4)
+	for _, name := range productTestUnset {
+		envArgs = append(envArgs, "-u", name)
+	}
+	envArgs = append(envArgs, productTestHomeVar+"="+home, devEnvDisableVar+"=1", "GOWORK=off", name)
+	envArgs = append(envArgs, args...)
+	return sparkwing.Exec(ctx, "env", envArgs...)
+}
+
+func runStoreRaceShards(ctx context.Context) error {
+	return withProductTestHome(func(home string) error {
+		return runStoreRaceShardsAtHome(ctx, home)
+	})
+}
+
+func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 	dir, err := os.MkdirTemp("", "sparkwing-store-race-*")
 	if err != nil {
 		return err
@@ -110,10 +126,10 @@ func runStoreRaceShards(ctx context.Context) (runErr error) {
 		}
 	}()
 	binary := filepath.Join(dir, "store.test")
-	if _, err := sparkwing.Exec(ctx, "go", "test", "-c", "-race", "-o", binary, "./pkg/store").Run(); err != nil {
+	if _, err := storeRaceExec(ctx, home, "go", "test", "-c", "-race", "-o", binary, "./pkg/store").Run(); err != nil {
 		return fmt.Errorf("compile store race binary: %w", err)
 	}
-	listed, err := sparkwing.Exec(ctx, binary, "-test.list", "^(Test|Example|Fuzz)").Dir("pkg/store").Capture()
+	listed, err := storeRaceExec(ctx, home, binary, "-test.list", "^(Test|Example|Fuzz)").Dir("pkg/store").Capture()
 	if err != nil {
 		return fmt.Errorf("list store race tests: %w", err)
 	}
@@ -129,7 +145,7 @@ func runStoreRaceShards(ctx context.Context) (runErr error) {
 	for i, shard := range shards {
 		sparkwing.Info(ctx, "store race shard %d: %d tests, sha256=%s", i+1, len(shard), storeRaceDigest(shard))
 	}
-	if _, err := sparkwing.Exec(ctx, "go", "test", "-race", "-count=1", "./pkg/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
+	if _, err := storeRaceExec(ctx, home, "go", "test", "-race", "-count=1", "./pkg/store/internal/storetest").Env("GOMAXPROCS", "1").Run(); err != nil {
 		return fmt.Errorf("storetest race package: %w", err)
 	}
 
@@ -138,7 +154,7 @@ func runStoreRaceShards(ctx context.Context) (runErr error) {
 	results := make(chan storeRaceResult, storeRaceShardCount)
 	for i, shard := range shards {
 		go func() {
-			result, runErr := sparkwing.Exec(shardCtx, binary,
+			result, runErr := storeRaceExec(shardCtx, home, binary,
 				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=55m").
 				Dir("pkg/store").Env("GOMAXPROCS", "1").Capture()
 			results <- storeRaceResult{shard: i + 1, count: len(shard), output: result, err: runErr}

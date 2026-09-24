@@ -69,3 +69,30 @@ func TestStoreRacePatternAnchorsEveryTopLevelName(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", "operator-home")
+	t.Setenv("SPARKWING_AGENT_TOKEN", "operator-token")
+	t.Setenv("SPARKWING_CHILD_LEASE_TOKEN", "operator-lease")
+	t.Setenv("GOWORK", "operator-workspace")
+	result, err := storeRaceExec(t.Context(), home, "env").Capture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(result.Stdout, "\n")
+	for _, want := range []string{
+		"SPARKWING_HOME=" + home,
+		"SPARKWING_DEV_ENV_DISABLE=1",
+		"GOWORK=off",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("suite environment lacks %q", want)
+		}
+	}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "SPARKWING_AGENT_TOKEN=") || strings.HasPrefix(line, "SPARKWING_CHILD_LEASE_TOKEN=") {
+			t.Errorf("suite inherited a runner credential: %s", strings.SplitN(line, "=", 2)[0])
+		}
+	}
+}
