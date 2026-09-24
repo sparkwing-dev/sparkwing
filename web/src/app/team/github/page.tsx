@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import TeamShell, { Panel, errorText } from "@/components/TeamShell";
+import TeamShell, { Panel, errorText, quietButtonClass } from "@/components/TeamShell";
+import Tooltip from "@/components/Tooltip";
 import { ExtraReposPanel } from "@/components/GitHubAppExtraRepos";
 import {
   ConnectGitHubForm,
@@ -183,6 +184,10 @@ function ConnectedGitHub({ me }: { me: Me }) {
   }
   const installations = app.installations;
   const choices = subscribableRepositories(installations, repositories);
+  const runsInfo =
+    "Set push branches for deploy pipelines. Pull requests from forks are not run.";
+  const subscriptionInfo =
+    "Saving a repository and pipeline already subscribed replaces its events.";
 
   return (
     <>
@@ -193,7 +198,6 @@ function ConnectedGitHub({ me }: { me: Me }) {
       )}
       <Panel
         title="Connected accounts"
-        hint="An installation of the GitHub App proves this team controls those repositories. Only an owner who administers the GitHub account connects it."
         action={
           canManage ? (
             <ConnectGitHubForm
@@ -206,8 +210,8 @@ function ConnectedGitHub({ me }: { me: Me }) {
         {installations.length === 0 ? (
           <div className="p-4 text-xs text-[var(--muted)]">
             {canManage
-              ? "No GitHub account connected. Connect GitHub to run pipelines on pushes and pull requests."
-              : "No GitHub account connected. A team owner connects one."}
+              ? "Connect GitHub to run pipelines on pushes and pull requests."
+              : "A team owner can connect GitHub to start runs from this team's repositories."}
           </div>
         ) : (
           <ul>
@@ -227,7 +231,18 @@ function ConnectedGitHub({ me }: { me: Me }) {
       </Panel>
       <Panel
         title="Runs from GitHub"
-        hint="Each subscription runs one pipeline on matching pushes or pull requests. Set push branches for deploy pipelines. Pull requests from forks aren't run."
+        action={
+          <Tooltip content={runsInfo}>
+            <button
+              type="button"
+              aria-label={`About GitHub runs: ${runsInfo}`}
+              className={`${quietButtonClass} min-h-11 min-w-11 focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+              onClick={(event) => event.currentTarget.focus()}
+            >
+              Info
+            </button>
+          </Tooltip>
+        }
       >
         <SubscriptionsTable
           subscriptions={subscriptions}
@@ -240,7 +255,18 @@ function ConnectedGitHub({ me }: { me: Me }) {
       {canManage && installations.length > 0 ? (
         <Panel
           title={editing ? "Edit subscription" : "Add a subscription"}
-          hint="Saving a repository and pipeline that already exist replaces their events."
+          action={!editing ? (
+            <Tooltip content={subscriptionInfo}>
+              <button
+                type="button"
+                aria-label={`About subscriptions: ${subscriptionInfo}`}
+                className={`${quietButtonClass} min-h-11 min-w-11 focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+                onClick={(event) => event.currentTarget.focus()}
+              >
+                Info
+              </button>
+            </Tooltip>
+          ) : null}
         >
           <SubscriptionForm
             key={editing ? `${editing.repository}/${editing.pipeline}` : "new"}

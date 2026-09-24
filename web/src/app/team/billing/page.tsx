@@ -33,7 +33,6 @@ import {
   purchaseProblem,
   startCheckout,
   storagePrice,
-  vcpuHourPrice,
 } from "@/lib/billing";
 import { billingEnabled, unixSecondsISO } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
@@ -112,7 +111,7 @@ function BillingRoute() {
           {billing.checkout_enabled ? <BuyPanel billing={billing} /> : null}
           <PricesPanel billing={billing} />
           <UsagePanel billing={billing} />
-          <GrantsPanel billing={billing} />
+          <HistoryPanel billing={billing} />
         </>
       )}
     </>
@@ -230,17 +229,9 @@ function BuyPanel({ billing }: { billing: Billing }) {
 
 function PricesPanel({ billing }: { billing: Billing }) {
   const rows = priceRows(billing);
-  const headline = vcpuHourPrice(billing);
   const storage = storagePrice(billing);
   return (
-    <Panel
-      title="Prices"
-      hint={
-        headline
-          ? `${headline.uniform ? "" : "From "}${fmtRateUSD(headline.usd)} per vCPU-hour, billed by the second.`
-          : undefined
-      }
-    >
+    <Panel title="Prices">
       {rows.length === 0 ? (
         <div className="p-4 text-xs text-[var(--muted)]">
           The controller reported no machine classes.
@@ -256,9 +247,6 @@ function PricesPanel({ billing }: { billing: Billing }) {
                 Credits / second
               </th>
               <th scope="col" className={`${thClass} text-right`}>
-                Credits / minute
-              </th>
-              <th scope="col" className={`${thClass} text-right`}>
                 Per hour
               </th>
             </tr>
@@ -272,9 +260,6 @@ function PricesPanel({ billing }: { billing: Billing }) {
                 <td className={tdClass}>{r.cores} vCPU</td>
                 <td className={`${tdClass} text-right font-mono`}>
                   {fmtRate(r.creditsPerSecond)}
-                </td>
-                <td className={`${tdClass} text-right font-mono`}>
-                  {fmtRate(r.creditsPerMinute)}
                 </td>
                 <td className={`${tdClass} text-right font-mono`}>
                   {fmtRateUSD(r.usdPerHour)}
@@ -303,10 +288,7 @@ function PricesPanel({ billing }: { billing: Billing }) {
 
 function UsagePanel({ billing }: { billing: Billing }) {
   return (
-    <Panel
-      title="Recent usage"
-      hint="Runner time charged per run, newest first."
-    >
+    <Panel title="Recent usage">
       {billing.usage.length === 0 ? (
         <div className="p-4 text-xs text-[var(--muted)]">
           No runs have been charged yet.
@@ -368,14 +350,11 @@ function UsagePanel({ billing }: { billing: Billing }) {
   );
 }
 
-function GrantsPanel({ billing }: { billing: Billing }) {
+function HistoryPanel({ billing }: { billing: Billing }) {
   return (
-    <Panel
-      title="Purchases"
-      hint="Purchases, grants and refunds, newest first."
-    >
+    <Panel title="History">
       {billing.grants.length === 0 ? (
-        <div className="p-4 text-xs text-[var(--muted)]">No purchases yet.</div>
+        <div className="p-4 text-xs text-[var(--muted)]">No history yet.</div>
       ) : (
         <table className="w-full text-sm">
           <thead className="border-b border-[var(--border)]">

@@ -9,6 +9,7 @@ import {
   inputClass,
   quietButtonClass,
 } from "@/components/TeamShell";
+import Tooltip from "@/components/Tooltip";
 import { toast } from "@/components/Toasts";
 import {
   type ExtraRepos,
@@ -20,7 +21,7 @@ import {
 } from "@/lib/githubApp";
 
 const extraReposHint =
-  "A run's GitHub token reads only its own repository. List the private submodules or dependencies it also needs, up to 10 of the same owner, all covered by the installation that covers the repository. Only an owner changes this list; nothing in a repository can.";
+  "Add private submodules or dependencies here, up to 10 repositories from the same owner. The GitHub installation must cover each one. Only a team owner can edit this list.";
 
 // The team owner's per-repository list of further repositories a run's
 // token reads. repositories are those the team's installations cover.
@@ -69,7 +70,21 @@ export function ExtraReposPanel({
   }
 
   return (
-    <Panel title="Extra repositories" hint={extraReposHint}>
+    <Panel
+      title="Extra repositories"
+      action={
+        <Tooltip content={extraReposHint}>
+          <button
+            type="button"
+            aria-label={`About extra repositories: ${extraReposHint}`}
+            className={`${quietButtonClass} min-h-11 min-w-11 focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+            onClick={(event) => event.currentTarget.focus()}
+          >
+            Info
+          </button>
+        </Tooltip>
+      }
+    >
       {loadError ? (
         <div className="p-4 text-xs text-red-300">{loadError}</div>
       ) : lists === null ? (
