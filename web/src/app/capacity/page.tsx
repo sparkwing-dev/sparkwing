@@ -45,11 +45,14 @@ import {
   sortProfiles,
 } from "@/lib/capacity";
 import Tooltip from "@/components/Tooltip";
+import { useTeamState } from "@/lib/useTeam";
 
 const HOST_POLL_MS = 2000;
 const PRICING_POLL_MS = 10000;
 
 export default function CapacityPage() {
+  const team = useTeamState();
+  const localAdmission = team.status === "single-team";
   const [qs, setQs] = useState<QueueState | null>(null);
   const [hostLoaded, setHostLoaded] = useState(false);
   const [pricing, setPricing] = useState<CapacityProfiles | null>(null);
@@ -75,6 +78,7 @@ export default function CapacityPage() {
   }, []);
 
   useEffect(() => {
+    if (!localAdmission) return;
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) void refreshHost();
@@ -87,9 +91,10 @@ export default function CapacityPage() {
       window.clearInterval(i);
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };
-  }, [refreshHost]);
+  }, [refreshHost, localAdmission]);
 
   useEffect(() => {
+    if (!localAdmission) return;
     let cancelled = false;
     queueMicrotask(() => {
       if (!cancelled) void refreshPricing();
@@ -101,9 +106,10 @@ export default function CapacityPage() {
       cancelled = true;
       window.clearInterval(i);
     };
-  }, [refreshPricing]);
+  }, [refreshPricing, localAdmission]);
 
   useEffect(() => {
+    if (!localAdmission) return;
     if (!selected) {
       let cancelled = false;
       queueMicrotask(() => {
@@ -126,7 +132,7 @@ export default function CapacityPage() {
       cancelled = true;
       window.clearInterval(i);
     };
-  }, [selected]);
+  }, [selected, localAdmission]);
 
   const rows = useMemo(
     () => sortProfiles(pricing?.profiles ?? [], sortKey, ascending),
@@ -144,6 +150,18 @@ export default function CapacityPage() {
     },
     [sortKey],
   );
+
+  if (!localAdmission) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
+        <h1 className="text-xl font-bold">Capacity is local to a machine</h1>
+        <p className="mt-3 text-sm text-[var(--muted)]">
+          Cloud runner capacity is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
+          Run trends are in <Link href="/analytics" className="text-[var(--accent)]">Analytics</Link>.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
