@@ -13,6 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
@@ -56,6 +58,15 @@ func classState(t *testing.T, l *objectguard.Limiter, c objectguard.Class) objec
 	}
 	t.Fatalf("the limiter reports no state for class %q", c)
 	return objectguard.ClassState{}
+}
+
+func TestBudgetRejectsUnknownS3StackWithoutRetry(t *testing.T) {
+	var options awss3.Options
+	objectguard.WithBudget(objectguard.New(testConfig(10, 0)))(&options)
+	stack := middleware.NewStack("UnexpectedS3", smithyhttp.NewStackRequest)
+	if err := options.APIOptions[0](stack); err == nil || !strings.Contains(err.Error(), "Retry") {
+		t.Fatalf("unbudgeted non-presign stack returned %v, want Retry error", err)
+	}
 }
 
 // TestBudgetSpendsOneUnitPerBilledAttempt is the arithmetic the budget

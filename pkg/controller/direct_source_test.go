@@ -2,9 +2,11 @@ package controller_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -23,6 +26,10 @@ import (
 
 func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	s3Client, objects := directS3(t)
+	budget := objectguard.New(objectguard.Config{Enabled: true, Limits: map[objectguard.Class]objectguard.Limit{
+		objectguard.ClassPut: {PerMinute: 10},
+	}})
+	s3Client = s3.New(s3Client.Options(), objectguard.WithBudget(budget))
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
 		return s.WithDirectUploads(s3Client, "bucket", "cache")
 	})
@@ -221,5 +228,43 @@ func TestSourceUploadUserBearerReservesBeforeRun(t *testing.T) {
 	if code := f.call(http.MethodPost, "/api/v1/runs/"+started.RunID+"/retry", user.auth, nil, &retryError); code != http.StatusUnprocessableEntity ||
 		!strings.Contains(fmt.Sprint(retryError["error"]), "new source upload") {
 		t.Fatalf("retry reused one-run source = %d, %+v, want 422 with reupload guidance", code, retryError)
+	}
+}
+
+func TestSourceUploadReleasesReservationWhenPresigningFails(t *testing.T) {
+	s3Client, _ := directS3(t)
+	opts := s3Client.Options()
+	opts.Credentials = aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{}, errors.New("signing credentials unavailable")
+	})
+	guarded := s3.New(opts, objectguard.WithBudget(objectguard.New(objectguard.Config{Enabled: true})))
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		return s.WithDirectUploads(guarded, "bucket", "cache")
+	})
+	user := f.ghUser(651, "source-owner")
+	allowance := int64(1 << 30)
+	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+		t.Fatal(err)
+	}
+	team, err := f.store.ForTeam(t.Context(), store.Team(user.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := team.CreateToken(t.Context(), "source-owner", store.TokenKindUser,
+		[]string{controller.ScopeRunsWrite}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("source"))
+	digest := hex.EncodeToString(sum[:])
+	key := "sources/" + digest + "/" + strings.Repeat("1", 32)
+	if code := f.call(http.MethodPost, "/api/v1/data/upload", "Bearer "+raw,
+		map[string]any{"kind": "source", "key": key, "size": 6, "sha256": digest}, nil); code != http.StatusInternalServerError {
+		t.Fatalf("presign failure = %d, want 500", code)
+	}
+	var reserved int64
+	if err := f.store.DB().QueryRowContext(t.Context(),
+		`SELECT reserved_bytes FROM team_storage WHERE team = ? AND store = ?`, user.team, string(store.StorageCache)).Scan(&reserved); err != nil || reserved != 0 {
+		t.Fatalf("reserved bytes after presign failure = %d, err %v", reserved, err)
 	}
 }
