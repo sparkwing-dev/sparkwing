@@ -897,6 +897,9 @@ unlock.
 
 ### Fixed
 
+- **web:** Navigation fetches a tab's route on hover, focus or touch instead of
+  prefetching every visible tab on page load.
+
 - **CLI:** `runs grep` applies branch and SHA prefix filters before its run
   limit, so newer unrelated runs do not hide an older matching log. It reads
   an explicit profile logs URL or the controller's announced logs service,
