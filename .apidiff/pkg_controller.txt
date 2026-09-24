@@ -79,7 +79,7 @@ const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
 const DefaultMaxIdleClaimPoll = 5 * time.Second
 const DefaultRunnersPerToken = 64
-const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
+const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
 type DirectUploadResponse struct {

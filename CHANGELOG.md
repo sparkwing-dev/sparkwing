@@ -914,6 +914,12 @@ unlock.
 
 ### Fixed
 
+- **controller + web (Breaking):** Browser sign-in cookies now survive restarts for 30 days.
+  Controller sessions expire after seven idle days or 30 days from sign-in,
+  whichever comes first. Logout and server-side revocation still take effect
+  on the next request. `Store.ExtendSession` is replaced by
+  `Store.LookupSessionAndRenew`; see [Browser session renewal](docs/migrations/_unreleased.md#browser-session-renewal).
+
 - **cloud CLI + cache:** `sparkwing cloud status` omits the optional gitcache
   probe when no cache pod URL is announced, while an announced unhealthy cache
   still fails. Cloud keeps its cache Service internal; off-cluster source,

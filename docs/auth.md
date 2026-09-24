@@ -1137,6 +1137,10 @@ along with `Secure`, because a browser discards a `__Host-` cookie that is not
 custom browser client reads whichever name the deployment sets, preferring the
 prefixed one.
 
+Both sign-in cookies persist across browser restarts for 30 days. Their
+presence does not extend a controller session: the controller checks the
+session on every protected request and clears invalid cookies.
+
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health
 endpoints but cannot retain those cookies. For a loopback-only development
@@ -1328,10 +1332,9 @@ every request and the dashboard resolves the session on every protected
 request, so deleting a session or a user logs that browser out on its
 next request.
 
-A session expires 12 hours after its last use and the controller renews it when
-under an hour remains, but never past seven days from the moment it was
-created. Reaching that age deletes the row and answers `401`, so the browser
-signs in again. An embedder changes the cap with
+A session expires seven days after its last use. Each successful use renews
+that term, but never past 30 days from creation. Reaching that age deletes the
+row and answers `401`, so the browser signs in again. An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
 ## Extension points

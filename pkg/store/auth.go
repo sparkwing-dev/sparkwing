@@ -217,6 +217,20 @@ func newSessionID() (string, error) {
 
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error) {
+	return s.lookupSession(rawSession, now, 0, 0)
+}
+
+// LookupSessionAndRenew resolves a live session and extends its expiry from
+// this use. A row past maxLifetime is returned without renewal for its caller
+// to revoke.
+func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+	if ttl <= 0 {
+		return nil, errors.New("sessions: ttl must be positive")
+	}
+	return s.lookupSession(rawSession, now, ttl, maxLifetime)
+}
+
+func (s *Store) lookupSession(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
@@ -259,12 +273,47 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		return nil, errors.New("session expired")
 	}
 	sess.CSRFToken = csrfToken
-	_, _ = s.execNoCtx(
-		`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
-		now.UTC().Unix(), digest,
-	)
-	ts := now.UTC()
-	sess.LastUsedAt = &ts
+	if ttl > 0 {
+		if sess.CreatedAt.After(now) || maxLifetime > 0 && !now.Before(sess.CreatedAt.Add(maxLifetime)) {
+			return &sess, nil
+		}
+		renewed := now.Add(ttl)
+		if maxLifetime > 0 {
+			limit := sess.CreatedAt.Add(maxLifetime)
+			if renewed.After(limit) {
+				renewed = limit
+			}
+		}
+		result, err := s.execNoCtx(`UPDATE sessions
+			SET last_used_at = CASE WHEN last_used_at > ? THEN last_used_at ELSE ? END,
+				expires_at = CASE
+				WHEN expires_at > ? THEN expires_at
+				ELSE ? END
+			WHERE hash = ? AND expires_at > ?`,
+			now.UTC().Unix(), now.UTC().Unix(), renewed.Unix(), renewed.Unix(), digest, now.UTC().Unix())
+		if err != nil {
+			return nil, fmt.Errorf("%w: renew session: %w", ErrSessionBackend, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("%w: renew session rows: %w", ErrSessionBackend, err)
+		}
+		if rows == 0 {
+			return nil, errors.New("unknown session")
+		}
+		if sess.ExpiresAt.Before(renewed) {
+			sess.ExpiresAt = renewed
+		}
+	} else {
+		_, _ = s.execNoCtx(
+			`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
+			now.UTC().Unix(), digest,
+		)
+	}
+	if ttl == 0 || sess.LastUsedAt == nil || sess.LastUsedAt.Before(now) {
+		ts := now.UTC()
+		sess.LastUsedAt = &ts
+	}
 	return &sess, nil
 }
 
@@ -285,16 +334,6 @@ func (s *Store) ExpireSessions(now time.Time) (int64, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
-}
-
-// ExtendSession bumps expires_at to now+ttl (sliding TTL).
-func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error {
-	expires := now.Add(ttl).UTC().Unix()
-	_, err := s.execNoCtx(
-		`UPDATE sessions SET expires_at = ? WHERE hash = ?`,
-		expires, sessionDigest(rawSession),
-	)
-	return err
 }
 
 // CreateUser inserts a user with an argon2id-hashed password. scopes is

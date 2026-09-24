@@ -1850,7 +1850,6 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireRetainedRuns(ctx context.Context, now time.Time) ([]TeamRetentionExpiry, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
-func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,
 ) error
@@ -1935,6 +1934,7 @@ func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (s *Store) ListUsers() ([]User, error)
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error)
+func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
 func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)

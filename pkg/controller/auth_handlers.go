@@ -13,15 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const (
-	sessionTTL    = 12 * time.Hour
-	sessionExtend = 1 * time.Hour
-)
+const sessionTTL = 7 * 24 * time.Hour
 
 // DefaultSessionMaxLifetime bounds how long a browser session lives from
 // its creation, however often the dashboard renews it. Override it with
 // Server.WithSessionMaxLifetime.
-const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
+const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 
 var errSessionLifetimeExceeded = errors.New("session exceeded its maximum lifetime")
 
@@ -65,7 +62,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, sessionTTL, now)
+	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, s.sessionInitialTTL(), now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -135,7 +132,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	sess, err := s.store.LookupSession(raw, now)
+	sess, err := s.store.LookupSessionAndRenew(raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
 		if errors.Is(err, store.ErrSessionBackend) {
@@ -150,11 +147,6 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.DeleteSession(raw)
 		writeError(w, http.StatusUnauthorized, errSessionLifetimeExceeded)
 		return
-	}
-	if sess.ExpiresAt.Sub(now) < sessionExtend {
-		ttl := s.sessionExtensionTTL(sess.CreatedAt, now)
-		_ = s.store.ExtendSession(sess.ID, ttl, now)
-		sess.ExpiresAt = now.Add(ttl)
 	}
 	resp := sessionResp{
 		Principal: sess.Principal,
@@ -186,11 +178,11 @@ func (s *Server) sessionExpired(createdAt, now time.Time) bool {
 	return s.sessionMaxLifetime > 0 && !now.Before(createdAt.Add(s.sessionMaxLifetime))
 }
 
-func (s *Server) sessionExtensionTTL(createdAt, now time.Time) time.Duration {
+func (s *Server) sessionInitialTTL() time.Duration {
 	if s.sessionMaxLifetime <= 0 {
 		return sessionTTL
 	}
-	return min(createdAt.Add(s.sessionMaxLifetime).Sub(now), sessionTTL)
+	return min(s.sessionMaxLifetime, sessionTTL)
 }
 
 func extractSessionHeader(r *http.Request) string {

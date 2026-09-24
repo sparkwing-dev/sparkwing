@@ -149,8 +149,8 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, raw string
 // safety: an account's scopes come from its membership as it stands now, so a demotion or removal
 // takes effect on the next request rather than at session expiry.
 func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time) (*Principal, error) {
-	//nolint:contextcheck // LookupSession predates contexts on the session surface; handleSession calls it the same way
-	sess, err := s.store.LookupSession(raw, now)
+	//nolint:contextcheck // session lookup predates contexts on this surface; handleSession uses it the same way
+	sess, err := s.store.LookupSessionAndRenew(raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 	s.observeSignUp(r.Context(), name, res, now)
 	acct := res.Account
 	raw, csrf, sess, err := s.store.CreateIdentityAccountSession(r.Context(), acct, acct.ActiveTeam,
-		profile.Provider, profile.Subject, sessionTTL, now)
+		profile.Provider, profile.Subject, s.sessionInitialTTL(), now)
 	if err != nil {
 		if errors.Is(err, store.ErrIdentityUnlinked) {
 			writeError(w, http.StatusUnauthorized, errors.New("that sign-in changed while it was being verified; start again"))

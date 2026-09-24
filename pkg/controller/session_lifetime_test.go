@@ -65,9 +65,14 @@ func TestSessionRoute_RefusesRenewalPastTheAbsoluteCap(t *testing.T) {
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()
-	ageSession(t, st, now.Add(-controller.DefaultSessionMaxLifetime-time.Minute), now.Add(6*time.Hour))
-
+	ageSession(t, st, now.Add(-29*24*time.Hour), now.Add(time.Hour))
 	status, body := resolveSession(t, ts, login.SessionID)
+	if status != http.StatusOK {
+		t.Fatalf("resolve session within 30 days = %d, want 200: %s", status, body)
+	}
+	ageSession(t, st, now.Add(-30*24*time.Hour-time.Minute), now.Add(time.Hour))
+
+	status, body = resolveSession(t, ts, login.SessionID)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("resolve capped session = %d, want 401: %s", status, body)
 	}
@@ -83,6 +88,29 @@ func TestSessionRoute_RefusesRenewalPastTheAbsoluteCap(t *testing.T) {
 	}
 }
 
+func TestLoginSessionStartsWithSevenDaysOfValidity(t *testing.T) {
+	ts, _ := sessionLifetimeServer(t, 0)
+	bootstrapAdmin(t, ts)
+	started := time.Now().UTC()
+	login := loginForSessionHash(t, ts)
+	finished := time.Now().UTC()
+
+	status, body := resolveSession(t, ts, login.SessionID)
+	if status != http.StatusOK {
+		t.Fatalf("resolve new session = %d, want 200: %s", status, body)
+	}
+	var session struct {
+		ExpiresAt int64 `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		t.Fatalf("decode session %s: %v", body, err)
+	}
+	got := time.Unix(session.ExpiresAt, 0).UTC()
+	if got.Before(started.Add(7*24*time.Hour-2*time.Second)) || got.After(finished.Add(7*24*time.Hour+2*time.Second)) {
+		t.Errorf("new session expires at %s, want seven days after login", got)
+	}
+}
+
 func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 	const maxLifetime = 3 * time.Hour
 	ts, st := sessionLifetimeServer(t, maxLifetime)
@@ -90,6 +118,13 @@ func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 	login := loginForSessionHash(t, ts)
 
 	now := time.Now().UTC()
+	var initialExpiry int64
+	if err := st.DB().QueryRow(`SELECT expires_at FROM sessions`).Scan(&initialExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if got := time.Unix(initialExpiry, 0).UTC(); got.After(now.Add(maxLifetime)) {
+		t.Errorf("initial expiry = %s, want no later than creation cap %s", got, now.Add(maxLifetime))
+	}
 	created := now.Add(-2 * time.Hour)
 	ageSession(t, st, created, now.Add(30*time.Minute))
 
@@ -113,6 +148,35 @@ func TestSessionRoute_ClampsRenewalToTheAbsoluteCap(t *testing.T) {
 	}
 	if got := time.Unix(stored, 0).UTC(); got.After(limit) {
 		t.Errorf("stored expiry = %s, want no later than the cap %s", got, limit)
+	}
+}
+
+func TestSessionRoute_ExtendsARecentlyUsedSessionBeforeItsFinalHour(t *testing.T) {
+	ts, st := sessionLifetimeServer(t, 0)
+	bootstrapAdmin(t, ts)
+	login := loginForSessionHash(t, ts)
+
+	now := time.Now().UTC()
+	ageSession(t, st, now.Add(-24*time.Hour), now.Add(61*time.Minute))
+	status, body := resolveSession(t, ts, login.SessionID)
+	if status != http.StatusOK {
+		t.Fatalf("resolve active session = %d, want 200: %s", status, body)
+	}
+	var session struct {
+		ExpiresAt int64 `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		t.Fatalf("decode session %s: %v", body, err)
+	}
+	if got := time.Unix(session.ExpiresAt, 0); got.Before(now.Add(7*24*time.Hour - 2*time.Second)) {
+		t.Errorf("active session expires at %s, want seven days after use", got)
+	}
+	var stored int64
+	if err := st.DB().QueryRow(`SELECT expires_at FROM sessions`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != session.ExpiresAt {
+		t.Errorf("stored expiry = %d, response expiry = %d", stored, session.ExpiresAt)
 	}
 }
 

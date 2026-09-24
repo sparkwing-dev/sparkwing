@@ -377,7 +377,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request, data loginPageData,
 		}
 	}
 	data.CSRFToken = token
-	setCSRFCookie(w, token, secure)
+	setCSRFCookie(w, token, secure, int(12*time.Hour/time.Second))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -518,6 +518,7 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 }
 
 func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
+	const maxAge = int(30 * 24 * time.Hour / time.Second)
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName(sessionCookieName, secure),
 		Value:    sess.SessionID,
@@ -525,12 +526,12 @@ func setSessionCookies(w http.ResponseWriter, sess *loginResp, secure bool) {
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(12 * time.Hour / time.Second),
+		MaxAge:   maxAge,
 	})
-	setCSRFCookie(w, sess.CSRFToken, secure)
+	setCSRFCookie(w, sess.CSRFToken, secure, maxAge)
 }
 
-func setCSRFCookie(w http.ResponseWriter, token string, secure bool) {
+func setCSRFCookie(w http.ResponseWriter, token string, secure bool, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName(csrfCookieName, secure),
 		Value:    token,
@@ -538,7 +539,7 @@ func setCSRFCookie(w http.ResponseWriter, token string, secure bool) {
 		HttpOnly: false, // safety: the native logout form reads the session-bound token without exposing the HttpOnly session id
 		Secure:   secure,
 		SameSite: http.SameSiteStrictMode,
-		MaxAge:   int(12 * time.Hour / time.Second),
+		MaxAge:   maxAge,
 	})
 }
 

@@ -176,7 +176,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | GitHub runner bindings | 20 per team, funded or not | `pkg/store/github_runner_bindings.go` |
 | GitHub runner credentials | 20 live per team, each expiring after an hour and deleted once expired | `pkg/store/github_runner_bindings.go` |
 | Invitations | 50 open and 100 sent per day per team, each expiring after 7 days | `pkg/store/identity.go` |
-| Browser sessions | 12 hours sliding, 7 days at most, deleted once expired | `pkg/controller/auth_handlers.go` |
+| Browser sessions | seven days after last use, 30 days at most; deleted once expired | `pkg/controller/auth_handlers.go` |
 | Bytes the controller serves | a monthly budget per principal and a daily cap per controller on a limits profile | `pkg/controller/limits_profile.go` |
 | Egress usage rows | 13 months | `pkg/store/egress.go` |
 | Controller requests | per-token request budget, per-runner claim and heartbeat budgets, and the sign-in limiter, on a limits profile | `pkg/controller/limits_profile.go` |

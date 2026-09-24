@@ -1,5 +1,16 @@
 # Migrating to the next release
 
+## Browser session renewal
+
+`Store.ExtendSession` has been removed. Replace a
+`LookupSession`/`ExtendSession` pair with
+`LookupSessionAndRenew(rawSession, now, idleTTL, maxLifetime)`. The new call
+checks the session and renews its expiry in one database write. The caller
+must reject an over-age session returned without renewal and revoke it.
+Controller sessions now last seven days after their last use, with a 30-day
+cap from sign-in. Dashboard session and CSRF cookies persist for 30 days;
+server-side expiry and logout still end access on the next request.
+
 ## Schema 72: storage commit receipts
 
 Back up the controller database before starting the upgraded controller.
