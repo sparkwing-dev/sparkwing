@@ -14,7 +14,7 @@ import (
 
 const maxExecutionExecutorNameLen = 128
 
-var executorNameEscape = regexp.MustCompile("\\x1b(?:\\[[0-?]*[ -/]*[@-~]|\\][^\\x07]*(?:\\x07|\\x1b\\\\)|.)")
+var executorNameEscape = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)`)
 
 func safeExecutorName(name string) string {
 	name = executorNameEscape.ReplaceAllString(name, "")
