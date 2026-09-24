@@ -71,10 +71,12 @@ func RunGrepLocal(ctx context.Context, paths Paths, opts GrepOpts, out io.Writer
 	}
 	defer func() { _ = st.Close() }()
 	runs, err := st.ListRuns(ctx, store.RunFilter{
-		Limit:     grepFetchLimit(opts),
-		Pipelines: opts.Pipelines,
-		Statuses:  opts.Statuses,
-		Since:     sinceCutoff(opts.Since),
+		Limit:          grepFetchLimit(opts),
+		Pipelines:      opts.Pipelines,
+		Statuses:       opts.Statuses,
+		GitBranches:    opts.Filter.Branches,
+		GitSHAPrefixes: opts.Filter.SHAPrefixes,
+		Since:          sinceCutoff(opts.Since),
 	})
 	if err != nil {
 		return err
@@ -101,10 +103,12 @@ func RunGrepRemote(ctx context.Context, controllerURL, logsURL, token string, op
 	logc := sparkwinglogs.New(logsURL, nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	runs, err := c.ListRuns(ctx, store.RunFilter{
-		Limit:     grepFetchLimit(opts),
-		Pipelines: opts.Pipelines,
-		Statuses:  opts.Statuses,
-		Since:     sinceCutoff(opts.Since),
+		Limit:          grepFetchLimit(opts),
+		Pipelines:      opts.Pipelines,
+		Statuses:       opts.Statuses,
+		GitBranches:    opts.Filter.Branches,
+		GitSHAPrefixes: opts.Filter.SHAPrefixes,
+		Since:          sinceCutoff(opts.Since),
 	})
 	if err != nil {
 		return err

@@ -2,11 +2,60 @@ package orchestrator
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestRunGrepRemoteFindsOlderRunMatchingSourceBeforeLimit(t *testing.T) {
+	older := &store.Run{ID: "older-match", Pipeline: "build", Status: "failed", GitBranch: "rare", GitSHA: "deadbeef1234"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/runs":
+			w.Header().Set("X-Sparkwing-Run-Filter-Version", store.RunFilterVersion)
+			if r.URL.Query().Get("status") == "failed" &&
+				r.URL.Query().Get("git_branch") == "rare" && strings.EqualFold(r.URL.Query().Get("git_sha"), "deadbee") {
+				_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{older}})
+				return
+			}
+			newer := make([]*store.Run, 1000)
+			for i := range newer {
+				newer[i] = &store.Run{ID: fmt.Sprintf("newer-%04d", i), Pipeline: "build", Status: "failed", GitBranch: "main", GitSHA: "cafebabe1234"}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"runs": newer})
+		case "/api/v1/runs/older-match/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: older.ID, NodeID: "build"}}})
+		case "/api/v1/logs/older-match/build":
+			_, _ = w.Write([]byte("needle in older log\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	for _, prefix := range []string{"deadbee", "DEADBEE"} {
+		t.Run(prefix, func(t *testing.T) {
+			var output bytes.Buffer
+			err := RunGrepRemote(context.Background(), srv.URL, srv.URL, "", GrepOpts{
+				Pattern: "needle", Limit: 1, Quiet: true, Statuses: []string{"failed"},
+				Filter: CompiledFilter{Branches: []string{"rare"}, SHAPrefixes: []string{prefix}},
+			}, &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(output.String()); got != older.ID {
+				t.Fatalf("matching older run = %q, want %q", got, older.ID)
+			}
+		})
+	}
+}
 
 func writeLogFile(t *testing.T, path string, lines []string) {
 	t.Helper()

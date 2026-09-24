@@ -888,6 +888,9 @@ unlock.
 
 ### Fixed
 
+- **CLI:** `runs grep` applies branch and SHA prefix filters before its run
+  limit, so newer unrelated runs do not hide an older matching log.
+
 - **runner:** A trigger that fails setup before pipeline dispatch now records a
   failed run with an operator troubleshooting step instead of remaining pending
   until the controller's 15-minute fallback. If its failure cannot be recorded,
