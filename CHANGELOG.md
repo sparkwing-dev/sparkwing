@@ -48,10 +48,12 @@ unlock.
   [Execution attribution](docs/migrations/_unreleased.md#execution-attribution).
 - **controller:** GitHub App subscriptions can opt into PR closed, labeled and ready-for-review actions, release published and prereleased actions, and branch create and delete events. Runs expose event, ref, action, label, merge and tag environment values; OIDC subjects use the event's ref and trigger. Subscriptions follow a repository id across rename and same-team transfer. Schema 69 adds default-off subscription columns; existing subscriptions retain their behavior. Branch filters also gate branch creation and deletion, and base-branch filters gate every pull request action.
 
-- **dashboard:** the Runs page can collapse its runs and nodes columns into
-  status-dot rails. Each dot keeps selection and shows its run or node label on
-  hover or focus. Narrow screens default to collapsed rails, and the viewer's
-  choice persists in the browser.
+- **dashboard:** the Runs page cycles from full columns to a Runs rail, then
+  both Runs and Nodes rails, and back through an icon-only sidebar control.
+  Each rail keeps selection and shows its labels on hover or focus. Expanded
+  Runs and Nodes panes have equal widths, with slim scrollbar thumbs visible
+  during scrolling. Narrow screens default to both rails; the viewer's choice
+  persists in the browser.
 - **runner image:** Kubernetes Jobs and warm runners have bash, coreutils,
   git, OpenSSH client, CA certificates, curl, tar, gzip, xz, make, jq, and
   unzip. The Debian slim runtime supports downloaded glibc-based toolchains;
@@ -894,6 +896,9 @@ unlock.
   the claim remains open for lease recovery. Failed trigger closure logs the
   run ID and controller error for operator investigation.
 
+- **dashboard:** A historical trigger that ended before dispatch shows plain
+  retry, Fleet and run-ID sharing steps in the Runs summary. Its stored error
+  stays available under Technical error.
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.
 

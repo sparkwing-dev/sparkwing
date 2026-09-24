@@ -7,6 +7,8 @@ import type { Node as RunNode, Run, RunInvocation } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import { ansiToHtml } from "@/lib/ansi";
 
+const legacyNoDispatch = "reaped: trigger consumer finished without dispatching the pipeline";
+
 function fmtMs(ms: number): string {
   if (!ms) return "-";
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -438,7 +440,18 @@ export default function SummaryPanel({
             </div>
           )}
 
-          {run.error && run.status !== "success" && (
+          {run.error === legacyNoDispatch && nodes.length === 0 ? (
+            <div className="rounded border border-[var(--warning)]/40 bg-[var(--warning)]/10 p-3 text-xs space-y-2">
+              <div className="font-medium">No node started. The trigger worker ended before dispatching the pipeline.</div>
+              <div className="text-[var(--muted)]">
+                Rerun this pipeline. Check <Link href="/cluster" className="text-[var(--accent)] hover:underline">Fleet</Link> for available machines. If it happens again, share run ID <code className="text-[var(--foreground)]">{run.id}</code> with support. <CopyButton value={run.id} />
+              </div>
+              <details className="text-[var(--muted)]">
+                <summary className="cursor-pointer">Technical error</summary>
+                <code className="mt-1 block break-all text-red-300">{run.error}</code>
+              </details>
+            </div>
+          ) : run.error && run.status !== "success" && (
             <div className="text-xs font-mono">
               <span className="text-[var(--muted)]">error </span>
               <span className="text-red-300">{run.error}</span>

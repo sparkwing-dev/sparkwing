@@ -100,6 +100,24 @@ const DETAIL_FALLBACK_POLL_MS = 8000;
 const RUNS_WINDOW = 200;
 const EMPTY_NODES: RunNode[] = [];
 const COLUMNS_KEY = "sparkwing:runs-columns";
+type ColumnsMode = "expanded" | "runs-collapsed" | "collapsed";
+
+function usePaneScrollbar() {
+  const [scrolling, setScrolling] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const onScroll = useCallback(() => {
+    setScrolling(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      setScrolling(false);
+      timer.current = null;
+    }, 800);
+  }, []);
+  return { scrolling, onScroll };
+}
 
 function statusDot(status: string): string {
   switch (status) {
@@ -542,9 +560,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   const run = activeDetail?.run || null;
   const paneOpen = !!selectedRun;
-  const [columnsPreference, setColumnsPreference] = useState<"expanded" | "collapsed" | null>(null);
+  const [columnsPreference, setColumnsPreference] = useState<ColumnsMode | null>(null);
   const [narrowViewport, setNarrowViewport] = useState(false);
-  const [fullColumnsReady, setFullColumnsReady] = useState(true);
+  const [runsFullReady, setRunsFullReady] = useState(true);
+  const [nodesFullReady, setNodesFullReady] = useState(true);
+  const runsScrollbar = usePaneScrollbar();
+  const nodesScrollbar = usePaneScrollbar();
   useLayoutEffect(() => {
     const query = window.matchMedia("(max-width: 1099px)");
     const update = () => setNarrowViewport(query.matches);
@@ -552,24 +573,35 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     query.addEventListener("change", update);
     try {
       const saved = window.localStorage.getItem(COLUMNS_KEY);
-      if (saved === "expanded" || saved === "collapsed") setColumnsPreference(saved);
+      if (saved === "expanded" || saved === "runs-collapsed" || saved === "collapsed") {
+        setColumnsPreference(saved);
+      }
     } catch {
       // Storage may be unavailable in private browsing.
     }
     return () => query.removeEventListener("change", update);
   }, []);
-  const columnsCollapsed = columnsPreference === "collapsed" || (columnsPreference === null && narrowViewport);
+  const columnsMode = columnsPreference ?? (narrowViewport ? "collapsed" : "expanded");
+  const runsCollapsed = columnsMode !== "expanded";
+  const nodesCollapsed = columnsMode === "collapsed";
   useLayoutEffect(() => {
-    if (columnsCollapsed) setFullColumnsReady(false);
-    else if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setFullColumnsReady(true);
-  }, [columnsCollapsed]);
-  const showRail = columnsCollapsed || !fullColumnsReady;
-  const toggleColumns = () => {
-    const next = columnsCollapsed ? "expanded" : "collapsed";
-    setFullColumnsReady(false);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (runsCollapsed) setRunsFullReady(false);
+    else if (reducedMotion) setRunsFullReady(true);
+    if (nodesCollapsed) setNodesFullReady(false);
+    else if (reducedMotion) setNodesFullReady(true);
+  }, [runsCollapsed, nodesCollapsed]);
+  const showRunsRail = runsCollapsed || !runsFullReady;
+  const showNodesRail = nodesCollapsed || !nodesFullReady;
+  const setColumnsMode = (next: ColumnsMode) => {
+    if (next === "expanded") {
+      setRunsFullReady(!runsCollapsed);
+      setNodesFullReady(!nodesCollapsed);
+    }
     setColumnsPreference(next);
     if (next === "expanded" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setFullColumnsReady(true);
+      setRunsFullReady(true);
+      setNodesFullReady(true);
     }
     try {
       window.localStorage.setItem(COLUMNS_KEY, next);
@@ -577,6 +609,20 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       // The control still works when storage is unavailable.
     }
   };
+  const toggleColumns = () => {
+    setColumnsMode(
+      columnsMode === "expanded"
+        ? "runs-collapsed"
+        : columnsMode === "runs-collapsed"
+          ? "collapsed"
+          : "expanded",
+    );
+  };
+  const nextColumnsAction = columnsMode === "expanded"
+    ? "Collapse Runs"
+    : columnsMode === "runs-collapsed"
+      ? "Collapse Nodes"
+      : "Expand Runs and Nodes";
   const [paneExpanding, setPaneExpanding] = useState(false);
   const hadOpenPane = useRef(paneOpen);
   useLayoutEffect(() => {
@@ -627,6 +673,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         tag === "INPUT" ||
         tag === "TEXTAREA" ||
         tag === "SELECT" ||
+        t?.closest('button, a, [role="button"], [role="link"]') ||
+        t?.closest(".pane-scrollbar") ||
         t?.isContentEditable
       )
         return;
@@ -804,7 +852,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => {
-                  if (columnsCollapsed && !showNewRun) toggleColumns();
+                  if (runsCollapsed && !showNewRun) setColumnsMode("expanded");
                   setShowNewRun(!showNewRun);
                 }}
                 aria-expanded={showNewRun}
@@ -1014,29 +1062,36 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {
                                                             }
         <div
-          className={`${paneOpen ? (columnsCollapsed ? "w-8 shrink-0" : "w-52 shrink-0") : "flex-1"} border-r border-[var(--border)] flex flex-col transition-[width,flex-grow] duration-200 motion-reduce:transition-none`}
+          id="runs-column"
+          className={`${paneOpen ? (runsCollapsed ? "w-8 shrink-0" : "w-52 shrink-0") : "flex-1"} border-r border-[var(--border)] flex flex-col transition-[width,flex-grow] duration-200 motion-reduce:transition-none`}
           onTransitionEnd={(event) => {
             if (event.target === event.currentTarget) {
               if (event.propertyName === "flex-grow") setPaneExpanding(false);
-              if (event.propertyName === "width" && !columnsCollapsed) setFullColumnsReady(true);
+              if (event.propertyName === "width" && !runsCollapsed) setRunsFullReady(true);
             }
           }}
         >
           {paneOpen && (
-            <button
-              type="button"
-              onClick={toggleColumns}
-              aria-label={columnsCollapsed ? "Expand runs and nodes" : "Collapse runs and nodes"}
-              aria-expanded={!columnsCollapsed}
-              title={columnsCollapsed ? "Expand runs and nodes" : "Collapse runs and nodes"}
-              className="h-8 shrink-0 flex items-center justify-center border-b border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-violet-300"
-            >
-              <span aria-hidden="true">{columnsCollapsed ? "›" : "‹"}</span>
-              {!showRail && <span className="ml-2 text-[10px] uppercase tracking-wider">Collapse columns</span>}
-            </button>
+            <div className="h-8 shrink-0 border-b border-[var(--border)]">
+              <Tooltip content={nextColumnsAction}>
+                <button
+                  type="button"
+                  onClick={toggleColumns}
+                  aria-label={nextColumnsAction}
+                  aria-controls="runs-column nodes-column"
+                  title={nextColumnsAction}
+                  className="w-8 h-8 flex items-center justify-center text-[var(--muted)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-violet-300"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2.5" y="3" width="19" height="18" rx="2" />
+                    <path d="M8.5 3v18" />
+                  </svg>
+                </button>
+              </Tooltip>
+            </div>
           )}
-          {showRail && paneOpen ? (
-            <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          {showRunsRail && paneOpen ? (
+            <div className="pane-scrollbar flex-1 overflow-y-auto overflow-x-hidden" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
               <RunRail
                 kind="runs"
                 items={topLevel.map((r) => ({
@@ -1067,7 +1122,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               />
             </div>
           )}
-          <div className="flex-1 overflow-y-auto">
+          <div className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
             {topLevel.map((r) => {
               const isActive = selectedRun === r.id;
               const isChecked = checkedRuns.has(r.id);
@@ -1132,8 +1187,20 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
         {                             }
         {run && activeDetail && (
-          <div className={`${columnsCollapsed ? "w-8" : "w-72"} border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-[width] duration-200 motion-reduce:transition-none`}>
-            {showRail ? (
+          <div
+            id="nodes-column"
+            className={`pane-scrollbar ${nodesCollapsed ? "w-8" : "w-52"} border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-[width] duration-200 motion-reduce:transition-none`}
+            tabIndex={0}
+            aria-label="Nodes pane"
+            data-scrolling={nodesScrollbar.scrolling}
+            onScroll={nodesScrollbar.onScroll}
+            onTransitionEnd={(event) => {
+              if (event.target === event.currentTarget && event.propertyName === "width" && !nodesCollapsed) {
+                setNodesFullReady(true);
+              }
+            }}
+          >
+            {showNodesRail ? (
               <>
                 <div className="h-8 shrink-0 border-b border-[var(--border)]" />
                 <RunRail
