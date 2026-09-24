@@ -105,6 +105,66 @@ func callDownload(t *testing.T, s *Server, grant, key string, ingress bool) (*ht
 	return rec, body
 }
 
+func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
+	s, firstGrant, _ := downloadFixture(t)
+	s.WithTeamDownloadCaps(100, 100)
+	s.WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 3})
+	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
+	s.WithDirectUploads(client, "bucket", "cache")
+
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstClaim, err := authwire.VerifyCacheGrant("grant-key", firstGrant, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondGrant, err := authwire.MintClaimCacheGrant("grant-key", firstClaim.Team, firstClaim.Run, time.Now().Add(-time.Minute), time.Hour, firstClaim.Claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondGrant == firstGrant {
+		t.Fatal("distinct claims minted the same grant")
+	}
+	reader, _, err := team.CreateToken(t.Context(), "reader", store.TokenKindUser, []string{ScopeRunsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithAuthenticator(NewAuthenticator(s.store, 0))
+
+	call := func(path, grant, body string) int {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		if grant != "" {
+			req.Header.Set("Authorization", "Bearer "+grant)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	download := `{"kind":"binary","key":"bins/abc"}`
+	digest := strings.Repeat("a", 64)
+	upload := `{"kind":"artifact","key":"artifacts/blobs/` + digest + `","size":0,"sha256":"` + digest + `","run_id":"run-1"}`
+	commit := `{"upload_id":"missing-upload","run_id":"run-1"}`
+	for _, step := range []struct {
+		path, grant, body string
+		want              int
+	}{
+		{"/api/v1/data/upload", "", upload, http.StatusUnauthorized},
+		{"/api/v1/data/download", firstGrant, download, http.StatusOK},
+		{"/api/v1/data/upload", secondGrant, upload, http.StatusOK},
+		{"/api/v1/data/commit", secondGrant, commit, http.StatusNotFound},
+		{"/api/v1/data/download", secondGrant, download, http.StatusTooManyRequests},
+		{"/api/v1/data/download", reader, download, http.StatusTooManyRequests},
+		{"/api/v1/data/download", "", download, http.StatusUnauthorized},
+	} {
+		if got := call(step.path, step.grant, step.body); got != step.want {
+			t.Fatalf("%s grant=%t: status = %d, want %d", step.path, step.grant != "", got, step.want)
+		}
+	}
+}
+
 func logDownloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	t.Helper()
 	s, grant, head := downloadFixture(t)

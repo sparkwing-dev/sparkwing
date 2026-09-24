@@ -14,6 +14,8 @@ cache grant minted for that claim. The runner's raw token cannot sign uploads.
 A signing grant carries the exact node or trigger claim, including its
 generation. Reserve, commit and download check that claim and its token again.
 Revoking the token stops new signed URLs, even while the claim remains live.
+Signing requests share the team's controller request budget across grants and
+answer `429` with `Retry-After` when it is spent.
 The pending row fixes the run ID and claimant. The
 operator's metered marker classifies a token as cloud for build trust. Keep
 cloud tokens on trusted machines because that marker controls provenance.

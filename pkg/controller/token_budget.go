@@ -69,38 +69,47 @@ func (t *tokenBudget) values() TokenRequestBudget {
 
 func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t := s.tokenBudget
-		if t == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		now := time.Now()
-		if t.alarm != nil && t.alarm.record(now) {
-			observeRequestRateAlarm()
-			s.logger.Warn("controller request rate above its alarm",
-				"requests_per_minute", t.policy.AlarmPerMinute,
-				"reason", "one controller is serving more requests a minute than it was sized for")
-		}
-		if t.requests == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if s.ownRunLiveness(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		key := s.floodKey(r, "")
-		allowed, wait := t.requests.AllowWithRetry(key, now)
-		if !allowed && !s.ownAgentLivenessHeartbeat(r) {
-			observePrincipalThrottled(budgetClassToken)
-			s.logger.Warn("request shed",
-				"principal", key, "route_class", budgetClassToken, "retry_after", wait,
-				"reason", "per-token request budget exhausted")
-			writeRetryAfter(w, wait, "too many requests from this token")
+		if !s.allowTokenRequest(w, r, s.floodKey(r, "")) {
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
+	principal := &Principal{Team: team, TokenPrefix: prefix}
+	key := s.floodKey(r.WithContext(contextWithPrincipal(r.Context(), principal)), "")
+	return s.allowTokenRequest(w, r, key)
+}
+
+func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key string) bool {
+	t := s.tokenBudget
+	if t == nil {
+		return true
+	}
+	now := time.Now()
+	if t.alarm != nil && t.alarm.record(now) {
+		observeRequestRateAlarm()
+		s.logger.Warn("controller request rate above its alarm",
+			"requests_per_minute", t.policy.AlarmPerMinute,
+			"reason", "one controller is serving more requests a minute than it was sized for")
+	}
+	if t.requests == nil {
+		return true
+	}
+	if s.ownRunLiveness(r) {
+		return true
+	}
+	allowed, wait := t.requests.AllowWithRetry(key, now)
+	if !allowed && !s.ownAgentLivenessHeartbeat(r) {
+		observePrincipalThrottled(budgetClassToken)
+		s.logger.Warn("request shed",
+			"principal", key, "route_class", budgetClassToken, "retry_after", wait,
+			"reason", "per-token request budget exhausted")
+		writeRetryAfter(w, wait, "too many requests from this token")
+		return false
+	}
+	return true
 }
 
 // safety: The unmetered liveness lane requires a live claim fence; the route handler validates the write.

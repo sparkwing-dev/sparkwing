@@ -144,6 +144,9 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
 			return "", nil, false
 		}
+		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
+			return "", nil, false
+		}
 		return store.Team(grant.Team), &grant, true
 	}
 	p, err := s.authMiddleware().Authenticate(token)
@@ -166,6 +169,9 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 	team := store.NormalizeTeam(p.Team)
 	if !teamblob.ValidTeam(string(team)) {
 		writeError(w, http.StatusForbidden, errors.New("credential names no team"))
+		return "", nil, false
+	}
+	if !s.allowDataRequest(w, r, team, p.TokenPrefix) {
 		return "", nil, false
 	}
 	return team, nil, true

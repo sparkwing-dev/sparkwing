@@ -96,6 +96,9 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
+	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
+		return directCaller{}, false
+	}
 	metered, err := s.store.TokenMetered(r.Context(), grant.Claim.TokenPrefix)
 	if err != nil {
 		s.writeInternalError(w, r, "direct upload provenance", err)
