@@ -423,10 +423,18 @@ func TestCacheGrantSigningBindsLiveTriggerGeneration(t *testing.T) {
 
 func TestCacheGrantSigningBindsLiveNodeGeneration(t *testing.T) {
 	s, _, head := downloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, nodeToken, err := team.CreateToken(t.Context(), "node-runner", store.TokenKindRunner, []string{ScopeNodesClaim}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.store.CreateNode(t.Context(), store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?, claim_membership_id = ?, reservation_id = ?, claim_generation = 1, lease_expires_at = ? WHERE run_id = ? AND node_id = ?`, "holder", "node-runner", "node-token", "member", "reservation", time.Now().Add(time.Hour).UnixNano(), "run-1", "build"); err != nil {
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?, claim_membership_id = ?, reservation_id = ?, claim_generation = 1, lease_expires_at = ? WHERE run_id = ? AND node_id = ?`, "holder", nodeToken.Principal, nodeToken.Prefix, "member", "reservation", time.Now().Add(time.Hour).UnixNano(), "run-1", "build"); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/cache-grant", nil)
@@ -435,7 +443,7 @@ func TestCacheGrantSigningBindsLiveNodeGeneration(t *testing.T) {
 	req.Header.Set(store.ClaimMembershipHeader, "member")
 	req.Header.Set(store.ClaimReservationHeader, "reservation")
 	req.Header.Set(store.ClaimGenerationHeader, "1")
-	req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{Name: "node-runner", TokenPrefix: "node-token", Kind: store.TokenKindRunner, Team: "team-a"}))
+	req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{Name: nodeToken.Principal, TokenPrefix: nodeToken.Prefix, Kind: store.TokenKindRunner, Team: "team-a"}))
 	rec := httptest.NewRecorder()
 	s.handleRunCacheGrant(teamA).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -446,7 +454,7 @@ func TestCacheGrantSigningBindsLiveNodeGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant, err := authwire.VerifyCacheGrant("grant-key", response.Grant, time.Now())
-	if err != nil || grant.Claim == nil || grant.Claim.Kind != "node" || grant.Claim.NodeID != "build" {
+	if err != nil || grant.Claim == nil || grant.Claim.Kind != "node" || grant.Claim.NodeID != "build" || grant.Claim.TokenPrefix != nodeToken.Prefix {
 		t.Fatalf("node grant = %+v, %v", grant, err)
 	}
 	if signed, _ := callDownload(t, s, response.Grant, "bins/abc", false); signed.Code != http.StatusOK {
