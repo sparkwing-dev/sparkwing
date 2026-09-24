@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/envredact"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
@@ -128,7 +129,7 @@ func runNodeRemote(
 	if cacheGrant == "" || bincache.ControllerGitcacheToken(gcURL, controllerURL, token) != "" {
 		binaryCacheURL = ""
 	}
-	binary, err := resolveRemoteBinary(ctx, sparkwingDir, binaryCacheURL, cacheGrant, logger)
+	binary, err := resolveRemoteBinary(ctx, sparkwingDir, controllerURL, token, runID, binaryCacheURL, cacheGrant, logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
@@ -142,11 +143,28 @@ func runNodeRemote(
 // one the environment names, else the cache this node's grant opens. A pooled
 // agent serves many runs from one process, so the grant is the node's, never
 // one read from the process environment.
-func supervisorArtifactStore(ctx context.Context, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
-	if ResolveDevEnvURL(ArtifactStoreEnvVar) != "" || cacheURL == "" || cacheGrant == "" {
+func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
+	if ResolveDevEnvURL(ArtifactStoreEnvVar) != "" {
 		return resolveArtifactStoreFromEnv(ctx)
 	}
-	return sparkwingcache.New(cacheURL, cacheGrant, nil), nil
+	var legacy storage.ArtifactStore
+	if cacheURL != "" && cacheGrant != "" {
+		legacy = sparkwingcache.New(cacheURL, cacheGrant, nil)
+	}
+	if controllerURL != "" && cacheGrant != "" && runID != "" {
+		d := directdata.New(controllerURL, cacheGrant, runID, nil)
+		available, err := d.Available(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if available {
+			return directArtifactStore{client: d, legacy: legacy}, nil
+		}
+	}
+	if legacy != nil {
+		return legacy, nil
+	}
+	return resolveArtifactStoreFromEnv(ctx)
 }
 
 func adoptNodeBaseline(ctx context.Context, trigger *store.Trigger, checkoutDir, gcURL, token, runID, nodeID string, logger *slog.Logger) {
@@ -201,7 +219,7 @@ func runNodeChild(
 	logger *slog.Logger,
 ) (runner.Result, error) {
 	fence, _ := store.NodeClaimFenceFromContext(ctx)
-	artifact, err := supervisorArtifactStore(ctx, cacheURL, cacheGrant)
+	artifact, err := supervisorArtifactStore(ctx, controllerURL, runID, cacheURL, cacheGrant)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("open supervisor artifact store: %w", err)
 	}
@@ -389,7 +407,7 @@ func (b remoteBinary) release() {
 	}
 }
 
-func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
+func resolveRemoteBinary(ctx context.Context, sparkwingDir, controllerURL, controllerToken, runID, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
@@ -404,8 +422,8 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string,
 	}
 	compiled := false
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
-		if gcURL != "" {
-			if fetchErr := bincache.TryBinary(ctx, gcURL, token, key, tempPath); fetchErr == nil {
+		if gcURL != "" || token != "" {
+			if fetchErr := bincache.TryBinaryPreferred(ctx, controllerURL, controllerToken, token, runID, gcURL, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -417,8 +435,8 @@ func resolveRemoteBinary(ctx context.Context, sparkwingDir, gcURL, token string,
 	if err != nil {
 		return remoteBinary{}, err
 	}
-	if published && compiled && gcURL != "" {
-		if err := bincache.UploadBinary(ctx, gcURL, token, key, lease.Path()); err != nil {
+	if published && compiled && token != "" {
+		if err := bincache.UploadBinaryPreferred(ctx, controllerURL, token, runID, gcURL, key, lease.Path()); err != nil {
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

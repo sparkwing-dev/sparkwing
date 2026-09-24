@@ -532,6 +532,9 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
+const DirectCacheMaxAge = 30 * 24 * time.Hour
+const DirectUploadMaxSize int64 = 500 << 20
+const DirectUploadTTL = 24 * time.Hour
 const DispatchedHeartbeatInterval = 5 * time.Second
 func DisplayProfileKey(key string) string
 type DownloadCapError struct {
@@ -630,6 +633,7 @@ var ErrNoTokenCandidates = errors.New("unknown token")
 var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
 var ErrNotMember = errors.New("store: not a member of this team")
+var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
@@ -1737,6 +1741,7 @@ func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Tim
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Time) ([]Account, error)
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
+func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool) (Upload, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -1766,6 +1771,9 @@ func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now 
 func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)
+func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
+func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
+func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error)
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)
 func (s *Store) ComputeLimits(ctx context.Context) (_ ComputeLimits, err error)
 func (s *Store) ComputeUsage(ctx context.Context) (_ ComputeUsage, err error)
@@ -1925,6 +1933,7 @@ func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts Concurren
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
+func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
@@ -1950,6 +1959,8 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
+func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error)
+func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
@@ -1984,6 +1995,7 @@ func (s *Store) Requirements(ctx context.Context) ([]string, error)
 func (s *Store) RequirementsWritingWouldAdd(ctx context.Context) ([]string, error)
 func (s *Store) ResealSecrets(ctx context.Context, sealedPrefix string, batchSize int, reseal func(Team, Secret) (string, error)) (SecretResealCounts, error)
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error)
+func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetExecutorLiveness(ctx context.Context) error
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
@@ -2038,6 +2050,7 @@ func (s *Store) SetStorageAllowance(ctx context.Context, principal string, bytes
 func (s *Store) SetStorageQuota(ctx context.Context, q StorageQuota) error
 func (s *Store) SetStorageSettings(ctx context.Context, in StorageSettings) error
 func (s *Store) SetTokenMetered(ctx context.Context, prefix string, metered bool) error
+func (s *Store) SetTrustLocalBuilds(ctx context.Context, team Team, trust bool) error
 func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, error)
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
@@ -2067,10 +2080,12 @@ func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
+func (s *Store) TrustLocalBuilds(ctx context.Context, team Team) (bool, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (s *Store) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload, error)
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) ValidateExecutorClaimReservation(ctx context.Context, claimant ClaimIdentity, runID, nodeID, executorName, reservationID string, slot int, resourceDigest string) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
@@ -2375,6 +2390,32 @@ type UnpricedCPUClassError struct {
 }
 func (e *UnpricedCPUClassError) Error() string
 func (e *UnpricedCPUClassError) Unwrap() error
+type Upload struct {
+	ID          string
+	Team        Team
+	RunID       string
+	Kind        StorageKind
+	Key         string
+	Size        int64
+	SHA256      string
+	Principal   string
+	ClaimPrefix string
+	Provenance  string
+	ExpiresAt   time.Time
+	CommittedAt time.Time
+}
+type UploadRequest struct {
+	Team        Team
+	RunID       string
+	Kind        StorageKind
+	Key         string
+	Size        int64
+	SHA256      string
+	Principal   string
+	ClaimPrefix string
+	Provenance  string
+	Now         time.Time
+}
 type UsageMetrics struct {
 	Weeks      []UsageWeek
 	FirstGreen FirstGreenStats

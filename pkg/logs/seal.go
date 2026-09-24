@@ -239,7 +239,7 @@ func (c Completeness) SyntheticLine() string {
 	if c.Message == "" {
 		return ""
 	}
-	return "— " + c.Message + " —"
+	return "[" + c.Message + "]"
 }
 
 type appendSequenceKey struct{}

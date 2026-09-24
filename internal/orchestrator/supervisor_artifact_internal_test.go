@@ -21,7 +21,7 @@ func TestSupervisorArtifactsGoToTheNodesCacheWithItsGrant(t *testing.T) {
 	}))
 	defer cache.Close()
 
-	store, err := supervisorArtifactStore(context.Background(), cache.URL, "swcg_node-grant")
+	store, err := supervisorArtifactStore(context.Background(), "", "", cache.URL, "swcg_node-grant")
 	if err != nil || store == nil {
 		t.Fatalf("store = %v, %v; want the node's cache", store, err)
 	}
@@ -36,7 +36,7 @@ func TestSupervisorArtifactsGoToTheNodesCacheWithItsGrant(t *testing.T) {
 		"no grant":       {cache.URL, ""},
 		"no cache named": {"", "swcg_node-grant"},
 	} {
-		if store, err := supervisorArtifactStore(context.Background(), tc.url, tc.grant); err != nil || store != nil {
+		if store, err := supervisorArtifactStore(context.Background(), "", "", tc.url, tc.grant); err != nil || store != nil {
 			t.Errorf("%s: store = %v, %v; want none from an empty environment", name, store, err)
 		}
 	}

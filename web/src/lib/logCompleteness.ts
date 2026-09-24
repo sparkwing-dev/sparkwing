@@ -27,7 +27,7 @@ export function completenessLine(c: LogCompleteness | null): string | null {
   ) {
     return null;
   }
-  return `— ${c.message} —`;
+  return `[${c.message}]`;
 }
 
 // completenessSettled reports whether the verdict can change without the

@@ -50,6 +50,7 @@ func githubActionsCredential(ctx context.Context, client *http.Client, controlle
 	q := u.Query()
 	q.Set("audience", audience)
 	u.RawQuery = q.Encode()
+	// #nosec G704 -- GitHub Actions supplies this URL and its bearer token together.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return githubCredential{}, err
@@ -70,6 +71,7 @@ func githubActionsCredential(ctx context.Context, client *http.Client, controlle
 	if err != nil {
 		return githubCredential{}, err
 	}
+	// #nosec G704 -- the controller URL is a runner CLI setting, not a web request field.
 	req, err = http.NewRequestWithContext(ctx, http.MethodPost, audience+"/api/v1/runners/github/exchange", bytes.NewReader(body))
 	if err != nil {
 		return githubCredential{}, err
@@ -86,6 +88,7 @@ func githubActionsCredential(ctx context.Context, client *http.Client, controlle
 }
 
 func doJSON(client *http.Client, req *http.Request, want int, out any) error {
+	// #nosec G704 -- both callers construct requests from the Actions or configured controller URL.
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

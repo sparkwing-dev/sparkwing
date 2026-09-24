@@ -22,6 +22,17 @@ unlock.
 
 ### Added
 
+- **controller + runner:** Signed downloads and direct S3 uploads keep binary
+  and artifact bytes off the controller. A runner reserves storage, PUTs a
+  checksummed object to `pending/`, then commits it under an immutable
+  cloud or local key. Schema 70 records committed objects and provenance.
+  A signing grant stays bound to its exact live claim and active token.
+  Cache grants cannot sign logs; `logs.read` is required. In-cluster downloads
+  use S3, while public-ingress downloads use a 60-second CloudFront URL.
+  Both count against the team's daily download cap. Cloud runners read
+  cloud-built binaries unless the team enables `trust_local_builds`. Older
+  controllers keep the cache path. See [Direct data uploads](docs/data-uploads.md)
+  and [Tenant limits](docs/limits.md).
 - **controller + web:** GitHub App push subscriptions accept `branches` and
   pull request subscriptions accept `base_branches`, each with up to 10 glob
   patterns. The controller checks the push branch or pull request base branch

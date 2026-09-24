@@ -38,6 +38,28 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Signed downloads through CloudFront
+
+For object-store downloads through a public ingress, configure the controller
+with a CloudFront distribution domain, trusted key pair ID, and private key.
+Point `--cache-blob-store` at the cache service's S3 bucket and prefix; the
+controller announces `data_download_url` to in-cluster callers when that store
+is configured, and to public-ingress callers when CloudFront signing is also
+configured.
+Set `SPARKWING_CLOUDFRONT_DOMAIN` and
+`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then provide the signing key with either
+`SPARKWING_CLOUDFRONT_PRIVATE_KEY` or
+`SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE`. Store the key in a Kubernetes Secret
+and mount it as a file; keep it out of Helm values, command arguments, and
+logs. The distribution must serve the private data bucket through its origin
+access control configuration.
+
+The controller returns a 60-second CloudFront URL for requests arriving
+through the public ingress. Requests through the in-cluster Service receive a
+regional S3 URL instead, so runner pods in the bucket's region can use the S3
+gateway endpoint. Local filesystem storage keeps its direct byte-serving path and
+does not need CloudFront signing keys. See [Data downloads](api.md#data-downloads)
+for route behavior.
 The self-hosted controller runs without credit metering unless a signed license
 grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
 no credit or team billing routes, and gives teams unlimited room in the

@@ -2,7 +2,10 @@ package bincache
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,12 +14,22 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
-const testDeployKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBxZXN0a2V5bWF0ZXJpYWxub3RyZWFsbHlhbmVkMjU1MTlrZXkAAAAAAAAA
------END OPENSSH PRIVATE KEY-----`
+func testDeployKey(t *testing.T) string {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(private, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(pem.EncodeToMemory(block)))
+}
 
 const testKnownHosts = "git.example.invalid ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHRlc3Rob3N0a2V5"
 
@@ -41,6 +54,7 @@ func credentialController(t *testing.T, status int, body string) (*httptest.Serv
 }
 
 func TestRequestDirectCredentialReadsEachKind(t *testing.T) {
+	key := testDeployKey(t)
 	cases := map[string]struct {
 		body string
 		want DirectCredential
@@ -57,9 +71,9 @@ func TestRequestDirectCredentialReadsEachKind(t *testing.T) {
 			DirectCredential{Kind: CredentialHTTPS, Host: "gitlab.example.com", Username: "deploy", Secret: "glpat-abc"},
 		},
 		"ssh": {
-			`{"kind":"ssh","host":"git.example.invalid","secret":` + jsonString(testDeployKey) +
+			`{"kind":"ssh","host":"git.example.invalid","secret":` + jsonString(key) +
 				`,"known_hosts":` + jsonString(testKnownHosts) + `}`,
-			DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey, KnownHosts: testKnownHosts},
+			DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: key, KnownHosts: testKnownHosts},
 		},
 	}
 	for name, tc := range cases {
@@ -102,13 +116,14 @@ func TestRequestDirectCredentialFallsBackOnAnOldController(t *testing.T) {
 }
 
 func TestRequestDirectCredentialRefusesUnusableValues(t *testing.T) {
+	key := testDeployKey(t)
 	for name, body := range map[string]string{
 		"app token newline":   `{"kind":"github_app","host":"github.com","token":"ghs_ok\nGIT_CONFIG_KEY_9=x"}`,
 		"app on another host": `{"kind":"github_app","host":"gitlab.com","token":"ghs_ok"}`,
 		"https space":         `{"kind":"https","host":"gitlab.com","username":"u","secret":"a b"}`,
 		"https newline user":  `{"kind":"https","host":"gitlab.com","username":"u\nhost=evil","secret":"ab"}`,
 		"host with a path":    `{"kind":"https","host":"gitlab.com/evil","username":"u","secret":"ab"}`,
-		"ssh without pin":     `{"kind":"ssh","host":"gitlab.com","secret":` + jsonString(testDeployKey) + `}`,
+		"ssh without pin":     `{"kind":"ssh","host":"gitlab.com","secret":` + jsonString(key) + `}`,
 		"ssh not a key":       `{"kind":"ssh","host":"gitlab.com","secret":"hunter2","known_hosts":"gitlab.com ssh-ed25519 AAAA"}`,
 		"unknown kind":        `{"kind":"ftp","host":"gitlab.com","secret":"x"}`,
 		"extra repo url":      `{"kind":"github_app","host":"github.com","token":"ghs_ok","extra_repositories":["https://evil/x"]}`,
@@ -240,13 +255,14 @@ func readRecord(t *testing.T, record, name string) string {
 // is in no environment variable, and it is gone when the checkout returns,
 // before anything the fetched tree names could run.
 func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
+	key := testDeployKey(t)
 	repos := t.TempDir()
 	_, tip := makeBareRepoWithSparkwing(t, repos, "widgets", "main")
 	record := sshRecorder(t, repos, false)
 	t.Setenv("GIT_SSH_COMMAND", "/usr/bin/false")
 	t.Setenv("SSH_AUTH_SOCK", "/tmp/should-not-be-used.sock")
 
-	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey, KnownHosts: testKnownHosts}
+	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: key, KnownHosts: testKnownHosts}
 	opts := directOptions{protocols: "ssh", cred: cred}
 	dest := filepath.Join(t.TempDir(), "run")
 	if err := directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
@@ -260,7 +276,7 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 	if got := readRecord(t, record, "keymode"); got != "600" {
 		t.Errorf("key file mode = %s, want 600", got)
 	}
-	if got := readRecord(t, record, "keybody"); got != testDeployKey {
+	if got := readRecord(t, record, "keybody"); got != key {
 		t.Errorf("key file = %q, want the released key", got)
 	}
 	if got := readRecord(t, record, "hosts"); got != testKnownHosts {
@@ -276,7 +292,7 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 		}
 	}
 	env := readRecord(t, record, "env")
-	if strings.Contains(env, "PRIVATE KEY") || strings.Contains(env, "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUA") {
+	if strings.Contains(env, "PRIVATE KEY") || strings.Contains(env, strings.Split(key, "\n")[1]) {
 		t.Error("the key is in ssh's environment")
 	}
 	if strings.Contains(env, "should-not-be-used") {
@@ -293,10 +309,11 @@ func TestSSHCredentialFetchPinsTheKeyAndRemovesIt(t *testing.T) {
 // A transport that echoes the key into its error output has the key redacted
 // from the error that carries that output to logs and the run's failure.
 func TestSSHCredentialLeakIsRedactedFromTheError(t *testing.T) {
+	key := testDeployKey(t)
 	repos := t.TempDir()
 	_, tip := makeBareRepoWithSparkwing(t, repos, "widgets", "main")
 	record := sshRecorder(t, repos, true)
-	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey, KnownHosts: testKnownHosts}
+	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: key, KnownHosts: testKnownHosts}
 	err := directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
 		"main", tip, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh", cred: cred})
 	if err == nil {
@@ -305,7 +322,7 @@ func TestSSHCredentialLeakIsRedactedFromTheError(t *testing.T) {
 	if !strings.Contains(err.Error(), "***") {
 		t.Fatalf("control: the stand-in's echo never reached the error: %v", err)
 	}
-	for _, line := range strings.Split(testDeployKey, "\n")[1:3] {
+	for _, line := range strings.Split(key, "\n")[1:3] {
 		if strings.Contains(err.Error(), line) {
 			t.Fatalf("the error carries key material %q:\n%v", line, err)
 		}
@@ -316,8 +333,9 @@ func TestSSHCredentialLeakIsRedactedFromTheError(t *testing.T) {
 }
 
 func TestCredentialRemoteFitsTheTransportAndHost(t *testing.T) {
+	key := testDeployKey(t)
 	https := DirectCredential{Kind: CredentialHTTPS, Host: "gitlab.example.com", Username: "u", Secret: "s"}
-	ssh := DirectCredential{Kind: CredentialSSH, Host: "gitlab.example.com", Secret: testDeployKey, KnownHosts: "x"}
+	ssh := DirectCredential{Kind: CredentialSSH, Host: "gitlab.example.com", Secret: key, KnownHosts: "x"}
 	cases := []struct {
 		remote string
 		cred   DirectCredential

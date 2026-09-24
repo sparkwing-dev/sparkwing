@@ -105,7 +105,11 @@ func RunNodeCommand(args []string) error {
 	// credential; it asks for its own run's grant, which the source fetch, the
 	// binary cache, the artifact store and the node's steps all read from here.
 	if apiSocket == "" && os.Getenv(authwire.CacheGrantEnv) == "" {
-		if grant := RequestRunCacheGrant(ctx, *controllerURL, token, runID, slog.Default()); grant != "" {
+		grantCtx := ctx
+		if fence.HolderID != "" {
+			grantCtx = store.WithNodeClaimFence(ctx, fence)
+		}
+		if grant := RequestRunCacheGrant(grantCtx, *controllerURL, token, runID, slog.Default()); grant != "" {
 			if err := os.Setenv(authwire.CacheGrantEnv, grant); err != nil {
 				return fmt.Errorf("hand the node its cache grant: %w", err)
 			}

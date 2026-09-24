@@ -18,7 +18,7 @@ describe("LogCompletenessLine", () => {
     assert.match(html, /role="status"/);
     assert.match(html, /data-log-completeness="cut_off"/);
     assert.match(html, /select-none/);
-    assert.match(html, /— logs cut off: .* after line 1,234 —/);
+    assert.match(html, /\[logs cut off: .* after line 1,234\]/);
   });
 
   it("renders nothing for a complete log", () => {

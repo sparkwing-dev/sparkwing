@@ -181,13 +181,15 @@ file. Other syntax and workflow checks remain active.
   pipeline module.
 - **Why the whole-tree vet, test and lint are in neither hook:** the house
   standard puts them in the pre-commit chain, and this repo runs them in `gate`
-  on purpose. The broad tier takes 12 to 24 minutes through the shared
-  admission daemon (the Postgres suite 401 s, the race tests 401 s, the full
-  unit suite 315 s, lint 117 s), a hook that long is a hook everyone passes
-  `--no-verify`, and it loses the fast-forward race whenever a co-maintainer
-  lands first. Hosted CI runs `gate` and `pre-release` on every pull request
-  and every push to main, so a landing pays for them there. What the push tier
-  keeps of the four is the packages the change touches: `go build`, `go vet`,
+  on purpose. Earlier broad-tier runs took 12 to 24 minutes through the shared
+  admission daemon. At that time, the Postgres suite took 401 s, race tests
+  401 s, the full unit suite 315 s, and lint 117 s. The Postgres lane now takes
+  693 s end to end. No new broad-tier total has been measured. A hook that
+  long is a hook everyone passes `--no-verify`, and it loses the fast-forward
+  race whenever a co-maintainer lands first. Hosted CI runs `gate` and
+  `pre-release` on every pull request and push to main, so a landing pays for
+  them there. What the push tier keeps of the four is the packages the change
+  touches: `go build`, `go vet`,
   and the fast linter subset, the whole-tree linters minus the type-and-SSA
   family, which costs minutes. Every touched package is checked even on a
   wide push; the file-count waiver relaxes only elapsed time. No test suite
@@ -405,8 +407,10 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
-  the first run downloads the Postgres binaries.
+  thirty-minute timeout. The Go package has a fixed 15-minute timeout because
+  1,076 passing tests took 656 seconds in an isolated measurement and 679
+  seconds in the pipeline, with seven workers. The pipeline took 693 seconds
+  end to end. The first run may also download the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

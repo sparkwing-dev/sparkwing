@@ -1129,7 +1129,7 @@ sparkwing runs tree --run run-fictional --profile prod -o json
 Fire, list, or inspect controller triggers
 
 Inspect the controller's queue of pipeline triggers. 'list' shows pending,
-claimed, completed, and failed entries. 'get' reads one trigger by identifier.
+claimed, and completed entries. 'get' reads one trigger by identifier.
 Select the controller with --profile NAME.
 
 Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
@@ -1157,7 +1157,7 @@ sparkwing pipeline trigger fictional-deploy --profile prod
 Inspect one trigger's full metadata by id
 
 Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args,
-git, env, status, error, claim lease). Defaults to a compact multi-line rendering; -o
+git, env, status, claim lease). Defaults to a compact multi-line rendering; -o
 json emits the raw response.
 
 ### Flags

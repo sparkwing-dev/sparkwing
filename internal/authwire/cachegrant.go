@@ -24,9 +24,22 @@ const CacheGrantTTL = 6 * time.Hour
 // team whose cache namespace the holder may read and write, the run it was
 // minted for, and when it stops being accepted.
 type CacheGrant struct {
-	Team    string `json:"t"`
-	Run     string `json:"r"`
-	Expires int64  `json:"e"`
+	Team    string      `json:"t"`
+	Run     string      `json:"r"`
+	Expires int64       `json:"e"`
+	Claim   *CacheClaim `json:"c,omitempty"`
+}
+
+// CacheClaim binds a signed download to the claim that requested its grant.
+type CacheClaim struct {
+	Kind          string `json:"k"`
+	NodeID        string `json:"n,omitempty"`
+	HolderID      string `json:"h,omitempty"`
+	MembershipID  string `json:"m,omitempty"`
+	ReservationID string `json:"r,omitempty"`
+	Generation    int64  `json:"g"`
+	Principal     string `json:"p"`
+	TokenPrefix   string `json:"t"`
 }
 
 // OperatorTeam is the team the deployment operator's own runs belong to. The
@@ -58,6 +71,11 @@ const CacheGrantKeyEnv = "SPARKWING_CACHE_GRANT_KEY"
 // named by [CacheGrantKeyEnv], valid until now+ttl. The controller and the
 // cache hold that key; a runner does not, so it cannot mint.
 func MintCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration) (string, error) {
+	return MintClaimCacheGrant(signingKey, team, run, now, ttl, nil)
+}
+
+// MintClaimCacheGrant signs a cache grant with its issuing live claim.
+func MintClaimCacheGrant(signingKey, team, run string, now time.Time, ttl time.Duration, claim *CacheClaim) (string, error) {
 	if strings.TrimSpace(signingKey) == "" {
 		return "", errors.New("cache grant: no grant key to sign with")
 	}
@@ -67,7 +85,7 @@ func MintCacheGrant(signingKey, team, run string, now time.Time, ttl time.Durati
 	if run == "" || ttl <= 0 {
 		return "", errors.New("cache grant: a run and a positive lifetime are required")
 	}
-	payload, err := json.Marshal(CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix()})
+	payload, err := json.Marshal(CacheGrant{Team: team, Run: run, Expires: now.Add(ttl).Unix(), Claim: claim})
 	if err != nil {
 		return "", err
 	}
