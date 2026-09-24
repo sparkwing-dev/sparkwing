@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,31 @@ func TestController_Health(t *testing.T) {
 	}
 	if objectStore["tripped"] != false {
 		t.Errorf("object_store.tripped=%v want false on a fresh controller", objectStore["tripped"])
+	}
+}
+
+func TestController_RecentRunFailuresWarnWithoutDegradingService(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	for i := range 20 {
+		if err := st.CreateRun(t.Context(), store.Run{
+			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		Status           string   `json:"status"`
+		Problems         []string `json:"problems"`
+		RecentRunWarning string   `json:"recent_run_warning"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning == "" {
+		t.Fatalf("historical failures classified as service health: %+v", body)
 	}
 }
 

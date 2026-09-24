@@ -36,7 +36,8 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 // given instant.
 func (t *Tenant) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error) {
 	rows, err := t.s.query(ctx, `
-SELECT run_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
+SELECT run_id, status, claimed_by, claim_token_prefix,
+       COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
   FROM nodes
  WHERE claimed_by IS NOT NULL AND claimed_by != ''
    AND claim_executor = ''
@@ -51,10 +52,13 @@ SELECT run_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expir
 	for rows.Next() {
 		var claim LegacyAgentClaim
 		var started, expires int64
-		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &started, &expires); err != nil {
+		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
 			return nil, err
 		}
-		claim.LastSeen = time.Unix(0, max(started, expires))
+		if started > 0 {
+			claim.StartedAt = time.Unix(0, started)
+			claim.LastSeen = claim.StartedAt
+		}
 		out = append(out, claim)
 	}
 	return out, rows.Err()

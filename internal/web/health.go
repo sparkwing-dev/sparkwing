@@ -25,6 +25,7 @@ type serviceStatus struct {
 	CheckedAt string   `json:"checked_at"`
 	Error     string   `json:"error,omitempty"`
 	Problems  []string `json:"problems,omitempty"`
+	Warning   string   `json:"warning,omitempty"`
 }
 
 func healthServicesHandler(services []HealthService, token string) http.HandlerFunc {
@@ -118,7 +119,11 @@ func noteSlowResponse(status *serviceStatus) {
 
 func applyHealthBody(status *serviceStatus, resp *http.Response) {
 	body, err := health.Decode(resp.Body)
-	if err != nil || !body.Degraded() {
+	if err != nil {
+		return
+	}
+	status.Warning = body.RecentRunWarning
+	if !body.Degraded() {
 		return
 	}
 	status.Status = "degraded"

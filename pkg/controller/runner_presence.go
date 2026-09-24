@@ -84,25 +84,19 @@ func (r *runnerPresenceRegistry) awarded(key presenceKey) {
 	}
 }
 
-// safety: the agents view knows a runner by the name segment of its holder id
-// and not by the credential behind it, so the newest row under that name wins.
-func (r *runnerPresenceRegistry) lookup(name string, now time.Time, within time.Duration) (runnerPresence, bool) {
+// safety: a different credential can claim the same display name, so only
+// the credential behind the stored claim can refresh its liveness.
+func (r *runnerPresenceRegistry) lookup(key presenceKey, now time.Time, within time.Duration) (runnerPresence, bool) {
 	if r == nil {
 		return runnerPresence{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var newest runnerPresence
-	found := false
-	for key, p := range r.m {
-		if key.name != name || now.Sub(p.UpdatedAt) > within {
-			continue
-		}
-		if !found || p.UpdatedAt.After(newest.UpdatedAt) {
-			newest, found = p, true
-		}
+	p, ok := r.m[key]
+	if !ok || now.Sub(p.UpdatedAt) > within {
+		return runnerPresence{}, false
 	}
-	return newest, found
+	return p, true
 }
 
 // safety: forgetting the rows that fell out of the window here is what bounds

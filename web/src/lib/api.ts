@@ -686,6 +686,7 @@ export interface ServiceStatus {
   checked_at: string;
   error?: string;
   problems?: string[];
+  warning?: string;
 }
 
 export async function getServiceHealth(): Promise<ServiceStatus[]> {

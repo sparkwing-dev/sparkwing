@@ -1,4 +1,4 @@
-import type { Agent } from "./api";
+import type { Agent, ServiceStatus } from "./api";
 
 export type FleetRegistration = "registered" | "legacy";
 export type FleetHeadroomState = "reported" | "stale" | "not-reported";
@@ -10,6 +10,20 @@ const kindOrder: Record<string, number> = {
   pool: 2,
   local: 3,
 };
+
+export function fleetServiceSummary(services: ServiceStatus[]) {
+  const controller = services.find((service) => service.name === "controller");
+  const recentRunFailures = controller?.warning ? [controller.warning] : [];
+  const overall =
+    services.length === 0
+      ? "unknown"
+      : services.every((service) => service.status === "ok")
+        ? "ok"
+        : services.some((service) => service.status === "down")
+          ? "down"
+          : "degraded";
+  return { recentRunFailures, serviceProbes: services, overall };
+}
 
 export function sortFleetAgents(a: Agent, b: Agent): number {
   const statusDiff =
@@ -28,7 +42,7 @@ export function fleetLocation(agent: Agent): "local" | "cloud" | "unknown" {
 }
 
 export function fleetRegistration(agent: Agent): FleetRegistration {
-  return agent.max_concurrent > 0 ? "registered" : "legacy";
+  return agent.active_slots != null ? "registered" : "legacy";
 }
 
 export function fleetHeadroomState(agent: Agent): FleetHeadroomState {

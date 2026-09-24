@@ -287,6 +287,7 @@ type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
   agents?: Record<string, unknown>[];
+  services?: Record<string, unknown>[];
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
@@ -370,7 +371,7 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/health/services") {
-      await route.fulfill({ json: { services: [] } });
+      await route.fulfill({ json: { services: options.services ?? [] } });
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/agents") {
@@ -1780,7 +1781,7 @@ test("separates fleet policy, observations, and current activity", async ({
         last_seen: new Date().toISOString(),
         status: "idle",
         active_jobs: [],
-        max_concurrent: 0,
+        max_concurrent: 2,
       },
     ],
   });
@@ -1798,6 +1799,7 @@ test("separates fleet policy, observations, and current activity", async ({
   await expect(configured.getByText("20 (ceiling 80)")).toBeVisible();
   await expect(observed.getByText("3 cores / 6.0 GiB")).toBeVisible();
   await expect(observed.getByText("headroom observed", { exact: true })).toBeVisible();
+  await expect(observed.getByText("last heartbeat", { exact: true })).toBeVisible();
   await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
   await expect(activity.getByText("2", { exact: true })).toBeVisible();
   await expect(
@@ -1805,12 +1807,45 @@ test("separates fleet policy, observations, and current activity", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: /old-pool/ }).click();
+  const legacyObserved = page.getByRole("button", { name: /old-pool/ }).locator("..").getByRole("region", { name: "Observed liveness" });
+  await expect(legacyObserved.getByText("last observed", { exact: true })).toBeVisible();
   await expect(
     page.getByText(
       "Configuration unavailable. This executor was inferred from recent activity.",
     ),
   ).toBeVisible();
   await expect(page.getByText("not reported", { exact: true })).toBeVisible();
+});
+
+test("Fleet shows recent run failures separately from healthy services", async ({ page }) => {
+  const runProblem = "runs: 63% success over 154 (24h), 57 failed";
+  await installMockAPI(page, {
+    services: [
+      { name: "controller", url: "http://controller/health", status: "degraded", latency_ms: 7, checked_at: isoFromNow(0), problems: [runProblem] },
+      { name: "logs", url: "http://logs/health", status: "ok", latency_ms: 3, checked_at: isoFromNow(0) },
+    ],
+  });
+  await page.goto("/cluster");
+  await expect(page.getByText("All systems operational")).toBeVisible();
+  await expect(page.getByText("controller", { exact: true }).locator("..").getByText("Healthy")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent run failures" })).toBeVisible();
+  await expect(page.getByText(runProblem)).toBeVisible();
+  await expect(page.getByRole("link", { name: "View failed runs" })).toHaveAttribute("href", "/runs?status=failed");
+});
+
+test("Fleet retains dependency degradation alongside recent run failures", async ({ page }) => {
+  await installMockAPI(page, {
+    services: [{
+      name: "controller", url: "http://controller/health", status: "degraded",
+      latency_ms: 7, checked_at: isoFromNow(0),
+      problems: ["runs: 63% success over 154 (24h), 57 failed", "db: unavailable"],
+    }],
+  });
+  await page.goto("/cluster");
+  await expect(page.getByText("Degraded - at least one service is slow or partial")).toBeVisible();
+  await expect(page.getByText("controller", { exact: true }).locator("..").getByText("Degraded")).toBeVisible();
+  await expect(page.getByText("db: unavailable")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent run failures" })).toBeVisible();
 });
 
 test("keeps every public dashboard navigation target routable", async ({

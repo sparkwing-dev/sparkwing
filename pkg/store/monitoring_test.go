@@ -94,7 +94,7 @@ func TestLegacyAgentClaimsUseTheStoreDialect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" {
+	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" || claims[0].TokenPrefix != "swr_runner" {
 		t.Fatalf("legacy claims = %+v", claims)
 	}
 }

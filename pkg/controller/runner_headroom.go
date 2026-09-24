@@ -21,29 +21,29 @@ type runnerHeadroom struct {
 
 type runnerHeadroomRegistry struct {
 	mu sync.Mutex
-	m  map[string]runnerHeadroom
+	m  map[presenceKey]runnerHeadroom
 }
 
 func newRunnerHeadroomRegistry() *runnerHeadroomRegistry {
-	return &runnerHeadroomRegistry{m: map[string]runnerHeadroom{}}
+	return &runnerHeadroomRegistry{m: map[presenceKey]runnerHeadroom{}}
 }
 
-func (r *runnerHeadroomRegistry) record(name string, h runnerHeadroom) {
-	if r == nil || name == "" {
+func (r *runnerHeadroomRegistry) record(key presenceKey, h runnerHeadroom) {
+	if r == nil || key.name == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.m[name] = h
+	r.m[key] = h
 }
 
-func (r *runnerHeadroomRegistry) lookup(name string, now time.Time, staleAfter time.Duration) (runnerHeadroom, bool) {
+func (r *runnerHeadroomRegistry) lookup(key presenceKey, now time.Time, staleAfter time.Duration) (runnerHeadroom, bool) {
 	if r == nil {
 		return runnerHeadroom{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	h, ok := r.m[name]
+	h, ok := r.m[key]
 	if !ok || now.Sub(h.UpdatedAt) > staleAfter {
 		return runnerHeadroom{}, false
 	}
@@ -62,11 +62,11 @@ func (r *runnerHeadroomRegistry) list(now time.Time, staleAfter time.Duration) [
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]namedRunnerHeadroom, 0, len(r.m))
-	for name, h := range r.m {
+	for key, h := range r.m {
 		if now.Sub(h.UpdatedAt) > staleAfter {
 			continue
 		}
-		out = append(out, namedRunnerHeadroom{Name: name, runnerHeadroom: h})
+		out = append(out, namedRunnerHeadroom{Name: key.name, runnerHeadroom: h})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -76,6 +76,10 @@ func holderName(holderID string) (name, kind string) {
 	parts := strings.SplitN(holderID, ":", 3)
 	if len(parts) < 2 {
 		return "", ""
+	}
+	if len(parts) == 2 && parts[0] != "runner" && parts[0] != "pod" && parts[0] != "agent" &&
+		len(parts[1]) >= 16 && strings.IndexFunc(parts[1], func(ch rune) bool { return ch < '0' || ch > '9' }) < 0 {
+		return parts[0], "agent"
 	}
 	switch parts[0] {
 	case "runner":

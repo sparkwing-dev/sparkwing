@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Agent } from "./api";
+import type { Agent, ServiceStatus } from "./api";
 import {
   fleetHeadroomState,
   fleetLocation,
   fleetRegistration,
   fleetSlotTotals,
+  fleetServiceSummary,
   fleetSlots,
   formatFleetResources,
   sortFleetAgents,
@@ -24,12 +25,32 @@ function agent(fields: Partial<Agent>): Agent {
 }
 
 describe("fleet presentation", () => {
+  it("shows a controller run warning without degrading a healthy service", () => {
+    const controller: ServiceStatus = {
+      name: "controller",
+      url: "/health",
+      status: "ok",
+      latency_ms: 3,
+      checked_at: "2026-09-24T00:00:00Z",
+      warning: "runs: 0% success over 20 (24h), 20 failed",
+    };
+    const summary = fleetServiceSummary([controller]);
+    assert.deepEqual(summary.recentRunFailures, [controller.warning]);
+    assert.equal(summary.overall, "ok");
+    assert.deepEqual(summary.serviceProbes, [controller]);
+
+    const degraded = { ...controller, status: "degraded", problems: ["db: unavailable"] };
+    const withOutage = fleetServiceSummary([degraded]);
+    assert.equal(withOutage.overall, "degraded");
+    assert.deepEqual(withOutage.serviceProbes[0].problems, ["db: unavailable"]);
+  });
   it("does not infer a missing location", () => {
     assert.equal(fleetLocation(agent({})), "unknown");
   });
 
   it("separates registered policy from legacy activity", () => {
-    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "registered");
+    assert.equal(fleetRegistration(agent({ active_slots: 0, max_concurrent: 2 })), "registered");
+    assert.equal(fleetRegistration(agent({ max_concurrent: 2 })), "legacy");
     assert.equal(fleetRegistration(agent({ max_concurrent: 0 })), "legacy");
   });
 

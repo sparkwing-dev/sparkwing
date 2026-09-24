@@ -899,6 +899,19 @@ unlock.
 - **dashboard:** A historical trigger that ended before dispatch shows plain
   retry, Fleet and run-ID sharing steps in the Runs summary. Its stored error
   stays available under Technical error.
+- **controller + dashboard:** A busy legacy agent's accepted claim heartbeats
+  keep Fleet's observed liveness fresh without offering a free slot. Recent
+  run failures appear as a separate Home warning and no longer mark a healthy
+  controller as degraded.
+
+- **controller:** Fleet groups claim-mode agents with a plain `holder_prefix`
+  under one stable name and uses their own idle polls for liveness. An unrelated
+  credential cannot keep a stale claim's agent marked live or mix its active
+  runs into the most recently started claimant's row. Legacy last-seen time
+  comes from a node start or live poll, never a future lease deadline.
+- **dashboard:** Fleet shows a low 24-hour run success rate as a separate
+  recent-run warning linked to failed Runs. Controller and service probes stay
+  Healthy when that is their only problem; dependency failures remain Degraded.
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.
 

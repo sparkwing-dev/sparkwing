@@ -77,6 +77,11 @@ export default function Home() {
     [services],
   );
 
+  const runWarnings = useMemo(
+    () => services.filter((s) => s.warning),
+    [services],
+  );
+
   const running = useMemo(
     () => runs.filter((r) => r.status === "running"),
     [runs],
@@ -130,6 +135,7 @@ export default function Home() {
           <NeedsAttention
             approvals={approvals}
             degraded={degraded}
+            runWarnings={runWarnings}
             running={running.length}
           />
         </>
@@ -298,13 +304,15 @@ function LastDeployCard({ run }: { run: Run | null }) {
 function NeedsAttention({
   approvals,
   degraded,
+  runWarnings,
   running,
 }: {
   approvals: Approval[];
   degraded: ServiceStatus[];
+  runWarnings: ServiceStatus[];
   running: number;
 }) {
-  const nothing = approvals.length === 0 && degraded.length === 0;
+  const nothing = approvals.length === 0 && degraded.length === 0 && runWarnings.length === 0;
   return (
     <div className="mb-6">
       <div className="flex items-baseline gap-2 mb-2">
@@ -379,6 +387,15 @@ function NeedsAttention({
                 <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
                   {s.latency_ms}ms
                 </span>
+              </Link>
+            </li>
+          ))}
+          {runWarnings.map((s) => (
+            <li key={`${s.name}-runs`}>
+              <Link href="/runs" className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--surface-raised)] transition-colors">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <span className="text-[11px] font-mono text-amber-400 shrink-0">runs</span>
+                <span className="font-mono text-xs truncate flex-1">{s.warning}</span>
               </Link>
             </li>
           ))}
