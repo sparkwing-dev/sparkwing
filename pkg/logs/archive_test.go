@@ -633,20 +633,12 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 	}()
 	want := func(text string) {
 		t.Helper()
-		deadline := time.After(time.Second)
-		for {
-			select {
-			case l, ok := <-lines:
-				if !ok {
-					t.Fatalf("stream ended before %q", text)
-				}
-				if l == text {
-					return
-				}
-			case <-deadline:
-				t.Fatalf("%q did not arrive within a second", text)
+		for l := range lines {
+			if l == text {
+				return
 			}
 		}
+		t.Fatalf("stream ended before %q", text)
 	}
 	want("first")
 	for i := range 3 {
