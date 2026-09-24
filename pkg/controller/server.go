@@ -93,6 +93,7 @@ type Server struct {
 	downloadS3       *s3.PresignClient
 	downloadCDN      *sign.URLSigner
 	downloadDomain   string
+	directUploads    *directUploadS3
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
@@ -1106,6 +1107,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
 	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
 	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
+	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
+	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
 	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
 	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
 	mux.Handle("PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetRunnerGitCredentials)))
@@ -1187,6 +1190,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// safety: the cache proves itself with its operator token and the logs
 	// service with the caller's forwarded credential, which these handlers check.
 	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
+	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
+	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
+	router.HandleFunc("GET /api/v1/data/capabilities", s.handleDirectCapabilities)
 	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
 	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
 	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)

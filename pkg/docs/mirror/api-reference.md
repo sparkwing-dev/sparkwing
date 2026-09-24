@@ -56,6 +56,10 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/crons/{id}/pause` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/resume` | `runs.control` |
 | `POST` | `/api/v1/crons/{id}/run` | `runs.control` |
+| `GET` | `/api/v1/data/capabilities` | `public` |
+| `POST` | `/api/v1/data/commit` | `public` |
+| `POST` | `/api/v1/data/download` | `public` |
+| `POST` | `/api/v1/data/upload` | `public` |
 | `GET` | `/api/v1/egress` | `admin` |
 | `POST` | `/api/v1/gitcache/git/register` | `admin` |
 | `GET` | `/api/v1/gitcache/git/{path...}` | `admin` |
@@ -181,6 +185,8 @@ Every route the controller and logs service register, with the scope each requir
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |
 | `POST` | `/api/v1/team/billing/checkout` | `team.admin` |
+| `GET` | `/api/v1/team/build-trust` | `runs.read` |
+| `PUT` | `/api/v1/team/build-trust` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `POST` | `/api/v1/team/cli-tokens` | `runs.read` |
 | `DELETE` | `/api/v1/team/cli-tokens/{prefix}` | `runs.read` |

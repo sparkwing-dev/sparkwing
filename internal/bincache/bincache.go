@@ -124,6 +124,10 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	if err != nil {
 		return err
 	}
+	return installVerifiedBinary(dest, resp.Body, want, hash)
+}
+
+func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string) error {
 	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
@@ -133,7 +137,7 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	}
 	tmp := f.Name()
 	sum := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, sum), resp.Body); err != nil {
+	if _, err := io.Copy(io.MultiWriter(f, sum), src); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err

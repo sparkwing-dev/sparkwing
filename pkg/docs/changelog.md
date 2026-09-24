@@ -22,18 +22,16 @@ unlock.
 
 ### Added
 
-- **controller + runner:** `POST /api/v1/data/download` returns a signed URL,
-  object SHA-256 when stored, size and expiry for one team-owned object. In-cluster
-  requests receive a regional S3 URL; public-ingress requests receive a
-  CloudFront URL with a 60-second lifetime. Filesystem-backed installs
-  keep serving bytes directly. The controller charges the object's size
-  against the team's daily download allowance when it signs the URL. Clients
-  discover the route through `GET /api/v1/services`; binary fetches retain the
-  cache path when an older controller does not announce it. Uploads still use the cache.
-  Signing with a runner's cache grant requires its issuing trigger or node
-  claim to remain live; a former claimant's grant cannot keep signing URLs.
-  See [Data downloads](docs/api.md#data-downloads) and
-  [Tenant limits](docs/limits.md).
+- **controller + runner:** Signed downloads and direct S3 uploads keep binary
+  and artifact bytes off the controller. A runner reserves storage, PUTs a
+  checksummed object to `pending/`, then commits it under an immutable
+  cloud or local key. Schema 70 records committed objects and provenance.
+  A signing grant stays bound to its exact live claim. In-cluster downloads
+  use S3, while public-ingress downloads use a 60-second CloudFront URL.
+  Both count against the team's daily download cap. Cloud runners read
+  cloud-built binaries unless the team enables `trust_local_builds`. Older
+  controllers keep the cache path. See [Direct data uploads](docs/data-uploads.md)
+  and [Tenant limits](docs/limits.md).
 - **controller + web:** GitHub App push subscriptions accept `branches` and
   pull request subscriptions accept `base_branches`, each with up to 10 glob
   patterns. The controller checks the push branch or pull request base branch

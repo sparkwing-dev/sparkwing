@@ -143,6 +143,68 @@ func TestDataDownloadSignsOnlyGrantsTeamAndChargesAtSigning(t *testing.T) {
 	}
 }
 
+func TestCommittedBinaryDownloadUsesTheSameDailyCap(t *testing.T) {
+	s, grant, _ := downloadFixture(t)
+	input := "01234567-89abcdef"
+	digest := strings.Repeat("a", 64)
+	u, err := s.store.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: "team-a", RunID: "run-1", Kind: store.StorageCache,
+		Key: "bin/" + input + "/" + digest, Size: 4, SHA256: digest,
+		Principal: "runner", Provenance: "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.CommitUpload(t.Context(), "team-a", u.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	first, signed := callDownload(t, s, grant, "bin/"+input, false)
+	if first.Code != http.StatusOK || !strings.Contains(signed.URL, "/local/bin/"+input) {
+		t.Fatalf("first committed download = %d %+v", first.Code, signed)
+	}
+	second, _ := callDownload(t, s, grant, "bin/"+input, false)
+	if second.Code != http.StatusTooManyRequests {
+		t.Fatalf("second committed download = %d, want 429", second.Code)
+	}
+}
+
+func TestStaleGrantCannotReserveOrCommitAfterSameTokenReclaimsRun(t *testing.T) {
+	s, grant, _ := downloadFixture(t)
+	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
+	s.WithDirectUploads(client, "bucket", "cache")
+	request := func(digest string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"binary","key":"bin/01234567-89abcdef/`+digest+`","size":4,"sha256":"`+digest+`","run_id":"run-1"}`))
+		req.Header.Set("Authorization", "Bearer "+grant)
+		req.Header.Set("Content-Type", "application/json")
+		return req
+	}
+	first := httptest.NewRecorder()
+	s.Handler().ServeHTTP(first, request(strings.Repeat("a", 64)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first reserve = %d: %s", first.Code, first.Body.String())
+	}
+	var upload DirectUploadResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &upload); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	stale := httptest.NewRecorder()
+	s.Handler().ServeHTTP(stale, request(strings.Repeat("b", 64)))
+	if stale.Code != http.StatusForbidden {
+		t.Fatalf("stale reserve = %d, want 403", stale.Code)
+	}
+	commit := httptest.NewRequest(http.MethodPost, "/api/v1/data/commit", strings.NewReader(`{"upload_id":"`+upload.UploadID+`","run_id":"run-1"}`))
+	commit.Header.Set("Authorization", "Bearer "+grant)
+	commit.Header.Set("Content-Type", "application/json")
+	stale = httptest.NewRecorder()
+	s.Handler().ServeHTTP(stale, commit)
+	if stale.Code != http.StatusForbidden {
+		t.Fatalf("stale commit = %d, want 403", stale.Code)
+	}
+}
+
 func TestDataDownloadIngressGetsExactExpiringCloudFrontPolicy(t *testing.T) {
 	s, grant, _ := downloadFixture(t)
 	rec, body := callDownload(t, s, grant, "bins/abc", true)

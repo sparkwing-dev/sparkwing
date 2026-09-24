@@ -15,7 +15,7 @@ import (
 // service's buckets to reconcile every team's stored bytes.
 const StoragePassEvery = time.Hour
 
-const cacheObjectMaxAge = 30 * 24 * time.Hour
+const cacheObjectMaxAge = store.DirectCacheMaxAge
 
 // CacheObjectMaxAge is how long the storage pass keeps team's cache
 // objects: thirty days after each was last written, and forever for the
@@ -75,6 +75,9 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if _, err := s.store.ReleaseExpiredStorage(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("release expired reservations: %w", err))
 	}
+	if _, err := s.store.PruneExpiredUploads(ctx, now); err != nil {
+		errs = append(errs, fmt.Errorf("prune expired uploads: %w", err))
+	}
 	for kind, bucket := range p.stores {
 		// safety: the marks are read before the listing, so what is committed
 		// while it runs is added back to what it finds.
@@ -95,6 +98,11 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 		if err := s.store.ReconcileStorage(ctx, kind, listed, marks, now); err != nil {
 			errs = append(errs, fmt.Errorf("reconcile %s: %w", kind, err))
 			continue
+		}
+		if kind == store.StorageCache {
+			if _, err := s.store.PruneExpiredCacheObjects(ctx, now); err != nil {
+				errs = append(errs, fmt.Errorf("prune expired cache object rows: %w", err))
+			}
 		}
 		s.logger.Info("storage pass", "store", string(kind), "teams", len(m.Teams),
 			"expired_objects", m.Expired.Objects, "expired_bytes", m.Expired.Bytes)

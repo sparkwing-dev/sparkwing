@@ -2712,6 +2712,7 @@ paths:
                   logs: {type: string}
                   dashboard: {type: string}
                   multi_team: {type: boolean}
+                  direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 
@@ -6586,13 +6587,126 @@ paths:
         "502": {description: The checkout service or Stripe did not open a session.}
         "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
 
+  /api/v1/data/capabilities:
+    get:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Report whether direct uploads and committed-object downloads are available.
+      responses:
+        "200":
+          description: Direct data capabilities.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  upload: {type: boolean}
+                  download: {type: boolean}
+        "404": {description: Direct uploads are unavailable.}
+
+  /api/v1/data/upload:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Reserve storage and sign a checksum-bound S3 PUT for a live claim.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.directUploadRequest
+              type: object
+              required: [kind, key, size, sha256, run_id]
+              properties:
+                kind: {type: string, enum: [binary, artifact]}
+                key: {type: string}
+                size: {type: integer, format: int64}
+                sha256: {type: string}
+                run_id: {type: string}
+      responses:
+        "200":
+          description: Pending-object PUT and required signed headers.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.DirectUploadResponse
+                type: object
+                required: [upload_id, url, headers, expires_at]
+                properties:
+                  upload_id: {type: string}
+                  url: {type: string, format: uri}
+                  headers: {type: object, additionalProperties: {type: string}}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The immutable object already exists.}
+        "413": {description: The upload exceeds its size or storage allowance.}
+
+  /api/v1/data/commit:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Verify the pending S3 object and publish it under an immutable key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.directCommitRequest
+              type: object
+              required: [upload_id, run_id]
+              properties:
+                upload_id: {type: string}
+                run_id: {type: string}
+      responses:
+        "204": {description: The committed object is visible to authorized readers.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The pending object is absent or its final key holds other content.}
+        "422": {description: The pending object's size or checksum differs from the reservation.}
+
+  /api/v1/team/build-trust:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Read whether this team trusts local builds on cloud runners.
+      responses:
+        "200":
+          description: The team's build trust setting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.buildTrustRequest
+                type: object
+                required: [trust_local_builds]
+                properties:
+                  trust_local_builds: {type: boolean}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Let the team owner set whether cloud runners trust local builds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.buildTrustRequest
+              type: object
+              required: [trust_local_builds]
+              properties:
+                trust_local_builds: {type: boolean}
+      responses:
+        "200": {description: The stored build trust setting.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
   /api/v1/data/download:
     post:
       x-sparkwing-scope: public
       tags: [artifacts]
       summary: Sign a short-lived URL for one team object.
       description: >-
-        Accepts a cache grant only while the exact trigger or node claim that minted it remains live, or a non-runner bearer principal authorized to read the team's run data. The object key is resolved under the credential's team. `binary` keys must start with `bins/`; `artifact` and `log` select the cache and logs stores. The response includes the stored object's SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+        Accepts a cache grant only while the exact trigger or node claim that minted it remains live, or a non-runner bearer principal authorized to read the team's run data. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data; `artifact` and `log` select the cache and logs stores. The response includes the stored object's SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
       requestBody:
         required: true
         content:

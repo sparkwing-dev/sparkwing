@@ -110,7 +110,7 @@ func TestTriggerRunGrantConfinesTheBinCacheToTheRunsTeam(t *testing.T) {
 		ControllerURL: ctrl.URL,
 		GitcacheURL:   cacheSrv.URL,
 		Token:         "runner-a",
-	}, grantA, logger)
+	}, grantA, "run-a", logger)
 	if err != nil {
 		t.Fatal(err)
 	}

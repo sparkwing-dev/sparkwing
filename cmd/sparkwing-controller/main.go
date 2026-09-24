@@ -600,6 +600,13 @@ func run(args []string) error {
 			return err
 		}
 	}
+	if strings.HasPrefix(*cacheBlobStore, "s3://") {
+		client, bucket, prefix, err := storeurl.OpenS3(ctx, *cacheBlobStore)
+		if err != nil {
+			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
+		}
+		srv = srv.WithDirectUploads(client, bucket, prefix)
+	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err
 	}

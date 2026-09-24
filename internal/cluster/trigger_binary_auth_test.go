@@ -44,12 +44,14 @@ func TestTriggerBinaryCacheCarriesTheRunGrant(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	controller := httptest.NewServer(http.NotFoundHandler())
+	defer controller.Close()
 
 	binary, err := triggerBuildOrFetchBinary(context.Background(), writeTrivialPipeline(t), TriggerLoopOptions{
-		ControllerURL: "https://controller.example",
+		ControllerURL: controller.URL,
 		GitcacheURL:   server.URL,
 		Token:         "runner-token",
-	}, "swcg1.run-grant", nil)
+	}, "swcg1.run-grant", "run-test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,7 @@ func TestTriggerBinaryCacheIsSkippedWithoutAGrant(t *testing.T) {
 		ControllerURL: "https://controller.example",
 		GitcacheURL:   server.URL,
 		Token:         "runner-token",
-	}, "", nil)
+	}, "", "run-test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

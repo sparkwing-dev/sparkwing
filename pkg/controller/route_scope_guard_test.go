@@ -42,8 +42,13 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /internal/storage/commit":   true,
 		"POST /internal/storage/release":  true,
 		"POST /internal/downloads/charge": true,
-		"POST /api/v1/data/download": true,
+		"POST /api/v1/data/download":      true,
 		"POST /internal/egress/totals":    true,
+		// safety: upload and commit authenticate a bound grant or runner token and
+		// check its live claim inside the handler; capability reports only availability.
+		"POST /api/v1/data/upload":      true,
+		"POST /api/v1/data/commit":      true,
+		"GET /api/v1/data/capabilities": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {

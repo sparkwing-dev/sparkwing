@@ -233,6 +233,7 @@ var tenantTables = []string{
 	"credit_checkouts",
 	"credit_freezes",
 	"credit_grants",
+	"data_objects",
 	"cron_fires",
 	"cron_schedules",
 	"debug_pauses",
@@ -268,6 +269,8 @@ var tenantTables = []string{
 	"storage_run_usage",
 	"team_download_day",
 	"team_storage",
+	"team_build_trust",
+	"uploads",
 	"tokens",
 	"triggers",
 	"users",
@@ -281,6 +284,8 @@ var keyedAtCreation = []string{
 	"git_credentials", "github_app_extra_repos", "github_app_installations", "github_app_triggers",
 	"github_runner_bindings", "github_runner_credentials", "invitations", "memberships",
 	"storage_reservations", "team_download_day", "team_storage",
+	"uploads", "data_objects",
+	"team_build_trust",
 }
 
 // safety: executors is here because an executor enrolls with the deployment

@@ -19,12 +19,14 @@ unauthenticated endpoints, and first-visit admin bootstrap are in
 ## Data downloads
 
 `POST /api/v1/data/download` signs a short-lived download for an object. Send
-`{ "kind": "binary", "key": "bins/<hash>" }` with a reader bearer token or a
+`{ "kind": "binary", "key": "bin/<input-hash>" }` for a committed binary,
+`{ "kind": "artifact", "key": "artifacts/blobs/<sha256>" }` for a committed
+artifact, or `bins/<hash>` for a legacy cache binary. Use a reader token or a
 run-scoped cache grant minted while its runner holds an exact trigger or node
 claim. The controller checks the grant's claim generation and holder against
 the live claim on each signing request. A grant from an earlier claimant or
 one minted without a claim cannot sign. The controller also checks the live
-run, team-owned key, stored object, and team's daily download allowance
+run, team-owned key, committed object or legacy cache object, and team's daily download allowance
 before it returns `{ "url": "...", "sha256": "...", "size": 123,
 "expires": "..." }`. It charges the recorded object size when it signs the
 URL.
@@ -38,12 +40,15 @@ local filesystem store continues serving bytes directly through its existing
 artifact route. Treat the returned URL as a temporary
 bearer credential.
 
-Binary clients discover this route through `GET /api/v1/services` and use it when the
-controller announces it. The controller omits it on public ingress if CloudFront
-signing is unavailable. Older controllers also omit it, so those clients
-continue through the cache download route when it is absent. Uploads still go
-to the cache. See [Tenant limits](limits.md) for the daily team allowance and
-[Self-hosting](self-hosting.md) for CloudFront configuration.
+Binary clients discover this route through `GET /api/v1/services`. The controller
+omits it on public ingress if CloudFront signing is unavailable. An S3-backed
+controller also announces direct uploads through `direct_data` and
+`GET /api/v1/data/capabilities`. Runners use the cache service when an older
+controller has no direct route. Cloud runners read committed cloud binaries,
+or local binaries when the team enables `trust_local_builds`. They do not read
+legacy cache binaries when direct uploads are active. See
+[Direct data uploads](data-uploads.md), [Tenant limits](limits.md), and
+[Self-hosting](self-hosting.md).
 
 ## Webhooks
 

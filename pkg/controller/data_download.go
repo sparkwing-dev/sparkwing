@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -83,75 +84,77 @@ type dataDownloadRequest struct {
 	Key  string `json:"key"`
 }
 
-func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Team, bool) {
+func (s *Server) verifyDataGrant(ctx context.Context, token string) (authwire.CacheGrant, error) {
+	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
+	if err != nil {
+		return authwire.CacheGrant{}, err
+	}
+	team, err := s.store.ForTeam(ctx, store.Team(grant.Team))
+	if err != nil {
+		return authwire.CacheGrant{}, err
+	}
+	run, err := team.GetRun(ctx, grant.Run)
+	if err != nil || run.Status != "running" || run.FinishedAt != nil || grant.Claim == nil {
+		return authwire.CacheGrant{}, errors.New("cache grant run or claim is not live")
+	}
+	claim := grant.Claim
+	identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
+	var live bool
+	switch claim.Kind {
+	case "trigger":
+		live, err = s.store.TriggerClaimFenceIsLive(ctx, grant.Run, identity, claim.Generation, time.Now())
+	case "node":
+		fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
+		live, err = s.store.NodeClaimFenceIsLive(ctx, grant.Run, claim.NodeID, fence, time.Now())
+	default:
+		return authwire.CacheGrant{}, errors.New("cache grant claim kind is invalid")
+	}
+	if err != nil {
+		return authwire.CacheGrant{}, err
+	}
+	if !live {
+		return authwire.CacheGrant{}, errors.New("cache grant claim is not live")
+	}
+	return grant, nil
+}
+
+func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Team, *authwire.CacheGrant, bool) {
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || token == "" {
 		writeError(w, http.StatusUnauthorized, errors.New("download needs a bearer"))
-		return "", false
+		return "", nil, false
 	}
 	if strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
-		if err != nil {
+		if _, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now()); err != nil {
 			writeError(w, http.StatusUnauthorized, err)
-			return "", false
+			return "", nil, false
 		}
-		t, err := s.store.ForTeam(r.Context(), store.Team(grant.Team))
+		grant, err := s.verifyDataGrant(r.Context(), token)
 		if err != nil {
-			s.writeInternalError(w, r, "resolve download team", err)
-			return "", false
+			writeError(w, http.StatusForbidden, err)
+			return "", nil, false
 		}
-		run, err := t.GetRun(r.Context(), grant.Run)
-		if errors.Is(err, store.ErrNotFound) || err == nil && (run.Status != "running" || run.FinishedAt != nil) {
-			writeError(w, http.StatusForbidden, errors.New("cache grant run is not live"))
-			return "", false
-		}
-		if err != nil {
-			s.writeInternalError(w, r, "check download run", err)
-			return "", false
-		}
-		if grant.Claim == nil {
-			writeError(w, http.StatusForbidden, errors.New("cache grant has no live claim"))
-			return "", false
-		}
-		claim := grant.Claim
-		identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
-		var live bool
-		switch claim.Kind {
-		case "trigger":
-			live, err = s.store.TriggerClaimFenceIsLive(r.Context(), grant.Run, identity, claim.Generation, time.Now())
-		case "node":
-			fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
-			live, err = s.store.NodeClaimFenceIsLive(r.Context(), grant.Run, claim.NodeID, fence, time.Now())
-		}
-		if err != nil {
-			s.writeInternalError(w, r, "check download claim", err)
-			return "", false
-		}
-		if !live {
-			writeError(w, http.StatusForbidden, errors.New("cache grant claim is not live"))
-			return "", false
-		}
-		return store.Team(grant.Team), true
+		return store.Team(grant.Team), &grant, true
 	}
 	p, err := s.authMiddleware().Authenticate(token)
 	if err != nil || p == nil {
 		writeError(w, http.StatusUnauthorized, errors.New("invalid download bearer"))
-		return "", false
+		return "", nil, false
 	}
 	if !p.HasScope(ScopeRunsRead) && !p.HasScope(ScopeAdmin) {
 		writeError(w, http.StatusForbidden, errors.New("download needs runs.read"))
-		return "", false
+		return "", nil, false
 	}
 	if p.Kind == store.TokenKindRunner && !p.HasScope(ScopeAdmin) {
 		writeError(w, http.StatusForbidden, errors.New("runner download needs a claim-bound cache grant"))
-		return "", false
+		return "", nil, false
 	}
 	team := store.NormalizeTeam(p.Team)
 	if !teamblob.ValidTeam(string(team)) {
 		writeError(w, http.StatusForbidden, errors.New("credential names no team"))
-		return "", false
+		return "", nil, false
 	}
-	return team, true
+	return team, nil, true
 }
 
 func downloadKind(kind string) store.StorageKind {
@@ -170,7 +173,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	team, ok := s.downloadTeam(w, r)
+	team, grant, ok := s.downloadTeam(w, r)
 	if !ok {
 		return
 	}
@@ -185,29 +188,72 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("invalid download kind or key"))
 		return
 	}
-	if req.Kind == "binary" && !strings.HasPrefix(req.Key, "bins/") {
-		writeError(w, http.StatusBadRequest, errors.New("binary key must start with bins/"))
+	var err error
+	var cloudReader bool
+	if grant != nil {
+		cloudReader, err = s.store.TokenMetered(r.Context(), grant.Claim.TokenPrefix)
+		if err != nil {
+			s.writeInternalError(w, r, "read download provenance", err)
+			return
+		}
+	}
+	var objectSize int64
+	var digest string
+	var objectKey string
+	switch {
+	case req.Kind == "binary" && strings.HasPrefix(req.Key, "bin/"):
+		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader)
+		if errors.Is(findErr, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if findErr != nil {
+			writeError(w, http.StatusBadRequest, findErr)
+			return
+		}
+		objectSize, digest = obj.Size, obj.SHA256
+		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
+	case req.Kind == "artifact" && strings.HasPrefix(req.Key, "artifacts/"):
+		obj, findErr := s.store.CommittedObjectFor(r.Context(), team, req.Key, cloudReader)
+		if errors.Is(findErr, store.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if findErr != nil {
+			s.writeInternalError(w, r, "read committed artifact", findErr)
+			return
+		}
+		if obj.Kind != store.StorageCache {
+			writeError(w, http.StatusBadRequest, errors.New("object kind does not match"))
+			return
+		}
+		objectSize, digest = obj.Size, obj.SHA256
+		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
+	default:
+		if req.Kind == "binary" && (!strings.HasPrefix(req.Key, "bins/") || (cloudReader && s.directUploads != nil)) {
+			http.NotFound(w, r)
+			return
+		}
+		objectKey, err = bucket.Key(string(team), req.Key)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		object, headErr := bucket.Head(r.Context(), string(team), req.Key)
+		if errors.Is(headErr, teamblob.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if headErr != nil {
+			s.writeInternalError(w, r, "head download object", headErr)
+			return
+		}
+		objectSize, digest = object.Size, object.Metadata["sha256"]
+	}
+	if err != nil || objectSize < 0 {
+		writeError(w, http.StatusBadRequest, errors.New("invalid download object key or size"))
 		return
 	}
-	key, err := bucket.Key(string(team), req.Key)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	object, err := bucket.Head(r.Context(), string(team), req.Key)
-	if errors.Is(err, teamblob.ErrNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "head download object", err)
-		return
-	}
-	if object.Size < 0 {
-		s.writeInternalError(w, r, "head download object", errors.New("negative object size"))
-		return
-	}
-	digest := object.Metadata["sha256"]
 	if req.Kind == "binary" {
 		b, derr := hex.DecodeString(digest)
 		if derr != nil || len(b) != sha256.Size {
@@ -222,7 +268,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, errors.New("CloudFront signing unavailable"))
 			return
 		}
-		resource := (&url.URL{Scheme: "https", Host: s.downloadDomain, Path: "/" + key}).String()
+		resource := (&url.URL{Scheme: "https", Host: s.downloadDomain, Path: "/" + objectKey}).String()
 		policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{DateLessThan: sign.NewAWSEpochTime(expires)}}}}
 		signed, err = s.downloadCDN.SignWithPolicy(resource, policy)
 	} else {
@@ -230,7 +276,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusServiceUnavailable, errors.New("S3 signing unavailable"))
 			return
 		}
-		out, signErr := s.downloadS3.PresignGetObject(r.Context(), &s3.GetObjectInput{Bucket: aws.String(bucket.Bucket()), Key: aws.String(key)}, func(o *s3.PresignOptions) { o.Expires = downloadURLTTL })
+		out, signErr := s.downloadS3.PresignGetObject(r.Context(), &s3.GetObjectInput{Bucket: aws.String(bucket.Bucket()), Key: aws.String(objectKey)}, func(o *s3.PresignOptions) { o.Expires = downloadURLTTL })
 		err = signErr
 		if err == nil {
 			signed = out.URL
@@ -240,7 +286,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "sign download", err)
 		return
 	}
-	_, err = s.store.ChargeDownload(r.Context(), store.DownloadCharge{Team: team, Bytes: object.Size, Now: time.Now(), FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
+	_, err = s.store.ChargeDownload(r.Context(), store.DownloadCharge{Team: team, Bytes: objectSize, Now: time.Now(), FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded})
 	var capErr *store.DownloadCapError
 	switch {
 	case errors.As(err, &capErr):
@@ -251,5 +297,5 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "charge signed download", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, DataDownloadResponse{URL: signed, SHA256: digest, Size: object.Size, Expires: expires})
+	writeJSON(w, http.StatusOK, DataDownloadResponse{URL: signed, SHA256: digest, Size: objectSize, Expires: expires})
 }

@@ -82,6 +82,12 @@ const DefaultRunnersPerToken = 64
 const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
 const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
 const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
+type DirectUploadResponse struct {
+	UploadID  string
+	URL       string
+	Headers   map[string]string
+	ExpiresAt time.Time
+}
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
@@ -360,6 +366,7 @@ func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
+func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
@@ -407,6 +414,8 @@ type ServicesResponse struct {
 	Dashboard string
 
 	MultiTeam bool
+
+	DirectData bool
 }
 type SourceTokenResponse struct {
 	Token      string

@@ -43,6 +43,8 @@ type ServicesResponse struct {
 	// cache's refresh and seed routes take the cache's operator token, which
 	// no team member holds there, so a CLI skips them.
 	MultiTeam bool `json:"multi_team,omitempty"`
+	// DirectData advertises S3-backed signed data routes for claimed runs.
+	DirectData bool `json:"direct_data,omitempty"`
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
@@ -51,13 +53,14 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	if downloadViaIngress(r) && s.downloadCDN == nil {
 		downloadURL = ""
 	}
-	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" {
+	if s.cachePodURL == "" && s.logsURL == "" && s.dashboardURL == "" && !multiTeam && downloadURL == "" && s.directUploads == nil {
 		http.Error(w, "no services announced", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ServicesResponse{
 		DataDownloadURL: downloadURL,
+		DirectData:      s.directUploads != nil,
 		CachePod:        s.cachePodURL,
 		Logs:            s.logsURL,
 		Dashboard:       s.dashboardURL,

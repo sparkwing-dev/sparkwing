@@ -281,7 +281,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		adoptTriggerBaseline(ctx, opts, trigger, filepath.Dir(sparkwingDir), sha, grant, logger)
 	}
 
-	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, logger)
+	binary, buildErr := triggerBuildOrFetchBinary(ctx, sparkwingDir, opts, grant, trigger.ID, logger)
 	if buildErr != nil {
 		shipCompileOutput(ctx, opts, trigger.ID, buildErr, logger)
 		return awaitHeartbeat(), buildErr
@@ -546,7 +546,7 @@ func (b triggerBinary) release() {
 	}
 }
 
-func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) (triggerBinary, error) {
+func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts TriggerLoopOptions, cacheGrant, runID string, logger *slog.Logger) (triggerBinary, error) {
 	start := time.Now()
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
@@ -568,7 +568,7 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	}
 	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
 		if binaryCacheURL != "" || cacheGrant != "" {
-			if fetchErr := bincache.TryBinaryPreferSigned(ctx, opts.ControllerURL, opts.Token, cacheGrant, binaryCacheURL, key, tempPath); fetchErr == nil {
+			if fetchErr := bincache.TryBinaryPreferred(ctx, opts.ControllerURL, opts.Token, cacheGrant, runID, binaryCacheURL, key, tempPath); fetchErr == nil {
 				fetched = true
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
@@ -581,8 +581,8 @@ func triggerBuildOrFetchBinary(ctx context.Context, sparkwingDir string, opts Tr
 	if err != nil {
 		return triggerBinary{}, err
 	}
-	if published && compiled && binaryCacheURL != "" {
-		if err := bincache.UploadBinary(ctx, binaryCacheURL, cacheGrant, key, lease.Path()); err != nil {
+	if published && compiled && cacheGrant != "" {
+		if err := bincache.UploadBinaryPreferred(ctx, opts.ControllerURL, cacheGrant, runID, binaryCacheURL, key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

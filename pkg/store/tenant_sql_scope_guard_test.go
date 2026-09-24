@@ -16,6 +16,8 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
+	"(*Store).PruneExpiredUploads":      "the hourly storage pass releases expired pending uploads for every team",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
 	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
@@ -184,7 +186,6 @@ var unportedSQL = []string{
 	"(*Store).LookupSession",
 	"(*Store).LookupToken",
 	"(*Store).NodeClaimFenceIsLive",
-	"(*Store).NodeClaimFenceNodeForRun",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
 	"(*Store).NodeExecutionAttemptIsLive",
 	"(*Store).NodeSettlement",
