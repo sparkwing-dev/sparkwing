@@ -861,6 +861,9 @@ unlock.
 
 ### Fixed
 
+- **dashboard:** A GitHub App repository access update returns to the signed-in
+  team's GitHub tab and confirms the update instead of showing sign-in.
+
 - **warm-pool + controller:** externally executed nodes share one status poll
   per run with bounded backoff. Run and trigger heartbeats and node touch
   requests stay available when a token's request budget is exhausted, so

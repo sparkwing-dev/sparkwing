@@ -329,8 +329,8 @@ func TestGitHubAppSetupExplainsAnInstallAwaitingApproval(t *testing.T) {
 	}
 
 	update := githubAppReturn(handler, "/github/app/setup", url.Values{"installation_id": {"42"}, "setup_action": {"update"}}, nil, false)
-	if update.Code != http.StatusSeeOther || update.Header().Get("Location") != githubAppSettingsPath {
-		t.Fatalf("update from github.com = %d %q, want 303 to the settings page", update.Code, update.Header().Get("Location"))
+	if update.Code != http.StatusOK || !strings.Contains(update.Body.String(), githubAppSettingsPath+"?access_updated=1") {
+		t.Fatalf("update from github.com = %d %q, want a same-origin navigation page", update.Code, update.Body.String())
 	}
 }
 

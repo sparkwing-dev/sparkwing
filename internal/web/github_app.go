@@ -127,10 +127,16 @@ func githubAppSetupHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		flow, ok := readGitHubAppFlow(r, secure)
-		// hack: GitHub also sends a change made on github.com here, with no state; the
-		// repositories are read from GitHub when they matter, so nothing is left to do.
+		// safety: a cross-site redirect withholds the Strict session cookie; a page on
+		// this origin makes the next navigation carry it.
 		if !ok && query.Get("state") == "" && query.Get("setup_action") == "update" {
-			http.Redirect(w, r, githubAppSettingsPath, http.StatusSeeOther)
+			renderFlowPage(w, http.StatusOK, flowPage{
+				Title:       "Repository access updated on GitHub",
+				Message:     "Returning to your team's GitHub settings.",
+				Refresh:     githubAppSettingsPath + "?access_updated=1",
+				ActionHref:  githubAppSettingsPath + "?access_updated=1",
+				ActionLabel: "Continue to GitHub settings",
+			})
 			return
 		}
 		if !ok {
