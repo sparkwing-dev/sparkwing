@@ -302,6 +302,21 @@ func TestIsDirective(t *testing.T) {
 	}
 }
 
+func TestExternalBoundaryMarkerOnlyBelongsInTests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "widget.go")
+	src := "package widget\n// sleepcheck:external-boundary unused marker\nfunc helper() {}\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].line != 2 {
+		t.Fatalf("production marker verdict = %v, want one rejection", got)
+	}
+}
+
 func TestCheckFile_DirectivesDoNotCloakNarration(t *testing.T) {
 	src := `package widget
 

@@ -7,6 +7,9 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/gatescope"
 )
 
 type externalBoundary struct {
@@ -67,7 +70,19 @@ func approvedWaits(root string, rules []externalBoundary) (map[string]map[source
 				continue
 			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
+				clause, ok := node.(*ast.CommClause)
+				if !ok {
+					return true
+				}
+				statement, ok := clause.Comm.(*ast.ExprStmt)
+				if !ok {
+					return true
+				}
+				receive, ok := statement.X.(*ast.UnaryExpr)
+				if !ok || receive.Op != token.ARROW {
+					return true
+				}
+				call, ok := receive.X.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
@@ -112,4 +127,33 @@ func withoutApproved(findings []finding, allowed map[string]map[sourcePosition]b
 		}
 	}
 	return out
+}
+
+func unconsumedBoundaryMarkers(root string, allowed map[string]map[sourcePosition]bool) ([]finding, error) {
+	var unused []finding
+	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			return
+		}
+		for _, group := range file.Comments {
+			for _, comment := range group.List {
+				if !strings.HasPrefix(comment.Text, "// sleepcheck:external-boundary") {
+					continue
+				}
+				line := fset.Position(comment.Pos()).Line
+				consumed := false
+				for position := range allowed[rel] {
+					if position.line == line+1 {
+						consumed = true
+					}
+				}
+				if !consumed {
+					unused = append(unused, finding{file: rel, line: line, form: "unapproved external-boundary marker"})
+				}
+			}
+		}
+	})
+	return unused, err
 }

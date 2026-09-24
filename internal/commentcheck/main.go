@@ -171,7 +171,7 @@ func checkFile(path string) ([]violation, error) {
 			continue
 		}
 		first := cg.List[0].Text
-		if isDirective(first) {
+		if isDirective(first) && (!strings.HasPrefix(first, "// sleepcheck:external-boundary") || strings.HasSuffix(path, "_test.go")) {
 			for _, comment := range cg.List[1:] {
 				if isDirective(comment.Text) {
 					continue

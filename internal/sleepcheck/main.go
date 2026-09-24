@@ -102,6 +102,11 @@ func main() {
 	}
 	allowed, stale := approvedWaits(root, approvedExternalBoundaries)
 	findings = withoutApproved(findings, allowed)
+	unusedMarkers, err := unconsumedBoundaryMarkers(root, allowed)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
+		os.Exit(2)
+	}
 
 	if *staged || *base != "" {
 		added, aerr := scopedAdds(root, *staged, *base)
@@ -128,7 +133,10 @@ func main() {
 		fmt.Printf("%s: approved external-boundary wait missing or changed in %s (%s)\n",
 			rule.file, rule.function, rule.duration)
 	}
-	if len(findings) > 0 || len(unread) > 0 || len(stale) > 0 {
+	for _, marker := range unusedMarkers {
+		fmt.Printf("%s:%d: %s\n", marker.file, marker.line, marker.form)
+	}
+	if len(findings) > 0 || len(unread) > 0 || len(stale) > 0 || len(unusedMarkers) > 0 {
 		os.Exit(1)
 	}
 	fmt.Println("sleepcheck: clean")

@@ -339,9 +339,10 @@ file. Other syntax and workflow checks remain active.
   The former prevent a test from hanging if a pod ignores a refused claim;
   the latter bound cleanup of an external runner and avoid a busy HTTP loop.
   Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
-  above it. The checker allows only the listed path, function, duration and
-  exact marker, and fails if an exception disappears or changes. New waits
-  and sleeps still fail.
+  above its select receive arm. The checker allows only the listed path,
+  function, duration, select arm and exact marker, and fails if an exception
+  disappears or changes or a marker has no approved wait. New waits and sleeps
+  still fail.
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
