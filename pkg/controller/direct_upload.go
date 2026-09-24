@@ -305,7 +305,7 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errors.New("this claimant cannot commit the upload"))
 		return
 	}
-	if caller.pendingTrigger && !strings.HasPrefix(u.Key, "bin/") {
+	if caller.pendingTrigger && !validDirectKey("binary", u.Key, u.SHA256) {
 		writeError(w, http.StatusForbidden, errors.New("a pending trigger can commit only binary cache uploads"))
 		return
 	}
