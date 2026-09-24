@@ -40,6 +40,37 @@ body {
   color: var(--foreground);
 }
 
+.pane-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+}
+
+.pane-scrollbar[data-scrolling="true"] {
+  scrollbar-color: var(--accent) transparent;
+}
+
+.pane-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pane-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pane-scrollbar::-webkit-scrollbar-button {
+  display: none;
+}
+
+.pane-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: var(--radius-control);
+}
+
+.pane-scrollbar[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  background: var(--accent);
+}
+
 @keyframes ping-once {
   0% {
     transform: scale(1);

@@ -1184,13 +1184,36 @@ test("runs and nodes collapse into selectable rails and remember the viewer's ch
   await expect(page).toHaveURL(/node=verify/);
   await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
 
-  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
   await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
   await expect(page.locator('[data-run-id="run-20260827-001"]')).toBeVisible();
+  await expect.poll(async () => [
+    await page.locator("#runs-column").evaluate((pane) => pane.getBoundingClientRect().width),
+    await page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width),
+  ]).toEqual([208, 208]);
   await page.reload();
   await expect(runsRail).toHaveCount(0);
-  await page.getByRole("button", { name: "Collapse runs and nodes" }).click();
+  await expect(nodesRail).toHaveCount(0);
+  const collapseRuns = page.getByRole("button", { name: "Collapse Runs" });
+  await expect(collapseRuns).toHaveAttribute("title", "Collapse Runs");
+  await expect(collapseRuns.locator("svg")).toBeVisible();
+  await expect(collapseRuns).toHaveText("");
+  await collapseRuns.focus();
+  await page.keyboard.press("Enter");
   await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect(nodesRail).toHaveCount(0);
+  await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
+  await expect(runsRail.locator('[data-rail-id="run-20260827-001"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse Nodes" }).click();
+  await expect(nodesRail.locator("[data-rail-id]")).toHaveCount(1);
+  await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
+  await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await expect(page).toHaveURL(/node=verify/);
 });
 
 test("runs columns follow the viewport until the viewer chooses a width", async ({ page }) => {
@@ -1203,15 +1226,57 @@ test("runs columns follow the viewport until the viewer chooses a width", async 
   const tab = page.getByRole("button", { name: "Activity" });
   const tabY = await tab.evaluate((element) => element.getBoundingClientRect().top);
   await expect(page.getByLabel("Runs rail")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Collapse runs and nodes" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Collapse Runs" })).toBeVisible();
 
   await page.setViewportSize({ width: 1000, height: 800 });
   await expect(page.getByLabel("Runs rail")).toBeVisible();
   expect(await tab.evaluate((element) => element.getBoundingClientRect().top)).toBe(tabY);
-  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
   await expect(page.getByLabel("Runs rail")).toHaveCount(0);
   await page.setViewportSize({ width: 900, height: 800 });
   await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+});
+
+test("Runs and Nodes show slim scroll thumbs during keyboard scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 600 });
+  const runs = Array.from({ length: 40 }, (_, index) => ({
+    ...finishedRun,
+    id: `run-scroll-${index}`,
+    started_at: isoFromNow(-index * 60_000),
+  }));
+  const nodes = Array.from({ length: 40 }, (_, index) => ({
+    id: `node-${index}`,
+    status: "success",
+    outcome: "success",
+    duration_ms: 1000,
+  }));
+  await installMockAPI(page, {
+    runs,
+    details: { [runs[0].id]: { run: runs[0], nodes } },
+  });
+  await page.goto(`/runs?run=${runs[0].id}`);
+
+  for (const pane of [page.getByLabel("Runs pane"), page.getByLabel("Nodes pane")]) {
+    await expect(pane).toHaveAttribute("data-scrolling", "false");
+    const before = await pane.evaluate((element) => ({
+      width: element.clientWidth,
+      top: element.scrollTop,
+      color: getComputedStyle(element).getPropertyValue("scrollbar-color"),
+    }));
+    await pane.focus();
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before.top);
+    await expect(pane).toHaveAttribute("data-scrolling", "true");
+    await expect(pane).toBeFocused();
+    const active = await pane.evaluate((element) => ({
+      width: element.clientWidth,
+      color: getComputedStyle(element).getPropertyValue("scrollbar-color"),
+    }));
+    expect(active.width).toBe(before.width);
+    expect(active.color).not.toBe(before.color);
+    await expect(pane).toHaveAttribute("data-scrolling", "false", { timeout: 3000 });
+    await expect.poll(() => pane.evaluate((element) => getComputedStyle(element).getPropertyValue("scrollbar-color"))).toBe(before.color);
+  }
 });
 
 test("renders live structured node logs", async ({ page }) => {
