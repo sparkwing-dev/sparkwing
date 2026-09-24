@@ -1237,6 +1237,41 @@ test("runs columns follow the viewport until the viewer chooses a width", async 
   await expect(page.getByLabel("Runs rail")).toHaveCount(0);
 });
 
+test("starting a run from the middle pane state keeps Nodes expanded", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse Runs" }).click();
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await page.getByRole("button", { name: "+ Start a run" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
+});
+
+test("Tab leaves focused Runs and Nodes panes without changing detail tabs", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const summary = page.locator('[data-tab-key="summary"]');
+  await expect(summary).toHaveClass(/border-cyan-400/);
+  for (const [name, key] of [["Runs pane", "Tab"], ["Nodes pane", "Shift+Tab"]] as const) {
+    const pane = page.getByLabel(name);
+    await pane.focus();
+    await page.keyboard.press(key);
+    await expect(summary).toHaveClass(/border-cyan-400/);
+    expect(await pane.evaluate((element) => document.activeElement === element)).toBe(false);
+  }
+});
+
 test("Runs and Nodes show slim scroll thumbs during keyboard scrolling", async ({ page }) => {
   await page.setViewportSize({ width: 1300, height: 600 });
   const runs = Array.from({ length: 40 }, (_, index) => ({

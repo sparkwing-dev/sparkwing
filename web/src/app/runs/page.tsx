@@ -595,8 +595,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const showNodesRail = nodesCollapsed || !nodesFullReady;
   const setColumnsMode = (next: ColumnsMode) => {
     if (next === "expanded") {
-      setRunsFullReady(false);
-      setNodesFullReady(false);
+      setRunsFullReady(!runsCollapsed);
+      setNodesFullReady(!nodesCollapsed);
     }
     setColumnsPreference(next);
     if (next === "expanded" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -674,6 +674,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         tag === "TEXTAREA" ||
         tag === "SELECT" ||
         t?.closest('button, a, [role="button"], [role="link"]') ||
+        t?.closest(".pane-scrollbar") ||
         t?.isContentEditable
       )
         return;
