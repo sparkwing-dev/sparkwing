@@ -33,10 +33,14 @@ export default function Nav() {
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
   const team = useTeamState();
+  const admissionTabs =
+    team.status === "single-team"
+      ? tabs
+      : tabs.filter((tab) => tab.href !== "/queue" && tab.href !== "/capacity");
   const visibleTabs =
     team.status === "ready"
-      ? [...tabs.slice(0, -1), teamTab, tabs[tabs.length - 1]]
-      : tabs;
+      ? [...admissionTabs.slice(0, -1), teamTab, admissionTabs[admissionTabs.length - 1]]
+      : admissionTabs;
 
   useEffect(() => {
     let cancelled = false;
