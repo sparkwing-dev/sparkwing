@@ -14,13 +14,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type githubAppRepoRef struct {
-	ID       int64  `json:"id"`
-	FullName string `json:"full_name"`
+	ID            int64  `json:"id"`
+	FullName      string `json:"full_name"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 type githubAppDelivery struct {
@@ -433,6 +437,15 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		githubAppIgnored(w, "the event predates this team's connection of the installation")
 		return
 	}
+	var cronStatus int
+	var cronErr error
+	var cronSkip string
+	if event == "push" && intake.branch != "" && intake.branch == env.Repository.DefaultBranch {
+		cronStatus, cronSkip, cronErr = s.reconcileGitHubAppCrons(r, in, tenant, repo, intake)
+		if cronErr != nil {
+			s.logger.Warn("github app schedule reconciliation failed", "team", string(in.Team), "repo", repo.Slug(), "err", cronErr)
+		}
+	}
 	subs, err := tenant.GitHubAppTriggersFor(ctx, env.Installation.ID, env.Repository.ID)
 	if err != nil {
 		s.writeInternalError(w, r, "github app triggers", err)
@@ -445,10 +458,68 @@ func (s *Server) handleGitHubAppRunEvent(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if len(planned) == 0 {
+		if cronErr != nil {
+			writeError(w, cronStatus, cronErr)
+			return
+		}
+		if cronSkip != "" {
+			githubAppIgnored(w, cronSkip)
+			return
+		}
 		githubAppIgnored(w, "no pipeline of this team subscribes to "+event+" on "+repo.Slug()+" for this branch")
 		return
 	}
 	s.startGitHubAppRuns(w, r, in, tenant, env, repo, event, delivery, body, planned)
+}
+
+func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInstallation,
+	tenant *store.Tenant, repo store.GitHubRepo, intake githubAppIntake,
+) (int, string, error) {
+	// safety: two push handlers on one controller must check GitHub's current
+	// head and write in the same order, or an older delivery can restore its pin.
+	s.githubApp.cronMu.Lock()
+	defer s.githubApp.cronMu.Unlock()
+	snapshot, err := s.githubApp.client.FileAtDefaultHead(r.Context(), in.InstallationID, repo.Owner, repo.Name,
+		".sparkwing/"+projectconfig.Filename)
+	if err != nil {
+		return http.StatusBadGateway, "", fmt.Errorf("read GitHub schedule config: %w", err)
+	}
+	if snapshot.RepositoryID != repo.ID || snapshot.DefaultBranch != intake.branch || snapshot.HeadSHA != intake.sha {
+		return 0, "the push no longer names this repository's default-branch head", nil
+	}
+	var entries []crons.Declared
+	if snapshot.Found {
+		cfg, err := projectconfig.Parse(snapshot.Content)
+		if err != nil {
+			return http.StatusUnprocessableEntity, "", fmt.Errorf("read GitHub schedule config: %w", err)
+		}
+		for _, pipeline := range cfg.Pipelines {
+			for _, schedule := range pipeline.On.Schedule {
+				if schedule.Where == pipelines.ScheduleWhereController {
+					entries = append(entries, crons.Declared{Pipeline: pipeline.Name, Name: schedule.EffectiveName(), Trigger: schedule})
+				}
+			}
+		}
+	}
+	repoURL := "https://github.com/" + repo.Slug() + ".git"
+	svc := s.cronServiceFor(tenant, "github-app:"+strconv.FormatInt(in.InstallationID, 10))
+	for _, entry := range entries {
+		if err := s.cronIntervalRefusal(r, entry.Trigger.Cron); err != nil {
+			return http.StatusUnprocessableEntity, "", err
+		}
+	}
+	if len(entries) > 0 {
+		if status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, len(entries)); err != nil {
+			return status, "", err
+		}
+	}
+	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{RepoURL: repoURL, Branch: intake.branch, SHA: intake.sha, Entries: entries})
+	if err != nil {
+		return http.StatusInternalServerError, "", fmt.Errorf("arm GitHub App schedules: %w", err)
+	}
+	s.logger.Info("github app schedules reconciled", "team", string(in.Team), "repo", repo.Slug(),
+		"sha", intake.sha, "armed", report.Armed, "refreshed", report.Refreshed, "withdrawn", report.Withdrawn)
+	return 0, "", nil
 }
 
 func githubAppBranchMatches(patterns []string, branch string) bool {

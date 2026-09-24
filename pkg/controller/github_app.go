@@ -35,6 +35,7 @@ type githubAppState struct {
 	client   *githubapp.Client
 	stateKey []byte
 	checks   *githubCheckReporter
+	cronMu   sync.Mutex
 
 	// safety: GitHub's answer for which installation covers a repository is
 	// read on every run and token, so it is kept briefly rather than asked

@@ -4,6 +4,7 @@ The Sparkwing GitHub App connects a team to the GitHub repositories it controls.
 
 - push, pull request, release and branch runs from the App's webhook, for the pipelines the team subscribes to each repository;
 - source for cloud runners through a short-lived installation token restricted to one repository and `contents: read`, plus the repositories a team owner listed for it ([extra repositories](git-credentials.md#extra-repositories));
+- automatic controller cron arming from `on.schedule` declarations with `where: controller` on a pushed default branch, with no separate Team switch;
 - a check run on the commit each of those runs builds, and a re-run when someone re-runs it from GitHub.
 
 A deployment runs one App. Its private key stays in the controller, which mints every token it needs and hands out only tokens restricted to a single repository.

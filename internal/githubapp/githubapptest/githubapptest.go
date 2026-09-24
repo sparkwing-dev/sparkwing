@@ -36,9 +36,10 @@ const WebhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.
 type Repo struct {
-	ID       int64
-	FullName string
-	Private  bool
+	ID            int64
+	FullName      string
+	Private       bool
+	DefaultBranch string
 }
 
 // Installation is one installation of the App.
@@ -100,18 +101,20 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
-	URL     string
-	Key     *rsa.PrivateKey
-	t       testing.TB
-	mu      sync.Mutex
-	insts   map[int64]*Installation
-	codes   map[string]*userCode
-	users   map[string]*userCode
-	tokens  map[string]*issuedToken
-	commits map[string]string
-	minted  []MintedToken
-	stats   []Status
-	checks  []CheckRunCall
+	URL          string
+	Key          *rsa.PrivateKey
+	t            testing.TB
+	mu           sync.Mutex
+	insts        map[int64]*Installation
+	codes        map[string]*userCode
+	users        map[string]*userCode
+	tokens       map[string]*issuedToken
+	commits      map[string]string
+	files        map[string][]byte
+	failContents int
+	minted       []MintedToken
+	stats        []Status
+	checks       []CheckRunCall
 	// checkRuns maps a check run id to the call that created it.
 	checkRuns  map[int64]CheckRunCall
 	failChecks int
@@ -131,6 +134,7 @@ func New(t testing.TB) *GitHub {
 		users:     map[string]*userCode{},
 		tokens:    map[string]*issuedToken{},
 		commits:   map[string]string{},
+		files:     map[string][]byte{},
 		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
@@ -141,6 +145,8 @@ func New(t testing.TB) *GitHub {
 	mux.HandleFunc("GET /app/installations/{id}", g.appOnly(g.handleInstallation))
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", g.appOnly(g.handleMint))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/installation", g.appOnly(g.handleRepoInstallation))
+	mux.HandleFunc("GET /repos/{owner}/{repo}", g.handleRepoMetadata)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/contents/{path...}", g.handleContents)
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
 	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
@@ -180,6 +186,70 @@ func (g *GitHub) SetCommit(repo, ref, sha string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.commits[strings.ToLower(repo)+"/"+ref] = sha
+}
+
+// SetFile makes path available at sha, or removes it when content is nil.
+func (g *GitHub) SetFile(repo, sha, path string, content []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	key := strings.ToLower(repo) + "/" + sha + "/" + path
+	if content == nil {
+		delete(g.files, key)
+		return
+	}
+	g.files[key] = append([]byte(nil), content...)
+}
+
+// FailContents makes the next n file reads fail as a GitHub API error.
+func (g *GitHub) FailContents(n int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failContents = n
+}
+
+func (g *GitHub) handleRepoMetadata(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, candidate := range g.insts[tok.installation].Repos {
+		if strings.EqualFold(candidate.FullName, repo) {
+			branch := candidate.DefaultBranch
+			if branch == "" {
+				branch = "main"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"id": candidate.ID, "default_branch": branch})
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+}
+
+func (g *GitHub) handleContents(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	g.mu.Lock()
+	if g.failContents > 0 {
+		g.failContents--
+		g.mu.Unlock()
+		writeJSON(w, http.StatusBadGateway, map[string]string{"message": "Bad Gateway"})
+		return
+	}
+	data, ok := g.files[repo+"/"+r.URL.Query().Get("ref")+"/"+r.PathValue("path")]
+	g.mu.Unlock()
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"encoding": "base64", "content": base64.StdEncoding.EncodeToString(data)})
 }
 
 func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {

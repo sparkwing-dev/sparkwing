@@ -134,6 +134,15 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	cfg, err := Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// Parse validates a project config read from a source other than a checkout.
+func Parse(raw []byte) (*Config, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	var cfg Config
@@ -141,10 +150,10 @@ func Load(path string) (*Config, error) {
 		if errors.Is(err, io.EOF) {
 			return &Config{}, nil
 		}
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse sparkwing.yaml: %w", err)
 	}
 	if err := cfg.normalize(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 	return &cfg, nil
 }

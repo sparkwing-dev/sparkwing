@@ -22,6 +22,11 @@ unlock.
 
 ### Added
 
+- **controller + GitHub App:** A push of the current default-branch head reads
+  `.sparkwing/sparkwing.yaml` with a repository-scoped `contents: read` token
+  and arms its `where: controller` schedules for the connected team. Removing
+  a declaration withdraws it; unreadable config leaves prior schedules armed.
+  Cloud Crons shows the automatic setup path. Local crons remain manual.
 - **controller + runner:** Signed downloads and direct S3 uploads keep binary
   and artifact bytes off the controller. A runner reserves storage, PUTs a
   checksummed object to `pending/`, then commits it under an immutable

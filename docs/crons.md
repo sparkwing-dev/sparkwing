@@ -366,7 +366,27 @@ sentence status prints when any is non-zero.
 ## Controller schedules
 
 An entry declared `where: controller` fires from a controller, not from any
-host. A host arms nothing for it; it pushes it:
+host. A host arms nothing for it. When the repository is connected to the
+Sparkwing GitHub App, a push of its current default-branch head automatically
+arms its controller entries; no Team switch or CLI command is needed. The App
+reads `.sparkwing/sparkwing.yaml` at that commit with a token restricted to the
+repository and `contents: read`. A later default-branch push that removes an
+entry withdraws it, while an unreadable or invalid config leaves the last
+armed schedules in place. Tags, pull requests, other branches and old pushes
+do not change controller schedules. Scheduled runs still pass the team's
+credit and admission checks when they fire.
+
+Auto-arming checks the live default-branch head before writing, and one
+controller serializes those checks and writes. Controllers sharing a store do
+not serialize each other; use one controller for GitHub App cron auto-arming
+until store-level ordering is available.
+
+Schedule rows still identify their repository by clone URL. If a repository is
+renamed or transferred, disarm schedules at its old URL; a push at the new URL
+does not withdraw them. Automatic repository-ID reconciliation is not yet
+available.
+
+For a repository without the App connection, an operator can push entries:
 
 ```bash
 sparkwing crons install --profile prod --repo ~/code/my-app

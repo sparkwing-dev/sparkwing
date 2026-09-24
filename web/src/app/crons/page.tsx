@@ -171,7 +171,9 @@ function CronsRoute() {
           <HealthBannerCard overview={overview} />
           {schedules.length === 0 ? (
             <>
-              <EmptyState />
+              <EmptyState
+                cloud={overview?.health.timer.detail === "controller loop"}
+              />
               {selected && (
                 <DetailPane
                   detail={detail}
@@ -921,19 +923,33 @@ function Skeleton() {
   );
 }
 
-function EmptyState() {
+function EmptyState({ cloud }: { cloud: boolean }) {
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-6 flex items-start gap-3">
       <span className="w-2.5 h-2.5 rounded-full bg-[var(--muted)] shrink-0 mt-1.5" />
       <div>
         <div className="text-sm text-[var(--foreground)]">
-          No schedules are armed on this host.
+          {cloud
+            ? "No controller schedules are armed yet."
+            : "No schedules are armed on this host."}
         </div>
         <div className="text-xs text-[var(--muted)] mt-1">
-          Declare <code className="font-mono">on: schedule:</code> in a
-          repo&apos;s <code className="font-mono">sparkwing.yaml</code>, then
-          run <code className="font-mono">sparkwing crons install</code> in that
-          repo to arm it here.
+          {cloud ? (
+            <>
+              Connect the GitHub App to a repository and declare an{" "}
+              <code className="font-mono">on.schedule</code> entry with{" "}
+              <code className="font-mono">where: controller</code> on its
+              default branch. The next push arms it automatically.
+            </>
+          ) : (
+            <>
+              Declare <code className="font-mono">on: schedule:</code> in a
+              repo&apos;s <code className="font-mono">sparkwing.yaml</code>,
+              then run{" "}
+              <code className="font-mono">sparkwing crons install</code> in that
+              repo to arm it here.
+            </>
+          )}
         </div>
       </div>
     </div>
