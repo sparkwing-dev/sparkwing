@@ -117,7 +117,7 @@ func TestGitHubActionsRunnerClaimsTriggersInProcess(t *testing.T) {
 func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var running atomic.Bool
-		polling := make(chan struct{}, 1)
+		polling := make(chan time.Time, 100)
 		responses := []claimResp{{node: fakeNode("a")}}
 		for range 100000 {
 			responses = append(responses, claimResp{})
@@ -125,12 +125,20 @@ func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
 		stub := &stubClaimer{responses: responses, observe: func() {
 			if running.Load() {
 				select {
-				case polling <- struct{}{}:
+				case polling <- time.Now():
 				default:
 				}
 			}
 		}}
 		release := make(chan struct{})
+		released := false
+		releaseNode := func() {
+			if !released {
+				close(release)
+				released = true
+			}
+		}
+		defer releaseNode()
 		started := make(chan struct{})
 		exec := func(ctx context.Context, n *store.Node, holderID string) {
 			running.Store(true)
@@ -156,14 +164,27 @@ func TestRunPoolLoop_IdleExitWaitsForHeldNodesThenLeaves(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("the claimed node never started")
 		}
+		heldAt := time.Now()
+		held, stopHeld := context.WithTimeout(ctx, 2*cfg.IdleExit)
+		defer stopHeld()
+		<-held.Done()
+		synctest.Wait()
+		if ctx.Err() != nil {
+			t.Fatal("the loop stopped before the held node passed idle exit")
+		}
 		select {
-		case <-polling:
 		case <-done:
 			t.Fatal("the loop exited while a node was still held")
-		case <-ctx.Done():
-			t.Fatal("the loop stopped polling while a node was still held")
+		default:
 		}
-		close(release)
+		latestPoll := time.Time{}
+		for len(polling) > 0 {
+			latestPoll = <-polling
+		}
+		if latestPoll.Before(heldAt.Add(cfg.IdleExit)) {
+			t.Fatal("the loop stopped polling before the held node passed idle exit")
+		}
+		releaseNode()
 		exitCtx, stopExit := context.WithTimeout(context.Background(), 2*time.Second)
 		defer stopExit()
 		select {
