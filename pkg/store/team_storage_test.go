@@ -270,6 +270,28 @@ func TestExpiredReservationsReleaseAndLateCommitsCount(t *testing.T) {
 	}
 }
 
+func TestExpiredZeroByteReservationIsRemoved(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 16<<10)
+	freeTeam(t, st, "team-a")
+	now := time.Now()
+	zero, err := reserve(st, "team-a", store.StorageCache, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ReleaseExpiredStorage(t.Context(), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.DB().QueryRowContext(t.Context(),
+		storetest.Rebind(st, `SELECT COUNT(*) FROM storage_reservations WHERE id = ?`), zero.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expired zero-byte reservation remains: %d row", count)
+	}
+}
+
 // An overwrite that shrinks an object commits a negative size, and the count
 // never falls below zero.
 func TestCommitOfAShrinkingOverwriteNeverGoesNegative(t *testing.T) {
