@@ -861,6 +861,10 @@ unlock.
 
 ### Fixed
 
+- **runner:** memoized nodes and queued concurrency groups run through off-cluster agents,
+  Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
+  for its claimed node while the controller keeps keys within the runner's team.
+  Runner credentials can cancel a waiter on a run they claim.
 - **warm-pool + controller:** externally executed nodes share one status poll
   per run with bounded backoff. Run and trigger heartbeats and node touch
   requests stay available when a token's request budget is exhausted, so

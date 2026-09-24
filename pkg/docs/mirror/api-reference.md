@@ -29,7 +29,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `admin` |
+| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
 | `POST` | `/api/v1/concurrency/{key}/heartbeat` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/holder` | `runs.state` |

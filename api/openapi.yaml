@@ -1665,7 +1665,7 @@ paths:
   /api/v1/concurrency/{key}/cancel-waiter:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Drop one waiter from a key's queue.
       requestBody:

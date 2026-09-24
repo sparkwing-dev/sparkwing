@@ -239,8 +239,8 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 
 // A pipeline that declares a concurrency group or a memoized node moves its
 // slot from the process holding the run's claim, on the documented runner scope
-// set. Another bearer of the same scopes reaches none of it, and the two
-// cross-run routes stay admin.
+// set. Another bearer of the same scopes reaches none of it; force release
+// stays admin.
 func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -309,18 +309,20 @@ func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 		!strings.Contains(err.Error(), "controller 403: claim_required") {
 		t.Fatalf("ResolveWaiter on another run = %v, want 403 claim_required", err)
 	}
+	if _, err := stranger.CancelWaiter(ctx, key, trigger.ID, "build"); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("CancelWaiter on another run = %v, want 403 claim_required", err)
+	}
 
 	if _, err := c.ForceReleaseSuperseded(ctx, key); err == nil ||
 		!strings.Contains(err.Error(), "controller 403: missing_scope") {
 		t.Fatalf("ForceReleaseSuperseded on the runner scope set = %v, want 403 missing_scope", err)
 	}
-	if _, err := c.CancelWaiter(ctx, key, trigger.ID, "build"); err == nil ||
-		!strings.Contains(err.Error(), "controller 403: missing_scope") {
-		t.Fatalf("CancelWaiter on the runner scope set = %v, want 403 missing_scope", err)
-	}
-
 	if err := c.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err != nil {
 		t.Fatalf("ReleaseSlot holding the run's claim: %v", err)
+	}
+	if _, err := c.CancelWaiter(ctx, key, trigger.ID, "build"); err != nil {
+		t.Fatalf("CancelWaiter holding the run's claim: %v", err)
 	}
 
 	admin := client.NewWithToken(f.url, nil, adminRaw)
