@@ -697,7 +697,9 @@ unlock.
   and target 64 KiB per HTTP append, keeping a longer single line intact.
   Idle-tail appends start after 100 ms. A sequence
   range lets the logs service account for every line; failed batches count
-  every line dropped. Upgrade the logs service before runners and pipeline
+  every line dropped. Accepted-range retries on one live logs service write
+  one copy; a restart can still replay an ambiguously acknowledged batch.
+  Upgrade the logs service before runners and pipeline
   binaries. See [Batched log append protocol](docs/migrations/_unreleased.md#batched-log-append-protocol).
 
 - **controller (Breaking):** The hourly storage pass deletes cache objects older than

@@ -6,9 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func (f *archiveFixture) send(t *testing.T, method, path, bearer, body string, headers map[string]string) (int, string) {
@@ -118,6 +125,155 @@ func TestSequenceRangeAccountsForEveryLineAndRejectsFalseRanges(t *testing.T) {
 	}
 	if got := f.report(t, "Bearer a", "run-a", "build").Assess(done, late); got.State != StateComplete || got.Lines != 3 {
 		t.Fatalf("range verdict = %+v", got)
+	}
+}
+
+func TestRangeRejectsTrailingUnnumberedRecord(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	headers := map[string]string{LogStreamHeader: "range", LogSeqHeader: "1", LogSeqEndHeader: "2"}
+	code, _ := f.send(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", "one\ntwo\ntrailing", headers)
+	if code != http.StatusBadRequest {
+		t.Fatalf("malformed range body = %d, want 400", code)
+	}
+}
+
+func TestRetryOfCommittedRangeDoesNotDuplicateBody(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	path := "/api/v1/logs/run-a/build"
+	headers := map[string]string{LogStreamHeader: "range", LogSeqHeader: "1", LogSeqEndHeader: "2"}
+	for range 2 {
+		if code, body := f.send(t, http.MethodPost, path, "Bearer a", "one\ntwo\n", headers); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+	}
+	if code, body := f.send(t, http.MethodGet, path, "Bearer a", "", nil); code != http.StatusOK || body != "one\ntwo\n" {
+		t.Fatalf("retry returned %d %q, want one copy", code, body)
+	}
+}
+
+func TestPartialRangeOverlapIsRejectedBeforeWriting(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	path := "/api/v1/logs/run-a/build"
+	first := map[string]string{LogStreamHeader: "range", LogSeqHeader: "1", LogSeqEndHeader: "2"}
+	if code, body := f.send(t, http.MethodPost, path, "Bearer a", "one\ntwo\n", first); code != http.StatusNoContent {
+		t.Fatalf("first append = %d %s", code, body)
+	}
+	overlap := map[string]string{LogStreamHeader: "range", LogSeqHeader: "2", LogSeqEndHeader: "3"}
+	if code, _ := f.send(t, http.MethodPost, path, "Bearer a", "two\nthree\n", overlap); code != http.StatusUnprocessableEntity {
+		t.Fatalf("overlap = %d, want 422", code)
+	}
+	if code, body := f.send(t, http.MethodGet, path, "Bearer a", "", nil); code != http.StatusOK || body != "one\ntwo\n" {
+		t.Fatalf("after overlap = %d %q", code, body)
+	}
+}
+
+func TestAmbiguousCommittedRangeRetryStoresOneCopy(t *testing.T) {
+	s, err := New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var appends atomic.Int64
+	h := s.Handler()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/logs/run/node" && appends.Add(1) == 1 {
+			capture := httptest.NewRecorder()
+			h.ServeHTTP(capture, r)
+			if capture.Code != http.StatusNoContent {
+				http.Error(w, "underlying append failed", capture.Code)
+				return
+			}
+			http.Error(w, "upstream lost the acknowledgment", http.StatusBadGateway)
+			return
+		}
+		h.ServeHTTP(w, r)
+	}))
+	defer hs.Close()
+	c := NewClient(hs.URL, nil)
+	ctx := WithAppendSequenceRange(context.Background(), "range", 1, 2)
+	if err := c.Append(ctx, "run", "node", []byte("one\ntwo\n")); err == nil {
+		t.Fatal("first append should report the lost acknowledgment")
+	}
+	if err := c.Append(ctx, "run", "node", []byte("one\ntwo\n")); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := c.Read(context.Background(), "run", "node"); err != nil || string(body) != "one\ntwo\n" {
+		t.Fatalf("stored body = %q, err = %v", body, err)
+	}
+}
+
+func TestRetriedRangesStayInTheirExecutionAttempt(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	path := "/api/v1/logs/run-a/build"
+	for _, attempt := range []struct {
+		ordinal, start, end, body string
+	}{
+		{"1", "1", "2", "first\nsecond\n"},
+		{"2", "3", "4", "third\nfourth\n"},
+	} {
+		headers := map[string]string{
+			store.ClaimHolderHeader:     "holder",
+			store.ClaimGenerationHeader: "1",
+			store.AttemptOrdinalHeader:  attempt.ordinal,
+			LogStreamHeader:             "same-stream",
+			LogSeqHeader:                attempt.start,
+			LogSeqEndHeader:             attempt.end,
+		}
+		for range 2 {
+			if code, body := f.send(t, http.MethodPost, path, "Bearer a", attempt.body, headers); code != http.StatusNoContent {
+				t.Fatalf("attempt %s append = %d %s", attempt.ordinal, code, body)
+			}
+		}
+		selected := path + "?claim_generation=1&attempt=" + attempt.ordinal
+		if code, body := f.send(t, http.MethodGet, selected, "Bearer a", "", nil); code != http.StatusOK || body != attempt.body {
+			t.Fatalf("attempt %s read = %d %q", attempt.ordinal, code, body)
+		}
+	}
+}
+
+func TestRangeRetryRepairsMissingAttemptOpenRecordWithoutWritingBody(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	path := "/api/v1/logs/run-a/build"
+	headers := func(ordinal, first, last string) map[string]string {
+		return map[string]string{
+			store.ClaimHolderHeader:     "holder",
+			store.ClaimGenerationHeader: "1",
+			store.AttemptOrdinalHeader:  ordinal,
+			LogStreamHeader:             "same-stream",
+			LogSeqHeader:                first,
+			LogSeqEndHeader:             last,
+		}
+	}
+	if code, body := f.send(t, http.MethodPost, path, "Bearer a", "first\nsecond\n", headers("1", "1", "2")); code != http.StatusNoContent {
+		t.Fatalf("first attempt = %d %s", code, body)
+	}
+	sealPath := filepath.Join(f.root, "runs", nodeSealPath("run-a", "build"))
+	saved := sealPath + ".held"
+	if err := os.Rename(sealPath, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(sealPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := f.send(t, http.MethodPost, path, "Bearer a", "third\nfourth\n", headers("2", "3", "4")); code != http.StatusInternalServerError {
+		t.Fatalf("blocked open record = %d, want 500", code)
+	}
+	if err := os.Remove(sealPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(saved, sealPath); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.send(t, http.MethodPost, path, "Bearer a", "third\nfourth\n", headers("2", "3", "4")); code != http.StatusNoContent {
+		t.Fatalf("retry = %d %s", code, body)
+	}
+	selected := path + "?claim_generation=1&attempt=2"
+	if code, body := f.send(t, http.MethodGet, selected, "Bearer a", "", nil); code != http.StatusOK || body != "third\nfourth\n" {
+		t.Fatalf("second attempt body = %d %q, want one copy", code, body)
+	}
+	report := f.report(t, "Bearer a", "run-a", "build")
+	wantFile := sealFileRel("run-a", appendIdentity{claimGeneration: 1, attemptOrdinal: 2}.path("run-a", "build"))
+	if report.UnconfirmedFiles != 0 || len(report.Streams) != 1 || !slices.Contains(report.Streams[0].Files, wantFile) {
+		t.Fatalf("repaired open record missing for %q: %+v", wantFile, report)
 	}
 }
 

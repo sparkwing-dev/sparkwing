@@ -575,6 +575,92 @@ func (ts *sealTrackers) snapshot(key string) (streamTracker, bool) {
 	return cp, true
 }
 
+type rangeState uint8
+
+const (
+	rangeFresh rangeState = iota
+	rangeDuplicate
+	rangeOverlap
+)
+
+// safety: a confirmed range is answered before its retry can consume quota or append bytes.
+// The node append lock held by the caller keeps this decision adjacent to observeSequence.
+func (s *Server) numberedRangeState(runID, nodeID string, seq appendSequence) rangeState {
+	s.seals.mu.Lock()
+	defer s.seals.mu.Unlock()
+	t := s.seals.m[trackerKey(runID, nodeID, seq.stream)]
+	if t == nil || seq.seq > t.highest {
+		return rangeFresh
+	}
+	if t.missing == 0 {
+		if seq.end <= t.highest {
+			return rangeDuplicate
+		}
+		return rangeOverlap
+	}
+	var represented int64
+	for _, gap := range t.gaps {
+		length := gap.To - gap.From + 1
+		if length > t.missing-represented {
+			return rangeOverlap
+		}
+		represented += length
+	}
+	if represented != t.missing {
+		return rangeOverlap
+	}
+	received := int64(0)
+	for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+		n := seq.seq + offset
+		if n > t.highest {
+			continue
+		}
+		missing := false
+		for _, gap := range t.gaps {
+			if n >= gap.From && n <= gap.To {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			received++
+		}
+	}
+	if received == 0 {
+		return rangeFresh
+	}
+	if received == seq.end-seq.seq+1 {
+		return rangeDuplicate
+	}
+	return rangeOverlap
+}
+
+// safety: an append can land before its new attempt's open record fails;
+// a confirmed retry repairs that metadata without writing the body twice.
+func (s *Server) ensureSequenceOpenRecord(root *os.Root, runID, nodeID, file, stream string) error {
+	recs, err := readSealRecords(root, runID, nodeID)
+	if err != nil {
+		return err
+	}
+	rel := sealFileRel(runID, file)
+	for _, rec := range recs {
+		if rec.Kind == recordOpen && rec.Stream == stream && rec.File == rel {
+			return nil
+		}
+	}
+	if err := s.appendSealRecord(root, runID, nodeID, sealRecord{
+		Kind: recordOpen, File: rel, Stream: stream, At: time.Now(),
+	}); err != nil {
+		return err
+	}
+	s.seals.mu.Lock()
+	if t := s.seals.m[trackerKey(runID, nodeID, stream)]; t != nil {
+		t.files[rel] = true
+	}
+	s.seals.mu.Unlock()
+	return nil
+}
+
 // observeSequence records one numbered append. The caller holds the
 // node's append lock, so the seal file and the tracker change together.
 func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq appendSequence) error {

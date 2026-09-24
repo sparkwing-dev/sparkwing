@@ -138,6 +138,12 @@ append names its first and last sequence numbers; the logs service checks
 the line count before recording that range. A failed batch counts every
 line in it as dropped. Deploy the logs service before a writer that sends
 ranges so older services do not miscount batched lines.
+While a logs service keeps its in-memory range tracker, retrying an accepted
+batch writes no second copy and consumes no extra log quota. A service restart
+or tracker eviction can lose that deduplication knowledge. If the append
+landed but its acknowledgment did not, a later retry can store the body
+again; the seal still counts unique sequence numbers, so its completeness
+state does not certify exactly one physical copy across that window.
 
 Readers judge each finished node's newest execution attempt from its
 seals, so a clean retry reads `complete` even when the attempt it
