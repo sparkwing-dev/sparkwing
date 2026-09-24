@@ -26,7 +26,7 @@ func TestSSHCredentialNeedsATmpfsInCloudMode(t *testing.T) {
 	repos := t.TempDir()
 	_, tip := makeBareRepoWithSparkwing(t, repos, "widgets", "main")
 	record := sshRecorder(t, repos, false)
-	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey, KnownHosts: testKnownHosts}
+	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey(t), KnownHosts: testKnownHosts}
 	checkout := func(tmpfsOnly bool) error {
 		return directCheckout(context.Background(), t.TempDir(), "ssh://git@git.example.invalid/widgets.git",
 			"main", tip, filepath.Join(t.TempDir(), "run"), directOptions{protocols: "ssh", cred: cred, keyTmpfsOnly: tmpfsOnly})
@@ -64,7 +64,7 @@ func TestSSHCredentialNeedsATmpfsInCloudMode(t *testing.T) {
 func TestSweepSSHKeyDirsRemovesOnlyLeftovers(t *testing.T) {
 	root := t.TempDir()
 	withKeyRoots(t, true, root)
-	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey, KnownHosts: testKnownHosts}
+	cred := DirectCredential{Kind: CredentialSSH, Host: "git.example.invalid", Secret: testDeployKey(t), KnownHosts: testKnownHosts}
 
 	// A crash drops the lock with the process; the directory and key stay.
 	crashed := filepath.Join(root, "sparkwing-git-crashed")
