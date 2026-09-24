@@ -56,6 +56,24 @@ test("keeps activity rows exactly two lines with long metadata and errors", asyn
   }
 });
 
+test("Home shows the latest default-branch failure and optional feature failures", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [
+      { ...finishedRun, id: "old-red", repo: "product", status: "failed", error: "old failure", started_at: "2026-08-27T18:00:00Z" },
+      { ...finishedRun, id: "new-green", repo: "owner/product", status: "success", started_at: "2026-08-27T18:02:00Z" },
+      { ...finishedRun, id: "current-red", repo: "owner/other", status: "failed", error: "current failure reason", started_at: "2026-08-27T18:03:00Z" },
+      { ...finishedRun, id: "feature-red", repo: "owner/product", git_branch: "feature/demo", status: "failed", error: "feature failure reason", started_at: "2026-08-27T18:04:00Z" },
+    ],
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Latest failed pipelines" })).toBeVisible();
+  await expect(page.getByText("current failure reason")).toBeVisible();
+  await expect(page.getByText("old failure")).toHaveCount(0);
+  await expect(page.getByText("feature failure reason")).toHaveCount(0);
+  await page.getByRole("checkbox", { name: "Include feature branches" }).check();
+  await expect(page.getByText("feature failure reason")).toBeVisible();
+});
+
 const finishedDetail = {
   run: finishedRun,
   nodes: [
