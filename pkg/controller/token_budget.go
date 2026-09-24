@@ -11,20 +11,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TokenRequestBudget bounds ordinary requests from one authenticated caller
-// across the controller's routes, and names the controller-wide
-// rate an operator wants to hear about. The per-runner budgets in
-// [RequestBudget] size a cooperating runner's loops; this one bounds the token
-// itself, which is what a caller varying the runner it claims to be still
-// spends from.
+// TokenRequestBudget bounds ordinary authenticated requests and signed-data
+// requests, and names the controller-wide rate an operator wants to hear about.
+// Signed-up teams share a bucket; the operator's team uses a bucket per token.
+// The per-runner budgets in [RequestBudget] size a cooperating runner's loops;
+// this budget still bounds a caller varying the runner it claims to be.
 //
 // Zero in either field leaves that guard off, which is what a controller
 // starts with.
 type TokenRequestBudget struct {
-	// PerTokenMinute caps ordinary requests one token may make per rolling minute.
+	// PerTokenMinute caps requests from one signed-up team or operator token
+	// per rolling minute, including signed-data requests made with claim grants.
 	// Past it a request is answered 429 with a Retry-After naming the refill
-	// delay. The budget is keyed the way the trigger cap is: the token prefix,
-	// or the client address for a caller carrying no token.
+	// delay. A caller carrying no token uses its client address.
 	PerTokenMinute int
 
 	// AlarmPerMinute is the request rate, counted across every caller, past
@@ -34,7 +33,7 @@ type TokenRequestBudget struct {
 	AlarmPerMinute int
 }
 
-// WithTokenRequestBudget installs b as the whole-API per-token budget and
+// WithTokenRequestBudget installs b as the controller request budget and
 // controller-wide rate alarm. Calling it with the zero budget turns both off.
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server {
 	s.tokenBudget = newTokenBudget(b)

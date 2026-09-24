@@ -125,7 +125,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if secondGrant == firstGrant {
-		t.Fatal("distinct claims minted the same grant")
+		t.Fatal("separate issuances minted the same grant")
 	}
 	reader, _, err := team.CreateToken(t.Context(), "reader", store.TokenKindUser, []string{ScopeRunsRead}, time.Hour, time.Now())
 	if err != nil {
@@ -133,7 +133,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 	}
 	s.WithAuthenticator(NewAuthenticator(s.store, 0))
 
-	call := func(path, grant, body string) int {
+	call := func(path, grant, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		if grant != "" {
 			req.Header.Set("Authorization", "Bearer "+grant)
@@ -141,7 +141,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, req)
-		return rec.Code
+		return rec
 	}
 	download := `{"kind":"binary","key":"bins/abc"}`
 	digest := strings.Repeat("a", 64)
@@ -159,8 +159,76 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 		{"/api/v1/data/download", reader, download, http.StatusTooManyRequests},
 		{"/api/v1/data/download", "", download, http.StatusUnauthorized},
 	} {
-		if got := call(step.path, step.grant, step.body); got != step.want {
-			t.Fatalf("%s grant=%t: status = %d, want %d", step.path, step.grant != "", got, step.want)
+		got := call(step.path, step.grant, step.body)
+		if got.Code != step.want {
+			t.Fatalf("%s grant=%t: status = %d, want %d", step.path, step.grant != "", got.Code, step.want)
+		}
+		if got.Code == http.StatusTooManyRequests && got.Header().Get("Retry-After") == "" {
+			t.Fatalf("%s: 429 has no Retry-After", step.path)
+		}
+	}
+}
+
+func TestSignedDataBudgetStopsStaleGrantBeforeClaimReads(t *testing.T) {
+	s, grant, _ := downloadFixture(t)
+	s.WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 1})
+	client := s3.NewFromConfig(aws.Config{Region: "us-west-2", Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")})
+	s.WithDirectUploads(client, "bucket", "cache")
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, _, err := team.CreateToken(t.Context(), "reader", store.TokenKindUser, []string{ScopeRunsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithAuthenticator(NewAuthenticator(s.store, 0))
+
+	first, _ := callDownload(t, s, grant, "bins/abc", false)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first grant signing = %d", first.Code)
+	}
+	ordinary := httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil)
+	ordinary.Header.Set("Authorization", "Bearer "+reader)
+	ordinaryAnswer := httptest.NewRecorder()
+	s.Handler().ServeHTTP(ordinaryAnswer, ordinary)
+	if ordinaryAnswer.Code != http.StatusTooManyRequests {
+		t.Fatalf("same-team ordinary request = %d, want 429", ordinaryAnswer.Code)
+	}
+	if ordinaryAnswer.Header().Get("Retry-After") == "" {
+		t.Fatal("same-team ordinary 429 has no Retry-After")
+	}
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_seq = 2 WHERE id = ?`, "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	call := func(path, bearer, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	digest := strings.Repeat("a", 64)
+	for _, step := range []struct {
+		path, bearer, body string
+		want               int
+	}{
+		{"/api/v1/data/download", grant, `{"kind":"binary","key":"bins/abc"}`, http.StatusTooManyRequests},
+		{"/api/v1/data/upload", grant, `{"kind":"artifact","key":"artifacts/blobs/` + digest + `","size":0,"sha256":"` + digest + `","run_id":"run-1"}`, http.StatusTooManyRequests},
+		{"/api/v1/data/commit", grant, `{"upload_id":"missing-upload","run_id":"run-1"}`, http.StatusTooManyRequests},
+		{"/api/v1/data/download", grant + "invalid", `{"kind":"binary","key":"bins/abc"}`, http.StatusUnauthorized},
+		{"/api/v1/data/upload", grant + "invalid", `{"kind":"artifact","key":"artifacts/blobs/` + digest + `","size":0,"sha256":"` + digest + `","run_id":"run-1"}`, http.StatusForbidden},
+	} {
+		got := call(step.path, step.bearer, step.body)
+		if got.Code != step.want {
+			t.Fatalf("%s: status = %d, want %d", step.path, got.Code, step.want)
+		}
+		if got.Code == http.StatusTooManyRequests && got.Header().Get("Retry-After") == "" {
+			t.Fatalf("%s: 429 has no Retry-After", step.path)
 		}
 	}
 }
