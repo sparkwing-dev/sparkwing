@@ -1,5 +1,20 @@
 # Migrating to the next release
 
+## Schema 72: storage commit receipts
+
+Back up the controller database before starting the upgraded controller.
+Schema 72 records each committed storage reservation by team, store, and ID
+for at least 24 hours. Hourly storage maintenance removes older receipts.
+A repeated commit during that window counts once. A repeated renewal
+returns its original next reservation while that reservation is active.
+A replay after pruning counts as a new commit.
+
+The first upgraded start records the `storage-commit-receipts-v1`
+requirement. An older controller refuses the database because it would count
+repeated commits again. To roll back, stop every controller, restore the
+database backup taken before this upgrade, then start the older build.
+Do not delete the requirement row from a live schema-72 database.
+
 ## Schema 71: GitHub App cron identity
 
 Back up the controller's PostgreSQL database or SQLite `state.db` before
@@ -47,7 +62,7 @@ own billing in the dashboard.
 
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v71 when the
+v0.60.0 runs schema v47. This release migrates the database to v72 when the
 controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
@@ -59,7 +74,7 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 71`,
+5. Verify: the startup line reads `runs-store schema 72`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.

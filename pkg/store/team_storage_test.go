@@ -258,6 +258,9 @@ func TestExpiredReservationsReleaseAndLateCommitsCount(t *testing.T) {
 	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: stale.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: later}); err != nil {
 		t.Fatalf("a late commit: %v", err)
 	}
+	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: stale.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: later}); err != nil {
+		t.Fatalf("a replay of the late commit: %v", err)
+	}
 	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 2<<10 || got.ReservedBytes != 12<<10 {
 		t.Fatalf("after a late commit = %+v, want its 2 KiB used beside the live 12 KiB reservation", got)
 	}
@@ -366,6 +369,89 @@ func TestCommitNamingAnotherTeamsReservationTouchesOnlyTheCommitter(t *testing.T
 	}
 	if got := usageOf(t, st, "team-a", store.StorageCache); got.ReservedBytes != 10 {
 		t.Fatalf("team-a after team-b released its reservation = %+v, want it still held", got)
+	}
+}
+
+func TestCommitReceiptUsesTeamInItsKey(t *testing.T) {
+	st := storetest.Open(t)
+	freeTeam(t, st, "team-a")
+	freeTeam(t, st, "team-b")
+	now := time.Now()
+	res, err := reserve(st, "team-a", store.StorageCache, 10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, team := range []store.Team{"team-b", "team-a"} {
+		c := store.StorageCommit{ID: res.ID, Team: team, Kind: store.StorageCache, Bytes: 10, Now: now}
+		for range 2 {
+			if err := st.CommitStorage(t.Context(), c); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := usageOf(t, st, team, store.StorageCache); got.UsedBytes != 10 {
+			t.Fatalf("%s used %d, want one 10-byte commit", team, got.UsedBytes)
+		}
+	}
+	if got := usageOf(t, st, "team-a", store.StorageCache).ReservedBytes; got != 0 {
+		t.Fatalf("owner's reservation still holds %d bytes", got)
+	}
+}
+
+func TestCommitReceiptCountsReplayOnceAndRejectsChangedBytes(t *testing.T) {
+	st := storetest.Open(t)
+	freeTeam(t, st, "team-a")
+	now := time.Now()
+	res, err := reserve(st, "team-a", store.StorageLogs, 100, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 100, Now: now}
+	if err := st.CommitStorage(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitStorage(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 100 || got.ReservedBytes != 0 {
+		t.Fatalf("replayed commit = %+v, want one 100-byte write", got)
+	}
+	c.Bytes = 99
+	if err := st.CommitStorage(t.Context(), c); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("changed replay = %v, want invalid input", err)
+	}
+}
+
+func TestCommitReceiptPrunesAfterOneDay(t *testing.T) {
+	st := storetest.Open(t)
+	freeTeam(t, st, "team-a")
+	now := time.Now()
+	res, err := reserve(st, "team-a", store.StorageLogs, 100, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 100, Now: now}
+	if err := st.CommitStorage(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.PruneStorageCommitReceipts(t.Context(), now.Add(23*time.Hour)); err != nil || n != 0 {
+		t.Fatalf("prune before horizon = %d, %v", n, err)
+	}
+	c.Now = now.Add(23 * time.Hour)
+	if err := st.CommitStorage(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs).UsedBytes; got != 100 {
+		t.Fatalf("within horizon used %d, want 100", got)
+	}
+	if n, err := st.PruneStorageCommitReceipts(t.Context(), now.Add(25*time.Hour)); err != nil || n != 1 {
+		t.Fatalf("prune after horizon = %d, %v", n, err)
+	}
+	c.Now = now.Add(25 * time.Hour)
+	if err := st.CommitStorage(t.Context(), c); err != nil {
+		t.Fatal(err)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs).UsedBytes; got != 200 {
+		t.Fatalf("after pruned horizon used %d, want 200", got)
 	}
 }
 
@@ -526,5 +612,46 @@ func TestRenewCommitsTheBlockAndReservesTheNext(t *testing.T) {
 	}
 	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
 		t.Fatalf("after a refused renew = %+v, want the commit kept: 3 KiB used, nothing held", got)
+	}
+	_, err = st.RenewStorage(ctx,
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	if !errors.As(err, &quota) || usageOf(t, st, "team-a", store.StorageLogs).UsedBytes != 3<<10 {
+		t.Fatalf("replayed refused renewal = %v; count changed", err)
+	}
+}
+
+func TestRenewReceiptReplaysTheSameNextReservation(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 16<<10)
+	freeTeam(t, st, "team-a")
+	now := time.Now()
+	block, err := reserve(st, "team-a", store.StorageLogs, 1<<10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now}
+	nextReq := store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, UpTo: true, Now: now}
+	first, err := st.RenewStorage(t.Context(), c, nextReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := st.RenewStorage(t.Context(), c, nextReq)
+	if err != nil || replayed.ID != first.ID || replayed.Granted != first.Granted {
+		t.Fatalf("renew replay = %+v, %v; first = %+v", replayed, err, first)
+	}
+	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 1<<10 || got.ReservedBytes != 1<<10 {
+		t.Fatalf("renew replay = %+v, want one commit and one next block", got)
+	}
+	nextReq.Bytes++
+	if _, err := st.RenewStorage(t.Context(), c, nextReq); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("changed renewal = %v, want invalid input", err)
+	}
+	if err := st.ReleaseStorage(t.Context(), "team-a", first.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	nextReq.Bytes--
+	if _, err := st.RenewStorage(t.Context(), c, nextReq); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("replay after next block release = %v, want invalid input", err)
 	}
 }

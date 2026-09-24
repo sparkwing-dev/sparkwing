@@ -308,8 +308,10 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 	if n == 0 {
 		return ErrObjectExists
 	}
-	if err := commitStorageTx(ctx, tx, StorageCommit{ID: id, Team: team, Kind: u.Kind, Bytes: u.Size, Now: now}); err != nil {
+	if replayed, err := commitStorageTx(ctx, tx, StorageCommit{ID: id, Team: team, Kind: u.Kind, Bytes: u.Size, Now: now}); err != nil {
 		return err
+	} else if replayed {
+		return ErrInvalidInput
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE uploads SET committed_at = ? WHERE id = ? AND team = ?`, now.UnixNano(), id, string(team))
 	if err != nil {

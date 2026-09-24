@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 71
+const expectedSchemaVersion = 72
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1843,6 +1843,7 @@ var migrationRequirements = map[int][]string{
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
 	51: {teamScopedUserKeysRequirement},
 	71: {"github-app-cron-identity-v1"},
+	72: {"storage-commit-receipts-v1"},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -2068,6 +2069,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		}
 		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
 		return err
+	case 72:
+		return applyStorageCommitReceiptsMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2490,6 +2493,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
 		return err
+	case 72:
+		return applyStorageCommitReceiptsMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

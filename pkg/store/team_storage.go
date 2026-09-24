@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -80,6 +81,29 @@ CREATE TABLE IF NOT EXISTS egress_day (
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (service, period)
 );`
+
+const storageCommitReceiptsSQL = `CREATE TABLE IF NOT EXISTS storage_commit_receipts (
+    team          TEXT NOT NULL,
+    store         TEXT NOT NULL,
+    id            TEXT NOT NULL,
+    bytes         BIGINT NOT NULL,
+    committed_at  BIGINT NOT NULL,
+    renew_request BLOB,
+    renew_status  TEXT NOT NULL DEFAULT '',
+    renew_result  BLOB,
+    PRIMARY KEY (team, store, id)
+);
+CREATE INDEX IF NOT EXISTS idx_storage_commit_receipts_age ON storage_commit_receipts(committed_at);`
+
+const storageCommitReceiptHorizon = 24 * time.Hour
+
+func applyStorageCommitReceiptsMigration(ctx context.Context, tx *storeTx, postgres bool) error {
+	ddl := storageCommitReceiptsSQL
+	if postgres {
+		ddl = strings.ReplaceAll(ddl, "BLOB", "BYTEA")
+	}
+	return execStatements(ctx, tx, ddl)
+}
 
 func applyTeamStorageMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	return execStatements(ctx, tx, teamStorageTablesSQL)
@@ -167,20 +191,33 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 // RenewStorage commits c and reserves next in one transaction, for a writer
 // that settles one block of bytes as it takes the next. The commit lands
 // whether or not next fits: a refusal of next returns its error after the
-// commit is kept.
+// commit is kept. A retry with the same ID and bytes returns the prior
+// reservation or refusal while its receipt remains.
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error) {
+	if NormalizeTeam(c.Team) != NormalizeTeam(next.Team) || c.Kind != next.Kind {
+		return StorageReservation{}, fmt.Errorf("%w: a storage renewal must stay in its team and store", ErrInvalidInput)
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := commitStorageTx(ctx, tx, c); err != nil {
+	replayed, err := commitStorageTx(ctx, tx, c)
+	if err != nil {
 		return StorageReservation{}, err
+	}
+	if replayed {
+		return replayStorageRenewTx(ctx, tx, c, next)
 	}
 	out, rerr := reserveStorageTx(ctx, tx, next)
 	var quota *StorageQuotaError
 	if rerr != nil && !errors.As(rerr, &quota) && !errors.Is(rerr, ErrFreeStoragePaused) {
 		return StorageReservation{}, rerr
+	}
+	if c.ID != "" {
+		if err := recordStorageRenewTx(ctx, tx, c, next, out, rerr); err != nil {
+			return StorageReservation{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return StorageReservation{}, err
@@ -320,7 +357,8 @@ UPDATE team_storage SET reserved_bytes = CASE WHEN reserved_bytes > ? THEN reser
 // StorageCommit records what a write stored.
 type StorageCommit struct {
 	// ID is the reservation the write took; one that already expired, was
-	// never taken, or is not Team's still counts Bytes.
+	// never taken, or is not Team's still counts Bytes on its first commit.
+	// An identical retry within the receipt window counts once.
 	ID   string
 	Team Team
 	Kind StorageKind
@@ -340,16 +378,16 @@ func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) 
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := commitStorageTx(ctx, tx, c); err != nil {
+	if _, err := commitStorageTx(ctx, tx, c); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func commitStorageTx(ctx context.Context, tx *storeTx, c StorageCommit) (err error) {
+func commitStorageTx(ctx context.Context, tx *storeTx, c StorageCommit) (replayed bool, err error) {
 	team := NormalizeTeam(c.Team)
 	if err := checkStorageTeam(team, c.Kind); err != nil {
-		return err
+		return false, err
 	}
 	now := c.Now
 	if now.IsZero() {
@@ -359,25 +397,146 @@ func commitStorageTx(ctx context.Context, tx *storeTx, c StorageCommit) (err err
 	var found bool
 	if c.ID != "" {
 		if r, found, err = reservationTx(ctx, tx, team, c.ID); err != nil {
-			return err
+			return false, err
 		}
 		if found && r.kind != c.Kind {
-			return fmt.Errorf("%w: reservation %s is not the %s store's", ErrInvalidInput, c.ID, c.Kind)
+			return false, fmt.Errorf("%w: reservation %s is not the %s store's", ErrInvalidInput, c.ID, c.Kind)
 		}
 	}
 	if _, _, err := lockTeamStorageTx(ctx, tx, team, c.Kind, now); err != nil {
-		return err
+		return false, err
+	}
+	if c.ID != "" {
+		insert, err := tx.ExecContext(ctx, `INSERT INTO storage_commit_receipts
+            (team, store, id, bytes, committed_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (team, store, id) DO NOTHING`,
+			string(team), string(c.Kind), c.ID, c.Bytes, now.UnixNano())
+		if err != nil {
+			return false, err
+		}
+		if n, err := insert.RowsAffected(); err != nil {
+			return false, err
+		} else if n == 0 {
+			var prior int64
+			if err := tx.QueryRowContext(ctx, `SELECT bytes FROM storage_commit_receipts
+                WHERE team = ? AND store = ? AND id = ?`, string(team), string(c.Kind), c.ID).Scan(&prior); err != nil {
+				return false, err
+			}
+			if prior != c.Bytes {
+				return false, fmt.Errorf("%w: reservation %s was committed with %d bytes", ErrInvalidInput, c.ID, prior)
+			}
+			return true, nil
+		}
 	}
 	if found {
 		if err := dropReservationTx(ctx, tx, c.ID, r); err != nil {
-			return err
+			return false, err
 		}
 	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE team_storage SET used_bytes = CASE WHEN used_bytes + ? > 0 THEN used_bytes + ? ELSE 0 END,
        committed_bytes = committed_bytes + ?, updated_at = ?
  WHERE team = ? AND store = ?`, c.Bytes, c.Bytes, c.Bytes, now.UnixNano(), string(team), string(c.Kind))
+	return false, err
+}
+
+type storageRenewRequest struct {
+	Bytes int64         `json:"bytes"`
+	UpTo  bool          `json:"up_to"`
+	TTL   time.Duration `json:"ttl"`
+}
+
+func recordStorageRenewTx(ctx context.Context, tx *storeTx, c StorageCommit, next StorageReserve, out StorageReservation, rerr error) error {
+	request, err := json.Marshal(storageRenewRequest{Bytes: next.Bytes, UpTo: next.UpTo, TTL: next.TTL})
+	if err != nil {
+		return err
+	}
+	status := "reserved"
+	var result []byte
+	switch {
+	case rerr == nil:
+		result, err = json.Marshal(out)
+	case errors.Is(rerr, ErrFreeStoragePaused):
+		status = "paused"
+	default:
+		var quota *StorageQuotaError
+		if !errors.As(rerr, &quota) {
+			return rerr
+		}
+		status = "quota"
+		result, err = json.Marshal(quota)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE storage_commit_receipts
+        SET renew_request = ?, renew_status = ?, renew_result = ?
+        WHERE team = ? AND store = ? AND id = ?`,
+		request, status, result, string(NormalizeTeam(c.Team)), string(c.Kind), c.ID)
 	return err
+}
+
+func replayStorageRenewTx(ctx context.Context, tx *storeTx, c StorageCommit, next StorageReserve) (StorageReservation, error) {
+	team := NormalizeTeam(c.Team)
+	var request, result []byte
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT renew_request, renew_status, renew_result
+        FROM storage_commit_receipts WHERE team = ? AND store = ? AND id = ?`,
+		string(team), string(c.Kind), c.ID).Scan(&request, &status, &result); err != nil {
+		return StorageReservation{}, err
+	}
+	want, err := json.Marshal(storageRenewRequest{Bytes: next.Bytes, UpTo: next.UpTo, TTL: next.TTL})
+	if err != nil {
+		return StorageReservation{}, err
+	}
+	if len(request) == 0 || string(request) != string(want) {
+		return StorageReservation{}, fmt.Errorf("%w: reservation %s was committed with a different renewal", ErrInvalidInput, c.ID)
+	}
+	switch status {
+	case "reserved":
+		var out StorageReservation
+		if err := json.Unmarshal(result, &out); err != nil {
+			return StorageReservation{}, err
+		}
+		now := c.Now
+		if now.IsZero() {
+			now = time.Now()
+		}
+		var expiresAt int64
+		err := tx.QueryRowContext(ctx, `SELECT expires_at FROM storage_reservations
+            WHERE id = ? AND team = ? AND store = ?`, out.ID, string(team), string(c.Kind)).Scan(&expiresAt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return StorageReservation{}, err
+		}
+		if errors.Is(err, sql.ErrNoRows) || !out.ExpiresAt.After(now) || expiresAt <= now.UnixNano() {
+			return StorageReservation{}, fmt.Errorf("%w: renewed reservation %s is no longer active", ErrInvalidInput, out.ID)
+		}
+		return out, nil
+	case "quota":
+		var quota StorageQuotaError
+		if err := json.Unmarshal(result, &quota); err != nil {
+			return StorageReservation{}, err
+		}
+		return StorageReservation{}, &quota
+	case "paused":
+		return StorageReservation{}, freeStoragePaused(team)
+	default:
+		return StorageReservation{}, fmt.Errorf("%w: reservation %s was committed without renewal", ErrInvalidInput, c.ID)
+	}
+}
+
+// PruneStorageCommitReceipts bounds the receipt table after the retry window.
+// A commit replayed after that window counts again.
+func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	res, err := s.exec(ctx, `DELETE FROM storage_commit_receipts WHERE committed_at < ?`,
+		now.Add(-storageCommitReceiptHorizon).UnixNano())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // ReleaseStorage gives back team's reservation id, whose write stored

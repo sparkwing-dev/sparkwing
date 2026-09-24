@@ -900,6 +900,11 @@ unlock.
 - **controller:** A storage listing that already sees a smaller overwritten
   object keeps its listed size instead of applying the same shrink twice.
 
+- **controller:** A committed storage reservation counts once when retried
+  within 24 hours. A renewed block returns the same next reservation on
+  retry, and hourly storage maintenance prunes older receipts. Schema 72 makes
+  older controllers refuse the receipt ledger. See [Storage commit receipts](docs/migrations/_unreleased.md#schema-72-storage-commit-receipts).
+
 - **web:** Navigation fetches a tab's route on hover, focus or touch instead of
   prefetching every visible tab on page load.
 
