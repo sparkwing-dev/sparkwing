@@ -1396,6 +1396,21 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [status, setStatus] = useState(initialStatus);
   const [branch, setBranch] = useState(initialBranch);
   const [commit, setCommit] = useState(initialCommit);
+  useEffect(() => {
+    setQuery(initialQuery);
+    setSince(initialSince);
+    setPipeline(initialPipeline);
+    setStatus(initialStatus);
+    setBranch(initialBranch);
+    setCommit(initialCommit);
+  }, [
+    initialQuery,
+    initialSince,
+    initialPipeline,
+    initialStatus,
+    initialBranch,
+    initialCommit,
+  ]);
   const [results, setResults] = useState<RunsGrepMatch[] | null>(null);
   const [runsMap, setRunsMap] = useState<Record<string, Run>>({});
   const [loading, setLoading] = useState(false);
@@ -1423,10 +1438,11 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         setLoading(false);
         return;
       }
+      const commits = searchFilterValues(commitVal);
       if (
-        searchFilterValues(commitVal).some(
-          (prefix) => !/^[0-9a-f]+$/i.test(prefix),
-        )
+        commitVal.trim() &&
+        (commits.length === 0 ||
+          commits.some((prefix) => !/^[0-9a-f]+$/i.test(prefix)))
       ) {
         setError("Commit must be a hexadecimal SHA prefix.");
         setResults(null);
@@ -1446,7 +1462,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           pipelines: searchFilterValues(pipelineVal),
           statuses: searchFilterValues(statusVal),
           branches: searchFilterValues(branchVal),
-          shaPrefixes: searchFilterValues(commitVal),
+          shaPrefixes: commits,
           since: sinceVal === "all" ? undefined : sinceVal,
           limit: 200,
           maxMatches: 10,

@@ -2173,3 +2173,36 @@ test("Search finds an older run through server-side filters", async ({ page }) =
   await expect(page.getByRole("button", { name: /^REPO/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^TAG/ })).toHaveCount(0);
 });
+
+test("Search keeps visible filters aligned with same-view navigation", async ({ page }) => {
+  const searched: URL[] = [];
+  await installMockAPI(page);
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    searched.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: { query: "needle", matches: [], runs: {}, total: 0, runs_scanned: 0, runs_matching: 0 },
+    });
+  });
+  await page.goto("/runs?view=search&gq=needle&pipeline=build&commit=deadbee");
+  await expect.poll(() => searched.length).toBe(1);
+  await expect(page.getByLabel("Pipeline")).toHaveValue("build");
+
+  await page.evaluate(() => {
+    history.pushState(null, "", "/runs?view=search&gq=needle&pipeline=deploy&branch=release&commit=cafebabe");
+  });
+  await expect(page.getByLabel("Pipeline")).toHaveValue("deploy");
+  await expect(page.getByLabel("Branch")).toHaveValue("release");
+  await expect(page.getByLabel("Commit")).toHaveValue("cafebabe");
+  await page.getByRole("button", { name: "search", exact: true }).click();
+  await expect.poll(() => searched.length).toBeGreaterThanOrEqual(2);
+  const submitted = searched.at(-1)!;
+  expect(submitted.searchParams.getAll("pipeline")).toEqual(["deploy"]);
+  expect(submitted.searchParams.getAll("branch")).toEqual(["release"]);
+  expect(submitted.searchParams.getAll("sha")).toEqual(["cafebabe"]);
+
+  const beforeInvalid = searched.length;
+  await page.getByLabel("Commit").fill(", ,");
+  await page.getByRole("button", { name: "search", exact: true }).click();
+  await expect(page.getByText("Commit must be a hexadecimal SHA prefix.")).toBeVisible();
+  expect(searched).toHaveLength(beforeInvalid);
+});

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,40 @@ func TestS3Backend_ListRuns(t *testing.T) {
 	runs, _ = b.ListRuns(context.Background(), store.RunFilter{Statuses: []string{"failed"}})
 	if len(runs) != 1 || runs[0].ID != "beta" {
 		t.Fatalf("status=failed = %v, want [beta]", runs)
+	}
+}
+
+func TestS3Backend_ListRunsFiltersBeforeLimit(t *testing.T) {
+	t.Parallel()
+	st := mustFS(t)
+	b := backend.NewS3Backend(st, nil)
+	base := time.Now().UTC().Add(-time.Hour)
+	older := mkRun("older-match", "build", "succeeded", base)
+	older.GitBranch = "rare"
+	older.GitSHA = "deadbeef1234"
+	putState(t, st, older)
+	for i := range 201 {
+		run := mkRun(fmt.Sprintf("newer-%03d", i), "build", "succeeded", base.Add(time.Duration(i+1)*time.Second))
+		run.GitBranch = "main"
+		run.GitSHA = "cafebabe1234"
+		putState(t, st, run)
+	}
+	for _, filter := range []store.RunFilter{
+		{GitBranches: []string{"rare"}, Limit: 200},
+		{GitSHAPrefixes: []string{"deadbee"}, Limit: 200},
+		{GitBranches: []string{"rare"}, GitSHAPrefixes: []string{"deadbee"}, Limit: 200},
+	} {
+		runs, err := b.ListRuns(context.Background(), filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(runs) != 1 || runs[0].ID != older.ID {
+			first := ""
+			if len(runs) > 0 {
+				first = runs[0].ID
+			}
+			t.Fatalf("ListRuns(%+v) = %d runs, first %q; want older-match", filter, len(runs), first)
+		}
 	}
 }
 
