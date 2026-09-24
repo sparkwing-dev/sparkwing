@@ -30,6 +30,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 		t.Skip("S3 integration bucket and endpoint required")
 	}
 	s, grant, _ := downloadFixture(t)
+	s.WithTeamDownloadCaps(1<<20, 1<<20)
 	var suffix [12]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
 		t.Fatal(err)
