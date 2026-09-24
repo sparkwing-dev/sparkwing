@@ -283,7 +283,8 @@ func TestExpiredZeroByteReservationIsRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := st.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM storage_reservations WHERE id = ?`, zero.ID).Scan(&count); err != nil {
+	if err := st.DB().QueryRowContext(t.Context(),
+		storetest.Rebind(st, `SELECT COUNT(*) FROM storage_reservations WHERE id = ?`), zero.ID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
