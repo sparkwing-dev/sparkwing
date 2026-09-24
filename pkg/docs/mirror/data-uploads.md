@@ -4,9 +4,9 @@ When the controller has an S3 `--cache-blob-store`, runners can move binary
 and artifact bytes between themselves and the bucket. The controller handles
 small requests and the storage ledger. `GET /api/v1/services` announces
 `direct_data`; a runner with only a cache grant can probe
-`GET /api/v1/data/capabilities`. Runners use the cache service on older
-controllers. An `fs://` artifact store uses its existing local byte path; it
-does not issue S3 or CloudFront URLs. This signing route serves claimed runners.
+`GET /api/v1/data/capabilities`. An `fs://` artifact store uses its existing
+local byte path; it does not issue S3 or CloudFront URLs. This signing route
+serves claimed runners.
 Source bundles have a separate pretrigger user-token path described below.
 
 The runner must hold a live claim on `run_id` for each request and send a
@@ -65,8 +65,8 @@ artifacts spool to a temporary file before reserve.
 For a binary, the final key includes its content hash. `POST /api/v1/data/download`
 takes `{kind,key}` and returns `{url,sha256,size,expires}`. A binary read uses
 `bin/<input-hash>` as its key; an artifact read names the committed key. The
-same route signs legacy cache reads. It applies the team's daily download cap
-to both paths. In-cluster callers receive an S3 URL, and callers through the
+route applies the team's daily download cap to both paths. In-cluster callers
+receive an S3 URL, and callers through the
 public ingress receive a CloudFront URL. Cloud runners receive only cloud-built
 binaries unless the team owner sets
 `trust_local_builds` with `PUT /api/v1/team/build-trust`. The default is

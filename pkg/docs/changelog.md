@@ -45,8 +45,8 @@ unlock.
   Cache grants cannot sign logs; `logs.read` is required. In-cluster downloads
   use S3, while public-ingress downloads use a 60-second CloudFront URL.
   Both count against the team's daily download cap. Cloud runners read
-  cloud-built binaries unless the team enables `trust_local_builds`. Older
-  controllers keep the cache path. See [Direct data uploads](docs/data-uploads.md)
+  cloud-built binaries unless the team enables `trust_local_builds`. See
+  [Direct data uploads](docs/data-uploads.md)
   and [Tenant limits](docs/limits.md).
 - **controller + web:** GitHub App push subscriptions accept `branches` and
   pull request subscriptions accept `base_branches`, each with up to 10 glob
@@ -913,6 +913,12 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **cloud CLI + cache:** `sparkwing cloud status` omits the optional gitcache
+  probe when no cache pod URL is announced, while an announced unhealthy cache
+  still fails. Cloud keeps its cache Service internal; off-cluster source,
+  binary and artifact bytes use signed S3 and CloudFront URLs instead of a
+  public cache ingress.
 
 - **jev-lint:** Root-confined reads keep symlinked Go files and changed paths
   from adding source outside the checkout to a TypeSafe request. A changed

@@ -276,9 +276,9 @@ service (if configured), and gitcache (if configured). Each
 probe prints ok / warn / fail along with latency and any
 error detail.
 
-Exit code is non-zero when any probe fails. Missing optional
-services (logs, gitcache) count as warn, not fail, so a
-minimally-configured laptop profile can still exit 0.
+Exit code is non-zero when any probe fails. Missing optional logs
+can warn without failing. A controller that announces no cache pod URL
+omits the gitcache probe; direct-data Cloud needs no public cache pod.
 
 ### Flags
 

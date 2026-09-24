@@ -85,61 +85,22 @@ curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
   --data-binary @/tmp/repo.bundle
 ```
 
-## Operator Discovery
+## Cloud cache paths
 
-Some operator flows -- the eager-refresh on
-`sparkwing pipeline trigger --profile <controller-profile>` and the
-profile health probe -- talk to the cache pod directly over HTTP. They
-discover the cache pod's URL from the controller -- no per-profile
-configuration required on the operator side.
+Cloud keeps `--cache-url` pointed at its in-cluster cache Service. It does not
+expose the cache through a public Ingress or set `CACHE_POD_URL` or
+`--cache-pod-url`. `GET /api/v1/services` therefore has no `cache_pod` URL,
+and `sparkwing cloud status` omits that optional probe. Do not open a public
+cache host to make a health check pass.
 
-Wire it up on the controller deployment:
-
-```yaml
-env:
-  - name: CACHE_POD_URL
-    value: "https://cache-sparkwing.example.dev"
-```
-
-(Or pass `--cache-pod-url=https://cache-sparkwing.example.dev` on
-the controller's command line.) The controller announces this URL
-via `GET /api/v1/services`; operator CLIs fetch it once per session
-and cache in-process.
-
-If `CACHE_POD_URL` is unset the announce endpoint returns 404. The
-profile health probe reports a cache warning, but a normal Cloud pipeline
-trigger uses a pushed commit and its runner fetches from origin. The CLI
-does not refresh or seed the cache for pipeline triggers. `--working-tree`
-uploads its source bundle through the direct S3 path and works without a
-cloud-reachable origin.
-The controller serves the proxy routes only when started with
-`--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
-cache Service, so set both: `--cache-pod-url` for the
-externally-reachable URL operators hit directly, `--cache-url` for the
-controller-to-cache proxy target.
-
-Off-cluster agents default `gitcache` to
-`https://<controller>/api/v1/gitcache`. Before a claimed node touches the
-cache, the agent asks the controller for the run's
-[cache grant](#cache-grants). With a grant and an announced cache, the node
-reads source, the binary cache and artifacts from the announced
-`--cache-pod-url` directly, carrying the grant, and never through the
-controller's proxy, so the controller stays off the data path. An explicit
-`gitcache` that names a cache directly, such as an in-cluster Service, is
-kept. A controller that mints no grant answers the grant request with 404,
-and the node runs as before: through the proxy below, or, with no
-`gitcache`, without the cache.
-
-Without a grant the runner
-narrows the proxy URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
-register and read only the repository of its live run claim. The controller
-removes that bearer before contacting the internal cache. The unscoped
-`/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache
-private while a workstation or server uses outbound HTTPS only. The dashboard
-ingress exposes these routes to machine bearers without accepting browser
-session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
-supported through `agent.yaml` `gitcache`; the agent reaches it with a
-per-run [cache grant](#cache-grants).
+The controller announces `direct_data` when its S3 cache blob store is
+configured. `--working-tree` uploads a one-run source bundle to S3 before
+admission; only that run's live claim can obtain a signed CloudFront download.
+Claimed runners reserve binary and artifact writes through the controller,
+send bytes to S3, and use signed CloudFront reads when off-cluster. See
+[Direct data uploads](data-uploads.md). A pushed-commit run fetches its Git
+source from origin. Warm cloud runners use the internal cache Service for
+Git mirrors and artifacts; no public cache URL is needed.
 
 ## On-Demand Fetch
 
@@ -402,8 +363,8 @@ verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
 without calling the controller and confines the request to that team. The
 grant key is a secret of its own: the cache refuses to start when it equals
 the cache's operator token, and it is never a runner's token, because pipeline
-code can read that token. A multi-team controller configured with a cache
-(`--cache-url` or `--cache-pod-url`) refuses to start without a grant key or
+code can read that token. A multi-team controller configured with the internal
+cache (`--cache-url`) refuses to start without a grant key or
 with one equal to `SPARKWING_CACHE_TOKEN`. A single-team controller starts
 either way: without a key it answers the route with 404, and with the operator
 token as its key it answers 503. A cache without a grant key accepts no grants. A GitHub Actions runner credential gets 403: it is confined to one
