@@ -42,6 +42,17 @@ func TestClaimNamedNodeAwardsAnUnqueuedNode(t *testing.T) {
 	if !live {
 		t.Fatal("the fence the award returned does not admit the holder's writes")
 	}
+	fence := store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}
+	if nodeID, err := s.NodeClaimFenceNodeForRun(ctx, "run-named", fence, time.Now()); err != nil || nodeID != "build" {
+		t.Fatalf("node for live fence = %q, %v", nodeID, err)
+	}
+	fence.ClaimGeneration++
+	if nodeID, err := s.NodeClaimFenceNodeForRun(ctx, "run-named", fence, time.Now()); err != nil || nodeID != "" {
+		t.Fatalf("node for stale fence = %q, %v", nodeID, err)
+	}
 }
 
 func TestClaimNamedNodeRefusesANodeAnotherHolderHas(t *testing.T) {

@@ -184,6 +184,7 @@ var unportedSQL = []string{
 	"(*Store).LookupSession",
 	"(*Store).LookupToken",
 	"(*Store).NodeClaimFenceIsLive",
+	"(*Store).NodeClaimFenceNodeForRun",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
 	"(*Store).NodeExecutionAttemptIsLive",
 	"(*Store).NodeSettlement",

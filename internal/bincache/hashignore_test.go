@@ -73,6 +73,7 @@ func TestPipelineCacheKey_HashAllFilesEnvRestoresFullHashing(t *testing.T) {
 
 func TestPipelineCacheKey_NonRepoDirHashesEverything(t *testing.T) {
 	dir := newPipelineDir(t)
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n")
 	before := mustKey(t, dir)
 

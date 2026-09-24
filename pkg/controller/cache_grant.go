@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
@@ -78,7 +79,47 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 			})
 			return
 		}
-		grant, err := authwire.MintCacheGrant(key, string(team), runID, now, ttl)
+		var claim *authwire.CacheClaim
+		node, trigger := claimIdentityShape(r)
+		if node && trigger {
+			writeError(w, http.StatusConflict, store.ErrLockHeld)
+			return
+		}
+		if node {
+			fence, fenceErr := nodeClaimFenceFromRequest(r)
+			if fenceErr != nil {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			nodeID, liveErr := s.store.NodeClaimFenceNodeForRun(r.Context(), runID, fence, now)
+			if liveErr != nil {
+				s.writeInternalError(w, r, "check cache grant claim", liveErr)
+				return
+			}
+			if nodeID == "" {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			claim = &authwire.CacheClaim{Kind: "node", NodeID: nodeID, HolderID: fence.HolderID, MembershipID: fence.MembershipID, ReservationID: fence.ReservationID, Generation: fence.ClaimGeneration, Principal: fence.Claimant.Principal, TokenPrefix: fence.Claimant.TokenPrefix}
+		} else if trigger {
+			generation, parseErr := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+			if parseErr != nil || generation < 1 {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			identity := claimIdentity(r)
+			live, liveErr := s.store.TriggerClaimFenceIsLive(r.Context(), runID, identity, generation, now)
+			if liveErr != nil {
+				s.writeInternalError(w, r, "check cache grant claim", liveErr)
+				return
+			}
+			if !live {
+				writeError(w, http.StatusConflict, store.ErrLockHeld)
+				return
+			}
+			claim = &authwire.CacheClaim{Kind: "trigger", Generation: generation, Principal: identity.Principal, TokenPrefix: identity.TokenPrefix}
+		}
+		grant, err := authwire.MintClaimCacheGrant(key, string(team), runID, now, ttl, claim)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return

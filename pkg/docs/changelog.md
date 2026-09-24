@@ -30,6 +30,8 @@ unlock.
   against the team's daily download allowance when it signs the URL. Clients
   discover the route through `GET /api/v1/services`; binary fetches retain the
   cache path when an older controller does not announce it. Uploads still use the cache.
+  Signing with a runner's cache grant requires its issuing trigger or node
+  claim to remain live; a former claimant's grant cannot keep signing URLs.
   See [Data downloads](docs/api.md#data-downloads) and
   [Tenant limits](docs/limits.md).
 

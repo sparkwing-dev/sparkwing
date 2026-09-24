@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -52,7 +53,13 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	if err := team.CreateRun(t.Context(), store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := authwire.MintCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour)
+	if err := team.CreateTrigger(t.Context(), store.Trigger{ID: "run-1", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`, "runner", "old-token", time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: "runner", TokenPrefix: "old-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +183,98 @@ func TestDataDownloadRejectsGrantForFinishedRun(t *testing.T) {
 	rec, _ := callDownload(t, s, grant, "bins/abc", false)
 	if rec.Code != http.StatusForbidden || len(head.keys) != 0 {
 		t.Fatalf("finished run: status=%d heads=%v", rec.Code, head.keys)
+	}
+}
+
+func TestDataDownloadRejectsFormerClaimantsGrant(t *testing.T) {
+	s, grant, head := downloadFixture(t)
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE triggers SET claim_principal = ?, claim_token_prefix = ?, claim_seq = 2, lease_expires_at = ? WHERE id = ?`, "new-runner", "new-token", time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := callDownload(t, s, grant, "bins/abc", false)
+	if rec.Code != http.StatusForbidden || len(head.keys) != 0 {
+		t.Fatalf("former claimant: status=%d heads=%v body=%s", rec.Code, head.keys, rec.Body.String())
+	}
+}
+
+func TestDataDownloadRejectsUnboundCacheGrant(t *testing.T) {
+	s, _, head := downloadFixture(t)
+	grant, err := authwire.MintCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := callDownload(t, s, grant, "bins/abc", false)
+	if rec.Code != http.StatusForbidden || len(head.keys) != 0 {
+		t.Fatalf("unbound grant: status=%d heads=%v", rec.Code, head.keys)
+	}
+}
+
+func TestCacheGrantSigningBindsLiveTriggerGeneration(t *testing.T) {
+	s, _, _ := downloadFixture(t)
+	request := func(generation string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/cache-grant", nil)
+		req.SetPathValue("id", "run-1")
+		req.Header.Set(store.TriggerGenerationHeader, generation)
+		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{
+			Name: "runner", TokenPrefix: "old-token", Kind: store.TokenKindRunner, Team: "team-a",
+		}))
+		rec := httptest.NewRecorder()
+		s.handleRunCacheGrant(teamA).ServeHTTP(rec, req)
+		return rec
+	}
+	live := request("1")
+	if live.Code != http.StatusOK {
+		t.Fatalf("live mint = %d: %s", live.Code, live.Body.String())
+	}
+	var response CacheGrantResponse
+	if err := json.Unmarshal(live.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := authwire.VerifyCacheGrant("grant-key", response.Grant, time.Now())
+	if err != nil || grant.Claim == nil || grant.Claim.Kind != "trigger" || grant.Claim.Generation != 1 {
+		t.Fatalf("bound grant = %+v, %v", grant, err)
+	}
+	if stale := request("2"); stale.Code != http.StatusConflict {
+		t.Fatalf("unheld generation minted: %d: %s", stale.Code, stale.Body.String())
+	}
+}
+
+func TestCacheGrantSigningBindsLiveNodeGeneration(t *testing.T) {
+	s, _, head := downloadFixture(t)
+	if err := s.store.CreateNode(t.Context(), store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?, claim_membership_id = ?, reservation_id = ?, claim_generation = 1, lease_expires_at = ? WHERE run_id = ? AND node_id = ?`, "holder", "node-runner", "node-token", "member", "reservation", time.Now().Add(time.Hour).UnixNano(), "run-1", "build"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/cache-grant", nil)
+	req.SetPathValue("id", "run-1")
+	req.Header.Set(store.ClaimHolderHeader, "holder")
+	req.Header.Set(store.ClaimMembershipHeader, "member")
+	req.Header.Set(store.ClaimReservationHeader, "reservation")
+	req.Header.Set(store.ClaimGenerationHeader, "1")
+	req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{Name: "node-runner", TokenPrefix: "node-token", Kind: store.TokenKindRunner, Team: "team-a"}))
+	rec := httptest.NewRecorder()
+	s.handleRunCacheGrant(teamA).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("node mint = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response CacheGrantResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := authwire.VerifyCacheGrant("grant-key", response.Grant, time.Now())
+	if err != nil || grant.Claim == nil || grant.Claim.Kind != "node" || grant.Claim.NodeID != "build" {
+		t.Fatalf("node grant = %+v, %v", grant, err)
+	}
+	if signed, _ := callDownload(t, s, response.Grant, "bins/abc", false); signed.Code != http.StatusOK {
+		t.Fatalf("live node sign = %d: %s", signed.Code, signed.Body.String())
+	}
+	if _, err := s.store.DB().ExecContext(t.Context(), `UPDATE nodes SET claim_generation = 2 WHERE run_id = ? AND node_id = ?`, "run-1", "build"); err != nil {
+		t.Fatal(err)
+	}
+	if stale, _ := callDownload(t, s, response.Grant, "bins/abc", false); stale.Code != http.StatusForbidden || len(head.keys) != 1 {
+		t.Fatalf("stale node sign = %d, heads=%v", stale.Code, head.keys)
 	}
 }
 

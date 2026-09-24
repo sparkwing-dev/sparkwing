@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -108,6 +109,28 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Tea
 			s.writeInternalError(w, r, "check download run", err)
 			return "", false
 		}
+		if grant.Claim == nil {
+			writeError(w, http.StatusForbidden, errors.New("cache grant has no live claim"))
+			return "", false
+		}
+		claim := grant.Claim
+		identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
+		var live bool
+		switch claim.Kind {
+		case "trigger":
+			live, err = s.store.TriggerClaimFenceIsLive(r.Context(), grant.Run, identity, claim.Generation, time.Now())
+		case "node":
+			fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
+			live, err = s.store.NodeClaimFenceIsLive(r.Context(), grant.Run, claim.NodeID, fence, time.Now())
+		}
+		if err != nil {
+			s.writeInternalError(w, r, "check download claim", err)
+			return "", false
+		}
+		if !live {
+			writeError(w, http.StatusForbidden, errors.New("cache grant claim is not live"))
+			return "", false
+		}
 		return store.Team(grant.Team), true
 	}
 	p, err := s.authMiddleware().Authenticate(token)
@@ -117,6 +140,10 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Tea
 	}
 	if !p.HasScope(ScopeRunsRead) && !p.HasScope(ScopeAdmin) {
 		writeError(w, http.StatusForbidden, errors.New("download needs runs.read"))
+		return "", false
+	}
+	if p.Kind == store.TokenKindRunner && !p.HasScope(ScopeAdmin) {
+		writeError(w, http.StatusForbidden, errors.New("runner download needs a claim-bound cache grant"))
 		return "", false
 	}
 	team := store.NormalizeTeam(p.Team)

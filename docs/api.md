@@ -19,9 +19,12 @@ unauthenticated endpoints, and first-visit admin bootstrap are in
 ## Data downloads
 
 `POST /api/v1/data/download` signs a short-lived download for an object. Send
-`{ "kind": "binary", "key": "bins/<hash>" }` with a bearer token or a
-run-scoped cache grant. The controller checks the grant, its live run, the
-team-owned key, the stored object, and the team's daily download allowance
+`{ "kind": "binary", "key": "bins/<hash>" }` with a reader bearer token or a
+run-scoped cache grant minted while its runner holds an exact trigger or node
+claim. The controller checks the grant's claim generation and holder against
+the live claim on each signing request. A grant from an earlier claimant or
+one minted without a claim cannot sign. The controller also checks the live
+run, team-owned key, stored object, and team's daily download allowance
 before it returns `{ "url": "...", "sha256": "...", "size": 123,
 "expires": "..." }`. It charges the recorded object size when it signs the
 URL.
