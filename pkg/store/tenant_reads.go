@@ -55,6 +55,9 @@ SELECT run_id, status, claimed_by, claim_token_prefix,
 		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
 			return nil, err
 		}
+		if started > 0 {
+			claim.StartedAt = time.Unix(0, started)
+		}
 		claim.LastSeen = time.Unix(0, max(started, expires))
 		out = append(out, claim)
 	}

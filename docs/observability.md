@@ -331,9 +331,10 @@ It also shows what admission is doing with the machine:
   policy. A claim-mode agent with a plain `holder_prefix` keeps one stable
   identity; idle polls from the credential that made its stored claim refresh
   liveness. Polls from another credential cannot keep that claim live. The
-  newest claimant owns a shared legacy display name, so its active runs never
-  mix with another credential's. The headroom observation time remains separate
-  from last claim or poll activity.
+  most recently started claim owns a shared legacy display name; unstarted
+  claims use stable credential order. Its active runs never mix with another
+  credential's. The headroom observation time remains separate from last claim
+  or poll activity.
   Fleet presents the controller's rolling run-failure warning separately from
   service health. Database, object-store, auth, and slow-response problems
   still degrade their service; the controller health API keeps its own status.

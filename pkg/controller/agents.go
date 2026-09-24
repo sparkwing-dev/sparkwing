@@ -228,10 +228,13 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	byHolder := map[string]*holderInfo{}
 	sort.Slice(claims, func(i, j int) bool {
-		if claims[i].LastSeen.Equal(claims[j].LastSeen) {
+		if !claims[i].StartedAt.Equal(claims[j].StartedAt) {
+			return claims[i].StartedAt.After(claims[j].StartedAt)
+		}
+		if claims[i].TokenPrefix != claims[j].TokenPrefix {
 			return claims[i].TokenPrefix < claims[j].TokenPrefix
 		}
-		return claims[i].LastSeen.After(claims[j].LastSeen)
+		return claims[i].RunID < claims[j].RunID
 	})
 
 	for _, claim := range claims {
@@ -254,6 +257,9 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		if claim.TokenPrefix != h.tokenPrefix {
 			continue
+		}
+		if seen := claim.LastSeen.UnixNano(); seen > h.lastSeenNs {
+			h.lastSeenNs = seen
 		}
 		if claim.Status != "done" {
 			h.activeRuns[claim.RunID] = struct{}{}

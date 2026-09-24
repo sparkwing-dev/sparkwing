@@ -232,9 +232,32 @@ func TestAgents_LegacyPlainHolderUsesOwnLivePoll(t *testing.T) {
 	if got := claim(other, "moonborn:1790249256598651004"); got != http.StatusOK {
 		t.Fatalf("other claim = %d", got)
 	}
+	if _, err := st.DB().Exec(`UPDATE nodes SET started_at = ? WHERE run_id = 'run-a'`, now.Add(-2*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE nodes SET started_at = ? WHERE run_id = 'run-b'`, now.Add(-time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
 	takeover := list()
 	if len(takeover.ActiveJobs) != 1 || takeover.ActiveJobs[0] != "run-b" {
 		t.Fatalf("latest credential's active runs = %v, want only run-b", takeover.ActiveJobs)
+	}
+	first, err := st.GetNode(ctx, "run-a", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: "agent-a", TokenPrefix: ownerToken.Prefix}
+	heartbeatCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		Claimant: claimant, HolderID: first.ClaimedBy,
+		MembershipID: first.ClaimMembershipID, ReservationID: first.ReservationID,
+		ClaimGeneration: first.ClaimGeneration,
+	})
+	if err := st.HeartbeatNodeClaim(heartbeatCtx, "run-a", "work", claimant, first.ClaimedBy, 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	renewed := list()
+	if len(renewed.ActiveJobs) != 1 || renewed.ActiveJobs[0] != "run-b" {
+		t.Fatalf("older credential's lease renewal changed display owner: %v", renewed.ActiveJobs)
 	}
 }
 
