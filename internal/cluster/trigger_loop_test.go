@@ -256,6 +256,45 @@ func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
 	}
 }
 
+func TestRunTriggerLoop_DoesNotCloseTriggerWhenFailureCannotBeRecorded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var claimed atomic.Bool
+	var done atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+				Status: "claimed", ClaimSeq: 7,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+			http.Error(w, "state write unavailable", http.StatusServiceUnavailable)
+			cancel()
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+			done.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !claimed.Load() || done.Load() != 0 {
+		t.Fatalf("claim = %t, finished trigger after failed run write = %d", claimed.Load(), done.Load())
+	}
+}
+
 func waitForTriggerHelper(path string, timeout time.Duration) error {
 	deadlineAt := time.Now().Add(timeout)
 	poll := time.NewTicker(5 * time.Millisecond)

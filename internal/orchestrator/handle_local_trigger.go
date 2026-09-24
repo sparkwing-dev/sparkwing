@@ -43,7 +43,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		"parent_run_id", trigger.ParentRunID,
 	)
 
+	finishTrigger := true
 	defer func() {
+		if !finishTrigger {
+			return
+		}
 		if ferr := backends.State.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger (local) failed",
 				"trigger_id", trigger.ID, "err", ferr)
@@ -83,6 +87,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	res, err := Run(ctx, backends, opts)
 	if err != nil {
 		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+			finishTrigger = false
 			logger.Error("record failed trigger run (local)", "run_id", trigger.ID, "err", ferr)
 		}
 		logger.Error(

@@ -174,9 +174,10 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 				if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
 					logger.Warn("trigger loop: FinishRun failed",
 						"run_id", trigger.ID, "err", ferr)
+				} else {
+					_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
 				}
 				finishCancel()
-				_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
 			}
 			if selfTerminate {
 				logger.Error("trigger loop: self-terminating after prolonged controller silence",

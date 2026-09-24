@@ -50,7 +50,11 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	if logger == nil {
 		logger = slog.Default()
 	}
+	finishTrigger := true
 	defer func() {
+		if !finishTrigger {
+			return
+		}
 		if ferr := stateClient.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger failed",
 				"trigger_id", trigger.ID, "err", ferr)
@@ -95,6 +99,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	cancelRun()
 	if err != nil {
 		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+			finishTrigger = false
 			logger.Error("record failed trigger run",
 				"run_id", trigger.ID, "err", ferr)
 		}
@@ -136,10 +141,16 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 }
 
 func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
-	if _, defined := sparkwing.Lookup(trigger.Pipeline); defined {
-		return nil
+	reason := cause.Error()
+	_, defined := sparkwing.Lookup(trigger.Pipeline)
+	if defined {
+		reason = "pipeline setup failed before dispatch; ask an operator to inspect the trigger worker logs for this run"
 	}
-	if _, err := state.GetRun(ctx, trigger.ID); errors.Is(err, store.ErrNotFound) {
+	run, err := state.GetRun(ctx, trigger.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		if defined {
+			return nil
+		}
 		if err := state.CreateRun(ctx, store.Run{
 			ID: trigger.ID, Pipeline: trigger.Pipeline, Status: "running",
 			TriggerSource: trigger.TriggerSource, GitBranch: trigger.GitBranch, GitSHA: trigger.GitSHA,
@@ -150,8 +161,10 @@ func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, t
 		}
 	} else if err != nil {
 		return err
+	} else if run.Status != "pending" && run.Status != "running" {
+		return nil
 	}
-	return state.FinishRun(ctx, trigger.ID, "failed", cause.Error())
+	return state.FinishRun(ctx, trigger.ID, "failed", reason)
 }
 
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {

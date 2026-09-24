@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,6 +75,79 @@ func TestClaimedUnknownPipelineFailsVisibly(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "level=WARN") {
 		t.Errorf("worker warning absent: %s", logs.String())
+	}
+}
+
+func TestClaimedDefinedPipelineSetupFailureFailsPendingRun(t *testing.T) {
+	registerRemotePipelines(t)
+	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv := orchestrator.NewControllerServer(t, st, nil)
+	t.Cleanup(srv.Close)
+	cli := client.New(srv.URL, nil)
+	const id = "defined-setup-failure"
+	if err := st.CreateTrigger(ctx, store.Trigger{
+		ID: id, Pipeline: "remote-ok", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{
+		ID: id, Pipeline: "remote-ok", Status: "pending", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.ClaimNextTrigger(ctx, 0)
+	if err != nil || trigger == nil {
+		t.Fatalf("claim trigger: %v, %+v", err, trigger)
+	}
+	orchestrator.ExecuteClaimedTrigger(ctx, orchestrator.WorkerOptions{},
+		orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli, trigger)
+
+	run, err := cli.GetRun(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") ||
+		strings.Contains(run.Error, "secret-should-not-be-shown") {
+		t.Fatalf("setup failure run = status %q, error %q", run.Status, run.Error)
+	}
+	gotTrigger, err := cli.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotTrigger.Status != "failed" {
+		t.Fatalf("setup failure trigger status = %q, want failed", gotTrigger.Status)
+	}
+}
+
+func TestClaimedSetupFailureKeepsTriggerOpenWhenRunWriteUnavailable(t *testing.T) {
+	registerRemotePipelines(t)
+	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "invalid-duration")
+	var runRead, triggerDone atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/setup-write-unavailable":
+			runRead.Store(true)
+			http.Error(w, "state unavailable", http.StatusServiceUnavailable)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/setup-write-unavailable/done":
+			triggerDone.Store(true)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cli := client.New(srv.URL, nil)
+	orchestrator.ExecuteClaimedTrigger(context.Background(), orchestrator.WorkerOptions{},
+		orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli,
+		&store.Trigger{ID: "setup-write-unavailable", Pipeline: "remote-ok"})
+	if !runRead.Load() || triggerDone.Load() {
+		t.Fatalf("run read attempted = %t, trigger marked done = %t", runRead.Load(), triggerDone.Load())
 	}
 }
 
