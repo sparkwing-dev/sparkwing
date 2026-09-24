@@ -884,6 +884,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Expired zero-byte storage reservations are removed during
+  cleanup, so empty artifact uploads leave no permanent reservation rows.
+
 - **runner:** memoized nodes and queued concurrency groups run through off-cluster agents,
   Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
   for its claimed node while the controller keeps keys within the runner's team.
