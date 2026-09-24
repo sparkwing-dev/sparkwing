@@ -419,10 +419,14 @@ func unschedulableEvent(queued bool) string {
 	return eventClassRefused
 }
 
-// safety: a request larger than every matching node's allocatable capacity
-// cannot become schedulable by waiting for current jobs to finish.
+// safety: a request larger than every matching fixed node cannot become
+// schedulable by waiting for current jobs to finish.
 func (r *Runner) impossibleShape(ctx context.Context, job *batchv1.Job) string {
 	pod := &corev1.Pod{Spec: job.Spec.Template.Spec}
+	// safety: a band pool can add a larger node than any one currently running.
+	if pod.Spec.NodeSelector[cpuBandKey] != "" {
+		return ""
+	}
 	cpu, memory := podRequestTotals(pod)
 	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{
 		LabelSelector: labels.Set(pod.Spec.NodeSelector).String(),

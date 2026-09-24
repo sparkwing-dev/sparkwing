@@ -578,10 +578,28 @@ func TestImpossibleShapeFailsBeforeJobCreation(t *testing.T) {
 	r := New(client, nil, Config{Image: "runner"}, nil)
 	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
 		capacity.Resolution{Cores: 1, MemoryBytes: 512 << 20, Source: store.CostSourcePin},
-		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{})
+		store.CPUClass{}, store.NodeClaimFence{})
 	msg := r.impossibleShape(t.Context(), job)
 	if !strings.Contains(msg, "1 cpu") || !strings.Contains(msg, "allocatable") {
 		t.Fatalf("impossible shape = %q, want clear CPU and allocatable error", msg)
+	}
+}
+
+func TestImpossibleShapeAllowsLargerJobPoolNodeToScale(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "small-band-node", Labels: map[string]string{cpuBandKey: cpuBandSmall},
+		},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("3"), corev1.ResourceMemory: resource.MustParse("12Gi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
+		store.CPUClass{Cores: 4, MemoryBytes: 16 << 30}, store.NodeClaimFence{})
+	if msg := r.impossibleShape(t.Context(), job); msg != "" {
+		t.Fatalf("autoscaling job pool refused larger pod: %s", msg)
 	}
 }
 

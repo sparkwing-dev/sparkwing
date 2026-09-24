@@ -53,8 +53,9 @@ tolerations the runner was configured with. A cluster offering those classes
 needs a node pool labeled and tainted with that key and value; on a cluster
 without one the pod never schedules and the node fails with the scheduler's
 message. Requests use the pipeline's pinned or measured resources, independently
-of the billed class; a request exceeding every matching node's allocatable
-capacity fails before the Job is created. See [Runner classes](auth.md#runner-classes).
+of the billed class. On fixed node pools, a request exceeding every matching
+node's allocatable capacity fails before the Job is created; band pools can add
+larger nodes. See [Runner classes](auth.md#runner-classes).
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and
