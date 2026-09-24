@@ -78,6 +78,10 @@ Logs live in a separate service keyed by run and node
 (`/api/v1/logs/{runID}/{nodeID}`), with a whole-run read and an SSE
 stream for live tail. The routes and their scopes are in
 [api-reference.md](api-reference.md).
+On a node read, `grep=TEXT&line_numbers=1` returns NDJSON objects with
+`line_no` (the position in the full node log) and `line`. Matching is
+case-sensitive. `max_matches=N` caps the response; omitting it returns all
+matches. Without `line_numbers=1`, the read returns plain text as before.
 
 A runner numbers its appends: each carries `X-Sparkwing-Log-Stream`, a
 name for the writer, and `X-Sparkwing-Log-Seq`, the line's position in

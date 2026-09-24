@@ -15,7 +15,8 @@ import (
 )
 
 type Profile struct {
-	Name string `yaml:"-"`
+	Name             string `yaml:"-"`
+	logsURLInherited bool
 
 	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
@@ -46,6 +47,15 @@ func (p *Profile) ControllerToken() string {
 	return p.Controller.Token
 }
 
+// ExplicitLogsURL returns the logs URL the profile supplied, excluding a
+// controller URL filled in by InheritControllerDefaults.
+func (p *Profile) ExplicitLogsURL() string {
+	if p == nil || p.Logs == nil || p.logsURLInherited {
+		return ""
+	}
+	return p.Logs.URL
+}
+
 func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
@@ -53,6 +63,9 @@ func (p *Profile) HasController() bool {
 func (p *Profile) InheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
+	}
+	if p.Logs != nil && p.Logs.Type == backends.TypeController && p.Logs.URL == "" {
+		p.logsURLInherited = true
 	}
 	for _, spec := range []*backends.Spec{p.Secrets, p.State, p.Cache, p.Logs} {
 		if spec == nil || spec.Type != backends.TypeController {
@@ -174,6 +187,11 @@ func Save(path string, cfg *Config) error {
 		}
 		cp := *p
 		cp.Name = ""
+		if cp.logsURLInherited && cp.Logs != nil {
+			logs := *cp.Logs
+			logs.URL = ""
+			cp.Logs = &logs
+		}
 		out.Profiles[name] = &cp
 	}
 	buf, err := yaml.Marshal(out)

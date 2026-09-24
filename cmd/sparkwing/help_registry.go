@@ -2791,11 +2791,16 @@ infrastructure error.`,
 var cmdJobsGrep = Command{
 	Path:     "sparkwing runs grep",
 	Synopsis: "Search log bodies across recent runs for a substring",
-	Description: `Walks the runs matching the filter set and substring-greps
-every node's log. Reuses the same filter flags as ` + "`runs list`" + ` so
-the candidate set is identical to what that verb would return.
-In cluster mode the grep runs server-side per (run, node), so only
-matching bytes come back over the wire.
+	Description: `Walks runs selected by pipeline, status, branch, SHA prefix, and since,
+then substring-greps every node's log. Those positive filters apply before
+the run limit. Exclusions and started-date bounds apply after fetching at
+most 1,000 runs. In cluster mode the grep runs server-side per (run, node),
+so only matching lines and their original line numbers come back over the wire.
+A profile logs URL supplied explicitly is used directly; otherwise grep
+requires the logs service URL the controller announces.
+
+CLI log text matching is case-sensitive and --max-matches caps each node.
+Dashboard Search matches text without case and caps its whole response.
 
 Default output is a table of RUN / NODE / LINE / TEXT. -q
 (quiet) prints the unique matching run ids -- the usual

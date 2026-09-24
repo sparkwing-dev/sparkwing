@@ -252,6 +252,47 @@ type ReadFilter struct {
 	Grep  string // substring filter (case-sensitive)
 }
 
+// GrepLine is a matching node log line with its position in the full log.
+type GrepLine struct {
+	LineNo int    `json:"line_no"`
+	Line   string `json:"line"`
+}
+
+// Grep reads matching lines with their original line numbers from the logs service.
+func (c *Client) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error) {
+	q := url.Values{"grep": {pattern}, "line_numbers": {"1"}}
+	if maxMatches > 0 {
+		q.Set("max_matches", fmt.Sprint(maxMatches))
+	}
+	u := fmt.Sprintf("%s/api/v1/logs/%s/%s?%s", c.baseURL,
+		url.PathEscape(runID), url.PathEscape(nodeID), q.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setRunnerIdentity(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("logs grep %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	}
+	var matches []GrepLine
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var line GrepLine
+		if err := decoder.Decode(&line); errors.Is(err, io.EOF) {
+			return matches, nil
+		} else if err != nil {
+			return nil, err
+		}
+		matches = append(matches, line)
+	}
+}
+
 // ReadFiltered is Read with server-side line filters. Matches the
 // flag set exposed on `sparkwing runs logs` so cluster-mode never
 // tails a million lines over the wire.
