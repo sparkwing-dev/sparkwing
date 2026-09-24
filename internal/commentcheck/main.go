@@ -43,7 +43,8 @@ narrow the report to the lines those diffs add; -base also reads untracked
 .go files, which git diff alone leaves out.
 
 Allowed: GoDoc on exported API declarations and fields, body comments tagged
-hack:, safety:, bug: or perf:, and #nosec GNNN -- reason annotations.
+hack:, safety:, bug: or perf:, #nosec GNNN -- reason annotations, and
+sleepcheck:external-boundary markers checked by internal/sleepcheck.
 Caps: a tagged comment runs at most 4 lines, each at most 120 characters; a
 #nosec annotation is one line standing alone in its comment group.
 A tag opens a // comment, so a /* */ block carries no tag and is a violation
@@ -332,6 +333,7 @@ func mark(allowed map[*ast.CommentGroup]bool, cg *ast.CommentGroup) {
 func isDirective(text string) bool {
 	return strings.HasPrefix(text, "//go:") ||
 		strings.HasPrefix(text, "//nolint:") ||
+		strings.HasPrefix(text, "// sleepcheck:external-boundary ") ||
 		strings.HasPrefix(text, "//lint:ignore ") ||
 		strings.HasPrefix(text, "//lint:file-ignore ")
 }

@@ -126,6 +126,7 @@ func TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused(t *testing.T) {
 	case <-refused:
 	case err := <-done:
 		t.Fatalf("RunNodeCommand returned %v before any renewal was refused", err)
+	// sleepcheck:external-boundary real HTTP claim renewal must arrive before pod cleanup
 	case <-time.After(4 * store.DispatchedHeartbeatInterval):
 		close(claimRefusedRelease)
 		t.Fatal("the pod never renewed its claim")
@@ -135,6 +136,7 @@ func TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused(t *testing.T) {
 		if err == nil {
 			t.Fatal("RunNodeCommand succeeded after its claim renewal was refused, want a failure so the pod exits non-zero")
 		}
+	// sleepcheck:external-boundary refusal must stop the real pod before cleanup
 	case <-time.After(2 * store.DispatchedHeartbeatInterval):
 		close(claimRefusedRelease)
 		<-done

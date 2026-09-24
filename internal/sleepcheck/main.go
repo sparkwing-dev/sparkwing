@@ -29,9 +29,10 @@ var clockReads = map[string]bool{
 }
 
 type finding struct {
-	file string
-	line int
-	form string
+	file   string
+	line   int
+	column int
+	form   string
 }
 
 type unreadable struct {
@@ -53,6 +54,9 @@ or time.Until read as a wait or a deadline (a greater-or-less comparison, a
 loop condition, or a context.WithTimeout or WithDeadline argument). time.Now()
 that only stamps a fixture value is allowed. A file that dot-imports time
 cannot be judged and fails for that reason.
+
+Four approved real HTTP/process bounds require an exact source marker,
+file, function and duration; a stale or changed exception fails the run.
 
 -staged and -base narrow the report to the lines those diffs add, which is how
 a test written before this rule keeps passing; -base also reads untracked
@@ -96,6 +100,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
 		os.Exit(2)
 	}
+	allowed, stale := approvedWaits(root, approvedExternalBoundaries)
+	findings = withoutApproved(findings, allowed)
 
 	if *staged || *base != "" {
 		added, aerr := scopedAdds(root, *staged, *base)
@@ -118,7 +124,11 @@ func main() {
 	if len(unread) > 0 {
 		fmt.Print(unreadableFailure(unread))
 	}
-	if len(findings) > 0 || len(unread) > 0 {
+	for _, rule := range stale {
+		fmt.Printf("%s: approved external-boundary wait missing or changed in %s (%s)\n",
+			rule.file, rule.function, rule.duration)
+	}
+	if len(findings) > 0 || len(unread) > 0 || len(stale) > 0 {
 		os.Exit(1)
 	}
 	fmt.Println("sleepcheck: clean")
@@ -163,14 +173,22 @@ func checkFile(path, rel string) ([]finding, error) {
 	elapsed := elapsedNames(file, timePkg)
 
 	var out []finding
-	seen := map[int]bool{}
+	seenClock := map[int]bool{}
+	seenCalls := map[token.Pos]bool{}
 	add := func(pos token.Pos, form string) {
-		line := fset.Position(pos).Line
-		if seen[line] {
-			return
+		location := fset.Position(pos)
+		if strings.HasPrefix(form, "time.") {
+			if seenCalls[pos] {
+				return
+			}
+			seenCalls[pos] = true
+		} else {
+			if seenClock[location.Line] {
+				return
+			}
+			seenClock[location.Line] = true
 		}
-		seen[line] = true
-		out = append(out, finding{file: rel, line: line, form: form})
+		out = append(out, finding{file: rel, line: location.Line, column: location.Column, form: form})
 	}
 
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -357,7 +375,10 @@ func sortFindings(findings []finding) {
 		if findings[i].file != findings[j].file {
 			return findings[i].file < findings[j].file
 		}
-		return findings[i].line < findings[j].line
+		if findings[i].line != findings[j].line {
+			return findings[i].line < findings[j].line
+		}
+		return findings[i].column < findings[j].column
 	})
 }
 

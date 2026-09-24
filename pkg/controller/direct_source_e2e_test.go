@@ -230,6 +230,7 @@ func (e *directSourceE2E) startRunner(name, command string) {
 		go func() { _ = cmd.Wait(); close(done) }()
 		select {
 		case <-done:
+		// sleepcheck:external-boundary external runner gets ten seconds to exit before kill
 		case <-time.After(10 * time.Second):
 			_ = cmd.Process.Kill()
 			<-done
@@ -256,6 +257,7 @@ func (e *directSourceE2E) awaitSuccess(runID string) {
 		select {
 		case <-e.ctx.Done():
 			e.t.Fatalf("run %s never finished; saw %v", runID, seen)
+		// sleepcheck:external-boundary external runner status needs a paced HTTP poll
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
