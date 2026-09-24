@@ -83,3 +83,35 @@ func TestRunsGrepControllerOnlyProfileNeedsLogsAnnouncement(t *testing.T) {
 		t.Fatalf("missing logs announcement error = %v", err)
 	}
 }
+
+func TestRunsGrepDiscoversLogsWhenProfileURLWasInherited(t *testing.T) {
+	logsHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/logs/run-inherited/build" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"line_no": 2, "line": "fatal error"})
+	}))
+	t.Cleanup(logsHTTP.Close)
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/services":
+			_ = json.NewEncoder(w).Encode(map[string]string{"logs": logsHTTP.URL})
+		case "/api/v1/runs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"runs": []*store.Run{{ID: "run-inherited", Status: "failed"}}})
+		case "/api/v1/runs/run-inherited/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []*store.Node{{RunID: "run-inherited", NodeID: "build"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(controller.Close)
+	setProfilesFixture(t, fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller}\n", controller.URL))
+	var grepErr error
+	output := captureStdout(t, func() {
+		grepErr = runJobs([]string{"grep", "--profile", "prod", "--pattern", "fatal", "-q", "-o", "plain"})
+	})
+	if grepErr != nil || strings.TrimSpace(output) != "run-inherited" {
+		t.Fatalf("grep inherited logs URL = (%q, %v)", output, grepErr)
+	}
+}
