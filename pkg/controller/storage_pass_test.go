@@ -150,9 +150,9 @@ func TestTheStoragePassReconcilesAndKeepsWritesInFlight(t *testing.T) {
 	}
 }
 
-// The pass expires a team's cache objects past their age in the listing it
-// already makes, keeps the operator's, and never expires logs, whose
-// retention the logs service keys to each run.
+// The pass expires cache objects past their age in the listing it already
+// makes, including the operator's team and token namespaces. Log retention
+// remains with the logs service.
 func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
 	f := freeTierFixture(t, 5)
 	b := newPassBuckets(t)
@@ -162,6 +162,7 @@ func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
 	}
 	b.put(t, "cache/teams/alpha/bins/old", 300)
 	b.put(t, "cache/teams/default/bins/operator", 10)
+	b.put(t, "cache/bins/operator-root", 10)
 	b.put(t, "logs/teams/alpha/runs/r1/build.log", 40)
 	b.now = b.now.Add(controller.CacheObjectMaxAge("alpha") + time.Hour)
 
@@ -171,8 +172,11 @@ func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
 	if b.has(t, "cache/teams/alpha/bins/old") {
 		t.Error("a cache object past its age survived the pass")
 	}
-	if !b.has(t, "cache/teams/default/bins/operator") || !b.has(t, "logs/teams/alpha/runs/r1/build.log") {
-		t.Error("the pass expired the operator's cache object or a log")
+	if b.has(t, "cache/teams/default/bins/operator") || b.has(t, "cache/bins/operator-root") {
+		t.Error("old operator cache survived the pass")
+	}
+	if !b.has(t, "logs/teams/alpha/runs/r1/build.log") {
+		t.Error("the cache pass expired a log")
 	}
 	if got := held(t, f.store, "alpha", store.StorageCache); got != 0 {
 		t.Errorf("alpha's cache after expiry = %d, want 0", got)
