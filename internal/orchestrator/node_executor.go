@@ -593,6 +593,9 @@ done:
 		sparkwing.Debug(nodeCtx, "hook: AfterRun[%d] firing (err=%v)", i, lastErr)
 		callAfterRun(nodeCtx, hook, lastErr, i, nlog)
 	}
+	if err := flushNodeLogExecutionAttempt(nlog); err != nil && lastErr == nil && nodeLogFatal(nlog) == nil {
+		lastErr = err
+	}
 
 	if fatal := nodeLogFatal(nlog); fatal != nil {
 		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
@@ -687,6 +690,17 @@ done:
 	}
 
 	emitNodeEnd(sparkwing.Success, "")
+	if fatal := nodeLogFatal(nlog); fatal != nil {
+		wrapped := fmt.Errorf("logs append blocked; failing node: %w", fatal)
+		text := boundedFailureText(ctx, runID, node.ID(), wrapped)
+		fctx := failureWriteCtx(ctx, wrapped)
+		if err := r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureLogsAuth, nil); err != nil {
+			noteLostStateWrite(fctx, "finish node", runID, err)
+		}
+		noteEvent(fctx, r.backends.State, runID, node.ID(), "node_failed", []byte(text))
+		appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
+		return nil, wrapped
+	}
 
 	if count, reason := nodeLogDrops(nlog); count > reportedDrops {
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})

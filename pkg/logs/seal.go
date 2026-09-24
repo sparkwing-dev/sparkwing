@@ -30,6 +30,7 @@ import (
 const (
 	LogStreamHeader = "X-Sparkwing-Log-Stream"
 	LogSeqHeader    = "X-Sparkwing-Log-Seq"
+	LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
 )
 
 // SealGrace is how long after a node finishes a reader waits for the
@@ -247,6 +248,7 @@ type appendSequenceKey struct{}
 type appendSequence struct {
 	stream string
 	seq    int64
+	end    int64
 }
 
 // WithAppendSequence numbers the append made with the returned context:
@@ -254,7 +256,12 @@ type appendSequence struct {
 // that numbers its appends seals the stream with [Client.Seal] when it
 // finishes.
 func WithAppendSequence(ctx context.Context, stream string, seq int64) context.Context {
-	return context.WithValue(ctx, appendSequenceKey{}, appendSequence{stream: stream, seq: seq})
+	return WithAppendSequenceRange(ctx, stream, seq, seq)
+}
+
+// WithAppendSequenceRange numbers consecutive newline-delimited records in one append.
+func WithAppendSequenceRange(ctx context.Context, stream string, first, last int64) context.Context {
+	return context.WithValue(ctx, appendSequenceKey{}, appendSequence{stream: stream, seq: first, end: last})
 }
 
 func appendSequenceFromContext(ctx context.Context) (appendSequence, bool) {
@@ -353,7 +360,8 @@ func writeResponseError(op string, resp *http.Response) error {
 
 func appendSequenceFromRequest(r *http.Request) (appendSequence, bool, error) {
 	stream, rawSeq := r.Header.Get(LogStreamHeader), r.Header.Get(LogSeqHeader)
-	if stream == "" && rawSeq == "" {
+	rawEnd := r.Header.Get(LogSeqEndHeader)
+	if stream == "" && rawSeq == "" && rawEnd == "" {
 		return appendSequence{}, false, nil
 	}
 	if !streamIDPattern.MatchString(stream) {
@@ -363,7 +371,14 @@ func appendSequenceFromRequest(r *http.Request) (appendSequence, bool, error) {
 	if err != nil || seq < 1 {
 		return appendSequence{}, false, errors.New("log sequence must be a positive integer")
 	}
-	return appendSequence{stream: stream, seq: seq}, true, nil
+	end := seq
+	if rawEnd != "" {
+		end, err = strconv.ParseInt(rawEnd, 10, 64)
+		if err != nil || end < seq || end-seq >= 256 {
+			return appendSequence{}, false, errors.New("log sequence range must contain 1-256 consecutive records")
+		}
+	}
+	return appendSequence{stream: stream, seq: seq, end: end}, true, nil
 }
 
 // sealRecord is one line of a node's seal file. The file is append-only,
@@ -570,7 +585,9 @@ func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq 
 	t := s.seals.m[key]
 	opened := false
 	if t != nil {
-		t.observe(seq.seq, now)
+		for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+			t.observe(seq.seq+offset, now)
+		}
 		opened = t.files[rel]
 		t.files[rel] = true
 	}
@@ -602,7 +619,9 @@ func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq 
 		}
 		t.files[rel] = true
 	}
-	t.observe(seq.seq, now)
+	for offset := int64(0); offset <= seq.end-seq.seq; offset++ {
+		t.observe(seq.seq+offset, now)
+	}
 	s.seals.put(key, t, now)
 	return nil
 }

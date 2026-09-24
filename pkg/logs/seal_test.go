@@ -91,6 +91,36 @@ func TestSealedStreamWithEveryLineReadsComplete(t *testing.T) {
 	}
 }
 
+func TestSequenceRangeAccountsForEveryLineAndRejectsFalseRanges(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	path := "/api/v1/logs/run-a/build"
+	headers := map[string]string{LogStreamHeader: "range", LogSeqHeader: "1", LogSeqEndHeader: "3"}
+	for _, bad := range []struct {
+		body string
+		end  string
+	}{
+		{"one\ntwo\n", "3"},
+		{"one\ntwo\nthree\n", "2"},
+		{"one\ntwo\nthree\n", "257"},
+		{"one\ntwo\nthree\n", "0"},
+	} {
+		headers[LogSeqEndHeader] = bad.end
+		if code, _ := f.send(t, http.MethodPost, path, "Bearer a", bad.body, headers); code != http.StatusBadRequest {
+			t.Fatalf("bad range end %q body %q = %d", bad.end, bad.body, code)
+		}
+	}
+	headers[LogSeqEndHeader] = "3"
+	if code, body := f.send(t, http.MethodPost, path, "Bearer a", "one\ntwo\nthree\n", headers); code != http.StatusNoContent {
+		t.Fatalf("range append = %d %s", code, body)
+	}
+	if code := f.seal(t, "Bearer a", "run-a", "build", Seal{Stream: "range", FinalSeq: 3, Lines: 3}); code != http.StatusNoContent {
+		t.Fatalf("seal = %d", code)
+	}
+	if got := f.report(t, "Bearer a", "run-a", "build").Assess(done, late); got.State != StateComplete || got.Lines != 3 {
+		t.Fatalf("range verdict = %+v", got)
+	}
+}
+
 func TestSealedStreamWithAGapReadsIncomplete(t *testing.T) {
 	f := newArchiveFixture(t, 0)
 	for _, seq := range []int64{1, 2, 4, 5} {

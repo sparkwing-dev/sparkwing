@@ -693,6 +693,13 @@ unlock.
 
 ### Changed
 
+- **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
+  and target 64 KiB per HTTP append, keeping a longer single line intact.
+  Idle-tail appends start after 100 ms. A sequence
+  range lets the logs service account for every line; failed batches count
+  every line dropped. Upgrade the logs service before runners and pipeline
+  binaries. See [Batched log append protocol](docs/migrations/_unreleased.md#batched-log-append-protocol).
+
 - **controller (Breaking):** The hourly storage pass deletes cache objects older than
   30 days for the default team and the operator token's cache root, as it
   already does for other teams. It also removes expired direct-object rows for

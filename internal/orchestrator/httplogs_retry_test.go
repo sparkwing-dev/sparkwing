@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -47,9 +49,13 @@ func TestHTTPLogs_ClaimedNodeBuffersUntilAttemptAndKeepsItsOrdinal(t *testing.T)
 		t.Fatalf("bind posts = %d, want 0 before execution acknowledgement", got)
 	}
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "after acknowledgement"})
-	if got := posts.Load(); got != 2 {
-		t.Fatalf("posts = %d, want 2", got)
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
 	}
+	if got := posts.Load(); got != 1 {
+		t.Fatalf("posts = %d, want 1 batched append", got)
+	}
+	defer func() { _ = nlog.Close() }()
 }
 
 func TestHTTPLogs_ClaimedNodeFlushesBufferedLogsAfterBodyWithoutAnotherEmit(t *testing.T) {
@@ -107,6 +113,7 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	}
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 
 	if got := posts.Load(); got != 3 {
 		t.Errorf("attempts: got %d POSTs, want 3 (retry budget)", got)
@@ -135,11 +142,54 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	posts.Store(0)
 	healthy.Store(true)
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 	if posts.Load() != 1 {
 		t.Errorf("happy path attempts: got %d, want 1", posts.Load())
 	}
 	if c, _ := dropper.Drops(); c != 1 {
 		t.Errorf("dropCount after success: got %d, want 1", c)
+	}
+}
+
+func TestHTTPLogs_BatchRetryKeepsItsSequenceRange(t *testing.T) {
+	type request struct{ first, last, body string }
+	var seen []request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/seal") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		seen = append(seen, request{
+			first: r.Header.Get(logs.LogSeqHeader),
+			last:  r.Header.Get(logs.LogSeqEndHeader),
+			body:  string(body),
+		})
+		if len(seen) == 1 {
+			http.Error(w, "retry", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 0)
+	nlog, err := orchestrator.NewHTTPLogs(srv.URL, nil, nil).OpenNodeLog(context.Background(), "run", "node", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nlog.Emit(sparkwing.LogRecord{Msg: "one"})
+	nlog.Emit(sparkwing.LogRecord{Msg: "two"})
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] != seen[1] || seen[0].first != "1" || seen[0].last != "2" {
+		t.Fatalf("retry requests = %+v", seen)
+	}
+	if count, _ := nlog.(interface{ Drops() (int, string) }).Drops(); count != 0 {
+		t.Fatalf("successful retry dropped %d lines", count)
+	}
+	if err := nlog.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -161,6 +211,7 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	nlog, _ := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 	first := posts.Load()
 	if first != 1 {
 		t.Errorf("first emit: got %d POSTs, want 1 (auth latches before retry budget)", first)
@@ -168,6 +219,7 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "third"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 	if posts.Load() != first {
 		t.Errorf("after latch: got %d POSTs, want %d (no further attempts)", posts.Load(), first)
 	}
@@ -199,16 +251,17 @@ func TestHTTPLogs_DropCooldownStopsAttemptsButKeepsCounting(t *testing.T) {
 		t.Fatalf("OpenNodeLog: %v", err)
 	}
 
-	for i := range 20 {
+	for i := range 300 {
 		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: fmt.Sprintf("line-%d", i)})
 	}
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 
 	if got := posts.Load(); got != 3 {
 		t.Errorf("POSTs: got %d, want 3 (only the first line pays the retry budget)", got)
 	}
 	count, reason := nlog.(interface{ Drops() (int, string) }).Drops()
-	if count != 20 {
-		t.Errorf("dropCount: got %d, want 20 (every lost line counts, attempted or not)", count)
+	if count != 300 {
+		t.Errorf("dropCount: got %d, want 300 (every lost line counts, attempted or not)", count)
 	}
 	if !strings.Contains(reason, "500") {
 		t.Errorf("dropReason should mention HTTP 500, got %q", reason)
@@ -239,11 +292,13 @@ func TestHTTPLogs_DropCooldownExpiryProbesAgain(t *testing.T) {
 	nlog, _ := be.OpenNodeLog(context.Background(), "run-x", "node-x", nil)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 	posts.Store(0)
 	healthy.Store(true)
 	orchestrator.ExpireTestHTTPNodeLogDropCooldown(t, nlog)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
+	_ = nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt()
 	if got := posts.Load(); got != 1 {
 		t.Errorf("post-cooldown POSTs: got %d, want 1 (the window expired, so the line is attempted)", got)
 	}

@@ -88,6 +88,7 @@ type Limits struct {
 const LineTruncationMarker = "[sparkwing-logs] truncated: line byte cap reached\n"
 const LogBlockBytes int64 = 1 << 20
 const LogBlockSettleEvery = time.Minute
+const LogSeqEndHeader = "X-Sparkwing-Log-Seq-End"
 const LogSeqHeader = "X-Sparkwing-Log-Seq"
 const LogStreamHeader = "X-Sparkwing-Log-Stream"
 const MaxClaimCacheTTL = 30 * time.Second
@@ -209,6 +210,7 @@ type StreamReport struct {
 }
 const TruncationMarker = "[sparkwing-logs] truncated: byte cap reached\n"
 func WithAppendSequence(ctx context.Context, stream string, seq int64) context.Context
+func WithAppendSequenceRange(ctx context.Context, stream string, first, last int64) context.Context
 func WithReaderIdentity(ctx context.Context, id string) context.Context
 
 # methods on un-declared receiver types (likely a bug)

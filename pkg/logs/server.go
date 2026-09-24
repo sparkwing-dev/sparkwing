@@ -658,6 +658,10 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	if numbered && seq.end > seq.seq && int64(bytes.Count(body, []byte{'\n'})) != seq.end-seq.seq+1 {
+		http.Error(w, "log sequence range does not match newline-delimited records", http.StatusBadRequest)
+		return
+	}
 
 	root, err := s.openRunsRoot()
 	if err != nil {

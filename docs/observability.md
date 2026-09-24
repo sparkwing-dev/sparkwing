@@ -131,6 +131,13 @@ similar. The runner numbers every line it writes and, when the node
 finishes, sends one seal per stream naming how many it numbered and how
 many it failed to deliver. The seal sits beside the log, never in it, and
 moves to the object store with the run's logs when the run is archived.
+The writer batches up to 256 consecutive lines, targets 64 KiB per append,
+and keeps an oversized single line intact. It starts an idle-tail append
+after 100 ms, and flushes the final batch before sealing. Each
+append names its first and last sequence numbers; the logs service checks
+the line count before recording that range. A failed batch counts every
+line in it as dropped. Deploy the logs service before a writer that sends
+ranges so older services do not miscount batched lines.
 
 Readers judge each finished node's newest execution attempt from its
 seals, so a clean retry reads `complete` even when the attempt it
