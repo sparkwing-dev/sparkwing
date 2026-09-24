@@ -203,7 +203,7 @@ func (e *directSourceE2E) trigger(pipeline string) string {
 	return triggered.RunID
 }
 
-// safety: The runner process inherits the test env, so stopping it also stops its work.
+// safety: exec replaces the shell, so cleanup signals the runner itself.
 func (e *directSourceE2E) startRunner(name, command string) {
 	t := e.t
 	t.Logf("%s: %s", name, redactToken(command))

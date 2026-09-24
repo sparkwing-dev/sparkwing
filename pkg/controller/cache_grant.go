@@ -23,7 +23,8 @@ type CacheGrantResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// safety: A cache grant binds the run's team namespace and cannot outlive its requesting credential.
+// safety: The cache cannot resolve runner tokens, so the controller vouches for the run's owning team.
+// teamOf must name that team: the grant is the cache's only team boundary and expires with the credential.
 func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
