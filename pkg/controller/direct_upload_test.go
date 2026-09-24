@@ -172,6 +172,18 @@ func TestPendingTriggerCanCommitBinaryCacheUpload(t *testing.T) {
 		map[string]any{"upload_id": reserved.UploadID, "run_id": "run-pending-cache"}, nil); code != http.StatusNoContent {
 		t.Fatalf("pending trigger commit = %d", code)
 	}
+	artifact, err := f.store.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: store.Team(owner.team), RunID: "run-pending-cache", Kind: store.StorageCache,
+		Key: "artifacts/blobs/" + digest, Size: int64(len(body)), SHA256: digest,
+		Principal: token.Principal, ClaimPrefix: prefix, Provenance: "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("POST", "/api/v1/data/commit", "Bearer "+grant,
+		map[string]any{"upload_id": artifact.ID, "run_id": "run-pending-cache"}, nil); code != http.StatusForbidden {
+		t.Fatalf("pending trigger artifact commit = %d, want 403", code)
+	}
 }
 
 func TestDirectUploadChecksumAndVisibility(t *testing.T) {

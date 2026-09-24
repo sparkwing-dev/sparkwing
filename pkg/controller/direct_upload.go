@@ -75,11 +75,12 @@ type directCommitRequest struct {
 }
 
 type directCaller struct {
-	team        store.Team
-	runID       string
-	principal   string
-	claimPrefix string
-	provenance  string
+	team           store.Team
+	runID          string
+	principal      string
+	claimPrefix    string
+	provenance     string
+	pendingTrigger bool
 }
 
 // safety: A signing grant must name an exact live claim so pooled token reuse cannot revive an old claimant.
@@ -101,7 +102,12 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 		return directCaller{}, false
 	}
-	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant, allowPendingTrigger) != nil {
+	if runID != "" && grant.Run != runID {
+		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
+		return directCaller{}, false
+	}
+	pendingTrigger, err := s.verifyLiveDataGrant(r.Context(), grant, allowPendingTrigger)
+	if err != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
@@ -116,7 +122,7 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	}
 	return directCaller{
 		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
-		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance,
+		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, pendingTrigger: pendingTrigger,
 	}, true
 }
 
@@ -280,7 +286,6 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 	if strings.EqualFold(scheme, "Bearer") && !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
 		caller, ok = s.directSourceCaller(w, r)
 	} else {
-		// safety: a pending trigger can commit only an upload reserved through the binary path.
 		caller, ok = s.directCaller(w, r, req.RunID, true)
 	}
 	if !ok {
@@ -298,6 +303,10 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(u.Key, "sources/") != (caller.runID == "") ||
 		u.RunID != caller.runID || u.Principal != caller.principal || u.ClaimPrefix != caller.claimPrefix || !time.Now().Before(u.ExpiresAt) {
 		writeError(w, http.StatusForbidden, errors.New("this claimant cannot commit the upload"))
+		return
+	}
+	if caller.pendingTrigger && !strings.HasPrefix(u.Key, "bin/") {
+		writeError(w, http.StatusForbidden, errors.New("a pending trigger can commit only binary cache uploads"))
 		return
 	}
 	if !u.CommittedAt.IsZero() {

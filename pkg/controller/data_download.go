@@ -85,26 +85,26 @@ type dataDownloadRequest struct {
 	Key  string `json:"key"`
 }
 
-func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) error {
+func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant, allowPendingTrigger bool) (bool, error) {
 	if grant.Claim == nil {
-		return errors.New("cache grant has no claim")
+		return false, errors.New("cache grant has no claim")
 	}
 	team, err := s.store.ForTeam(ctx, store.Team(grant.Team))
 	if err != nil {
-		return err
+		return false, err
 	}
 	run, err := team.GetRun(ctx, grant.Run)
 	// safety: a live trigger fetches source and compiles binary cache before dispatch.
 	pendingTrigger := allowPendingTrigger && grant.Claim.Kind == "trigger" && run != nil && run.Status == "pending"
 	if err != nil || run == nil || (run.Status != "running" && !pendingTrigger) || run.FinishedAt != nil {
-		return errors.New("cache grant run or claim is not live")
+		return false, errors.New("cache grant run or claim is not live")
 	}
 	claim := grant.Claim
 	// safety: the signed grant can outlive the token that held its claim.
 	claimantToken, err := s.store.LookupTokenByPrefix(claim.TokenPrefix)
 	if err != nil || claimantToken == nil || claimantToken.Team != store.Team(grant.Team) ||
 		claimantToken.Principal != claim.Principal || !claimantToken.IsValid(time.Now()) {
-		return errors.New("cache grant claimant token is not active")
+		return false, errors.New("cache grant claimant token is not active")
 	}
 	identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
 	var live bool
@@ -115,15 +115,15 @@ func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGr
 		fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
 		live, err = s.store.NodeClaimFenceIsLive(ctx, grant.Run, claim.NodeID, fence, time.Now())
 	default:
-		return errors.New("cache grant claim kind is invalid")
+		return false, errors.New("cache grant claim kind is invalid")
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !live {
-		return errors.New("cache grant claim is not live")
+		return false, errors.New("cache grant claim is not live")
 	}
-	return nil
+	return pendingTrigger, nil
 }
 
 func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind string) (store.Team, *authwire.CacheGrant, bool) {
@@ -149,7 +149,7 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
 			return "", nil, false
 		}
-		if err := s.verifyLiveDataGrant(r.Context(), grant, kind == "source" || kind == "binary"); err != nil {
+		if _, err := s.verifyLiveDataGrant(r.Context(), grant, kind == "source" || kind == "binary"); err != nil {
 			writeError(w, http.StatusForbidden, err)
 			return "", nil, false
 		}
