@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -101,5 +102,83 @@ func TestAPendingRunStampedTerminalCarriesAFinishTime(t *testing.T) {
 	if run.FinishedAt == nil {
 		t.Fatal("a pending run moved to a terminal status carries no finish time; this is the path " +
 			"a dispatch failure takes, so the claim it belongs to is never closed out")
+	}
+}
+
+func TestFinishedPendingRowCannotBeReopenedOrRewritten(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	ended := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "legacy-pending-finish", Pipeline: "p", Status: "pending", StartedAt: ended,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx,
+		storetest.Rebind(s, `UPDATE runs SET finished_at = ? WHERE id = ?`),
+		ended.UnixNano(), "legacy-pending-finish"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "legacy-pending-finish", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.GetRun(ctx, "legacy-pending-finish")
+	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
+		t.Fatalf("finished pending row reopened: %+v, %v", run, err)
+	}
+	if err := s.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("single finish = %v, want invalid input", err)
+	}
+	if err := s.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
+		t.Fatal(err)
+	}
+	tn, err := s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.FinishRun(ctx, run.ID, "failed", "late claimant"); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("team single finish = %v, want invalid input", err)
+	}
+	if err := tn.FinishRunsIfActive(ctx, []string{run.ID}, "failed", "late claimant"); err != nil {
+		t.Fatal(err)
+	}
+	run, err = s.GetRun(ctx, run.ID)
+	if err != nil || run.Status != "pending" || run.FinishedAt == nil || !run.FinishedAt.Equal(ended) {
+		t.Fatalf("finished pending verdict rewritten: %+v, %v", run, err)
+	}
+}
+
+func TestFinishRunIdenticalRetryKeepsFinishTime(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	if err := s.CreateRun(ctx, store.Run{ID: "retry-finish", Pipeline: "p", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.GetRun(ctx, "retry-finish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishRun(ctx, "retry-finish", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.GetRun(ctx, "retry-finish")
+	if err != nil || again.Status != "success" || again.FinishedAt == nil || !again.FinishedAt.Equal(*first.FinishedAt) {
+		t.Fatalf("identical retry moved finish: %+v, %v", again, err)
+	}
+}
+
+func TestCreateRunRejectsFinishedAtOnNonTerminalRow(t *testing.T) {
+	s := storetest.Open(t)
+	ended := time.Now()
+	err := s.CreateRun(t.Context(), store.Run{
+		ID: "bad-finished-pending", Pipeline: "p", Status: "pending", StartedAt: ended, FinishedAt: &ended,
+	})
+	if !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("finished pending create = %v, want invalid input", err)
 	}
 }

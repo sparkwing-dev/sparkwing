@@ -914,6 +914,11 @@ unlock.
 
 ### Fixed
 
+- **controller:** Run completion accepts only `success`, `failed`, or
+  `cancelled`. An identical retry keeps the original finish time; a
+  conflicting verdict returns `400`. Creating a run cannot reopen a row
+  already stamped finished.
+
 - **controller:** A storage listing that already sees a smaller overwritten
   object keeps its listed size instead of applying the same shrink twice.
 

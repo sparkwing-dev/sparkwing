@@ -1119,7 +1119,7 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 
 func writeStateError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrSecretInputHash):
+	case errors.Is(err, store.ErrSecretInputHash), errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)

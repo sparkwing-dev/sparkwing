@@ -16,6 +16,15 @@ needs; `admin` satisfies any check. Token kinds, the scope set, the
 unauthenticated endpoints, and first-visit admin bootstrap are in
 [auth.md](auth.md).
 
+## Run completion
+
+`POST /api/v1/runs/{id}/finish` accepts `success`, `failed`, or `cancelled`.
+Another status returns `400` without finishing the run. Repeating the same
+status and error text succeeds without moving its finish time; a different
+verdict after completion returns `400`. `POST /api/v1/runs` cannot attach a
+finish time to a pending or running row, or reopen a pending row that already
+has one.
+
 ## Data downloads
 
 `POST /api/v1/data/download` signs a short-lived download for an object. Send

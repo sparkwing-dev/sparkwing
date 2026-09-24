@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -67,8 +68,7 @@ func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) er
 	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, finishRunStmt+` AND team = ?`,
-		status, errMsg, time.Now().UnixNano(), runID, string(t.team)); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -79,6 +79,9 @@ func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) er
 // cannot be partly cancelled, and a member of another team fails the
 // whole batch with [ErrNotFound] rather than being skipped.
 func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
 	if len(runIDs) == 0 {
 		return nil
 	}
@@ -94,7 +97,7 @@ func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE runs SET status = ?, error = ?, finished_at = ?
-			  WHERE team = ? AND id = ? AND status NOT IN ('success','failed','cancelled')`,
+			  WHERE team = ? AND id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`,
 			status, errMsg, now, string(t.team), runID); err != nil {
 			return err
 		}
