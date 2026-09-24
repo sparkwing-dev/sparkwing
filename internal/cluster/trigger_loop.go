@@ -171,12 +171,17 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 				logger.Error("trigger loop: trigger failed",
 					"run_id", trigger.ID, "err", err)
 				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(claimCtx), 5*time.Second)
-				if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
+				ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error())
+				canFinish := ferr == nil
+				if ferr != nil {
 					logger.Warn("trigger loop: FinishRun failed",
 						"run_id", trigger.ID, "err", ferr)
+					canFinish = orchestrator.ConfirmTerminalRunAfterWriteError(claimCtx, cli, trigger.ID)
 				}
 				finishCancel()
-				_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
+				if canFinish {
+					_ = cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID)
+				}
 			}
 			if selfTerminate {
 				logger.Error("trigger loop: self-terminating after prolonged controller silence",

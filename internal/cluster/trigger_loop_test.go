@@ -256,6 +256,60 @@ func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
 	}
 }
 
+func TestRunTriggerLoop_ConfirmsRunAfterAmbiguousFinishResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   string
+		wantDone int32
+	}{
+		{name: "write rejected", status: "pending", wantDone: 0},
+		{name: "response lost after commit", status: "failed", wantDone: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			var claimed atomic.Bool
+			var reads, done atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+					if claimed.Swap(true) {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(store.Trigger{
+						ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+						Status: "claimed", ClaimSeq: 7,
+					})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+					http.Error(w, "response unavailable", http.StatusServiceUnavailable)
+					cancel()
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/bad-source":
+					reads.Add(1)
+					_ = json.NewEncoder(w).Encode(store.Run{ID: "bad-source", Status: tc.status})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+					done.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+				ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+				Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !claimed.Load() || reads.Load() != 1 || done.Load() != tc.wantDone {
+				t.Fatalf("claim = %t, run reads = %d, trigger done = %d; want one read and %d done",
+					claimed.Load(), reads.Load(), done.Load(), tc.wantDone)
+			}
+		})
+	}
+}
+
 func waitForTriggerHelper(path string, timeout time.Duration) error {
 	deadlineAt := time.Now().Add(timeout)
 	poll := time.NewTicker(5 * time.Millisecond)
