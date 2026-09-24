@@ -693,6 +693,9 @@ func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, rep
 	}
 	repos := map[string]bool{}
 	for _, row := range rows {
+		if !row.Declared {
+			continue
+		}
 		key := row.RepoPath
 		if row.GitHubRepositoryID > 0 {
 			key = fmt.Sprintf("github:%d", row.GitHubRepositoryID)

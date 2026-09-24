@@ -270,3 +270,36 @@ func TestGitHubAppCronCannotProveManualGitHubURLDistinct(t *testing.T) {
 func githubRepo(id int64, fullName string) githubapptest.Repo {
 	return githubapptest.Repo{ID: id, FullName: fullName}
 }
+
+func TestGitHubAppWithdrawnRepoReleasesCapacity(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.app.SetRepos(7, githubRepo(701, "acme/widgets"), githubRepo(702, "acme/plans"))
+	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 9 {
+		if _, _, err := tn.ArmCronSchedule(t.Context(), store.CronSchedule{
+			ID: fmt.Sprintf("crn_seed_%d", i), RepoPath: fmt.Sprintf("https://example.com/r%d.git", i),
+			Pipeline: "seed", Name: "default", Cron: "0 1 * * *", TZ: "UTC",
+			Overlap: store.CronOverlapSkip, CatchUp: time.Hour, Where: store.CronWhereController,
+		}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.app.SetCommit("acme/widgets", "main", headSHA)
+	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code, _ := f.deliver("push", cronPush(7, 701, "acme/widgets", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
+		t.Fatalf("first arm = %d", code)
+	}
+	if n, err := tn.WithdrawGitHubCronRepository(t.Context(), 7, 701, time.Now()); err != nil || n != 1 {
+		t.Fatalf("withdraw = %d, %v", n, err)
+	}
+	f.app.SetCommit("acme/plans", "main", headSHA)
+	f.app.SetFile("acme/plans", headSHA, ".sparkwing/sparkwing.yaml", []byte(githubCronConfig))
+	if code, _ := f.deliver("push", cronPush(7, 702, "acme/plans", headSHA, "refs/heads/main"), ""); code != http.StatusAccepted {
+		t.Fatalf("replacement repo should fit after withdrawal, got %d", code)
+	}
+}
