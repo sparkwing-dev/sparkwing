@@ -11,6 +11,7 @@ import {
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import {
   fleetHeadroomState,
+  fleetServiceSummary,
   fleetLocation,
   fleetRegistration,
   fleetSlotTotals,
@@ -132,35 +133,8 @@ export default function ClusterPage() {
     };
   }, [agents]);
 
-  const recentRunFailures = services.flatMap((svc) =>
-    svc.name === "controller"
-      ? (svc.problems ?? []).filter((problem) => problem.startsWith("runs: "))
-      : [],
-  );
-  const serviceProbes = services.map((svc) => {
-    if (svc.name !== "controller") return svc;
-    const problems = (svc.problems ?? []).filter(
-      (problem) => !problem.startsWith("runs: "),
-    );
-    return {
-      ...svc,
-      problems,
-      status:
-        svc.status === "degraded" && recentRunFailures.length > 0 &&
-        !svc.error && problems.length === 0
-          ? "ok"
-          : svc.status,
-    };
-  });
+  const { recentRunFailures, serviceProbes, overall } = fleetServiceSummary(services);
   const maxLatency = Math.max(1, ...serviceProbes.map((s) => s.latency_ms));
-  const overall =
-    serviceProbes.length === 0
-      ? "unknown"
-      : serviceProbes.every((s) => s.status === "ok")
-        ? "ok"
-        : serviceProbes.some((s) => s.status === "down")
-          ? "down"
-          : "degraded";
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">

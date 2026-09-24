@@ -6,8 +6,9 @@ import (
 )
 
 type runnerHeartbeatRegistry struct {
-	mu sync.Mutex
-	m  map[presenceKey]time.Time
+	mu        sync.Mutex
+	m         map[presenceKey]time.Time
+	lastSweep time.Time
 }
 
 func newRunnerHeartbeatRegistry() *runnerHeartbeatRegistry {
@@ -20,6 +21,14 @@ func (r *runnerHeartbeatRegistry) record(key presenceKey, at time.Time) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.lastSweep.IsZero() || at.Sub(r.lastSweep) >= time.Minute {
+		for candidate, seen := range r.m {
+			if at.Sub(seen) > runnerHeadroomStale {
+				delete(r.m, candidate)
+			}
+		}
+		r.lastSweep = at
+	}
 	r.m[key] = at
 }
 
