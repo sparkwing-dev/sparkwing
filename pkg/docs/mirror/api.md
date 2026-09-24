@@ -86,6 +86,14 @@ turns that into one verdict. See
 
 ## Run coordination
 
+`POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start` records one
+attempt for the node's claim generation and ordinal. Repeating that exact
+request is safe. The execution-start and node `touch` routes answer a
+transient PostgreSQL lock or serialization conflict with `503` and
+`Retry-After: 1`. Runners retry execution-start up to three times after
+those responses or a transient connection error; a different store error
+remains `500`.
+
 A pipeline binary needs more than node state from whatever holds its
 runs: it dispatches its own child triggers, and it measures what the run
 cost so the next run of the same pipeline is priced from evidence. Those

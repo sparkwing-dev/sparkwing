@@ -107,7 +107,9 @@ func (f *ghFixture) workAt(team, runID, slug, branch, sha string) {
 	owner, name, _ := strings.Cut(slug, "/")
 	now := time.Now()
 	if err := tn.CreateTriggerWithRun(ctx, store.Trigger{
-		ID: runID, Pipeline: "build", Repo: slug, GithubOwner: owner, GithubRepo: name, CreatedAt: now,
+		ID: runID, Pipeline: "build", TriggerSource: "github", Repo: slug,
+		GithubOwner: owner, GithubRepo: name, TriggerEnv: map[string]string{"GITHUB_EVENT_NAME": "push"}, CreatedAt: now,
+		WebhookDelivery: runID, WebhookReplayKey: "signed-" + runID,
 		GitBranch: branch, GitSHA: sha,
 	}, store.Run{
 		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug, GithubOwner: owner, GithubRepo: name,
@@ -140,6 +142,21 @@ func TestGitHubRunnerExchangeNeedsBothSidesOfConsent(t *testing.T) {
 	w := f.whoami("Bearer " + cred.Token)
 	if w.Team != owner.team || w.Principal != "github:42:Acme/Widgets" {
 		t.Fatalf("whoami = %+v", w)
+	}
+	token, err := f.store.LookupToken(cred.Token, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, err := tenant.GitHubRunnerCredentialPush(context.Background(), token.Prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if push.RunID != widgetsJob.RunID {
+		t.Fatalf("credential workflow run = %q, want %q", push.RunID, widgetsJob.RunID)
 	}
 
 	transferred := widgetsJob
@@ -332,6 +349,10 @@ func TestGitHubRunnerCredentialClaimsOnlyItsOwnPush(t *testing.T) {
 	}
 
 	f.workAt(owner.team, "run-feature", "Acme/Widgets", "feature", featureSHA)
+	var trigger store.Trigger
+	if code := f.call("POST", "/api/v1/triggers/claim", runner, nil, &trigger); code != http.StatusOK || trigger.ID != "run-feature" {
+		t.Fatalf("claim own push's trigger = %d %+v, want run-feature", code, trigger)
+	}
 	var node struct {
 		RunID string `json:"run_id"`
 	}

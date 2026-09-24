@@ -141,6 +141,30 @@ func TestMeteredTriggerClaimReservesItsMinute(t *testing.T) {
 	}
 }
 
+func TestDisabledMeteringDoesNotSettleAnEarlierTriggerReservation(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 10*triggerFloor(t, st, pool), "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-licensed")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-licensed", pool, 0); err != nil {
+		t.Fatal(err)
+	}
+	before, err := st.ListCreditCharges(ctx, 10)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("earlier reservation = %+v, %v", before, err)
+	}
+	if err := st.FinishTrigger(store.WithoutCreditMetering(ctx), "run-licensed"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.ListCreditCharges(ctx, 10)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("charges after unlicensed finish = %+v, %v", after, err)
+	}
+}
+
 // Postgres runs each claim in its own transaction, so the reservation has to
 // serialize on the ledger: claims racing for a balance that covers one minute
 // admit exactly one trigger.

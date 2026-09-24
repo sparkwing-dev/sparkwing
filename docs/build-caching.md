@@ -291,9 +291,15 @@ once. Immutable entries carry no upstream URLs and are unaffected.
 The repository's candidate installer requests `bin/install.sh --reuse-web`.
 This calls `bin/build-web.sh --reuse`, which can reuse the existing static export
 without npm installation, Next compilation, or recopying unchanged assets.
-Ordinary calls to either script still build fresh. Both build modes use
+With `pnpm` available, ordinary calls to either script build fresh. Both build modes use
 production settings and explicitly install development dependencies needed by
 TypeScript and PostCSS. The Next compiler cache remains available for rebuilds.
+
+If `pnpm` is absent, `bin/install.sh` copies a prebuilt `web/out` into the
+embedded dashboard directory. If `web/out` is absent, it keeps an existing
+embedded dashboard; with neither asset available, installation still builds the
+CLI and runner and warns that the dashboard is unavailable in the CLI.
+Install `pnpm` and rerun the script to build fresh dashboard assets.
 
 Reuse is local to the checkout. A private receipt under
 `internal/web/.build-state/` records hashes of frontend source and configuration,

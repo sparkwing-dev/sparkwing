@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -30,9 +31,16 @@ func githubWork(t *testing.T, s *store.Store, tenant *store.Tenant, runID, slug 
 		t.Fatalf("bad slug %q", slug)
 	}
 	now := time.Now()
+	if env == nil {
+		env = map[string]string{}
+	}
+	if _, ok := env["GITHUB_EVENT_NAME"]; !ok {
+		env["GITHUB_EVENT_NAME"] = "push"
+	}
 	if err := tenant.CreateTriggerWithRun(ctx, store.Trigger{
 		ID: runID, Pipeline: "build", Repo: slug, RepoURL: "https://github.com/" + slug + ".git",
-		GithubOwner: repo.Owner, GithubRepo: repo.Name, TriggerEnv: env, CreatedAt: now,
+		GithubOwner: repo.Owner, GithubRepo: repo.Name, TriggerSource: "github", TriggerEnv: env, CreatedAt: now,
+		WebhookDelivery: runID, WebhookReplayKey: "signed-" + runID,
 		GitBranch: mainPush.Branch, GitSHA: mainPush.SHA,
 	}, store.Run{
 		ID: runID, Pipeline: "build", Status: "pending", DeclaredRepo: slug,
@@ -46,6 +54,60 @@ func githubWork(t *testing.T, s *store.Store, tenant *store.Tenant, runID, slug 
 	}
 	if err := s.MarkNodeReady(ctx, runID, "compile"); err != nil {
 		t.Fatalf("mark ready: %v", err)
+	}
+}
+
+func TestGitHubRunnerScopeRefusesOtherTriggerProvenance(t *testing.T) {
+	cases := []struct {
+		name, source, event, retryOf, parent string
+		allowed                              bool
+	}{
+		{"push", "github", "push", "", "", true},
+		{"pull request", "github", "pull_request", "", "", false},
+		{"missing event", "github", "", "", "", false},
+		{"unsigned submission", "github", "push", "", "", false},
+		{"retry", "github", "push", "prior", "", false},
+		{"child", "github", "push", "", "prior", false},
+		{"manual", "manual", "push", "", "", false},
+		{"CLI", "cli", "push", "", "", false},
+		{"cron", "schedule", "push", "", "", false},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := storetest.Open(t)
+			acme := teamHandle(t, st, "acme")
+			id := githubClaimant(t, acme, "github:42:acme/widgets")
+			runID := fmt.Sprintf("provenance-%d", i)
+			env := map[string]string{"GITHUB_EVENT_NAME": tc.event, "GITHUB_REPOSITORY": "acme/widgets"}
+			githubWork(t, st, acme, runID, "acme/widgets", env)
+			if tc.name == "unsigned submission" {
+				_, err := st.DB().Exec(storetest.Rebind(st, `UPDATE triggers SET webhook_delivery = '', webhook_replay_key = '' WHERE id = ?`), runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := st.DB().Exec(storetest.Rebind(st, `UPDATE triggers SET trigger_source = ?, retry_of = ?, parent_run_id = ? WHERE id = ?`), tc.source, tc.retryOf, tc.parent, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ok, err := st.GitHubRunnerAdmits(context.Background(), widgetsScope(), runID)
+			if err != nil || ok != tc.allowed {
+				t.Fatalf("admitted = %v, %v; want %v", ok, err, tc.allowed)
+			}
+			ctx := store.WithGitHubRunnerScope(context.Background(), widgetsScope())
+			if !tc.allowed {
+				if n, err := st.ClaimNextReadyNode(ctx, id, "gh-1", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("node claim = %+v, %v", n, err)
+				}
+				if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); !errors.Is(err, store.ErrNotFound) {
+					t.Fatalf("trigger claim = %+v, %v", tr, err)
+				}
+			} else {
+				if tr, err := st.ClaimNextTriggerFor(ctx, id, 0, nil, nil); err != nil || tr.ID != runID {
+					t.Fatalf("push trigger claim = %+v, %v", tr, err)
+				}
+			}
+		})
 	}
 }
 
@@ -249,8 +311,12 @@ func TestGitHubRunnerCredentialMintIsBoundedAndSweepsExpiredOnes(t *testing.T) {
 	ctx := context.Background()
 	acme := teamHandle(t, st, "acme")
 	now := time.Now()
+	binding, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mint := func(at time.Time) error {
-		_, _, err := acme.MintGitHubRunnerCredential(ctx, "github:42:acme/widgets", mainPush,
+		_, _, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
 			[]string{"nodes.claim"}, time.Hour, at)
 		return err
 	}
@@ -299,7 +365,11 @@ func TestGitHubRunnerCredentialRemembersItsPush(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	acme, other := teamHandle(t, st, "acme"), teamHandle(t, st, "other")
-	_, tok, err := acme.MintGitHubRunnerCredential(ctx, "github:42:acme/widgets", mainPush,
+	binding, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets"}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tok, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
 		[]string{"nodes.claim"}, time.Hour, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -311,9 +381,33 @@ func TestGitHubRunnerCredentialRemembersItsPush(t *testing.T) {
 		t.Fatalf("another team read the credential's push: %v", err)
 	}
 	for name, push := range map[string]store.GitHubRunnerPush{"no branch": {SHA: mainPush.SHA}, "no commit": {Branch: "main"}} {
-		if _, _, err := acme.MintGitHubRunnerCredential(ctx, "github:42:acme/widgets", push,
+		if _, _, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", push,
 			[]string{"nodes.claim"}, time.Hour, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 			t.Errorf("%s: mint = %v, want ErrInvalidInput", name, err)
 		}
+	}
+}
+
+func TestGitHubRunnerMintAfterBindingRemoved(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{
+		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := acme.GitHubRunnerBinding(ctx, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.RemoveGitHubRunnerBinding(ctx, 42, now); err != nil {
+		t.Fatal(err)
+	}
+	raw, tok, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
+		[]string{"nodes.claim"}, time.Hour, now)
+	if !errors.Is(err, store.ErrNotFound) || raw != "" || tok != nil {
+		t.Fatalf("mint after unbind = %q, %+v, %v; want no credential", raw, tok, err)
 	}
 }

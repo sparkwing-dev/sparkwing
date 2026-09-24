@@ -293,10 +293,6 @@ sparkwing secrets list --profile prod
 # database restored without its key, and nothing else catches it.
 sparkwing secrets get --profile prod --name <name>
 
-# The ledger balance and its history survived.
-sparkwing cluster credits show --profile prod
-sparkwing cluster credits history --profile prod
-
 # Runner and user credentials survived, so runners reconnect without
 # being re-enrolled.
 sparkwing cluster tokens list --profile prod
@@ -304,6 +300,9 @@ sparkwing cluster tokens list --profile prod
 # Runners have reconnected.
 sparkwing cluster agents list --profile prod
 ```
+
+Sparkwing Cloud operators also verify the restored credit balance and ledger
+history with the private `sparkwing-ops` tool.
 
 Finish by running one real pipeline end to end and reading its logs,
 because that exercises the claim, secret-read, credit-charge and

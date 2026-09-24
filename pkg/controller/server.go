@@ -18,6 +18,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
@@ -878,8 +879,21 @@ func (s *Server) Handler() http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.Metering() {
+			path := r.URL.Path
+			if strings.HasPrefix(path, "/api/v1/credits") ||
+				strings.HasPrefix(path, "/api/v1/team/billing") ||
+				(strings.HasPrefix(path, "/api/v1/tokens/") && strings.HasSuffix(path, "/metered")) {
+				http.NotFound(w, r)
+				return
+			}
+			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // safety: neither mux is wired to the other and no handler runs, so a caller
@@ -916,7 +930,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
@@ -987,7 +1001,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	// safety: a slot is a cross-run lock, so the routes that move one bind to the
 	// live claim on the run they name rather than to the scope alone. force-release
-	// and cancel-waiter act on rows another run owns and stay admin.
+	// acts on holders from other runs and stays admin.
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleAcquireSlot))))
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleHeartbeatSlot))))
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot))))
@@ -996,7 +1010,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))))
-	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter))))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
 	mux.Handle("GET /api/v1/admin/usage-metrics", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUsageMetrics)))
@@ -1020,7 +1034,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat)))))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))
@@ -1109,6 +1123,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
 	mux.Handle("POST /api/v1/team/github-app/connect", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnect)))
 	mux.Handle("POST /api/v1/team/github-app/connect/complete", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnectComplete)))
+	mux.Handle("POST /api/v1/team/github-app/connect/available", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAvailable)))
+	mux.Handle("POST /api/v1/team/github-app/connect/select", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppSelect)))
 	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
 	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
 	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))
@@ -1528,13 +1544,17 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"run_id", p[0], "node_id", p[1])
 				}
 			}
-			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, ctx)
+			reapCtx := ctx
+			if !s.Metering() {
+				reapCtx = store.WithoutCreditMetering(ctx)
+			}
+			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
 			if err != nil {
 				s.logger.Error("reap failed", "err", err)
 				continue
 			}
 			for _, id := range ids {
-				s.settleExpiredTriggerClaim(ctx, id)
+				s.settleExpiredTriggerClaim(reapCtx, id)
 			}
 			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
 				5*store.DefaultLeaseDuration,
@@ -1619,6 +1639,10 @@ func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) sampleCreditLedger(ctx context.Context) {
+	if !s.Metering() {
+		ledgerSnapshot.set(store.CreditLedgerTotals{})
+		return
+	}
 	totals, err := s.store.CreditLedgerTotals(ctx)
 	if err != nil {
 		if ctx.Err() == nil {

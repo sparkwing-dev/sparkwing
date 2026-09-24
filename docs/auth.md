@@ -19,10 +19,9 @@ audit logs. The remaining ~35 characters carry the secret entropy.
 
 ## Metered runners
 
-A token carries a `metered` marker the operator sets, either at mint
-(`sparkwing cluster tokens create --metered`) or afterwards
-(`sparkwing cluster tokens set-metered --prefix P --metered true`). That marker
-is the only thing that decides whether the work a runner does costs credits.
+A token carries a `metered` marker that Sparkwing Cloud operators set with
+the private `sparkwing-ops` tool. That marker is the only thing that decides
+whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
@@ -97,10 +96,18 @@ the balance and how long it had been spent. Both the balance and the instant it
 ran out are the team's own, so one team spending its grants refuses and cancels
 that team's nodes and leaves every other team on the controller running.
 
-A token with no marker is neither checked nor charged, so a deployment that
-marks none bills nothing.
+A token with no marker is neither checked nor charged. A controller without a
+signed metering license ignores even a previously marked token when it claims
+work, and refuses requests to mint or mark a metered token.
 
 ## Credits
+
+Credits are a Sparkwing Cloud and enterprise feature. The controller requires
+the `metering` feature in its signed license. A signed `multi-team` license
+includes metering, including licenses issued before `metering` was named.
+Without either feature, credit and team billing routes return `404`, claims
+never check a balance or write charges, and the dashboard omits Billing.
+Customers who need metering can contact Korey for help running sparkwing-ops.
 
 Cloud runner time is prepaid. One credit is one second of one vCPU, and
 20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
@@ -125,9 +132,9 @@ its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
-`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=40000` sets
-the ladder and needs `admin`. A stored table this build cannot read is an error
-on every credit read rather than a silent return to the flat rate.
+Sparkwing Cloud operators set the ladder through the private `sparkwing-ops`
+tool. A stored table this build cannot read is an error on every credit read
+rather than a silent return to the flat rate.
 
 A balance belongs to a team: it is the sum of that team's grants less the sum of
 that team's charges, computed in SQL over the `credit_grants` and
@@ -142,10 +149,9 @@ a reservation a node did not use; each names the run, node, token prefix, and
 seconds it covered, and the class and rate it was billed at, so a later change
 to the table never reprices a charge already written.
 
-`sparkwing cluster credits show` prints the balance, the rate table, the charge
-cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
---amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
-lists every movement newest first.
+Sparkwing Cloud operators read balances and history, change pricing, and grant
+credits through the private `sparkwing-ops` tool. The controller's credit API
+routes remain the authority.
 
 ## Buying credits
 
@@ -186,7 +192,7 @@ at most one purchase, $500. The grant route still refuses an operator's `free`
 grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
 
 Purchases are final, so a refund is the operator's decision and is made by
-hand. `sparkwing cluster credits refund --payment <pi_...>` takes back what the
+hand. The private `sparkwing-ops` refund command takes back what the
 purchase still has on the ledger, in the team it funded, through
 `POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
 the operator then issues the money back. The controller never moves money, and
@@ -206,9 +212,8 @@ lost reverses the purchase the way a refund does and holds the team too, so a
 lost dispute holds it even when Stripe delivered the close before the open. A
 dispute won logs `alert=dispute_won` and changes nothing: the checkout service
 never releases a team, because one dispute's outcome says nothing about
-another's. The operator releases with
-`sparkwing cluster credits freeze --dispute <dp_...> --release` for one hold
-or `--team <slug> --release` for every hold on the team. Replaying any
+another's. The operator uses the private `sparkwing-ops` tool to release one
+dispute's hold or every hold on a team. Replaying any
 dispute event changes nothing, and a replayed hold never undoes a release. A
 dispute is bound to the one payment and team its first hold named: a hold or
 a lost-dispute reversal that names the same dispute for another payment is
@@ -257,18 +262,17 @@ at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
 is 2,000 credits a gibibyte-month, the published $0.10.
 
 The charge is a `storage` row naming the team, the bytes it billed and the
-interval it covered, so `sparkwing cluster credits show` and `credits history`
-separate retained bytes from runner time. It carries no cpu class and no
+interval it covered, so the private `sparkwing-ops` credit views separate
+retained bytes from runner time. It carries no cpu class and no
 per-second rate, because neither priced it.
 
 Each team's allowance is how many retained bytes it asked to keep. The pass
 expires its oldest finished runs above the allowance before it bills, and it
 never bills for more than the allowance, so the allowance is both what a team
 keeps and the most it pays for; an allowance of zero keeps everything and caps
-nothing. Read and write one with
-`sparkwing cluster credits allowance --principal NAME --gb N`, which needs
-`admin`. Only that verb writes it: rewriting a team's quota leaves the
-allowance where it stands.
+nothing. Sparkwing Cloud operators read and write one through the private
+`sparkwing-ops` tool. Rewriting a team's quota leaves the allowance where it
+stands.
 
 An empty balance is a hard cut, the same as it is for runner time: a write that
 would grow a team's retained bytes is refused with `402` and a reason naming
@@ -457,12 +461,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -571,11 +575,12 @@ The slot routes under `/api/v1/concurrency/{key}/` -- `acquire`, `heartbeat`,
 run the request names, so a pipeline that declares a concurrency group or a
 memoized node runs on the runner scope set. `acquire` and `resolve` name their
 run outright; `heartbeat`, `release` and `holder` name a holder, and the
-controller reads the run off that holder's row. A caller holding no live claim
-on that run gets `403 claim_required`, and so does a holder whose lease has
+controller reads the run off that holder's row. `cancel-waiter` names its run
+in the request body. A caller holding no live claim on that run gets
+`403 claim_required`, and so does a holder whose lease has
 already lapsed, because a lapsed row proves nothing about who is calling. The
-two routes that act on rows another run owns, `force-release` and
-`cancel-waiter`, stay `admin`. `admin` bypasses all of it.
+`force-release` can drop another run's superseded holder and stays `admin`.
+`admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
 read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
@@ -652,7 +657,7 @@ not no authentication.
 A controller holds one team, `default`, unless it runs with a signed
 multi-team license. The license is one line,
 `base64url(payload).base64url(signature)`, where the payload is JSON naming
-`features` (`multi-team`), `issued_to`, `issued_at` and `expires_at` (RFC
+`features` (`multi-team`, `metering`), `issued_to`, `issued_at` and `expires_at` (RFC
 3339), and the signature is Ed25519 over those payload bytes. The controller
 verifies it against a public key compiled into the binary and reads it from
 `--license-file` or from `SPARKWING_LICENSE`. A missing, malformed, expired or

@@ -227,6 +227,7 @@ type Account struct {
 // Installation is GitHub's record of one installation of the App.
 type Installation struct {
 	ID                  int64      `json:"id"`
+	AppID               int64      `json:"app_id"`
 	Account             Account    `json:"account"`
 	RepositorySelection string     `json:"repository_selection"`
 	SuspendedAt         *time.Time `json:"suspended_at"`
@@ -311,6 +312,30 @@ func (c *Client) UserOrgMembership(ctx context.Context, userToken, org string) (
 		return OrgMembership{}, nil
 	}
 	return m, err
+}
+
+// UserInstallations lists installations visible to the authorized user. Visibility
+// alone does not prove that the user administers the installation's account.
+func (c *Client) UserInstallations(ctx context.Context, userToken string) ([]Installation, error) {
+	var all []Installation
+	for page := 1; page <= 100; page++ {
+		var answer struct {
+			Installations []Installation `json:"installations"`
+		}
+		path := "/user/installations?per_page=100&page=" + strconv.Itoa(page)
+		if err := c.getJSON(ctx, path, "Bearer "+userToken, &answer); err != nil {
+			return nil, err
+		}
+		for _, inst := range answer.Installations {
+			if inst.AppID == c.cfg.AppID {
+				all = append(all, inst)
+			}
+		}
+		if len(answer.Installations) < 100 {
+			return all, nil
+		}
+	}
+	return nil, errors.New("githubapp: too many user installations")
 }
 
 // Installation reads installation id with the App's own credential.
@@ -440,6 +465,26 @@ func (c *Client) InstallationRepositories(ctx context.Context, installation int6
 		}
 	}
 	return out, nil
+}
+
+// ResolveCommit reads the commit selected by a branch or tag with a token
+// restricted to that repository.
+func (c *Client) ResolveCommit(ctx context.Context, installation int64, owner, repo, ref string) (string, error) {
+	tok, err := c.InstallationToken(ctx, installation, []string{repo}, map[string]string{"contents": "read"})
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	err = c.getJSON(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/commits/"+url.PathEscape(ref), "Bearer "+tok.Token, &commit)
+	if err != nil {
+		return "", err
+	}
+	if len(commit.SHA) != 40 {
+		return "", errors.New("githubapp: ref did not resolve to a commit")
+	}
+	return commit.SHA, nil
 }
 
 // permissionsNotGranted reports whether a refused token request names

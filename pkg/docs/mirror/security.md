@@ -264,8 +264,10 @@ re-claims at once rather than waiting its poll interval, so charging it
 would bound how fast a runner may execute rather than how fast it may
 ask. What the budget bounds is empty polling, which a runner can do
 without limit: a pool runner polls every 500ms, or 120 a minute, so 480
-allows four times that cadence. Heartbeats carry no such exemption; 1200
-suits the 3s cadence the shipped runners keep.
+allows four times that cadence. Node claim heartbeats carry no such
+exemption; 1200 suits the 3s cadence the shipped runners keep. Run and
+trigger claim heartbeats are unbudgeted because losing either can reap
+an active run.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
@@ -300,10 +302,10 @@ the rollout finishes.
 carries one setting rather than one per guard. It is described under
 [Limits profiles](#limits-profiles) below.
 
-The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
-never budgeted. An agent that loses it tears down its membership and
-every node under it, which is a far worse outcome than the load one
-heartbeat every few seconds represents.
+The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`,
+is never shed. Run and trigger heartbeats and node touch requests are
+unbudgeted when the caller owns the claim. Losing those updates can
+tear down an active run or executor.
 
 Past a budget the route answers `429` with a `Retry-After` naming the
 real refill delay, and `sparkwing_principal_throttled_total{route_class}`
@@ -314,12 +316,12 @@ because their callers are unauthenticated and would share one bucket.
 
 ## Per-token request budget
 
-`--requests-per-token-minute` bounds every route one token can reach,
+`--requests-per-token-minute` bounds ordinary requests one token can reach,
 keyed on the token prefix alone. It is the guard that binds a caller
 varying the runner it says it is: on the two claim routes the runner name
 is the caller's own word, so the per-runner budgets above bound a runaway
 loop rather than a holder of a valid token who means harm. The agent
-liveness heartbeat is spared here too. Past the budget a request answers
+liveness routes above are spared here too. Past the budget a request answers
 `429` with a `Retry-After`, counted under
 `sparkwing_principal_throttled_total{route_class="token"}`.
 
@@ -901,7 +903,10 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
-  the matches it found with `"truncated": true`. Search also requires
+  the matches it found with `"truncated": true` and a `reason` naming the
+  limit. Archived runs are scanned from their object-store logs without
+  restoring the run to the local volume. The archive's recorded team is
+  checked before reading a log object. Search also requires
   `run_id`; a query without one is refused with `400` rather than
   walking every stored run.
 

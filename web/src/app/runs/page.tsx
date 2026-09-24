@@ -67,6 +67,7 @@ import TriggerForm from "@/components/TriggerForm";
 import StatusLabel from "@/components/StatusLabel";
 import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
+import RunRail from "@/components/RunRail";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import ResourceChart from "@/components/ResourceChart";
 import LogBucketView from "@/components/LogBucketView";
@@ -85,19 +86,20 @@ import AttemptsDropdown from "@/components/AttemptsDropdown";
 import {
   ExecutionAttributionPanel,
   ExecutionBadge,
+  ExecutionIconPaths,
 } from "@/components/ExecutionAttribution";
 import { ansiToHtml, stripAnsi } from "@/lib/ansi";
 import {
   compactExecutionDisplay,
   executionAttempts,
   executionDisplay,
-  type ExecutionDisplay,
 } from "@/lib/executionAttribution";
 
 const POLL_MS = 2000;
 const DETAIL_FALLBACK_POLL_MS = 8000;
 const RUNS_WINDOW = 200;
 const EMPTY_NODES: RunNode[] = [];
+const COLUMNS_KEY = "sparkwing:runs-columns";
 
 function statusDot(status: string): string {
   switch (status) {
@@ -502,7 +504,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const activeDetail = detail?.run.id === selectedRun ? detail : null;
+  const activeDetail = selectedRun ? detail : null;
   const detailRun = activeDetail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =
@@ -539,14 +541,54 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [selectedRun, topLevel, runs.length]);
 
   const run = activeDetail?.run || null;
-  const [paneExpanding, setPaneExpanding] = useState(false);
-  const hadOpenPane = useRef(!!run);
+  const paneOpen = !!selectedRun;
+  const [columnsPreference, setColumnsPreference] = useState<"expanded" | "collapsed" | null>(null);
+  const [narrowViewport, setNarrowViewport] = useState(false);
+  const [fullColumnsReady, setFullColumnsReady] = useState(true);
   useLayoutEffect(() => {
-    if (hadOpenPane.current && !run && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const query = window.matchMedia("(max-width: 1099px)");
+    const update = () => setNarrowViewport(query.matches);
+    update();
+    query.addEventListener("change", update);
+    try {
+      const saved = window.localStorage.getItem(COLUMNS_KEY);
+      if (saved === "expanded" || saved === "collapsed") setColumnsPreference(saved);
+    } catch {
+      // Storage may be unavailable in private browsing.
+    }
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const columnsCollapsed = columnsPreference === "collapsed" || (columnsPreference === null && narrowViewport);
+  useLayoutEffect(() => {
+    if (columnsCollapsed) setFullColumnsReady(false);
+    else if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) setFullColumnsReady(true);
+  }, [columnsCollapsed]);
+  const showRail = columnsCollapsed || !fullColumnsReady;
+  const toggleColumns = () => {
+    const next = columnsCollapsed ? "expanded" : "collapsed";
+    setFullColumnsReady(false);
+    setColumnsPreference(next);
+    if (next === "expanded" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setFullColumnsReady(true);
+    }
+    try {
+      window.localStorage.setItem(COLUMNS_KEY, next);
+    } catch {
+      // The control still works when storage is unavailable.
+    }
+  };
+  const [paneExpanding, setPaneExpanding] = useState(false);
+  const hadOpenPane = useRef(paneOpen);
+  useLayoutEffect(() => {
+    if (
+      hadOpenPane.current &&
+      !paneOpen &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       setPaneExpanding(true);
     }
-    hadOpenPane.current = !!run;
-  }, [run]);
+    hadOpenPane.current = paneOpen;
+  }, [paneOpen]);
   const nodes = activeDetail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
   const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
@@ -761,7 +803,10 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowNewRun(!showNewRun)}
+                onClick={() => {
+                  if (columnsCollapsed && !showNewRun) toggleColumns();
+                  setShowNewRun(!showNewRun);
+                }}
                 aria-expanded={showNewRun}
                 className="text-[10px] px-2 py-1 rounded border border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors shrink-0"
               >
@@ -969,13 +1014,46 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {
                                                             }
         <div
-          className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all motion-reduce:transition-none`}
+          className={`${paneOpen ? (columnsCollapsed ? "w-8 shrink-0" : "w-52 shrink-0") : "flex-1"} border-r border-[var(--border)] flex flex-col transition-[width,flex-grow] duration-200 motion-reduce:transition-none`}
           onTransitionEnd={(event) => {
-            if (event.target === event.currentTarget && event.propertyName === "flex-grow") {
-              setPaneExpanding(false);
+            if (event.target === event.currentTarget) {
+              if (event.propertyName === "flex-grow") setPaneExpanding(false);
+              if (event.propertyName === "width" && !columnsCollapsed) setFullColumnsReady(true);
             }
           }}
         >
+          {paneOpen && (
+            <button
+              type="button"
+              onClick={toggleColumns}
+              aria-label={columnsCollapsed ? "Expand runs and nodes" : "Collapse runs and nodes"}
+              aria-expanded={!columnsCollapsed}
+              title={columnsCollapsed ? "Expand runs and nodes" : "Collapse runs and nodes"}
+              className="h-8 shrink-0 flex items-center justify-center border-b border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] focus-visible:outline-2 focus-visible:outline-violet-300"
+            >
+              <span aria-hidden="true">{columnsCollapsed ? "›" : "‹"}</span>
+              {!showRail && <span className="ml-2 text-[10px] uppercase tracking-wider">Collapse columns</span>}
+            </button>
+          )}
+          {showRail && paneOpen ? (
+            <div className="flex-1 overflow-y-auto overflow-x-hidden">
+              <RunRail
+                kind="runs"
+                items={topLevel.map((r) => ({
+                  id: r.id,
+                  label: `${r.repo || r.github_repo || "unknown"} / ${r.pipeline} / ${r.git_branch || "unknown branch"} / ${fmtFullDate(r.started_at)}`,
+                  dotClass: statusDot(r.status),
+                }))}
+                selectedID={selectedRun}
+                onSelect={(id) => {
+                  setFocusedRun(id);
+                  setFocusedColumn("runs");
+                  selectRun(id === selectedRun ? null : id);
+                }}
+              />
+            </div>
+          ) : (
+          <>
           {showNewRun && (
             <div className="p-3 border-b border-[var(--border)] shrink-0">
               <TriggerForm
@@ -1016,7 +1094,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                         : ""
                   }`}
                 >
-                  {!run && (
+                  {!paneOpen && (
                     <label
                       onClick={(e) => e.stopPropagation()}
                       className="-m-2 p-2 shrink-0 cursor-pointer flex items-start"
@@ -1035,7 +1113,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     <FullRunRow
                       r={r}
                       ctx={filterCtx}
-                      compact={!!run || paneExpanding}
+                      compact={paneOpen || paneExpanding}
                       progress={runProgress[r.id]}
                     />
                   </div>
@@ -1048,11 +1126,33 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
 
         {                             }
         {run && activeDetail && (
-          <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
+          <div className={`${columnsCollapsed ? "w-8" : "w-72"} border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-[width] duration-200 motion-reduce:transition-none`}>
+            {showRail ? (
+              <>
+                <div className="h-8 shrink-0 border-b border-[var(--border)]" />
+                <RunRail
+                  kind="nodes"
+                  items={nodes.map((n) => ({
+                    id: n.id,
+                    label: `${n.id} · ${fmtMs(nodeDuration(n))}`,
+                    dotClass: outcomeDot(n.outcome, n.status, reusedNodeIDs?.has(n.id)),
+                  }))}
+                  selectedID={selectedNode}
+                  onSelect={(id) => {
+                    setFocusedNode(id);
+                    setFocusedColumn("nodes");
+                    selectNode(id === selectedNode ? null : id);
+                  }}
+                />
+              </>
+            ) : (
+            <>
             <div
               onClick={() => {
                 setFocusedColumn("nodes");
@@ -1098,6 +1198,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               }}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
             />
+            </>
+            )}
           </div>
         )}
 
@@ -1279,6 +1381,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     Record<string, PipelineMeta>
   >({});
   const [runs, setRuns] = useState<Run[]>([]);
+  const [runsReady, setRunsReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
     Promise.all([getRuns({ limit: RUNS_WINDOW }), getPipelines()])
@@ -1286,6 +1389,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         if (cancelled) return;
         setRuns(rs);
         setPipelineMeta(meta);
+        setRunsReady(true);
       })
       .catch(() => {});
     return () => {
@@ -1314,42 +1418,55 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runsScanned, setRunsScanned] = useState(0);
+  const [runsMatching, setRunsMatching] = useState(0);
+  const searchGeneration = useRef(0);
   const runGrep = useCallback(
     async (q: string, sinceVal: string) => {
+      const generation = ++searchGeneration.current;
       const trimmed = q.trim();
       if (!trimmed) {
         setResults(null);
         setRunsMap({});
         setRunsScanned(0);
+        setRunsMatching(0);
+        return;
+      }
+      if (!runsReady) return;
+      const candidates = runs.filter((run) => runMatchesFilter(run, filterState, pipelineMeta));
+      setRunsMatching(candidates.length);
+      if (candidates.length === 0) {
+        setResults([]);
+        setRunsMap({});
+        setRunsScanned(0);
+        setLoading(false);
         return;
       }
       setLoading(true);
       setError(null);
+      setResults(null);
+      setRunsMap({});
+      setRunsScanned(0);
       try {
         const resp = await searchRunsGrep(trimmed, {
-          pipelines: filterState.filterPipeline,
-          excludePipelines: filterState.excludePipeline,
-          statuses: filterState.filterStatus,
-          excludeStatuses: filterState.excludeStatus,
-          branches: filterState.filterBranch,
-          excludeBranches: filterState.excludeBranch,
-          shaPrefixes: filterState.filterCommit,
-          excludeShaPrefixes: filterState.excludeCommit,
+          runIDs: candidates.map((run) => run.id),
           since: sinceVal || undefined,
           limit: 200,
           maxMatches: 10,
         });
+        if (generation !== searchGeneration.current) return;
         setResults(resp.matches ?? []);
         setRunsMap(resp.runs ?? {});
         setRunsScanned(resp.runs_scanned);
+        setRunsMatching(resp.runs_matching);
       } catch (e) {
+        if (generation !== searchGeneration.current) return;
         setError(e instanceof Error ? e.message : String(e));
         setResults([]);
       } finally {
-        setLoading(false);
+        if (generation === searchGeneration.current) setLoading(false);
       }
     },
-    [filterState],
+    [filterState, runs, pipelineMeta, runsReady],
   );
   const submit = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1357,16 +1474,15 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     else params.delete("gq");
     if (since && since !== "24h") params.set("gsince", since);
     else params.delete("gsince");
+    if (params.toString() === searchParams.toString()) {
+      runGrep(query, since);
+      return;
+    }
     router.replace(`/runs?${params.toString()}`, { scroll: false });
-    runGrep(query, since);
   }, [query, since, searchParams, router, runGrep]);
-  const ranInitialRef = useRef(false);
   useEffect(() => {
-    if (ranInitialRef.current) return;
-    ranInitialRef.current = true;
-    if (initialQuery) runGrep(initialQuery, initialSince);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (runsReady) runGrep(initialQuery, initialSince);
+  }, [runsReady, runGrep, initialQuery, initialSince]);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -1384,11 +1500,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
-  const visibleResults = results?.filter((match) => {
-    const trigger = runsMap[match.run_id]?.trigger_source || "";
-    return !filterState.excludeTrigger.includes(trigger) &&
-      (!filterState.filterTrigger.length || filterState.filterTrigger.includes(trigger));
-  }) ?? null;
+  const visibleResults = results;
   const byRun = new Map<string, RunsGrepMatch[]>();
   const runOrder: string[] = [];
   for (const m of visibleResults ?? []) {
@@ -1456,6 +1568,11 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-3">
+        {/^(success|succeeded|failed|failure|cancelled|canceled)$/i.test(query.trim()) && (
+          <div className="text-xs text-[var(--muted)] mb-3">
+            Search scans log text. Use the Status filter above to find runs by outcome.
+          </div>
+        )}
         {error && (
           <div className="text-xs font-mono text-red-400 mb-3">
             error: {error}
@@ -1464,20 +1581,19 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         {visibleResults === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)] space-y-1">
             <div>Searches log body across recent runs.</div>
-            <div>Tip: filters apply to search results.</div>
+            <div>Filters choose which runs are searched.</div>
           </div>
         )}
         {visibleResults !== null && visibleResults.length === 0 && !loading && (
           <div className="text-xs text-[var(--muted)]">
-            no matches across {runsScanned} run{runsScanned === 1 ? "" : "s"}
+            no matches; searched {runsScanned} of {runsMatching} runs matching filters
           </div>
         )}
         {visibleResults !== null && visibleResults.length > 0 && (
           <>
             <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
               {visibleResults.length} match{visibleResults.length === 1 ? "" : "es"} across{" "}
-              {byRun.size} run{byRun.size === 1 ? "" : "s"} (scanned{" "}
-              {runsScanned})
+              {byRun.size} run{byRun.size === 1 ? "" : "s"}; searched {runsScanned} of {runsMatching} runs matching filters
             </div>
             <div className="flex flex-col gap-3">
               {runOrder.map((runID) => {
@@ -1758,7 +1874,6 @@ function NodeRow({
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
   reused?: boolean;
 }) {
-  const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
   const statusLabel = reused ? "reused" : n.outcome || n.status;
   const steps = n.work?.steps ?? [];
   const hasSteps = steps.length > 0;
@@ -1799,8 +1914,8 @@ function NodeRow({
             className={`w-2 h-2 rounded-full shrink-0 ${outcomeDot(n.outcome, n.status, reused)}`}
             title={reused ? "Reused from prior attempt" : undefined}
           />
-          <span className="text-[11px] truncate flex-1 min-w-0">{label}</span>
           <ExecutionBadge node={n} />
+          <span className="text-[11px] truncate flex-1 min-w-0" title={n.id}>{n.id}</span>
           {(() => {
             const annos = collectNodeAnnotations(n);
             if (annos.length === 0) return null;
@@ -2751,7 +2866,6 @@ function RunDetailPane({
           nodes={nodes}
           onSelectNode={onSelectNode}
         />
-        {selected && <ExecutionAttributionPanel node={selected} />}
       </div>
 
       {showTrigger && (
@@ -2958,6 +3072,7 @@ function RunDetailPane({
               findMatchedErrors={findMatchedErrorNodes}
               findActiveKey={findActiveKey}
             />
+            {selected && <ExecutionAttributionPanel node={selected} />}
             <RunAnnotationsList
               nodes={nodes}
               onSelectNode={onSelectNode}
@@ -4588,12 +4703,25 @@ function DAG({
                   {fmtMs(nodeDuration(n))}
                 </text>
                 {(() => {
+                  const site = compactExecutionDisplay(n);
+                  if (!site?.icon || !site.tooltip) return null;
+                  const tipWidth = Math.min(270, Math.max(120, site.tooltip.length * 6.2 + 16));
+                  return (
+                    <g role="img" aria-label={site.tooltip} tabIndex={0} className="group" style={{ color: "#94a3b8" }}>
+                      <title>{site.tooltip}</title>
+                      <rect x={p.w - 22} y={1} width={18} height={18} fill="transparent" pointerEvents="all" />
+                      <svg x={p.w - 20} y={3} width={14} height={14} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <ExecutionIconPaths icon={site.icon} />
+                      </svg>
+                      <g className="pointer-events-none hidden group-hover:block group-focus:block">
+                        <rect x={p.w - tipWidth} y={-31} width={tipWidth} height={22} rx={4} fill="#0f172a" stroke="#475569" />
+                        <text x={p.w - tipWidth + 8} y={-16} fontSize={11} fill="#f1f5f9">{site.tooltip}</text>
+                      </g>
+                    </g>
+                  );
+                })()}
+                {(() => {
                   type TopPill =
-                    | {
-                        kind: "execution";
-                        w: number;
-                        display: ExecutionDisplay;
-                      }
                     | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
                     | { kind: "reused"; w: number }
@@ -4601,14 +4729,6 @@ function DAG({
                     | { kind: "inline"; w: number }
                     | { kind: "spawned"; w: number };
                   const pills: TopPill[] = [];
-                  const execution = compactExecutionDisplay(n);
-                  if (execution) {
-                    pills.push({
-                      kind: "execution",
-                      w: executionPillWidth(execution),
-                      display: execution,
-                    });
-                  }
                   if (n.dynamic) {
                     pills.push({ kind: "dynamic", w: DYNAMIC_PILL_W });
                   }
@@ -4641,15 +4761,6 @@ function DAG({
                     const x = cursor;
                     cursor += pl.w + gap;
                     switch (pl.kind) {
-                      case "execution":
-                        out.push(
-                          <ExecutionPill
-                            key="execution"
-                            display={pl.display}
-                            x={x}
-                          />,
-                        );
-                        break;
                       case "dynamic":
                         out.push(
                           <DynamicPill key="dynamic" nodeW={p.w} x={x} />,
@@ -5556,11 +5667,11 @@ function DagNodeTooltip({
           <span className="font-mono">{state || "pending"}</span>
           <span className="text-[var(--muted)]">Duration:</span>
           <span className="font-mono">{fmtMs(nodeDuration(node))}</span>
-          {(attempts.length > 0 || node.claimed || node.started_at) && (
+          {(execution.tooltip || execution.executorLabel !== "Executor unknown") && (
             <>
               <span className="text-[var(--muted)]">Execution:</span>
               <span className="font-mono">
-                {execution.locationLabel} · {execution.executorLabel}
+                {execution.tooltip || execution.executorLabel}
               </span>
             </>
           )}
@@ -5685,52 +5796,6 @@ function NodeBadge({
 }
 
 const DYNAMIC_PILL_W = 56;
-function executionPillWidth(display: ExecutionDisplay): number {
-  return Math.max(46, 14 + display.location.length * 6);
-}
-
-function ExecutionPill({
-  display,
-  x,
-}: {
-  display: ExecutionDisplay;
-  x: number;
-}) {
-  const label = display.location.toUpperCase();
-  const width = executionPillWidth(display);
-  const fill =
-    display.location === "local"
-      ? "rgba(52,211,153,0.95)"
-      : "rgba(56,189,248,0.95)";
-  const title = `${display.locationLabel} · ${display.executorLabel}`;
-  return (
-    <g role="img" aria-label={title} style={{ pointerEvents: "none" }}>
-      <title>{title}</title>
-      <rect
-        x={x}
-        y={-6}
-        width={width}
-        height={15}
-        rx={7.5}
-        ry={7.5}
-        fill={fill}
-      />
-      <text
-        x={x + width / 2}
-        y={5}
-        textAnchor="middle"
-        fill="rgba(8,20,28,0.95)"
-        fontSize={10}
-        fontWeight={700}
-        fontFamily="ui-sans-serif, system-ui, sans-serif"
-        style={{ letterSpacing: "0.5px" }}
-      >
-        {label}
-      </text>
-    </g>
-  );
-}
-
 function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   const pillW = DYNAMIC_PILL_W;
   const pillH = 15;

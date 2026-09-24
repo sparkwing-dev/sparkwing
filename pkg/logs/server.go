@@ -195,7 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
-	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.withRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))))
+	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
 
 	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs), scopeLogsDelete))
 

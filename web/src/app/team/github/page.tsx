@@ -59,6 +59,7 @@ function emptyToken() {
 
 function ConnectedGitHub({ me }: { me: Me }) {
   const canManage = canManageTeam(me.active_team.role);
+  const [accessUpdated, setAccessUpdated] = useState(false);
   const csrfToken = useSyncExternalStore(
     noSubscribe,
     readCSRFCookie,
@@ -111,6 +112,11 @@ function ConnectedGitHub({ me }: { me: Me }) {
   }, [load]);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("access_updated") === "1") {
+      setAccessUpdated(true);
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
     const account = connectedAccount(window.location.search);
     if (!account) return;
     toast(`Connected ${account} to this team`, "success");
@@ -180,6 +186,11 @@ function ConnectedGitHub({ me }: { me: Me }) {
 
   return (
     <>
+      {accessUpdated && (
+        <div role="status" className="mb-4 rounded border border-green-500/40 bg-green-500/10 px-4 py-3 text-sm text-green-200">
+          Repository access updated on GitHub
+        </div>
+      )}
       <Panel
         title="Connected accounts"
         hint="An installation of the GitHub App proves this team controls those repositories. Only an owner who administers the GitHub account connects it."
@@ -216,7 +227,7 @@ function ConnectedGitHub({ me }: { me: Me }) {
       </Panel>
       <Panel
         title="Runs from GitHub"
-        hint="Each subscription runs one pipeline when its repository gets a push or a pull request. Pull requests from forks aren't run."
+        hint="Each subscription runs one pipeline on matching pushes or pull requests. Set push branches for deploy pipelines. Pull requests from forks aren't run."
       >
         <SubscriptionsTable
           subscriptions={subscriptions}

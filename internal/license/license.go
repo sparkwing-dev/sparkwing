@@ -32,6 +32,10 @@ import (
 // FeatureMultiTeam lets a deployment hold more than one team.
 const FeatureMultiTeam = "multi-team"
 
+// FeatureMetering lets a deployment meter runner and storage usage. Existing
+// multi-team licenses grant it too, so they remain valid without re-issuance.
+const FeatureMetering = "metering"
+
 //go:embed license_key.pub
 var embeddedKey string
 
@@ -74,7 +78,8 @@ func (l *License) Allows(feature string, now time.Time) bool {
 	if l == nil || !now.Before(l.expiresAt) {
 		return false
 	}
-	return slices.Contains(l.features, feature)
+	return slices.Contains(l.features, feature) ||
+		(feature == FeatureMetering && slices.Contains(l.features, FeatureMultiTeam))
 }
 
 // EmbeddedKey returns the public key this build verifies licenses against.

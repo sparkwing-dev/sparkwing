@@ -5,8 +5,26 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
+	"unicode"
 )
+
+const maxExecutionExecutorNameLen = 128
+
+var executorNameEscape = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)`)
+
+func safeExecutorName(name string) string {
+	name = executorNameEscape.ReplaceAllString(name, "")
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, name))
+}
 
 type ExecutionStart struct {
 	HolderID        string `json:"holder_id"`
@@ -16,12 +34,15 @@ type ExecutionStart struct {
 	AttemptOrdinal  int    `json:"attempt_ordinal"`
 	// ExecutorKind is [ExecutorKindLocal] when the dispatcher runs the node
 	// in its own process, which has no claim identity to carry. Every other
-	// value is ignored: a claimed attempt takes its attribution from the
-	// executor that won the node.
+	// value is ignored for node claims: a claimed attempt takes its attribution
+	// from the executor that won the node. Trigger claims also accept kubernetes
+	// when their runner supplies its pod name.
 	ExecutorKind string `json:"executor_kind,omitempty"`
 	// ExecutorID names the host the node ran on, and is required alongside a
 	// local ExecutorKind.
 	ExecutorID string `json:"executor_id,omitempty"`
+	// ExecutorName identifies a claimed Kubernetes Job pod or trigger runner.
+	ExecutorName string `json:"executor_name,omitempty"`
 }
 
 type ExecutionAttemptFinish struct {
@@ -38,23 +59,25 @@ type ExecutionAttemptFinish struct {
 }
 
 type ExecutionAttempt struct {
-	RunID            string     `json:"run_id"`
-	NodeID           string     `json:"node_id,omitempty"`
-	Attempt          int        `json:"attempt"`
-	ClaimGeneration  int64      `json:"claim_generation,omitempty"`
-	CoordinatorID    string     `json:"-"`
-	MembershipID     string     `json:"-"`
-	ExecutorKind     string     `json:"executor_kind,omitempty"`
-	ExecutorName     string     `json:"executor_name,omitempty"`
-	ExecutorID       string     `json:"-"`
-	ExecutorLocation string     `json:"location,omitempty"`
-	HolderID         string     `json:"-"`
-	ReservationID    string     `json:"-"`
-	StartedAt        time.Time  `json:"started_at"`
-	FinishedAt       *time.Time `json:"finished_at,omitempty"`
-	Outcome          string     `json:"outcome,omitempty"`
-	FailureReason    string     `json:"failure_reason,omitempty"`
-	RetryRunID       string     `json:"retry_run_id,omitempty"`
+	RunID             string     `json:"run_id"`
+	NodeID            string     `json:"node_id,omitempty"`
+	Attempt           int        `json:"attempt"`
+	ClaimGeneration   int64      `json:"claim_generation,omitempty"`
+	CoordinatorID     string     `json:"-"`
+	MembershipID      string     `json:"-"`
+	ExecutorKind      string     `json:"executor_kind,omitempty"`
+	ExecutorName      string     `json:"executor_name,omitempty"`
+	ExecutorID        string     `json:"-"`
+	ExecutorLocation  string     `json:"location,omitempty"`
+	ExecutionSite     string     `json:"execution_site,omitempty"`
+	ExecutionSiteName string     `json:"execution_site_name,omitempty"`
+	HolderID          string     `json:"-"`
+	ReservationID     string     `json:"-"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	Outcome           string     `json:"outcome,omitempty"`
+	FailureReason     string     `json:"failure_reason,omitempty"`
+	RetryRunID        string     `json:"retry_run_id,omitempty"`
 }
 
 func executionAttributionEventFields(kind, name, location string) map[string]any {
@@ -68,7 +91,24 @@ func executionAttributionEventFields(kind, name, location string) map[string]any
 	return fields
 }
 
+func githubAttemptExecutor(ctx context.Context, tx *storeTx, runID, principal, prefix string) (string, error) {
+	_, repo, _ := strings.Cut(strings.TrimPrefix(principal, GitHubRunnerPrincipalPrefix), ":")
+	var githubRunID string
+	err := tx.QueryRowContext(ctx, `SELECT run_id FROM github_runner_credentials WHERE team = (`+runTeamSQL+`) AND prefix = ?`, runID, prefix).Scan(&githubRunID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if githubRunID != "" {
+		return repo + " run " + githubRunID, nil
+	}
+	return repo, nil
+}
+
 func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, start ExecutionStart) error {
+	if len(start.ExecutorName) > maxExecutionExecutorNameLen {
+		return fmt.Errorf("%w: executor_name exceeds %d bytes", ErrInvalidInput, maxExecutionExecutorNameLen)
+	}
+	start.ExecutorName = safeExecutorName(start.ExecutorName)
 	if triggerFence, triggerClaim := TriggerClaimFenceFromContext(ctx); triggerClaim {
 		if _, nodeClaim := NodeClaimFenceFromContext(ctx); nodeClaim {
 			return ErrLockHeld
@@ -126,8 +166,7 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 	if err == nil {
 		if prior.RunID == runID && prior.ClaimGeneration == generation &&
 			prior.CoordinatorID == coordinator && prior.MembershipID == membership &&
-			prior.ExecutorKind == kind && prior.ExecutorName == executorName &&
-			prior.ExecutorID == executor && prior.ExecutorLocation == location &&
+			prior.ExecutorID == executor &&
 			prior.HolderID == holder && prior.ReservationID == reservation && consumed == start.AttemptOrdinal {
 			return tx.Commit()
 		}
@@ -138,6 +177,47 @@ func (s *Store) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID
 	}
 	if start.AttemptOrdinal != consumed+1 {
 		return ErrLockHeld
+	}
+	if strings.HasPrefix(holder, "k8s-job:") {
+		kind = "kubernetes"
+		location = "cloud"
+		if start.ExecutorName != "" && !strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) {
+			executorName = start.ExecutorName
+		} else {
+			executorName = strings.TrimPrefix(holder, "k8s-job:")
+		}
+	} else if strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) {
+		executorName, err = githubAttemptExecutor(ctx, tx, runID, principal, prefix)
+		if err != nil {
+			return err
+		}
+		kind, location = "github-actions", "cloud"
+	} else if executorName == "" {
+		switch {
+		case strings.HasPrefix(holder, "agent:"):
+			executorName, _, _ = strings.Cut(strings.TrimPrefix(holder, "agent:"), ":")
+			kind, location = "agent", "local"
+		case strings.HasPrefix(holder, "runner:"):
+			executorName, _, _ = strings.Cut(strings.TrimPrefix(holder, "runner:"), ":")
+			kind, location = "agent", "local"
+		case strings.HasPrefix(holder, "pod:"):
+			executorName = strings.TrimPrefix(holder, "pod:")
+			kind, location = "kubernetes", "cloud"
+		case strings.HasPrefix(principal, "agent:"):
+			executorName = strings.TrimPrefix(principal, "agent:")
+			kind, location = "agent", "local"
+		}
+	}
+	var metered bool
+	err = tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (`+runTeamSQL+`) AND prefix = ?`, runID, prefix).Scan(&metered)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if metered {
+		location = "cloud"
+		if kind == "" {
+			kind = "cloud"
+		}
 	}
 	if location == "" {
 		location = "unknown"
@@ -235,6 +315,37 @@ func (s *Store) acknowledgeTriggerExecutionStart(ctx context.Context, runID, nod
 	kind, executorName := "", ""
 	if localExecutor != "" {
 		kind, executorName, location = ExecutorKindLocal, localExecutor, executorLocationLocal
+	} else {
+		principal := fence.Claimant.Principal
+		switch {
+		case strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix):
+			kind, location = "github-actions", "cloud"
+			executorName, err = githubAttemptExecutor(ctx, tx, runID, principal, fence.Claimant.TokenPrefix)
+			if err != nil {
+				return err
+			}
+		case strings.HasPrefix(principal, "agent:"):
+			kind, executorName, location = "agent", strings.TrimPrefix(principal, "agent:"), "local"
+		}
+		if start.ExecutorName != "" && !strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) {
+			executorName = start.ExecutorName
+			if start.ExecutorKind == "kubernetes" {
+				kind, location = "kubernetes", "cloud"
+			} else if kind == "" {
+				kind, location = "agent", "local"
+			}
+		}
+		var metered bool
+		err := tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE team = (`+runTeamSQL+`) AND prefix = ?`, runID, fence.Claimant.TokenPrefix).Scan(&metered)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if metered {
+			kind, location = "cloud", "cloud"
+			if executorName == "" {
+				executorName = principal
+			}
+		}
 	}
 	holder := "trigger:" + coordinatorID
 	var priorRun, priorCoordinator, priorKind, priorName, priorExecutor, priorLocation, priorHolder string

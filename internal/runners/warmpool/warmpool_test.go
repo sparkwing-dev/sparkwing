@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -77,6 +78,50 @@ func TestRunnerCapsOfferWindowAtFiveSeconds(t *testing.T) {
 	r := New(nil, nil, Config{ClaimWaitTimeout: time.Minute}, quietTestLogger())
 	if r.cfg.ClaimWaitTimeout != 5*time.Second {
 		t.Fatalf("claim wait = %s", r.cfg.ClaimWaitTimeout)
+	}
+}
+
+func TestRunnerBatchesRemoteNodeWait(t *testing.T) {
+	testRunnerBatchesRemoteNodeWait(t, time.Second, 5*time.Millisecond)
+}
+
+func TestRunnerBatchesRemoteNodeWaitForTwoMinutes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("two-minute request budget measurement")
+	}
+	testRunnerBatchesRemoteNodeWait(t, 2*time.Minute, 500*time.Millisecond)
+}
+
+func testRunnerBatchesRemoteNodeWait(t *testing.T, duration, pollInterval time.Duration) {
+	var remoteReads atomic.Int64
+	st, ctrl, cleanup := newWarmPoolFixture(t, []string{"github-actions"}, func(next http.Handler, _ *store.Store) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/api/v1/runs/run-1/nodes") {
+				remoteReads.Add(1)
+			}
+			next.ServeHTTP(w, req)
+		})
+	})
+	defer cleanup()
+	for i := 1; i < 8; i++ {
+		if err := st.CreateNode(context.Background(), store.Node{RunID: "run-1", NodeID: fmt.Sprintf("node-%d", i), Status: "pending", NeedsLabels: []string{"github-actions"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := New(ctrl, nil, Config{PollInterval: pollInterval, UnmatchableGrace: duration + time.Minute}, quietTestLogger())
+	ctx, cancel := context.WithTimeout(context.Background(), duration)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, id := range []string{"build", "node-1", "node-2", "node-3", "node-4", "node-5", "node-6", "node-7"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: id})
+		}()
+	}
+	wg.Wait()
+	if got := remoteReads.Load(); got >= 60 {
+		t.Fatalf("8 remote nodes made %d status requests in %s, want <60", got, duration)
 	}
 }
 
@@ -299,7 +344,7 @@ func TestRunnerCancellationRevokesUnclaimedNode(t *testing.T) {
 	st, ctrl, cleanup := newWarmPoolFixture(t, nil, func(next http.Handler, _ *store.Store) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			next.ServeHTTP(w, req)
-			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes/build") {
+			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes") {
 				polledOnce.Do(func() { close(polled) })
 			}
 		})
@@ -573,7 +618,7 @@ func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
 		var polls atomic.Int64
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			next.ServeHTTP(w, req)
-			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes/build") &&
+			if req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/nodes") &&
 				polls.Add(1) >= 5 {
 				polledOnce.Do(func() { close(polled) })
 			}

@@ -54,6 +54,43 @@ const finishedDetail = {
   ],
 };
 
+test("keeps a long node name visible beside its location icon", async ({ page }) => {
+  const longName = "verify-production-checks";
+  const detail = {
+    ...finishedDetail,
+    nodes: [{
+      ...finishedDetail.nodes[0],
+      id: longName,
+      executor_kind: "agent",
+      executor_name: "moonborn",
+      executor_location: "local",
+    }],
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const row = page.locator(`[data-node-id="${longName}"]`).first();
+  await expect(row).toBeVisible();
+  await expect(row.getByText(longName, { exact: true })).toBeVisible();
+  const label = row.getByText(longName, { exact: true });
+  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
+  const rowSite = row.getByLabel("Ran on moonborn (your machine)");
+  await expect(rowSite).toBeVisible();
+  await rowSite.focus();
+  await expect(rowSite.getByRole("tooltip")).toBeVisible();
+  await page.getByRole("button", { name: /DAG/ }).click();
+  const dagSite = page.locator('svg [role="img"][aria-label="Ran on moonborn (your machine)"]');
+  await expect(dagSite).toBeVisible();
+  await dagSite.hover();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await dagSite.focus();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+});
+
 function isoFromNow(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
 }
@@ -667,6 +704,91 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("keeps run panes the same size while switching selected runs", async ({ page }) => {
+  const nextRun = {
+    ...finishedRun,
+    id: "run-20260827-next",
+    pipeline: "verify-next",
+  };
+  const nextDetail = {
+    ...finishedDetail,
+    run: nextRun,
+    nodes: [{ ...finishedDetail.nodes[0], id: "next-node" }],
+  };
+  const nextStarted = deferred();
+  const releaseNext = deferred();
+  await installMockAPI(page, {
+    runs: [finishedRun, nextRun],
+    details: { [finishedRun.id]: finishedDetail },
+    onDetail: async (route, runID) => {
+      if (runID !== nextRun.id) return false;
+      nextStarted.resolve();
+      await releaseNext.promise;
+      await route.fulfill({ json: nextDetail });
+      return true;
+    },
+  });
+  await page.goto("/runs");
+  await page.locator(`[data-run-id="${finishedRun.id}"]`).click();
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let frames = 20;
+    const tick = () => --frames ? requestAnimationFrame(tick) : resolve();
+    requestAnimationFrame(tick);
+  }));
+
+  await page.evaluate((firstRunID) => {
+    const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
+    const sidebar = row?.parentElement?.parentElement;
+    const panes = sidebar?.parentElement;
+    if (!sidebar || !panes) throw new Error("run panes missing");
+    const samples: { sidebar: number; detail: number; row: number }[] = [];
+    const state = window as typeof window & {
+      __runPaneSamples?: typeof samples;
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__runPaneSamples = samples;
+    state.__stopRunPaneSamples = false;
+    const sample = () => {
+      const detail = panes.lastElementChild;
+      samples.push({
+        sidebar: sidebar.getBoundingClientRect().width,
+        detail: detail === sidebar ? 0 : detail?.getBoundingClientRect().width ?? 0,
+        row: row.getBoundingClientRect().height,
+      });
+      if (!state.__stopRunPaneSamples) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, finishedRun.id);
+
+  await page.locator(`[data-run-id="${nextRun.id}"]`).click();
+  await nextStarted.promise;
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(12);
+  releaseNext.resolve();
+  await expect(page.getByText("verify-next", { exact: true }).last()).toBeVisible();
+  await expect(page.locator('[data-node-id="next-node"]').first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(24);
+  const samples = await page.evaluate(() => {
+    const state = window as typeof window & {
+      __runPaneSamples?: { sidebar: number; detail: number; row: number }[];
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__stopRunPaneSamples = true;
+    return state.__runPaneSamples ?? [];
+  });
+  const first = samples[0];
+  expect(first.detail).toBeGreaterThan(0);
+  for (const sample of samples) {
+    expect(sample.sidebar).toBeCloseTo(first.sidebar, 1);
+    expect(sample.detail).toBeCloseTo(first.detail, 1);
+    expect(sample.row).toBeCloseTo(first.row, 1);
+  }
+});
+
 test("keeps interval, command, and process resource evidence distinct", async ({
   page,
 }) => {
@@ -1025,6 +1147,71 @@ test("run rows keep their height while the detail pane closes", async (
     .toBe(208);
   await rows.first().click();
   await expect(rows.first().locator(".grid").first()).toBeVisible();
+});
+
+test("runs and nodes collapse into selectable rails and remember the viewer's choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await installMockAPI(page, {
+    runs: [runningRun, finishedRun],
+    details: {
+      [runningRun.id]: {
+        run: runningRun,
+        nodes: [
+          { id: "compile", status: "success", outcome: "success", duration_ms: 1200 },
+          { id: "publish", status: "running", outcome: "", duration_ms: 2300 },
+        ],
+      },
+      [finishedRun.id]: finishedDetail,
+    },
+  });
+  await page.goto(`/runs?run=${runningRun.id}`);
+
+  const runsRail = page.getByLabel("Runs rail");
+  const nodesRail = page.getByLabel("Nodes rail");
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect(nodesRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect.poll(() => runsRail.evaluate((rail) => rail.parentElement!.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect.poll(() => nodesRail.evaluate((rail) => rail.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect(runsRail.locator('[data-rail-id="run-20260827-002"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(runsRail.locator("[data-rail-id]").first()).toHaveAttribute("aria-label", /sparkwing-dev\/sparkwing.*pre-commit.*main.*2026/);
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("deploy-production");
+  await nodesRail.locator('[data-rail-id="publish"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("publish · 2.3s");
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').click();
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await nodesRail.locator('[data-rail-id="verify"]').click();
+  await expect(page).toHaveURL(/node=verify/);
+  await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await expect(runsRail).toHaveCount(0);
+  await expect(page.locator('[data-run-id="run-20260827-001"]')).toBeVisible();
+  await page.reload();
+  await expect(runsRail).toHaveCount(0);
+  await page.getByRole("button", { name: "Collapse runs and nodes" }).click();
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+});
+
+test("runs columns follow the viewport until the viewer chooses a width", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const tab = page.getByRole("button", { name: "Activity" });
+  const tabY = await tab.evaluate((element) => element.getBoundingClientRect().top);
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Collapse runs and nodes" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  expect(await tab.evaluate((element) => element.getBoundingClientRect().top)).toBe(tabY);
+  await page.getByRole("button", { name: "Expand runs and nodes" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
 });
 
 test("renders live structured node logs", async ({ page }) => {
@@ -1398,6 +1585,46 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
       exact: true,
     }),
   ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
+});
+
+test("keeps run tabs fixed when selecting a node with execution history", async ({ page }) => {
+  const detail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      run_id: finishedRun.id,
+      executor_kind: "agent",
+      executor_name: "design-mac",
+      executor_location: "local",
+      execution_attempts: [{
+        run_id: finishedRun.id,
+        node_id: node.id,
+        attempt: 1,
+        executor_kind: "agent",
+        executor_name: "design-mac",
+        location: "local",
+        started_at: node.started_at,
+        finished_at: node.finished_at,
+        outcome: "success",
+      }],
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+
+  const summaryTab = page.locator('[data-tab-key="summary"]');
+  await expect(summaryTab).toBeVisible();
+  const before = (await summaryTab.boundingBox())!.y;
+  await page.locator('[data-node-id="verify"]').first().click();
+  const history = page.getByRole("region", { name: "Execution history for verify" });
+  await expect(history).toBeVisible();
+  expect((await summaryTab.boundingBox())!.y).toBe(before);
+  const attempt = history.getByRole("listitem");
+  await expect(attempt).toHaveCount(1);
+  expect((await attempt.boundingBox())!.height).toBeLessThanOrEqual(30);
 });
 
 test("separates fleet policy, observations, and current activity", async ({

@@ -104,7 +104,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 	}
 	subscribed := map[string]store.GitHubAppTrigger{}
 	for _, sub := range subs {
-		if sub.Push || sub.PullRequest {
+		if sub.Push || sub.PullRequest || len(sub.Tags) > 0 {
 			subscribed[sub.Pipeline] = sub
 		}
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		}
 	} else {
 		for _, sub := range subs {
-			if !sub.Push && !sub.PullRequest {
+			if !sub.Push && !sub.PullRequest && len(sub.Tags) == 0 {
 				continue
 			}
 			if run := githubAppRerunAnchor(anchors, sub); run != nil {
@@ -156,14 +156,15 @@ func githubAppRerunAnchor(anchors []*store.Trigger, sub store.GitHubAppTrigger) 
 }
 
 func githubAppRunEventSubscribed(run *store.Trigger, sub store.GitHubAppTrigger) bool {
-	switch run.TriggerEnv[sparkwing.EnvGitHubEventName] {
-	case "":
-		return sub.Push
-	case sparkwing.EventPullRequest:
-		return sub.PullRequest
-	default:
-		return false
+	event := run.TriggerEnv[sparkwing.EnvGitHubEventName]
+	if event == "" {
+		event = "push"
 	}
+	action := run.TriggerEnv["GITHUB_ACTION"]
+	if action == "" && event == sparkwing.EventPullRequest {
+		action = run.TriggerEnv[sparkwing.EnvPRAction]
+	}
+	return githubAppSubscribes(sub, event, action, run.TriggerEnv, run.GitBranch)
 }
 
 // githubAppRerunIntake is a re-run of anchor, asked for by user.

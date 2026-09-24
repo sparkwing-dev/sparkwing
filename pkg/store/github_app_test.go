@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -73,6 +74,188 @@ func TestGitHubAppUnbindDropsTheTeamsSubscriptions(t *testing.T) {
 		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
 	}, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("subscribing through an unbound installation = %v, want ErrNotFound", err)
+	}
+}
+
+func TestGitHubAppTagSubscriptionRoundTrip(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	tr := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "release", Tags: []string{"v*"}}
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(subs) != 1 || len(subs[0].Tags) != 1 || subs[0].Tags[0] != "v*" || subs[0].Push || subs[0].PullRequest {
+		t.Fatalf("tag-only subscription = %+v, %v", subs, err)
+	}
+	tr.Tags, tr.Push = nil, true
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err = acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || len(subs[0].Tags) != 0 || !subs[0].Push {
+		t.Fatalf("replaced subscription = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppTagSubscriptionMigrationPreservesBranchSubscription(t *testing.T) {
+	target := storetest.New(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE github_app_triggers DROP COLUMN on_tags`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 65`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	acme = teamHandle(t, st, "acme")
+	subs, err := acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || !subs[0].Push || len(subs[0].Tags) != 0 {
+		t.Fatalf("subscription after v65 migration = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppTagPatternMigrationDisablesBooleanTags(t *testing.T) {
+	target := storetest.New(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "build", Push: true,
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`UPDATE github_app_triggers SET on_tags = 1`,
+		`ALTER TABLE github_app_triggers DROP COLUMN tag_patterns`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 66`,
+	} {
+		if _, err := st.DB().ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	acme = teamHandle(t, st, "acme")
+	subs, err := acme.GitHubAppTriggers(ctx)
+	if err != nil || len(subs) != 1 || !subs[0].Push || len(subs[0].Tags) != 0 {
+		t.Fatalf("subscription after v66 migration = %+v, %v", subs, err)
+	}
+}
+
+func TestGitHubAppSubscriptionBranchesRoundTrip(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	tr := store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7,
+		Pipeline: "deploy", Push: true, PullRequest: true,
+		Branches: []string{"main", "release/*"}, BaseBranches: []string{"main"},
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, list := range []func(context.Context) ([]store.GitHubAppTrigger, error){
+		acme.GitHubAppTriggers,
+		func(ctx context.Context) ([]store.GitHubAppTrigger, error) {
+			return acme.GitHubAppTriggersFor(ctx, 7, 701)
+		},
+	} {
+		got, err := list(ctx)
+		if err != nil || len(got) != 1 || !reflect.DeepEqual(got[0].Branches, tr.Branches) || !reflect.DeepEqual(got[0].BaseBranches, tr.BaseBranches) {
+			t.Fatalf("subscription after write = %+v, %v", got, err)
+		}
+	}
+	tr.Branches, tr.BaseBranches = nil, nil
+	if _, err := acme.PutGitHubAppTrigger(ctx, tr, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(got) != 1 || len(got[0].Branches) != 0 || len(got[0].BaseBranches) != 0 {
+		t.Fatalf("subscription after clearing filters = %+v, %v", got, err)
+	}
+}
+
+func TestGitHubAppTriggerOptionsRoundTripAndDefaultOff(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	now := time.Now()
+	if _, err := acme.BindGitHubAppInstallation(ctx, acmeInstallation(), now); err != nil {
+		t.Fatal(err)
+	}
+	base := store.GitHubAppTrigger{RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "base", Push: true}
+	if _, err := acme.PutGitHubAppTrigger(ctx, base, now); err != nil {
+		t.Fatal(err)
+	}
+	opt := store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7, Pipeline: "opt",
+		PullRequestClosed: true, PullRequestLabeled: true, PullRequestLabels: []string{"ship"}, PullRequestReadyForReview: true,
+		ReleasePublished: true, ReleasePrereleased: true, BranchCreate: true, BranchDelete: true,
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, opt, now); err != nil {
+		t.Fatal(err)
+	}
+	subs, err := acme.GitHubAppTriggersFor(ctx, 7, 701)
+	if err != nil || len(subs) != 2 {
+		t.Fatalf("subscriptions = %+v, %v", subs, err)
+	}
+	if subs[0].PullRequestClosed || subs[0].ReleasePublished || subs[0].BranchDelete {
+		t.Fatalf("existing event defaults = %+v", subs[0])
+	}
+	got := subs[1]
+	if !got.PullRequestClosed || !got.PullRequestLabeled || len(got.PullRequestLabels) != 1 || got.PullRequestLabels[0] != "ship" ||
+		!got.PullRequestReadyForReview || !got.ReleasePublished || !got.ReleasePrereleased || !got.BranchCreate || !got.BranchDelete {
+		t.Fatalf("new event options = %+v", got)
+	}
+	if _, err := acme.PutGitHubAppTrigger(ctx, store.GitHubAppTrigger{
+		RepositoryID: 701, Repository: "acme/widgets", InstallationID: 7,
+		Pipeline: "bad", PullRequestLabeled: true,
+	}, now); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("empty label filter = %v", err)
 	}
 }
 

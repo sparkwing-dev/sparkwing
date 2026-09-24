@@ -34,6 +34,30 @@ unlock.
   claim to remain live; a former claimant's grant cannot keep signing URLs.
   See [Data downloads](docs/api.md#data-downloads) and
   [Tenant limits](docs/limits.md).
+- **controller + web:** GitHub App push subscriptions accept `branches` and
+  pull request subscriptions accept `base_branches`, each with up to 10 glob
+  patterns. The controller checks the push branch or pull request base branch
+  before starting a run, including a GitHub rerun. Empty lists keep the existing
+  all-branches behavior. The dashboard edits both filters. Schema 67 adds the
+  stored filters. Set `branches` for any deploy pipeline subscribed to push.
+  Tag pushes follow the `tags` patterns alone.
+- **execution history (Breaking):** node attempts record the executor for trigger-owned,
+  pooled, Kubernetes Job, GitHub Actions, local, and metered cloud execution.
+  Older attempts derive a site from matching claim credentials and holders when
+  available. GitHub Actions attempts include the repository and workflow run
+  ID. Schema 68 adds `github_runner_credentials.run_id`. See
+  [Execution attribution](docs/migrations/_unreleased.md#execution-attribution).
+- **controller:** GitHub App subscriptions can opt into PR closed, labeled and ready-for-review actions, release published and prereleased actions, and branch create and delete events. Runs expose event, ref, action, label, merge and tag environment values; OIDC subjects use the event's ref and trigger. Subscriptions follow a repository id across rename and same-team transfer. Schema 69 adds default-off subscription columns; existing subscriptions retain their behavior. Branch filters also gate branch creation and deletion, and base-branch filters gate every pull request action.
+
+- **dashboard:** the Runs page can collapse its runs and nodes columns into
+  status-dot rails. Each dot keeps selection and shows its run or node label on
+  hover or focus. Narrow screens default to collapsed rails, and the viewer's
+  choice persists in the browser.
+- **runner image:** Kubernetes Jobs and warm runners have bash, coreutils,
+  git, OpenSSH client, CA certificates, curl, tar, gzip, xz, make, jq, and
+  unzip. The Debian slim runtime supports downloaded glibc-based toolchains;
+  the image keeps the Go toolchain used for pipeline compilation. See
+  [Local execution](docs/local-execution.md).
 
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
@@ -52,6 +76,13 @@ unlock.
   `DELETE /api/v1/me/identities/{provider}`. Schema 64 adds
   `identities.linked`, `identity_link_states` and `identity_unlinks`. See
   [Linked sign-ins](docs/auth.md#linked-sign-ins).
+- **dashboard + controller:** run node rows and DAG cards show small execution
+  site icons with runner details on hover or focus. Node names use the row width,
+  and the controller derives machine, GitHub Actions, cloud, or cluster sites
+  from the claim credential and holder when available. Unknown sites leave no
+  badge.
+- **controller (Breaking):** GitHub App subscriptions select tag pushes with `tags: ["v*"]` or other explicit tag globs. Empty `tags` selects none; replace any `tags: true` subscription with a pattern list. Existing boolean tag subscriptions stop matching after schema v66 adds the default-off pattern column. Operator GitHub webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`.
+- **controller + web:** Team owners can connect a GitHub App installation made directly on GitHub by authorizing the App, choosing an installation they administer, and binding it to their team. The picker marks installations held by another team without naming that team.
 
 - **runner:** an off-cluster agent reads the cache the controller announces
   directly. A claimed node asks for its run's cache grant first; with a grant
@@ -555,20 +586,6 @@ unlock.
   change. Google sign-in reads `--google-client-id`
   (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
   callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
-- **cache:** the cache accepts a cache grant, a bearer a multi-team
-  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
-  `--grant-key` on the cache), a secret that is neither the cache's operator
-  token nor any runner's token, so a runner need not hold the cache's token.
-  The cache refuses to start, and the controller to mint, when the key equals
-  the operator token. A grant names one run's team, lasts six hours or until
-  the requesting credential expires, whichever is first, and is verified
-  offline. A GitHub Actions runner credential gets no grant (403). A grant
-  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
-  under `<data-dir>/teams/<team>/`, reads
-  only public `https` mirrors registered under their URL-derived name, and is
-  refused on registration (403), seeding, refresh, archive, upload and admin
-  routes. A team's bins and the git mirrors count toward the store ceiling.
-  The operator token is unchanged.
 - **store:** schema 49 adds a `team` column to every tenant-owned table and a
   `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
   methods take no team argument and cannot express a query across teams; it
@@ -667,6 +684,16 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **controller + dashboard (Breaking):** credit and billing routes, metered
+  tokens, claim charges, and storage billing require a signed `metering`
+  license. Existing signed `multi-team` licenses also grant metering.
+  Self-hosted controllers without either feature run claims and storage tiers
+  without credit limits, and the dashboard hides Billing. See
+  [Metering needs a signed license](docs/migrations/_unreleased.md#metering-needs-a-signed-license).
+- **dashboard:** the selected node's execution history now sits below the run
+  summary in the Summary tab. Single attempts use one compact row, and selecting
+  nodes leaves the tab bar in place.
 
 - **cli + controller:** on a multi-team controller, `sparkwing run --on`
   and `sparkwing crons install` no longer call the cache's `/git/refresh`
@@ -852,6 +879,41 @@ unlock.
 
 ### Fixed
 
+- **runner:** memoized nodes and queued concurrency groups run through off-cluster agents,
+  Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
+  for its claimed node while the controller keeps keys within the runner's team.
+  Runner credentials can cancel a waiter on a run they claim.
+- **dashboard:** A GitHub App repository access update returns to the signed-in
+  team's GitHub tab and confirms the update instead of showing sign-in.
+
+- **controller:** Execution-start rejects executor names over 128 bytes and
+  removes terminal escapes from names shown in attempt history.
+
+- **logs:** A log search returns the same 404 for an unknown run and a run
+  outside the caller's team, whether logs are local or archived.
+
+- **warm-pool + controller:** externally executed nodes share one status poll
+  per run with bounded backoff. Run and trigger heartbeats and node touch
+  requests stay available when a token's request budget is exhausted, so
+  polling cannot cause the controller to reap an active run.
+- **controller:** GitHub Actions runner credentials claim only signed GitHub
+  push deliveries for their repository, branch and commit. A retry, child run,
+  pull request or manually submitted trigger with matching Git fields is
+  refused. GitHub App pushes record their event name for this check. Unbinding
+  a repository during credential exchange now stops or revokes the credential.
+- **source installer:** `bin/install.sh` updates `sparkwing-runner` alongside
+  `sparkwing` instead of removing the runner. Without `pnpm`, it embeds an
+  existing dashboard export when available, or completes with a warning that
+  the dashboard is unavailable.
+- **dashboard:** Switching between selected runs keeps the compact runs list
+  and detail panes in place while the next run loads.
+- **logs + dashboard:** log search reads archived runs from the object store
+  without restoring them, reports the reason when a search budget stops a
+  scan, and keeps archived runs scoped to their team. The runs Search view
+  applies its active filters before reading logs, scans newest runs until its
+  match limit, and reports how many matching runs it searched. Outcome words
+  show a pointer to the Status filter.
+
 - **controller + runner:** A claimed trigger whose pipeline is absent from the
   fetched repository now produces a failed trigger and run. The failure names
   the defined pipelines and, when known, the repository revision. It appears
@@ -863,11 +925,21 @@ unlock.
   class. A request larger than every matching node's allocatable capacity
   fails before Job creation. Credits still reserve the class rate for at least
   20 seconds per started node.
+- **controller + runner:** parallel nodes of one run no longer deadlock while
+  recording execution start. The controller logs execution-start and node
+  heartbeat store errors with run and node IDs, answers transient PostgreSQL
+  contention with `503` and `Retry-After`, and runners retry an execution-start
+  request on that response or a transient connection failure.
+- **controller:** selecting an existing GitHub App installation now accepts
+  only IDs in the encrypted picker proof. An unlisted ID answers 404, and a
+  failed selection consumes the connection state.
 
 - **dashboard:** activity rows keep their height while a run's detail pane
   closes. The queue status dot pulses when the daemon status changes, the
   overview reserves its card layout while loading, and tooltips appear at
   their measured position.
+- **runner:** GitHub Actions jobs claim and plan their own push's triggers in
+  process, so App-created pipelines start without a warm runner pool.
 
 - **controller:** the controller measures its `--bucket-store` whether or not
   a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0
@@ -1295,6 +1367,14 @@ unlock.
   The runner-token list reports unix seconds, which the machines page handed to
   `Date` as milliseconds, so every created, last-seen and expiry date read as
   January 1970.
+
+### Removed
+
+- **cli (Breaking):** the public CLI no longer provides `sparkwing cluster
+  credits`, `sparkwing cluster tokens set-metered`, or `--metered` on token
+  creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
+  credit and metering operations. The controller's credit and token routes
+  remain available to that tool. See the [migration guide](docs/migrations/_unreleased.md#cloud-operator-commands-leave-the-public-cli).
 
 ## [v0.60.0] - 2026-09-21
 ### Added

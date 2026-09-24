@@ -409,6 +409,16 @@ func runRunnerCLI(args []string, version string) error {
 	}
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if *githubActions {
+		if !*claimNodes {
+			return errors.New("--github-actions requires --claim-nodes")
+		}
+		if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" {
+			return errors.New("--github-actions requires --trigger-runner=inprocess")
+		}
+		*alsoClaimTriggers = true
+		*triggerRunnerKind = "inprocess"
+	}
 	if *controllerURL == "" {
 		fs.Usage()
 		return errors.New("--controller is required")
@@ -435,9 +445,6 @@ func runRunnerCLI(args []string, version string) error {
 	}
 	var claimUntil time.Time
 	if *githubActions {
-		if *alsoClaimTriggers || !*claimNodes {
-			return errors.New("--github-actions claims this repository's nodes; drop --also-claim-triggers and --claim-nodes=false")
-		}
 		cred, err := githubActionsCredential(context.Background(), &http.Client{Timeout: githubExchangeTimeout},
 			*controllerURL, *team)
 		if err != nil {

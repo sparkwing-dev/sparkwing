@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
+	"github.com/sparkwing-dev/sparkwing/internal/license/licensetest"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -75,7 +77,14 @@ func newNamedClaimFixture(t *testing.T, opts store.TokenOptions) namedClaimFixtu
 	if err != nil {
 		t.Fatalf("CreateTokenWith: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	pub, priv := licensetest.NewKey(t)
+	now := time.Now()
+	raw := licensetest.Sign(t, priv, licensetest.Terms{
+		Features: []string{license.FeatureMetering}, IssuedTo: "test",
+		IssuedAt: now.Add(-time.Hour), ExpiresAt: now.Add(24 * time.Hour),
+	})
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithLicense(
+		license.Resolve(raw, pub, time.Now(), nil)).Handler())
 	t.Cleanup(srv.Close)
 	return namedClaimFixture{url: srv.URL, token: token, prefix: record.Prefix, store: st}
 }

@@ -3,10 +3,12 @@ package client
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -50,6 +52,57 @@ func TestClientDoesNotRetryAnUnavailablePost(t *testing.T) {
 	}
 	if got := attempts.Load(); got != 1 {
 		t.Fatalf("server saw %d attempt(s) of a POST, want one", got)
+	}
+}
+
+func TestExecutionStartRetriesTransientAnswers(t *testing.T) {
+	var attempts atomic.Int64
+	srv := httptest.NewServer(unavailableOnce(&attempts, http.StatusNoContent))
+	defer srv.Close()
+	c := New(srv.URL, srv.Client())
+	if err := c.AcknowledgeNodeExecutionStart(context.Background(), "r1", "n1", store.ExecutionStart{AttemptOrdinal: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("execution-start attempts = %d, want 2", got)
+	}
+}
+
+func TestExecutionStartStopsAfterRetryBudget(t *testing.T) {
+	var attempts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, srv.Client())
+	if err := c.AcknowledgeNodeExecutionStart(context.Background(), "r1", "n1", store.ExecutionStart{AttemptOrdinal: 1}); err == nil {
+		t.Fatal("execution-start succeeded against a controller that only answers 503")
+	}
+	if got := attempts.Load(); got != UnavailableRetries+1 {
+		t.Fatalf("execution-start attempts = %d, want %d", got, UnavailableRetries+1)
+	}
+}
+
+type transientRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f transientRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestExecutionStartRetriesTransientTransportError(t *testing.T) {
+	var attempts atomic.Int64
+	transport := transientRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if attempts.Add(1) == 1 {
+			return nil, &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: http.NoBody, Request: req}, nil
+	})
+	c := New("http://example.invalid", &http.Client{Transport: transport})
+	if err := c.AcknowledgeNodeExecutionStart(context.Background(), "r1", "n1", store.ExecutionStart{AttemptOrdinal: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("execution-start attempts = %d, want 2", got)
 	}
 }
 
@@ -151,5 +204,21 @@ func TestUnavailableWithoutRetryAfterStaysAPlainError(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("a 503 claim returned no error")
+	}
+}
+
+func TestListNodesHonorsPollAfterOn429(t *testing.T) {
+	for _, header := range []string{"Retry-After", store.ClaimPollAfterHeader} {
+		t.Run(header, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(header, "11")
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer srv.Close()
+			_, err := New(srv.URL, srv.Client()).ListNodes(context.Background(), "run-1")
+			if wait, ok := LoadSignal(err); !ok || wait != 11*time.Second {
+				t.Fatalf("429 %s = %s, %v; want 11s load signal", header, wait, ok)
+			}
+		})
 	}
 }

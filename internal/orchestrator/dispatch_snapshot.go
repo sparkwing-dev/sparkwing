@@ -63,8 +63,12 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 	if got, _ := r.backends.State.GetRun(ctx, runID); got != nil {
 		run = got
 	}
+	var trigger *store.Trigger
+	if got, err := r.backends.State.GetTrigger(ctx, runID); err == nil {
+		trigger = got
+	}
 
-	env := collectDispatchEnv(ctx, node, runID, run)
+	env := collectDispatchEnv(ctx, node, runID, run, trigger)
 	envBytes, err := json.Marshal(env.values)
 	if err != nil {
 		return fmt.Errorf("marshal env: %w", err)
@@ -112,7 +116,7 @@ type dispatchEnv struct {
 	masked       int
 }
 
-func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID string, run *store.Run) dispatchEnv {
+func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID string, run *store.Run, triggers ...*store.Trigger) dispatchEnv {
 	out := map[string]string{}
 	for _, kv := range os.Environ() {
 		i := strings.IndexByte(kv, '=')
@@ -145,6 +149,23 @@ func collectDispatchEnv(ctx context.Context, node *sparkwing.JobNode, runID stri
 		}
 		stamp("GITHUB_SHA", run.GitSHA)
 		stamp("GITHUB_REF_NAME", run.GitBranch)
+	}
+	if len(triggers) > 0 && triggers[0] != nil {
+		trig := triggers[0]
+		ref := trig.TriggerEnv["GITHUB_REF"]
+		if trig.TriggerSource == "github" && trig.TriggerEnv["GITHUB_EVENT_NAME"] == "push" {
+			if tag, ok := strings.CutPrefix(ref, "refs/tags/"); ok && tag != "" &&
+				trig.TriggerEnv["GITHUB_REF_TYPE"] == "tag" && trig.TriggerEnv["GITHUB_TAG"] == tag {
+				stamp("GITHUB_REF", ref)
+				stamp("GITHUB_REF_TYPE", "tag")
+				stamp("GITHUB_REF_NAME", tag)
+				stamp("GITHUB_TAG", tag)
+			} else if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok && branch != "" &&
+				trig.TriggerEnv["GITHUB_REF_TYPE"] == "branch" && run != nil && branch == run.GitBranch {
+				stamp("GITHUB_REF", ref)
+				stamp("GITHUB_REF_TYPE", "branch")
+			}
+		}
 	}
 	for k, v := range node.EnvMap() {
 		out[k] = v

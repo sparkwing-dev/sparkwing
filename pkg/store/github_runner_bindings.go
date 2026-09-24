@@ -46,8 +46,6 @@ CREATE TABLE IF NOT EXISTS github_runner_bindings (
 
 var githubRunnerBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerBindingsTableSQLite)
 
-// github_runner_credentials records the push each GitHub Actions credential
-// was minted for, keyed by the token's prefix.
 const githubRunnerCredentialsTableSQLite = `
 CREATE TABLE IF NOT EXISTS github_runner_credentials (
     team       TEXT NOT NULL,
@@ -59,6 +57,8 @@ CREATE TABLE IF NOT EXISTS github_runner_credentials (
 )`
 
 var githubRunnerCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerCredentialsTableSQLite)
+
+var githubRunnerRunCols = map[string]string{"run_id": "TEXT NOT NULL DEFAULT ''"}
 
 // applyGitHubRunnerBindingsMigration creates the bindings and credentials
 // tables. It is a step of the identity migration rather than a schema version
@@ -232,30 +232,35 @@ const MaxGitHubRunnerCredentials = 20
 // [MaxGitHubRunnerCredentials] live GitHub Actions credentials.
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
 
-// GitHubRunnerPush is the push a GitHub Actions job's ID token was issued
-// for: a branch and the commit on it.
+// GitHubRunnerPush is the branch, commit, and workflow run named by a GitHub
+// Actions job's ID token.
 type GitHubRunnerPush struct {
 	Branch string
 	SHA    string
+	RunID  string
 }
 
 // MintGitHubRunnerCredential mints a runner credential for principal bound to
-// push, valid for ttl, refusing with [ErrGitHubRunnerCredentialLimit] once
+// push and the live binding, valid for ttl. It refuses with
+// [ErrGitHubRunnerCredentialLimit] once
 // the team holds [MaxGitHubRunnerCredentials] live ones. The count and the
-// mint share a transaction under the team's lock, so concurrent exchanges
-// cannot pass the limit together. It drops the team's expired and revoked
-// GitHub Actions credentials first.
+// mint share a transaction under the team's lock, and the binding row is
+// locked before minting, so concurrent exchanges cannot pass the limit and
+// an unbind cannot leave a usable credential behind. It drops the team's
+// expired and revoked GitHub Actions credentials first.
 func (t *Tenant) MintGitHubRunnerCredential(
-	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error) {
-	if !strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix) || push.Branch == "" || push.SHA == "" || ttl <= 0 {
+	if binding.Team != t.team || binding.RepositoryID <= 0 || binding.RepositoryOwnerID <= 0 ||
+		!strings.HasPrefix(principal, GitHubRunnerPrincipalPrefix+fmt.Sprint(binding.RepositoryID)+":") ||
+		push.Branch == "" || push.SHA == "" || ttl <= 0 {
 		return "", nil, ErrInvalidInput
 	}
 	if err := refuseAdminScope(scopes); err != nil {
 		return "", nil, err
 	}
 	for attempt := 1; ; attempt++ {
-		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, principal, push, scopes, ttl, now)
+		raw, tok, err := t.mintGitHubRunnerCredentialOnce(ctx, binding, principal, push, scopes, ttl, now)
 		if err == nil {
 			return raw, tok, nil
 		}
@@ -267,7 +272,7 @@ func (t *Tenant) MintGitHubRunnerCredential(
 }
 
 func (t *Tenant) mintGitHubRunnerCredentialOnce(
-	ctx context.Context, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
+	ctx context.Context, binding GitHubRunnerBinding, principal string, push GitHubRunnerPush, scopes []string, ttl time.Duration, now time.Time,
 ) (string, *Token, error) {
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -275,6 +280,15 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 	}
 	defer rollbackOrLog(tx)
 	if err := t.lockTeamTx(ctx, tx); err != nil {
+		return "", nil, err
+	}
+	var ownerID int64
+	err = tx.QueryRowContext(ctx, `SELECT repository_owner_id FROM github_runner_bindings
+		WHERE team = ? AND repository_id = ?`+tx.forUpdate(), string(t.team), binding.RepositoryID).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && ownerID != binding.RepositoryOwnerID) {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
 		return "", nil, err
 	}
 	at := now.UTC().Unix()
@@ -306,8 +320,8 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 		return "", nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_runner_credentials (team, prefix, branch, sha, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		string(t.team), tok.Prefix, push.Branch, push.SHA, tok.ExpiresAt.UTC().Unix()); err != nil {
+		INSERT INTO github_runner_credentials (team, prefix, branch, sha, run_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		string(t.team), tok.Prefix, push.Branch, push.SHA, push.RunID, tok.ExpiresAt.UTC().Unix()); err != nil {
 		return "", nil, err
 	}
 	return raw, tok, tx.Commit()
@@ -318,8 +332,8 @@ func (t *Tenant) mintGitHubRunnerCredentialOnce(
 func (t *Tenant) GitHubRunnerCredentialPush(ctx context.Context, prefix string) (GitHubRunnerPush, error) {
 	var push GitHubRunnerPush
 	err := t.s.queryRow(ctx,
-		`SELECT branch, sha FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
-		string(t.team), prefix).Scan(&push.Branch, &push.SHA)
+		`SELECT branch, sha, run_id FROM github_runner_credentials WHERE team = ? AND prefix = ?`,
+		string(t.team), prefix).Scan(&push.Branch, &push.SHA, &push.RunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GitHubRunnerPush{}, ErrNotFound
 	}
@@ -426,6 +440,9 @@ type GitHubRunnerScope struct {
 // the scope's push. tr's team is checked by the caller's query.
 func (g GitHubRunnerScope) admits(tr *Trigger) bool {
 	return g.Push.Branch != "" && g.Push.SHA != "" &&
+		tr.TriggerSource == "github" && tr.TriggerEnv["GITHUB_EVENT_NAME"] == "push" &&
+		tr.WebhookDelivery != "" && tr.WebhookReplayKey != "" &&
+		tr.RetryOf == "" && tr.ParentRunID == "" && tr.ParentNodeID == "" &&
 		tr.GitBranch == g.Push.Branch && tr.GitSHA == g.Push.SHA && TriggerNamesGitHubRepo(tr, g.Repo)
 }
 
@@ -456,6 +473,9 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 	spellings := g.Repo.spellings()
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(spellings)), ",")
 	clause := ` AND ` + col("team") + ` = ?` +
+		` AND ` + col("trigger_source") + ` = 'github'` +
+		` AND ` + col("webhook_delivery") + ` != '' AND ` + col("webhook_replay_key") + ` != ''` +
+		` AND ` + col("retry_of") + ` = '' AND COALESCE(` + col("parent_run_id") + `, '') = '' AND ` + col("parent_node_id") + ` = ''` +
 		` AND LOWER(` + col("github_owner") + `) = ? AND LOWER(` + col("github_repo") + `) = ?` +
 		` AND (` + col("repo") + ` = '' OR LOWER(` + col("repo") + `) IN (` + ph + `))` +
 		` AND (` + col("repo_url") + ` = '' OR LOWER(` + col("repo_url") + `) IN (` + ph + `))` +
@@ -485,9 +505,12 @@ func (s *Store) GitHubRunnerAdmits(ctx context.Context, scope GitHubRunnerScope,
 	var tr Trigger
 	var envJSON []byte
 	err := s.queryRow(ctx, `
-		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha
+		SELECT repo, repo_url, github_owner, github_repo, trigger_env, git_branch, git_sha,
+		       trigger_source, retry_of, COALESCE(parent_run_id, ''), parent_node_id,
+		       webhook_delivery, webhook_replay_key
 		FROM triggers WHERE team = ? AND id = ?`, string(scope.Team), runID).
-		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA)
+		Scan(&tr.Repo, &tr.RepoURL, &tr.GithubOwner, &tr.GithubRepo, &envJSON, &tr.GitBranch, &tr.GitSHA,
+			&tr.TriggerSource, &tr.RetryOf, &tr.ParentRunID, &tr.ParentNodeID, &tr.WebhookDelivery, &tr.WebhookReplayKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

@@ -205,7 +205,7 @@ func TestWebhookGitHub_TagPushIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{
 		"ref": "refs/tags/v1.2.3",
-		"after": "abc",
+		"after": "0123456789abcdef0123456789abcdef01234567",
 		"repository": {"full_name": "x/y"}
 	}`)
 	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "push", body, signWebhook(testWebhookSecret, body))

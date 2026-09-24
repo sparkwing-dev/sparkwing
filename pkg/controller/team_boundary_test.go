@@ -211,6 +211,26 @@ func tenancyDialects(t *testing.T, run func(t *testing.T, f *tenancyFixture)) {
 	}
 }
 
+func TestTeamBoundary_ConcurrencyHolderCannotCrossTeams(t *testing.T) {
+	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
+		path := "/api/v1/concurrency/deploy"
+		for _, route := range []string{"/heartbeat", "/release", "/holder?holder_id=holder-a"} {
+			method := http.MethodPost
+			if strings.HasPrefix(route, "/holder") {
+				method = http.MethodGet
+			}
+			code, _ := f.do(method, path+route, f.everyScopeB, map[string]any{"holder_id": "holder-a", "outcome": "success"})
+			if code == http.StatusOK || code == http.StatusNoContent {
+				t.Errorf("team B reached team A's concurrency holder through %s: %d", route, code)
+			}
+		}
+		holder, err := f.teamA.ConcurrencyHolder(context.Background(), "deploy", "holder-a", time.Now())
+		if err != nil || holder == nil || holder.RunID != f.runA {
+			t.Fatalf("team A holder changed: %+v, %v", holder, err)
+		}
+	})
+}
+
 // The sequence an identity review ran against a build without the boundary: a
 // fresh account in its own team listed, read and cancelled a run of another
 // team and started a run that landed in default.

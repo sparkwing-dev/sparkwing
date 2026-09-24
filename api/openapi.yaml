@@ -1665,7 +1665,7 @@ paths:
   /api/v1/concurrency/{key}/cancel-waiter:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Drop one waiter from a key's queue.
       requestBody:
@@ -3299,12 +3299,15 @@ paths:
                 attempt_ordinal: {type: integer, minimum: 1}
                 executor_kind:
                   type: string
-                  enum: [local]
-                  description: Opens the attempt for a node its dispatcher runs in its own process. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
+                  enum: [local, kubernetes]
+                  description: local opens the attempt for a node its dispatcher runs in its own process; a trigger claim may send kubernetes with its pod's executor_name. For local, no claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
                 executor_id:
                   type: string
                   maxLength: 128
                   description: The host a locally executed node ran on. It is the attempt's executor id and its display name.
+                executor_name:
+                  type: string
+                  description: At most 128 UTF-8 bytes. The Kubernetes Job pod or trigger runner a claimed attempt ran on. Ignored for GitHub Actions credentials, whose attempts name the repository and workflow run.
       responses:
         "204": {description: Attempt started. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -4437,9 +4440,9 @@ paths:
     get:
       x-sparkwing-scope: public
       tags: [teams]
-      summary: Report whether this controller hosts teams and which sign-in providers it offers.
+      summary: Report which licensed team and billing features this controller offers.
       description: >-
-        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only when the controller holds a valid multi-team license. `auth.providers` lists `google` only when that license is present and a Google client is configured.
+        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only with a valid multi-team license. `billing.enabled` is true with a valid metering or multi-team license. `auth.providers` lists `google` only when a multi-team license is present and a Google client is configured.
       security: []
       responses:
         "200":
@@ -4449,10 +4452,16 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.capabilitiesResp
                 type: object
-                required: [teams, auth, claims]
+                required: [teams, billing, auth, claims]
                 properties:
                   teams:
                     x-sparkwing-go-type: pkg/controller.capabilitiesTeams
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  billing:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesBilling
                     type: object
                     required: [enabled]
                     properties:
@@ -5632,7 +5641,7 @@ paths:
       tags: [teams]
       summary: Start connecting a GitHub App installation to the active team.
       description: >-
-        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie, sends the browser to `install_url`, and on GitHub's return to the setup URL (with `installation_id`, `setup_action` and `state`) checks `state` and sends the browser to `authorize_url`. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
+        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie. To install, it sends the browser to `install_url`, then sends the setup return to `authorize_url`. To connect an existing installation, it sends the browser straight to `authorize_url` and calls connect/available after GitHub returns. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
       requestBody:
         required: true
         content:
@@ -5662,6 +5671,53 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/team/github-app/connect/available:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List existing App installations the authorized user administers.
+      description: >-
+        Owner only. Redeems the GitHub authorization code with PKCE and checks the linked GitHub identity. Reads GET /user/installations with the user token and returns only this App's installations whose accounts the user administers. The encrypted authorization proof expires with the signed state. An installation bound to another team is marked without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppAvailableReq
+              type: object
+              required: [state, verifier, code, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Administered installations and a proof for selecting one.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppAvailableResp
+                type: object
+                required: [authorization, installations]
+                properties:
+                  authorization: {type: string, description: Encrypted proof bound to the state.}
+                  installations:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppAvailableInstallation
+                      type: object
+                      required: [installation_id, account_login, account_type, connected_elsewhere]
+                      properties:
+                        installation_id: {type: integer, format: int64}
+                        account_login: {type: string}
+                        account_type: {type: string}
+                        connected_elsewhere: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/team/github-app/connect/complete:
     post:
       x-sparkwing-scope: team.admin
@@ -5683,6 +5739,38 @@ paths:
                 code: {type: string, description: The code GitHub returned to the callback.}
                 installation_id: {type: integer, format: int64, description: From the setup redirect.}
                 redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Another team holds the installation.}
+
+  /api/v1/team/github-app/connect/select:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Bind one existing installation to the active team.
+      description: >-
+        Owner only. Checks the signed state, PKCE verifier, linked GitHub identity, encrypted authorization proof, and live GitHub administration of the chosen installation. Consumes the state once in the store before binding. Answers 409 when another team holds the installation without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppSelectReq
+              type: object
+              required: [state, verifier, authorization, installation_id]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                authorization: {type: string}
+                installation_id: {type: integer, format: int64}
       responses:
         "201":
           description: Bound.
@@ -5785,9 +5873,9 @@ paths:
     put:
       x-sparkwing-scope: team.admin
       tags: [teams]
-      summary: Subscribe a pipeline to a repository's pushes and pull requests.
+      summary: Subscribe a pipeline to a repository's branch pushes, matching tag pushes and pull requests.
       description: >-
-        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
+        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. Branch patterns use Go path.Match against the pushed branch or pull request base branch; an empty list matches every branch. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
       requestBody:
         required: true
         content:
@@ -5800,7 +5888,22 @@ paths:
                 repository: {type: string, description: owner/name.}
                 pipeline: {type: string}
                 push: {type: boolean}
+                tags:
+                  type: array
+                  maxItems: 10
+                  items: {type: string, maxLength: 128}
+                  description: Tag name globs matched with Go path.Match; empty selects no tags.
                 pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
+                branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Branch push, creation and deletion glob patterns, at most 128 bytes each. Empty matches all branches."}
+                base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Pull request base branch glob patterns, applied to every pull request action, at most 128 bytes each. Empty matches all base branches."}
+                pull_request_closed: {type: boolean, description: "Runs when a pull request closes, merged or not."}
+                pull_request_labeled: {type: boolean, description: "Runs when a pull request gains one of pull_request_labels; requires a nonempty list."}
+                pull_request_labels: {type: array, items: {type: string}, description: "Labels compared without case."}
+                pull_request_ready_for_review: {type: boolean, description: "Runs when a draft pull request is marked ready."}
+                release_published: {type: boolean, description: "Runs at a published release's tag commit."}
+                release_prereleased: {type: boolean, description: "Runs at a prereleased release's tag commit."}
+                branch_create: {type: boolean, description: "Runs when a branch matching branches is created."}
+                branch_delete: {type: boolean, description: "Runs at the default branch commit when a branch matching branches is deleted."}
       responses:
         "200":
           description: Written.
@@ -6640,14 +6743,28 @@ components:
     GitHubAppTrigger:
       x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
       type: object
-      required: [repository, repository_id, installation_id, pipeline, push, pull_request, created_by, created_at]
+      required: [repository, repository_id, installation_id, pipeline, push, tags, pull_request, branches, base_branches, pull_request_closed, pull_request_labeled, pull_request_labels, pull_request_ready_for_review, release_published, release_prereleased, branch_create, branch_delete, created_by, created_at]
       properties:
         repository: {type: string, description: owner/name as GitHub spells it.}
         repository_id: {type: integer, format: int64}
         installation_id: {type: integer, format: int64}
         pipeline: {type: string}
         push: {type: boolean}
+        tags:
+          type: array
+          maxItems: 10
+          items: {type: string, maxLength: 128}
         pull_request: {type: boolean}
+        branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        pull_request_closed: {type: boolean}
+        pull_request_labeled: {type: boolean}
+        pull_request_labels: {type: array, items: {type: string}}
+        pull_request_ready_for_review: {type: boolean}
+        release_published: {type: boolean}
+        release_prereleased: {type: boolean}
+        branch_create: {type: boolean}
+        branch_delete: {type: boolean}
         created_by: {type: string}
         created_at: {type: integer, format: int64, description: Unix seconds.}
     GitHubAppExtraRepos:
@@ -6832,6 +6949,11 @@ components:
         executor_location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived from the claim credential and holder; absent without enough evidence.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         required_executor_location:
           type: string
           enum: ["", local, cloud, unknown]
@@ -6902,6 +7024,11 @@ components:
         location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived for the current claim's attempt when available.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         outcome: {type: string}

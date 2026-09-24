@@ -400,6 +400,16 @@ takes a pipeline name, a repository such as `https://github.com/acme/app`,
 and a branch (`main` unless you change it). The runner that claims it fetches
 the branch tip.
 
+Selecting a run opens its detail beside the compact runs list. Switching to
+another run keeps both panes in place while its detail loads; clearing the
+selection closes the detail.
+
+When viewing a run, the chevron above the runs list collapses both the runs
+and nodes columns into status-dot rails. Hover or focus a dot to see its full
+label; select it to open that run or node. Screens narrower than 1100px start
+with the rails collapsed. Your choice to expand or collapse them is saved in
+this browser.
+
 **From a terminal.** Under **Team > Machines > CLI access**, **Create CLI
 token** mints a personal token and shows it once with two commands:
 

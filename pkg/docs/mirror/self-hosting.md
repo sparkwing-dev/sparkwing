@@ -60,6 +60,13 @@ regional S3 URL instead, so runner pods in the bucket's region can use the S3
 gateway endpoint. Local filesystem storage keeps its direct byte-serving path and
 does not need CloudFront signing keys. See [Data downloads](api.md#data-downloads)
 for route behavior.
+The self-hosted controller runs without credit metering unless a signed license
+grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
+no credit or team billing routes, and gives teams unlimited room in the
+controller's storage-tier checks. Operator-set storage quotas still apply.
+The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
+metering can contact Korey for help running sparkwing-ops. See
+[Credits](auth.md#credits) for the licensed behavior.
 
 ### Storage class
 
@@ -148,6 +155,11 @@ asks for, `--no-service` writes the config for a machine you supervise
 yourself, and an existing config is replaced only with `--force`. Retire the
 machine with `sparkwing cluster runners remove --profile prod`, which stops the
 service and then revokes the token.
+
+From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
+`sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
+updates both binaries from the same checkout. Keep that directory on the
+service's PATH when using the source installer.
 
 The command needs an admin credential on the profile, because minting a token
 is an admin route. A machine whose operator holds no admin token uses the
@@ -449,7 +461,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
 `GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
 the team still has stored and what the storage charge and the sweep both
 measure. The quota route does not take the allowance: rewriting a quota leaves
-it where it stands, so the two cannot overwrite each other. What a team retains
-is charged against the credit ledger once an operator prices storage;
-[Credits](auth.md) describes the rate, the free allowance, which bytes count,
-and what a spent balance does.
+it where it stands, so the two cannot overwrite each other. A licensed
+metering controller charges retained bytes against the credit ledger when
+the operator prices storage. [Credits](auth.md) describes the rate, the free
+allowance, which bytes count, and what a spent balance does.

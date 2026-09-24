@@ -70,6 +70,15 @@ describe("teamsEnabled", () => {
   });
 });
 
+describe("billingEnabled", () => {
+  it("offers billing only when controller capabilities enable it", () => {
+    assert.equal(teams.billingEnabled(null), false);
+    assert.equal(teams.billingEnabled({ mode: "cluster", teams: { enabled: true } }), false);
+    assert.equal(teams.billingEnabled({ mode: "cluster", billing: { enabled: false } }), false);
+    assert.equal(teams.billingEnabled({ mode: "cluster", billing: { enabled: true } }), true);
+  });
+});
+
 describe("role gates", () => {
   it("offers team administration to owners only", () => {
     assert.equal(teams.canManageTeam("owner"), true);

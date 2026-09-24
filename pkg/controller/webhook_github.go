@@ -332,15 +332,26 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		return
 	}
 
-	if payload.Deleted {
+	if payload.Deleted || strings.Trim(payload.After, "0") == "" {
+		reason := "branch deleted"
+		if strings.HasPrefix(payload.Ref, "refs/tags/") {
+			reason = "tag deleted"
+		}
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status": "ignored",
-			"reason": "branch deleted",
+			"reason": reason,
 		})
 		return
 	}
-	branch, ok := strings.CutPrefix(payload.Ref, "refs/heads/")
-	if !ok {
+	if strings.HasPrefix(payload.Ref, "refs/tags/") {
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status": "ignored",
+			"reason": "tag push",
+		})
+		return
+	}
+	branch, isBranch := strings.CutPrefix(payload.Ref, "refs/heads/")
+	if !isBranch || branch == "" {
 		writeJSON(w, http.StatusAccepted, map[string]string{
 			"status": "ignored",
 			"reason": "non-branch ref",
@@ -359,8 +370,10 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 		"GITHUB_REPOSITORY":          payload.Repository.FullName,
 		"GITHUB_BEFORE":              payload.Before,
 		"GITHUB_AFTER":               payload.After,
+		"GITHUB_REF":                 payload.Ref,
 		sparkwing.EnvGitHubEventName: githubEventPush,
 	}
+	triggerEnv["GITHUB_REF_TYPE"] = "branch"
 	owner, repoName := "", ""
 	if parts := strings.SplitN(payload.Repository.FullName, "/", 2); len(parts) == 2 {
 		owner, repoName = parts[0], parts[1]

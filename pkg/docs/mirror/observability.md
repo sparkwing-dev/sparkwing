@@ -23,6 +23,8 @@ events carry node requirements, the round priority target, safe executor
 display fields (`executor_name`, `executor_kind`, and `executor_location`), and
 effective scores. Events never carry a credential, token prefix, principal,
 holder, membership ID, internal controller or executor ID, or reservation ID.
+An execution-start request accepts at most 128 bytes for `executor_name`.
+Attempt display names strip terminal escapes and inline control characters.
 
 | Event | Meaning |
 |---|---|
@@ -49,11 +51,11 @@ the logs.
 | `agent_lost` | The agent or gateway stopped heartbeating. The source node is terminal; a fresh linked run may retry it within `.Retry(n)`. | Check the executor and `agent_loss_*` events. A post-start retry is at-least-once and spends each acknowledged invocation. |
 | `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no runner claimed the node within the controller's queue deadline (default 15m). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
 | `credits_exhausted` | The controller's prepaid credit balance ran out and the node was cancelled after the grace period. Its claim is released and its offers are withdrawn. | Add credits, then re-run. A node cancelled this way held no slot afterwards, so nothing is left to reclaim. |
-| `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | Add the class with `sparkwing cluster credits settings --rate-table`, or lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
+| `unpriced_cpu_class` | The node asks for more cpu than the largest class the credit rate table prices, and the runner that tried to take it reported nothing smaller, so no claim could be billed. | A Sparkwing Cloud operator can add the class with the private `sparkwing-ops` tool. Otherwise lower the node's cpu request, then re-run. The `credits_unpriced_class` event carries the request and the ceiling. |
 | `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |
-| `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | Grant credits (`sparkwing cluster credits grant`) and rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
+| `credits_exhausted` | The credit balance stayed at zero past the grace period, so the controller cancelled the node. | A Sparkwing Cloud operator can grant credits with the private `sparkwing-ops` tool. Then rerun. The run's `credits_exhausted` event carries the balance and how long it had been spent. |
 | `logs_dropped` | The log store stayed unreachable past the append retry budget, so log lines were lost. The node's own work may have succeeded; its record of that work is incomplete. | Check the logs backend named in the run's `invocation.backends` -- for `s3`, the bucket, `AWS_REGION`, credentials, and `SPARKWING_S3_ENDPOINT`. The `logs_drop` event carries the lost-line count and the first error. Set `SPARKWING_LOGS_DROP_POLICY=warn` to keep such runs green instead. |
 
 A plain pipeline-level failure (a failed test or command) carries no
@@ -137,9 +139,9 @@ replaced was cut off:
 | State | Meaning | The reader shows |
 |---|---|---|
 | `complete` | Every stream was sealed, no numbers are missing, and the runner dropped nothing. | Nothing. |
-| `incomplete` | Sealed, but the service never received some numbered lines or the runner reported drops. | `— logs incomplete: N lines missing —` |
-| `cut_off` | A stream that numbered its lines sent no seal within 60 seconds of the node finishing: the runner died or lost its connection mid-stream. | `— logs cut off: the log stream ended without the runner's confirmation after line N —` |
-| `unconfirmed` | The runner never numbered its lines, which is how a runner released before seals writes. Nothing says whether the log is whole. | `— logs unconfirmed: this runner does not report whether its log is complete (N lines stored) —` |
+| `incomplete` | Sealed, but the service never received some numbered lines or the runner reported drops. | `- logs incomplete: N lines missing -` |
+| `cut_off` | A stream that numbered its lines sent no seal within 60 seconds of the node finishing: the runner died or lost its connection mid-stream. | `- logs cut off: the log stream ended without the runner's confirmation after line N -` |
+| `unconfirmed` | The runner never numbered its lines, which is how a runner released before seals writes. Nothing says whether the log is whole. | `- logs unconfirmed: this runner does not report whether its log is complete (N lines stored) -` |
 | `streaming` | The node is running, or finished less than 60 seconds ago and its seal has not arrived. | Nothing yet. |
 | `unknown` | The log store keeps no seals: a filesystem, S3 or stdout logs surface. | Nothing. |
 
@@ -330,13 +332,23 @@ It also shows what admission is doing with the machine:
   view reports whether the controller considers headroom live, stale, or
   absent without fabricating a timestamp.
 
-The run node list and DAG mark execution location with both text and color.
-Selecting a node shows every durable execution attempt, including the executor
-kind and name, timestamps, outcome, and retry link when the controller recorded
-one. A recorded platform appears with its attempt; a missing platform remains
-unknown. The dashboard reads this history from explicit public execution
-attribution. It does not derive location from transient claim ownership; an
-older record with no attribution is shown as unknown.
+The run node list and DAG show a small location icon for known execution sites.
+Hover or focus the icon to see the runner or repository. Machine, Sparkwing
+Cloud, GitHub Actions, and cluster execution use distinct icons; unknown
+locations leave the space empty. Node names use the available row width and
+keep their full name in a tooltip.
+Selecting a node shows its execution history in the run detail's Summary tab,
+below the run and node summary. A single attempt occupies one compact row.
+Every durable attempt retains its executor kind and name, run link, timestamps,
+outcome, and retry link when the controller recorded one. In-process trigger
+nodes record the trigger claimant. Claimed nodes record the selected runner or
+the claim holder; Kubernetes Jobs record their pod hostname; GitHub Actions jobs
+record the repository and workflow run ID. Local runs record the machine
+hostname. Metered runner attempts record cloud placement. The controller also
+derives execution sites for older attempts from stored claim holders and, while
+the claim still matches, the credential. A recorded platform appears with its
+attempt; a missing platform remains unknown. The panel says unknown only when
+the stored attempt and matching claim have no usable executor identity.
 
 - **Capacity page**: the same host ledger with the subtraction behind
   each Available cell written out, then every measured pipeline with the

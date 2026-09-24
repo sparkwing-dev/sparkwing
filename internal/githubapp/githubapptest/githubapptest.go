@@ -100,17 +100,18 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
-	URL    string
-	Key    *rsa.PrivateKey
-	t      testing.TB
-	mu     sync.Mutex
-	insts  map[int64]*Installation
-	codes  map[string]*userCode
-	users  map[string]*userCode
-	tokens map[string]*issuedToken
-	minted []MintedToken
-	stats  []Status
-	checks []CheckRunCall
+	URL     string
+	Key     *rsa.PrivateKey
+	t       testing.TB
+	mu      sync.Mutex
+	insts   map[int64]*Installation
+	codes   map[string]*userCode
+	users   map[string]*userCode
+	tokens  map[string]*issuedToken
+	commits map[string]string
+	minted  []MintedToken
+	stats   []Status
+	checks  []CheckRunCall
 	// checkRuns maps a check run id to the call that created it.
 	checkRuns  map[int64]CheckRunCall
 	failChecks int
@@ -129,16 +130,19 @@ func New(t testing.TB) *GitHub {
 		codes:     map[string]*userCode{},
 		users:     map[string]*userCode{},
 		tokens:    map[string]*issuedToken{},
+		commits:   map[string]string{},
 		checkRuns: map[int64]CheckRunCall{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", g.handleAccessToken)
 	mux.HandleFunc("GET /user", g.handleUser)
+	mux.HandleFunc("GET /user/installations", g.handleUserInstallations)
 	mux.HandleFunc("GET /user/memberships/orgs/{org}", g.handleMembership)
 	mux.HandleFunc("GET /app/installations/{id}", g.appOnly(g.handleInstallation))
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", g.appOnly(g.handleMint))
 	mux.HandleFunc("GET /repos/{owner}/{repo}/installation", g.appOnly(g.handleRepoInstallation))
 	mux.HandleFunc("GET /installation/repositories", g.handleInstallationRepos)
+	mux.HandleFunc("GET /repos/{owner}/{repo}/commits/{ref...}", g.handleCommit)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/statuses/{sha}", g.handleStatus)
 	mux.HandleFunc("POST /repos/{owner}/{repo}/check-runs", g.handleCheckRun)
 	mux.HandleFunc("PATCH /repos/{owner}/{repo}/check-runs/{id}", g.handleCheckRun)
@@ -169,6 +173,30 @@ func (g *GitHub) SetRepos(id int64, repos ...Repo) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.insts[id].Repos = repos
+}
+
+// SetCommit makes a repository ref resolve to sha.
+func (g *GitHub) SetCommit(repo, ref, sha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.commits[strings.ToLower(repo)+"/"+ref] = sha
+}
+
+func (g *GitHub) handleCommit(w http.ResponseWriter, r *http.Request) {
+	repo := strings.ToLower(r.PathValue("owner") + "/" + r.PathValue("repo"))
+	tok := g.installationToken(r)
+	if tok == nil || !tok.repos[repo] || tok.permissions["contents"] != "read" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"message": "Forbidden"})
+		return
+	}
+	g.mu.Lock()
+	sha := g.commits[repo+"/"+r.PathValue("ref")]
+	g.mu.Unlock()
+	if sha == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"sha": sha})
 }
 
 // SetChecksGranted records whether installation id's owner accepted the
@@ -301,6 +329,24 @@ func (g *GitHub) handleMembership(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
+func (g *GitHub) handleUserInstallations(w http.ResponseWriter, r *http.Request) {
+	u := g.userFor(r)
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
+		return
+	}
+	g.mu.Lock()
+	var installations []map[string]any
+	for _, inst := range g.insts {
+		if inst.Account.Type == "User" && inst.Account.ID == u.user.ID ||
+			inst.Account.Type == "Organization" && u.userTokenOrgs[inst.Account.Login].State == "active" {
+			installations = append(installations, installationJSON(inst))
+		}
+	}
+	g.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"installations": installations})
+}
+
 func (g *GitHub) appOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -354,6 +400,7 @@ func (g *GitHub) installation(r *http.Request) *Installation {
 func installationJSON(inst *Installation) map[string]any {
 	out := map[string]any{
 		"id":                   inst.ID,
+		"app_id":               AppID,
 		"account":              inst.Account,
 		"repository_selection": "selected",
 		"suspended_at":         nil,

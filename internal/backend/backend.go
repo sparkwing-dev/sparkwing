@@ -31,6 +31,7 @@ type Capabilities struct {
 	// Teams, Auth and GitHubApp come from a controller that serves identity;
 	// a local install leaves them nil so its capabilities read as before.
 	Teams     *CapabilitiesTeams     `json:"teams,omitempty"`
+	Billing   *CapabilitiesBilling   `json:"billing,omitempty"`
 	Auth      *CapabilitiesAuth      `json:"auth,omitempty"`
 	GitHubApp *CapabilitiesGitHubApp `json:"github_app,omitempty"`
 }
@@ -41,6 +42,10 @@ type CapabilitiesGitHubApp struct {
 }
 
 type CapabilitiesTeams struct {
+	Enabled bool `json:"enabled"`
+}
+
+type CapabilitiesBilling struct {
 	Enabled bool `json:"enabled"`
 }
 

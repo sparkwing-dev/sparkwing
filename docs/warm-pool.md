@@ -6,6 +6,12 @@ The warm pool pre-loads Docker build caches onto PVCs so pipeline builds start w
 
 The controller owns the pool's lifecycle -- the reconcile and warming loops that keep a pool of PVCs sized and loaded with Docker images -- and exposes checkout/return/heartbeat over HTTP. Which runner executes a node (in-process, a one-shot k8s Job, or a warm runner pod) is a worker-side choice (`sparkwing cluster worker --runner`), and the pod spec that claims and mounts a pool PVC ships with the cluster deployment, not with the CLI.
 
+While external executors work on nodes, the warm-pool dispatcher reads their
+statuses with one `GET /api/v1/runs/{id}/nodes` per run. An unchanged run
+backs off from 500 ms to 12 seconds with jitter; a status change resets the
+interval. A `429` response with `Retry-After` or
+`X-Sparkwing-Poll-After` sets a minimum wait before the next read.
+
 ## PVC lifecycle
 
 Each PVC goes through these states:

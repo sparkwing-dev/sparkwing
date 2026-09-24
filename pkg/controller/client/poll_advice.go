@@ -155,6 +155,10 @@ func (c *Client) setRunnerIdentity(req *http.Request) {
 }
 
 func pollAdviceOf(resp *http.Response) time.Duration {
+	return min(pollAdviceOfResponse(resp), MaxPollAdvice)
+}
+
+func pollAdviceOfResponse(resp *http.Response) time.Duration {
 	if resp == nil {
 		return 0
 	}
@@ -166,5 +170,5 @@ func pollAdviceOf(resp *http.Response) time.Duration {
 	if err != nil || seconds <= 0 {
 		return 0
 	}
-	return min(time.Duration(seconds)*time.Second, MaxPollAdvice)
+	return time.Duration(seconds) * time.Second
 }

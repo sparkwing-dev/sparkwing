@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -70,7 +71,9 @@ func TestCreditRefusalLandsOnTheRefusedTeamsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	signed, pub := multiTeamLicense(t)
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().WithLicense(
+		license.Resolve(signed, pub, time.Now(), nil)).Handler())
 	t.Cleanup(srv.Close)
 	c := client.NewWithToken(srv.URL, nil, raw)
 

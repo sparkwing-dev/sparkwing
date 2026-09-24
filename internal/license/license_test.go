@@ -40,6 +40,34 @@ func TestVerifyAcceptsALicenseSignedByTheKey(t *testing.T) {
 	}
 }
 
+func TestMeteringRequiresASignedFeature(t *testing.T) {
+	pub, priv := licensetest.NewKey(t)
+	for _, tc := range []struct {
+		name     string
+		features []string
+		want     bool
+	}{
+		{"legacy multi-team", []string{license.FeatureMultiTeam}, true},
+		{"metering only", []string{"metering"}, true},
+		{"unrelated", []string{"other"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			terms := multiTeamTerms()
+			terms.Features = tc.features
+			lic, err := license.Verify(licensetest.Sign(t, priv, terms), pub, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := lic.Allows("metering", now); got != tc.want {
+				t.Fatalf("metering = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if (*license.License)(nil).Allows("metering", now) {
+		t.Fatal("an absent license grants metering")
+	}
+}
+
 func TestVerifyRefusesALicenseSignedByAnotherKey(t *testing.T) {
 	pub, _ := licensetest.NewKey(t)
 	_, otherPriv := licensetest.NewKey(t)

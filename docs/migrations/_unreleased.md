@@ -1,8 +1,21 @@
 # Migrating to the next release
 
+## Cloud operator commands leave the public CLI
+
+Sparkwing Cloud operators switch credit, storage allowance, refund, freeze,
+and token metering operations to the private `sparkwing-ops` CLI. The public
+`sparkwing cluster credits` group and `sparkwing cluster tokens set-metered`
+command are removed. Public `sparkwing cluster tokens create` no longer accepts
+`--metered`; create or mark metered runner tokens with the private tool.
+
+Self-hosted token and runner administration and object-store controls stay in
+`sparkwing`.
+The controller's HTTP routes are unchanged, and team owners still see their
+own billing in the dashboard.
+
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v64 when the
+v0.60.0 runs schema v47. This release migrates the database to v69 when the
 controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
@@ -14,10 +27,24 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 64`,
+5. Verify: the startup line reads `runs-store schema 69`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.
+
+## Metering needs a signed license
+
+A controller without a signed `metering` or `multi-team` feature no longer
+serves credit or team billing routes, accepts metered token changes, checks
+balances at claim time, or writes credit charges. Its dashboard hides Billing,
+and its storage-tier checks give every team unlimited room. Operator-set
+storage quotas still apply.
+
+An existing signed `multi-team` license includes metering without re-issuance.
+For a deployment that used credits without a multi-team license, contact Korey
+for a metering license and help running sparkwing-ops before upgrading. An
+unlicensed deployment can upgrade without a data migration; stored credit
+rows and token markers remain dormant.
 
 ## Dashboard session and CSRF cookies carry the `__Host-` prefix
 
@@ -187,3 +214,14 @@ direct-source runner fetched `git.repo_url`, so such a trigger showed one
 repository and ran another. Send only the fields that name the repository you
 mean, or make them agree; `https://github.com/acme/app.git`,
 `git@github.com:acme/app.git` and `acme/app` agree.
+
+## Execution attribution
+
+Schema 68 adds a defaulted `run_id` column to `github_runner_credentials`.
+The store migrates on open. Existing credentials retain an empty run ID, so
+their attempts can show the repository but cannot recover the workflow run.
+New GitHub Actions credential exchanges record the verified OIDC run ID.
+
+Upgrade every process sharing a runs store before relying on the new execution
+history fields. Older binaries do not record the new runner identity, and a
+mixed deployment can still produce attempts with incomplete attribution.
