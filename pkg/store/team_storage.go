@@ -265,13 +265,13 @@ VALUES (?, ?, 0, 0, 0, 0, ?) ON CONFLICT (team, store) DO NOTHING`,
 		string(team), string(kind)).Scan(&used, &reserved); err != nil {
 		return 0, 0, err
 	}
-	var expired int64
+	var expired, expiredCount int64
 	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(bytes), 0) FROM storage_reservations WHERE team = ? AND store = ? AND expires_at <= ?`,
-		string(team), string(kind), now.UnixNano()).Scan(&expired); err != nil {
+	SELECT COALESCE(SUM(bytes), 0), COUNT(*) FROM storage_reservations WHERE team = ? AND store = ? AND expires_at <= ?`,
+		string(team), string(kind), now.UnixNano()).Scan(&expired, &expiredCount); err != nil {
 		return 0, 0, err
 	}
-	if expired == 0 {
+	if expiredCount == 0 {
 		return used, reserved, nil
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM storage_reservations WHERE team = ? AND store = ? AND expires_at <= ?`,
