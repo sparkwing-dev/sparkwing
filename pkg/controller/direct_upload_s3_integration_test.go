@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,7 +109,7 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 			t.Logf("verified cleanup of test objects under %s", prefix)
 		}
 	})
-	put := func(data []byte) int {
+	put := func(data []byte) (int, string) {
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, upload.URL, bytes.NewReader(data))
 		if err != nil {
 			t.Fatal(err)
@@ -121,15 +123,23 @@ func TestDirectUploadS3ReservePutCommitAndSignedGet(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		return resp.StatusCode
+		var s3Error struct {
+			Code string `xml:"Code"`
+		}
+		if resp.StatusCode/100 != 2 {
+			if err := xml.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&s3Error); err != nil {
+				return resp.StatusCode, "unparsed"
+			}
+		}
+		return resp.StatusCode, s3Error.Code
 	}
-	if code := put([]byte("direct S3 payloae")); code/100 == 2 {
+	if code, reason := put([]byte("direct S3 payloae")); code/100 == 2 {
 		t.Fatalf("wrong checksum PUT = %d, want rejection", code)
 	} else {
-		t.Logf("wrong checksum PUT rejected: status %d", code)
+		t.Logf("wrong checksum PUT rejected: status %d, code %s", code, reason)
 	}
-	if code := put(body); code/100 != 2 {
-		t.Fatalf("valid PUT = %d", code)
+	if code, reason := put(body); code/100 != 2 {
+		t.Fatalf("valid PUT = %d, code %s", code, reason)
 	} else {
 		t.Logf("valid PUT accepted: status %d", code)
 	}
