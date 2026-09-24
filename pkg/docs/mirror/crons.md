@@ -381,10 +381,17 @@ controller serializes those checks and writes. Controllers sharing a store do
 not serialize each other; use one controller for GitHub App cron auto-arming
 until store-level ordering is available.
 
-Schedule rows still identify their repository by clone URL. If a repository is
-renamed or transferred, disarm schedules at its old URL; a push at the new URL
-does not withdraw them. Automatic repository-ID reconciliation is not yet
-available.
+App-managed schedules carry GitHub's installation and repository ids. A rename
+updates their clone URL without restarting their pause, cursor or history.
+Removing a repository from an installation, uninstalling the App or moving the
+repository to another team's installation withdraws the former binding's
+schedules. Manually pushed schedules keep their URL identity; an App schedule
+that would duplicate one is refused until the owner disarms the manual row.
+These cleanups depend on signed GitHub deliveries or a later verified push;
+an undelivered removal notice can leave an old row armed until one arrives.
+If GitHub cannot list an installation's repositories during a removal notice,
+the controller withdraws that installation's App schedules until a later
+verified push can arm them again.
 
 For a repository without the App connection, an operator can push entries:
 

@@ -256,6 +256,11 @@ func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation i
 		string(t.team), installation); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+		WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+		time.Now().UnixNano(), string(t.team), installation); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -298,9 +303,23 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 	if suspended {
 		flag = 1
 	}
-	_, err = o.s.exec(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
-		WHERE team = ? AND installation_id = ?`, flag, now.UTC().Unix(), string(in.Team), installation)
-	return err
+	tx, err := o.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if _, err := tx.ExecContext(ctx, `UPDATE github_app_installations SET suspended = ?, updated_at = ?
+		WHERE team = ? AND installation_id = ?`, flag, now.UTC().Unix(), string(in.Team), installation); err != nil {
+		return err
+	}
+	if suspended {
+		if _, err := tx.ExecContext(ctx, `UPDATE cron_schedules SET declared = 0, updated_at = ?
+			WHERE team = ? AND github_installation_id = ? AND declared = 1`,
+			now.UnixNano(), string(in.Team), installation); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 const githubAppTriggerCols = `repository_id, pipeline, repository, installation_id, on_push, tag_patterns, on_pull_request,

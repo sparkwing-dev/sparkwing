@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -95,10 +96,8 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	case "installation":
 		s.handleGitHubAppInstallationEvent(w, r, env, delivery)
 	case "installation_repositories":
-		// safety: the covering answers kept for a minute are dropped, so a
-		// repository removed on GitHub starts nothing from the next delivery on.
 		s.githubApp.forgetCovering()
-		githubAppIgnored(w, "the repositories an installation covers are read from GitHub when a run starts or a token is minted")
+		s.handleGitHubAppInstallationRepositoriesEvent(w, r, env)
 	case "push", "pull_request", "release", "create", "delete":
 		s.handleGitHubAppRunEvent(w, r, event, delivery, env, body)
 	case "repository":
@@ -108,6 +107,54 @@ func (s *Server) handleGitHubAppWebhook(w http.ResponseWriter, r *http.Request) 
 	default:
 		githubAppIgnored(w, "event "+event+" starts nothing")
 	}
+}
+
+func (s *Server) handleGitHubAppInstallationRepositoriesEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
+	ctx := r.Context()
+	in, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, env.Installation.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		githubAppIgnored(w, "no team holds this installation")
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "github app installation repositories", err)
+		return
+	}
+	tenant, err := s.tenantForTeam(ctx, in.Team)
+	if err != nil {
+		s.writeInternalError(w, r, "github app installation team", err)
+		return
+	}
+	current, err := s.githubApp.client.InstallationRepositories(ctx, env.Installation.ID)
+	if err != nil {
+		if env.Action == "removed" {
+			if _, werr := tenant.WithdrawGitHubCronInstallation(ctx, env.Installation.ID, time.Now()); werr != nil {
+				s.writeInternalError(w, r, "withdraw unreadable installation schedules", werr)
+				return
+			}
+		}
+		writeError(w, http.StatusBadGateway, fmt.Errorf("read installation repositories: %w", err))
+		return
+	}
+	covered := make(map[int64]bool, len(current))
+	for _, repo := range current {
+		covered[repo.ID] = true
+	}
+	rows, err := tenant.ListCronSchedules(ctx)
+	if err != nil {
+		s.writeInternalError(w, r, "github app schedules", err)
+		return
+	}
+	for _, row := range rows {
+		if row.GitHubInstallationID != env.Installation.ID || row.GitHubRepositoryID == 0 || covered[row.GitHubRepositoryID] {
+			continue
+		}
+		if _, err := tenant.WithdrawGitHubCronRepository(ctx, env.Installation.ID, row.GitHubRepositoryID, time.Now()); err != nil {
+			s.writeInternalError(w, r, "withdraw removed GitHub repository schedule", err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 }
 
 // safety: an installation event only removes or pauses a binding; creating one
@@ -487,6 +534,9 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	if snapshot.RepositoryID != repo.ID || snapshot.DefaultBranch != intake.branch || snapshot.HeadSHA != intake.sha {
 		return 0, "the push no longer names this repository's default-branch head", nil
 	}
+	if _, err := s.store.AsOperator().WithdrawOtherGitHubCronBindings(r.Context(), in.Team, in.InstallationID, repo.ID, time.Now()); err != nil {
+		return http.StatusInternalServerError, "", fmt.Errorf("withdraw former GitHub App schedule bindings: %w", err)
+	}
 	var entries []crons.Declared
 	if snapshot.Found {
 		cfg, err := projectconfig.Parse(snapshot.Content)
@@ -503,23 +553,59 @@ func (s *Server) reconcileGitHubAppCrons(r *http.Request, in store.GitHubAppInst
 	}
 	repoURL := "https://github.com/" + repo.Slug() + ".git"
 	svc := s.cronServiceFor(tenant, "github-app:"+strconv.FormatInt(in.InstallationID, 10))
+	if err := manualCronConflict(r.Context(), svc, repoURL, entries); err != nil {
+		if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), in.InstallationID, repo.ID, time.Now()); werr != nil {
+			return http.StatusInternalServerError, "", fmt.Errorf("stop conflicting App schedule: %w", werr)
+		}
+		return http.StatusConflict, "", err
+	}
 	for _, entry := range entries {
 		if err := s.cronIntervalRefusal(r, entry.Trigger.Cron); err != nil {
 			return http.StatusUnprocessableEntity, "", err
 		}
 	}
 	if len(entries) > 0 {
-		if status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, len(entries)); err != nil {
+		if status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, repo.ID, len(entries)); err != nil {
 			return status, "", err
 		}
 	}
-	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{RepoURL: repoURL, Branch: intake.branch, SHA: intake.sha, Entries: entries})
+	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{
+		RepoURL: repoURL, Branch: intake.branch, SHA: intake.sha, Entries: entries,
+		GitHubInstallationID: in.InstallationID, GitHubRepositoryID: repo.ID,
+	})
 	if err != nil {
 		return http.StatusInternalServerError, "", fmt.Errorf("arm GitHub App schedules: %w", err)
 	}
 	s.logger.Info("github app schedules reconciled", "team", string(in.Team), "repo", repo.Slug(),
 		"sha", intake.sha, "armed", report.Armed, "refreshed", report.Refreshed, "withdrawn", report.Withdrawn)
 	return 0, "", nil
+}
+
+func manualCronConflict(ctx context.Context, svc *crons.Service, repoURL string, entries []crons.Declared) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	wantRepo, err := sourceurl.Identity(repoURL)
+	if err != nil {
+		return fmt.Errorf("read schedule repository identity: %w", err)
+	}
+	want := map[string]bool{}
+	for _, entry := range entries {
+		want[entry.Pipeline+"\x00"+entry.Name] = true
+	}
+	rows, err := svc.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if row.GitHubRepositoryID != 0 || !want[row.Pipeline+"\x00"+row.Name] {
+			continue
+		}
+		if gotRepo, err := sourceurl.Identity(row.RepoPath); err == nil && gotRepo == wantRepo {
+			return fmt.Errorf("a manually pushed schedule already owns %s/%s; disarm it before App auto-arming", row.Pipeline, row.Name)
+		}
+	}
+	return nil
 }
 
 func githubAppBranchMatches(patterns []string, branch string) bool {
@@ -536,12 +622,20 @@ func githubAppBranchMatches(patterns []string, branch string) bool {
 }
 
 func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.Request, env githubAppDelivery) {
-	if env.Action != "renamed" && env.Action != "transferred" {
+	if env.Action != "renamed" && env.Action != "transferred" && env.Action != "deleted" {
 		githubAppIgnored(w, "repository action starts nothing")
 		return
 	}
 	_, tenant, repo, ok := s.githubAppBinding(w, r, env)
 	if !ok {
+		return
+	}
+	if env.Action == "deleted" {
+		if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+			s.writeInternalError(w, r, "withdraw deleted GitHub repository schedule", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 		return
 	}
 	inst, covered, err := s.githubApp.liveCoveringInstallation(r.Context(), repo)
@@ -550,6 +644,12 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 		return
 	}
 	if !covered || inst.ID != env.Installation.ID || inst.SuspendedAt != nil {
+		if env.Action == "transferred" {
+			if _, err := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+				s.writeInternalError(w, r, "withdraw transferred GitHub repository schedule", err)
+				return
+			}
+		}
 		githubAppIgnored(w, "the installation no longer covers "+repo.Slug())
 		return
 	}
@@ -567,6 +667,23 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 	}
 	if !matched {
 		githubAppIgnored(w, "the installation no longer covers repository id")
+		return
+	}
+	if _, err := s.store.AsOperator().WithdrawOtherGitHubCronBindings(r.Context(), tenant.Team(), env.Installation.ID, repo.ID, time.Now()); err != nil {
+		s.writeInternalError(w, r, "withdraw former GitHub repository schedule", err)
+		return
+	}
+	if err := tenant.RenameGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID,
+		"https://github.com/"+repo.Slug()+".git", time.Now()); err != nil {
+		if errors.Is(err, store.ErrCronScheduleTaken) {
+			if _, werr := tenant.WithdrawGitHubCronRepository(r.Context(), env.Installation.ID, repo.ID, time.Now()); werr != nil {
+				s.writeInternalError(w, r, "withdraw conflicting GitHub repository schedule", werr)
+				return
+			}
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		s.writeInternalError(w, r, "rename GitHub repository schedule", err)
 		return
 	}
 	if err := tenant.RenameGitHubAppTriggerRepository(r.Context(), env.Installation.ID, repo.ID, repo.Slug()); err != nil {

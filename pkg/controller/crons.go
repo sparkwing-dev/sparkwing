@@ -674,7 +674,7 @@ const (
 )
 
 func (s *Server) cronRepoWithinCaps(w http.ResponseWriter, r *http.Request, svc *crons.Service, repoURL string, entries int) bool {
-	status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, entries)
+	status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, 0, entries)
 	if err != nil {
 		writeError(w, status, err)
 		return false
@@ -682,7 +682,7 @@ func (s *Server) cronRepoWithinCaps(w http.ResponseWriter, r *http.Request, svc 
 	return true
 }
 
-func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, entries int) (int, error) {
+func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {
 	if entries > maxCronSchedulesPerRepo {
 		return http.StatusBadRequest, fmt.Errorf(
 			"a repository may declare at most %d schedules; this push declares %d", maxCronSchedulesPerRepo, entries)
@@ -693,9 +693,17 @@ func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, rep
 	}
 	repos := map[string]bool{}
 	for _, row := range rows {
-		repos[row.RepoPath] = true
+		key := row.RepoPath
+		if row.GitHubRepositoryID > 0 {
+			key = fmt.Sprintf("github:%d", row.GitHubRepositoryID)
+		}
+		repos[key] = true
 	}
-	if !repos[repoURL] && len(repos) >= maxCronReposPerTeam {
+	key := repoURL
+	if githubRepoID > 0 {
+		key = fmt.Sprintf("github:%d", githubRepoID)
+	}
+	if !repos[key] && len(repos) >= maxCronReposPerTeam {
 		return http.StatusConflict, fmt.Errorf(
 			"this team already schedules %d repositories, the most it may; disarm one first", len(repos))
 	}

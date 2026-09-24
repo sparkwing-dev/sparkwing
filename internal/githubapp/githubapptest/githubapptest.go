@@ -101,20 +101,21 @@ type issuedToken struct {
 
 // GitHub is the fake.
 type GitHub struct {
-	URL          string
-	Key          *rsa.PrivateKey
-	t            testing.TB
-	mu           sync.Mutex
-	insts        map[int64]*Installation
-	codes        map[string]*userCode
-	users        map[string]*userCode
-	tokens       map[string]*issuedToken
-	commits      map[string]string
-	files        map[string][]byte
-	failContents int
-	minted       []MintedToken
-	stats        []Status
-	checks       []CheckRunCall
+	URL              string
+	Key              *rsa.PrivateKey
+	t                testing.TB
+	mu               sync.Mutex
+	insts            map[int64]*Installation
+	codes            map[string]*userCode
+	users            map[string]*userCode
+	tokens           map[string]*issuedToken
+	commits          map[string]string
+	files            map[string][]byte
+	failContents     int
+	failInstallRepos int
+	minted           []MintedToken
+	stats            []Status
+	checks           []CheckRunCall
 	// checkRuns maps a check run id to the call that created it.
 	checkRuns  map[int64]CheckRunCall
 	failChecks int
@@ -205,6 +206,13 @@ func (g *GitHub) FailContents(n int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.failContents = n
+}
+
+// FailInstallationRepositories makes the next n repository-list reads fail.
+func (g *GitHub) FailInstallationRepositories(n int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failInstallRepos = n
 }
 
 func (g *GitHub) handleRepoMetadata(w http.ResponseWriter, r *http.Request) {
@@ -584,6 +592,11 @@ func (g *GitHub) handleInstallationRepos(w http.ResponseWriter, r *http.Request)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.failInstallRepos > 0 {
+		g.failInstallRepos--
+		writeJSON(w, http.StatusBadGateway, map[string]string{"message": "Bad Gateway"})
+		return
+	}
 	inst := g.insts[tok.installation]
 	repos := []map[string]any{}
 	for _, repo := range inst.Repos {

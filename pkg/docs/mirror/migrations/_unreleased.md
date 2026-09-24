@@ -1,5 +1,21 @@
 # Migrating to the next release
 
+## Schema 71: GitHub App cron identity
+
+Back up the controller's PostgreSQL database or SQLite `state.db` before
+starting the upgraded controller. Schema 71 adds installation and repository
+identity to App-managed cron schedules. Existing local and manually pushed
+schedules keep their URL identity; no URL or `armed_by` value is used to guess
+an App identity. The first upgraded start records the
+`github-app-cron-identity-v1` requirement, so an older controller refuses this
+database rather than ticking schedules without the App removal safeguards.
+
+To roll back to a schema-70 controller, stop every controller, restore the
+database backup taken before this upgrade, then start the older build. Do not
+delete the version or requirement row from a live schema-71 database: that
+would leave App schedule identities in a shape the older controller cannot
+manage safely.
+
 ## Default and operator cache expires after 30 days
 
 Before starting an upgraded controller with `--cache-blob-store`, back up or

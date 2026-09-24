@@ -16,10 +16,12 @@ import (
 // SHA follows the branch tip. Entries carries one [Declared] per schedule, with
 // RepoPath left to the arm.
 type ArmPush struct {
-	RepoURL string
-	Branch  string
-	SHA     string
-	Entries []Declared
+	RepoURL              string
+	Branch               string
+	SHA                  string
+	Entries              []Declared
+	GitHubInstallationID int64
+	GitHubRepositoryID   int64
 }
 
 // ArmPushed records a repository's controller schedules against this store and
@@ -34,6 +36,10 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 	}
 	if !PushedRepo(push.RepoURL) {
 		return ArmReport{}, fmt.Errorf("crons: %q is not a clone URL, so it cannot carry pushed schedules", push.RepoURL)
+	}
+	if (push.GitHubInstallationID == 0) != (push.GitHubRepositoryID == 0) ||
+		push.GitHubInstallationID < 0 || push.GitHubRepositoryID < 0 {
+		return ArmReport{}, errors.New("crons: GitHub installation and repository ids must both be positive or both zero")
 	}
 	now := s.now()
 	var report ArmReport
@@ -50,6 +56,11 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 			return report, fmt.Errorf("%s: %w", entry.DisplayName(), rerr)
 		}
 		row.GitBranch = push.Branch
+		if push.GitHubRepositoryID > 0 {
+			row.ID = AppScheduleID(s.team(), push.GitHubInstallationID, push.GitHubRepositoryID, entry.Pipeline, entry.Name)
+			row.GitHubInstallationID = push.GitHubInstallationID
+			row.GitHubRepositoryID = push.GitHubRepositoryID
+		}
 		stored, created, aerr := s.schedules().ArmCronSchedule(ctx, row, now)
 		if aerr != nil {
 			return report, aerr
@@ -73,7 +84,14 @@ func (s *Service) ArmPushed(ctx context.Context, push ArmPush) (ArmReport, error
 		return report, err
 	}
 	for _, sched := range existing {
-		if sched.RepoPath != push.RepoURL || keep[sched.ID] || !sched.Declared {
+		if keep[sched.ID] || !sched.Declared {
+			continue
+		}
+		if push.GitHubRepositoryID > 0 {
+			if sched.GitHubInstallationID != push.GitHubInstallationID || sched.GitHubRepositoryID != push.GitHubRepositoryID {
+				continue
+			}
+		} else if sched.GitHubRepositoryID != 0 || sched.RepoPath != push.RepoURL {
 			continue
 		}
 		if err := s.schedules().SetCronScheduleDeclared(ctx, sched.ID, false, now); err != nil {

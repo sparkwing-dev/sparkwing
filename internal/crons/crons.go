@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +60,18 @@ func TeamScheduleID(team store.Team, repoPath, pipeline, name string) string {
 	}
 	if team = store.NormalizeTeam(team); team != "" && team != store.DefaultTeam {
 		seed = "team\x00" + string(team) + "\x00" + seed
+	}
+	sum := sha256.Sum256([]byte(seed))
+	return ScheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]
+}
+
+// AppScheduleID keeps one team's App schedule identity when GitHub changes a
+// repository's URL. Its NUL-prefixed domain cannot be a local checkout path.
+func AppScheduleID(team store.Team, installationID, repositoryID int64, pipeline, name string) string {
+	seed := "github-app-cron\x00" + string(store.NormalizeTeam(team)) + "\x00" +
+		strconv.FormatInt(installationID, 10) + "\x00" + strconv.FormatInt(repositoryID, 10) + "\x00" + pipeline
+	if name != "" && name != store.CronScheduleDefaultName {
+		seed += "\x00" + name
 	}
 	sum := sha256.Sum256([]byte(seed))
 	return ScheduleIDPrefix + hex.EncodeToString(sum[:])[:scheduleIDHexLen]

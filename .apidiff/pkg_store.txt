@@ -438,9 +438,11 @@ type CronOverride struct {
 type CronSchedule struct {
 	ID string
 
-	Team     Team
-	RepoPath string
-	Pipeline string
+	Team                 Team
+	RepoPath             string
+	GitHubInstallationID int64
+	GitHubRepositoryID   int64
+	Pipeline             string
 
 	Name    string
 	Cron    string
@@ -1251,6 +1253,7 @@ func (o *Operator) SetGitHubAppInstallationSuspended(ctx context.Context, instal
 func (o *Operator) TeamRunIDs(ctx context.Context, team Team) (_ []string, err error)
 func (o *Operator) UnbindGitHubAppInstallation(ctx context.Context, installation int64) (Team, error)
 func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, exclude []Team) (*UsageMetrics, error)
+func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 const OperatorScope = "admin"
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
@@ -2261,6 +2264,7 @@ func (t *Tenant) RemoveGitHubRunnerBinding(ctx context.Context, repositoryID int
 func (t *Tenant) RemoveMember(ctx context.Context, actorID, subjectID string, now time.Time) ([]string, error)
 func (t *Tenant) Rename(ctx context.Context, displayName string, now time.Time) (TeamInfo, error)
 func (t *Tenant) RenameGitHubAppTriggerRepository(ctx context.Context, installation, repositoryID int64, name string) error
+func (t *Tenant) RenameGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, repoURL string, now time.Time) error
 func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.Time) (TeamDeletion, []string, error)
 func (t *Tenant) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (t *Tenant) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
@@ -2285,6 +2289,8 @@ func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error
 func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (t *Tenant) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+func (t *Tenant) WithdrawGitHubCronInstallation(ctx context.Context, installationID int64, now time.Time) (int64, error)
+func (t *Tenant) WithdrawGitHubCronRepository(ctx context.Context, installationID, repositoryID int64, now time.Time) (int64, error)
 func TierQuota(tier string) (StorageQuota, bool)
 type Token struct {
 	Hash   string
