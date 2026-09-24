@@ -1761,6 +1761,7 @@ func (s *Store) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bo
 func (s *Store) ChargeDownload(ctx context.Context, c DownloadCharge) (_ DownloadCharged, err error)
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error)
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
+func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
 func (s *Store) ClaimNamedNode(
 	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
@@ -1849,7 +1850,6 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireRetainedRuns(ctx context.Context, now time.Time) ([]TeamRetentionExpiry, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
-func (s *Store) ExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error
 func (s *Store) FailNodeForUnpricedClass(
 	ctx context.Context, refusal *UnpricedCPUClassError, now time.Time,

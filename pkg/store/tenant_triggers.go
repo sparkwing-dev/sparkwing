@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 // CreateTrigger writes a pending trigger into t's team.
@@ -49,12 +50,13 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 		return err
 	}
 	if sourceKey != "" {
-		// safety: an unused source remains bindable for its full day after
-		// commit, including when its pending reservation is already old.
+		// safety: a fresh clock at this update decides the one-day window;
+		// expires_at=0 is the storage pass's competing prune claim.
+		cutoff := time.Now().Add(-sourceBundleRetention).UnixNano()
 		res, err := tx.ExecContext(ctx, `UPDATE uploads SET run_id = ?
             WHERE team = ? AND key = ? AND principal = ? AND claim_prefix = ?
-			  AND committed_at > ? AND run_id = ''`,
-			r.ID, string(t.team), sourceKey, principal, tokenPrefix, trig.CreatedAt.Add(-sourceBundleRetention).UnixNano())
+			  AND committed_at > ? AND run_id = '' AND expires_at != 0`,
+			r.ID, string(t.team), sourceKey, principal, tokenPrefix, cutoff)
 		if err != nil {
 			return err
 		}

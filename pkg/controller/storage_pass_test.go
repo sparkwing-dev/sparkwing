@@ -124,6 +124,9 @@ func TestSourceStoragePassPrunesOrphanButKeepsQueuedRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := time.Now().Add(-25 * time.Hour)
+			if bound {
+				old = time.Now().Add(-time.Hour)
+			}
 			key := "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("1", 32)
 			u, err := f.store.ReserveUpload(t.Context(), store.UploadRequest{
 				Team: "source-team", Kind: store.StorageCache,

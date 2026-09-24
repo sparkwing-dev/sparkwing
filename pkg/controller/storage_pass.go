@@ -76,7 +76,7 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	}
 	for kind, bucket := range p.stores {
 		if kind == store.StorageCache {
-			expired, err := s.store.ExpiredSourceBundles(ctx, now)
+			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("list expired source bundles: %w", err))
 			} else {

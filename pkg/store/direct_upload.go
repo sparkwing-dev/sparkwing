@@ -224,15 +224,22 @@ func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID stri
 	return found == 1, err
 }
 
-// ExpiredSourceBundles names sources whose 24-hour use window ended. Pending
-// and running runs keep their source regardless of upload age.
-func (s *Store) ExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error) {
-	rows, err := s.query(ctx, `SELECT u.id, u.team, u.key
-        FROM uploads u LEFT JOIN runs r ON r.team = u.team AND r.id = u.run_id
+// ClaimExpiredSourceBundles marks eligible source rows before their S3 delete.
+// A binder cannot take an orphan after this claim; an unremoved mark is returned
+// on the next pass so a failed S3 deletion can be retried.
+func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error) {
+	rows, err := s.query(ctx, `UPDATE uploads AS u SET expires_at = 0
         WHERE u.key LIKE 'sources/%' AND u.committed_at > 0
-          AND ((u.run_id = '' AND u.committed_at <= ?)
-            OR (u.run_id != '' AND r.finished_at IS NOT NULL AND r.finished_at <= ?)
-            OR (u.run_id != '' AND r.id IS NULL AND u.committed_at <= ?))`,
+          AND (u.expires_at = 0
+            OR (u.run_id = '' AND u.committed_at <= ?)
+            OR (u.run_id != '' AND EXISTS (
+                SELECT 1 FROM runs r WHERE r.team = u.team AND r.id = u.run_id
+                  AND r.status IN ('success','failed','cancelled')
+                  AND r.finished_at IS NOT NULL AND r.finished_at <= ?))
+            OR (u.run_id != '' AND NOT EXISTS (
+                SELECT 1 FROM runs r WHERE r.team = u.team AND r.id = u.run_id)
+                AND u.committed_at <= ?))
+        RETURNING id, team, key`,
 		now.Add(-sourceBundleRetention).UnixNano(), now.Add(-sourceBundleRetention).UnixNano(), now.Add(-sourceBundleRetention).UnixNano())
 	if err != nil {
 		return nil, err
