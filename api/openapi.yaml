@@ -6610,6 +6610,7 @@ paths:
       x-sparkwing-scope: public
       tags: [artifacts]
       summary: Reserve storage and sign a checksum-bound S3 PUT for a live claim.
+      description: Requires a cache grant minted for the exact live node or trigger claim. A raw runner token cannot sign.
       requestBody:
         required: true
         content:
@@ -6648,6 +6649,7 @@ paths:
       x-sparkwing-scope: public
       tags: [artifacts]
       summary: Verify the pending S3 object and publish it under an immutable key.
+      description: Requires the same live claim-bound cache grant used to reserve the upload.
       requestBody:
         required: true
         content:

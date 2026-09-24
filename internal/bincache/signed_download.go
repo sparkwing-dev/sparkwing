@@ -121,21 +121,20 @@ func TryBinaryPreferSigned(ctx context.Context, controllerURL, controllerToken, 
 		return err
 	}
 	tmp := f.Name()
-	defer os.Remove(tmp)
 	sum := sha256.New()
 	n, copyErr := io.Copy(io.MultiWriter(f, sum), io.LimitReader(blob.Body, signed.Size+1))
 	closeErr := f.Close()
 	if copyErr != nil {
-		return copyErr
+		return errors.Join(copyErr, os.Remove(tmp))
 	}
 	if closeErr != nil {
-		return closeErr
+		return errors.Join(closeErr, os.Remove(tmp))
 	}
 	if n != signed.Size || !bytes.Equal(sum.Sum(nil), want) {
-		return fmt.Errorf("%w: bin/%s", ErrDigest, hash)
+		return errors.Join(fmt.Errorf("%w: bin/%s", ErrDigest, hash), os.Remove(tmp))
 	}
 	if err := os.Chmod(tmp, 0o755); err != nil {
-		return err
+		return errors.Join(err, os.Remove(tmp))
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		return errors.Join(err, os.Remove(tmp))

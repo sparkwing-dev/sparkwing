@@ -98,7 +98,10 @@ func (c *Client) control(ctx context.Context, path string, body, out any) (int, 
 		return resp.StatusCode, ErrExists
 	}
 	if resp.StatusCode/100 != 2 {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		msg, err := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if err != nil {
+			return resp.StatusCode, fmt.Errorf("direct data %s: read error body: %w", path, err)
+		}
 		return resp.StatusCode, fmt.Errorf("direct data %s: %s: %s", path, resp.Status, strings.TrimSpace(string(msg)))
 	}
 	if out != nil && resp.StatusCode != http.StatusNoContent {
@@ -125,7 +128,7 @@ func (c *Client) Upload(ctx context.Context, kind, key string, body io.ReadSeeke
 	if _, err := body.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	put, err := http.NewRequestWithContext(ctx, http.MethodPut, answer.URL, body)
+	put, err := http.NewRequestWithContext(ctx, http.MethodPut, answer.URL, io.NopCloser(body))
 	if err != nil {
 		return err
 	}

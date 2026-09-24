@@ -20,7 +20,7 @@ type directArtifactStore struct {
 	legacy storage.ArtifactStore
 }
 
-func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader) error {
+func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader) (err error) {
 	if !strings.HasPrefix(key, "artifacts/blobs/") && !strings.HasPrefix(key, "artifacts/manifests/") {
 		if s.legacy != nil {
 			return s.legacy.Put(ctx, key, body)
@@ -31,8 +31,7 @@ func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
-	defer f.Close()
+	defer func() { err = errors.Join(err, f.Close(), os.Remove(f.Name())) }()
 	sum := sha256.New()
 	n, err := io.Copy(io.MultiWriter(f, sum), io.LimitReader(body, 500<<20+1))
 	if err != nil {

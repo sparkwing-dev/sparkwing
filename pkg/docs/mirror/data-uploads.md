@@ -7,8 +7,9 @@ small requests and the storage ledger. `GET /api/v1/services` announces
 `GET /api/v1/data/capabilities`. Runners use the cache service on older controllers. An
 `fs://` artifact store continues to write locally.
 
-The runner must hold a live claim on `run_id` for each request. It may use its
-runner token or a cache grant minted for that run. A signing grant carries the
+The runner must hold a live claim on `run_id` for each request and send a
+cache grant minted for that claim. The runner's raw token cannot sign uploads.
+A signing grant carries the
 exact node or trigger claim, including its generation. Reserve, commit and
 download check that claim again, so an old grant cannot sign after the same
 token reclaims the run. The pending row fixes the run ID and claimant. The

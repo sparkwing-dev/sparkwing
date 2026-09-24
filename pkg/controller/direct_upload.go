@@ -87,38 +87,16 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		writeError(w, http.StatusUnauthorized, errors.New("a bearer is required"))
 		return directCaller{}, false
 	}
-	var name, prefix string
-	var team store.Team
-	if strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		g, err := s.verifyDataGrant(r.Context(), token)
-		if err != nil || (runID != "" && g.Run != runID) || g.Claim == nil {
-			writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
-			return directCaller{}, false
-		}
-		name, prefix, team = g.Claim.Principal, g.Claim.TokenPrefix, store.Team(g.Team)
-		runID = g.Run
-	} else {
-		if runID == "" {
-			writeError(w, http.StatusBadRequest, errors.New("run_id is required for this bearer"))
-			return directCaller{}, false
-		}
-		p, err := s.authMiddleware().Authenticate(token)
-		if err != nil || p == nil || !(p.HasScope(ScopeNodesClaim) || p.HasScope(ScopeTriggersClaim)) {
-			writeError(w, http.StatusUnauthorized, errors.New("this bearer cannot claim run work"))
-			return directCaller{}, false
-		}
-		name, prefix, team = p.Name, p.TokenPrefix, store.NormalizeTeam(p.Team)
-	}
-	claimed, err := s.store.ClaimedRunFor(r.Context(), runID, store.ClaimIdentity{Principal: name, TokenPrefix: prefix}, time.Now())
-	if errors.Is(err, store.ErrNotFound) || (err == nil && claimed.Team != team) {
-		writeError(w, http.StatusForbidden, errors.New("this credential holds no live claim on the run"))
+	if !strings.HasPrefix(token, authwire.CacheGrantPrefix) {
+		writeError(w, http.StatusForbidden, errors.New("direct uploads require a claim-bound cache grant"))
 		return directCaller{}, false
 	}
-	if err != nil {
-		s.writeInternalError(w, r, "direct upload claim", err)
+	grant, err := s.verifyDataGrant(r.Context(), token)
+	if err != nil || (runID != "" && grant.Run != runID) || grant.Claim == nil {
+		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
-	metered, err := s.store.TokenMetered(r.Context(), prefix)
+	metered, err := s.store.TokenMetered(r.Context(), grant.Claim.TokenPrefix)
 	if err != nil {
 		s.writeInternalError(w, r, "direct upload provenance", err)
 		return directCaller{}, false
@@ -127,7 +105,10 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if metered {
 		provenance = "cloud"
 	}
-	return directCaller{team: claimed.Team, runID: runID, principal: name, claimPrefix: prefix, provenance: provenance}, true
+	return directCaller{
+		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
+		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance,
+	}, true
 }
 
 func (d *directUploadS3) pendingKey(id string) string { return "pending/" + id }
@@ -185,6 +166,11 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("the upload needs a content-addressed key and a nonnegative size"))
 		return
 	}
+	raw, err := hex.DecodeString(req.SHA256)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("sha256 must be lowercase hex"))
+		return
+	}
 	u, err := s.store.ReserveUpload(r.Context(), store.UploadRequest{
 		Team: caller.team, RunID: caller.runID, Kind: store.StorageCache, Key: req.Key, Size: req.Size,
 		SHA256: req.SHA256, Principal: caller.principal, ClaimPrefix: caller.claimPrefix, Provenance: caller.provenance,
@@ -204,14 +190,15 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	raw, _ := hex.DecodeString(req.SHA256)
 	checksum := base64.StdEncoding.EncodeToString(raw)
 	put, err := d.presign.PresignPutObject(r.Context(), &s3.PutObjectInput{
 		Bucket: aws.String(d.bucket), Key: aws.String(d.pendingKey(u.ID)),
 		ContentLength: aws.Int64(u.Size), ChecksumSHA256: aws.String(checksum),
 	}, func(o *s3.PresignOptions) { o.Expires = 15 * time.Minute })
 	if err != nil {
-		_ = s.store.ReleaseStorage(r.Context(), u.Team, u.ID, time.Now())
+		if releaseErr := s.store.ReleaseStorage(r.Context(), u.Team, u.ID, time.Now()); releaseErr != nil {
+			err = errors.Join(err, releaseErr)
+		}
 		s.writeInternalError(w, r, "presign direct upload", err)
 		return
 	}
@@ -271,7 +258,11 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	raw, _ := hex.DecodeString(u.SHA256)
+	raw, err := hex.DecodeString(u.SHA256)
+	if err != nil {
+		s.writeInternalError(w, r, "decode reserved upload checksum", err)
+		return
+	}
 	if aws.ToInt64(head.ContentLength) != u.Size || aws.ToString(head.ChecksumSHA256) != base64.StdEncoding.EncodeToString(raw) {
 		writeError(w, http.StatusUnprocessableEntity, errors.New("pending object size or sha256 checksum does not match the declaration"))
 		return

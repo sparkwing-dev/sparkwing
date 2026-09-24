@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -104,20 +105,45 @@ func directS3(t *testing.T) (*s3.Client, func() map[string]directObject) {
 
 func stringLength(n int) string { return strconv.Itoa(n) }
 
+func claimedUploadGrant(t *testing.T, f *appFixture, team, runID, prefix string) string {
+	t.Helper()
+	t.Setenv(authwire.CacheGrantKeyEnv, "direct-test-grant-key")
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE runs SET status = 'running' WHERE id = ?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	var claim authwire.CacheClaim
+	var tokenPrefix string
+	claim.Kind, claim.NodeID = "node", "compile"
+	err := f.store.DB().QueryRowContext(t.Context(), `SELECT claim_principal, claim_token_prefix, claimed_by,
+        COALESCE(claim_membership_id, ''), COALESCE(reservation_id, ''), claim_generation
+        FROM nodes WHERE run_id = ? AND node_id = ?`, runID, claim.NodeID).Scan(
+		&claim.Principal, &tokenPrefix, &claim.HolderID, &claim.MembershipID, &claim.ReservationID, &claim.Generation)
+	if err != nil || tokenPrefix != prefix {
+		t.Fatalf("node claim = %+v prefix=%q err=%v", claim, tokenPrefix, err)
+	}
+	claim.TokenPrefix = tokenPrefix
+	grant, err := authwire.MintClaimCacheGrant("direct-test-grant-key", team, runID, time.Now(), time.Hour, &claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "Bearer " + grant
+}
+
 func TestDirectUploadChecksumAndVisibility(t *testing.T) {
 	client, objects := directS3(t)
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
 		return s.WithDirectUploads(client, "bucket", "cache")
 	})
 	olga := f.ghUser(521, "olga")
-	runner, prefix := f.runWork(olga, "run-bytes", "https://github.com/acme/widgets.git")
+	rawRunner, prefix := f.runWork(olga, "run-bytes", "https://github.com/acme/widgets.git")
 	var services controller.ServicesResponse
-	if code := f.call("GET", "/api/v1/services", runner, nil, &services); code != http.StatusOK || !services.DirectData {
+	if code := f.call("GET", "/api/v1/services", rawRunner, nil, &services); code != http.StatusOK || !services.DirectData {
 		t.Fatalf("direct data announcement = %d %+v", code, services)
 	}
 	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
 		t.Fatal(err)
 	}
+	runner := claimedUploadGrant(t, f, olga.team, "run-bytes", prefix)
 	body := []byte("hello direct upload")
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
@@ -204,10 +230,11 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 		return s.WithDirectUploads(client, "bucket", "cache")
 	})
 	olga := f.ghUser(522, "olga")
-	runner, prefix := f.runWork(olga, "run-retry", "https://github.com/acme/widgets.git")
+	_, prefix := f.runWork(olga, "run-retry", "https://github.com/acme/widgets.git")
 	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
 		t.Fatal(err)
 	}
+	runner := claimedUploadGrant(t, f, olga.team, "run-retry", prefix)
 	body := []byte("retry copy")
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
@@ -276,10 +303,11 @@ func TestDirectCommitRefusesExistingObjectWithDifferentChecksum(t *testing.T) {
 		return s.WithDirectUploads(client, "bucket", "cache")
 	})
 	olga := f.ghUser(524, "olga")
-	runner, prefix := f.runWork(olga, "run-mismatch", "https://github.com/acme/widgets.git")
+	_, prefix := f.runWork(olga, "run-mismatch", "https://github.com/acme/widgets.git")
 	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
 		t.Fatal(err)
 	}
+	runner := claimedUploadGrant(t, f, olga.team, "run-mismatch", prefix)
 	good := []byte("expected bytes")
 	goodSum := sha256.Sum256(good)
 	digest := hex.EncodeToString(goodSum[:])
@@ -334,7 +362,8 @@ func TestDirectUploadRequiresTheRunsLiveClaim(t *testing.T) {
 		return s.WithDirectUploads(b.raw, passBucket, "cache")
 	})
 	olga := f.ghUser(501, "olga")
-	runner, _ := f.runWork(olga, "run-direct", "https://github.com/acme/widgets.git")
+	rawRunner, prefix := f.runWork(olga, "run-direct", "https://github.com/acme/widgets.git")
+	runner := claimedUploadGrant(t, f, olga.team, "run-direct", prefix)
 	request := map[string]any{
 		"kind": "binary", "key": "bin/01234567-89abcdef/" + strings.Repeat("a", 64),
 		"size": 3, "sha256": strings.Repeat("a", 64), "run_id": "run-direct",
@@ -367,7 +396,7 @@ func TestDirectUploadRequiresTheRunsLiveClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	var second map[string]any
-	if code := f.call("POST", "/api/v1/runs/run-second/nodes/compile/claim", runner,
+	if code := f.call("POST", "/api/v1/runs/run-second/nodes/compile/claim", rawRunner,
 		map[string]any{"holder_id": "pod-second"}, &second); code != http.StatusOK {
 		t.Fatalf("second claim = %d", code)
 	}
@@ -386,6 +415,36 @@ func TestDirectUploadRequiresTheRunsLiveClaim(t *testing.T) {
 	request["run_id"] = "run-never-claimed"
 	if code := f.call("POST", "/api/v1/data/upload", runner, request, &answer); code != http.StatusForbidden {
 		t.Fatalf("stale claimant = %d, want 403", code)
+	}
+}
+
+func TestRawRunnerBearerCannotSignDataWithALiveClaim(t *testing.T) {
+	client, _ := directS3(t)
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		return s.WithDirectUploads(client, "bucket", "cache")
+	})
+	olga := f.ghUser(525, "olga")
+	rawRunner, prefix := f.runWork(olga, "run-raw", "https://github.com/acme/widgets.git")
+	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
+		t.Fatal(err)
+	}
+	grant := claimedUploadGrant(t, f, olga.team, "run-raw", prefix)
+	request := map[string]any{
+		"kind": "binary", "key": "bin/01234567-89abcdef/" + strings.Repeat("a", 64),
+		"size": 4, "sha256": strings.Repeat("a", 64), "run_id": "run-raw",
+	}
+	var upload controller.DirectUploadResponse
+	if code := f.call("POST", "/api/v1/data/upload", rawRunner, request, &upload); code != http.StatusForbidden {
+		t.Fatalf("raw runner reserve = %d, want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/data/upload", grant, request, &upload); code != http.StatusOK {
+		t.Fatalf("claim grant reserve = %d, want 200", code)
+	}
+	var ignored map[string]any
+	if code := f.call("POST", "/api/v1/data/commit", rawRunner, map[string]any{
+		"upload_id": upload.UploadID, "run_id": "run-raw",
+	}, &ignored); code != http.StatusForbidden {
+		t.Fatalf("raw runner commit = %d, want 403", code)
 	}
 }
 
