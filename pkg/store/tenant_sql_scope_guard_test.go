@@ -18,6 +18,8 @@ import (
 var reviewedUnscopedSQL = map[string]string{
 	"(*Store).NodeClaimFenceNodeForRun": "the run ID is global, and the query matches its exact claimant and generation",
 	"(*Store).PruneExpiredUploads":      "the hourly storage pass releases expired pending uploads for every team",
+	"(*Store).PruneExpiredCacheObjects": "the controller's leased hourly storage pass deletes expired cache rows " +
+		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
 	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
