@@ -487,10 +487,8 @@ export async function searchRunsGrep(
     params.set("max_matches", String(opts.maxMatches));
   const res = await authFetch(`${API_URL}/api/v1/runs/grep?${params}`, {
     cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) {
-    return { query, matches: [], runs: {}, total: 0, runs_scanned: 0, runs_matching: 0 };
-  }
+  });
+  if (!res.ok) throw new Error(`Search failed (${res.status})`);
   return res.json();
 }
 

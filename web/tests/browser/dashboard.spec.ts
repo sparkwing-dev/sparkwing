@@ -2120,3 +2120,56 @@ for (const count of [999, 1000]) {
     }
   });
 }
+
+test("Search finds an older run through server-side filters", async ({ page }) => {
+  const older = {
+    ...finishedRun,
+    id: "older-match",
+    pipeline: "build",
+    git_branch: "rare",
+    git_sha: "deadbeef1234",
+  };
+  const newer = Array.from({ length: 201 }, (_, index) => ({
+    ...finishedRun,
+    id: `newer-${index}`,
+    pipeline: "build",
+    git_branch: "main",
+    git_sha: "cafebabe1234",
+  }));
+  const searched: URL[] = [];
+  const runLists: URL[] = [];
+  await installMockAPI(page, {
+    runs: newer,
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/runs") runLists.push(url);
+    },
+  });
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    searched.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: {
+        query: "needle",
+        matches: [{ run_id: older.id, pipeline: older.pipeline, node_id: "build", line: 1, content: "needle in old archive" }],
+        runs: { [older.id]: older },
+        total: 1,
+        runs_scanned: 1,
+        runs_matching: 1,
+      },
+    });
+  });
+
+  await page.goto("/runs?view=search&pipeline=build&status=success&branch=rare&commit=deadbee&gsince=all&gq=needle");
+  await expect(page.getByText("needle in old archive")).toBeVisible();
+  expect(searched).toHaveLength(1);
+  expect(searched[0].searchParams.getAll("pipeline")).toEqual(["build"]);
+  expect(searched[0].searchParams.getAll("status")).toEqual(["success"]);
+  expect(searched[0].searchParams.getAll("branch")).toEqual(["rare"]);
+  expect(searched[0].searchParams.getAll("sha")).toEqual(["deadbee"]);
+  expect(searched[0].searchParams.has("since")).toBe(false);
+  expect(searched[0].searchParams.getAll("run_id")).toEqual([]);
+  expect(runLists).toHaveLength(0);
+  await expect(page.getByRole("button", { name: /^TRIGGER/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^REPO/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^TAG/ })).toHaveCount(0);
+});

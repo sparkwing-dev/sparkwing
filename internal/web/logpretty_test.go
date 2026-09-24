@@ -315,7 +315,7 @@ func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
 	}
 }
 
-func TestRunsGrep_FindsOlderBranchMatchBeyondRecentRuns(t *testing.T) {
+func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -324,11 +324,11 @@ func TestRunsGrep_FindsOlderBranchMatchBeyondRecentRuns(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	base := time.Now().Add(-time.Hour)
-	if err := st.CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", StartedAt: base}); err != nil {
+	if err := st.CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 201 {
-		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
+		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -352,6 +352,22 @@ func TestRunsGrep_FindsOlderBranchMatchBeyondRecentRuns(t *testing.T) {
 	}
 	if len(body.Matches) != 1 || body.Matches[0].RunID != "older-match" {
 		t.Fatalf("branch search matches = %+v, want older-match", body.Matches)
+	}
+	rec = httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=deadbee&limit=200", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SHA search = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Matches) != 1 || body.Matches[0].RunID != "older-match" {
+		t.Fatalf("SHA search matches = %+v, want older-match", body.Matches)
+	}
+	rec = httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=not-a-sha", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid SHA search = %d, want 400", rec.Code)
 	}
 }
 

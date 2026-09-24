@@ -1092,11 +1092,22 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 				maxMatches = n
 			}
 		}
+		shaPrefixes := r.URL.Query()["sha"]
+		for _, prefix := range shaPrefixes {
+			prefix = strings.TrimSpace(prefix)
+			if prefix == "" || strings.IndexFunc(prefix, func(ch rune) bool {
+				return !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'))
+			}) >= 0 {
+				writeErr(w, http.StatusBadRequest, errors.New("sha must be a hexadecimal prefix"))
+				return
+			}
+		}
 		filter := store.RunFilter{
-			Pipelines:   r.URL.Query()["pipeline"],
-			Statuses:    r.URL.Query()["status"],
-			GitBranches: r.URL.Query()["branch"],
-			Limit:       runLimit,
+			Pipelines:      r.URL.Query()["pipeline"],
+			Statuses:       r.URL.Query()["status"],
+			GitBranches:    r.URL.Query()["branch"],
+			GitSHAPrefixes: shaPrefixes,
+			Limit:          runLimit,
 		}
 		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 			if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
@@ -1114,11 +1125,6 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			branches:    r.URL.Query()["nbranch"],
 			shaPrefixes: r.URL.Query()["nsha"],
 		})
-		branches := r.URL.Query()["branch"]
-		shaPrefixes := r.URL.Query()["sha"]
-		if len(branches) > 0 || len(shaPrefixes) > 0 {
-			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
-		}
 		if ids, specified := r.URL.Query()["run_id"]; specified {
 			allowed := make(map[string]bool, len(ids))
 			for _, id := range ids {
@@ -1227,31 +1233,6 @@ func applyGrepExcludes(runs []*store.Run, ex grepExcludes) []*store.Run {
 		}
 		if excludedBySHA {
 			continue
-		}
-		out = append(out, run)
-	}
-	return out
-}
-
-func filterRunsByBranchSHA(runs []*store.Run, branches, shaPrefixes []string) []*store.Run {
-	out := runs[:0]
-	for _, run := range runs {
-		if len(branches) > 0 {
-			if !containsExact(branches, run.GitBranch) {
-				continue
-			}
-		}
-		if len(shaPrefixes) > 0 {
-			matched := false
-			for _, p := range shaPrefixes {
-				if p != "" && strings.HasPrefix(run.GitSHA, p) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
 		}
 		out = append(out, run)
 	}

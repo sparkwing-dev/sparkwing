@@ -878,6 +878,10 @@ unlock.
 
 ### Fixed
 
+- **dashboard + log search:** Search applies pipeline, status, branch, commit,
+  and since filters before limiting candidate runs, so an older archived log
+  remains searchable after newer unrelated runs. The Search view exposes those
+  filters directly; the Run list keeps its broader browsing filters.
 - **runner:** memoized nodes and queued concurrency groups run through off-cluster agents,
   Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
   for its claimed node while the controller keeps keys within the runner's team.
