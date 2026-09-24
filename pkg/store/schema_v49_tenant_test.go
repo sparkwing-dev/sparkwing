@@ -29,6 +29,9 @@ func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 		// safety: v52 leads these keys with the team, so they go back to the
 		// v47 keys around the column drop.
 		`DROP INDEX IF EXISTS idx_cron_schedules_repo_pipeline_name`,
+		`DROP INDEX IF EXISTS idx_cron_schedules_github_identity`,
+		`ALTER TABLE cron_schedules DROP COLUMN github_installation_id`,
+		`ALTER TABLE cron_schedules DROP COLUMN github_repository_id`,
 		`DROP INDEX IF EXISTS ` + store.TriggerIdempotencyIndexName,
 		`DROP INDEX IF EXISTS ` + store.TriggerWebhookDeliveryIndexName,
 		`DROP INDEX IF EXISTS ` + store.TriggerWebhookReplayKeyIndexName,

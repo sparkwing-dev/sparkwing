@@ -233,6 +233,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"declared-run-repo",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
+		"github-app-cron-identity-v1",
 		"pipeline-scoped-secrets",
 		"team-scoped-user-keys",
 	}
@@ -280,6 +281,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	}
 	wantListed := []string{
 		"declared-run-repo",
+		"github-app-cron-identity-v1",
 		"inherited-holder-marker",
 		"pipeline-scoped-secrets",
 		"repo-scoped-secrets",
