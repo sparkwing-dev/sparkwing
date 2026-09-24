@@ -110,7 +110,7 @@ test("an owner sees prices from the controller and starts a checkout", async ({
   );
   await expect(
     page.getByText("Purchases are final. Credits never expire.", {
-      exact: false,
+      exact: true,
     }),
   ).toBeVisible();
 

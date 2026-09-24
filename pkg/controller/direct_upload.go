@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -91,8 +92,15 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		writeError(w, http.StatusForbidden, errors.New("direct uploads require a claim-bound cache grant"))
 		return directCaller{}, false
 	}
-	grant, err := s.verifyDataGrant(r.Context(), token)
-	if err != nil || (runID != "" && grant.Run != runID) || grant.Claim == nil {
+	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
+	if err != nil || grant.Claim == nil {
+		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
+		return directCaller{}, false
+	}
+	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
+		return directCaller{}, false
+	}
+	if (runID != "" && grant.Run != runID) || s.verifyLiveDataGrant(r.Context(), grant) != nil {
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}

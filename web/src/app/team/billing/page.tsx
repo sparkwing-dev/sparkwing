@@ -220,7 +220,7 @@ function BuyPanel({ billing }: { billing: Billing }) {
           </p>
         ) : null}
         <p className="text-xs text-[var(--muted)]">
-          Purchases are final. Credits never expire. 1 credit = 1 vCPU-second.
+          Purchases are final. Credits never expire.
         </p>
       </form>
     </Panel>

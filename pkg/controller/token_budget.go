@@ -11,20 +11,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TokenRequestBudget bounds ordinary requests from one authenticated caller
-// across the controller's routes, and names the controller-wide
-// rate an operator wants to hear about. The per-runner budgets in
-// [RequestBudget] size a cooperating runner's loops; this one bounds the token
-// itself, which is what a caller varying the runner it claims to be still
-// spends from.
+// TokenRequestBudget bounds ordinary authenticated requests and signed-data
+// requests, and names the controller-wide rate an operator wants to hear about.
+// Signed-up teams share a bucket; the operator's team uses a bucket per token.
+// The per-runner budgets in [RequestBudget] size a cooperating runner's loops;
+// this budget still bounds a caller varying the runner it claims to be.
 //
 // Zero in either field leaves that guard off, which is what a controller
 // starts with.
 type TokenRequestBudget struct {
-	// PerTokenMinute caps ordinary requests one token may make per rolling minute.
+	// PerTokenMinute caps requests from one signed-up team or operator token
+	// per rolling minute, including signed-data requests made with claim grants.
 	// Past it a request is answered 429 with a Retry-After naming the refill
-	// delay. The budget is keyed the way the trigger cap is: the token prefix,
-	// or the client address for a caller carrying no token.
+	// delay. A caller carrying no token uses its client address.
 	PerTokenMinute int
 
 	// AlarmPerMinute is the request rate, counted across every caller, past
@@ -34,7 +33,7 @@ type TokenRequestBudget struct {
 	AlarmPerMinute int
 }
 
-// WithTokenRequestBudget installs b as the whole-API per-token budget and
+// WithTokenRequestBudget installs b as the controller request budget and
 // controller-wide rate alarm. Calling it with the zero budget turns both off.
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server {
 	s.tokenBudget = newTokenBudget(b)
@@ -69,38 +68,47 @@ func (t *tokenBudget) values() TokenRequestBudget {
 
 func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t := s.tokenBudget
-		if t == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		now := time.Now()
-		if t.alarm != nil && t.alarm.record(now) {
-			observeRequestRateAlarm()
-			s.logger.Warn("controller request rate above its alarm",
-				"requests_per_minute", t.policy.AlarmPerMinute,
-				"reason", "one controller is serving more requests a minute than it was sized for")
-		}
-		if t.requests == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if s.ownRunLiveness(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		key := s.floodKey(r, "")
-		allowed, wait := t.requests.AllowWithRetry(key, now)
-		if !allowed && !s.ownAgentLivenessHeartbeat(r) {
-			observePrincipalThrottled(budgetClassToken)
-			s.logger.Warn("request shed",
-				"principal", key, "route_class", budgetClassToken, "retry_after", wait,
-				"reason", "per-token request budget exhausted")
-			writeRetryAfter(w, wait, "too many requests from this token")
+		if !s.allowTokenRequest(w, r, s.floodKey(r, "")) {
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
+	principal := &Principal{Team: team, TokenPrefix: prefix}
+	key := s.floodKey(r.WithContext(contextWithPrincipal(r.Context(), principal)), "")
+	return s.allowTokenRequest(w, r, key)
+}
+
+func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key string) bool {
+	t := s.tokenBudget
+	if t == nil {
+		return true
+	}
+	now := time.Now()
+	if t.alarm != nil && t.alarm.record(now) {
+		observeRequestRateAlarm()
+		s.logger.Warn("controller request rate above its alarm",
+			"requests_per_minute", t.policy.AlarmPerMinute,
+			"reason", "one controller is serving more requests a minute than it was sized for")
+	}
+	if t.requests == nil {
+		return true
+	}
+	if s.ownRunLiveness(r) {
+		return true
+	}
+	allowed, wait := t.requests.AllowWithRetry(key, now)
+	if !allowed && !s.ownAgentLivenessHeartbeat(r) {
+		observePrincipalThrottled(budgetClassToken)
+		s.logger.Warn("request shed",
+			"principal", key, "route_class", budgetClassToken, "retry_after", wait,
+			"reason", "per-token request budget exhausted")
+		writeRetryAfter(w, wait, "too many requests from this token")
+		return false
+	}
+	return true
 }
 
 // safety: The unmetered liveness lane requires a live claim fence; the route handler validates the write.

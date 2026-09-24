@@ -84,25 +84,24 @@ type dataDownloadRequest struct {
 	Key  string `json:"key"`
 }
 
-func (s *Server) verifyDataGrant(ctx context.Context, token string) (authwire.CacheGrant, error) {
-	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
-	if err != nil {
-		return authwire.CacheGrant{}, err
+func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGrant) error {
+	if grant.Claim == nil {
+		return errors.New("cache grant has no claim")
 	}
 	team, err := s.store.ForTeam(ctx, store.Team(grant.Team))
 	if err != nil {
-		return authwire.CacheGrant{}, err
+		return err
 	}
 	run, err := team.GetRun(ctx, grant.Run)
-	if err != nil || run.Status != "running" || run.FinishedAt != nil || grant.Claim == nil {
-		return authwire.CacheGrant{}, errors.New("cache grant run or claim is not live")
+	if err != nil || run.Status != "running" || run.FinishedAt != nil {
+		return errors.New("cache grant run or claim is not live")
 	}
 	claim := grant.Claim
 	// safety: the signed grant can outlive the token that held its claim.
 	claimantToken, err := s.store.LookupTokenByPrefix(claim.TokenPrefix)
 	if err != nil || claimantToken == nil || claimantToken.Team != store.Team(grant.Team) ||
 		claimantToken.Principal != claim.Principal || !claimantToken.IsValid(time.Now()) {
-		return authwire.CacheGrant{}, errors.New("cache grant claimant token is not active")
+		return errors.New("cache grant claimant token is not active")
 	}
 	identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
 	var live bool
@@ -113,15 +112,15 @@ func (s *Server) verifyDataGrant(ctx context.Context, token string) (authwire.Ca
 		fence := store.NodeClaimFence{Claimant: identity, HolderID: claim.HolderID, MembershipID: claim.MembershipID, ReservationID: claim.ReservationID, ClaimGeneration: claim.Generation}
 		live, err = s.store.NodeClaimFenceIsLive(ctx, grant.Run, claim.NodeID, fence, time.Now())
 	default:
-		return authwire.CacheGrant{}, errors.New("cache grant claim kind is invalid")
+		return errors.New("cache grant claim kind is invalid")
 	}
 	if err != nil {
-		return authwire.CacheGrant{}, err
+		return err
 	}
 	if !live {
-		return authwire.CacheGrant{}, errors.New("cache grant claim is not live")
+		return errors.New("cache grant claim is not live")
 	}
-	return grant, nil
+	return nil
 }
 
 func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind string) (store.Team, *authwire.CacheGrant, bool) {
@@ -131,17 +130,24 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 		return "", nil, false
 	}
 	if strings.HasPrefix(token, authwire.CacheGrantPrefix) {
-		if _, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now()); err != nil {
+		grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), token, time.Now())
+		if err != nil {
 			writeError(w, http.StatusUnauthorized, err)
 			return "", nil, false
 		}
-		grant, err := s.verifyDataGrant(r.Context(), token)
-		if err != nil {
-			writeError(w, http.StatusForbidden, err)
+		if grant.Claim == nil {
+			writeError(w, http.StatusForbidden, errors.New("cache grant has no claim"))
+			return "", nil, false
+		}
+		if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 			return "", nil, false
 		}
 		if kind == "log" {
 			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
+			return "", nil, false
+		}
+		if err := s.verifyLiveDataGrant(r.Context(), grant); err != nil {
+			writeError(w, http.StatusForbidden, err)
 			return "", nil, false
 		}
 		return store.Team(grant.Team), &grant, true
@@ -166,6 +172,9 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind strin
 	team := store.NormalizeTeam(p.Team)
 	if !teamblob.ValidTeam(string(team)) {
 		writeError(w, http.StatusForbidden, errors.New("credential names no team"))
+		return "", nil, false
+	}
+	if !s.allowDataRequest(w, r, team, p.TokenPrefix) {
 		return "", nil, false
 	}
 	return team, nil, true

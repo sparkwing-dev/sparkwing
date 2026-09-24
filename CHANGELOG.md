@@ -1138,6 +1138,10 @@ unlock.
 
 ### Security
 
+- **controller:** Direct upload, commit and download signing spend the existing
+  controller request budget after authentication. Grants from one team share
+  its bucket, so minting another claim grant does not reset the limit.
+
 - **controller:** GitHub check summaries contain only the run outcome,
   duration, node outcome counts and the console link; private node names and
   error text stay behind sign-in. GitHub re-runs require the pipeline's own
