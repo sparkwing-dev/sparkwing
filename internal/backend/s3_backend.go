@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,6 +253,7 @@ func runIDFromStateKey(key string) (string, bool) {
 func applyRunFilter(runs []*store.Run, f store.RunFilter) []*store.Run {
 	pipelineSet := toSet(f.Pipelines)
 	statusSet := toSet(f.Statuses)
+	branchSet := toSet(f.GitBranches)
 	out := runs[:0]
 	for _, r := range runs {
 		if r == nil {
@@ -262,6 +264,22 @@ func applyRunFilter(runs []*store.Run, f store.RunFilter) []*store.Run {
 		}
 		if len(statusSet) > 0 && !statusSet[r.Status] {
 			continue
+		}
+		if len(branchSet) > 0 && !branchSet[r.GitBranch] {
+			continue
+		}
+		if len(f.GitSHAPrefixes) > 0 {
+			matched := false
+			for _, prefix := range f.GitSHAPrefixes {
+				prefix = strings.ToLower(strings.TrimSpace(prefix))
+				if prefix != "" && strings.HasPrefix(strings.ToLower(r.GitSHA), prefix) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if !f.Since.IsZero() && r.StartedAt.Before(f.Since) {
 			continue

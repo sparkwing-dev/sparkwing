@@ -1371,48 +1371,46 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
   return "success";
 }
 
+function searchFilterValues(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const filterState = useUrlFilterState();
-  const filterCtx = useFilterCtx(filterState);
-  const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
-  const [pipelineMeta, setPipelineMeta] = useState<
-    Record<string, PipelineMeta>
-  >({});
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [runsReady, setRunsReady] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([getRuns({ limit: RUNS_WINDOW }), getPipelines()])
-      .then(([rs, meta]) => {
-        if (cancelled) return;
-        setRuns(rs);
-        setPipelineMeta(meta);
-        setRunsReady(true);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const options = computeOptions(runs, pipelineMeta);
-  const groups = buildGroupsFromState(filterState, options);
-  const dateGroup = {
-    startedAfter: filterState.startedAfter,
-    startedBefore: filterState.startedBefore,
-    finishedAfter: filterState.finishedAfter,
-    finishedBefore: filterState.finishedBefore,
-    setStartedAfter: filterState.setStartedAfter,
-    setStartedBefore: filterState.setStartedBefore,
-    setFinishedAfter: filterState.setFinishedAfter,
-    setFinishedBefore: filterState.setFinishedBefore,
-  };
-
   const initialQuery = searchParams.get("gq") || "";
-  const initialSince = searchParams.get("gsince") || "24h";
+  const requestedSince = searchParams.get("gsince") || "24h";
+  const initialSince = ["24h", "168h", "720h", "all"].includes(requestedSince)
+    ? requestedSince
+    : "24h";
+  const initialPipeline = searchParams.get("pipeline") || "";
+  const initialStatus = searchParams.get("status") || "";
+  const initialBranch = searchParams.get("branch") || "";
+  const initialCommit = searchParams.get("commit") || "";
   const [query, setQuery] = useState(initialQuery);
   const [since, setSince] = useState(initialSince);
+  const [pipeline, setPipeline] = useState(initialPipeline);
+  const [status, setStatus] = useState(initialStatus);
+  const [branch, setBranch] = useState(initialBranch);
+  const [commit, setCommit] = useState(initialCommit);
+  useEffect(() => {
+    setQuery(initialQuery);
+    setSince(initialSince);
+    setPipeline(initialPipeline);
+    setStatus(initialStatus);
+    setBranch(initialBranch);
+    setCommit(initialCommit);
+  }, [
+    initialQuery,
+    initialSince,
+    initialPipeline,
+    initialStatus,
+    initialBranch,
+    initialCommit,
+  ]);
   const [results, setResults] = useState<RunsGrepMatch[] | null>(null);
   const [runsMap, setRunsMap] = useState<Record<string, Run>>({});
   const [loading, setLoading] = useState(false);
@@ -1421,7 +1419,14 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [runsMatching, setRunsMatching] = useState(0);
   const searchGeneration = useRef(0);
   const runGrep = useCallback(
-    async (q: string, sinceVal: string) => {
+    async (
+      q: string,
+      sinceVal: string,
+      pipelineVal: string,
+      statusVal: string,
+      branchVal: string,
+      commitVal: string,
+    ) => {
       const generation = ++searchGeneration.current;
       const trimmed = q.trim();
       if (!trimmed) {
@@ -1429,15 +1434,21 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         setRunsMap({});
         setRunsScanned(0);
         setRunsMatching(0);
+        setError(null);
+        setLoading(false);
         return;
       }
-      if (!runsReady) return;
-      const candidates = runs.filter((run) => runMatchesFilter(run, filterState, pipelineMeta));
-      setRunsMatching(candidates.length);
-      if (candidates.length === 0) {
-        setResults([]);
+      const commits = searchFilterValues(commitVal);
+      if (
+        commitVal.trim() &&
+        (commits.length === 0 ||
+          commits.some((prefix) => !/^[0-9a-f]+$/i.test(prefix)))
+      ) {
+        setError("Commit must be a hexadecimal SHA prefix.");
+        setResults(null);
         setRunsMap({});
         setRunsScanned(0);
+        setRunsMatching(0);
         setLoading(false);
         return;
       }
@@ -1448,8 +1459,11 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       setRunsScanned(0);
       try {
         const resp = await searchRunsGrep(trimmed, {
-          runIDs: candidates.map((run) => run.id),
-          since: sinceVal || undefined,
+          pipelines: searchFilterValues(pipelineVal),
+          statuses: searchFilterValues(statusVal),
+          branches: searchFilterValues(branchVal),
+          shaPrefixes: commits,
+          since: sinceVal === "all" ? undefined : sinceVal,
           limit: 200,
           maxMatches: 10,
         });
@@ -1466,7 +1480,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         if (generation === searchGeneration.current) setLoading(false);
       }
     },
-    [filterState, runs, pipelineMeta, runsReady],
+    [],
   );
   const submit = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1474,15 +1488,49 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     else params.delete("gq");
     if (since && since !== "24h") params.set("gsince", since);
     else params.delete("gsince");
+    for (const [key, value] of [
+      ["pipeline", pipeline],
+      ["status", status],
+      ["branch", branch],
+      ["commit", commit],
+    ]) {
+      if (value.trim()) params.set(key, value.trim());
+      else params.delete(key);
+    }
     if (params.toString() === searchParams.toString()) {
-      runGrep(query, since);
+      runGrep(query, since, pipeline, status, branch, commit);
       return;
     }
     router.replace(`/runs?${params.toString()}`, { scroll: false });
-  }, [query, since, searchParams, router, runGrep]);
+  }, [
+    query,
+    since,
+    pipeline,
+    status,
+    branch,
+    commit,
+    searchParams,
+    router,
+    runGrep,
+  ]);
   useEffect(() => {
-    if (runsReady) runGrep(initialQuery, initialSince);
-  }, [runsReady, runGrep, initialQuery, initialSince]);
+    runGrep(
+      initialQuery,
+      initialSince,
+      initialPipeline,
+      initialStatus,
+      initialBranch,
+      initialCommit,
+    );
+  }, [
+    runGrep,
+    initialQuery,
+    initialSince,
+    initialPipeline,
+    initialStatus,
+    initialBranch,
+    initialCommit,
+  ]);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
       sessionStorage.setItem(
@@ -1512,26 +1560,42 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <div
-        ref={filterRef}
-        className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0"
-      >
+      <div className="border-b border-[var(--border)] flex items-center bg-[var(--surface)] shrink-0">
         {pivotTabs}
-        <FullFilterBar
-          openDropdown={openDropdown}
-          setOpenDropdown={setOpenDropdown}
-          groups={groups}
-          dateGroup={dateGroup}
-          searchText={filterState.filterText}
-          setSearchText={filterState.setFilterText}
-          onClearAll={() => clearAllFilters(filterState)}
-        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)] shrink-0">
+        {([
+          ["Pipeline", pipeline, setPipeline],
+          ["Status", status, setStatus],
+          ["Branch", branch, setBranch],
+          ["Commit", commit, setCommit],
+        ] as const).map(([label, value, setValue]) => (
+          <label key={label} className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
+            {label}
+            <input
+              type="text"
+              aria-label={label}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder={label === "Commit" ? "SHA prefix" : label.toLowerCase()}
+              className="w-28 text-xs font-mono px-1.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[var(--foreground)]"
+            />
+          </label>
+        ))}
+        <span className="text-[10px] text-[var(--muted)]">Separate multiple values with commas.</span>
       </div>
       <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface)] shrink-0">
         <span className="text-fuchsia-300 font-mono text-xs">⌕ search</span>
         <input
           autoFocus
           type="text"
+          aria-label="Log text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -1540,24 +1604,22 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               submit();
             }
           }}
-          placeholder="substring across log bodies -- uses the filters above as the candidate set"
+          placeholder="Substring in job logs"
           className="flex-1 text-xs font-mono px-2 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9] placeholder:text-[var(--muted)]"
         />
         <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">
-          since
-          <input
-            type="text"
+          Since
+          <select
+            aria-label="Since"
             value={since}
             onChange={(e) => setSince(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="24h"
-            className="w-16 text-xs font-mono px-1.5 py-1 rounded bg-[#0d1117] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[#c9d1d9]"
-          />
+            className="text-xs font-mono px-1.5 py-1 rounded bg-[var(--background)] border border-[var(--border)] focus:border-[var(--accent)] outline-none text-[var(--foreground)]"
+          >
+            <option value="24h">24 hours</option>
+            <option value="168h">7 days</option>
+            <option value="720h">30 days</option>
+            <option value="all">All time</option>
+          </select>
         </label>
         <button
           onClick={submit}
@@ -1570,7 +1632,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {/^(success|succeeded|failed|failure|cancelled|canceled)$/i.test(query.trim()) && (
           <div className="text-xs text-[var(--muted)] mb-3">
-            Search scans log text. Use the Status filter above to find runs by outcome.
+            Search scans log text. Use Status to choose runs by outcome.
           </div>
         )}
         {error && (
@@ -1580,20 +1642,20 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         )}
         {visibleResults === null && !loading && !error && (
           <div className="text-xs text-[var(--muted)] space-y-1">
-            <div>Searches log body across recent runs.</div>
-            <div>Filters choose which runs are searched.</div>
+            <div>Searches job logs from up to 200 matching runs, newest first.</div>
+            <div>Choose All time to include older runs.</div>
           </div>
         )}
-        {visibleResults !== null && visibleResults.length === 0 && !loading && (
+        {visibleResults !== null && visibleResults.length === 0 && !loading && !error && (
           <div className="text-xs text-[var(--muted)]">
-            no matches; searched {runsScanned} of {runsMatching} runs matching filters
+            no matches; searched {runsScanned} of {runsMatching} candidate runs
           </div>
         )}
         {visibleResults !== null && visibleResults.length > 0 && (
           <>
             <div className="text-[10px] text-[var(--muted)] font-mono mb-2">
               {visibleResults.length} match{visibleResults.length === 1 ? "" : "es"} across{" "}
-              {byRun.size} run{byRun.size === 1 ? "" : "s"}; searched {runsScanned} of {runsMatching} runs matching filters
+              {byRun.size} run{byRun.size === 1 ? "" : "s"}; searched {runsScanned} of {runsMatching} candidate runs
             </div>
             <div className="flex flex-col gap-3">
               {runOrder.map((runID) => {
@@ -1607,7 +1669,13 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     <div className="px-3 py-2 border-b border-[var(--border)] flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         {meta ? (
-                          <FullRunRow r={meta} ctx={filterCtx} />
+                          <div className="flex flex-wrap gap-x-2 gap-y-1 text-xs font-mono">
+                            <span className="text-[var(--accent)]">{runID}</span>
+                            <span>{meta.pipeline}</span>
+                            <span>{meta.status}</span>
+                            {meta.git_branch && <span>{meta.git_branch}</span>}
+                            {meta.git_sha && <span>{meta.git_sha.slice(0, 7)}</span>}
+                          </div>
                         ) : (
                           <span className="font-mono text-xs text-[var(--accent)]">
                             {runID}

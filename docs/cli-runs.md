@@ -549,6 +549,11 @@ the candidate set is identical to what that verb would return.
 In cluster mode the grep runs server-side per (run, node), so only
 matching bytes come back over the wire.
 
+The dashboard Search view applies pipeline, status, branch, commit SHA prefix,
+and since before its 200-run candidate limit. Its All time choice can reach
+older runs. The Run list has additional filters for browsing runs; those do
+not narrow log Search.
+
 Default output is a table of RUN / NODE / LINE / TEXT. -q
 (quiet) prints the unique matching run ids -- the usual
 shape for piping into `runs logs` or `runs status`.
