@@ -31,7 +31,7 @@ type Measurement struct {
 
 // Measure lists every namespace in the store once, one LIST per thousand
 // objects plus a delimited listing of the root and of teams/, and deletes
-// team objects past [Options.TeamObjectMaxAge] in the same walk. It runs on
+// objects past [Options.TeamObjectMaxAge] in the same walk. It runs on
 // a schedule of hours, never per request. A namespace whose listing fails is
 // left out and the error returned, so a caller never takes a partial
 // measurement for the whole.
@@ -59,7 +59,7 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 				if !ValidTeam(team) {
 					continue
 				}
-				t, expired, err := s.measureTeam(ctx, team, tp)
+				t, expired, err := s.measureNamespace(ctx, team, tp)
 				out.Expired.Bytes += expired.Bytes
 				out.Expired.Objects += expired.Objects
 				if err != nil {
@@ -69,7 +69,9 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 				out.Teams[team] = t
 			}
 		default:
-			t, err := s.measure(ctx, top)
+			t, expired, err := s.measureNamespace(ctx, "", top)
+			out.Expired.Bytes += expired.Bytes
+			out.Expired.Objects += expired.Objects
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -81,20 +83,8 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 	return out, errors.Join(errs...)
 }
 
-func (s *Store) measure(ctx context.Context, prefix string) (Tally, error) {
-	var t Tally
-	err := s.walk(ctx, prefix, func(o types.Object) {
-		t.Bytes += aws.ToInt64(o.Size)
-		t.Objects++
-	})
-	if err != nil {
-		return Tally{}, err
-	}
-	return t, nil
-}
-
 // safety: only deletions the store confirmed leave the tally; an object it refused stays in it.
-func (s *Store) measureTeam(ctx context.Context, team, prefix string) (Tally, Tally, error) {
+func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tally, Tally, error) {
 	var t Tally
 	var expired []sizedKey
 	var age time.Duration

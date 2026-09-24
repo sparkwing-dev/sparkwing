@@ -120,7 +120,7 @@ second run over the same data removes nothing more.
 | Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
 | Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive | logs service | `--retention` on `sparkwing-logs`; 30 days with `--archive-store` unless set, off otherwise |
-| Team binaries, dependency archives and artifacts | written more than 30 days ago, deleted in the listing that reconciles the cache's count | controller, hourly storage pass | `--cache-blob-store`; the operator's own team keeps its objects |
+| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (`SPARKWING_CACHE_PROXY_MAX_BYTES`, 2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |

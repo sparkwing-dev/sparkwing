@@ -16,7 +16,7 @@ const DirectUploadMaxSize int64 = 500 << 20
 // DirectUploadTTL matches the bucket's pending/ lifecycle window.
 const DirectUploadTTL = 24 * time.Hour
 
-// DirectCacheMaxAge is the bucket retention window for a team's cache keys.
+// DirectCacheMaxAge is the controller's retention window for cache keys.
 const DirectCacheMaxAge = 30 * 24 * time.Hour
 
 const directUploadTablesSQL = `CREATE TABLE IF NOT EXISTS uploads (
@@ -332,8 +332,8 @@ func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, 
 // bucket's successful retention listing has removed their bytes.
 func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
 	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND team <> ? AND committed_at <= ?`,
-		string(StorageCache), string(DefaultTeam), cutoff)
+	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND committed_at <= ?`,
+		string(StorageCache), cutoff)
 	if err != nil {
 		return 0, err
 	}

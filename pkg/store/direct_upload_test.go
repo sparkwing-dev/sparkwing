@@ -50,6 +50,28 @@ func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
 	}
 }
 
+func TestPruneExpiredCacheObjectsIncludesDefaultTeam(t *testing.T) {
+	st := storetest.Open(t)
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	key := "artifacts/blobs/" + strings.Repeat("a", 64)
+	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: store.DefaultTeam, RunID: "run-operator", Kind: store.StorageCache,
+		Key: key, Size: 1, SHA256: strings.Repeat("a", 64), Principal: "operator", Provenance: "local", Now: old,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitUpload(t.Context(), store.DefaultTeam, u.ID, u.Principal, old.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := st.PruneExpiredCacheObjects(t.Context(), time.Now()); err != nil || n != 1 {
+		t.Fatalf("expired default cache rows = %d, %v, want one", n, err)
+	}
+	if _, err := st.CommittedObject(t.Context(), store.DefaultTeam, key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expired default cache object is still committed: %v", err)
+	}
+}
+
 func TestCloudBinaryLookupRefusesLocalProvenanceUntilTeamTrustsIt(t *testing.T) {
 	st := storetest.Open(t)
 	setFreeAllowance(t, st, 16<<10)
