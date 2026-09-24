@@ -22,6 +22,12 @@ unlock.
 
 ### Added
 
+- **runner image:** Kubernetes Jobs and warm runners have bash, coreutils,
+  git, OpenSSH client, CA certificates, curl, tar, gzip, xz, make, jq, and
+  unzip. The Debian slim runtime supports downloaded glibc-based toolchains;
+  the image keeps the Go toolchain used for pipeline compilation. See
+  [Local execution](docs/local-execution.md).
+
 - **controller + web:** a signed-in user links a Google or GitHub sign-in to
   their own account from **Account -> Linked sign-ins**, whatever address the
   provider holds, and unlinks one while another remains. The flow is the
