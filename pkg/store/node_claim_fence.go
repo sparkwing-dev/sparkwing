@@ -112,6 +112,21 @@ func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, 
 	return err == nil, err
 }
 
+// NodeClaimFenceNodeForRun returns the node held by an exact live claim in a run.
+func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error) {
+	var nodeID string
+	err := s.queryRow(ctx, `SELECT node_id FROM nodes
+	WHERE run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?
+	  AND claim_membership_id = ? AND reservation_id = ? AND claim_generation = ?
+	  AND `+nodeClaimLiveSQL(""), runID, fence.HolderID, fence.Claimant.Principal,
+		fence.Claimant.TokenPrefix, fence.MembershipID, fence.ReservationID,
+		fence.ClaimGeneration, now.UnixNano()).Scan(&nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return nodeID, err
+}
+
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error) {
 	if ordinal < 1 {
 		return false, nil

@@ -578,6 +578,35 @@ func run(args []string) error {
 			return fmt.Errorf("--logs-archive-store: %w", err)
 		}
 		srv = srv.WithStoragePass(cache, logsStore)
+		privateKey := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY")
+		if keyFile := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE"); keyFile != "" {
+			if privateKey != "" {
+				return errors.New("set only one of SPARKWING_CLOUDFRONT_PRIVATE_KEY and SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE")
+			}
+			// #nosec G703 -- the operator configures this private-key file path
+			keyBytes, err := os.ReadFile(keyFile)
+			if err != nil {
+				return fmt.Errorf("CloudFront private key file: %w", err)
+			}
+			privateKey = string(keyBytes)
+		}
+		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
+		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
+		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
+		client, _, _, err := storeurl.OpenS3(ctx, rawStore)
+		if err != nil {
+			return fmt.Errorf("download signer S3: %w", err)
+		}
+		if err := srv.WithSignedDownloads(cache, logsStore, client, domain, keyPairID, privateKey); err != nil {
+			return err
+		}
+	}
+	if strings.HasPrefix(*cacheBlobStore, "s3://") {
+		client, bucket, prefix, err := storeurl.OpenS3(ctx, *cacheBlobStore)
+		if err != nil {
+			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
+		}
+		srv = srv.WithDirectUploads(client, bucket, prefix)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err

@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // ErrNoCacheGrant reports a controller that mints no cache grants: one that
@@ -33,6 +35,14 @@ func RequestCacheGrant(ctx context.Context, controllerURL, runnerToken, runID st
 	}
 	if runnerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+runnerToken)
+	}
+	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
+		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
+		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
+		req.Header.Set(store.ClaimGenerationHeader, strconv.FormatInt(fence.ClaimGeneration, 10))
+	} else if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
+		req.Header.Set(store.TriggerGenerationHeader, strconv.FormatInt(fence.ClaimGeneration, 10))
 	}
 	cli := &http.Client{
 		Timeout: 15 * time.Second,

@@ -13,7 +13,7 @@ import (
 )
 
 func TestUnlicensedControllerHasNoMetering(t *testing.T) {
-	f := newCreditsFixtureWithLicense(t, true, "") // A stored metered token must not bypass the license.
+	f := newCreditsFixtureWithLicense(t, true, "") // safety: A stored metered token must not bypass the license.
 	for _, route := range []string{"/api/v1/credits", "/api/v1/credits/history", "/api/v1/credits/settings", "/api/v1/team/billing"} {
 		status, _ := creditsRequest(t, http.MethodGet, f.url+route, f.admin, nil)
 		if status != http.StatusNotFound && status != http.StatusForbidden {

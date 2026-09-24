@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestRequestCacheGrantAuthenticatesAsTheRunner(t *testing.T) {
@@ -27,6 +29,36 @@ func TestRequestCacheGrantAuthenticatesAsTheRunner(t *testing.T) {
 	}
 	if gotAuth != "Bearer runner-token" {
 		t.Errorf("authorization = %q, want the runner's own token", gotAuth)
+	}
+}
+
+func TestRequestCacheGrantCarriesExactClaimFence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"trigger", store.WithTriggerClaimFence(context.Background(), store.TriggerClaimFence{ClaimGeneration: 7}), "trigger:7"},
+		{"node", store.WithNodeClaimFence(context.Background(), store.NodeClaimFence{HolderID: "holder", MembershipID: "member", ReservationID: "reservation", ClaimGeneration: 8}), "node:holder:member:reservation:8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			ctrl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if generation := r.Header.Get(store.TriggerGenerationHeader); generation != "" {
+					got = "trigger:" + generation
+				} else {
+					got = "node:" + r.Header.Get(store.ClaimHolderHeader) + ":" + r.Header.Get(store.ClaimMembershipHeader) + ":" + r.Header.Get(store.ClaimReservationHeader) + ":" + r.Header.Get(store.ClaimGenerationHeader)
+				}
+				_, _ = w.Write([]byte(`{"grant":"swcg1.payload.sig"}`))
+			}))
+			defer ctrl.Close()
+			if _, err := RequestCacheGrant(tc.ctx, ctrl.URL, "runner", "run-1"); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("claim headers = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

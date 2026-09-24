@@ -11,7 +11,8 @@ import (
 )
 
 type Services struct {
-	CachePod string `json:"cache_pod,omitempty"`
+	CachePod        string `json:"cache_pod,omitempty"`
+	DataDownloadURL string `json:"data_download_url,omitempty"`
 
 	Logs string `json:"logs,omitempty"`
 

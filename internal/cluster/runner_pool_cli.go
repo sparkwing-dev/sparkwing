@@ -624,7 +624,7 @@ func executePooledNode(
 		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
-	grant := orchestrator.RequestRunCacheGrant(execCtx, controllerURL, token, n.RunID, logger)
+	grant := orchestrator.RequestRunCacheGrant(heartbeatCtx, controllerURL, token, n.RunID, logger)
 	var announced string
 	if grant != "" {
 		services, err := discovery.ServicesFor(execCtx, controllerURL, token)

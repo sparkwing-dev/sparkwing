@@ -31,6 +31,9 @@ the cache's bare repos would drift from upstream.
 in-cluster, no GitHub rate limits.
 
 **Writes** (gitops deploy push) go directly to GitHub via HTTPS + PAT.
+
+Binary and artifact uploads use the controller's [direct data routes](data-uploads.md)
+when it announces an S3 data store. An older controller keeps the cache path.
 Runners have `GITHUB_TOKEN` from the `github-config` k8s secret.
 
 ## Repo Registration

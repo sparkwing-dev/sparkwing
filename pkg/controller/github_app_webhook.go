@@ -505,10 +505,7 @@ func (s *Server) handleGitHubAppRepositoryEvent(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, githubAppWebhookResp{Status: "updated"})
 }
 
-// githubAppSubscribes reports whether sub selects a delivery of event and
-// action whose trigger environment is env on branch. Branch filters gate
-// every event that runs a branch's code, and tag patterns alone select tag
-// pushes.
+// safety: Branch filters gate every event that runs branch code; tag patterns alone select tag pushes.
 func githubAppSubscribes(sub store.GitHubAppTrigger, event, action string, env map[string]string, branch string) bool {
 	baseMatches := githubAppBranchMatches(sub.BaseBranches, env[sparkwing.EnvPRBaseRef])
 	switch event {

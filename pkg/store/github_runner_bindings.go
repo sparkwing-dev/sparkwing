@@ -46,8 +46,6 @@ CREATE TABLE IF NOT EXISTS github_runner_bindings (
 
 var githubRunnerBindingsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(githubRunnerBindingsTableSQLite)
 
-// github_runner_credentials records the push and workflow run each GitHub
-// Actions credential was minted for, keyed by the token's prefix.
 const githubRunnerCredentialsTableSQLite = `
 CREATE TABLE IF NOT EXISTS github_runner_credentials (
     team       TEXT NOT NULL,

@@ -103,8 +103,7 @@ func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 	})
 }
 
-// A liveness request borrows the unmetered lane only with the required
-// claim fence and a live claim. The route handler validates the write.
+// safety: The unmetered liveness lane requires a live claim fence; the route handler validates the write.
 func (s *Server) ownRunLiveness(r *http.Request) bool {
 	if r.Method != http.MethodPost || s.store == nil {
 		return false
