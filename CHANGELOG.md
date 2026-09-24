@@ -886,8 +886,8 @@ unlock.
 
 - **runner:** A trigger that fails setup before pipeline dispatch now records a
   failed run with an operator troubleshooting step instead of remaining pending
-  until the controller's 15-minute fallback. A trigger stays claimable if its
-  failure cannot be recorded.
+  until the controller's 15-minute fallback. If its failure cannot be recorded,
+  the claim remains open for lease recovery.
 
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.

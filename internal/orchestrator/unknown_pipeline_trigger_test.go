@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -148,6 +149,51 @@ func TestClaimedSetupFailureKeepsTriggerOpenWhenRunWriteUnavailable(t *testing.T
 		&store.Trigger{ID: "setup-write-unavailable", Pipeline: "remote-ok"})
 	if !runRead.Load() || triggerDone.Load() {
 		t.Fatalf("run read attempted = %t, trigger marked done = %t", runRead.Load(), triggerDone.Load())
+	}
+}
+
+func TestClaimedSetupFailureConfirmsAmbiguousRunWrite(t *testing.T) {
+	registerRemotePipelines(t)
+	t.Setenv(orchestrator.StoreWedgeBudgetEnvVar, "invalid-duration")
+	for _, tc := range []struct {
+		name       string
+		finalState string
+		wantDone   bool
+	}{
+		{name: "write rejected", finalState: "pending", wantDone: false},
+		{name: "response lost after commit", finalState: "failed", wantDone: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads, writes atomic.Int32
+			var done atomic.Bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/ambiguous-setup":
+					status := "pending"
+					if reads.Add(1) > 1 {
+						status = tc.finalState
+					}
+					_ = json.NewEncoder(w).Encode(store.Run{ID: "ambiguous-setup", Status: status})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/ambiguous-setup/finish":
+					writes.Add(1)
+					http.Error(w, "response unavailable", http.StatusServiceUnavailable)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/ambiguous-setup/done":
+					done.Store(true)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			cli := client.New(srv.URL, nil)
+			orchestrator.ExecuteClaimedTrigger(context.Background(), orchestrator.WorkerOptions{},
+				orchestrator.RemoteBackends(cli, nil, nil, nil, 0), cli,
+				&store.Trigger{ID: "ambiguous-setup", Pipeline: "remote-ok"})
+			if reads.Load() != 2 || writes.Load() != 1 || done.Load() != tc.wantDone {
+				t.Fatalf("run reads = %d, writes = %d, trigger done = %t; want 2, 1, %t",
+					reads.Load(), writes.Load(), done.Load(), tc.wantDone)
+			}
+		})
 	}
 }
 

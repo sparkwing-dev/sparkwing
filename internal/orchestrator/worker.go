@@ -98,7 +98,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	res, err := Run(runCtx, backends, runOpts)
 	cancelRun()
 	if err != nil {
-		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err, false); ferr != nil {
 			finishTrigger = false
 			logger.Error("record failed trigger run",
 				"run_id", trigger.ID, "err", ferr)
@@ -140,15 +140,15 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	)
 }
 
-func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
+func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error, createMissingRun bool) error {
 	reason := cause.Error()
 	_, defined := sparkwing.Lookup(trigger.Pipeline)
 	if defined {
-		reason = "pipeline setup failed before dispatch; ask an operator to inspect the trigger worker logs for this run"
+		reason = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
 	}
 	run, err := state.GetRun(ctx, trigger.ID)
 	if errors.Is(err, store.ErrNotFound) {
-		if defined {
+		if defined && !createMissingRun {
 			return nil
 		}
 		if err := state.CreateRun(ctx, store.Run{
@@ -164,7 +164,27 @@ func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, t
 	} else if run.Status != "pending" && run.Status != "running" {
 		return nil
 	}
-	return state.FinishRun(ctx, trigger.ID, "failed", reason)
+	if err := state.FinishRun(ctx, trigger.ID, "failed", reason); err != nil {
+		if ConfirmTerminalRunAfterWriteError(ctx, state, trigger.ID) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// ConfirmTerminalRunAfterWriteError checks whether a failed finish response
+// followed a committed terminal write. Its read is bounded independently of
+// the write's context, which may have expired before its response arrived.
+func ConfirmTerminalRunAfterWriteError(ctx context.Context, state interface {
+	GetRun(context.Context, string) (*store.Run, error)
+}, runID string,
+) bool {
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	run, err := state.GetRun(checkCtx, runID)
+	return err == nil && run != nil &&
+		(run.Status == "success" || run.Status == "failed" || run.Status == "cancelled")
 }
 
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {
