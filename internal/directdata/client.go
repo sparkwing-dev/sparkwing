@@ -154,7 +154,7 @@ type DownloadAnswer struct {
 	URL       string    `json:"url"`
 	SHA256    string    `json:"sha256"`
 	Size      int64     `json:"size"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresAt time.Time `json:"expires"`
 }
 
 // Download signs one committed object and opens its byte stream. The caller

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,10 +57,14 @@ func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
 	if err := team.CreateTrigger(t.Context(), store.Trigger{ID: "run-1", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`, "runner", "old-token", time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
+	_, token, err := team.CreateToken(t.Context(), "runner", store.TokenKindRunner, []string{ScopeTriggersClaim}, time.Hour, time.Now())
+	if err != nil {
 		t.Fatal(err)
 	}
-	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: "runner", TokenPrefix: "old-token"})
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE triggers SET status = 'claimed', claim_principal = ?, claim_token_prefix = ?, claim_seq = 1, lease_expires_at = ? WHERE id = ?`, token.Principal, token.Prefix, time.Now().Add(time.Hour).UnixNano(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := authwire.MintClaimCacheGrant("grant-key", "team-a", "run-1", time.Now(), time.Hour, &authwire.CacheClaim{Kind: "trigger", Generation: 1, Principal: token.Principal, TokenPrefix: token.Prefix})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +105,116 @@ func callDownload(t *testing.T, s *Server, grant, key string, ingress bool) (*ht
 	return rec, body
 }
 
+func logDownloadFixture(t *testing.T) (*Server, string, *downloadHead) {
+	t.Helper()
+	s, grant, head := downloadFixture(t)
+	s.WithAuthenticator(NewAuthenticator(s.store, 0))
+	logs, err := teamblob.New(teamblob.Options{Bucket: "bucket", Prefix: "logs", Client: head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.downloadStores[store.StorageLogs] = logs
+	return s, grant, head
+}
+
+func callLogDownload(t *testing.T, s *Server, bearer string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/data/download", strings.NewReader(`{"kind":"log","key":"runs/run-B/build.log"}`))
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestDataDownloadRejectsLogSigningWithRunCacheGrant(t *testing.T) {
+	s, grant, head := logDownloadFixture(t)
+	response := callLogDownload(t, s, grant)
+	if response.Code != http.StatusForbidden || len(head.keys) != 0 {
+		t.Fatalf("cross-run log signing = %d, HEAD keys=%v", response.Code, head.keys)
+	}
+}
+
+func TestDataDownloadRequiresLogsReadForLogSigning(t *testing.T) {
+	s, _, head := logDownloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsOnly, _, err := team.CreateToken(t.Context(), "reader", store.TokenKindUser, []string{ScopeRunsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := callLogDownload(t, s, runsOnly)
+	if response.Code != http.StatusForbidden || len(head.keys) != 0 {
+		t.Fatalf("runs.read-only log signing = %d, HEAD keys=%v", response.Code, head.keys)
+	}
+	logsReader, _, err := team.CreateToken(t.Context(), "logs-reader", store.TokenKindUser, []string{ScopeLogsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response = callLogDownload(t, s, logsReader)
+	if response.Code != http.StatusOK || len(head.keys) != 1 {
+		t.Fatalf("logs.read signing = %d, HEAD keys=%v", response.Code, head.keys)
+	}
+}
+
+func TestRevokedClaimantCannotSignDataWithAnOldGrant(t *testing.T) {
+	s, grant, head := downloadFixture(t)
+	issued, err := authwire.VerifyCacheGrant("grant-key", grant, time.Now())
+	if err != nil || issued.Claim == nil {
+		t.Fatalf("fixture grant = %+v, %v", issued, err)
+	}
+	var s3Calls atomic.Int32
+	objectStore := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		s3Calls.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer objectStore.Close()
+	client := s3.New(s3.Options{
+		Region: "us-west-2", BaseEndpoint: aws.String(objectStore.URL), UsePathStyle: true,
+		Credentials: credentials.NewStaticCredentialsProvider("AKID", "SECRET", ""),
+	})
+	s.WithDirectUploads(client, "bucket", "cache")
+	upload := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/data/upload", strings.NewReader(`{"kind":"binary","key":"bin/01234567-89abcdef/`+strings.Repeat("a", 64)+`","size":4,"sha256":"`+strings.Repeat("a", 64)+`","run_id":"run-1"}`))
+		req.Header.Set("Authorization", "Bearer "+grant)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	first := upload()
+	if first.Code != http.StatusOK {
+		t.Fatalf("initial reserve = %d: %s", first.Code, first.Body.String())
+	}
+	var reserved DirectUploadResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &reserved); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.RevokeToken(issued.Claim.TokenPrefix, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if response, _ := callDownload(t, s, grant, "bins/abc", false); response.Code != http.StatusForbidden || len(head.keys) != 0 {
+		t.Fatalf("revoked download = %d, HEAD keys=%v", response.Code, head.keys)
+	}
+	if response := upload(); response.Code != http.StatusForbidden {
+		t.Fatalf("revoked reserve = %d, want 403", response.Code)
+	}
+	var reservations int
+	if err := s.store.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM uploads WHERE team = ?`, "team-a").Scan(&reservations); err != nil || reservations != 1 {
+		t.Fatalf("upload reservations = %d, %v", reservations, err)
+	}
+	commit := httptest.NewRequest(http.MethodPost, "/api/v1/data/commit", strings.NewReader(`{"upload_id":"`+reserved.UploadID+`","run_id":"run-1"}`))
+	commit.Header.Set("Authorization", "Bearer "+grant)
+	commit.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, commit)
+	if rec.Code != http.StatusForbidden || s3Calls.Load() != 0 {
+		t.Fatalf("revoked commit = %d, S3 calls=%d", rec.Code, s3Calls.Load())
+	}
+}
+
 func TestDataDownloadRejectsInvalidGrant(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -108,6 +223,7 @@ func TestDataDownloadRejectsInvalidGrant(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/data/download", strings.NewReader(`{"kind":"binary","key":"bins/abc"}`))
 	req.Header.Set("Authorization", "Bearer swcg1.invalid")
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s := New(st, nil)
 	s.downloadStores = map[store.StorageKind]*teamblob.Store{store.StorageCache: nil}
@@ -155,7 +271,7 @@ func TestCommittedBinaryDownloadUsesTheSameDailyCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.store.CommitUpload(t.Context(), "team-a", u.ID, time.Now()); err != nil {
+	if err := s.store.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	first, signed := callDownload(t, s, grant, "bin/"+input, false)
@@ -272,13 +388,17 @@ func TestDataDownloadRejectsUnboundCacheGrant(t *testing.T) {
 }
 
 func TestCacheGrantSigningBindsLiveTriggerGeneration(t *testing.T) {
-	s, _, _ := downloadFixture(t)
+	s, boundGrant, _ := downloadFixture(t)
+	issued, err := authwire.VerifyCacheGrant("grant-key", boundGrant, time.Now())
+	if err != nil || issued.Claim == nil {
+		t.Fatalf("fixture grant = %+v, %v", issued, err)
+	}
 	request := func(generation string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/runs/run-1/cache-grant", nil)
 		req.SetPathValue("id", "run-1")
 		req.Header.Set(store.TriggerGenerationHeader, generation)
 		req = req.WithContext(contextWithPrincipal(req.Context(), &Principal{
-			Name: "runner", TokenPrefix: "old-token", Kind: store.TokenKindRunner, Team: "team-a",
+			Name: issued.Claim.Principal, TokenPrefix: issued.Claim.TokenPrefix, Kind: store.TokenKindRunner, Team: "team-a",
 		}))
 		rec := httptest.NewRecorder()
 		s.handleRunCacheGrant(teamA).ServeHTTP(rec, req)

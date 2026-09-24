@@ -98,6 +98,12 @@ func (s *Server) verifyDataGrant(ctx context.Context, token string) (authwire.Ca
 		return authwire.CacheGrant{}, errors.New("cache grant run or claim is not live")
 	}
 	claim := grant.Claim
+	// safety: the signed grant can outlive the token that held its claim.
+	claimantToken, err := s.store.LookupTokenByPrefix(claim.TokenPrefix)
+	if err != nil || claimantToken == nil || claimantToken.Team != store.Team(grant.Team) ||
+		claimantToken.Principal != claim.Principal || !claimantToken.IsValid(time.Now()) {
+		return authwire.CacheGrant{}, errors.New("cache grant claimant token is not active")
+	}
 	identity := store.ClaimIdentity{Principal: claim.Principal, TokenPrefix: claim.TokenPrefix}
 	var live bool
 	switch claim.Kind {
@@ -118,7 +124,7 @@ func (s *Server) verifyDataGrant(ctx context.Context, token string) (authwire.Ca
 	return grant, nil
 }
 
-func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Team, *authwire.CacheGrant, bool) {
+func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request, kind string) (store.Team, *authwire.CacheGrant, bool) {
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || token == "" {
 		writeError(w, http.StatusUnauthorized, errors.New("download needs a bearer"))
@@ -134,6 +140,10 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Tea
 			writeError(w, http.StatusForbidden, err)
 			return "", nil, false
 		}
+		if kind == "log" {
+			writeError(w, http.StatusForbidden, errors.New("cache grants cannot sign log downloads"))
+			return "", nil, false
+		}
 		return store.Team(grant.Team), &grant, true
 	}
 	p, err := s.authMiddleware().Authenticate(token)
@@ -141,8 +151,12 @@ func (s *Server) downloadTeam(w http.ResponseWriter, r *http.Request) (store.Tea
 		writeError(w, http.StatusUnauthorized, errors.New("invalid download bearer"))
 		return "", nil, false
 	}
-	if !p.HasScope(ScopeRunsRead) && !p.HasScope(ScopeAdmin) {
-		writeError(w, http.StatusForbidden, errors.New("download needs runs.read"))
+	requiredScope := ScopeRunsRead
+	if kind == "log" {
+		requiredScope = ScopeLogsRead
+	}
+	if !p.HasScope(requiredScope) && !p.HasScope(ScopeAdmin) {
+		writeError(w, http.StatusForbidden, fmt.Errorf("download needs %s", requiredScope))
 		return "", nil, false
 	}
 	if p.Kind == store.TokenKindRunner && !p.HasScope(ScopeAdmin) {
@@ -173,13 +187,13 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	team, grant, ok := s.downloadTeam(w, r)
-	if !ok {
-		return
-	}
 	var req dataDownloadRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	team, grant, ok := s.downloadTeam(w, r, req.Kind)
+	if !ok {
 		return
 	}
 	kind := downloadKind(req.Kind)

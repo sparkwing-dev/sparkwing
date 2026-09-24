@@ -32,10 +32,10 @@ func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
 	}); !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("oversize reserve: %v", err)
 	}
-	if err := st.CommitUpload(t.Context(), "team-b", u.ID, now); !errors.Is(err, store.ErrNotFound) {
+	if err := st.CommitUpload(t.Context(), "team-b", u.ID, u.Principal, now); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-team commit: %v", err)
 	}
-	if err := st.CommitUpload(t.Context(), "team-a", u.ID, now); err != nil {
+	if err := st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, now); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.CommittedObject(t.Context(), "team-a", u.Key)
@@ -45,7 +45,7 @@ func TestDirectUploadReservesAndPublishesOnlyAfterCommit(t *testing.T) {
 	if v := usageOf(t, st, "team-a", store.StorageCache); v.UsedBytes != u.Size || v.ReservedBytes != 0 {
 		t.Fatalf("storage after commit: %+v", v)
 	}
-	if err := st.CommitUpload(context.Background(), "team-a", u.ID, now); err != nil {
+	if err := st.CommitUpload(context.Background(), "team-a", u.ID, u.Principal, now); err != nil {
 		t.Fatalf("retry commit: %v", err)
 	}
 }
@@ -63,7 +63,7 @@ func TestCloudBinaryLookupRefusesLocalProvenanceUntilTeamTrustsIt(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CommitUpload(t.Context(), "team-a", u.ID, time.Now()); err != nil {
+	if err := st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.BinaryObject(t.Context(), "team-a", input, true); !errors.Is(err, store.ErrNotFound) {
@@ -95,7 +95,7 @@ func TestSameBinaryCanBeCommittedByLocalAndCloudRunners(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := st.CommitUpload(t.Context(), "team-a", u.ID, time.Now()); err != nil {
+		if err := st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}

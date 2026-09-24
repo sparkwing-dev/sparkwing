@@ -258,7 +258,7 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 		Key:               aws.String("cache/teams/" + olga.team + "/cloud/" + key),
 		CopySource:        aws.String(url.PathEscape("bucket/pending/" + answer.UploadID)),
 		MetadataDirective: types.MetadataDirectiveReplace,
-		Metadata:          map[string]string{"upload-id": answer.UploadID, "sha256": digest, "provenance": "cloud"},
+		Metadata:          map[string]string{"upload-id": answer.UploadID, "sha256": digest, "provenance": "cloud", "uploader": "previous-team-member"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -292,8 +292,13 @@ func TestDirectCommitAdoptsVerifiedCopyAfterOldReservationExpires(t *testing.T) 
 	}, &ignored); code != http.StatusNoContent {
 		t.Fatalf("retry commit = %d, logs: %s", code, f.logs.String())
 	}
-	if _, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key); err != nil {
-		t.Fatal(err)
+	committed, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key)
+	if err != nil || committed.Principal != "previous-team-member" {
+		t.Fatalf("committed uploader = %+v, %v", committed, err)
+	}
+	reservation, err := f.store.UploadForTeam(t.Context(), store.Team(olga.team), retry.UploadID)
+	if err != nil || reservation.Principal == committed.Principal {
+		t.Fatalf("recovery actor = %+v, %v", reservation, err)
 	}
 }
 

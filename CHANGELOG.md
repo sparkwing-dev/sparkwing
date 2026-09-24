@@ -26,7 +26,8 @@ unlock.
   and artifact bytes off the controller. A runner reserves storage, PUTs a
   checksummed object to `pending/`, then commits it under an immutable
   cloud or local key. Schema 70 records committed objects and provenance.
-  A signing grant stays bound to its exact live claim. In-cluster downloads
+  A signing grant stays bound to its exact live claim and active token.
+  Cache grants cannot sign logs; `logs.read` is required. In-cluster downloads
   use S3, while public-ingress downloads use a 60-second CloudFront URL.
   Both count against the team's daily download cap. Cloud runners read
   cloud-built binaries unless the team enables `trust_local_builds`. Older

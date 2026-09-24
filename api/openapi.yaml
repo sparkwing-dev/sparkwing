@@ -6708,7 +6708,7 @@ paths:
       tags: [artifacts]
       summary: Sign a short-lived URL for one team object.
       description: >-
-        Accepts a cache grant only while the exact trigger or node claim that minted it remains live, or a non-runner bearer principal authorized to read the team's run data. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data; `artifact` and `log` select the cache and logs stores. The response includes the stored object's SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+        A cache grant signs binary and artifact downloads only while its exact issuing claim and claimant token remain active. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
       requestBody:
         required: true
         content:

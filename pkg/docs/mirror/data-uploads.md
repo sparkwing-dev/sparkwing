@@ -4,15 +4,17 @@ When the controller has an S3 `--cache-blob-store`, runners can move binary
 and artifact bytes between themselves and the bucket. The controller handles
 small requests and the storage ledger. `GET /api/v1/services` announces
 `direct_data`; a runner with only a cache grant can probe
-`GET /api/v1/data/capabilities`. Runners use the cache service on older controllers. An
-`fs://` artifact store continues to write locally.
+`GET /api/v1/data/capabilities`. Runners use the cache service on older
+controllers. An `fs://` artifact store uses its existing local byte path; it
+does not issue S3 or CloudFront URLs. This signing route serves claimed runners.
+It has no owner or CLI token path.
 
 The runner must hold a live claim on `run_id` for each request and send a
 cache grant minted for that claim. The runner's raw token cannot sign uploads.
-A signing grant carries the
-exact node or trigger claim, including its generation. Reserve, commit and
-download check that claim again, so an old grant cannot sign after the same
-token reclaims the run. The pending row fixes the run ID and claimant. The
+A signing grant carries the exact node or trigger claim, including its
+generation. Reserve, commit and download check that claim and its token again.
+Revoking the token stops new signed URLs, even while the claim remains live.
+The pending row fixes the run ID and claimant. The
 operator's metered marker classifies a token as cloud for build trust. Keep
 cloud tokens on trusted machines because that marker controls provenance.
 
@@ -33,7 +35,9 @@ cloud tokens on trusted machines because that marker controls provenance.
    prefix. The controller then publishes a database object row and moves the
    reservation into used bytes. Direct readers cannot see the key until that
    row commits. If a copy completed before the database commit, a new
-   reservation can adopt it only when S3 reports the same size and checksum.
+   reservation can adopt it only when S3 reports the same size, checksum and
+   provenance. The committed row keeps the original uploader from S3 metadata;
+   the new reservation records who recovered it.
 
 The bucket's one-day `pending/` lifecycle removes abandoned bytes. The
 controller's hourly storage pass releases expired reservations and removes

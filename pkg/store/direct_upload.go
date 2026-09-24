@@ -258,8 +258,12 @@ func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud
 	return s.CommittedObject(ctx, team, key)
 }
 
-// CommitUpload publishes a verified and copied upload exactly once.
-func (s *Store) CommitUpload(ctx context.Context, team Team, id string, now time.Time) (err error) {
+// CommitUpload publishes a verified and copied upload exactly once. The
+// recorded uploader comes from the final object's verified S3 metadata.
+func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error) {
+	if recordedUploader == "" {
+		return ErrInvalidInput
+	}
 	team = NormalizeTeam(team)
 	if now.IsZero() {
 		now = time.Now()
@@ -293,7 +297,7 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id string, now time
 	res, err := tx.ExecContext(ctx, `INSERT INTO data_objects
         (team, key, store, size, sha256, principal, provenance, committed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
-		string(team), u.Key, string(u.Kind), u.Size, u.SHA256, u.Principal, u.Provenance, now.UnixNano())
+		string(team), u.Key, string(u.Kind), u.Size, u.SHA256, recordedUploader, u.Provenance, now.UnixNano())
 	if err != nil {
 		return err
 	}

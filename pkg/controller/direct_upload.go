@@ -268,6 +268,7 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	final := d.finalKey(u)
+	recordedUploader := u.Principal
 	_, err = d.client.CopyObject(r.Context(), &s3.CopyObjectInput{
 		Bucket: aws.String(d.bucket), Key: aws.String(final),
 		CopySource:  aws.String(url.PathEscape(d.bucket + "/" + d.pendingKey(u.ID))),
@@ -285,16 +286,18 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 			})
 			if herr != nil || aws.ToInt64(previous.ContentLength) != u.Size ||
 				aws.ToString(previous.ChecksumSHA256) != base64.StdEncoding.EncodeToString(raw) ||
-				previous.Metadata["sha256"] != u.SHA256 || previous.Metadata["provenance"] != u.Provenance {
+				previous.Metadata["sha256"] != u.SHA256 || previous.Metadata["provenance"] != u.Provenance ||
+				previous.Metadata["uploader"] == "" {
 				writeError(w, http.StatusConflict, store.ErrObjectExists)
 				return
 			}
+			recordedUploader = previous.Metadata["uploader"]
 		} else {
 			s.writeInternalError(w, r, "copy committed object", err)
 			return
 		}
 	}
-	if err := s.store.CommitUpload(r.Context(), u.Team, u.ID, time.Now()); err != nil {
+	if err := s.store.CommitUpload(r.Context(), u.Team, u.ID, recordedUploader, time.Now()); err != nil {
 		if errors.Is(err, store.ErrObjectExists) {
 			writeError(w, http.StatusConflict, err)
 		} else {

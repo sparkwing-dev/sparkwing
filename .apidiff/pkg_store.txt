@@ -1771,7 +1771,7 @@ func (s *Store) ClaimedRunsFor(ctx context.Context, claimant ClaimIdentity, now 
 func (s *Store) ClearCronOverride(ctx context.Context, id string, now time.Time) error
 func (s *Store) Close() error
 func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error)
-func (s *Store) CommitUpload(ctx context.Context, team Team, id string, now time.Time) (err error)
+func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploader string, now time.Time) (err error)
 func (s *Store) CommittedObject(ctx context.Context, team Team, key string) (Upload, error)
 func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, cloud bool) (Upload, error)
 func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, err error)

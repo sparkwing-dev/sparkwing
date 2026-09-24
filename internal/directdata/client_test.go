@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestDownloadUsesTheSignedRouteWithoutAnUploadRunField(t *testing.T) {
@@ -23,13 +24,19 @@ func TestDownloadUsesTheSignedRouteWithoutAnUploadRunField(t *testing.T) {
 		if len(request) != 2 || request["kind"] != "artifact" || request["key"] != "artifacts/blobs/hash" {
 			t.Errorf("download request = %+v", request)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"url": object.URL, "sha256": "hash", "size": 5})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"url": object.URL, "sha256": "hash", "size": 5,
+			"expires": "2030-01-01T00:00:00Z",
+		})
 	}))
 	defer controller.Close()
 	client := New(controller.URL, "grant", "run", nil)
-	body, _, err := client.Download(context.Background(), "artifact", "artifacts/blobs/hash")
+	body, answer, err := client.Download(context.Background(), "artifact", "artifacts/blobs/hash")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if answer.ExpiresAt.Format(time.RFC3339) != "2030-01-01T00:00:00Z" {
+		t.Fatalf("signed URL expiry = %s", answer.ExpiresAt)
 	}
 	defer body.Close()
 	got, err := io.ReadAll(body)
