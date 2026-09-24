@@ -421,6 +421,11 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		p = strings.TrimSuffix(p, "/")
+		if p == "favicon.ico" && strings.EqualFold(r.Host, "console.sparkwing.dev") {
+			p = "favicon-orange.ico"
+			r = r.Clone(r.Context())
+			r.URL.Path = "/favicon-orange.ico"
+		}
 		if p == "" {
 			serveTemplatedHTML(w, r, bundleFS, "index.html", opts)
 			return
@@ -466,8 +471,11 @@ func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, 
 		return
 	}
 	body := raw
+	if strings.EqualFold(r.Host, "console.sparkwing.dev") {
+		body = bytes.ReplaceAll(body, []byte("/favicon.ico"), []byte("/favicon-orange.ico"))
+	}
 	if nonce := cspNonceFrom(r.Context()); nonce != "" {
-		body = nonceInlineScripts(raw, nonce)
+		body = nonceInlineScripts(body, nonce)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeGeneratedHTML(w, r, body)

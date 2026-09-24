@@ -20,7 +20,7 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if immutableStaticAssetRequest(r, bundleFS) {
+		if immutableStaticAssetRequest(r, bundleFS) || publicFaviconRequest(r, bundleFS) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -46,6 +46,17 @@ func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handle
 		r = r.WithContext(contextWithWebPrincipal(r.Context(), sess, cookie.Value))
 		next.ServeHTTP(w, r)
 	})
+}
+
+func publicFaviconRequest(r *http.Request, bundleFS fs.FS) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Path != "/favicon.ico" && r.URL.Path != "/favicon-orange.ico" {
+		return false
+	}
+	info, err := fs.Stat(bundleFS, strings.TrimPrefix(r.URL.Path, "/"))
+	return err == nil && !info.IsDir()
 }
 
 func immutableStaticAssetRequest(r *http.Request, bundleFS fs.FS) bool {

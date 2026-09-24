@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import ConnectionBanner from "@/components/ConnectionBanner";
-import DynamicFavicon from "@/components/DynamicFavicon";
 import Toaster from "@/components/Toasts";
 import WaitlistGate from "@/components/WaitlistGate";
 
@@ -39,7 +38,6 @@ export default function RootLayout({
         <script src="/sparkwing-runtime.js" />
       </head>
       <body className="h-full flex flex-col">
-        <DynamicFavicon />
         <Nav />
         <ConnectionBanner />
         <div className="flex-1 flex flex-col overflow-hidden">
