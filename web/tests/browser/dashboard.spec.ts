@@ -1192,15 +1192,11 @@ test("runs and nodes collapse into selectable rails and remember the viewer's ch
     await page.locator("#runs-column").evaluate((pane) => pane.getBoundingClientRect().width),
     await page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width),
   ]).toEqual([208, 208]);
-  await page.reload();
-  await expect(runsRail).toHaveCount(0);
-  await expect(nodesRail).toHaveCount(0);
   const collapseRuns = page.getByRole("button", { name: "Collapse Runs" });
   await expect(collapseRuns).toHaveAttribute("title", "Collapse Runs");
   await expect(collapseRuns.locator("svg")).toBeVisible();
   await expect(collapseRuns).toHaveText("");
-  await collapseRuns.focus();
-  await page.keyboard.press("Enter");
+  await collapseRuns.press("Enter");
   await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
   await expect(nodesRail).toHaveCount(0);
   await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
@@ -1214,6 +1210,10 @@ test("runs and nodes collapse into selectable rails and remember the viewer's ch
   await expect(nodesRail).toHaveCount(0);
   await expect(page).toHaveURL(/run=run-20260827-001/);
   await expect(page).toHaveURL(/node=verify/);
+  await page.reload();
+  await expect(page.locator("#nodes-column")).toBeVisible();
+  await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
 });
 
 test("runs columns follow the viewport until the viewer chooses a width", async ({ page }) => {

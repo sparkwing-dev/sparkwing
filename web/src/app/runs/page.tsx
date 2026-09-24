@@ -673,6 +673,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         tag === "INPUT" ||
         tag === "TEXTAREA" ||
         tag === "SELECT" ||
+        t?.closest('button, a, [role="button"], [role="link"]') ||
         t?.isContentEditable
       )
         return;
