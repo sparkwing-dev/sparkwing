@@ -76,7 +76,6 @@ func TestProxyAllowList_SessionCannotReachUnproxiedControllerRoutes(t *testing.T
 		{http.MethodPost, "/api/v1/users"},
 		{http.MethodGet, "/api/v1/users"},
 		{http.MethodPost, "/api/v1/runs"},
-		{http.MethodGet, "/api/v1/queue/state"},
 		{http.MethodDelete, "/api/v1/logs/r1"},
 		{http.MethodPost, "/api/v1/logs/r1/n1"},
 		{http.MethodGet, "/api/v1/logs/r1/n1/tail"},
@@ -109,6 +108,8 @@ func TestProxyAllowList_SessionScopesGateProxiedRoutes(t *testing.T) {
 		want   int
 	}{
 		{"reader reads runs", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/runs", http.StatusNoContent},
+		{"reader reads compute queue", []string{controller.ScopeRunsRead}, http.MethodGet, "/api/v1/queue/state", http.StatusNoContent},
+		{"scopeless session cannot read compute queue", nil, http.MethodGet, "/api/v1/queue/state", http.StatusForbidden},
 		{"reader cannot cancel", []string{controller.ScopeRunsRead}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusForbidden},
 		{"operator cancels", []string{controller.ScopeRunsControl}, http.MethodPost, "/api/v1/runs/r1/cancel", http.StatusNoContent},
 		{"operator cannot delete", []string{controller.ScopeRunsControl}, http.MethodDelete, "/api/v1/runs/r1", http.StatusForbidden},

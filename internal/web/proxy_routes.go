@@ -23,6 +23,7 @@ var proxyRoutes = []proxyRoute{
 	{"GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", controller.ScopeRunsRead},
 	{"GET /api/v1/approvals/pending", controller.ScopeRunsRead},
 	{"GET /api/v1/agents", controller.ScopeRunsRead},
+	{"GET /api/v1/queue/state", controller.ScopeRunsRead},
 	{"GET /api/v1/trends", controller.ScopeRunsRead},
 	{"GET /api/v1/pipelines", controller.ScopeRunsRead},
 	{"POST /api/v1/triggers", controller.ScopeRunsWrite},
