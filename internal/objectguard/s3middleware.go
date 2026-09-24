@@ -26,6 +26,10 @@ func WithBudget(l *Limiter) func(*s3.Options) {
 			return
 		}
 		o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
+			// safety: presigning has no Retry because it sends no billed S3 request.
+			if _, ok := stack.Finalize.Get("Retry"); !ok {
+				return nil
+			}
 			return stack.Finalize.Insert(&budgetMiddleware{limiter: l}, "Retry", middleware.After)
 		})
 	}
