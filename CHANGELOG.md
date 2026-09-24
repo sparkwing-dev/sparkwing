@@ -884,6 +884,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** Fleet groups claim-mode agents with a plain `holder_prefix`
+  under one stable name and uses their own idle polls for liveness. An unrelated
+  credential cannot keep a stale claim's agent marked live.
 - **controller:** Expired zero-byte storage reservations are removed during
   cleanup, so empty artifact uploads leave no permanent reservation rows.
 

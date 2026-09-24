@@ -1696,8 +1696,7 @@ func (s *Server) recordAdvertisedHeadroom(r *http.Request, holderID string, h *c
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && store.NormalizeTeam(p.Team) != "" {
 		team = store.NormalizeTeam(p.Team)
 	}
-	name, _ := holderName(holderID)
-	s.runnerHeadroom.record(name, runnerHeadroom{
+	s.runnerHeadroom.record(presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(holderID)}, runnerHeadroom{
 		Team:        team,
 		Cores:       h.Cores,
 		MemoryBytes: h.MemoryBytes,

@@ -27,8 +27,8 @@ func TestQueueStateShowsOnlyTheCallersTeamsRunners(t *testing.T) {
 	}
 	srv := New(st, nil)
 	now := time.Now()
-	srv.runnerHeadroom.record("operator-box", runnerHeadroom{Team: store.DefaultTeam, Cores: 4, UpdatedAt: now})
-	srv.runnerHeadroom.record("team-b-box", runnerHeadroom{Team: "team-b", Cores: 2, UpdatedAt: now})
+	srv.runnerHeadroom.record(presenceKey{name: "operator-box"}, runnerHeadroom{Team: store.DefaultTeam, Cores: 4, UpdatedAt: now})
+	srv.runnerHeadroom.record(presenceKey{name: "team-b-box"}, runnerHeadroom{Team: "team-b", Cores: 2, UpdatedAt: now})
 
 	view := func(team store.Team) []string {
 		t.Helper()

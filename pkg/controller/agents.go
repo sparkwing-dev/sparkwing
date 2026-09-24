@@ -222,27 +222,17 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type holderInfo struct {
-		name, kind string
-		lastSeenNs int64
-		activeRuns map[string]struct{}
+		name, kind, tokenPrefix string
+		lastSeenNs              int64
+		activeRuns              map[string]struct{}
 	}
 	byHolder := map[string]*holderInfo{}
 
 	for _, claim := range claims {
-		parts := strings.SplitN(claim.ClaimedBy, ":", 3)
-		if len(parts) < 2 {
+		name, kind := holderName(claim.ClaimedBy)
+		if name == "" {
 			continue
 		}
-		kind := ""
-		switch parts[0] {
-		case "runner":
-			kind = "agent"
-		case "pod":
-			kind = "pool"
-		default:
-			kind = parts[0]
-		}
-		name := parts[1]
 		key := kind + ":" + name
 
 		h, ok := byHolder[key]
@@ -254,7 +244,10 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			}
 			byHolder[key] = h
 		}
-		h.lastSeenNs = max(h.lastSeenNs, claim.LastSeen.UnixNano())
+		if seen := claim.LastSeen.UnixNano(); seen >= h.lastSeenNs {
+			h.lastSeenNs = seen
+			h.tokenPrefix = claim.TokenPrefix
+		}
 		if claim.Status != "done" {
 			h.activeRuns[claim.RunID] = struct{}{}
 		}
@@ -280,11 +273,14 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			ActiveJobs:    active,
 			MaxConcurrent: 0,
 		}
-		if presence, ok := s.runnerPresence.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+		if presence, ok := s.runnerPresence.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Capabilities = presence.Labels
 			agent.MaxConcurrent = presence.MaxConcurrent
+			if presence.UpdatedAt.UnixNano() > h.lastSeenNs {
+				agent.LastSeen = presence.UpdatedAt.UTC().Format(time.RFC3339)
+			}
 		}
-		if hr, ok := s.runnerHeadroom.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+		if hr, ok := s.runnerHeadroom.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Headroom = &AgentHeadroom{
 				Cores:       hr.Cores,
 				MemoryBytes: hr.MemoryBytes,
