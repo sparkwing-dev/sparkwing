@@ -57,14 +57,17 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	}
 	instructions := dockerfileInstructions(runnerDockerfile)
 	const goVersion = "1.26.6"
-	const goImage = "golang:" + goVersion + "-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83"
-	const alpineImage = "alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+	const buildImage = "golang:" + goVersion + "-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83"
+	const goImage = "golang:" + goVersion + "-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36"
+	const runtimeImage = "debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251"
 	for _, required := range []string{
-		"FROM --platform=$BUILDPLATFORM " + goImage + " AS build",
-		"FROM " + alpineImage + " AS runtime",
+		"FROM --platform=$BUILDPLATFORM " + buildImage + " AS build",
+		"FROM " + runtimeImage + " AS runtime",
 		"ARG SPARKWING_IMAGE_REFRESH=local",
-		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client procps-ng",
+		"RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends bash ca-certificates coreutils curl git gzip jq make openssh-client procps tar unzip xz-utils && rm -rf /var/lib/apt/lists/*",
 		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
+		"COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh",
+		"RUN /bin/sh /usr/local/bin/check-runner-image.sh",
 		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
 		"COPY --from=build /out/" + k8s.JobBinary + " /usr/local/bin/" + k8s.JobBinary,
 		`ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]`,
@@ -80,9 +83,19 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	if !strings.Contains(string(body), `go-version: "`+goVersion+`"`) {
 		t.Errorf("release workflow Go version does not match runner toolchain %s", goVersion)
 	}
+	if !strings.Contains(string(body), "cp .release-tools/bin/build-release-images.sh .release-tools/bin/check-runner-image.sh bin/") {
+		t.Error("release workflow does not copy the runner image check into the build context")
+	}
+	check, err := os.ReadFile("../../bin/check-runner-image.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(check), `"$(git --exec-path)/git-daemon"`) {
+		t.Error("runner image check does not verify the git daemon used by the Kubernetes end-to-end fixture")
+	}
 }
 
-func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
+func TestReleaseWorkflowRefreshesPackagesPerAttempt(t *testing.T) {
 	t.Parallel()
 
 	body, err := os.ReadFile("../../.github/workflows/release.yaml")
@@ -90,7 +103,7 @@ func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(body), `SPARKWING_IMAGE_REFRESH: ${{ github.run_id }}-${{ github.run_attempt }}`) {
-		t.Error("release workflow does not refresh Alpine packages for each image build attempt")
+		t.Error("release workflow does not refresh packages for each image build attempt")
 	}
 
 	for _, path := range []string{"../../build/Dockerfile.binary", "../../build/Dockerfile.runner"} {
@@ -104,7 +117,10 @@ func TestReleaseWorkflowRefreshesAlpinePackagesPerAttempt(t *testing.T) {
 			if !containsDockerInstruction(instructions, "ARG SPARKWING_IMAGE_REFRESH=local") {
 				t.Error("image refresh contract does not declare SPARKWING_IMAGE_REFRESH")
 			}
-			const refresh = "RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache"
+			refresh := "RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apk upgrade --no-cache"
+			if filepath.Base(path) == "Dockerfile.runner" {
+				refresh = "RUN test -n \"${SPARKWING_IMAGE_REFRESH}\" && apt-get update && apt-get upgrade -y"
+			}
 			var found bool
 			for _, instruction := range instructions {
 				found = found || strings.HasPrefix(instruction, refresh)

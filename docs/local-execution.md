@@ -727,6 +727,16 @@ the outer pool's `runner.labels`, and the Job reports the configured set as its
 runtime runner metadata. Saturated or offline agents therefore spill eligible
 work to Kubernetes without weakening placement requirements.
 
+The published runner image uses Debian slim, so downloaded Linux Go and Node
+toolchains can use glibc. It supplies bash, coreutils, git, OpenSSH client,
+CA certificates, curl, tar, gzip, xz, make, jq, and unzip for pipeline steps.
+It also carries the Go version needed to compile Sparkwing pipelines on a
+cache miss. Pipeline steps install other language toolchains at the version
+their project needs; `.CacheDir(...)` can retain downloaded dependencies
+between runs. The chart can persist `GOCACHE` and `GOMODCACHE` on a PVC with
+`runner.goCache.persistence.enabled`. The image runs as UID/GID 65534 and
+keeps the runner entrypoint for credential setup.
+
 Before it creates the Job the dispatcher claims that one node for itself with
 its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands
 the awarded claim to the pod as `SPARKWING_NODE_CLAIM_HOLDER`,

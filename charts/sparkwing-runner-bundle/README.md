@@ -368,7 +368,8 @@ enabled component to images built from one Sparkwing revision.
 > The runner Deployment's command is
 > `/usr/local/bin/runner-entrypoint.sh /usr/local/bin/sparkwing-runner`,
 > so the runner image must be built from `build/Dockerfile.runner`
-> (git + Go toolchain + the netrc-seeding entrypoint). Point
+> (Debian slim, the pipeline compilation Go toolchain, bash, common CLI
+> tools, and the netrc-seeding entrypoint). Point
 > `runner.image.repository` at an image built from that Dockerfile.
 
 
