@@ -106,6 +106,7 @@ func TestSequenceRangeAccountsForEveryLineAndRejectsFalseRanges(t *testing.T) {
 		body string
 		end  string
 	}{
+		{"", "2"},
 		{"one\ntwo\n", "3"},
 		{"one\ntwo\nthree\n", "2"},
 		{"one\ntwo\nthree\n", "257"},

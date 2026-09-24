@@ -654,12 +654,12 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
-	if len(body) == 0 {
-		w.WriteHeader(http.StatusNoContent)
+	if numbered && seq.end > seq.seq && (len(body) == 0 || body[len(body)-1] != '\n' || int64(bytes.Count(body, []byte{'\n'})) != seq.end-seq.seq+1) {
+		http.Error(w, "log sequence range does not match newline-delimited records", http.StatusBadRequest)
 		return
 	}
-	if numbered && seq.end > seq.seq && (body[len(body)-1] != '\n' || int64(bytes.Count(body, []byte{'\n'})) != seq.end-seq.seq+1) {
-		http.Error(w, "log sequence range does not match newline-delimited records", http.StatusBadRequest)
+	if len(body) == 0 {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
