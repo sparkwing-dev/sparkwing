@@ -461,12 +461,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
 | `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -575,11 +575,12 @@ The slot routes under `/api/v1/concurrency/{key}/` -- `acquire`, `heartbeat`,
 run the request names, so a pipeline that declares a concurrency group or a
 memoized node runs on the runner scope set. `acquire` and `resolve` name their
 run outright; `heartbeat`, `release` and `holder` name a holder, and the
-controller reads the run off that holder's row. A caller holding no live claim
-on that run gets `403 claim_required`, and so does a holder whose lease has
+controller reads the run off that holder's row. `cancel-waiter` names its run
+in the request body. A caller holding no live claim on that run gets
+`403 claim_required`, and so does a holder whose lease has
 already lapsed, because a lapsed row proves nothing about who is calling. The
-two routes that act on rows another run owns, `force-release` and
-`cancel-waiter`, stay `admin`. `admin` bypasses all of it.
+`force-release` can drop another run's superseded holder and stays `admin`.
+`admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
 read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and

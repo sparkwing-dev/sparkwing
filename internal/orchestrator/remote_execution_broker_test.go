@@ -133,7 +133,6 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 		"/api/v1/agents/desk/heartbeat",
 		"/api/v1/tokens",
 		"/api/v1/services",
-		"/api/v1/concurrency/node-run-1-node-a/acquire",
 		"/api/v1/secrets/DEPLOY_KEY?run=run-2",
 	} {
 		method := http.MethodPost
@@ -176,6 +175,78 @@ func TestRemoteExecutionBrokerBindsExactAttemptAndDeniesSupervisorRoutes(t *test
 		start.body["reservation_id"] != fence.ReservationID || start.body["claim_generation"] != float64(23) ||
 		start.body["attempt_ordinal"] != float64(2) {
 		t.Fatalf("attempt body = %#v", start.body)
+	}
+}
+
+func TestRemoteExecutionBrokerMemoizedSlot(t *testing.T) {
+	var forwarded []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		forwarded = append(forwarded, r.Method+" "+r.URL.EscapedPath())
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/acquire"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"kind":"granted","granted":true,"holder_id":"run-1/node-a"}`)
+		case strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/release"):
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/cancel-waiter"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"cancelled":true}`)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer upstream.Close()
+	broker, err := startRemoteExecutionBroker(upstream.URL, "", "team-token", "run-1", "node-a", store.NodeClaimFence{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close()
+	key := "memo:ck:hash"
+	child := NewHTTPConcurrency(broker.URL(), nil, broker.capability, time.Minute)
+	got, err := child.AcquireSlot(context.Background(), store.AcquireSlotRequest{Key: key, RunID: "run-1", NodeID: "node-a", HolderID: "run-1/node-a", CacheKeyHash: "hash"})
+	if err != nil || got.Kind != store.AcquireGranted {
+		t.Fatalf("memo acquire = %+v, %v", got, err)
+	}
+	if _, _, err := child.HeartbeatSlot(context.Background(), key, "run-1/node-a", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.ReleaseSlot(context.Background(), key, "run-1/node-a", "success", "run-1/node-a", "hash", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled, err := child.CancelWaiter(context.Background(), key, "run-1", "node-a"); err != nil || !cancelled {
+		t.Fatalf("cancel own waiter = %v, %v", cancelled, err)
+	}
+	if len(forwarded) != 4 {
+		t.Fatalf("forwarded routes = %v", forwarded)
+	}
+
+	for _, req := range []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/acquire", `{"run_id":"run-2","node_id":"node-a","holder_id":"run-2/node-a"}`},
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/acquire", `{"run_id":"run-1","node_id":"node-b","holder_id":"run-1/node-b"}`},
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/release", `{"holder_id":"run-2/node-a","outcome":"success"}`},
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/heartbeat", `{"holder_id":"run-2/node-a"}`},
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/cancel-waiter", `{"run_id":"run-2","node_id":"node-a"}`},
+		{http.MethodPost, "/api/v1/concurrency/" + key + "/force-release", `{}`},
+	} {
+		r, err := http.NewRequest(req.method, broker.URL()+req.path, strings.NewReader(req.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+broker.capability)
+		resp, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s = %d, want 403", req.method, req.path, resp.StatusCode)
+		}
+	}
+	if len(forwarded) != 4 {
+		t.Fatalf("foreign slot request reached controller: %v", forwarded)
 	}
 }
 

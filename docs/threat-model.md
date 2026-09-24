@@ -31,7 +31,11 @@ broker and the child (`remote_execution_broker.go`, `run_node_remote.go`).
 
 **That capability reaches one node's routes.** The broker proxies the awarded
 run's and node's paths -- start, finish, steps, events, heartbeat, artifacts --
-and answers everything else with `403`, so the child cannot claim work, renew a
+and concurrency acquire, observation, renewal, waiter resolution, waiter
+cancellation, and release
+for that node's holder. The controller resolves concurrency keys in the
+runner token's team, so the same key in another team remains separate. The
+broker answers everything else with `403`, so the child cannot claim work, renew a
 claim, register an executor, or call an administrative route. It also strips
 the claim headers the child sends and stamps the supervisor's own, so the child
 cannot execute against a claim it was not given. The allow-list is
