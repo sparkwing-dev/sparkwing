@@ -27,6 +27,8 @@ import {
   fmtMsCompact,
 } from "@/lib/timeFormat";
 import Tooltip from "@/components/Tooltip";
+import { Sparkline } from "@/components/PipelineOverview";
+import { latestFailedPipelines } from "@/lib/homeTriage";
 
 const POLL_MS = 15000;
 const OVERVIEW_RUN_LIMIT = 1000;
@@ -37,6 +39,7 @@ export default function Home() {
   const [services, setServices] = useState<ServiceStatus[]>([]);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
+  const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
@@ -87,6 +90,11 @@ export default function Home() {
     [runs],
   );
 
+  const failedPipelines = useMemo(
+    () => latestFailedPipelines(runs, includeFeatureBranches),
+    [runs, includeFeatureBranches],
+  );
+
   const anchorLabel =
     ANCHOR_OPTIONS.find((o) => o.ms === anchorMs)?.label ?? "anchor";
 
@@ -129,6 +137,53 @@ export default function Home() {
               anchorLabel={anchorLabel}
             />
           </div>
+
+          <section className="mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
+                Latest failed pipelines
+              </h2>
+              <label className="flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeFeatureBranches}
+                  onChange={(event) => setIncludeFeatureBranches(event.target.checked)}
+                  className="accent-violet-500"
+                />
+                Include feature branches
+              </label>
+            </div>
+            <p className="mb-2 text-[11px] text-[var(--muted)]">
+              Latest main/master run per repository and pipeline in recent history.
+            </p>
+            {failedPipelines.length === 0 ? (
+              <Panel><span className="text-sm text-[var(--muted)]">No latest runs failed in this window.</span></Panel>
+            ) : (
+              <div className="space-y-2">
+                {failedPipelines.map(({ key, repo, pipeline, branch, latest, runs: history }) => (
+                  <Link
+                    key={key}
+                    href={`/runs?run=${encodeURIComponent(latest.id)}`}
+                    className="block rounded-lg border border-red-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
+                  >
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
+                        {repo} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      </span>
+                      <Sparkline runs={history.slice(0, 30)} />
+                      <span className="text-[11px] font-mono text-[var(--muted)]">
+                        {fmtAgo(latest.started_at)}
+                        {now - Date.parse(latest.started_at) > WEEK_MS ? " · older than 7d" : ""}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-red-300" title={latest.error || ""}>
+                      {latest.error || "Failed without a recorded error"}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
 
           <LastDeployCard run={overview.lastDeploy} />
 
@@ -333,7 +388,7 @@ function NeedsAttention({
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-400" />
             <span className="text-sm">
-              Nothing needs attention. Services healthy, no pending approvals.
+              No service issues or pending approvals.
             </span>
           </div>
         </Panel>

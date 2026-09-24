@@ -537,6 +537,12 @@ function PipelineCard({
         </Tooltip>
       </button>
 
+      {row.lastRun?.status === "failed" && row.lastRun.error && (
+        <div className="px-3 pb-2 font-mono text-[11px] text-red-400 truncate" title={row.lastRun.error}>
+          Latest error: {row.lastRun.error}
+        </div>
+      )}
+
       {expanded && (
         <div className="border-t border-[var(--border)] px-3 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -592,7 +598,7 @@ function PipelineCard({
   );
 }
 
-function Sparkline({ runs }: { runs: Run[] }) {
+export function Sparkline({ runs }: { runs: Run[] }) {
   const ordered = [...runs].reverse();
   const filler = Math.max(0, SPARK_SIZE - ordered.length);
   return (
@@ -627,6 +633,9 @@ function RunSummaryTip({ run }: { run: Run }) {
         <span className="text-[var(--muted)]">started </span>
         <span>{fmtFullDate(run.started_at)}</span>
       </div>
+      {run.error && (
+        <div className="max-w-xs break-words text-red-300">{run.error}</div>
+      )}
       {run.finished_at && (
         <div>
           <span className="text-[var(--muted)]">finished </span>
