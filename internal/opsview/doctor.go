@@ -28,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
@@ -120,6 +121,14 @@ type DoctorReport struct {
 	Toolchains []DoctorToolchain `json:"toolchains,omitempty"`
 
 	StandaloneStores []DoctorStandaloneStore `json:"standalone_stores,omitempty"`
+
+	// LegacySettings are settings files config.yaml replaced that are still in
+	// the config directory after doctor's migration attempt, and replaced path
+	// variables still set.
+	LegacySettings []userconfig.Leftover `json:"legacy_settings,omitempty"`
+
+	// LegacySettingsError is why the migration left them.
+	LegacySettingsError string `json:"legacy_settings_error,omitempty"`
 }
 
 // DoctorStandaloneStore is one runs store written by pipeline binaries that
@@ -296,7 +305,8 @@ func (r DoctorReport) Clean() bool {
 		len(r.QuarantinedLedgers) == 0 &&
 		len(r.PoisonedProfiles) == 0 &&
 		r.InstallConflict == nil &&
-		r.ShadowedHooks == nil
+		r.ShadowedHooks == nil &&
+		len(r.LegacySettings) == 0
 }
 
 func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
@@ -305,6 +315,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		return report, err
 	}
 	home = p.Root
+	diagnoseLegacySettings(dryRun, &report)
 	diagnoseToolchains(p, &report)
 	diagnoseStandaloneStores(p, &report)
 	if err := validateDoctorMutationPaths(p, nil, false); err != nil {
@@ -772,6 +783,15 @@ func standaloneRunCount(path string) (int, *time.Time, bool) {
 	}
 	at := time.Unix(0, oldest.Int64).UTC()
 	return runs, &at, true
+}
+
+func diagnoseLegacySettings(dryRun bool, report *DoctorReport) {
+	if !dryRun {
+		if err := userconfig.MigrateLegacy(); err != nil {
+			report.LegacySettingsError = err.Error()
+		}
+	}
+	report.LegacySettings = userconfig.Leftovers()
 }
 
 func diagnoseInstallConflict(report *DoctorReport) {
@@ -1542,6 +1562,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		}
 	}
 	fmt.Fprintf(w, "standalone_stores\t%d\t%d\n", len(r.StandaloneStores), standaloneRuns)
+	fmt.Fprintf(w, "legacy_settings\t%d\n", len(r.LegacySettings))
 	return nil
 }
 
@@ -1562,6 +1583,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		return nil
 	}
 	renderInstallConflict(w, r)
+	renderLegacySettings(w, r)
 	renderDaemonSection(w, r)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if n := len(r.PermissionRepairs); n > 0 {
@@ -1833,6 +1855,21 @@ func renderInstallConflict(w io.Writer, r DoctorReport) {
 	fmt.Fprintf(w, "  which one a caller gets depends on whose PATH resolved it: an interactive shell and a launchd, systemd, or cron job order theirs differently, so the same command can be two different builds\n")
 	fmt.Fprintf(w, "  each install keeps its own version memory under the sparkwing home, so they cannot rewrite each other's records -- but their outputs are evidence from different builds\n")
 	fmt.Fprintf(w, "  to resolve: keep one and retire the rest with the guidance above, or point each job at the absolute path of the copy you mean\n")
+}
+
+func renderLegacySettings(w io.Writer, r DoctorReport) {
+	if len(r.LegacySettings) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nwarning: %d legacy setting(s) sparkwing no longer reads; each belongs in config.yaml\n", len(r.LegacySettings))
+	for _, l := range r.LegacySettings {
+		fmt.Fprintf(w, "  %s -> %s\n", l.Name, l.MovesTo)
+	}
+	if r.LegacySettingsError != "" {
+		fmt.Fprintf(w, "  %s\n", strings.ReplaceAll(r.LegacySettingsError, "\n", "\n  "))
+	} else if r.DryRun {
+		fmt.Fprintln(w, "  doctor without --dry-run moves each file into config.yaml")
+	}
 }
 
 func renderToolchains(w io.Writer, r DoctorReport) {
