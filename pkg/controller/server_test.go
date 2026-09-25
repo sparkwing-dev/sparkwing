@@ -57,6 +57,30 @@ func TestController_Health(t *testing.T) {
 	}
 }
 
+func TestController_HealthHidesDatabaseErrors(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("health status=%d, want 503", resp.StatusCode)
+	}
+	var body struct {
+		Status   string   `json:"status"`
+		Problems []string `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "degraded" || len(body.Problems) != 1 || body.Problems[0] != "db: unavailable" {
+		t.Fatalf("public health exposed database failure details: %+v", body)
+	}
+}
+
 func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

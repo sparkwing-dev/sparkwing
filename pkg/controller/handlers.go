@@ -35,10 +35,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := s.store.ListRuns(r.Context(), store.RunFilter{Limit: 1}); err != nil {
+		s.logger.Error("controller health database check failed", "err", err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",
 			"auth":     authState,
-			"problems": []string{"db: " + err.Error()},
+			"problems": []string{"db: unavailable"},
 		})
 		return
 	}
