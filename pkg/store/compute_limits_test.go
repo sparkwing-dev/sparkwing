@@ -273,6 +273,62 @@ func TestRunsPerHourGuardRefusesAMeteredPrincipalPastTheCap(t *testing.T) {
 	}
 }
 
+func TestPerPrincipalGuardsUseTheRunsTeamForMetering(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	const principal = "agent:shared"
+	meteredTeamClaimant(t, acme, principal)
+	if _, _, err := globex.CreateTokenWith(ctx, principal, store.TokenKindRunner,
+		[]string{"nodes.claim"}, 0, time.Now(), store.TokenOptions{}); err != nil {
+		t.Fatalf("mint globex's unmetered token: %v", err)
+	}
+	setLimit(t, s, store.ComputeLimitNodesPerRun, 1)
+	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
+	create := store.WithCreatingPrincipal(ctx, principal)
+	if err := globex.CreateRun(create, store.Run{ID: "globex-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("create globex's first run: %v", err)
+	}
+	for _, nodeID := range []string{"build", "test"} {
+		if err := s.CreateNode(ctx, store.Node{RunID: "globex-1", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatalf("unmetered globex node %s: %v", nodeID, err)
+		}
+	}
+	if err := globex.CreateRun(create, store.Run{ID: "globex-2", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("unmetered globex's second run: %v", err)
+	}
+}
+
+func TestRunsPerHourGuardCountsSharedPrincipalWithinOneTeam(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	const principal = "agent:shared"
+	meteredTeamClaimant(t, acme, principal)
+	meteredTeamClaimant(t, globex, principal)
+	setLimit(t, s, store.ComputeLimitRunsPerHour, 1)
+	create := store.WithCreatingPrincipal(ctx, principal)
+	for _, tc := range []struct {
+		team *store.Tenant
+		id   string
+	}{{acme, "acme-1"}, {globex, "globex-1"}} {
+		if err := tc.team.CreateRun(create, store.Run{ID: tc.id, Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatalf("create %s: %v", tc.id, err)
+		}
+	}
+	err := globex.CreateRun(create, store.Run{ID: "globex-2", Pipeline: "demo", Status: "running", StartedAt: time.Now()})
+	refused := limitRefusal(t, err, store.ComputeLimitRunsPerHour)
+	if refused.Observed != 1 {
+		t.Fatalf("globex refusal counted %d runs, want its own one run", refused.Observed)
+	}
+	setLimit(t, s, store.ComputeLimitRunsPerHour, 0)
+	setLimit(t, s, store.ComputeLimitGlobalRunsPerHour, 2)
+	err = globex.CreateRun(create, store.Run{ID: "globex-2", Pipeline: "demo", Status: "running", StartedAt: time.Now()})
+	limitRefusal(t, err, store.ComputeLimitGlobalRunsPerHour)
+}
+
 func TestRunsPerHourGuardChecksFirstAttributionOfPendingRun(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
@@ -353,6 +409,42 @@ func TestConcurrentRunnerGuardRefusesTheSecondClaimForOnePrincipal(t *testing.T)
 	if usage.Runners != 1 || usage.ByPrincipal["agent:cloud"] != 1 {
 		t.Fatalf("usage = %+v, want one runner for the claiming principal", usage)
 	}
+}
+
+func TestConcurrentRunnerGuardCountsSharedPrincipalWithinOneTeam(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	const principal = "agent:shared"
+	acmeRunner := meteredTeamClaimant(t, acme, principal)
+	globexRunner := meteredTeamClaimant(t, globex, principal)
+	for _, tc := range []struct {
+		team *store.Tenant
+		id   string
+	}{{acme, "acme-1"}, {globex, "globex-1"}, {globex, "globex-2"}} {
+		if _, err := tc.team.GrantCredits(ctx, store.CreditGrantPaid,
+			1000*store.MicroCreditsPerCredit, "pay_"+tc.id, "admin"); err != nil {
+			t.Fatalf("fund %s: %v", tc.id, err)
+		}
+		readyTeamNode(t, s, tc.team, tc.id, "build")
+	}
+	setLimit(t, s, store.ComputeLimitConcurrentRunners, 1)
+	if _, err := s.ClaimNextReadyNode(ctx, acmeRunner, "pod-a", time.Minute, nil); err != nil {
+		t.Fatalf("acme's first claim: %v", err)
+	}
+	if _, err := s.ClaimNextReadyNode(ctx, globexRunner, "pod-g1", time.Minute, nil); err != nil {
+		t.Fatalf("globex's first claim with a shared principal: %v", err)
+	}
+	_, err := s.ClaimNextReadyNode(ctx, globexRunner, "pod-g2", time.Minute, nil)
+	refused := limitRefusal(t, err, store.ComputeLimitConcurrentRunners)
+	if refused.Observed != 1 {
+		t.Fatalf("globex refusal counted %d runners, want its own one runner", refused.Observed)
+	}
+	setLimit(t, s, store.ComputeLimitConcurrentRunners, 0)
+	setLimit(t, s, store.ComputeLimitGlobalRunners, 2)
+	_, err = s.ClaimNextReadyNode(ctx, globexRunner, "pod-g2", time.Minute, nil)
+	limitRefusal(t, err, store.ComputeLimitGlobalRunners)
 }
 
 func TestGlobalRunnerGuardCountsEveryPrincipal(t *testing.T) {

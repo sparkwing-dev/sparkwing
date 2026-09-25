@@ -914,6 +914,10 @@ unlock.
 
 ### Fixed
 
+- **controller:** Per-principal runner, node and hourly run guards now check
+  metering and usage within one team. Teams sharing a principal name no longer
+  spend each other's runner or hourly allowance; global caps still count all teams.
+
 - **controller:** GitHub webhook and GitHub App runs now enter the pending run
   state when their triggers are accepted, allowing claimed warm runners to
   fetch signed cache binaries before the pipeline starts.

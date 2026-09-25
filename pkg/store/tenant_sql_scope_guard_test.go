@@ -16,6 +16,8 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
 	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
 	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
@@ -252,7 +254,6 @@ var unportedSQL = []string{
 	"(*Store).chargeStorageTx",
 	"(*Store).claimReadyNodeForExecutorTx",
 	"(*Store).createAgentLossRetryTx",
-	"(*Store).enforceClaimComputeLimitsTx",
 	"(*Store).eventKindPresent",
 	"(*Store).executorEligibility",
 	"(*Store).executorEligibilityTx",
@@ -306,7 +307,6 @@ var unportedSQL = []string{
 	"creditExhaustionAnchorTx",
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
-	"enforceNodesPerRunTx",
 	"gatherRunAnnotations",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
@@ -315,12 +315,10 @@ var unportedSQL = []string{
 	"nodeChargeTx",
 	"nodeExecutorOfferCountTx",
 	"persistAgentLossRetryNodeSourceTx",
-	"principalMetered",
 	"recentPaidGrantsMicro",
 	"rehashSessions",
 	"runElapsedSecondsTx",
 	"runPrincipalTx",
-	"runsPerHourRefusal",
 	"scrubSecretInputHashes",
 	"selectTokensByPrefixTx",
 	"snapshotAgentLossRetryNodesTx",
@@ -333,7 +331,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 213
+const unportedSQLSize = 209
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

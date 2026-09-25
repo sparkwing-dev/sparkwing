@@ -416,19 +416,11 @@ func (s *Store) ComputeAlarmState(ctx context.Context) (runners, alarm int64, er
 // lock the reservation already holds, so two runners polling at once cannot
 // both read a count below the cap and both claim against it.
 func (s *Store) enforceClaimComputeLimitsTx(
-	ctx context.Context, tx *storeTx, limits ComputeLimits, claimant ClaimIdentity, runID string, now time.Time,
+	ctx context.Context, tx *storeTx, team Team, limits ComputeLimits, claimant ClaimIdentity, runID string, now time.Time,
 ) error {
 	if limits.GlobalRunners > 0 {
-		var total int64
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&total); err != nil {
+		if err := globalRunnerRefusal(ctx, tx, limits.GlobalRunners); err != nil {
 			return err
-		}
-		if total >= limits.GlobalRunners {
-			return &ComputeLimitError{
-				Limit: ComputeLimitGlobalRunners, Cap: limits.GlobalRunners,
-				Observed: total, Scope: "controller",
-			}
 		}
 	}
 	if limits.ConcurrentRunners > 0 {
@@ -438,8 +430,8 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 		var held int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0 AND claim_principal = ?`,
-			claimant.Principal).Scan(&held); err != nil {
+			`SELECT COUNT(*) FROM nodes WHERE team = ? AND credit_charged_through > 0 AND claim_principal = ?`,
+			team, claimant.Principal).Scan(&held); err != nil {
 			return err
 		}
 		if held >= derived.Cap {
@@ -459,6 +451,21 @@ func (s *Store) enforceClaimComputeLimitsTx(
 				Limit: ComputeLimitRunSeconds, Cap: limits.RunSeconds,
 				Observed: elapsed, Scope: "run " + runID, Principal: claimant.Principal,
 			}
+		}
+	}
+	return nil
+}
+
+func globalRunnerRefusal(ctx context.Context, q rowQuerier, limit int64) error {
+	var total int64
+	if err := q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM nodes WHERE credit_charged_through > 0`).Scan(&total); err != nil {
+		return err
+	}
+	if total >= limit {
+		return &ComputeLimitError{
+			Limit: ComputeLimitGlobalRunners, Cap: limit,
+			Observed: total, Scope: "controller",
 		}
 	}
 	return nil
@@ -486,7 +493,7 @@ func runElapsedSecondsTx(ctx context.Context, tx *storeTx, runID string, now tim
 // safety: a re-created row is the caller guaranteeing the row exists before it
 // writes a terminal status, so it is measured against nothing; only a row the
 // statement would actually insert counts.
-func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string) error {
+func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) error {
 	limits, err := computeLimitsTx(ctx, tx)
 	if err != nil {
 		return err
@@ -495,7 +502,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 		return nil
 	}
 	present, err := rowPresentTx(ctx, tx,
-		`SELECT 1 FROM nodes WHERE run_id = ? AND node_id = ?`, runID, nodeID)
+		`SELECT 1 FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`, team, runID, nodeID)
 	if err != nil || present {
 		return err
 	}
@@ -505,7 +512,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 	}
 	ceiling, guard := limits.GlobalNodesPerRun, ComputeLimitGlobalNodesPerRun
 	if limits.NodesPerRun > 0 {
-		metered, err := principalMetered(ctx, tx, principal)
+		metered, err := principalMetered(ctx, tx, team, principal)
 		if err != nil {
 			return err
 		}
@@ -521,7 +528,7 @@ func enforceNodesPerRunTx(ctx context.Context, tx *storeTx, runID, nodeID string
 	}
 	var nodes int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM nodes WHERE run_id = ?`, runID).Scan(&nodes); err != nil {
+		`SELECT COUNT(*) FROM nodes WHERE team = ? AND run_id = ?`, team, runID).Scan(&nodes); err != nil {
 		return err
 	}
 	if nodes >= ceiling {
@@ -558,25 +565,25 @@ func enforceRunsPerHourTx(ctx context.Context, tx *storeTx, team Team, runID, pr
 		}
 		// safety: a pending run already spent the global slot; its first claimant still
 		// spends a metered principal's hourly slot before it takes ownership.
-		return runsPerHourRefusal(ctx, tx, ComputeLimits{RunsPerHour: limits.RunsPerHour}, principal, now)
+		return runsPerHourRefusal(ctx, tx, team, ComputeLimits{RunsPerHour: limits.RunsPerHour}, principal, now)
 	}
-	return runsPerHourRefusal(ctx, tx, limits, principal, now)
+	return runsPerHourRefusal(ctx, tx, team, limits, principal, now)
 }
 
 func runsPerHourRefusal(
-	ctx context.Context, q rowQuerier, limits ComputeLimits, principal string, now time.Time,
+	ctx context.Context, q rowQuerier, team Team, limits ComputeLimits, principal string, now time.Time,
 ) error {
 	since := now.Add(-time.Hour).UnixNano()
 	if limits.RunsPerHour > 0 {
-		metered, err := principalMetered(ctx, q, principal)
+		metered, err := principalMetered(ctx, q, team, principal)
 		if err != nil {
 			return err
 		}
 		if metered {
 			var runs int64
 			if err := q.QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM runs WHERE created_principal = ? AND created_at >= ?`,
-				principal, since).Scan(&runs); err != nil {
+				`SELECT COUNT(*) FROM runs WHERE team = ? AND created_principal = ? AND created_at >= ?`,
+				team, principal, since).Scan(&runs); err != nil {
 				return err
 			}
 			if runs >= limits.RunsPerHour {
@@ -588,16 +595,21 @@ func runsPerHourRefusal(
 		}
 	}
 	if limits.GlobalRunsPerHour > 0 {
-		var runs int64
-		if err := q.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {
-			return err
-		}
-		if runs >= limits.GlobalRunsPerHour {
-			return &ComputeLimitError{
-				Limit: ComputeLimitGlobalRunsPerHour, Cap: limits.GlobalRunsPerHour,
-				Observed: runs, Scope: "controller",
-			}
+		return globalRunsPerHourRefusal(ctx, q, limits.GlobalRunsPerHour, since)
+	}
+	return nil
+}
+
+func globalRunsPerHourRefusal(ctx context.Context, q rowQuerier, limit, since int64) error {
+	var runs int64
+	if err := q.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM runs WHERE created_at >= ?`, since).Scan(&runs); err != nil {
+		return err
+	}
+	if runs >= limit {
+		return &ComputeLimitError{
+			Limit: ComputeLimitGlobalRunsPerHour, Cap: limit,
+			Observed: runs, Scope: "controller",
 		}
 	}
 	return nil
@@ -634,12 +646,12 @@ func runPrincipalTx(ctx context.Context, tx *storeTx, runID string) (string, err
 
 // safety: metering follows the operator's token marker, so a principal holding
 // no metered token is local work the per-principal guards leave alone.
-func principalMetered(ctx context.Context, q rowQuerier, principal string) (bool, error) {
+func principalMetered(ctx context.Context, q rowQuerier, team Team, principal string) (bool, error) {
 	if principal == "" {
 		return false, nil
 	}
 	return rowPresentTx(ctx, q,
-		`SELECT 1 FROM tokens WHERE principal = ? AND metered != 0 LIMIT 1`, principal)
+		`SELECT 1 FROM tokens WHERE team = ? AND principal = ? AND metered != 0 LIMIT 1`, team, principal)
 }
 
 // safety: the create-side guards count runs and nodes, which no claim reads, so

@@ -1939,7 +1939,7 @@ func (s *Store) reserveNodeCreditsTx(
 		return err
 	}
 	if limits.Any() {
-		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+		if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
 			return err
 		}
 	}
