@@ -31,8 +31,8 @@ func withStdin(t *testing.T, body string) {
 
 func profilesFixturePath(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
-	t.Setenv("SPARKWING_PROFILES", path)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", path)
 	return path
 }
 

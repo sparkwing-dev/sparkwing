@@ -82,7 +82,7 @@ type Config struct {
 	Defaults Defaults `yaml:"defaults,omitempty"`
 
 	// Profiles maps profile name to its surface bundle. The same
-	// shape as ~/.config/sparkwing/profiles.yaml's profiles map;
+	// shape as the profiles section of ~/.config/sparkwing/config.yaml;
 	// project profiles get referenced from inside the project
 	// (pipeline.profile, defaults.profile), user profiles from the
 	// CLI (--profile).
@@ -98,7 +98,7 @@ type Config struct {
 type Defaults struct {
 	// Profile names the profile that applies when neither --profile
 	// nor pipeline.profile is set. The name resolves against
-	// Config.Profiles first and the user's profiles.yaml second, so a
+	// Config.Profiles first and the user's config.yaml second, so a
 	// repo can default to a connection whose token stays out of the
 	// checkout. Empty means "no default" -- a pipeline without its own
 	// profile: still runs (against the sqlite-only test/dev shape).

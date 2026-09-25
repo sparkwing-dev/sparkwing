@@ -10,6 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func runFleet(args []string) error {
@@ -38,13 +39,9 @@ func runFleetInit(args []string) error {
 		}
 		return err
 	}
-	path := os.Getenv(fleet.PathEnv)
-	var err error
-	if path == "" {
-		path, err = fleet.DefaultPath()
-		if err != nil {
-			return err
-		}
+	path, err := userconfig.Path()
+	if err != nil {
+		return err
 	}
 	cfg := fleet.Config{Local: fleet.Local{MaxConcurrent: 1, Contribution: "50%,50%"}}
 	if *tailnet {
@@ -68,7 +65,7 @@ func runFleetInit(args []string) error {
 	if err := fleet.Create(path, cfg, fleet.LocalTailscaleIPs); err != nil {
 		return fmt.Errorf("fleet init: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "Created %s\n", path)
+	fmt.Fprintf(os.Stdout, "Wrote the fleet section of %s\n", path)
 	return nil
 }
 

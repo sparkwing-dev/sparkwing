@@ -12,7 +12,7 @@ import (
 
 func writePublishProfiles(t *testing.T, cachePath string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
 		"  team:\n" +
 		"    secrets:\n      type: none\n" +
@@ -22,7 +22,7 @@ func writePublishProfiles(t *testing.T, cachePath string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestResolveArtifactStoreReadsTheNamedProfile(t *testing.T) {
@@ -45,7 +45,7 @@ func TestResolveArtifactStoreReadsTheNamedProfile(t *testing.T) {
 }
 
 func TestResolveArtifactStoreReportsAnS3ProfileAsAnS3URL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
 		"  team:\n" +
 		"    secrets:\n      type: none\n" +
@@ -56,7 +56,7 @@ func TestResolveArtifactStoreReportsAnS3ProfileAsAnS3URL(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 
 	p, err := resolveProfile("team")
 	if err != nil {

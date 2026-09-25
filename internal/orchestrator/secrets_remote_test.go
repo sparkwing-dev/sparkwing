@@ -38,16 +38,17 @@ func TestApplySecretsProfileOverride_NormalReadsRemoteProfile(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	yaml := fmt.Sprintf(`default: stage
-profiles:
+	yaml := fmt.Sprintf(`profiles:
   stage:
     controller:
       url: %s
       token: t-stage
 `, srv.URL)
-	if err := os.WriteFile(filepath.Join(cfgDir, "profiles.yaml"), []byte(yaml), 0o600); err != nil {
-		t.Fatalf("write profiles.yaml: %v", err)
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
 	}
+	t.Setenv("SPARKWING_CONFIG", cfgPath)
 	t.Setenv("SPARKWING_SECRETS_PROFILE", "stage")
 
 	var opts Options
@@ -71,14 +72,14 @@ profiles:
 }
 
 func TestApplySecretsProfileOverride_LocalOnlyDoesNotOpenRemoteProfile(t *testing.T) {
-	profiles := filepath.Join(t.TempDir(), "profiles.yaml")
+	profiles := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(profiles, []byte(`profiles:
   dead:
     controller: { url: http://127.0.0.1:1 }
 `), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", profiles)
+	t.Setenv("SPARKWING_CONFIG", profiles)
 	t.Setenv("SPARKWING_SECRETS_PROFILE", "dead")
 
 	opts := Options{LocalOnly: true}
@@ -97,13 +98,14 @@ func TestRemoteSecretSource_BadProfileErrors(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmpHome, ".config", "sparkwing"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	yaml := `default: only
-profiles:
+	yaml := `profiles:
   only: {}
 `
-	if err := os.WriteFile(filepath.Join(tmpHome, ".config", "sparkwing", "profiles.yaml"), []byte(yaml), 0o600); err != nil {
+	cfgPath := filepath.Join(tmpHome, ".config", "sparkwing", "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	t.Setenv("SPARKWING_CONFIG", cfgPath)
 
 	if _, err := remoteSecretSource("", ""); err == nil {
 		t.Fatal("empty profile name must error")

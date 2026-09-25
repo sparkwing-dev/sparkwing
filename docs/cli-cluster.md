@@ -46,7 +46,7 @@ sparkwing cluster agents list --profile prod
 Inspect the controller's fleet view
 
 Hits GET /api/v1/agents on the selected profile's controller.
-Prints the caller's team's executor registrations, including idle and
+Prints persisted executor registrations, including idle and
 offline agents and gateways, plus recent legacy claim-only runners.
 
 ### Subcommands
@@ -105,7 +105,7 @@ sparkwing cluster agents enroll --profile prod --name build-gateway --token-pref
 
 Print the controller's known agents
 
-Fetches /api/v1/agents and renders the caller's team's fleet members.
+Fetches /api/v1/agents and renders a table of fleet members.
 Registered executors report their operator-assigned identity,
 kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible
@@ -498,13 +498,14 @@ Mint a runner token, write the config, start the service
 
 Mints a runner token carrying nodes.claim, triggers.claim,
 runs.state, secrets.read and logs.write against the profile's controller,
-writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
 
-The config is written in claim mode, which is the mode that executes work.
-An existing config is never replaced without --force, because the token it
-holds stays live until it is revoked.
+The section is written in claim mode, which is the mode that executes work.
+An existing agent section is never replaced without --force, because the token
+it holds stays live until it is revoked. Every other section of the file is
+kept.
 
 Nothing is minted until the config validates and the machine answers: a
 missing sparkwing-runner, an unreachable service manager, or an unusable
@@ -517,7 +518,7 @@ else this machine's own git credentials. Without it the agent fetches through
 the controller's gitcache proxy.
 
 The command prints the token prefix and the revoke command. The raw token
-reaches only the config file.
+reaches only config.yaml.
 
 ### Flags
 
@@ -529,8 +530,8 @@ reaches only the config file.
 | `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
 | `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
 | `--logs URL` | Logs service URL (default: the profile's logs surface) |
-| `--config PATH` | Agent config to write (default: ~/.config/sparkwing/agent.yaml) |
-| `--force` | Replace an existing agent config |
+| `--config PATH` | config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml) |
+| `--force` | Replace an existing agent section |
 | `--no-service` | Write the config without installing or starting the service |
 | `--profile NAME` | Profile naming the controller to enroll against (required) |
 
@@ -569,7 +570,7 @@ replaces it.
 
 | Flag | Description |
 |---|---|
-| `--config PATH` | Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml) |
+| `--config PATH` | config.yaml whose agent section holds the token (default: ~/.config/sparkwing/config.yaml) |
 | `--no-service` | Revoke the token without touching the service |
 | `--profile NAME` | Profile naming the controller that issued the token (required) |
 
@@ -1051,7 +1052,7 @@ or against a local 'sparkwing serve start' via --profile local.
 
 | Flag | Description |
 |---|---|
-| `--profile PROFILE` | Profile name from profiles.yaml (required) |
+| `--profile PROFILE` | Profile name from config.yaml (required) |
 | `--poll DUR` | Claim poll interval when the queue is empty (default: 1s) |
 | `--heartbeat DUR` | Claim-lease heartbeat cadence (default: 5s) |
 

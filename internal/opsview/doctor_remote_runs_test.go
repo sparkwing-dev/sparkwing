@@ -54,13 +54,13 @@ func seedRunDirHomeAt(t *testing.T, home string, ghostAge time.Duration) (paths.
 func ownHome(t *testing.T, home, profiles string) {
 	t.Helper()
 	t.Setenv("SPARKWING_HOME", home)
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if profiles != "" {
 		if err := os.WriteFile(path, []byte(profiles), 0o600); err != nil {
 			t.Fatalf("write profiles: %v", err)
 		}
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestDiagnose_KeepsRunDirWhenAProfileRecordsRunsElsewhere(t *testing.T) {

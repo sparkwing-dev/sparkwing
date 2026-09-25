@@ -78,7 +78,7 @@ func run(args []string) error {
 	cachePodURL := fs.String("cache-pod-url", os.Getenv("CACHE_POD_URL"),
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
-			"hardcoding it in profiles.yaml. Empty disables the announcement.")
+			"hardcoding it in config.yaml. Empty disables the announcement.")
 	logsURL := fs.String("logs-url", os.Getenv("SPARKWING_LOGS_URL"),
 		"externally-reachable URL of the sparkwing-logs service. Announced via "+
 			"GET /api/v1/services so runners post node log lines to the service that "+

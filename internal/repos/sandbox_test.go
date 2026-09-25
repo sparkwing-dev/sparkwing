@@ -8,7 +8,7 @@ import (
 )
 
 func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
-	t.Setenv("SPARKWING_REPOS", "")
+	t.Setenv("SPARKWING_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	got, err := DefaultPath()
@@ -19,7 +19,7 @@ func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve home: %v", err)
 	}
-	live := filepath.Join(home, ".config", "sparkwing", "repos.yaml")
+	live := filepath.Join(home, ".config", "sparkwing", "config.yaml")
 	if got == live {
 		t.Fatalf("DefaultPath resolved to the developer's own registry %s", live)
 	}
@@ -30,30 +30,30 @@ func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
 
 func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "explicit.yaml")
-	t.Setenv("SPARKWING_REPOS", want)
+	t.Setenv("SPARKWING_CONFIG", want)
 	got, err := DefaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
 	if got != want {
-		t.Errorf("DefaultPath = %q, want the SPARKWING_REPOS value %q", got, want)
+		t.Errorf("DefaultPath = %q, want the SPARKWING_CONFIG value %q", got, want)
 	}
 
-	t.Setenv("SPARKWING_REPOS", "")
+	t.Setenv("SPARKWING_CONFIG", "")
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	got, err = DefaultPath()
 	if err != nil {
 		t.Fatalf("DefaultPath: %v", err)
 	}
-	if want := filepath.Join(xdg, "sparkwing", "repos.yaml"); got != want {
+	if want := filepath.Join(xdg, "sparkwing", "config.yaml"); got != want {
 		t.Errorf("DefaultPath = %q, want %q", got, want)
 	}
 }
 
 func TestAutoRegister_SkipsAScratchCheckoutUnderTempDir(t *testing.T) {
-	registry := filepath.Join(t.TempDir(), "repos.yaml")
-	t.Setenv("SPARKWING_REPOS", registry)
+	registry := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", registry)
 
 	scratch, err := os.MkdirTemp("", "sparkwing-tv-fake-*")
 	if err != nil {
@@ -104,8 +104,8 @@ func TestUnderTempDir(t *testing.T) {
 }
 
 func TestAutoRegister_StillRecordsACheckoutOutsideTempDir(t *testing.T) {
-	registry := filepath.Join(t.TempDir(), "repos.yaml")
-	t.Setenv("SPARKWING_REPOS", registry)
+	registry := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", registry)
 
 	outside := filepath.Join(string(filepath.Separator), "Users", "dev", "code", "app")
 	err := AutoRegister(outside)

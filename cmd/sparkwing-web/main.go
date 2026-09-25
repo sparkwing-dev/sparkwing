@@ -51,7 +51,7 @@ func run(args []string) error {
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
 
-	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
+	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/config.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
 	logsSpecFlag := fs.String("logs-spec", "", "inline logs backend spec, e.g. s3://bucket/logs or stdout:")
 	artifactsSpec := fs.String("artifacts-spec", "", "inline artifact backend spec; only consulted when state is object-store-backed")

@@ -14,7 +14,7 @@ and writes the profile that every other command selects with --profile.
 'status' reports what that connection authenticates as. 'disconnect' removes
 the profile and revokes its token.
 
-Nothing here edits profiles.yaml by hand. Enroll this machine as a runner with
+Nothing here edits config.yaml by hand. Enroll this machine as a runner with
 'sparkwing cluster runners add'.
 
 ### Subcommands
@@ -43,7 +43,7 @@ a profile carrying the controller URL and a token.
 --admin-token-stdin reads an admin credential from stdin and mints a user
 token with it, carrying runs.read, runs.write, triggers.read, logs.read and
 approvals.write. The admin credential is never stored; only the minted token
-reaches profiles.yaml. --token-stdin stores a token you already hold. Neither
+reaches config.yaml. --token-stdin stores a token you already hold. Neither
 flag connects to a controller serving unauthenticated.
 
 --name defaults to the controller host with every character outside a-z0-9
@@ -54,7 +54,7 @@ without --force, because the token it holds stays live until it is revoked.
 --set-default writes defaults.profile into this repository's
 .sparkwing/sparkwing.yaml, so runs in this checkout select the connection with
 no flag. The name resolves against the project's own profiles: block first and
-profiles.yaml second, so the token stays out of the checkout.
+config.yaml second, so the token stays out of the checkout.
 
 The command closes with the dashboard URL the controller announces and the
 probes 'sparkwing configure profiles test' runs.

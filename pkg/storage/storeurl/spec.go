@@ -23,7 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ProfileLookup resolves a profile name (from profiles.yaml) to its
+// ProfileLookup resolves a profile name (from config.yaml) to its
 // controller URL and bearer token. The factory invokes it for
 // type=controller specs; other types ignore it. Pass nil when no
 // controller-typed spec can appear.

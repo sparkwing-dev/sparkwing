@@ -11,9 +11,7 @@ import (
 
 func (f *chainFixture) corruptRegistry(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(f.root, "repos.yaml")
-	writeRepoFile(t, path, "repos:\n  - path: "+f.repo+"\nfallback_paths:\n  - ~/code\ne\n")
-	t.Setenv("SPARKWING_REPOS", path)
+	writeRegistry(t, filepath.Join(f.root, "config.yaml"), "repos:\n  - path: "+f.repo+"\nfallback_paths:\n  - ~/code\ne\n")
 }
 
 func armedFleet(t *testing.T) {
@@ -59,7 +57,7 @@ func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T)
 	if strings.Contains(blindOut, "no repos registered") {
 		t.Errorf("survey reported an empty registry when the registry was unreadable:\n%s", blindOut)
 	}
-	if !strings.Contains(blindErr.Error(), "repos.yaml") {
+	if !strings.Contains(blindErr.Error(), "config.yaml") {
 		t.Errorf("the error does not name the file to fix: %v", blindErr)
 	}
 }

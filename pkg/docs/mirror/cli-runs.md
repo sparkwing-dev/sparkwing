@@ -554,11 +554,6 @@ requires the logs service URL the controller announces.
 CLI log text matching is case-sensitive and --max-matches caps each node.
 Dashboard Search matches text without case and caps its whole response.
 
-The dashboard Search view applies pipeline, status, branch, commit SHA prefix,
-and since before its 200-run candidate limit. Its All time choice can reach
-older runs. The Run list has additional filters for browsing runs; those do
-not narrow log Search.
-
 Default output is a table of RUN / NODE / LINE / TEXT. -q
 (quiet) prints the unique matching run ids -- the usual
 shape for piping into `runs logs` or `runs status`.

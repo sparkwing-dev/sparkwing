@@ -53,7 +53,7 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	home := t.TempDir()
 	f := &runnersFixture{
 		store:    st,
-		config:   filepath.Join(t.TempDir(), "agent.yaml"),
+		config:   filepath.Join(t.TempDir(), "config.yaml"),
 		calls:    &calls,
 		failExec: map[string]string{},
 		binary:   "/usr/local/bin/sparkwing-runner",
@@ -160,7 +160,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 		t.Errorf("service calls = %v, want %v", *f.calls, wantCalls)
 	}
 	for _, want := range []string{
-		minted.Prefix, "wrote " + f.config, "runners remove --profile prod",
+		minted.Prefix, "wrote the agent section of " + f.config, "runners remove --profile prod",
 		"docs read --topic threat-model",
 	} {
 		if !strings.Contains(out, want) {
@@ -192,7 +192,7 @@ func TestRunnersAddSkipsTheServiceWhenAsked(t *testing.T) {
 
 func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := os.WriteFile(f.config, []byte("controller: http://elsewhere\ntoken: keep-me\n"), 0o600); err != nil {
+	if err := os.WriteFile(f.config, []byte("agent:\n  controller: http://elsewhere\n  token: keep-me\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := runRunners([]string{"add", "--profile", "prod", "--name", "desk", "--config", f.config})
@@ -213,7 +213,7 @@ func TestRunnersAddRefusesAnExistingConfigAndMintsNothing(t *testing.T) {
 
 func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 	f := newRunnersFixture(t)
-	if err := os.WriteFile(f.config, []byte("controller: http://elsewhere\ntoken: replace-me\n"), 0o600); err != nil {
+	if err := os.WriteFile(f.config, []byte("# desk\nfleet:\n  listen: 127.0.0.1:4346\nagent:\n  controller: http://elsewhere\n  token: replace-me\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	captureStdout(t, func() {
@@ -229,7 +229,10 @@ func TestRunnersAddForceReplacesTheConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(body), "replace-me") {
-		t.Errorf("--force did not replace the config: %s", body)
+		t.Errorf("--force did not replace the agent section: %s", body)
+	}
+	if !strings.Contains(string(body), "# desk") || !strings.Contains(string(body), "listen: 127.0.0.1:4346") {
+		t.Errorf("--force lost the file's other sections: %s", body)
 	}
 }
 
@@ -408,7 +411,7 @@ func TestRunnersAddForceTwiceKeepsTheLatestConfigReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".agent-") {
+		if strings.HasPrefix(e.Name(), ".config-") {
 			t.Errorf("a temporary config was left behind: %s", e.Name())
 		}
 	}
@@ -446,7 +449,7 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
-	body := fmt.Sprintf("controller: http://localhost:4344\ntoken: %s\nholder_prefix: desk\n", raw)
+	body := fmt.Sprintf("agent:\n  controller: http://localhost:4344\n  token: %s\n  holder_prefix: desk\n", raw)
 	if err := os.WriteFile(f.config, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

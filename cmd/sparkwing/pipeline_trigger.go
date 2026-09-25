@@ -140,7 +140,7 @@ func runPipelineTrigger(args []string) error {
 
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
 		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
-			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))
+			"Add a logs: spec to the profile in config.yaml to see streaming output.", prof.Name)))
 	followErr := orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
 		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
 	return remoteFollowExit(ctx, prof, resp.RunID, followErr)

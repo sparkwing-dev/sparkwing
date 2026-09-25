@@ -83,7 +83,7 @@ func projectDefaultProfile() (*profile.Profile, string, bool, error) {
 }
 
 // safety: the default may name a connection `sparkwing cloud connect` wrote
-// to the user's profiles.yaml, which is where its token stays.
+// to the user's config.yaml, which is where its token stays.
 func userProfile(name string) (*profile.Profile, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {

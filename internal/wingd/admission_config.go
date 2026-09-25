@@ -1,22 +1,16 @@
 package wingd
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
-	"go.yaml.in/yaml/v3"
-
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
-const AdmissionConfigFilename = "admission.yaml"
-
 type admissionConfigFile struct {
+	Budget string                 `yaml:"budget"`
 	Mode   string                 `yaml:"mode"`
 	Custom admissionCustomFile    `yaml:"custom"`
 	Jev    admissionJevConfigFile `yaml:"jev"`
@@ -44,32 +38,38 @@ type admissionJevConfigFile struct {
 	MaxBackfill    string  `yaml:"max_backfill"`
 }
 
-// ResolveAdmissionPolicy reads the optional machine-local policy. A missing
-// file selects Classic, preserving the admission behavior from before modes.
-func ResolveAdmissionPolicy(path string) (AdmissionPolicy, string, error) {
-	if path == "" {
-		var err error
-		path, err = fssecure.ConfigFile(AdmissionConfigFilename)
-		if err != nil {
-			return AdmissionPolicy{}, "", err
-		}
+func readAdmissionSection() (admissionConfigFile, string, error) {
+	path, err := userconfig.Path()
+	if err != nil {
+		return admissionConfigFile{}, "", err
 	}
-	f, err := fssecure.OpenPrivateConfig(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return DefaultAdmissionPolicy(), "default", nil
+	var raw admissionConfigFile
+	found, err := userconfig.Read(path, userconfig.Admission, &raw)
+	if err != nil || !found {
+		return admissionConfigFile{}, "", err
 	}
+	return raw, path, nil
+}
+
+// ResolveAdmissionPolicy reads the optional machine-local policy from the
+// admission section of config.yaml. An absent section selects Classic,
+// preserving the admission behavior from before modes.
+func ResolveAdmissionPolicy() (AdmissionPolicy, string, error) {
+	raw, path, err := readAdmissionSection()
 	if err != nil {
 		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
+	if path == "" {
+		return DefaultAdmissionPolicy(), "default", nil
+	}
+	policy, err := admissionPolicyFrom(raw)
 	if err != nil {
-		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: read %s: %w", path, err)
+		return AdmissionPolicy{}, "", err
 	}
-	var raw admissionConfigFile
-	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: parse %s: %w", path, err)
-	}
+	return policy, path, nil
+}
+
+func admissionPolicyFrom(raw admissionConfigFile) (AdmissionPolicy, error) {
 	policy := DefaultAdmissionPolicy()
 	if raw.Mode != "" {
 		policy.Mode = admission.Mode(strings.ToLower(strings.TrimSpace(raw.Mode)))
@@ -80,27 +80,27 @@ func ResolveAdmissionPolicy(path string) (AdmissionPolicy, string, error) {
 	case admission.ModeAuto, admission.ModeJev, admission.ModeCustom:
 		policy.Scheduling = admission.AutoPolicy()
 	default:
-		return AdmissionPolicy{}, "", fmt.Errorf("admission policy: mode %q must be classic, off, auto, jev, or custom", raw.Mode)
+		return AdmissionPolicy{}, fmt.Errorf("admission policy: mode %q must be classic, off, auto, jev, or custom", raw.Mode)
 	}
 	if policy.Mode == admission.ModeCustom || policy.Mode == admission.ModeJev {
 		for name, value := range raw.Custom.BackfillDelay {
 			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
 			if admission.NormalizeWorkloadClass(class) != class {
-				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+				return AdmissionPolicy{}, fmt.Errorf("admission policy: unknown workload class %q", name)
 			}
 			d, err := time.ParseDuration(strings.TrimSpace(value))
 			if err != nil || d < 0 {
-				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.backfill_delay.%s must be a non-negative duration", name)
+				return AdmissionPolicy{}, fmt.Errorf("admission policy: custom.backfill_delay.%s must be a non-negative duration", name)
 			}
 			policy.Scheduling.BackfillDelay[class] = d
 		}
 		for name, weight := range raw.Custom.ClassWeight {
 			class := admission.WorkloadClass(strings.ToLower(strings.TrimSpace(name)))
 			if admission.NormalizeWorkloadClass(class) != class {
-				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: unknown workload class %q", name)
+				return AdmissionPolicy{}, fmt.Errorf("admission policy: unknown workload class %q", name)
 			}
 			if weight < 0 || weight > 1000 {
-				return AdmissionPolicy{}, "", fmt.Errorf("admission policy: custom.class_weight.%s must be between 0 and 1000", name)
+				return AdmissionPolicy{}, fmt.Errorf("admission policy: custom.class_weight.%s must be between 0 and 1000", name)
 			}
 			policy.Scheduling.ClassWeight[class] = weight
 		}
@@ -108,13 +108,13 @@ func ResolveAdmissionPolicy(path string) (AdmissionPolicy, string, error) {
 			policy.Scheduling.AgingEvery = *raw.Custom.AgingEvery
 		}
 		if err := applyBurstConfig(&policy.Scheduling.Burst, raw.Custom.InteractiveBurst); err != nil {
-			return AdmissionPolicy{}, "", err
+			return AdmissionPolicy{}, err
 		}
 	}
 	if err := applyJevConfig(&policy.Jev, raw.Jev); err != nil {
-		return AdmissionPolicy{}, "", err
+		return AdmissionPolicy{}, err
 	}
-	return policy, path, nil
+	return policy, nil
 }
 
 func applyBurstConfig(dst *admission.BurstPolicy, raw admissionBurstFile) error {

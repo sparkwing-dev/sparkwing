@@ -46,8 +46,11 @@ func TestDirectTailnetFleetConfigIsExplicitAndUnambiguous(t *testing.T) {
 }
 
 func TestFleetInitCreatesCredentialFreePolicyAndRefusesReplacement(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "fleet.yaml")
-	t.Setenv("SPARKWING_FLEET_CONFIG", configPath)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("# this machine\nprofiles:\n  laptop: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", configPath)
 	output := captureStdout(t, func() {
 		if err := runFleetInit([]string{
 			"--listen", "127.0.0.1:4346", "--public-url", "https://fleet.example.test",
@@ -66,6 +69,9 @@ func TestFleetInitCreatesCredentialFreePolicyAndRefusesReplacement(t *testing.T)
 		t.Fatalf("initialized fleet config = %+v", cfg)
 	}
 	body := string(mustReadFleetFile(t, configPath))
+	if !strings.Contains(body, "# this machine") || !strings.Contains(body, "laptop: {}") {
+		t.Fatalf("fleet init lost the file's other content: %s", body)
+	}
 	for _, forbidden := range []string{"token", "prefix", "credential", "principal", "authority_id"} {
 		if strings.Contains(strings.ToLower(body), forbidden) {
 			t.Fatalf("initialized fleet config exposes %q: %s", forbidden, body)
@@ -73,7 +79,7 @@ func TestFleetInitCreatesCredentialFreePolicyAndRefusesReplacement(t *testing.T)
 	}
 	if err := runFleetInit([]string{
 		"--listen", "127.0.0.1:4346", "--public-url", "https://other.example.test",
-	}); err == nil || !strings.Contains(err.Error(), "already exists") {
+	}); err == nil || !strings.Contains(err.Error(), "already has a fleet section") {
 		t.Fatalf("replacement fleet init error = %v", err)
 	}
 }

@@ -7,11 +7,18 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), Filename)
+	return writeRawConfig(t, "fleet:\n  "+strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ")+"\n")
+}
+
+func writeRawConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), userconfig.Filename)
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +31,6 @@ func TestLoadRequiresFixedExplicitNetworkAndKnownFields(t *testing.T) {
 	}{
 		{"zero port", "listen: 127.0.0.1:0\npublic_url: http://127.0.0.1:0\n", "fixed host:port"},
 		{"unknown", "listen: 127.0.0.1:7443\npublic_url: http://127.0.0.1:7443\nsecret_token: nope\n", "field secret_token not found"},
-		{"second document", "listen: 127.0.0.1:7443\npublic_url: http://127.0.0.1:7443\n---\nallow_tailnet_http: true\n", "multiple YAML documents"},
 		{"proxy exposes plaintext listener", "listen: 0.0.0.0:7443\npublic_url: https://desk.example\n", "not a wildcard"},
 		{"loopback advertisement hides wildcard listener", "listen: :7443\npublic_url: http://127.0.0.1:7443\n", "not a wildcard"},
 		{"hostname listener", "listen: localhost:7443\npublic_url: http://localhost:7443\n", "literal local IP"},
@@ -35,6 +41,22 @@ func TestLoadRequiresFixedExplicitNetworkAndKnownFields(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeConfig(t, tc.body), nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadRequiresTheFleetSection(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"second document", "fleet:\n  listen: 127.0.0.1:7443\n---\nfleet:\n  allow_tailnet_http: true\n", "multiple YAML documents"},
+		{"no fleet section", "profiles: {}\n", "has no fleet section"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeRawConfig(t, tc.body), nil)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
@@ -108,7 +130,7 @@ func TestLoadAllowsOnlyVerifiedLiteralTailscaleHTTP(t *testing.T) {
 
 func TestLoadRejectsReachableConfigSymlinkOrBroadMode(t *testing.T) {
 	target := writeConfig(t, "listen: 127.0.0.1:7443\npublic_url: http://127.0.0.1:7443\n")
-	link := filepath.Join(t.TempDir(), "fleet.yaml")
+	link := filepath.Join(t.TempDir(), userconfig.Filename)
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
@@ -126,10 +148,10 @@ func TestLoadRejectsReachableConfigSymlinkOrBroadMode(t *testing.T) {
 }
 
 func TestCreateWritesOwnerOnlyConfigAndNeverReplacesIt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config", Filename)
+	path := writeRawConfig(t, "# this machine\nprofiles:\n  laptop: {}\n")
 	// safety: Create refuses a config outside the sparkwing home unless the
 	// operator named the file, and a test binary's home is the test sandbox.
-	t.Setenv(PathEnv, path)
+	t.Setenv(userconfig.PathEnv, path)
 	cfg := Config{
 		Listen: "127.0.0.1:7443", PublicURL: "http://127.0.0.1:7443",
 		Local: Local{MaxConcurrent: 1, Contribution: "50%,50%"},
@@ -137,7 +159,7 @@ func TestCreateWritesOwnerOnlyConfigAndNeverReplacesIt(t *testing.T) {
 	if err := Create(path, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := Create(path, cfg, nil); err == nil || !strings.Contains(err.Error(), "already exists") {
+	if err := Create(path, cfg, nil); err == nil || !strings.Contains(err.Error(), "already has a fleet section") {
 		t.Fatalf("second Create error = %v", err)
 	}
 	loaded, err := Load(path, nil)
@@ -146,5 +168,12 @@ func TestCreateWritesOwnerOnlyConfigAndNeverReplacesIt(t *testing.T) {
 	}
 	if loaded.Listen != cfg.Listen || loaded.Local.Contribution != "50%,50%" {
 		t.Fatalf("loaded config = %+v", loaded)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "# this machine") || !strings.Contains(string(body), "laptop: {}") {
+		t.Fatalf("Create lost the file's other content:\n%s", body)
 	}
 }

@@ -199,7 +199,8 @@ step_timings() {
 cli_verify() {
   local label="$1" cli="$2" url="$3" creds="$4" run="$5" home="$WORK/cli/${1//[^a-zA-Z0-9]/_}" failed=0
   install -d -m 700 "$home"
-  rm -f -- "$home/.config/sparkwing/profiles.yaml"
+  # safety: the builds under test predate and postdate config.yaml, so clear both files a profile can live in
+  rm -f -- "$home/.config/sparkwing/profiles.yaml" "$home/.config/sparkwing/config.yaml"
   controller_env "$home" "$cli" configure profiles add --name rehearsal --controller "$url" --token-stdin \
     < "$creds/canary-token" > "$home/add.log" 2>&1 || { fail "$label: profiles add: $(tail -1 "$home/add.log")"; return; }
   local -a checks=(

@@ -44,12 +44,12 @@ func TestRunsGrepUsesExplicitLogsURLAndOriginalLineNumber(t *testing.T) {
 	}))
 	t.Cleanup(controller.Close)
 	home := t.TempDir()
-	profiles := filepath.Join(home, "profiles.yaml")
+	profiles := filepath.Join(home, "config.yaml")
 	body := fmt.Sprintf("profiles:\n  prod:\n    controller: {url: %q}\n    logs: {type: controller, url: %q}\n", controller.URL, logsHTTP.URL)
 	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_PROFILES", profiles)
+	t.Setenv("SPARKWING_CONFIG", profiles)
 	t.Setenv("SPARKWING_HOME", home)
 	var grepErr error
 	output := captureStdout(t, func() {

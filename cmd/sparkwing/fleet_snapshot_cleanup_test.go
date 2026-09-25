@@ -21,15 +21,15 @@ func TestDispatchFleetCompileFailureCleansExactSource(t *testing.T) {
 	writeSnapshotFile(t, repo, ".sparkwing/main.go", "package main\nfunc main() { this is not Go }\n", 0o644)
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-m", "broken pipeline")
-	configPath := filepath.Join(tmp, "fleet.yaml")
-	if err := os.WriteFile(configPath, []byte("listen: 127.0.0.1:7443\npublic_url: http://127.0.0.1:7443\nexecutors: [{name: helper, location: local}]\n"), 0o600); err != nil {
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("fleet:\n  listen: 127.0.0.1:7443\n  public_url: http://127.0.0.1:7443\n  executors: [{name: helper, location: local}]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestDispatchFleetCompileFailureCleansExactSourceHelper$")
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_TEST_FLEET_COMPILE_FAILURE=1",
 		"SPARKWING_TEST_FLEET_REPO="+repo,
-		"SPARKWING_FLEET_CONFIG="+configPath,
+		"SPARKWING_CONFIG="+configPath,
 		"SPARKWING_NO_BINCACHE=1",
 		"GOWORK=off",
 		"TMPDIR="+tmp,

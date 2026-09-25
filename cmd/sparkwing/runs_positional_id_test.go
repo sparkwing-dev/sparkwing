@@ -56,12 +56,12 @@ func TestRunsReadVerbsAcceptABareRunID(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			home := t.TempDir()
-			profiles := filepath.Join(home, "profiles.yaml")
+			profiles := filepath.Join(home, "config.yaml")
 			body := "profiles:\n  prod:\n    controller:\n      url: " + srv.URL + "\n"
 			if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("SPARKWING_PROFILES", profiles)
+			t.Setenv("SPARKWING_CONFIG", profiles)
 			t.Setenv("SPARKWING_HOME", home)
 
 			// safety: status exits non-zero on a run with no terminal state, so the

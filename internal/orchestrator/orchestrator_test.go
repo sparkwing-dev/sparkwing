@@ -190,7 +190,7 @@ func newPaths(t *testing.T) orchestrator.Paths {
 
 func isolateProfiles(t *testing.T) {
 	t.Helper()
-	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("GITHUB_ACTIONS", "")

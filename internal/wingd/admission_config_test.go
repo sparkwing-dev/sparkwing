@@ -3,6 +3,7 @@ package wingd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,8 +11,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+func writeAdmissionConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	indented := "admission:\n  " + strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ") + "\n"
+	if err := os.WriteFile(path, []byte(indented), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_CONFIG", path)
+	return path
+}
+
 func TestResolveAdmissionPolicyDefaultsToClassic(t *testing.T) {
-	policy, source, err := ResolveAdmissionPolicy(filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
+	policy, source, err := ResolveAdmissionPolicy()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,11 +34,8 @@ func TestResolveAdmissionPolicyDefaultsToClassic(t *testing.T) {
 }
 
 func TestResolveAdmissionPolicyAutoEnablesAdaptiveScheduling(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "admission.yaml")
-	if err := os.WriteFile(path, []byte("mode: auto\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	policy, _, err := ResolveAdmissionPolicy(path)
+	writeAdmissionConfig(t, "mode: auto\n")
+	policy, _, err := ResolveAdmissionPolicy()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,12 +45,9 @@ func TestResolveAdmissionPolicyAutoEnablesAdaptiveScheduling(t *testing.T) {
 }
 
 func TestResolveAdmissionPolicyCustomAndJevBounds(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "admission.yaml")
-	content := []byte("mode: jev\ncustom:\n  backfill_delay:\n    interactive: 750ms\n  class_weight:\n    interactive: 20\n  aging_every: 3\n  interactive_burst:\n    cores: 0.5\n    max_p99: 1500ms\n    min_samples: 5\njev:\n  timeout: 125ms\n  min_confidence: 0.8\n  min_probability: 0.75\n  max_backfill: 3s\n")
-	if err := os.WriteFile(path, content, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	policy, _, err := ResolveAdmissionPolicy(path)
+	content := ("mode: jev\ncustom:\n  backfill_delay:\n    interactive: 750ms\n  class_weight:\n    interactive: 20\n  aging_every: 3\n  interactive_burst:\n    cores: 0.5\n    max_p99: 1500ms\n    min_samples: 5\njev:\n  timeout: 125ms\n  min_confidence: 0.8\n  min_probability: 0.75\n  max_backfill: 3s\n")
+	writeAdmissionConfig(t, content)
+	policy, _, err := ResolveAdmissionPolicy()
 	if err != nil {
 		t.Fatal(err)
 	}

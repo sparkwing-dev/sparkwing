@@ -67,7 +67,7 @@ func TestRunRejectsTokenWithoutABackend(t *testing.T) {
 
 func TestOpenFromConfigReturnsProfileSessionController(t *testing.T) {
 	root := t.TempDir()
-	profilesPath := filepath.Join(root, "profiles.yaml")
+	profilesPath := filepath.Join(root, "config.yaml")
 	statePath := filepath.Join(root, "state.db")
 	contents := "profiles:\n" +
 		"  prod:\n" +
@@ -80,7 +80,7 @@ func TestOpenFromConfigReturnsProfileSessionController(t *testing.T) {
 	if err := os.WriteFile(profilesPath, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_PROFILES", profilesPath)
+	t.Setenv("SPARKWING_CONFIG", profilesPath)
 
 	b, closer, controllerURL, err := openFromConfig(
 		context.Background(),

@@ -50,7 +50,7 @@ labels:
 fi
 grep -q "Gitcache URL contains" "$CASE_ROOT/out-bad" \
   || fail "rejection does not name the gitcache URL" "$CASE_ROOT/out-bad"
-[ ! -e "$home_bad/.config/sparkwing/agent.yaml" ] \
+[ ! -e "$home_bad/.config/sparkwing/config.yaml" ] \
   || fail "installer wrote a config despite rejecting the gitcache URL" "$CASE_ROOT/out-bad"
 
 home_name="$CASE_ROOT/home-name"
@@ -66,17 +66,28 @@ if ! run_install "$home_ok" SPARKWING_CACHE_TOKEN=swc_good \
   >"$CASE_ROOT/out-ok" 2>&1; then
   fail "installer refused a clean configuration" "$CASE_ROOT/out-ok"
 fi
-config="$home_ok/.config/sparkwing/agent.yaml"
+config="$home_ok/.config/sparkwing/config.yaml"
 [ -f "$config" ] || fail "clean install wrote no config at $config" "$CASE_ROOT/out-ok"
 ! grep -q 'cache_token' "$config" \
   || fail "clean install recorded a cache token; the agent asks the controller for per-run grants" "$config"
 ! grep -q 'swc_good' "$config" \
   || fail "clean install copied SPARKWING_CACHE_TOKEN into the agent config" "$config"
-grep -qx 'holder_prefix: "test-runner"' "$config" \
+grep -qx 'agent:' "$config" \
+  || fail "clean install did not write the agent section" "$config"
+grep -qx '  holder_prefix: "test-runner"' "$config" \
   || fail "clean install did not record the runner name" "$config"
-grep -qx 'contribution: "50%,50%"' "$config" \
+grep -qx '  contribution: "50%,50%"' "$config" \
   || fail "clean install did not record the resource ceiling" "$config"
-grep -qx 'local_admission: true' "$config" \
+grep -qx '  local_admission: true' "$config" \
   || fail "clean install did not require local admission" "$config"
+
+before="$(cat "$config")"
+if run_install "$home_ok" >"$CASE_ROOT/out-again" 2>&1; then
+  fail "installer overwrote an existing config.yaml" "$CASE_ROOT/out-again"
+fi
+grep -q "cluster runners add" "$CASE_ROOT/out-again" \
+  || fail "refusal does not name the command that merges the agent section" "$CASE_ROOT/out-again"
+[ "$(cat "$config")" = "$before" ] \
+  || fail "refused install changed config.yaml" "$config"
 
 echo "service-install-test: ok"

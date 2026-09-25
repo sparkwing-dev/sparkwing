@@ -10,10 +10,7 @@ import (
 )
 
 func TestConfig_RoundTripFromYAML(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "agent.yaml")
-	yaml := `
-controller: http://localhost:4344
+	path := writePrivateConfig(t, `controller: http://localhost:4344
 logs: http://localhost:4345
 gitcache: http://localhost:4344/api/v1/gitcache
 profile: dev
@@ -24,13 +21,7 @@ labels:
   - arch=arm64
   - "  "
 spawn_policy: return-to-queue
-`
-	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := fssecure.SecurePrivateConfig(path); err != nil {
-		t.Fatal(err)
-	}
+`)
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -61,17 +52,12 @@ func TestConfig_RejectsUnknownFieldsAndAdditionalDocuments(t *testing.T) {
 	for _, tc := range []struct {
 		name, body, want string
 	}{
-		{"unknown field", "controller: http://localhost:4344\nadmin: true\n", "field admin not found"},
-		{"second document", "controller: http://localhost:4344\n---\ntoken: hidden\n", "multiple YAML documents"},
+		{"unknown field", "agent:\n  controller: http://localhost:4344\n  admin: true\n", "field admin not found"},
+		{"second document", "agent:\n  controller: http://localhost:4344\n---\nagent:\n  token: hidden\n", "multiple YAML documents"},
+		{"no agent section", "profiles: {}\n", "has no agent section"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "agent.yaml")
-			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if err := fssecure.SecurePrivateConfig(path); err != nil {
-				t.Fatal(err)
-			}
+			path := writeRawConfig(t, tc.body)
 			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
@@ -180,7 +166,12 @@ labels:
 
 func writePrivateConfig(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "agent.yaml")
+	return writeRawConfig(t, "agent:\n  "+strings.ReplaceAll(strings.TrimSuffix(body, "\n"), "\n", "\n  ")+"\n")
+}
+
+func writeRawConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -193,13 +184,7 @@ func writePrivateConfig(t *testing.T, body string) string {
 // The agent asks the controller for a per-run cache grant, so a config that
 // still hands it the operator cache token is refused, naming the key to delete.
 func TestConfig_RefusesACacheToken(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(path, []byte("controller: http://localhost:4344\ncache_token: operator-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := fssecure.SecurePrivateConfig(path); err != nil {
-		t.Fatal(err)
-	}
+	path := writePrivateConfig(t, "controller: http://localhost:4344\ncache_token: operator-token\n")
 	_, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), "cache_token") {
 		t.Fatalf("Load error = %v, want one naming cache_token", err)
@@ -208,7 +193,7 @@ func TestConfig_RefusesACacheToken(t *testing.T) {
 
 // An allow list without a gitcache is the direct mode: the agent fetches each
 // run's source itself instead of through the controller's proxy. With no list
-// the agent keeps the proxy, which is what an old agent.yaml gets.
+// the agent keeps the proxy, which is what a section written before allow_repos gets.
 func TestConfig_AllowReposSelectsDirectSource(t *testing.T) {
 	norm, err := Validate(Config{Controller: "http://x", AllowRepos: []string{"GitHub.com/Acme/*"}})
 	if err != nil {
@@ -231,10 +216,7 @@ func TestConfig_AllowReposSelectsDirectSource(t *testing.T) {
 }
 
 func TestLoad_ReadsAllowRepos(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
-	if err := os.WriteFile(path, []byte("controller: http://x\nallow_repos:\n  - github.com/acme/*\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	path := writePrivateConfig(t, "controller: http://x\nallow_repos:\n  - github.com/acme/*\n")
 	cfg, err := Load(path)
 	if err != nil || len(cfg.AllowRepos) != 1 || cfg.AllowRepos[0] != "github.com/acme/*" {
 		t.Fatalf("load = %+v, %v", cfg, err)

@@ -116,11 +116,11 @@ func TestRunAgentCLI_RefusesTheRemovedEnrolledKeysBeforePolling(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
 	}{
-		{"name", "controller: http://127.0.0.1:1\nname: desk\ntoken: tok\n"},
-		{"coordinators", "coordinators:\n  - controller: http://127.0.0.1:1\n    token: tok\n"},
+		{"name", "agent:\n  controller: http://127.0.0.1:1\n  name: desk\n  token: tok\n"},
+		{"coordinators", "agent:\n  coordinators:\n    - controller: http://127.0.0.1:1\n      token: tok\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "agent.yaml")
+			path := filepath.Join(t.TempDir(), "config.yaml")
 			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
 				t.Fatal(err)
 			}

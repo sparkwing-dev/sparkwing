@@ -19,7 +19,7 @@ func TestQueueState_NamesBudgetSource(t *testing.T) {
 		Home:         home,
 		Budget:       budget,
 		BudgetSource: wingd.BudgetSourceConfig,
-		BudgetOrigin: "/home/op/.config/sparkwing/budget",
+		BudgetOrigin: "/home/op/.config/sparkwing/config.yaml admission.budget",
 	})
 
 	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
@@ -32,7 +32,7 @@ func TestQueueState_NamesBudgetSource(t *testing.T) {
 	if qs.Budget.Source != string(wingwire.BudgetSourceConfig) {
 		t.Errorf("source = %q, want %q", qs.Budget.Source, wingwire.BudgetSourceConfig)
 	}
-	if qs.Budget.Origin != "/home/op/.config/sparkwing/budget" {
+	if qs.Budget.Origin != "/home/op/.config/sparkwing/config.yaml admission.budget" {
 		t.Errorf("origin = %q, want the config path", qs.Budget.Origin)
 	}
 	if !qs.Budget.IgnoreExternal {

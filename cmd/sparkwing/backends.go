@@ -16,12 +16,12 @@ func resolveBinaryCacheSpec() (*backends.Spec, storeurl.ProfileLookup) {
 	name := os.Getenv("SPARKWING_PROFILE")
 	path, err := profile.DefaultPath()
 	if err != nil {
-		slog.Default().Debug("profiles.yaml path resolve failed", "err", err)
+		slog.Default().Debug("config.yaml path resolve failed", "err", err)
 		return nil, nil
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		slog.Default().Debug("profiles.yaml load failed", "err", err)
+		slog.Default().Debug("config.yaml profiles load failed", "err", err)
 		return nil, nil
 	}
 	p, _, err := profile.Resolve(name, cfg)

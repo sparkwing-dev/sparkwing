@@ -67,7 +67,7 @@ type Pipeline struct {
 	// Profile names the project profile (from sparkwing.yaml's
 	// profiles map) this pipeline uses. Empty means "fall back to
 	// the project's defaults.profile selector". The CLI's --profile
-	// flag (which targets ~/.config/sparkwing/profiles.yaml)
+	// flag (which targets ~/.config/sparkwing/config.yaml)
 	// overrides this when present.
 	Profile string `yaml:"profile,omitempty"`
 

@@ -23,7 +23,7 @@ type cronsProfileFixture struct {
 }
 
 // safety: a real controller with auth from its own store, and a scratch
-// profiles.yaml pointed at it, so the --profile path is not stubbed out.
+// config.yaml pointed at it, so the --profile path is not stubbed out.
 func newCronsProfileFixture(t *testing.T) *cronsProfileFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))

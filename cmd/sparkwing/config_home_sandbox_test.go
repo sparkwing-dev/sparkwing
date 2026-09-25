@@ -7,10 +7,8 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
-	"github.com/sparkwing-dev/sparkwing/internal/fleet"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 // safety: the user config directory is disposable here, because the behavior
@@ -21,8 +19,7 @@ func scratchUserConfigDir(t *testing.T) string {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	for _, env := range []string{
-		profile.PathEnv, repos.PathEnv, fleet.PathEnv,
-		secrets.SecretsPathEnv, secrets.ConfigPathEnv, versionHoldEnv,
+		userconfig.PathEnv, secrets.SecretsPathEnv, secrets.ConfigPathEnv, versionHoldEnv,
 	} {
 		t.Setenv(env, "")
 	}
@@ -73,23 +70,23 @@ func TestProfilesAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) 
 	underAScratchHome(t)
 
 	err := runProfilesAdd([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344"})
-	wantRefusedAndUnwritten(t, "profiles add", err, filepath.Join(userConfig, "profiles.yaml"))
+	wantRefusedAndUnwritten(t, "profiles add", err, filepath.Join(userConfig, userconfig.Filename))
 }
 
 func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
 	userConfig := scratchUserConfigDir(t)
 	home := underAScratchHome(t)
-	inHome := filepath.Join(home, "profiles.yaml")
-	t.Setenv(profile.PathEnv, inHome)
+	inHome := filepath.Join(home, userconfig.Filename)
+	t.Setenv(userconfig.PathEnv, inHome)
 
 	if err := runProfilesAdd([]string{"--name", "drill", "--controller", "http://127.0.0.1:4344"}); err != nil {
-		t.Fatalf("profiles add with %s=%s: %v", profile.PathEnv, inHome, err)
+		t.Fatalf("profiles add with %s=%s: %v", userconfig.PathEnv, inHome, err)
 	}
 
 	if p := loadSavedProfile(t, inHome, "drill"); p.Controller == nil || p.Controller.URL != "http://127.0.0.1:4344" {
 		t.Errorf("profile written to %s = %+v, want the controller it was given", inHome, p.Controller)
 	}
-	userProfiles := filepath.Join(userConfig, "profiles.yaml")
+	userProfiles := filepath.Join(userConfig, userconfig.Filename)
 	if _, err := os.Stat(userProfiles); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stat %s = %v, want the user config left absent", userProfiles, err)
 	}
@@ -154,7 +151,7 @@ func TestFleetInitUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
 	underAScratchHome(t)
 
 	err := runFleetInit([]string{"--listen", "127.0.0.1:4346", "--public-url", "http://127.0.0.1:4346"})
-	wantRefusedAndUnwritten(t, "fleet init", err, filepath.Join(userConfig, fleet.Filename))
+	wantRefusedAndUnwritten(t, "fleet init", err, filepath.Join(userConfig, userconfig.Filename))
 }
 
 func TestXrepoAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
@@ -166,5 +163,5 @@ func TestXrepoAddUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
 	}
 
 	err := runXrepoAdd([]string{checkout})
-	wantRefusedAndUnwritten(t, "xrepo add", err, filepath.Join(userConfig, "repos.yaml"))
+	wantRefusedAndUnwritten(t, "xrepo add", err, filepath.Join(userConfig, userconfig.Filename))
 }

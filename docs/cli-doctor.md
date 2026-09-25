@@ -32,6 +32,10 @@ It names the reset command for excessive learned demand floors.
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
 
+Settings files that config.yaml replaced are moved into it, each kept as
+<name>.migrated; any that cannot move, and any replaced path variable still
+set, are listed with where the setting belongs.
+
 --timeout bounds the daemon and local-state checks, each taking a slice of it,
 so a daemon that accepts connections and answers nothing is reported as wedged
 rather than spending the whole budget. Recovering a wedged daemon means

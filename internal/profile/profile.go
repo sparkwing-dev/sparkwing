@@ -3,14 +3,9 @@ package profile
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 
-	"go.yaml.in/yaml/v3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/configguard"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
@@ -102,39 +97,27 @@ func (p *Profile) EffectiveMirrorLocal() bool {
 	return *p.MirrorLocal
 }
 
+// Config is the profiles section of config.yaml: profile name to profile.
 type Config struct {
-	Profiles map[string]*Profile `yaml:"profiles,omitempty"`
+	Profiles map[string]*Profile
 }
 
 var ErrNoProfile = errors.New("no profile configured")
 
 var ErrProfileNotFound = errors.New("profile not found")
 
-// PathEnv names the profiles file, the way SPARKWING_HOME names the state root.
-const PathEnv = "SPARKWING_PROFILES"
-
-// DefaultPath reports the profiles file: $SPARKWING_PROFILES when set, else
-// profiles.yaml in [fssecure.ConfigDir]. SPARKWING_HOME does not move it,
-// because a profile is a machine-wide connection the operator keeps while runs
-// come and go; [configguard.ErrOutsideSandboxHome] is how a write says so.
+// DefaultPath reports the config.yaml profiles are read from and written to;
+// see [userconfig.Path].
 func DefaultPath() (string, error) {
-	if v := os.Getenv(PathEnv); v != "" {
-		return v, nil
-	}
-	return fssecure.ConfigFile("profiles.yaml")
+	return userconfig.Path()
 }
 
+// Load reads the profiles section of the config.yaml at path. An absent file
+// or section is an empty set of profiles.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Config{Profiles: map[string]*Profile{}}, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	cfg := Config{Profiles: map[string]*Profile{}}
+	if _, err := userconfig.Read(path, userconfig.Profiles, &cfg.Profiles); err != nil {
+		return nil, err
 	}
 	if cfg.Profiles == nil {
 		cfg.Profiles = map[string]*Profile{}
@@ -170,17 +153,10 @@ func (p *Profile) validateSurfaceFields() error {
 	return nil
 }
 
-// Save writes cfg to path. It refuses a path outside the sparkwing home in
-// use; see [configguard.GuardWrite].
+// Save replaces the profiles section of the config.yaml at path with cfg,
+// keeping every other section; see [userconfig.Write].
 func Save(path string, cfg *Config) error {
-	if err := configguard.GuardWrite("profiles", PathEnv, path); err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := fssecure.EnsureConfigDir(dir); err != nil {
-		return fmt.Errorf("prepare %s: %w", dir, err)
-	}
-	out := &Config{Profiles: map[string]*Profile{}}
+	out := map[string]*Profile{}
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			continue
@@ -192,34 +168,9 @@ func Save(path string, cfg *Config) error {
 			logs.URL = ""
 			cp.Logs = &logs
 		}
-		out.Profiles[name] = &cp
+		out[name] = &cp
 	}
-	buf, err := yaml.Marshal(out)
-	if err != nil {
-		return fmt.Errorf("marshal profiles: %w", err)
-	}
-	// safety: a random name plus O_EXCL keeps a pre-created path from receiving the token.
-	f, err := os.CreateTemp(dir, ".profiles-*.yaml")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if err := fssecure.TightenOpen(f); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("secure %s: %w", tmp, err)
-	}
-	if _, err := f.Write(buf); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename %s: %w", tmp, err)
-	}
-	return nil
+	return userconfig.Write(path, userconfig.Profiles, "profiles", out)
 }
 
 func LoadAndResolve(explicitName string) (*Profile, error) {

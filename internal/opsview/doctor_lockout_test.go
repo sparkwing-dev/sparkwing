@@ -12,15 +12,15 @@ import (
 
 func registerRepos(t *testing.T, paths ...string) {
 	t.Helper()
-	cfg := "repos:\n"
+	cfg := "repos:\n  repos:\n"
 	for _, p := range paths {
-		cfg += "  - path: " + p + "\n"
+		cfg += "    - path: " + p + "\n"
 	}
-	f := filepath.Join(t.TempDir(), "repos.yaml")
-	if err := os.WriteFile(f, []byte(cfg), 0o644); err != nil {
+	f := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(f, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_REPOS", f)
+	t.Setenv("SPARKWING_CONFIG", f)
 }
 
 func pinnedCheckout(t *testing.T, base, name, pin string, worktree bool) string {

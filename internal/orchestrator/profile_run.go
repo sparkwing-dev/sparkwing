@@ -73,7 +73,7 @@ func resolveNamedProfile(name string, projectCfg *projectconfig.Config) (*profil
 func userProfilesPathForError() string {
 	path, err := profile.DefaultPath()
 	if err != nil {
-		return "profiles.yaml"
+		return "config.yaml"
 	}
 	return path
 }
@@ -95,7 +95,7 @@ func resolveUserProfile(name string) (*profile.Profile, *profile.Chain, error) {
 }
 
 // safety: defaults.profile may name a connection `sparkwing cloud connect`
-// wrote to the user's profiles.yaml, which is where its token stays, so the
+// wrote to the user's config.yaml, which is where its token stays, so the
 // project block is preferred but not required.
 func resolveDefaultProfile(name string, cfg *projectconfig.Config) (*profile.Profile, *profile.Chain, error) {
 	if cfg != nil && cfg.Profiles != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 type ConfigureInit struct {
@@ -86,11 +87,11 @@ func runConfigureInit(args []string) error {
 func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	out := ConfigureInit{}
 
-	profilesPath, err := profile.DefaultPath()
+	configPath, err := userconfig.Path()
 	if err != nil {
 		return out, fmt.Errorf("configure init: resolve config dir: %w", err)
 	}
-	configDir := filepath.Dir(profilesPath)
+	configDir := filepath.Dir(configPath)
 	out.ConfigDir = configDir
 
 	existed := dirExists(configDir)
@@ -102,7 +103,7 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	}
 	out.Mode, out.Exposed = pathExposure(configDir)
 
-	out.ConfigFiles = surveyConfigFiles(configDir, profilesPath)
+	out.ConfigFiles = surveyConfigFiles(configDir, configPath)
 	out.Toolchain = probeToolchain()
 	out.Hooks = surveyProjectGates()
 	out.NextSteps = configureInitNextSteps()
@@ -126,13 +127,11 @@ func surveyProjectGates() *githooks.RepoGates {
 	return &row
 }
 
-func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
-	reposPath, _ := repos.DefaultPath()
+func surveyConfigFiles(configDir, configPath string) []ConfigureInitFile {
 	secretsEnvPath := filepath.Join(configDir, "secrets.env")
 
 	files := []ConfigureInitFile{
-		{Name: "profiles.yaml", Path: profilesPath, Summary: profileSummary(profilesPath)},
-		{Name: "repos.yaml", Path: reposPath, Summary: repoSummary(reposPath)},
+		{Name: userconfig.Filename, Path: configPath, Summary: configSummary(configPath)},
 		{Name: "secrets.env", Path: secretsEnvPath, Summary: "laptop-local masked secrets"},
 	}
 	for i := range files {
@@ -154,37 +153,14 @@ func pathExposure(path string) (string, bool) {
 	return fmt.Sprintf("%04o", perm), perm&0o077 != 0
 }
 
-func profileSummary(path string) string {
-	cfg, err := profile.Load(path)
-	if err != nil || cfg == nil {
-		return "remote-cluster profiles for `--profile <name>` dispatch"
+func configSummary(path string) string {
+	profiles, perr := profile.Load(path)
+	registry, rerr := repos.Load(path)
+	if perr != nil || rerr != nil {
+		return "unreadable; `sparkwing doctor` says why"
 	}
-	n := len(cfg.Profiles)
-	if n == 0 {
-		return "0 profiles defined"
-	}
-	if n == 1 {
-		return "1 profile defined"
-	}
-	return fmt.Sprintf("%d profiles defined", n)
-}
-
-func repoSummary(path string) string {
-	cfg, err := repos.Load(path)
-	if err != nil {
-		return "repository registry is unreadable"
-	}
-	if cfg == nil {
-		return "registered laptop checkouts for cross-repo pipeline lookup"
-	}
-	n := len(cfg.Repos)
-	if n == 0 {
-		return "0 repos registered"
-	}
-	if n == 1 {
-		return "1 repo registered"
-	}
-	return fmt.Sprintf("%d repos registered", n)
+	np, nr := len(profiles.Profiles), len(registry.Repos)
+	return fmt.Sprintf("%d profile%s, %d registered repo%s", np, pluralS(np), nr, pluralS(nr))
 }
 
 func printConfigureInitExposure(info ConfigureInit) {

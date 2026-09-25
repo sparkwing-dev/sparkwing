@@ -9,7 +9,7 @@ import (
 
 func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 	root := t.TempDir()
-	registry := filepath.Join(root, "repos.yaml")
+	registry := filepath.Join(root, "config.yaml")
 	live := filepath.Join(root, "live")
 	stale := filepath.Join(root, "stale")
 	if err := os.MkdirAll(filepath.Join(live, ".sparkwing"), 0o755); err != nil {
@@ -18,7 +18,7 @@ func TestPruneDropsOnlyStaleCheckouts(t *testing.T) {
 	if err := os.MkdirAll(stale, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_REPOS", registry)
+	t.Setenv("SPARKWING_CONFIG", registry)
 	want := &Config{
 		Repos:         []*Entry{{Path: live}, {Path: stale}},
 		FallbackPaths: []string{"~/code"},

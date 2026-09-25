@@ -20,9 +20,9 @@ func TestBudgetNote_NamesTheSetting(t *testing.T) {
 			state: wingwire.BudgetState{
 				Cores: 5, MachineCores: 10,
 				Source: string(wingwire.BudgetSourceConfig),
-				Origin: "/home/op/.config/sparkwing/budget",
+				Origin: "/home/op/.config/sparkwing/config.yaml admission.budget",
 			},
-			expect: []string{"5.0 cores (machine 10.0)", "/home/op/.config/sparkwing/budget"},
+			expect: []string{"5.0 cores (machine 10.0)", "/home/op/.config/sparkwing/config.yaml admission.budget"},
 		},
 		{
 			name: "environment",
@@ -56,9 +56,9 @@ func TestBudgetNote_NamesTheSetting(t *testing.T) {
 				Cores: 10, MachineCores: 10,
 				IgnoreExternal: true,
 				Source:         string(wingwire.BudgetSourceConfig),
-				Origin:         "/home/op/.config/sparkwing/budget",
+				Origin:         "/home/op/.config/sparkwing/config.yaml admission.budget",
 			},
-			expect: []string{"no capacity cap", "/home/op/.config/sparkwing/budget"},
+			expect: []string{"no capacity cap", "/home/op/.config/sparkwing/config.yaml admission.budget"},
 		},
 	}
 	for _, tc := range tests {
@@ -105,11 +105,11 @@ func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 		Budget: &wingwire.BudgetState{
 			Cores: 10, MachineCores: 10, IgnoreExternal: true,
 			Source: string(wingwire.BudgetSourceConfig),
-			Origin: "/home/op/.config/sparkwing/budget",
+			Origin: "/home/op/.config/sparkwing/config.yaml admission.budget",
 		},
 	}
 	note := opsview.ExternalIgnoredNote(qs)
-	if !strings.Contains(note, "/home/op/.config/sparkwing/budget") {
+	if !strings.Contains(note, "/home/op/.config/sparkwing/config.yaml admission.budget") {
 		t.Errorf("external note = %q, want it to name the setting that turned it on", note)
 	}
 
@@ -117,7 +117,7 @@ func TestExternalIgnoredNote_NamesTheSetting(t *testing.T) {
 	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
 		t.Fatalf("render pretty: %v", err)
 	}
-	if !strings.Contains(buf.String(), "/home/op/.config/sparkwing/budget") {
+	if !strings.Contains(buf.String(), "/home/op/.config/sparkwing/config.yaml admission.budget") {
 		t.Errorf("queue view does not name the setting behind ignore-external:\n%s", buf.String())
 	}
 }
@@ -126,7 +126,7 @@ func TestRenderDoctorPretty_ReportsMachineBudget(t *testing.T) {
 	r := opsview.DoctorReport{
 		MachineBudget: &opsview.DoctorMachineBudget{
 			Source:         string(wingwire.BudgetSourceConfig),
-			Origin:         "/home/op/.config/sparkwing/budget",
+			Origin:         "/home/op/.config/sparkwing/config.yaml admission.budget",
 			Raw:            "ignore-external",
 			IgnoreExternal: true,
 		},
@@ -139,7 +139,7 @@ func TestRenderDoctorPretty_ReportsMachineBudget(t *testing.T) {
 		t.Fatalf("render doctor: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"machine budget", "/home/op/.config/sparkwing/budget", "external load ignored"} {
+	for _, want := range []string{"machine budget", "/home/op/.config/sparkwing/config.yaml admission.budget", "external load ignored"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output does not contain %q:\n%s", want, out)
 		}
@@ -176,14 +176,14 @@ func TestRenderDoctorPlain_StatesBudgetEitherWay(t *testing.T) {
 	r := opsview.DoctorReport{
 		MachineBudget: &opsview.DoctorMachineBudget{
 			Source:         string(wingwire.BudgetSourceConfig),
-			Origin:         "/home/op/.config/sparkwing/budget",
+			Origin:         "/home/op/.config/sparkwing/config.yaml admission.budget",
 			IgnoreExternal: true,
 		},
 	}
 	if err := opsview.RenderDoctor(&buf, r, "plain", ""); err != nil {
 		t.Fatalf("render doctor: %v", err)
 	}
-	if !strings.Contains(buf.String(), "machine_budget\tconfig\t/home/op/.config/sparkwing/budget\t1") {
+	if !strings.Contains(buf.String(), "machine_budget\tconfig\t/home/op/.config/sparkwing/config.yaml admission.budget\t1") {
 		t.Errorf("plain doctor output does not carry the budget source and origin:\n%s", buf.String())
 	}
 }

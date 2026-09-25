@@ -53,7 +53,7 @@ detect_platform() {
 
 Run the native Windows agent manually under your service manager:
 
-  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\agent.yaml
+  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\config.yaml
 
 Or run this installer inside WSL when systemd user services are enabled." ;;
     *) err "unsupported platform: $(uname -s). Supported: Darwin (macOS), Linux." ;;
@@ -158,22 +158,27 @@ LOG_PATH="${SPARKWING_HOME}/runner.log"
 mkdir -p "$SPARKWING_HOME"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
-CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
+CONFIG_PATH="${CONFIG_DIR}/config.yaml"
+# safety: config.yaml holds every other sparkwing setting on this machine, and a shell cannot merge YAML without risking them
+if [ -e "$CONFIG_PATH" ] || [ -e "${CONFIG_DIR}/agent.yaml" ]; then
+  err "$CONFIG_DIR already holds sparkwing settings. Add the runner with 'sparkwing cluster runners add', which writes only the agent section of config.yaml, or add that section by hand."
+fi
 mkdir -p "$CONFIG_DIR"
 # safety: create the file at mode 600 first so the token is never readable, however permissive the umask
 install -m 600 /dev/null "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<YAML
-controller: "${CONTROLLER_URL}"
-logs: "${LOGS_URL}"
-gitcache: "${GITCACHE_URL}"
-token: "${API_TOKEN}"
-max_concurrent: ${MAX_CONCURRENT}
-holder_prefix: "${RUNNER_NAME}"
-contribution: "${CONTRIBUTION}"
-local_admission: true
-local_reserve: "${LOCAL_RESERVE}"
+agent:
+  controller: "${CONTROLLER_URL}"
+  logs: "${LOGS_URL}"
+  gitcache: "${GITCACHE_URL}"
+  token: "${API_TOKEN}"
+  max_concurrent: ${MAX_CONCURRENT}
+  holder_prefix: "${RUNNER_NAME}"
+  contribution: "${CONTRIBUTION}"
+  local_admission: true
+  local_reserve: "${LOCAL_RESERVE}"
 YAML
-log "wrote $CONFIG_PATH (mode 600)"
+log "wrote the agent section of $CONFIG_PATH (mode 600)"
 
 if [ "$PLATFORM" = "macos" ]; then
   TEMPLATE="${SCRIPT_DIR}/macos/com.sparkwing.runner.plist.template"

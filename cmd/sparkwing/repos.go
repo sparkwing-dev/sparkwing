@@ -187,7 +187,7 @@ func fleetJSON(fleet []repos.Repo, latest string) []fleetRepoJSON {
 
 func printFleet(fleet []repos.Repo, latest string) {
 	if len(fleet) == 0 {
-		fmt.Println(color.Dim("no sparkwing repos found (run a pipeline or add one to ~/.config/sparkwing/repos.yaml)"))
+		fmt.Println(color.Dim("no sparkwing repos found (run a pipeline or add one with `sparkwing configure xrepo add`)"))
 		return
 	}
 	fmt.Printf("Fleet: %d repo(s)", len(fleet))

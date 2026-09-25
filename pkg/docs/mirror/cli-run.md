@@ -111,7 +111,7 @@ is running and exits after five idle minutes; see
 | `--sw-allow-secret-file PATH` | Send this secret-shaped working-tree file to the fleet anyway; PATH is repository-relative (repeatable) |
 | `--sw-index PATH` | Judge the git index at PATH instead of the repository's own (prints an index_bound event naming it) |
 | `--sw-run-handle-file PATH` | Atomically publish the accepted run's machine-readable handle to PATH |
-| `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/profiles.yaml (default: laptop) |
+| `--profile NAME` | Run / read against the named profile from ~/.config/sparkwing/config.yaml (default: laptop) |
 | `--target TARGET` | Run against the named pipeline deployment target (e.g. dev, prod) |
 
 ### Examples

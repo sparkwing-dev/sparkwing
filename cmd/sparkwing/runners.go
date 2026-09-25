@@ -16,10 +16,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/agentservice"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -63,8 +63,8 @@ func runRunnersAdd(args []string) error {
 	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
 	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
 	logsURL := fs.String("logs", "", "logs service URL (default: the profile's logs surface)")
-	configPath := fs.String("config", "", "agent config to write (default: ~/.config/sparkwing/agent.yaml)")
-	force := fs.Bool("force", false, "replace an existing agent config")
+	configPath := fs.String("config", "", "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)")
+	force := fs.Bool("force", false, "replace an existing agent section")
 	noService := fs.Bool("no-service", false, "write the config without installing or starting the service")
 	if err := parseAndCheck(cmdRunnersAdd, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -138,7 +138,7 @@ func finishRunnerEnrollment(path string, cfg agentFileConfig, service runnerServ
 	if err := writeAgentConfig(path, cfg); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s (mode 0600)\n", path)
+	fmt.Printf("wrote the agent section of %s (mode 0600)\n", path)
 	return service.start(path)
 }
 
@@ -152,7 +152,7 @@ func printRunnerRevokeHint(profileName, prefix string) {
 func runRunnersRemove(args []string) error {
 	fs := flag.NewFlagSet(cmdRunnersRemove.Path, flag.ContinueOnError)
 	on := addProfileFlag(fs)
-	configPath := fs.String("config", "", "agent config to read the token from (default: ~/.config/sparkwing/agent.yaml)")
+	configPath := fs.String("config", "", "config.yaml whose agent section holds the token (default: ~/.config/sparkwing/config.yaml)")
 	noService := fs.Bool("no-service", false, "revoke the token without touching the service")
 	if err := parseAndCheck(cmdRunnersRemove, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -194,7 +194,7 @@ func runRunnersRemove(args []string) error {
 		return err
 	}
 	fmt.Printf("revoked %s on profile %s\n", prefix, prof.Name)
-	fmt.Printf("%s still holds that dead token; `sparkwing cluster runners add --force` replaces it\n", path)
+	fmt.Printf("the agent section of %s still holds that dead token; `sparkwing cluster runners add --force` replaces it\n", path)
 	return nil
 }
 
@@ -295,64 +295,15 @@ func agentConfigPath(override string) (string, error) {
 }
 
 func checkAgentConfigAbsent(path string, force bool) error {
-	info, err := os.Lstat(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return nil
-	case err != nil:
+	section, err := userconfig.Node(path, userconfig.Agent)
+	if err != nil || section == nil || force {
 		return err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink; sparkwing writes a credential only to a regular file, "+
-			"so move it aside and run this again", path)
-	}
-	if force {
-		return nil
-	}
-	return fmt.Errorf("%s already exists; pass --force to replace it (its token stays live until you revoke it)", path)
+	return fmt.Errorf("%s already has an agent section; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
-// safety: the config is replaced by a rename, so an interrupted write leaves the
-// previous credential intact rather than a truncated file no agent can read.
 func writeAgentConfig(path string, cfg agentFileConfig) error {
-	body, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := fssecure.EnsureConfigDir(dir); err != nil {
-		return err
-	}
-	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink; sparkwing writes a credential only to a regular file", path)
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".agent-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "sparkwing: could not clear the temporary file %s: %v\n", name, err)
-		}
-	}()
-	if err := fssecure.TightenOpen(tmp); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(name, path); err != nil {
-		return err
-	}
-	return fssecure.SecurePrivateConfig(path)
+	return userconfig.Write(path, userconfig.Agent, "the agent config", cfg)
 }
 
 func profileLogsURL(p *profile.Profile) string {

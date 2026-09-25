@@ -34,7 +34,7 @@ func linuxHost(t *testing.T, exec *fakeExec) Host {
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     "/usr/local/bin/sparkwing-runner",
-		ConfigPath: filepath.Join(root, ".config", "sparkwing", "agent.yaml"),
+		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
 		Exec:       exec.run,
 	}
 }
@@ -47,7 +47,7 @@ func darwinHost(t *testing.T, exec *fakeExec) Host {
 		Home:       root,
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     "/usr/local/bin/sparkwing-runner",
-		ConfigPath: filepath.Join(root, ".config", "sparkwing", "agent.yaml"),
+		ConfigPath: filepath.Join(root, ".config", "sparkwing", "config.yaml"),
 		LogPath:    filepath.Join(root, ".sparkwing", "runner.log"),
 		UID:        501,
 		Exec:       exec.run,
@@ -270,7 +270,7 @@ func TestInstallRequiresAbsolutePaths(t *testing.T) {
 		t.Fatal("Install accepted a relative binary path")
 	}
 	h = linuxHost(t, exec)
-	h.ConfigPath = "agent.yaml"
+	h.ConfigPath = "config.yaml"
 	if _, err := Install(h); err == nil {
 		t.Fatal("Install accepted a relative config path")
 	}
@@ -307,7 +307,7 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 			exec := &fakeExec{}
 			other := h
 			other.Exec = exec.run
-			other.ConfigPath = filepath.Join(filepath.Dir(h.ConfigPath), "other-agent.yaml")
+			other.ConfigPath = filepath.Join(filepath.Dir(h.ConfigPath), "other-config.yaml")
 
 			state, err := Uninstall(other)
 			if err != nil {
@@ -330,11 +330,11 @@ func TestUninstallLeavesAServiceRunningAnotherConfig(t *testing.T) {
 }
 
 func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
-	h := Host{Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/agent.yaml"}
+	h := Host{Binary: "/opt/my runner/sparkwing-runner", ConfigPath: "/home/a b/.config/sparkwing/config.yaml"}
 	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
 		t.Errorf("unitConfigPath = %q, want %q", got, h.ConfigPath)
 	}
-	h = Host{Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/agent.yaml"}
+	h = Host{Binary: "/opt/100%/sparkwing-runner", ConfigPath: "/home/a/100%/config.yaml"}
 	if got := unitConfigPath(serviceUnit(h)); got != h.ConfigPath {
 		t.Errorf("unitConfigPath with a specifier = %q, want %q", got, h.ConfigPath)
 	}
@@ -344,7 +344,7 @@ func TestUnitConfigPathReadsQuotedAndEscapedArguments(t *testing.T) {
 }
 
 func TestPlistConfigPathReadsProgramArguments(t *testing.T) {
-	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/agent.yaml", Home: "/Users/a b"}
+	h := Host{Binary: "/usr/local/bin/sparkwing-runner", ConfigPath: "/Users/a b/.config/sparkwing/config.yaml", Home: "/Users/a b"}
 	if got := plistConfigPath([]byte(agentPlist(h))); got != h.ConfigPath {
 		t.Errorf("plistConfigPath = %q, want %q", got, h.ConfigPath)
 	}
@@ -390,15 +390,15 @@ func TestPreflightReportsAnUnreachableServiceManager(t *testing.T) {
 
 func TestXMLTextEscapesMarkupAndKeepsSpaces(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
-		{"/Users/a b/agent.yaml", "/Users/a b/agent.yaml"},
-		{"/opt/r&d/agent.yaml", "/opt/r&amp;d/agent.yaml"},
-		{`/opt/<a>"b"/agent.yaml`, "/opt/&lt;a&gt;&#34;b&#34;/agent.yaml"},
+		{"/Users/a b/config.yaml", "/Users/a b/config.yaml"},
+		{"/opt/r&d/config.yaml", "/opt/r&amp;d/config.yaml"},
+		{`/opt/<a>"b"/config.yaml`, "/opt/&lt;a&gt;&#34;b&#34;/config.yaml"},
 	} {
 		if got := xmlText(tc.in); got != tc.want {
 			t.Errorf("xmlText(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
-	h := Host{Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/agent.yaml"}
+	h := Host{Binary: "/usr/local/bin/sparkwing-runner", Home: "/Users/r&d", ConfigPath: "/Users/r&d/config.yaml"}
 	body := agentPlist(h)
 	if strings.Contains(body, "r&d") {
 		t.Errorf("the plist carries a raw ampersand:\n%s", body)

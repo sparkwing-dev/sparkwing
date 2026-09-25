@@ -134,7 +134,7 @@ func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *t
 	if err := opsview.RenderDoctor(&gated, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse repos.yaml: yaml: line 459"}
+	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse config.yaml: yaml: line 459"}
 	if err := opsview.RenderDoctor(&blind, blindReport, "", ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *t
 	if strings.Contains(blind.String(), "every declared gate fires") {
 		t.Errorf("doctor claimed every gate fires having read no repos:\n%s", blind.String())
 	}
-	for _, want := range []string{"could not run", "repos.yaml"} {
+	for _, want := range []string{"could not run", "config.yaml"} {
 		if !strings.Contains(blind.String(), want) {
 			t.Errorf("output does not carry %q:\n%s", want, blind.String())
 		}
@@ -156,7 +156,7 @@ func TestRenderDoctorPlain_FlagsAGateSurveyThatDidNotRun(t *testing.T) {
 	if err := opsview.RenderDoctor(&clean, opsview.DoctorReport{GatesSurveyed: 3}, "plain", ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse repos.yaml"}
+	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse config.yaml"}
 	if err := opsview.RenderDoctor(&blind, blindReport, "plain", ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}

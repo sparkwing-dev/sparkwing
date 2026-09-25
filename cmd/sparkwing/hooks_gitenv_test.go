@@ -24,7 +24,7 @@ func TestDispatch_UnbindsFromTheRepositoryThatLaunchedIt(t *testing.T) {
 	t.Setenv("GIT_AUTHOR_NAME", "sparkwing test")
 	t.Setenv(gitenv.GateIndexVar, "")
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv("SPARKWING_REPOS", filepath.Join(t.TempDir(), "repos.yaml"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 
 	_ = runSparkwing([]string{"run"})
 

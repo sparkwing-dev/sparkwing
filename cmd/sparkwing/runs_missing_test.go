@@ -16,7 +16,7 @@ import (
 )
 
 func TestRunReadersDistinguishMissingRunFromEmptyRun(t *testing.T) {
-	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	paths := orchestrator.PathsAt(t.TempDir())
 	if err := paths.EnsureRoot(); err != nil {
 		t.Fatal(err)

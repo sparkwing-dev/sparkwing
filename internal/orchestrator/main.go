@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -145,7 +146,7 @@ func Main() {
 		DryRun:                    dryRunFromEnv(),
 		LocalOnly:                 os.Getenv("SPARKWING_LOCAL_ONLY") == "1",
 		Fleet:                     os.Getenv("SPARKWING_FLEET") == "1",
-		FleetConfigPath:           os.Getenv(fleet.PathEnv),
+		FleetConfigPath:           os.Getenv(userconfig.PathEnv),
 		FleetSourceRoot:           os.Getenv("SPARKWING_FLEET_SOURCE_ROOT"),
 		FleetSourceBundle:         os.Getenv("SPARKWING_FLEET_SOURCE_BUNDLE"),
 		FleetSourceSHA:            os.Getenv("SPARKWING_FLEET_SOURCE_SHA"),

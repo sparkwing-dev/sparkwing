@@ -103,12 +103,12 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 
 func TestProfilesListStreamsRedactedRecords(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "profiles.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(
 		"profiles:\n  prod:\n    controller:\n      url: https://example.invalid\n      token: swu_supersecretvalue\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 
 	out := captureStdout(t, func() {
 		if err := runProfilesList([]string{"-o", "json"}); err != nil {

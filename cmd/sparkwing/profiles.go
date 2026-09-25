@@ -60,7 +60,7 @@ func loadCfg() (*profile.Config, string, error) {
 
 func runProfilesAdd(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesAdd.Path, flag.ContinueOnError)
-	name := fs.String("name", "", "profile name (unique per profiles.yaml)")
+	name := fs.String("name", "", "profile name (unique in config.yaml)")
 	controller := fs.String("controller", "", "controller base URL (required for remote dispatch)")
 	token := fs.String("token", "", "bearer token, visible to other processes in the process list and shell history (optional -- omit for unauthed controllers)")
 	tokenStdin := fs.Bool("token-stdin", false, "read the bearer token from stdin, prompting without echo when stdin is a terminal")
@@ -293,7 +293,7 @@ func runProfilesDuplicate(args []string) error {
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (inspect it with `sparkwing configure profiles show --name %s`, then edit profiles.yaml or remove and re-add it)\n", src, dst, dst)
+	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (inspect it with `sparkwing configure profiles show --name %s`, then edit config.yaml or remove and re-add it)\n", src, dst, dst)
 	return nil
 }
 

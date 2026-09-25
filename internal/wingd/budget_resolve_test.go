@@ -3,30 +3,34 @@ package wingd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func budgetEnvSandbox(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("SPARKWING_CONFIG", "")
 	t.Setenv(BudgetEnv, "")
-	return filepath.Join(dir, "sparkwing", "budget")
+	return filepath.Join(dir, "sparkwing", "config.yaml")
 }
 
 func writeBudgetConfig(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatalf("create config dir: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatalf("write budget config: %v", err)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 }
 
 func TestResolveBudget_Precedence(t *testing.T) {
 	path := budgetEnvSandbox(t)
-	writeBudgetConfig(t, path, "2\n")
+	writeBudgetConfig(t, path, "admission:\n  budget: \"2\"\n")
 	t.Setenv(BudgetEnv, "4")
 
 	got, err := ResolveBudget("6")
@@ -68,15 +72,15 @@ func TestResolveBudget_Precedence(t *testing.T) {
 	if got.Source != BudgetSourceConfig {
 		t.Errorf("source = %q, want %q", got.Source, BudgetSourceConfig)
 	}
-	if got.Origin != path {
-		t.Errorf("origin = %q, want the config path %q", got.Origin, path)
+	if want := path + " admission.budget"; got.Origin != want {
+		t.Errorf("origin = %q, want the config path and key %q", got.Origin, want)
 	}
 }
 
 func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
-	writeBudgetConfig(t, path, "50%,ignore-external\n")
+	writeBudgetConfig(t, path, "admission:\n  budget: 50%,ignore-external\n")
 
 	got, err := ResolveBudget("")
 	if err != nil {
@@ -91,8 +95,8 @@ func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 	if !got.Budget.IgnoreExternal {
 		t.Error("ignore-external not read from the config file")
 	}
-	if got.Source != BudgetSourceConfig || got.Origin != path {
-		t.Errorf("source/origin = %q/%q, want %q/%q", got.Source, got.Origin, BudgetSourceConfig, path)
+	if want := path + " admission.budget"; got.Source != BudgetSourceConfig || got.Origin != want {
+		t.Errorf("source/origin = %q/%q, want %q/%q", got.Source, got.Origin, BudgetSourceConfig, want)
 	}
 }
 
@@ -121,7 +125,7 @@ func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
-	writeBudgetConfig(t, path, "\n# host sensor over-reads external load\n\n  ignore-external  \n")
+	writeBudgetConfig(t, path, "admission:\n  # host sensor over-reads external load\n\n  budget: \"  ignore-external  \"\n")
 
 	got, err := ResolveBudget("")
 	if err != nil {
@@ -138,7 +142,7 @@ func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
-	writeBudgetConfig(t, path, "# nothing set yet\n")
+	writeBudgetConfig(t, path, "admission:\n  # nothing set yet\n  mode: classic\n")
 
 	got, err := ResolveBudget("")
 	if err != nil {
@@ -152,10 +156,28 @@ func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
-	writeBudgetConfig(t, path, "half of it\n")
+	writeBudgetConfig(t, path, "admission:\n  budget: half of it\n")
 
-	if _, err := ResolveBudget(""); err == nil {
-		t.Fatal("resolve accepted a malformed config value; want an error naming the file")
+	if _, err := ResolveBudget(""); err == nil || !strings.Contains(err.Error(), path+" admission.budget") {
+		t.Fatalf("resolve error = %v; want an error naming the file and key", err)
+	}
+}
+
+func TestResolveBudget_MovesALegacyBudgetFileIntoConfig(t *testing.T) {
+	path := budgetEnvSandbox(t)
+	t.Setenv("SPARKWING_HOME", filepath.Dir(filepath.Dir(filepath.Dir(path))))
+	legacy := filepath.Join(filepath.Dir(path), "budget")
+	writeBudgetConfig(t, legacy, "# leave room for the desktop\n6,enforce\n")
+
+	got, err := ResolveBudget("")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.Budget.Cores != 6 || !got.Budget.Enforce || got.Source != BudgetSourceConfig {
+		t.Fatalf("budget = %+v from %q, want the legacy file's 6,enforce from config.yaml", got.Budget, got.Source)
+	}
+	if _, err := os.Stat(legacy + userconfig.MigratedSuffix); err != nil {
+		t.Fatalf("the legacy file was not set aside: %v", err)
 	}
 }
 

@@ -70,7 +70,8 @@ type Host struct {
 	// Binary is the absolute path of the sparkwing-runner binary.
 	Binary string
 
-	// ConfigPath is the agent.yaml the service reads its credential from.
+	// ConfigPath is the config.yaml whose agent section the service reads its
+	// credential from.
 	ConfigPath string
 
 	// LogPath receives the agent's stdout and stderr on macOS. systemd

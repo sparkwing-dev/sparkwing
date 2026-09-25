@@ -200,7 +200,7 @@ and writes the profile that every other command selects with --profile.
 'status' reports what that connection authenticates as. 'disconnect' removes
 the profile and revokes its token.
 
-Nothing here edits profiles.yaml by hand. Enroll this machine as a runner with
+Nothing here edits config.yaml by hand. Enroll this machine as a runner with
 'sparkwing cluster runners add'.`,
 	SubcommandOrder: []string{"connect", "status", "disconnect"},
 	Examples: []Example{
@@ -218,7 +218,7 @@ a profile carrying the controller URL and a token.
 --admin-token-stdin reads an admin credential from stdin and mints a user
 token with it, carrying runs.read, runs.write, triggers.read, logs.read and
 approvals.write. The admin credential is never stored; only the minted token
-reaches profiles.yaml. --token-stdin stores a token you already hold. Neither
+reaches config.yaml. --token-stdin stores a token you already hold. Neither
 flag connects to a controller serving unauthenticated.
 
 --name defaults to the controller host with every character outside a-z0-9
@@ -229,7 +229,7 @@ without --force, because the token it holds stays live until it is revoked.
 --set-default writes defaults.profile into this repository's
 .sparkwing/sparkwing.yaml, so runs in this checkout select the connection with
 no flag. The name resolves against the project's own profiles: block first and
-profiles.yaml second, so the token stays out of the checkout.
+config.yaml second, so the token stays out of the checkout.
 
 The command closes with the dashboard URL the controller announces and the
 probes 'sparkwing configure profiles test' runs.`,
@@ -320,13 +320,13 @@ annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
 disable).
 
-The registry lives at $SPARKWING_REPOS (if set), else
-$XDG_CONFIG_HOME/sparkwing/repos.yaml, else
-~/.config/sparkwing/repos.yaml. SPARKWING_HOME does not move it; it
+The registry is the repos section of config.yaml: $SPARKWING_CONFIG
+(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
+~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
 is the state, cache and logs root, and a registered checkout is a
 machine-wide fact that outlives any one home. A write from a command
 running under a home of its own is refused rather than sent to the
-machine's registry: set SPARKWING_REPOS to a path inside that home
+machine's registry: set SPARKWING_CONFIG to a path inside that home
 to keep it there.`,
 	SubcommandOrder: []string{"list", "add", "remove", "prune"},
 	Examples: []Example{
@@ -391,8 +391,8 @@ var cmdConfigureInit = Command{
 	Synopsis: "Set up ~/.config/sparkwing/ and report laptop-level config status",
 	Description: `Idempotent setup + status command for laptop-level
 sparkwing config. Creates ~/.config/sparkwing/ if it doesn't exist,
-then reports which config files are present (profiles.yaml,
-repos.yaml, secrets.env), the running CLI + Go toolchain version,
+then reports which config files are present (config.yaml,
+secrets.env), the running CLI + Go toolchain version,
 and a curated list of next-step commands.
 
 Pairs with the per-project flow: use this one on a fresh laptop
@@ -1359,7 +1359,7 @@ against a profile's storage, use 'sparkwing run --profile X'.`,
 		{Name: "<pipeline>", Desc: "Pipeline name registered on the controller", Required: true},
 	},
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline", Group: "System", Required: true},
+		{Name: "profile", Argument: "NAME", Desc: "Profile (from ~/.config/sparkwing/config.yaml) whose controller runs the pipeline", Group: "System", Required: true},
 		{Name: "detach", Desc: "Return once the trigger is registered (print the run id); don't follow", Group: "System"},
 		{Name: "working-tree", Desc: "Run tracked changes and untracked non-ignored files from an immutable remote snapshot", Group: "Source"},
 		{Name: "allow-secret-file", Argument: "PATH", Desc: "Send this secret-shaped working-tree file anyway; PATH is repository-relative (repeatable)", Group: "Source"},
@@ -1815,7 +1815,7 @@ that is neither loopback, the --addr host, nor listed in --allow-origin.
 		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/profiles.yaml (uses its logs + cache surfaces)", Group: "Storage"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},
 		{Name: "log-store", Argument: "URL", Desc: "Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "artifact-store", Argument: "URL", Desc: "Pluggable artifact backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile.", Group: "Storage"},
 		{Name: "read-only", Desc: "Reject writes on /api/v1/* (auth + webhooks remain open)", Group: "Storage"},
@@ -1895,7 +1895,7 @@ Use sparkwing-runner for --runner k8s|warm and image or service-account flags.
 Run against a remote controller via --profile prod (or whichever profile),
 or against a local 'sparkwing serve start' via --profile local.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from profiles.yaml", Required: true, Group: "Connection"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from config.yaml", Required: true, Group: "Connection"},
 		{Name: "poll", Argument: "DUR", Desc: "Claim poll interval when the queue is empty", Default: "1s", Group: "Tuning"},
 		{Name: "heartbeat", Argument: "DUR", Desc: "Claim-lease heartbeat cadence", Default: "5s", Group: "Tuning"},
 	},
@@ -1955,6 +1955,10 @@ It names the reset command for excessive learned demand floors.
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
 
+Settings files that config.yaml replaced are moved into it, each kept as
+<name>.migrated; any that cannot move, and any replaced path variable still
+set, are listed with where the setting belongs.
+
 --timeout bounds the daemon and local-state checks, each taking a slice of it,
 so a daemon that accepts connections and answers nothing is reported as wedged
 rather than spending the whole budget. Recovering a wedged daemon means
@@ -2008,15 +2012,16 @@ compgen lacks the facility.`,
 var cmdProfiles = Command{
 	Path:     "sparkwing configure profiles",
 	Synopsis: "Manage connection profiles for remote controllers",
-	Description: `Profile config lives at $SPARKWING_PROFILES (if set), else
-$XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
-~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
+	Description: `Profiles are the profiles section of config.yaml:
+$SPARKWING_CONFIG (if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml,
+else ~/.config/sparkwing/config.yaml. Permissions on save are 0600, and a
+save rewrites only the profiles section.
 
 SPARKWING_HOME does not move this file. It is the state, cache and
 logs root; profiles are machine-wide connections that outlive any
 one home. A write from a command running under a home of its own is
 refused rather than sent to the machine's profiles: set
-SPARKWING_PROFILES to a path inside that home to keep it there.
+SPARKWING_CONFIG to a path inside that home to keep it there.
 
 Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
@@ -2028,14 +2033,14 @@ exist on other commands; profiles are the only config surface.`,
 var cmdProfilesAdd = Command{
 	Path:     "sparkwing configure profiles add",
 	Synopsis: "Register a new connection profile",
-	Description: `Creates a new entry in profiles.yaml. --name and --controller
+	Description: `Creates a new entry in the profiles section of config.yaml. --name and --controller
 are required; the token is optional. --token-stdin reads the
 token from stdin and prompts without echo when stdin is a
 terminal; prefer it over --token, which is visible to other
 processes in the process list and recorded in shell history.
-Configure storage and service backends by editing profiles.yaml.`,
+Configure storage and service backends by editing config.yaml.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name (unique per profiles.yaml)", Required: true, Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Profile name (unique in config.yaml)", Required: true, Group: "Input"},
 		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Connection"},
 		{Name: "token", Argument: "TOKEN", Desc: "Bearer token, visible to other processes and shell history (omit for local/unauthed stacks)", ConflictsWith: []string{"token-stdin"}, Group: "Connection"},
 		{Name: "token-stdin", Desc: "Read the bearer token from stdin, prompting without echo on a terminal", ConflictsWith: []string{"token"}, Group: "Connection"},
@@ -2083,7 +2088,7 @@ redacted unless --show-token is passed.`,
 var cmdProfilesRemove = Command{
 	Path:        "sparkwing configure profiles remove",
 	Synopsis:    "Delete a profile",
-	Description: `Removes the named entry from profiles.yaml.`,
+	Description: `Removes the named entry from the profiles section of config.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
 	},
@@ -3668,13 +3673,14 @@ var cmdRunnersAdd = Command{
 	Synopsis: "Mint a runner token, write the config, start the service",
 	Description: `Mints a runner token carrying nodes.claim, triggers.claim,
 runs.state, secrets.read and logs.write against the profile's controller,
-writes ~/.config/sparkwing/agent.yaml at mode 0600, then installs and starts
+writes the agent section of ~/.config/sparkwing/config.yaml at mode 0600, then installs and starts
 the user service: a systemd user unit on Linux, a LaunchAgent on macOS. On
 Windows it prints the manual supervision steps instead.
 
-The config is written in claim mode, which is the mode that executes work.
-An existing config is never replaced without --force, because the token it
-holds stays live until it is revoked.
+The section is written in claim mode, which is the mode that executes work.
+An existing agent section is never replaced without --force, because the token
+it holds stays live until it is revoked. Every other section of the file is
+kept.
 
 Nothing is minted until the config validates and the machine answers: a
 missing sparkwing-runner, an unreachable service manager, or an unusable
@@ -3687,7 +3693,7 @@ else this machine's own git credentials. Without it the agent fetches through
 the controller's gitcache proxy.
 
 The command prints the token prefix and the revoke command. The raw token
-reaches only the config file.`,
+reaches only config.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Runner name, shown in the dashboard", Required: true, Group: "Identity"},
 		{Name: "allow-repo", Argument: "PATTERN", Desc: "Repository this machine may build and fetch directly, as host/path with '*' within one segment (repeatable)", Group: "Identity"},
@@ -3695,8 +3701,8 @@ reaches only the config file.`,
 		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
 		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
 		{Name: "logs", Argument: "URL", Desc: "Logs service URL (default: the profile's logs surface)", Group: "Input"},
-		{Name: "config", Argument: "PATH", Desc: "Agent config to write (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
-		{Name: "force", Desc: "Replace an existing agent config", Group: "Input"},
+		{Name: "config", Argument: "PATH", Desc: "config.yaml whose agent section to write (default: ~/.config/sparkwing/config.yaml)", Group: "Input"},
+		{Name: "force", Desc: "Replace an existing agent section", Group: "Input"},
 		{Name: "no-service", Desc: "Write the config without installing or starting the service", Group: "System"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller to enroll against", Required: true, Group: "System"},
 	},
@@ -3723,7 +3729,7 @@ A service file that runs a different agent config is left alone.
 The config file stays on disk holding the revoked token; 'runners add --force'
 replaces it.`,
 	Flags: []FlagSpec{
-		{Name: "config", Argument: "PATH", Desc: "Agent config to read the token from (default: ~/.config/sparkwing/agent.yaml)", Group: "Input"},
+		{Name: "config", Argument: "PATH", Desc: "config.yaml whose agent section holds the token (default: ~/.config/sparkwing/config.yaml)", Group: "Input"},
 		{Name: "no-service", Desc: "Revoke the token without touching the service", Group: "System"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile naming the controller that issued the token", Required: true, Group: "System"},
 	},
@@ -3792,7 +3798,8 @@ var cmdFleet = Command{
 	Path:     "sparkwing fleet",
 	Synopsis: "Configure foreground assisted execution",
 	Description: `Local fleet configuration. Running a pipeline with assistance uses
-sparkwing run PIPELINE --sw-fleet, and fleet.yaml names the helpers it trusts.
+sparkwing run PIPELINE --sw-fleet, and the fleet section of config.yaml names
+the helpers it trusts.
 
 Fleet runs transmit an immutable snapshot containing every tracked file and
 every non-ignored untracked file to the executor that wins a node. Review
@@ -3806,7 +3813,8 @@ history.`,
 var cmdFleetInit = Command{
 	Path:     "sparkwing fleet init",
 	Synopsis: "Create an owner-only foreground fleet policy",
-	Description: `Creates fleet.yaml without replacing an existing policy. The listener is
+	Description: `Writes the fleet section of config.yaml without replacing an existing
+policy or any other section. The listener is
 fixed for the life of each foreground run. HTTPS public URLs assume a local
 Tailscale Serve or reverse proxy and therefore require a literal loopback
 listener. Plain HTTP is accepted only at a literal IP that the local Tailscale
@@ -3814,10 +3822,10 @@ client confirms belongs to this machine. Tailscale supplies transport, not
 Sparkwing authorization: only explicitly enrolled helpers receive credentials,
 and no peer discovery occurs.
 
-SPARKWING_HOME does not move fleet.yaml; it is the state, cache and
+SPARKWING_HOME does not move config.yaml; it is the state, cache and
 logs root, and the fleet policy is machine-wide. A write from a
 command running under a home of its own is refused rather than sent
-to the machine's policy: set SPARKWING_FLEET_CONFIG to a path inside
+to the machine's policy: set SPARKWING_CONFIG to a path inside
 that home to keep it there.`,
 	Flags: []FlagSpec{
 		{Name: "tailnet", Desc: "Use this machine's Tailscale IPv4 address on port 4346", Group: "Network"},
