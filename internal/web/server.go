@@ -91,11 +91,9 @@ type HandlerOptions struct {
 	ControllerURL     string
 	AuthControllerURL string // safety: login stays controller-backed when data reads a shared store directly
 	LogsURL           string
-	CacheURL          string
 	Token             string
 
-	Version       string
-	ExtraServices []HealthService
+	Version string
 
 	RequireLogin      bool
 	TrustedProxyCIDRs []netip.Prefix
@@ -242,9 +240,6 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness", nodeLogCompletenessHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
-
-	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
-	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
 
 	authedMux.HandleFunc("GET /api/v1/capabilities", dashboardCapabilitiesHandler(opts))
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles", capacityProfilesHandler(opts.Backend))

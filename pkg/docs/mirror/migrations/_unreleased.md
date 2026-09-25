@@ -1,5 +1,15 @@
 # Migrating to the next release
 
+## Dashboard service probes
+
+The dashboard no longer shows internal service names, URLs, latency, or
+health details. Remove `--cache` from `sparkwing-web` startup arguments and
+`web.cache.url` from full-chart values. The dashboard's
+`GET /api/v1/health/services` route is gone. Operators can query each
+service's own health endpoint through their private operations path.
+Overview now reports pending approvals without treating service probes as
+team-facing alerts.
+
 ## Browser session renewal
 
 `Store.ExtendSession` has been removed. Replace a

@@ -65,26 +65,6 @@ func TestProfileModeDashboardServesNoAccountSession(t *testing.T) {
 	}
 }
 
-func TestServiceHealthNeedsARole(t *testing.T) {
-	t.Parallel()
-	handler := healthServicesHandler([]HealthService{{Name: "cache", URL: "http://cache.internal:8080/health"}}, "")
-	roleless := httptest.NewRequest(http.MethodGet, "/api/v1/health/services", nil)
-	roleless = roleless.WithContext(contextWithWebPrincipal(roleless.Context(), &sessionResp{Principal: "ada"}, "s"))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, roleless)
-	if rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "cache.internal") {
-		t.Fatalf("a roleless session = %d %s, want 403 naming no service", rec.Code, rec.Body)
-	}
-	member := httptest.NewRequest(http.MethodGet, "/api/v1/health/services", nil)
-	member = member.WithContext(contextWithWebPrincipal(member.Context(),
-		&sessionResp{Principal: "ada", Scopes: []string{"runs.read"}}, "s"))
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, member)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("a member's session = %d, want 200", rec.Code)
-	}
-}
-
 func TestOAuthStartSendsTheBrowsersAddress(t *testing.T) {
 	t.Parallel()
 	ctrl := newIdentityController(t, true)

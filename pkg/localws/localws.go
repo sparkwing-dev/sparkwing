@@ -265,7 +265,6 @@ func buildHandler(
 
 	root := http.NewServeMux()
 	root.Handle("GET /api/v1/version", versionHandler(opts.Version, opts.Instance))
-	root.Handle("/api/v1/health/services", webHandler)
 	root.Handle("GET /api/v1/runs/grep", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs", webHandler)
 	root.Handle("GET /api/v1/runs/{id}/logs/{node}", webHandler)

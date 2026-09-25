@@ -37,10 +37,6 @@ func run(args []string) error {
 
 	controllerURL := fs.String("controller", "", "controller URL to read from (legacy; prefer --state-spec=controller://<profile>)")
 	logsURL := fs.String("logs", "", "sparkwing-logs URL (legacy; prefer --logs-spec)")
-	cacheURL := fs.String("cache", "",
-		"sparkwing-cache URL to include in the services health panel. Probe only -- "+
-			"the dashboard reads nothing else from the cache. Empty leaves it off the panel.")
-
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
 	_ = fs.String("api-url", "", "deprecated; the dashboard proxies the API on its own origin")
 	requireLogin := fs.Bool("require-login", false,
@@ -105,7 +101,6 @@ func run(args []string) error {
 			Backend:           b,
 			Paths:             paths,
 			AuthControllerURL: authControllerURL,
-			CacheURL:          *cacheURL,
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
@@ -141,7 +136,6 @@ func run(args []string) error {
 			Paths:             paths,
 			ControllerURL:     *controllerURL,
 			LogsURL:           *logsURL,
-			CacheURL:          *cacheURL,
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,

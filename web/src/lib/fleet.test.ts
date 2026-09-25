@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Agent, ServiceStatus } from "./api";
+import type { Agent } from "./api";
 import {
   fleetHeadroomState,
   fleetLocation,
   fleetRegistration,
   fleetSlotTotals,
-  fleetServiceSummary,
   fleetSlots,
   formatFleetResources,
   sortFleetAgents,
@@ -25,23 +24,6 @@ function agent(fields: Partial<Agent>): Agent {
 }
 
 describe("fleet presentation", () => {
-  it("summarizes healthy and degraded services", () => {
-    const controller: ServiceStatus = {
-      name: "controller",
-      url: "/health",
-      status: "ok",
-      latency_ms: 3,
-      checked_at: "2026-09-24T00:00:00Z",
-    };
-    const summary = fleetServiceSummary([controller]);
-    assert.equal(summary.overall, "ok");
-    assert.deepEqual(summary.serviceProbes, [controller]);
-
-    const degraded = { ...controller, status: "degraded", problems: ["db: unavailable"] };
-    const withOutage = fleetServiceSummary([degraded]);
-    assert.equal(withOutage.overall, "degraded");
-    assert.deepEqual(withOutage.serviceProbes[0].problems, ["db: unavailable"]);
-  });
   it("does not infer a missing location", () => {
     assert.equal(fleetLocation(agent({})), "unknown");
   });

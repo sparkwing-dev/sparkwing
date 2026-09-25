@@ -6,10 +6,8 @@ import Link from "next/link";
 import {
   type Approval,
   type Run,
-  type ServiceStatus,
   getPendingApprovals,
   getRuns,
-  getServiceHealth,
 } from "@/lib/api";
 import {
   type Metric,
@@ -36,7 +34,6 @@ const OVERVIEW_RUN_LIMIT = 1000;
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [services, setServices] = useState<ServiceStatus[]>([]);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
   const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
@@ -44,14 +41,12 @@ export default function Home() {
 
   const refresh = useCallback(async () => {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
-    const [rs, ap, svc] = await Promise.all([
+    const [rs, ap] = await Promise.all([
       getRuns({ since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT }),
       getPendingApprovals(),
-      getServiceHealth(),
     ]);
     setRuns(rs);
     setApprovals(ap);
-    setServices(svc);
     setNow(Date.now());
     setLoaded(true);
   }, [anchorMs]);
@@ -73,11 +68,6 @@ export default function Home() {
   const overview = useMemo(
     () => summarize(runs, now, anchorMs),
     [runs, now, anchorMs],
-  );
-
-  const degraded = useMemo(
-    () => services.filter((s) => s.status !== "ok"),
-    [services],
   );
 
   const running = useMemo(
@@ -137,7 +127,6 @@ export default function Home() {
 
           <NeedsAttention
             approvals={approvals}
-            degraded={degraded}
             running={running.length}
           />
 
@@ -399,14 +388,12 @@ function GettingStarted() {
 
 function NeedsAttention({
   approvals,
-  degraded,
   running,
 }: {
   approvals: Approval[];
-  degraded: ServiceStatus[];
   running: number;
 }) {
-  const nothing = approvals.length === 0 && degraded.length === 0;
+  const nothing = approvals.length === 0;
   return (
     <div className="mb-6">
       <div className="flex items-baseline gap-2 mb-2">
@@ -426,8 +413,7 @@ function NeedsAttention({
         <Panel>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-sm">
-              <span className="w-2 h-2 rounded-full bg-green-400" />
-              Everything looks good here.
+              No pending approvals.
             </span>
             <Link href="/runs" className="text-sm text-indigo-300 hover:underline">
               Browse runs →
@@ -457,33 +443,6 @@ function NeedsAttention({
                     {fmtDateTime(a.requested_at)} · {fmtAgo(a.requested_at)}
                   </span>
                 </Tooltip>
-              </Link>
-            </li>
-          ))}
-          {degraded.map((s) => (
-            <li key={s.name}>
-              <Link
-                href="/cluster"
-                className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--surface-raised)] transition-colors"
-              >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    s.status === "down" ? "bg-red-400" : "bg-amber-400"
-                  }`}
-                />
-                <span
-                  className={`text-[11px] font-mono shrink-0 ${
-                    s.status === "down" ? "text-red-400" : "text-amber-400"
-                  }`}
-                >
-                  {s.status}
-                </span>
-                <span className="font-mono text-xs truncate flex-1">
-                  {s.name}
-                </span>
-                <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
-                  {s.latency_ms}ms
-                </span>
               </Link>
             </li>
           ))}

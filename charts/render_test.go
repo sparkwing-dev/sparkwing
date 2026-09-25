@@ -160,20 +160,11 @@ func hasFlag(args []string, prefix string) (string, bool) {
 	return "", false
 }
 
-func TestWebIsPointedAtTheBundledCache(t *testing.T) {
+func TestWebIsPointedAtTheBundledLogs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
 	args := webArgs(t, helmTemplate(t, "sparkwing"))
-	got, ok := hasFlag(args, "--cache=")
-	if !ok {
-		t.Fatalf("no --cache flag in %v", args)
-	}
-	const want = "--cache=http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got != want {
-		t.Errorf("cache flag = %q, want %q", got, want)
-	}
-
 	if got, _ := hasFlag(args, "--logs="); got !=
 		"--logs=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local" {
 		t.Errorf("logs flag = %q, want the bundled logs Service", got)
@@ -291,53 +282,6 @@ func TestWebDeploymentDropsAPIURL(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing", "web.apiUrl=https://api.example"))
 	if got, ok := hasFlag(args, "--api-url="); ok {
 		t.Errorf("api-url flag = %q, want the deprecated flag gone", got)
-	}
-}
-
-func TestWebCacheURLOverrideWins(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := webArgs(t, helmTemplate(t, "sparkwing", "web.cache.url=http://cache.elsewhere:8090"))
-	if got, _ := hasFlag(args, "--cache="); got != "--cache=http://cache.elsewhere:8090" {
-		t.Errorf("cache flag = %q, want the explicit override", got)
-	}
-}
-
-func TestWebHasNoCacheFlagWhenNoCacheIsDeployed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	for _, tc := range []struct {
-		name string
-		sets []string
-	}{
-		{
-			name: "cache component disabled for a node-only pool",
-			sets: []string{
-				"sparkwing-runner-bundle.cache.enabled=false",
-				"sparkwing-runner-bundle.runner.alsoClaimTriggers=false",
-			},
-		},
-		{name: "whole bundle disabled", sets: []string{"sparkwing-runner-bundle.enabled=false"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := webArgs(t, helmTemplate(t, "sparkwing", tc.sets...))
-			if got, ok := hasFlag(args, "--cache="); ok {
-				t.Errorf("rendered %q with no cache deployed", got)
-			}
-		})
-	}
-}
-
-func TestWebCacheURLFollowsTheSubChartNaming(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := webArgs(t, helmTemplate(t, "sparkwing-runner-bundle"))
-	if got, _ := hasFlag(args, "--cache="); got !=
-		"--cache=http://sparkwing-runner-bundle-cache.default.svc.cluster.local" {
-		t.Errorf("cache flag = %q, want the collapsed release name", got)
 	}
 }
 
@@ -1751,12 +1695,8 @@ func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			web := webArgs(t, helmTemplate(t, "sparkwing", test.set))
 			logsURL := "http://" + test.fullname + "-logs.default.svc.cluster.local"
-			cacheURL := "http://" + test.fullname + "-cache.default.svc.cluster.local"
 			if got, _ := hasFlag(web, "--logs="); got != "--logs="+logsURL {
 				t.Errorf("web logs flag = %q, want nested bundle Service %q", got, logsURL)
-			}
-			if got, _ := hasFlag(web, "--cache="); got != "--cache="+cacheURL {
-				t.Errorf("web cache flag = %q, want nested bundle Service %q", got, cacheURL)
 			}
 
 			controller := webArgs(t, helmRender(t, "./sparkwing-full",
@@ -1800,7 +1740,7 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 	logsURL := serviceURL(logsService)
 	cacheURL := serviceURL(cacheService)
 	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
-	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL, "--cache=" + cacheURL} {
+	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL} {
 		if !containsArg(webArgs, want) {
 			t.Errorf("web args = %v, want %q", webArgs, want)
 		}
@@ -1881,9 +1821,8 @@ func TestParentURLsMatchMaximumLengthBundleOverrides(t *testing.T) {
 		t.Fatalf("bundle Service names do not preserve suffixes: logs=%q cache=%q", logsService, cacheService)
 	}
 	logsURL := "http://" + logsService + "." + namespace + ".svc.cluster.local"
-	cacheURL := "http://" + cacheService + "." + namespace + ".svc.cluster.local"
 	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
-	for _, want := range []string{"--logs=" + logsURL, "--cache=" + cacheURL} {
+	for _, want := range []string{"--logs=" + logsURL} {
 		if !containsArg(webArgs, want) {
 			t.Errorf("web args = %v, want %q", webArgs, want)
 		}

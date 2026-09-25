@@ -689,25 +689,6 @@ export async function getTrends(opts?: {
   return res.json();
 }
 
-export interface ServiceStatus {
-  name: string;
-  url: string;
-  status: string;
-  latency_ms: number;
-  checked_at: string;
-  error?: string;
-  problems?: string[];
-}
-
-export async function getServiceHealth(): Promise<ServiceStatus[]> {
-  const res = await authFetch(`${API_URL}/api/v1/health/services`, {
-    cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) return [];
-  const data = await res.json();
-  return data.services || [];
-}
-
 export interface LogSearchResult {
   run_id: string;
   node_id: string;

@@ -341,7 +341,6 @@ type MockAPIOptions = {
   runs?: Record<string, unknown>[];
   details?: Record<string, Record<string, unknown>>;
   agents?: Record<string, unknown>[];
-  services?: Record<string, unknown>[];
   unauthorized?: boolean;
   failPath?: string;
   onDetail?: (route: Route, runID: string) => Promise<boolean>;
@@ -422,10 +421,6 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
     }
     if (request.method() === "GET" && path === "/api/v1/approvals/pending") {
       await route.fulfill({ json: { approvals: [] } });
-      return;
-    }
-    if (request.method() === "GET" && path === "/api/v1/health/services") {
-      await route.fulfill({ json: { services: options.services ?? [] } });
       return;
     }
     if (request.method() === "GET" && path === "/api/v1/agents") {
@@ -709,7 +704,7 @@ test("renders the empty production dashboard and passes accessibility smoke", as
   await expect(page.getByRole("link", { name: "Setup docs" })).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(page.getByText("No completed deploys yet.")).toBeVisible();
   await expect(
-    page.getByText("Everything looks good here."),
+    page.getByText("No pending approvals."),
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Browse runs" })).toHaveCount(2);
 
@@ -1529,10 +1524,6 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
       sendJSON({ approvals: [] });
       return true;
     }
-    if (url.pathname === "/api/v1/health/services") {
-      sendJSON({ services: [] });
-      return true;
-    }
     if (url.pathname.endsWith("/attempts")) {
       sendJSON({ runs: [] });
       return true;
@@ -1874,20 +1865,6 @@ test("separates fleet policy, observations, and current activity", async ({
   await expect(page.getByText("not reported", { exact: true })).toBeVisible();
 });
 
-test("Fleet shows dependency degradation", async ({ page }) => {
-  await installMockAPI(page, {
-    services: [{
-      name: "controller", url: "http://controller/health", status: "degraded",
-      latency_ms: 7, checked_at: isoFromNow(0),
-      problems: ["db: unavailable"],
-    }],
-  });
-  await page.goto("/cluster");
-  await expect(page.getByText("Degraded - at least one service is slow or partial")).toBeVisible();
-  await expect(page.getByText("controller", { exact: true }).locator("..").getByText("Degraded")).toBeVisible();
-  await expect(page.getByText("db: unavailable")).toBeVisible();
-});
-
 test("keeps every public dashboard navigation target routable", async ({
   page,
 }) => {
@@ -1914,6 +1891,22 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(docs).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(docs).toHaveAttribute("target", "_blank");
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toHaveCount(0);
+});
+
+test("Overview and Compute do not request or show service probes", async ({ page }) => {
+  const probeRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/health/services")) {
+      probeRequests.push(request.url());
+    }
+  });
+  await installMockAPI(page);
+  await page.goto("/");
+  await expect(page.getByText("No pending approvals.")).toBeVisible();
+  await page.goto("/cluster");
+  await expect(page.getByRole("heading", { name: "Fleet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Services", exact: true })).toHaveCount(0);
+  expect(probeRequests).toEqual([]);
 });
 
 test("navigation waits for a chosen tab before fetching other routes", async ({ page }) => {

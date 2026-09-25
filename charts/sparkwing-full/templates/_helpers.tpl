@@ -173,25 +173,6 @@ sub-chart logs).
 {{- end }}
 
 {{/*
-Resolved web.cache.url: explicit override wins; otherwise the
-in-cluster cache Service from the runner-bundle sub-chart (only if
-that sub-chart is enabled and its cache component is enabled).
-Empty string when neither applies, in which case the web pod is
-started without --cache and its services panel simply does not list
-the cache -- the same panel a dashboard showed before the flag
-existed. The cache is probe-only: nothing else the dashboard does
-reads it, so an operator who runs their own git mirror can leave
-this empty without losing anything else.
-*/}}
-{{- define "sparkwing-full.web.cacheURL" -}}
-{{- if .Values.web.cache.url -}}
-{{- .Values.web.cache.url -}}
-{{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "cache" "enabled") -}}
-{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.cache.fullname" .) .Release.Namespace -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Resolved controller cache URL: explicit override wins; otherwise the
 in-cluster cache Service from the runner-bundle sub-chart (only if
 that sub-chart is enabled and its cache component is enabled). Empty

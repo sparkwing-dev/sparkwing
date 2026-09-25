@@ -1483,6 +1483,12 @@ unlock.
 
 ### Removed
 
+- **web (Breaking):** the dashboard no longer probes or displays controller,
+  logs, and cache service health. It no longer serves
+  `GET /api/v1/health/services` or accepts the probe-only `--cache` flag.
+  The full chart no longer uses `web.cache.url`. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-service-probes).
+
 - **cli (Breaking):** the public CLI no longer provides `sparkwing cluster
   credits`, `sparkwing cluster tokens set-metered`, or `--metered` on token
   creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
