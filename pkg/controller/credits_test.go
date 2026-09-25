@@ -453,6 +453,57 @@ func TestCredits_MeteredHeartbeatRollsBackWhenLedgerFails(t *testing.T) {
 	}
 }
 
+func TestCredits_MeteredHeartbeatDoesNotReviveClaimExpiredDuringCharge(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+		t.Fatal(err)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner)
+	seedRunNode(t, f.store, "run-expiring-charge", "build")
+	if err := f.store.MarkNodeReady(ctx, "run-expiring-charge", "build"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	setNodeChargeWindow(t, f.store, n.RunID, n.NodeID, time.Now().Add(-30*time.Second))
+	// safety: expiring just after the charge timestamp models a ledger wait
+	// without sleeping, so a stale renewal clock would revive the claim.
+	if _, err := f.store.DB().Exec(`CREATE TRIGGER expire_claim_on_usage AFTER INSERT ON credit_charges
+		WHEN NEW.kind = 'usage' BEGIN UPDATE nodes SET lease_expires_at = NEW.charged_at + 1
+		WHERE run_id = NEW.run_id AND node_id = NEW.node_id; END`); err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix}
+	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+		Claimant: claimant,
+	})
+	_, _, err = f.store.HeartbeatNodeClaimWithCredits(claimCtx, n.RunID, n.NodeID,
+		claimant, n.ClaimedBy, 5*time.Minute, true)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("heartbeat after claim expiry = %v, want ErrLockHeld", err)
+	}
+	after, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.LeaseExpiresAt.Equal(*n.LeaseExpiresAt) || after.ClaimedBy != n.ClaimedBy {
+		t.Fatalf("failed heartbeat changed the claim: before=%+v after=%+v", n, after)
+	}
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage := creditChargesOfKind(charges, store.CreditChargeUsage); len(usage) != 0 {
+		t.Fatalf("expired claim kept a usage charge: %+v", usage)
+	}
+}
+
 func creditChargesOfKind(charges []store.CreditCharge, kind string) []store.CreditCharge {
 	var out []store.CreditCharge
 	for _, c := range charges {
