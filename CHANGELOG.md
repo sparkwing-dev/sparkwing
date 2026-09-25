@@ -914,10 +914,12 @@ unlock.
 
 ### Fixed
 
-- **controller + runner:** Metered trigger heartbeats now charge elapsed
+- **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
   the claim and fail the run; a ledger error refuses renewal. Runners stop on
-  the refusal, and finish or expiry bills only the unpaid tail.
+  the refusal, and finish or expiry bills only the unpaid tail. Schema 73 adds
+  a claim-specific credit cursor and charge-balance index. Drain metered trigger
+  claims before upgrading; see [Trigger credit cursor](docs/migrations/_unreleased.md#schema-73-trigger-credit-cursor).
 
 - **controller + store (Breaking):** A team's recent paid grants now raise only
   that team's concurrent runner cap. Refunds lower only the original team's

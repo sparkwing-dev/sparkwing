@@ -23,6 +23,7 @@ func assertV72StorageReceiptsUpgrade(t *testing.T, target *storetest.Target) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	downgradeTriggerCreditCursor(t, st)
 	for _, statement := range []string{
 		`DROP TABLE storage_commit_receipts`,
 		`DELETE FROM sparkwing_requirements WHERE name = 'storage-commit-receipts-v1'`,

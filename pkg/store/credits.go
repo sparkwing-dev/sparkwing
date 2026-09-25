@@ -417,6 +417,45 @@ var triggersCreditCols = map[string]string{
 	"credit_reserved_at": "INTEGER NOT NULL DEFAULT 0",
 }
 
+var triggerCreditCursorColsSQLite = map[string]string{
+	"credit_paid_seconds":      "INTEGER NOT NULL DEFAULT 0",
+	"credit_paid_amount_micro": "INTEGER NOT NULL DEFAULT 0",
+	"credit_reservation_id":    "TEXT NOT NULL DEFAULT ''",
+}
+
+var triggerCreditCursorColsPostgres = map[string]string{
+	"credit_paid_seconds":      "BIGINT NOT NULL DEFAULT 0",
+	"credit_paid_amount_micro": "BIGINT NOT NULL DEFAULT 0",
+	"credit_reservation_id":    "TEXT NOT NULL DEFAULT ''",
+}
+
+func applyTriggerCreditCursorMigration(ctx context.Context, tx *storeTx) error {
+	if tx.dialect == DialectPostgres {
+		if _, err := tx.ExecContext(ctx, `LOCK TABLE triggers IN ACCESS EXCLUSIVE MODE`); err != nil {
+			return err
+		}
+	}
+	var active int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM triggers WHERE status = ? AND credit_reserved_at != 0`,
+		triggerStatusClaimed).Scan(&active); err != nil {
+		return err
+	}
+	if active != 0 {
+		return fmt.Errorf("drain %d active metered trigger claim(s) before upgrading trigger credits", active)
+	}
+	if tx.dialect == DialectPostgres {
+		if err := addColumnsTx(ctx, tx, "triggers", triggerCreditCursorColsPostgres); err != nil {
+			return err
+		}
+	} else if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerCreditCursorColsSQLite); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_credit_charges_team_amount ON credit_charges(team, amount_micro)`)
+	return err
+}
+
 // safety: a node's grace clock starts where its paid runway ended, which is a
 // per-node instant; a ledger-wide stamp records only when some charge first
 // noticed the balance was empty, which lags by a heartbeat or by an idle hour.
@@ -1767,19 +1806,21 @@ func reserveTriggerCreditsTx(
 	if err != nil {
 		return err
 	}
-	if _, err := insertCreditChargeTx(ctx, tx, chargeWindow{
+	charge, err := insertCreditChargeTx(ctx, tx, chargeWindow{
 		Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
 		TokenPrefix: claimant.TokenPrefix, Principal: principal,
 		NowNS: now.UnixNano(), Rate: class.MicroPerSecond, Class: class.Cores,
-	}, CreditChargeReservation, MinBillableSeconds, required); err != nil {
+	}, CreditChargeReservation, MinBillableSeconds, required)
+	if err != nil {
 		return err
 	}
-	// safety: a window a previous claim left open is overwritten rather than
-	// settled, so that claim keeps the minimum it reserved and no more; every
-	// path that ends a claim settles it first, and only an older binary does not.
+	// safety: a new claim resets its cursor and reservation identity together,
+	// so no charge from a prior generation can enter this claim's refund.
 	_, err = tx.ExecContext(ctx,
-		`UPDATE triggers SET credit_reserved_at = ? WHERE team = ? AND id = ?`,
-		now.UnixNano(), string(team), triggerID)
+		`UPDATE triggers SET credit_reserved_at = ?, credit_paid_seconds = ?,
+		        credit_paid_amount_micro = ?, credit_reservation_id = ?
+		  WHERE team = ? AND id = ?`,
+		now.UnixNano(), MinBillableSeconds, required, charge.ID, string(team), triggerID)
 	return err
 }
 
@@ -1833,78 +1874,90 @@ func settleTriggerWindowTx(
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
-	var tokenPrefix, principal string
-	var seconds, amount, class, rate, chargedAt int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second, charged_at
-		  FROM credit_charges
-		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
-		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
-		string(team), triggerID, triggerCreditNodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &seconds, &amount, &class, &rate, &chargedAt)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		if !final {
-			return errors.New("credits: active trigger has no reservation")
-		}
-	case err != nil:
+	var paidSeconds, paidAmount int64
+	var reservationID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
+		   FROM triggers WHERE team = ? AND id = ?`, string(team), triggerID,
+	).Scan(&paidSeconds, &paidAmount, &reservationID); err != nil {
 		return err
-	default:
-		var paidSeconds, paidAmount int64
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(SUM(seconds), 0), COALESCE(SUM(amount_micro), 0)
-			   FROM credit_charges
-			  WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? AND charged_at >= ?`,
-			string(team), triggerID, triggerCreditNodeID, CreditChargeUsage, chargedAt,
-		).Scan(&paidSeconds, &paidAmount); err != nil {
+	}
+	if reservationID == "" {
+		return errors.New("credits: active trigger has no reservation id")
+	}
+	var tokenPrefix, principal string
+	var class, rate int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second
+		  FROM credit_charges
+		 WHERE team = ? AND id = ? AND run_id = ? AND node_id = ? AND kind = ?`,
+		string(team), reservationID, triggerID, triggerCreditNodeID, CreditChargeReservation,
+	).Scan(&tokenPrefix, &principal, &class, &rate); err != nil {
+		return err
+	}
+	w := chargeWindow{
+		Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
+		TokenPrefix: tokenPrefix, Principal: principal,
+		NowNS: settleNS, Rate: rate, Class: class,
+	}
+	elapsed := (settleNS - reservedAt) / int64(time.Second)
+	switch {
+	case refundAll:
+		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -paidSeconds, -paidAmount); err != nil {
 			return err
 		}
-		w := chargeWindow{
-			Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
-			TokenPrefix: tokenPrefix, Principal: principal,
-			NowNS: settleNS, Rate: rate, Class: class,
-		}
-		elapsed := (settleNS - reservedAt) / int64(time.Second)
-		switch {
-		case refundAll:
-			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -seconds-paidSeconds, -amount-paidAmount)
-		case elapsed > seconds+paidSeconds:
-			table, tableErr := creditRateTableTx(ctx, tx)
-			if tableErr != nil {
-				return tableErr
-			}
-			w.Rate = chargeRate(table, class)
-			over := elapsed - seconds - paidSeconds
-			if over > (1<<63-1)/w.Rate {
-				return errors.New("credits: trigger window charge exceeds int64")
-			}
-			var exhausted error
-			if !final {
-				balance, balanceErr := creditBalanceTx(ctx, tx, team)
-				if balanceErr != nil {
-					return balanceErr
-				}
-				required := w.Rate * over
-				// safety: a dispute hold refuses new claims; admitted work keeps paying as it finishes.
-				if balance < required {
-					exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
-				}
-			}
-			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, over, w.Rate*over)
-			if err == nil && exhausted != nil {
-				return exhausted
-			}
-		}
+	case elapsed > paidSeconds:
+		table, err := creditRateTableTx(ctx, tx)
 		if err != nil {
 			return err
 		}
+		w.Rate = chargeRate(table, class)
+		over := elapsed - paidSeconds
+		if over > (1<<63-1)/w.Rate {
+			return errors.New("credits: trigger window charge exceeds int64")
+		}
+		amount := w.Rate * over
+		var exhausted error
+		if !final {
+			balance, err := creditBalanceTx(ctx, tx, team)
+			if err != nil {
+				return err
+			}
+			// safety: a dispute hold refuses new claims; admitted work keeps paying as it finishes.
+			if balance < amount {
+				exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: amount, RunID: triggerID}
+			}
+		}
+		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, over, amount); err != nil {
+			return err
+		}
+		updated, err := tx.ExecContext(ctx,
+			`UPDATE triggers SET credit_paid_seconds = credit_paid_seconds + ?,
+			        credit_paid_amount_micro = credit_paid_amount_micro + ?
+			  WHERE team = ? AND id = ? AND credit_reservation_id = ?`,
+			over, amount, string(team), triggerID, reservationID)
+		if err != nil {
+			return err
+		}
+		rows, err := updated.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errors.New("credits: trigger cursor update missed its claim")
+		}
+		if exhausted != nil {
+			return exhausted
+		}
 	}
 	if final {
-		_, err = tx.ExecContext(ctx,
-			`UPDATE triggers SET credit_reserved_at = 0 WHERE team = ? AND id = ?`,
-			string(team), triggerID)
+		_, err := tx.ExecContext(ctx,
+			`UPDATE triggers SET credit_reserved_at = 0, credit_paid_seconds = 0,
+			        credit_paid_amount_micro = 0, credit_reservation_id = ''
+			  WHERE team = ? AND id = ?`, string(team), triggerID)
+		return err
 	}
-	return err
+	return nil
 }
 
 // safety: reserving inside the claim's own transaction is what keeps concurrent

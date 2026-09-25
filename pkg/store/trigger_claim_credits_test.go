@@ -376,6 +376,16 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-unstarted-paid", pool, time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	table, err := st.CreditRateTable(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range table {
+		table[i].MicroPerSecond *= 2
+	}
+	if err := st.SetCreditRateTable(ctx, table); err != nil {
+		t.Fatal(err)
+	}
 	backdateTriggerClaim(t, st, "run-unstarted-paid", time.Now().Add(-25*time.Second), time.Time{})
 	if _, err := st.HeartbeatTrigger(ctx, "run-unstarted-paid", time.Minute); err != nil {
 		t.Fatal(err)
@@ -391,6 +401,41 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	}
 	if got := balance(t, st); got != 2*floor {
 		t.Fatalf("second requeue moved balance to %d", got)
+	}
+}
+
+func TestMeteredTriggerRequeueCannotRefundAnEarlierGenerationAgain(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-skew")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-skew", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-skew", time.Now().Add(-25*time.Second), time.Time{})
+	if _, err := st.HeartbeatTrigger(ctx, "run-skew", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE credit_charges SET charged_at = ? WHERE run_id = ? AND kind = ?`),
+		time.Now().Add(time.Hour).UnixNano(), "run-skew", store.CreditChargeUsage); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.RequeueUnstartedClaim(ctx, "run-skew"); err != nil || !ok {
+		t.Fatalf("first requeue = %t, %v", ok, err)
+	}
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-skew", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.RequeueUnstartedClaim(ctx, "run-skew"); err != nil || !ok {
+		t.Fatalf("second requeue = %t, %v", ok, err)
+	}
+	if got := balance(t, st); got != 3*floor {
+		t.Fatalf("earlier generation minted credits on second refund: balance=%d, want %d", got, 3*floor)
 	}
 }
 

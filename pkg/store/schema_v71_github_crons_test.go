@@ -71,7 +71,11 @@ func seedManualCronForV71(t *testing.T, st *store.Store) {
 
 func downgradeV71CronColumns(t *testing.T, st *store.Store) {
 	t.Helper()
+	downgradeTriggerCreditCursor(t, st)
 	for _, statement := range []string{
+		`DROP TABLE storage_commit_receipts`,
+		`DELETE FROM sparkwing_requirements WHERE name = 'storage-commit-receipts-v1'`,
+		`DELETE FROM sparkwing_schema_version WHERE version = 72`,
 		`DROP INDEX idx_cron_schedules_github_identity`,
 		`ALTER TABLE cron_schedules DROP COLUMN github_installation_id`,
 		`ALTER TABLE cron_schedules DROP COLUMN github_repository_id`,
@@ -86,8 +90,8 @@ func downgradeV71CronColumns(t *testing.T, st *store.Store) {
 
 func assertV71CronIdentity(t *testing.T, st *store.Store) {
 	t.Helper()
-	if version, err := st.CurrentSchemaVersion(t.Context()); err != nil || version != 71 {
-		t.Fatalf("schema version = %d, %v; want 71", version, err)
+	if version, err := st.CurrentSchemaVersion(t.Context()); err != nil || version != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, %v; want %d", version, err, store.ExpectedSchemaVersion())
 	}
 	var installation, repository int64
 	if err := st.DB().QueryRowContext(t.Context(), `SELECT github_installation_id, github_repository_id

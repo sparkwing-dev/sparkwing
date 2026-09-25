@@ -1,5 +1,17 @@
 # Migrating to the next release
 
+## Schema 73: trigger credit cursor
+
+Stop metered trigger claims and wait for active claims to finish or expire,
+then back up the controller database before upgrading. The migration refuses
+to start while any metered trigger claim is active. It records each claim's
+paid seconds, paid amount, and exact reservation ID on the trigger. A new
+index speeds each team's balance read. The `trigger-credit-cursor-v1`
+requirement makes older controllers refuse the upgraded database.
+
+To roll back, stop the upgraded controller, restore the backup, and start the
+older build. Do not delete the requirement from a live database.
+
 ## Team runner cap
 
 Pass the team to `Store.RunnerCapFor(ctx, team, now)`. Its paid total and cap

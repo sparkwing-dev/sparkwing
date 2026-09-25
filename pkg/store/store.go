@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 72
+const expectedSchemaVersion = 73
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1844,6 +1844,7 @@ var migrationRequirements = map[int][]string{
 	51: {teamScopedUserKeysRequirement},
 	71: {"github-app-cron-identity-v1"},
 	72: {"storage-commit-receipts-v1"},
+	73: {"trigger-credit-cursor-v1"},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -2071,6 +2072,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 72:
 		return applyStorageCommitReceiptsMigration(ctx, tx, false)
+	case 73:
+		return applyTriggerCreditCursorMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2495,6 +2498,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 72:
 		return applyStorageCommitReceiptsMigration(ctx, tx, true)
+	case 73:
+		return applyTriggerCreditCursorMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -7536,6 +7541,7 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 			if errors.Is(err, ErrInsufficientCredits) {
 				if _, stopErr := tx.ExecContext(ctx,
 					`UPDATE triggers SET status = ?, lease_expires_at = NULL, credit_reserved_at = 0,
+					        credit_paid_seconds = 0, credit_paid_amount_micro = 0, credit_reservation_id = '',
 					        cancel_requested_at = COALESCE(cancel_requested_at, ?)
 					  WHERE id = ? AND team = ? AND status = ?`,
 					triggerStatusFailed, now.UnixNano(), id, team, triggerStatusClaimed); stopErr != nil {
