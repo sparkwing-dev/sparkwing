@@ -467,10 +467,16 @@ type renderedPolicyRule struct {
 type renderedResource struct {
 	Kind     string `yaml:"kind"`
 	Metadata struct {
-		Name      string            `yaml:"name"`
-		Namespace string            `yaml:"namespace"`
-		Labels    map[string]string `yaml:"labels"`
+		Name        string            `yaml:"name"`
+		Namespace   string            `yaml:"namespace"`
+		Labels      map[string]string `yaml:"labels"`
+		Annotations map[string]string `yaml:"annotations"`
 	} `yaml:"metadata"`
+	AutomountServiceAccountToken *bool `yaml:"automountServiceAccountToken"`
+	Subjects                     []struct {
+		Kind string `yaml:"kind"`
+		Name string `yaml:"name"`
+	} `yaml:"subjects"`
 	Rules []renderedPolicyRule `yaml:"rules"`
 	Spec  struct {
 		Template struct {
@@ -1956,6 +1962,47 @@ func TestRunnerBundleMountsNoServiceAccountTokens(t *testing.T) {
 		if !created[name] {
 			t.Errorf("%s names ServiceAccount %q that the chart never creates", component, name)
 		}
+	}
+}
+
+func TestCustomerJobServiceAccountHasNoCloudOrKubernetesPrivileges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: Helm rendering")
+	}
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "default",
+		"controller.url=http://controller", "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=arn:aws:iam::123:role/runner",
+		"runner.alsoClaimTriggers=true", "runner.triggerRunner.kind=warm", "runner.automountServiceAccountToken=true"))
+	var customer, runner *renderedResource
+	for i := range resources {
+		resource := &resources[i]
+		if resource.Kind == "ServiceAccount" && strings.HasSuffix(resource.Metadata.Name, "-customer-job") {
+			customer = resource
+		}
+		if resource.Kind == "ServiceAccount" && resource.Metadata.Annotations["eks.amazonaws.com/role-arn"] != "" {
+			runner = resource
+		}
+	}
+	if customer == nil || runner == nil {
+		t.Fatalf("missing isolated customer or configured runner ServiceAccount")
+	}
+	if customer.Metadata.Annotations["eks.amazonaws.com/role-arn"] != "" || len(customer.Metadata.Annotations) != 0 {
+		t.Errorf("customer account has annotations: %v", customer.Metadata.Annotations)
+	}
+	if customer.AutomountServiceAccountToken == nil || *customer.AutomountServiceAccountToken {
+		t.Error("customer account automounts Kubernetes token")
+	}
+	for _, resource := range resources {
+		if resource.Kind != "RoleBinding" && resource.Kind != "ClusterRoleBinding" {
+			continue
+		}
+		for _, subject := range resource.Subjects {
+			if subject.Kind == "ServiceAccount" && subject.Name == customer.Metadata.Name {
+				t.Errorf("%s %s binds customer account", resource.Kind, resource.Metadata.Name)
+			}
+		}
+	}
+	if runner.Metadata.Name == customer.Metadata.Name {
+		t.Error("runner and customer accounts share a name")
 	}
 }
 

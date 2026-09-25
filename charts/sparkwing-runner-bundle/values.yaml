@@ -420,7 +420,8 @@ logs:
 
 # -----------------------------------------------------------------------
 # 5. ServiceAccount. The runner, cache, and logs pods each get their
-#    own; only the runner's is bound to the chart's Role.
+#    own; only the runner's is bound to the chart's Role. A separate
+#    customer Job account has no bindings or cloud annotations.
 # -----------------------------------------------------------------------
 serviceAccount:
   # Create one (true) or use an existing SA you've already RBAC'd.
@@ -434,8 +435,8 @@ serviceAccount:
   # render fails until you set this true, so the choice is recorded in
   # your values rather than made by omission.
   shareAcrossComponents: false
-  # Annotations on the SA. Common case: IRSA (EKS) role binding for
-  # ECR / S3 access on the runner side.
+  # Annotations on the runner, cache, and logs SAs. The customer Job
+  # account never inherits them. Common case: IRSA (EKS) for ECR / S3.
   #   eks.amazonaws.com/role-arn: arn:aws:iam::123:role/sparkwing-runner
   annotations: {}
 

@@ -299,6 +299,9 @@ token: every pod sets `automountServiceAccountToken: false`, and the
 cache and logs pods run under their own ServiceAccounts rather than the
 runner's.
 
+The chart also creates a `-customer-job` ServiceAccount with no RoleBinding,
+cloud role annotation, or token automount. No chart workload uses it.
+
 The opt-in `k8s` and `warm` trigger runners call the API to create and inspect
 runner Jobs. Give the runner pod a token when selecting either mode:
 
