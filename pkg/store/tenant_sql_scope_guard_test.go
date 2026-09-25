@@ -73,6 +73,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).secretsNotSealed":              "finds every team's secret still held as plaintext or a pre-team envelope, so the startup reseal binds each to its own team",
 	"(*Store).SampleSealedSecrets":           "samples envelopes from any team to prove the configured key opens them before the startup reseal writes anything",
 	"(*Store).UnlinkIdentity":                "ends one account's sessions in every team, because the sign-in it removed could have opened any of them",
+	"(*Store).lookupSession":                 "resolves the globally unique digest of the presented session before its team is known, and renews only that session",
 	"(*Store).resolveSignInOnce":             "counts one account's memberships in every team, because a sign-in decides whether that human has any team at all",
 	"(*Store).approveOneOnce":                "counts one account's memberships in every team, because an admission decides whether that human needs a personal space",
 	"cancelRequeuedCancelledTriggersTx": "finalizes every team's cancelled triggers that lapsed back to the " +
@@ -144,7 +145,6 @@ var unportedSQL = []string{
 	"(*Store).DeleteSession",
 	"(*Store).DeleteUser",
 	"(*Store).ExpireSessions",
-	"(*Store).ExtendSession",
 	"(*Store).FindSpawnedChildTriggerID",
 	"(*Store).FindTriggerByIdempotencyKey",
 	"(*Store).FindTriggerByWebhookReplay",
@@ -152,7 +152,6 @@ var unportedSQL = []string{
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).FinishNodeStep",
 	"(*Store).FinishNodeWithReason",
-	"(*Store).FinishRun",
 	"(*Store).FinishRunAtGeneration",
 	"(*Store).FinishRunsIfActive",
 	"(*Store).FinishTrigger",
@@ -186,7 +185,6 @@ var unportedSQL = []string{
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).LookupSession",
 	"(*Store).LookupToken",
 	"(*Store).NodeClaimFenceIsLive",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
@@ -309,7 +307,6 @@ var unportedSQL = []string{
 	"duplicateGrantReferences",
 	"duplicateTokenPrefixes",
 	"enforceNodesPerRunTx",
-	"enforceRunsPerHourTx",
 	"gatherRunAnnotations",
 	"livePrefixesForPrincipal",
 	"loadAgentLossRetryNodeSourceTx",
@@ -336,7 +333,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 217
+const unportedSQLSize = 213
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

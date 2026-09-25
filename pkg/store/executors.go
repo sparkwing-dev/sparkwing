@@ -390,29 +390,32 @@ type ExecutorActivity struct {
 // ActiveExecutorActivity returns live run IDs and claim counts by registered
 // executor.
 func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
-	return s.activeExecutorActivity(ctx, now, "", false)
+	rows, err := s.query(ctx, `
+SELECT claim_executor, run_id, COUNT(*) FROM nodes
+ WHERE claim_executor != '' AND claimed_by IS NOT NULL
+   AND lease_expires_at >= ? AND `+nodeNotDone+`
+ GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`, now.UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	return scanExecutorActivity(rows)
 }
 
 // ActiveExecutorActivity returns only claims on t's nodes.
 func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
-	return t.s.activeExecutorActivity(ctx, now, t.team, true)
-}
-
-func (s *Store) activeExecutorActivity(ctx context.Context, now time.Time, team Team, scoped bool) (map[string]ExecutorActivity, error) {
-	query := `
+	rows, err := t.s.query(ctx, `
 SELECT claim_executor, run_id, COUNT(*) FROM nodes
  WHERE claim_executor != '' AND claimed_by IS NOT NULL
-   AND lease_expires_at >= ? AND ` + nodeNotDone
-	args := []any{now.UnixNano()}
-	if scoped {
-		query += ` AND team = ?`
-		args = append(args, string(team))
-	}
-	query += ` GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`
-	rows, err := s.query(ctx, query, args...)
+   AND lease_expires_at >= ? AND team = ? AND `+nodeNotDone+`
+ GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`,
+		now.UnixNano(), string(t.team))
 	if err != nil {
 		return nil, err
 	}
+	return scanExecutorActivity(rows)
+}
+
+func scanExecutorActivity(rows *sql.Rows) (map[string]ExecutorActivity, error) {
 	defer func() { _ = rows.Close() }()
 	out := map[string]ExecutorActivity{}
 	for rows.Next() {

@@ -3728,23 +3728,17 @@ func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, err
 const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ? AND finished_at IS NULL AND NOT (` + runTerminalIn + `)`
+ WHERE id = ? AND team = ? AND finished_at IS NULL AND NOT (` + runTerminalIn + `)`
 
 func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg string, team Team) error {
 	if !isTerminalRunStatus(status) {
 		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
 	}
-	stmt := finishRunStmt
-	args := []any{status, errMsg, time.Now().UnixNano(), runID}
-	lookup := `SELECT status, error FROM runs WHERE id = ?`
-	lookupArgs := []any{runID}
-	if team != "" {
-		stmt += ` AND team = ?`
-		args = append(args, string(team))
-		lookup += ` AND team = ?`
-		lookupArgs = append(lookupArgs, string(team))
+	if team == "" {
+		return ErrNoTeam
 	}
-	res, err := tx.ExecContext(ctx, stmt, args...)
+	res, err := tx.ExecContext(ctx, finishRunStmt,
+		status, errMsg, time.Now().UnixNano(), runID, string(team))
 	if err != nil {
 		return err
 	}
@@ -3752,7 +3746,9 @@ func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg str
 		return err
 	}
 	var priorStatus, priorError string
-	err = tx.QueryRowContext(ctx, lookup, lookupArgs...).Scan(&priorStatus, &priorError)
+	err = tx.QueryRowContext(ctx,
+		`SELECT status, error FROM runs WHERE id = ? AND team = ?`, runID, string(team)).
+		Scan(&priorStatus, &priorError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -7041,16 +7037,19 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	// run write. Read them apart and a re-claim lands between the two, which
 	// is the one interleaving this fence exists to refuse.
 	var current int64
+	var team string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT claim_seq FROM triggers WHERE id = ?`+tx.forUpdate(), runID).Scan(&current); {
+		`SELECT claim_seq, team FROM triggers WHERE id = ?`+tx.forUpdate(), runID).
+		Scan(&current, &team); {
 	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
 	case err != nil:
 		return false, err
 	case current != seq:
 		return false, nil
 	}
 
-	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, ""); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, Team(team)); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

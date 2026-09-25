@@ -1244,6 +1244,10 @@ unlock.
 
 ### Security
 
+- **store:** Finishing a trigger's run at a claim generation now uses the
+  trigger's team. A trigger ID shared with another team's run cannot finish
+  that run.
+
 - **controller:** The agents view now shows only executors whose runner
   credentials belong to the caller's team. Other teams' host names, resource
   headroom and active slot counts no longer appear.
