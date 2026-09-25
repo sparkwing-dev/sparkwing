@@ -83,11 +83,26 @@ grep -qx '  local_admission: true' "$config" \
 
 before="$(cat "$config")"
 if run_install "$home_ok" >"$CASE_ROOT/out-again" 2>&1; then
-  fail "installer overwrote an existing config.yaml" "$CASE_ROOT/out-again"
+  fail "installer replaced an existing agent section" "$CASE_ROOT/out-again"
 fi
-grep -q "cluster runners add" "$CASE_ROOT/out-again" \
-  || fail "refusal does not name the command that merges the agent section" "$CASE_ROOT/out-again"
+grep -q "cluster runners add --force" "$CASE_ROOT/out-again" \
+  || fail "refusal does not name the command that replaces the agent section" "$CASE_ROOT/out-again"
 [ "$(cat "$config")" = "$before" ] \
   || fail "refused install changed config.yaml" "$config"
+
+home_other="$CASE_ROOT/home-other"
+other_config="$home_other/.config/sparkwing/config.yaml"
+mkdir -p "$(dirname "$other_config")"
+printf '# this machine\nrepos:\n  repos:\n    - path: /src/app\n' >"$other_config"
+chmod 600 "$other_config"
+if ! run_install "$home_other" >"$CASE_ROOT/out-other" 2>&1; then
+  fail "installer refused a config.yaml with no agent section" "$CASE_ROOT/out-other"
+fi
+grep -qx '# this machine' "$other_config" && grep -qx '    - path: /src/app' "$other_config" \
+  || fail "installer lost the existing sections of config.yaml" "$other_config"
+grep -qx 'agent:' "$other_config" \
+  || fail "installer did not add the agent section to an existing config.yaml" "$other_config"
+[ "$(stat -c %a "$other_config" 2>/dev/null || stat -f %Lp "$other_config")" = 600 ] \
+  || fail "config.yaml is not owner-only after the installer extended it" "$other_config"
 
 echo "service-install-test: ok"
