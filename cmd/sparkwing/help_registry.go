@@ -1955,9 +1955,10 @@ It names the reset command for excessive learned demand floors.
 Standalone stores are listed with run counts and the oldest run's age.
 Inspect their records before deleting a store directory.
 
-Settings files that config.yaml replaced are moved into it, each kept as
-<name>.migrated; any that cannot move, and any replaced path variable still
-set, are listed with where the setting belongs.
+Settings files that config.yaml replaced are copied into it and left in place
+for older binaries. Doctor lists the ones already copied, which are safe to
+delete once nothing older reads them, apart from any it could not copy and
+any replaced path variable still set.
 
 --timeout bounds the daemon and local-state checks, each taking a slice of it,
 so a daemon that accepts connections and answers nothing is reported as wedged
