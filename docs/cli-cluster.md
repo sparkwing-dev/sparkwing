@@ -288,7 +288,7 @@ existed.
 
 ### Subcommands
 
-- `show` -- Print every compute guard and the cloud runners in use
+- `show` -- Print every compute guard and visible runner usage
 - `set` -- Set one compute guard
 
 ### Examples
@@ -344,12 +344,12 @@ sparkwing cluster limits set --name runner_scale_step_credits --value 5000 --pro
 
 ## `sparkwing cluster limits show`
 
-Print every compute guard and the cloud runners in use
+Print every compute guard and visible runner usage
 
 Prints each guard with its ceiling, or "unlimited" when nothing set
-one, then the cloud runners claimed now in total and per principal. A
-cloud runner is a claim a metered token holds, so a controller that
-marks no token metered reads zero.
+one. An operator also sees the cloud runners claimed now in total and per
+principal, and whether runner_alarm has been reached. Team readers see their
+own paid runner cap without another team's fleet activity.
 
 ### Flags
 

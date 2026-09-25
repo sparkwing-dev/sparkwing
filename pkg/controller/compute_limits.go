@@ -37,9 +37,9 @@ type requestBudgetsJSON struct {
 }
 
 type computeUsageJSON struct {
-	Runners            int64            `json:"runners"`
+	Runners            *int64           `json:"runners,omitempty"`
 	ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
-	AlarmReached       bool             `json:"alarm_reached"`
+	AlarmReached       *bool            `json:"alarm_reached,omitempty"`
 	DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
 	RecentPaidMicro    int64            `json:"recent_paid_micro"`
 	ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
@@ -123,15 +123,16 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 	out := computeLimitsJSON{
 		Limits: make(map[string]int64, len(store.ComputeLimitNames())),
 		Usage: computeUsageJSON{
-			Runners:      usage.Runners,
-			ByPrincipal:  usage.ByPrincipal,
-			AlarmReached: usage.AlarmReached,
+			ByPrincipal: usage.ByPrincipal,
 		},
 		Budgets: s.requestBudgetsView(),
 	}
-	// safety: the per-principal counts name every team's runners, so only the
-	// operator reads them.
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && !p.HasScope(ScopeAdmin) {
+	// safety: global runner activity and per-principal counts reveal other
+	// teams' work, so only the operator reads them.
+	if isAdmin(r) {
+		out.Usage.Runners = &usage.Runners
+		out.Usage.AlarmReached = &usage.AlarmReached
+	} else {
 		out.Usage.ByPrincipal = nil
 	}
 	for _, name := range store.ComputeLimitNames() {

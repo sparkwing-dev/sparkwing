@@ -12,7 +12,8 @@ func TestRenderComputeLimitsPlain(t *testing.T) {
 	t.Parallel()
 	var view computeLimitsResp
 	view.Limits = map[string]int64{store.ComputeLimitGlobalRunners: 50}
-	view.Usage.Runners = 3
+	runners := int64(3)
+	view.Usage.Runners = &runners
 	view.Usage.ByPrincipal = map[string]int64{"agent:b": 1, "agent:a": 2}
 
 	var buf bytes.Buffer
@@ -38,9 +39,10 @@ func TestRenderComputeLimits(t *testing.T) {
 		store.ComputeLimitConcurrentRunners: 4,
 		store.ComputeLimitGlobalRunners:     50,
 	}
-	view.Usage.Runners = 4
+	runners, alarm := int64(4), true
+	view.Usage.Runners = &runners
 	view.Usage.ByPrincipal = map[string]int64{"agent:cloud": 4, "agent:other": 0}
-	view.Usage.AlarmReached = true
+	view.Usage.AlarmReached = &alarm
 
 	var buf bytes.Buffer
 	if err := renderComputeLimits(&buf, view); err != nil {
@@ -59,6 +61,22 @@ func TestRenderComputeLimits(t *testing.T) {
 		if !strings.Contains(out, strings.ToUpper(name)) {
 			t.Errorf("output omits the guard %q:\n%s", name, out)
 		}
+	}
+}
+
+func TestRenderComputeLimitsOmitsUnavailableFleetUsage(t *testing.T) {
+	t.Parallel()
+	view := computeLimitsResp{Limits: map[string]int64{}}
+	var pretty, plain bytes.Buffer
+	if err := renderComputeLimits(&pretty, view); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeComputeLimitsPlain(&plain, view); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(pretty.String(), "CLOUD RUNNERS") || strings.Contains(pretty.String(), "\nALARM") ||
+		strings.Contains(plain.String(), "\nrunners\t") {
+		t.Fatalf("unavailable fleet usage printed as zero: pretty=%q plain=%q", pretty.String(), plain.String())
 	}
 }
 
