@@ -78,11 +78,47 @@ func TestV73TriggerCreditCursorRequiresDrainedClaimsSQLite(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if reopened, err := target.TryOpen(); err == nil || !strings.Contains(err.Error(), "drain 1 active metered trigger") {
+	if reopened, err := target.TryOpen(); err == nil || !strings.Contains(err.Error(), "1 open trigger credit reservation") {
 		if reopened != nil {
 			_ = reopened.Close()
 		}
 		t.Fatalf("upgrade with active metered claim = %v, want drain refusal", err)
+	}
+}
+
+func TestV73TriggerCreditCursorRefusesFinishedOpenReservationSQLite(t *testing.T) {
+	target := storetest.NewSQLite(t)
+	st, err := target.TryOpen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "finished-metered")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "finished-metered", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishTrigger(store.WithoutCreditMetering(ctx), "finished-metered"); err != nil {
+		t.Fatal(err)
+	}
+	var marker int64
+	if err := st.DB().QueryRowContext(ctx,
+		`SELECT credit_reserved_at FROM triggers WHERE id = 'finished-metered'`).Scan(&marker); err != nil || marker == 0 {
+		t.Fatalf("finished claim marker = %d, %v; want open reservation", marker, err)
+	}
+	downgradeTriggerCreditCursor(t, st)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if reopened, err := target.TryOpen(); err == nil || !strings.Contains(err.Error(), "1 open trigger credit reservation") {
+		if reopened != nil {
+			_ = reopened.Close()
+		}
+		t.Fatalf("upgrade with finished open reservation = %v, want settlement refusal", err)
 	}
 }
 

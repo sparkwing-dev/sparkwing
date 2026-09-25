@@ -4,7 +4,11 @@
 
 Stop metered trigger claims and wait for active claims to finish or expire,
 then back up the controller database before upgrading. The migration refuses
-to start while any metered trigger claim is active. It records each claim's
+to start while any trigger has an open credit reservation, regardless of its
+status. Review any remaining completed or pending row against the ledger and
+the backup before correcting it under the older build. Do not call
+`FinishTrigger` blindly on a completed row: with no lease end, it can bill
+through the time of that call. The migration records each new claim's
 paid seconds, paid amount, and exact reservation ID on the trigger. A new
 index speeds each team's balance read. The `trigger-credit-cursor-v1`
 requirement makes older controllers refuse the upgraded database.

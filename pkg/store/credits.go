@@ -435,14 +435,13 @@ func applyTriggerCreditCursorMigration(ctx context.Context, tx *storeTx) error {
 			return err
 		}
 	}
-	var active int64
+	var openReservations int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM triggers WHERE status = ? AND credit_reserved_at != 0`,
-		triggerStatusClaimed).Scan(&active); err != nil {
+		`SELECT COUNT(*) FROM triggers WHERE credit_reserved_at != 0`).Scan(&openReservations); err != nil {
 		return err
 	}
-	if active != 0 {
-		return fmt.Errorf("drain %d active metered trigger claim(s) before upgrading trigger credits", active)
+	if openReservations != 0 {
+		return fmt.Errorf("%d open trigger credit reservation(s) remain; drain live claims and review backed-up terminal or pending rows before upgrading", openReservations)
 	}
 	if tx.dialect == DialectPostgres {
 		if err := addColumnsTx(ctx, tx, "triggers", triggerCreditCursorColsPostgres); err != nil {
