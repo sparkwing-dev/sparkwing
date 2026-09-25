@@ -713,9 +713,11 @@ preferred briefly, but the original may reclaim when it is the only eligible
 capacity. Coordinator fallback cannot relax the required placement. External
 effects remain at-least-once within the configured budget.
 
-`sparkwing-runner run-trigger --controller <url> <run-id>` claims one pending
-run and exits after its trigger handler finishes. Set `SPARKWING_AGENT_TOKEN`
-to a runner bearer scoped to the run's team. The controller refuses another
+`sparkwing-runner run-trigger --controller <url> --logs <logs-url> <run-id>`
+claims one pending run and exits after its trigger handler finishes. The logs
+URL is required so logs survive the worker's temporary home; it can also come
+from `SPARKWING_LOGS_URL`. Set `SPARKWING_AGENT_TOKEN` to a runner bearer scoped
+to the run's team. The controller refuses another
 team's run, a cancelled run, and a run that already has a holder with the same
 not-found response. The trigger handler renews its claim while it runs; state
 writes and failure cleanup carry its claim generation. This entry point runs

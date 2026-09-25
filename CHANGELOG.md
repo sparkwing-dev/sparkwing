@@ -24,6 +24,7 @@ unlock.
 
 - **runner:** `sparkwing-runner run-trigger` claims one named pending run with
   a team-scoped runner bearer, executes its trigger handler, and exits. The
+  logs service URL is required so logs persist after the worker exits. The
   controller refuses cross-team, cancelled, and duplicate claims; the worker
   uses the claim generation for failure cleanup. See [Local execution](docs/local-execution.md).
 - **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads

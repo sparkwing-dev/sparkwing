@@ -3,9 +3,11 @@ package cluster
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,7 +60,7 @@ func TestRunSpecificTriggerClaimsOnlyNamedTeamRun(t *testing.T) {
 	}
 	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
 	defer srv.Close()
-	opts := TriggerLoopOptions{ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(), Token: alphaToken}
+	opts := TriggerLoopOptions{ControllerURL: srv.URL, LogsURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(), Token: alphaToken}
 	if err := RunSpecificTrigger(ctx, "bravo-run", opts); !errors.Is(err, store.ErrNotFound) || strings.Contains(err.Error(), alphaToken) {
 		t.Fatalf("alpha claim of bravo run = %v, want not found without bearer", err)
 	}
@@ -83,5 +85,32 @@ func TestRunSpecificTriggerClaimsOnlyNamedTeamRun(t *testing.T) {
 	}
 	if err := RunSpecificTrigger(ctx, "bravo-run", opts); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("repeat claim = %v, want not found", err)
+	}
+}
+
+func TestRunSpecificTriggerRequiresLogsBeforeClaim(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	err := RunSpecificTrigger(context.Background(), "run-1", TriggerLoopOptions{
+		ControllerURL: srv.URL, Token: "team-runner", WorkRoot: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "logs service URL is required") {
+		t.Fatalf("missing logs URL = %v, want refusal", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("missing logs URL made %d controller requests, want none", got)
+	}
+}
+
+func TestRunTriggerCLIRequiresLogsURL(t *testing.T) {
+	t.Setenv("SPARKWING_AGENT_TOKEN", "team-runner")
+	t.Setenv("SPARKWING_LOGS_URL", "")
+	err := runTriggerCLI([]string{"--controller", "http://127.0.0.1:1", "run-1"})
+	if err == nil || !strings.Contains(err.Error(), "logs service URL is required") {
+		t.Fatalf("run-trigger without --logs or SPARKWING_LOGS_URL = %v, want refusal", err)
 	}
 }

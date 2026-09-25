@@ -187,6 +187,9 @@ func RunSpecificTrigger(ctx context.Context, runID string, opts TriggerLoopOptio
 	if runID == "" || opts.ControllerURL == "" || opts.Token == "" {
 		return errors.New("run id, controller URL, and runner token are required")
 	}
+	if opts.LogsURL == "" {
+		return errors.New("logs service URL is required (--logs or SPARKWING_LOGS_URL)")
+	}
 	if opts.RunnerKind == "" {
 		opts.RunnerKind = "inprocess"
 	}
