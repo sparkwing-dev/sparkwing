@@ -110,7 +110,7 @@ type Store struct {
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
 	runnerCapMu     sync.Mutex
-	runnerCapCache  runnerCapEntry
+	runnerCapCache  map[Team]runnerCapEntry
 	runnerCapEpoch  uint64
 }
 

@@ -884,7 +884,7 @@ func reversePayment(t *testing.T, s *store.Store, credits int64, reference, reve
 
 func runnerCap(t *testing.T, s *store.Store) store.RunnerCap {
 	t.Helper()
-	derived, err := s.RunnerCapFor(context.Background(), time.Now())
+	derived, err := s.RunnerCapFor(context.Background(), store.DefaultTeam, time.Now())
 	if err != nil {
 		t.Fatalf("runner cap: %v", err)
 	}

@@ -315,7 +315,6 @@ var unportedSQL = []string{
 	"nodeChargeTx",
 	"nodeExecutorOfferCountTx",
 	"persistAgentLossRetryNodeSourceTx",
-	"recentPaidGrantsMicro",
 	"rehashSessions",
 	"runElapsedSecondsTx",
 	"runPrincipalTx",

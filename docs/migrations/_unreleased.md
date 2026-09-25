@@ -1,5 +1,13 @@
 # Migrating to the next release
 
+## Team runner cap
+
+Pass the team to `Store.RunnerCapFor(ctx, team, now)`. Its paid total and cap
+now cover only that team's grants. `GET /api/v1/compute-limits` reports those
+figures for the request's team. Existing grants retain their stored team;
+grants created before teams were introduced remain in `default`. No database
+migration is required.
+
 ## Dashboard service probes
 
 The dashboard no longer shows internal service names, URLs, latency, or

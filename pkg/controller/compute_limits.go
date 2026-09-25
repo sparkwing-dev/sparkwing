@@ -69,6 +69,9 @@ func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
 }
 
 func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requestTenant(w, r); !ok {
+		return
+	}
 	out, err := s.computeLimitsView(r)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -78,6 +81,9 @@ func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requestTenant(w, r); !ok {
+		return
+	}
 	var req setComputeLimitsReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -133,7 +139,11 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 		out.Limits[name] = v
 	}
 	if limits.ConcurrentRunners > 0 {
-		derived, err := s.store.RunnerCapFor(r.Context(), time.Now())
+		team, err := requestTeam(r)
+		if err != nil {
+			return computeLimitsJSON{}, err
+		}
+		derived, err := s.store.RunnerCapFor(r.Context(), team, time.Now())
 		if err != nil {
 			return computeLimitsJSON{}, err
 		}

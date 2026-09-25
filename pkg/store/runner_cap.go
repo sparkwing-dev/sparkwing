@@ -11,7 +11,7 @@ import (
 // RunnerCap is the concurrent-runner ceiling one metered principal is held to
 // and the paid credit that raised it.
 //
-// The ceiling scales with what the controller loaded recently, so a customer
+// The ceiling scales with what the team loaded recently, so a customer
 // that has paid for capacity gets it while an account that has paid nothing
 // cannot spawn a thousand pods. It is max_concurrent_runners plus one
 // runner_scale_base for every runner_scale_step_credits of paid credit
@@ -39,17 +39,17 @@ type runnerCapEntry struct {
 // date, so a refund settled after the window still takes back the payment that
 // bought the cap, and a refund of a payment that has aged out changes nothing.
 const recentPaidGrantsSQL = `SELECT COALESCE(SUM(g.amount_micro), 0) FROM credit_grants g
-  WHERE (g.kind = ? AND g.created_at >= ?)
+  WHERE g.team = ? AND ((g.kind = ? AND g.created_at >= ?)
      OR (g.kind = ? AND g.reverses != '' AND EXISTS (
            SELECT 1 FROM credit_grants p
-            WHERE p.kind = ? AND p.created_at >= ? AND p.reference != ''
-              AND p.reference = g.reverses))`
+            WHERE p.team = g.team AND p.kind = ? AND p.created_at >= ? AND p.reference != ''
+              AND p.reference = g.reverses)))`
 
-func recentPaidGrantsMicro(ctx context.Context, q rowQuerier, now time.Time) (int64, error) {
+func recentPaidGrantsMicro(ctx context.Context, q rowQuerier, team Team, now time.Time) (int64, error) {
 	var micro int64
 	since := now.Add(-RunnerScaleWindow).UnixNano()
 	if err := q.QueryRowContext(ctx, recentPaidGrantsSQL,
-		CreditGrantPaid, since, CreditGrantReversal, CreditGrantPaid, since).Scan(&micro); err != nil {
+		string(team), CreditGrantPaid, since, CreditGrantReversal, CreditGrantPaid, since).Scan(&micro); err != nil {
 		return 0, err
 	}
 	if micro < 0 {
@@ -113,21 +113,24 @@ func addSteps(base, steps int64) int64 {
 	return base + base*steps
 }
 
-// RunnerCapFor reports the concurrent-runner cap every metered principal is
-// held to, deriving it from the paid grants of the last [RunnerScaleWindow]
+// RunnerCapFor reports the concurrent-runner cap a team's metered principals
+// are held to, deriving it from that team's paid grants of the last [RunnerScaleWindow]
 // and caching the result for a minute. A grant clears the cache, so credit
 // loaded or reversed takes effect on the next claim rather than a minute
 // later.
-func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error) {
+func (s *Store) RunnerCapFor(ctx context.Context, team Team, now time.Time) (RunnerCap, error) {
+	if team == "" {
+		return RunnerCap{}, ErrNoTeam
+	}
 	limits, err := s.ComputeLimits(ctx)
 	if err != nil {
 		return RunnerCap{}, err
 	}
-	return s.runnerCap(ctx, storeRowQuerier{s}, limits, now)
+	return s.runnerCap(ctx, storeRowQuerier{s}, team, limits, now)
 }
 
 func (s *Store) runnerCap(
-	ctx context.Context, q rowQuerier, limits ComputeLimits, now time.Time,
+	ctx context.Context, q rowQuerier, team Team, limits ComputeLimits, now time.Time,
 ) (RunnerCap, error) {
 	if !limits.scales() {
 		return RunnerCap{Cap: limits.ConcurrentRunners}, nil
@@ -135,37 +138,40 @@ func (s *Store) runnerCap(
 	if limits.RunnerScaleStepCredits <= 0 {
 		return RunnerCap{Cap: limits.runnerCapFrom(0)}, nil
 	}
-	cached, epoch, ok := s.cachedRunnerCap(limits, now)
+	cached, epoch, ok := s.cachedRunnerCap(team, limits, now)
 	if ok {
 		return cached, nil
 	}
-	paid, err := recentPaidGrantsMicro(ctx, q, now)
+	paid, err := recentPaidGrantsMicro(ctx, q, team, now)
 	if err != nil {
 		return RunnerCap{}, err
 	}
 	out := RunnerCap{Cap: limits.runnerCapFrom(paid), RecentPaidMicro: paid}
-	s.storeRunnerCap(limits, now, epoch, out)
+	s.storeRunnerCap(team, limits, now, epoch, out)
 	return out, nil
 }
 
 // safety: the epoch the derivation started under travels back to the write, so
 // a grant that lands while the ledger is being read leaves an entry the next
 // lookup rejects rather than one that outlives the payment it missed.
-func (s *Store) cachedRunnerCap(limits ComputeLimits, now time.Time) (RunnerCap, uint64, bool) {
+func (s *Store) cachedRunnerCap(team Team, limits ComputeLimits, now time.Time) (RunnerCap, uint64, bool) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
 	epoch := s.runnerCapEpoch
-	entry := s.runnerCapCache
-	if entry.epoch != epoch || entry.limits != limits || !now.Before(entry.expires) {
+	entry, ok := s.runnerCapCache[team]
+	if !ok || entry.epoch != epoch || entry.limits != limits || !now.Before(entry.expires) {
 		return RunnerCap{}, epoch, false
 	}
 	return entry.cap, epoch, true
 }
 
-func (s *Store) storeRunnerCap(limits ComputeLimits, now time.Time, epoch uint64, derived RunnerCap) {
+func (s *Store) storeRunnerCap(team Team, limits ComputeLimits, now time.Time, epoch uint64, derived RunnerCap) {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
-	s.runnerCapCache = runnerCapEntry{
+	if s.runnerCapCache == nil {
+		s.runnerCapCache = make(map[Team]runnerCapEntry)
+	}
+	s.runnerCapCache[team] = runnerCapEntry{
 		limits: limits, epoch: epoch, expires: now.Add(runnerCapTTL), cap: derived,
 	}
 }
@@ -189,5 +195,5 @@ func (s *Store) invalidateRunnerCap() {
 	s.runnerCapMu.Lock()
 	defer s.runnerCapMu.Unlock()
 	s.runnerCapEpoch++
-	s.runnerCapCache = runnerCapEntry{}
+	s.runnerCapCache = nil
 }

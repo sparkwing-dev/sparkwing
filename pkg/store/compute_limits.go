@@ -57,7 +57,7 @@ const (
 	// Zero uses max_concurrent_runners, so an install that sets no scaling
 	// keeps the static cap.
 	ComputeLimitRunnerScaleBase = "runner_scale_base"
-	// ComputeLimitRunnerScaleStepCredits is the paid credit a controller must
+	// ComputeLimitRunnerScaleStepCredits is the paid credit a team must
 	// have been granted over [RunnerScaleWindow] to earn one more base. Zero
 	// turns scaling off and leaves max_concurrent_runners alone.
 	ComputeLimitRunnerScaleStepCredits = "runner_scale_step_credits"
@@ -424,7 +424,7 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 	}
 	if limits.ConcurrentRunners > 0 {
-		derived, err := s.runnerCap(ctx, tx, limits, now)
+		derived, err := s.runnerCap(ctx, tx, team, limits, now)
 		if err != nil {
 			return runnerCapReadRefusal(err, limits, claimant.Principal)
 		}
