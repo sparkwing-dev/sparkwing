@@ -324,11 +324,27 @@ func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix stri
 
 // ListExecutors returns every registered executor, including stale entries.
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error) {
-	rows, err := s.query(ctx, `
+	return s.listExecutors(ctx, "", false)
+}
+
+// ListExecutors returns the executors whose credential belongs to t's team.
+func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error) {
+	return t.s.listExecutors(ctx, t.team, true)
+}
+
+func (s *Store) listExecutors(ctx context.Context, team Team, scoped bool) ([]Executor, error) {
+	query := `
 SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
-  FROM executors ORDER BY kind, name`)
+  FROM executors`
+	var args []any
+	if scoped {
+		query += ` WHERE EXISTS (SELECT 1 FROM tokens WHERE prefix = executors.token_prefix AND team = ?)`
+		args = append(args, string(team))
+	}
+	query += ` ORDER BY kind, name`
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -374,11 +390,26 @@ type ExecutorActivity struct {
 // ActiveExecutorActivity returns live run IDs and claim counts by registered
 // executor.
 func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
-	rows, err := s.query(ctx, `
+	return s.activeExecutorActivity(ctx, now, "", false)
+}
+
+// ActiveExecutorActivity returns only claims on t's nodes.
+func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
+	return t.s.activeExecutorActivity(ctx, now, t.team, true)
+}
+
+func (s *Store) activeExecutorActivity(ctx context.Context, now time.Time, team Team, scoped bool) (map[string]ExecutorActivity, error) {
+	query := `
 SELECT claim_executor, run_id, COUNT(*) FROM nodes
  WHERE claim_executor != '' AND claimed_by IS NOT NULL
-   AND lease_expires_at >= ? AND `+nodeNotDone+`
- GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`, now.UnixNano())
+   AND lease_expires_at >= ? AND ` + nodeNotDone
+	args := []any{now.UnixNano()}
+	if scoped {
+		query += ` AND team = ?`
+		args = append(args, string(team))
+	}
+	query += ` GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

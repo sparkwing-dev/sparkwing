@@ -1244,6 +1244,10 @@ unlock.
 
 ### Security
 
+- **controller:** The agents view now shows only executors whose runner
+  credentials belong to the caller's team. Other teams' host names, resource
+  headroom and active slot counts no longer appear.
+
 - **controller:** Forwarded `logs.write` credentials must name a reservation
   and a nonnegative byte count when committing log storage. The cache's
   operator credential still records negative overwrite deltas.

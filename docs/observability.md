@@ -338,7 +338,7 @@ It also shows what admission is doing with the machine:
   reserve, measured external applications, and total capacity. An external
   sensor gap remains a gap rather than becoming zero. Mirrors `sparkwing
   queue`.
-- **Fleet section**: registered executors with their configured policy, observed
+- **Fleet section**: the caller's team's registered executors with their configured policy, observed
   liveness and headroom, and current slot and run activity in separate panels.
   Legacy executors inferred from recent activity stay visible without invented
   policy. A claim-mode agent with a plain `holder_prefix` keeps one stable

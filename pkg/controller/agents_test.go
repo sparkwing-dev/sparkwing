@@ -323,13 +323,17 @@ func TestAgents_RegisteredIdleAndOfflineExecutorsExposeNoPrincipal(t *testing.T)
 		{Name: "idle-agent", Kind: "agent", Location: "local", Capabilities: []string{"linux"}, MaxConcurrent: 2, Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 8 << 30}, Headroom: store.ExecutorResource{Cores: 3, MemoryBytes: 6 << 30}, LastSeen: time.Now()},
 		{Name: "old-gateway", Kind: "gateway", Location: "cloud", MaxConcurrent: 4, Headroom: store.ExecutorResource{Cores: 8}, LastSeen: time.Now().Add(-3 * time.Minute)},
 	} {
-		prefix := "swr_" + executor.Name
 		executor.Principal = "runner-secret-principal"
-		if err := st.EnrollExecutor(ctx, prefix, executor); err != nil {
+		_, token, err := st.CreateToken(executor.Principal, store.TokenKindRunner,
+			[]string{controller.ScopeNodesClaim}, 0, time.Now())
+		if err != nil {
+			t.Fatalf("CreateToken(%s): %v", executor.Name, err)
+		}
+		if err := st.EnrollExecutor(ctx, token.Prefix, executor); err != nil {
 			t.Fatalf("EnrollExecutor(%s): %v", executor.Name, err)
 		}
 		if err := st.HeartbeatExecutor(ctx,
-			store.ClaimIdentity{Principal: executor.Principal, TokenPrefix: prefix}, executor.Name,
+			store.ClaimIdentity{Principal: executor.Principal, TokenPrefix: token.Prefix}, executor.Name,
 			executor.Headroom, 0, executor.LastSeen); err != nil {
 			t.Fatalf("HeartbeatExecutor(%s): %v", executor.Name, err)
 		}

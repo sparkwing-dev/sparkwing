@@ -46,7 +46,7 @@ sparkwing cluster agents list --profile prod
 Inspect the controller's fleet view
 
 Hits GET /api/v1/agents on the selected profile's controller.
-Prints persisted executor registrations, including idle and
+Prints the caller's team's executor registrations, including idle and
 offline agents and gateways, plus recent legacy claim-only runners.
 
 ### Subcommands
@@ -105,7 +105,7 @@ sparkwing cluster agents enroll --profile prod --name build-gateway --token-pref
 
 Print the controller's known agents
 
-Fetches /api/v1/agents and renders a table of fleet members.
+Fetches /api/v1/agents and renders the caller's team's fleet members.
 Registered executors report their operator-assigned identity,
 kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible

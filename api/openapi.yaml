@@ -2383,7 +2383,7 @@ paths:
     get:
       x-sparkwing-scope: runs.read
       tags: [agents]
-      summary: List recently-heartbeating runners.
+      summary: List runners whose credentials belong to the caller's team.
       responses:
         "200":
           description: Agents.

@@ -8,34 +8,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// safety: an executor enrolls with the deployment and serves every team, so it
-// is listed to all of them, but only the caller's own runs appear as its jobs.
+// safety: an executor's credential can claim only its own team's nodes, so
+// another team must not see its identity, capacity, or live activity.
 func (s *Server) registeredAgents(ctx context.Context, t *store.Tenant, now time.Time) ([]Agent, error) {
-	executors, err := s.store.ListExecutors(ctx)
+	executors, err := t.ListExecutors(ctx)
 	if err != nil {
 		return nil, err
 	}
-	active, err := s.store.ActiveExecutorActivity(ctx, now)
-	if err != nil {
-		return nil, err
-	}
-	var seen []string
-	for _, activity := range active {
-		seen = append(seen, activity.RunIDs...)
-	}
-	owned, err := t.OwnedRunIDs(ctx, seen)
+	active, err := t.ActiveExecutorActivity(ctx, now)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Agent, 0, len(executors))
 	for _, e := range executors {
 		activity := active[e.Name]
-		var jobs []string
-		for _, id := range activity.RunIDs {
-			if owned[id] {
-				jobs = append(jobs, id)
-			}
-		}
+		jobs := activity.RunIDs
 		status := "idle"
 		lastSeen := ""
 		if e.LastSeen.IsZero() || now.Sub(e.LastSeen) > store.ExecutorRegistrationActiveWindow {
