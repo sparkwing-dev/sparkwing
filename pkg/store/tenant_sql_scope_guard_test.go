@@ -16,11 +16,12 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
-	"globalRunnerRefusal":                 "the global concurrent runner cap counts live claims from every team",
-	"globalRunsPerHourRefusal":            "the global hourly cap counts runs from every team",
-	"(*Store).NodeClaimFenceNodeForRun":   "the run ID is global, and the query matches its exact claimant and generation",
-	"(*Store).PruneExpiredUploads":        "the hourly storage pass releases expired pending uploads for every team",
-	"(*Store).PruneStorageCommitReceipts": "the hourly storage pass drops receipt rows past the retry window for every team",
+	"globalRunnerRefusal":                    "the global concurrent runner cap counts live claims from every team",
+	"globalRunsPerHourRefusal":               "the global hourly cap counts runs from every team",
+	"(*Store).NodeClaimFenceNodeForRun":      "the run ID is global, and the query matches its exact claimant and generation",
+	"(*Store).HeartbeatNodeClaimWithCredits": "the run ID is global, and the renewal matches the exact claimant, holder, membership, reservation and generation",
+	"(*Store).PruneExpiredUploads":           "the hourly storage pass releases expired pending uploads for every team",
+	"(*Store).PruneStorageCommitReceipts":    "the hourly storage pass drops receipt rows past the retry window for every team",
 	"(*Store).PruneExpiredCacheObjects": "the controller's leased hourly storage pass deletes expired cache rows " +
 		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
@@ -165,7 +166,6 @@ var unportedSQL = []string{
 	"(*Store).GetRun",
 	"(*Store).GetRunAncestorPipelines",
 	"(*Store).GetTrigger",
-	"(*Store).HeartbeatNodeClaim",
 	"(*Store).HeartbeatTrigger",
 	"(*Store).ListApprovalsForRun",
 	"(*Store).ListCreditCharges",
@@ -331,7 +331,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 209
+const unportedSQLSize = 208
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

@@ -618,7 +618,15 @@ const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 // trigger only when it runs the nodes through k8s Jobs or warm capacity,
 // which claim each node themselves.
 func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
-	if nodeRunner == "k8s" || nodeRunner == "warm" || s.meteredTokenPrefix(r) == "" {
+	if nodeRunner == "k8s" || nodeRunner == "warm" {
+		return false
+	}
+	prefix, err := s.meteredTokenPrefix(r)
+	if err != nil {
+		s.writeInternalError(w, r, "read metered token", err)
+		return true
+	}
+	if prefix == "" {
 		return false
 	}
 	p, _ := PrincipalFromContext(r.Context())
@@ -631,19 +639,22 @@ func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Requ
 
 // safety: a stored marker may outlive its license, so the controller checks
 // the license before treating that token as a billable claimant.
-func (s *Server) meteredTokenPrefix(r *http.Request) string {
+func (s *Server) meteredTokenPrefix(r *http.Request) (string, error) {
 	if !s.Metering() {
-		return ""
+		return "", nil
 	}
 	prefix := claimIdentity(r).TokenPrefix
 	if prefix == "" {
-		return ""
+		return "", nil
 	}
 	metered, err := s.store.TokenMetered(r.Context(), prefix)
-	if err != nil || !metered {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return prefix
+	if !metered {
+		return "", nil
+	}
+	return prefix, nil
 }
 
 // safety: the node's own claim carries the credential the ledger priced the
@@ -670,31 +681,6 @@ func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.No
 			"run_id", runID, "node_id", nodeID, "err", err)
 	}
 	return settlement, err
-}
-
-// safety: a balance spent past the grace period cancels the node in this same
-// request, so the run records why instead of waiting out the lease.
-func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
-		return false
-	}
-	ctx := r.Context()
-	res, err := s.store.ChargeNodeCredits(ctx, runID, nodeID, prefix, time.Now())
-	if err != nil {
-		s.logger.Warn("charging a metered node failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return false
-	}
-	if res.ForgivenSeconds > 0 {
-		s.logger.Warn("charge cap engaged; the gap since the previous charge is not billed",
-			"run_id", runID, "node_id", nodeID, "forgiven_s", res.ForgivenSeconds)
-	}
-	if !res.Cancel {
-		return false
-	}
-	s.cancelForExhaustedCredits(r, runID, nodeID, prefix, res)
-	return true
 }
 
 func (s *Server) cancelForExhaustedCredits(

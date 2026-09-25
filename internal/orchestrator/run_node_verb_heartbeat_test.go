@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -43,5 +44,43 @@ func TestDispatchedClaimRenewsAsThePodStarts(t *testing.T) {
 		}
 		cancel()
 		<-done
+	})
+}
+
+func TestDispatchedClaimStopsWhenHeartbeatsFailThroughLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport := heartbeatTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusInternalServerError, Body: http.NoBody, Header: make(http.Header)}, nil
+		})
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			heartbeatDispatchedClaim(ctx, client.NewWithToken("http://controller.test", &http.Client{Transport: transport}, "tok"), "run-1", "build",
+				store.NodeClaimFence{HolderID: "k8s-job:x", ClaimGeneration: 1}, 10*time.Second,
+				cancel, slog.New(slog.DiscardHandler))
+		}()
+		<-done
+		if !errors.Is(context.Cause(ctx), errClaimAbandoned) {
+			t.Fatalf("heartbeat failure left the node running: %v", context.Cause(ctx))
+		}
+	})
+}
+
+func TestDispatchedClaimStopsImmediatelyOnHeartbeatConflict(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport := heartbeatTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusConflict, Body: http.NoBody, Header: make(http.Header)}, nil
+		})
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		start := time.Now()
+		heartbeatDispatchedClaim(ctx, client.NewWithToken("http://controller.test", &http.Client{Transport: transport}, "tok"), "run-1", "build",
+			store.NodeClaimFence{HolderID: "k8s-job:x", ClaimGeneration: 1}, time.Minute,
+			cancel, slog.New(slog.DiscardHandler))
+		if !errors.Is(context.Cause(ctx), errClaimAbandoned) || time.Since(start) != 0 {
+			t.Fatalf("heartbeat conflict did not stop the node immediately: cause=%v delay=%s", context.Cause(ctx), time.Since(start))
+		}
 	})
 }

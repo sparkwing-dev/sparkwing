@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -356,6 +357,99 @@ func TestCredits_MeteredClaimChargesEachHeartbeat(t *testing.T) {
 	}
 	if len(creditChargesOfKind(charges, store.CreditChargeReservation)) != 1 {
 		t.Fatalf("the claim did not reserve: %+v", charges)
+	}
+}
+
+func TestCredits_MeteredHeartbeatRollsBackWhenLedgerFails(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
+		1000*store.MicroCreditsPerCent, "pay_1", "root"); err != nil {
+		t.Fatal(err)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner)
+	seedRunNode(t, f.store, "run-ledger-fault", "build")
+	if err := f.store.MarkNodeReady(ctx, "run-ledger-fault", "build"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := c.ClaimNode(ctx, "pod-1", nil, time.Minute, nil)
+	if err != nil || n == nil {
+		t.Fatalf("claim: %v", err)
+	}
+	setNodeChargeWindow(t, f.store, n.RunID, n.NodeID, time.Now().Add(-30*time.Second))
+	before, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chargedThroughBefore int64
+	if err := f.store.DB().QueryRow(`SELECT credit_charged_through FROM nodes WHERE run_id = ? AND node_id = ?`, n.RunID, n.NodeID).Scan(&chargedThroughBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().Exec(`CREATE TRIGGER fail_node_usage BEFORE INSERT ON credit_charges
+		WHEN NEW.kind = 'usage' BEGIN SELECT RAISE(ABORT, 'ledger unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		f.url+"/api/v1/runs/"+n.RunID+"/nodes/"+n.NodeID+"/heartbeat",
+		strings.NewReader(`{"holder_id":"pod-1","lease_secs":300}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.runner)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(store.ClaimHolderHeader, n.ClaimedBy)
+	req.Header.Set(store.ClaimMembershipHeader, n.ClaimMembershipID)
+	req.Header.Set(store.ClaimReservationHeader, n.ReservationID)
+	req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(n.ClaimGeneration))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("heartbeat status = %d, want 409", resp.StatusCode)
+	}
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(responseBody), "ledger unavailable") || !strings.Contains(string(responseBody), store.ErrLockHeld.Error()) {
+		t.Fatalf("heartbeat exposed the ledger error: %s", responseBody)
+	}
+	after, err := f.store.GetNode(ctx, n.RunID, n.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.ClaimedBy != before.ClaimedBy ||
+		after.ClaimGeneration != before.ClaimGeneration {
+		t.Fatalf("ledger failure changed claim or charge window: before=%+v after=%+v", before, after)
+	}
+	var chargedThroughAfter int64
+	if err := f.store.DB().QueryRow(`SELECT credit_charged_through FROM nodes WHERE run_id = ? AND node_id = ?`, n.RunID, n.NodeID).Scan(&chargedThroughAfter); err != nil {
+		t.Fatal(err)
+	}
+	if chargedThroughAfter != chargedThroughBefore {
+		t.Fatalf("ledger failure advanced charge window from %d to %d", chargedThroughBefore, chargedThroughAfter)
+	}
+	if _, err := f.store.DB().Exec(`ALTER TABLE tokens RENAME TO tokens_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	claimCtx := store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+		Claimant: store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix},
+	})
+	_, _, err = f.store.HeartbeatNodeClaimWithCredits(claimCtx, n.RunID, n.NodeID,
+		store.ClaimIdentity{Principal: "pool", TokenPrefix: f.prefix}, n.ClaimedBy, 5*time.Minute, true)
+	if err == nil {
+		t.Fatal("heartbeat renewed while the token marker was unreadable")
+	}
+	after, err = f.store.GetNode(ctx, n.RunID, n.NodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.LeaseExpiresAt.Equal(*before.LeaseExpiresAt) || after.ClaimedBy != before.ClaimedBy {
+		t.Fatalf("token lookup failure changed claim: before=%+v after=%+v", before, after)
 	}
 }
 
