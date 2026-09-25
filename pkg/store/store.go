@@ -6047,7 +6047,12 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 				}
 			}
 		}
-		expires := now.Add(clampNodeLease(lease)).UnixNano()
+		// safety: the ledger can block past the lease, so renewal uses a fresh clock.
+		renewAt := time.Now()
+		if currentLease < renewAt.UnixNano() {
+			return ErrLockHeld
+		}
+		expires := renewAt.Add(clampNodeLease(lease)).UnixNano()
 		res, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
 		    AND COALESCE(claim_principal, '') = ?
@@ -6056,7 +6061,7 @@ func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID
 		    AND COALESCE(reservation_id, '') = ?
 		    AND claim_generation = ? AND `+nodeClaimLiveSQL(""),
 			expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano())
+			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, renewAt.UnixNano())
 		if err != nil {
 			return err
 		}
