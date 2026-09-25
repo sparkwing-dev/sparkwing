@@ -107,7 +107,7 @@ kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing \
     -f compatible-images.yaml \
-    --set controller.url=https://app.sparkwing.dev \
+    --set controller.url=https://api.sparkwing.dev \
     --set controller.tokenSecret.name=sparkwing-token \
     --set cache.tokenSecret.name=sparkwing-cache-token \
     --set cache.grantKeySecret.name=sparkwing-cache-grant-key \

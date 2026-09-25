@@ -21,7 +21,7 @@
 controller:
   # REQUIRED. URL the runner uses to claim triggers / nodes. Must be
   # reachable from inside the cluster. Typical values:
-  #   https://app.sparkwing.dev                (Sparkwing Cloud)
+  #   https://api.sparkwing.dev                (Sparkwing Cloud)
   #   http://sparkwing-controller.sparkwing.svc.cluster.local
   #     (in-cluster controller, e.g. enterprise self-host)
   url: ""
