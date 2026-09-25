@@ -170,20 +170,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			if err != nil {
 				logger.Error("trigger loop: trigger failed",
 					"run_id", trigger.ID, "err", err)
-				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(claimCtx), 5*time.Second)
-				ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error())
-				canFinish := ferr == nil
-				if ferr != nil {
-					logger.Warn("trigger loop: FinishRun failed",
-						"run_id", trigger.ID, "err", ferr)
-					canFinish = orchestrator.ConfirmTerminalRunAfterWriteError(claimCtx, cli, trigger.ID)
-				}
-				finishCancel()
-				if canFinish {
-					if ferr := cli.FinishTrigger(context.WithoutCancel(claimCtx), trigger.ID); ferr != nil {
-						logger.Warn("trigger loop: FinishTrigger failed", "run_id", trigger.ID, "err", ferr)
-					}
-				}
+				finishFailedTrigger(claimCtx, cli, trigger.ID, err, logger)
 			}
 			if selfTerminate {
 				logger.Error("trigger loop: self-terminating after prolonged controller silence",
@@ -191,6 +178,60 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 				cancel()
 			}
 		}(trigger)
+	}
+}
+
+// RunSpecificTrigger claims and executes one pending run with the supplied runner credential.
+// The controller refuses a run owned by another team or already claimed or cancelled.
+func RunSpecificTrigger(ctx context.Context, runID string, opts TriggerLoopOptions) error {
+	if runID == "" || opts.ControllerURL == "" || opts.Token == "" {
+		return errors.New("run id, controller URL, and runner token are required")
+	}
+	if opts.RunnerKind == "" {
+		opts.RunnerKind = "inprocess"
+	}
+	if opts.WorkRoot == "" {
+		opts.WorkRoot = filepath.Join(bincache.SparkwingHome(), "trigger-loop")
+	}
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if err := fssecure.EnsureDir(opts.WorkRoot); err != nil {
+		return fmt.Errorf("mkdir work-root: %w", err)
+	}
+	cli := client.NewWithToken(opts.ControllerURL, nil, opts.Token).
+		WithRunnerIdentity(processRunnerIdentity("run-trigger")).
+		WithTriggerNodeRunner(opts.RunnerKind)
+	if !opts.AllowRepos.Empty() {
+		cli.WithAllowRepos(opts.AllowRepos.Patterns())
+	}
+	trigger, err := cli.ClaimSpecificTrigger(ctx, runID, store.DefaultLeaseDuration)
+	if err != nil {
+		return fmt.Errorf("claim trigger %s: %w", runID, err)
+	}
+	claimCtx := orchestrator.DispatchContext(ctx, trigger)
+	_, err = handleOneTrigger(claimCtx, cli, trigger, opts, logger)
+	if err != nil {
+		finishFailedTrigger(claimCtx, cli, runID, err, logger)
+		return fmt.Errorf("run trigger %s: %w", runID, err)
+	}
+	return nil
+}
+
+func finishFailedTrigger(ctx context.Context, cli *client.Client, runID string, runErr error, logger *slog.Logger) {
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	ferr := cli.FinishRun(finishCtx, runID, "failed", runErr.Error())
+	canFinish := ferr == nil
+	if ferr != nil {
+		logger.Warn("trigger loop: FinishRun failed", "run_id", runID, "err", ferr)
+		canFinish = orchestrator.ConfirmTerminalRunAfterWriteError(ctx, cli, runID)
+	}
+	finishCancel()
+	if canFinish {
+		if ferr := cli.FinishTrigger(context.WithoutCancel(ctx), runID); ferr != nil {
+			logger.Warn("trigger loop: FinishTrigger failed", "run_id", runID, "err", ferr)
+		}
 	}
 }
 

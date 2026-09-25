@@ -74,8 +74,9 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 	var topLevel bytes.Buffer
 	usage(&topLevel)
 	for _, want := range []string{
-		"runner|worker|agent|run-node|version",
+		"runner|worker|agent|run-node|run-trigger|version",
 		"run-node - execute one claimed node (the Kubernetes Job fallback entrypoint)",
+		"run-trigger - claim and execute one named run with a team runner token",
 		"version  - print this executable's offline build identity",
 	} {
 		if !bytes.Contains(topLevel.Bytes(), []byte(want)) {

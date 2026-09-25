@@ -34,6 +34,8 @@ func MainWithVersion(version string) {
 		err = runAgentCLI(os.Args[2:])
 	case "run-node":
 		err = orchestrator.RunNodeCommand(os.Args[2:])
+	case "run-trigger":
+		err = runTriggerCLI(os.Args[2:])
 	case "wingd":
 		err = orchestrator.RunWingd(os.Args[2:])
 	case "version":
@@ -53,11 +55,12 @@ func MainWithVersion(version string) {
 }
 
 func usage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: sparkwing-runner <runner|worker|agent|run-node|version> [flags]")
+	fmt.Fprintln(writer, "usage: sparkwing-runner <runner|worker|agent|run-node|run-trigger|version> [flags]")
 	fmt.Fprintln(writer, "  runner   - long-lived warm pool pod (claims triggers + nodes)")
 	fmt.Fprintln(writer, "  worker   - legacy trigger-only claim loop (prefer 'runner --also-claim-triggers')")
 	fmt.Fprintln(writer, "  agent    - remote machine agent (YAML-configured, off-cluster)")
 	fmt.Fprintln(writer, "  run-node - execute one claimed node (the Kubernetes Job fallback entrypoint)")
+	fmt.Fprintln(writer, "  run-trigger - claim and execute one named run with a team runner token")
 	fmt.Fprintln(writer, "  version  - print this executable's offline build identity")
 }
 
