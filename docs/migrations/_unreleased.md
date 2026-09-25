@@ -1,5 +1,90 @@
 # Migrating to the next release
 
+## One config.yaml for machine settings
+
+Sparkwing reads every machine setting from one file,
+`~/.config/sparkwing/config.yaml` (or `$XDG_CONFIG_HOME/sparkwing/config.yaml`),
+instead of one file per setting. Each old file becomes a section:
+
+| Old file | Section of config.yaml |
+|---|---|
+| `admission.yaml` | `admission` (same keys) |
+| `budget` | `admission.budget` (the file's one setting line) |
+| `agent.yaml` | `agent` (same keys) |
+| `fleet.yaml` | `fleet` (same keys) |
+| `profiles.yaml` | `profiles` (the file's `profiles:` map) |
+| `repos.yaml` | `repos` (same keys, `repos` and `fallback_paths`) |
+
+`secrets.env`, `config.env` and `version-hold` stay where they are.
+
+**Automatic move.** The first command that reads or writes settings moves
+each old file it finds into its section, writes `config.yaml` owner-only,
+then renames the old file to `<name>.migrated` and prints one line for it.
+Each file must pass its section's own validation first; one that fails stays
+in place and the command fails naming it. When `config.yaml` already holds a
+different value for that section, nothing moves and the command names both;
+keep the value you want in `config.yaml` and delete the old file. A
+`profiles.yaml` key other than `profiles:`, such as the `default:` older
+releases wrote, had no effect and is left out. `sparkwing doctor` moves the
+files too and lists any it could not. The automatic move will be removed in a
+later release; after that, an old file is ignored.
+
+Before:
+
+```text
+~/.config/sparkwing/profiles.yaml
+  profiles:
+    prod:
+      controller: { url: https://api.sparkwing.example, token: swu_... }
+~/.config/sparkwing/budget
+  # leave room for the desktop
+  50%,8gb
+~/.config/sparkwing/admission.yaml
+  mode: auto
+~/.config/sparkwing/repos.yaml
+  repos:
+    - path: /home/me/code/app
+```
+
+After:
+
+```yaml
+# ~/.config/sparkwing/config.yaml
+profiles:
+  prod:
+    controller: { url: https://api.sparkwing.example, token: swu_... }
+admission:
+  mode: auto
+  # leave room for the desktop
+  budget: 50%,8gb
+repos:
+  repos:
+    - path: /home/me/code/app
+```
+
+**Path overrides.** `SPARKWING_CONFIG` names the file. `SPARKWING_PROFILES`,
+`SPARKWING_REPOS` and `SPARKWING_FLEET_CONFIG` are gone; a command refuses to
+start while one is set, so unset it and move that file's contents into the
+matching section of the file `SPARKWING_CONFIG` names. `SPARKWING_BUDGET`
+still overrides `admission.budget`.
+
+**Stricter reads.** `config.yaml` must be an owner-only regular file, and an
+unknown section or key fails the read with the file and line named. The old
+`profiles.yaml`, `repos.yaml` and `admission.yaml` loaders ignored unknown
+keys; fix any the move reports.
+
+**Runners.** `sparkwing-runner agent --config PATH` and
+`sparkwing cluster runners add|remove --config PATH` now name a `config.yaml`
+and use its `agent` section. A service unit written by an older
+`runners add` still passes `--config .../agent.yaml`; until the automatic move
+is removed, sparkwing reads `config.yaml` in its place and says so. Edit the
+unit's `--config` to the `config.yaml` path before then. `install/service-install.sh`
+writes a new `config.yaml` and refuses when one exists; use
+`sparkwing cluster runners add` on a machine that already has settings.
+
+**Daemon flag.** The internal `sparkwing wingd run --admission-config` flag is
+gone; the daemon reads the `admission` section.
+
 ## Schema 73: trigger credit cursor
 
 Stop metered trigger claims and wait for active claims to finish or expire,
@@ -191,8 +276,9 @@ run's team, and the run's cache traffic carries that grant. The token let any
 team's pipeline read and replace every other team's cached binaries, which the
 other team's launcher then executed.
 
-- Delete `cache_token` from `agent.yaml`; the agent refuses to load a file
-  that still carries it. The installer no longer writes it.
+- Delete `cache_token` from the agent settings (`agent.yaml`, or the `agent`
+  section of `config.yaml`); the agent refuses to load settings that still
+  carry it. The installer no longer writes it.
 - The runner-bundle chart no longer sets `SPARKWING_CACHE_TOKEN` on the runner.
   A runner deployed by hand should drop it too, because the pipeline binary
   can read its launcher's environment.

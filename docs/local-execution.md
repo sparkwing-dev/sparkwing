@@ -478,9 +478,9 @@ never enter the manifest and so are never named. Sparkwing judges the first
 64 KiB of a settings or manifest file, searches the whole file for a key or
 certificate block, and never reads a file whose bytes are binary.
 
-`SPARKWING_FLEET_CONFIG` is the one supported environment override for this
-feature; it selects a `fleet.yaml` outside the default config directory. The
-remaining `SPARKWING_FLEET*` names are private parent-to-pipeline handoff, not
+The coordinator reads the `fleet` section of `config.yaml` (see
+[Machine settings](machine-config.md)); `SPARKWING_CONFIG` selects a different
+file. The `SPARKWING_FLEET*` names are private parent-to-pipeline handoff, not
 configuration: `SPARKWING_FLEET`, `SPARKWING_FLEET_SOURCE_ROOT`,
 `SPARKWING_FLEET_SOURCE_BUNDLE`, `SPARKWING_FLEET_SOURCE_SHA`,
 `SPARKWING_FLEET_SOURCE_MANIFEST_DIGEST`,
@@ -618,14 +618,16 @@ resolves outside the checkout, is refused.
 ### An agent that fetches source itself
 
 `sparkwing-runner agent` fetches source through the controller's gitcache
-proxy unless its `agent.yaml` names `allow_repos` and no `gitcache`, or it
-starts with `--allow-repo`, which replaces the file's list:
+proxy unless the `agent` section of its `config.yaml` names `allow_repos` and
+no `gitcache`, or it starts with `--allow-repo`, which replaces the section's
+list:
 
 ```yaml
-controller: https://sparkwing.example.com
-token: swr_...
-allow_repos:
-  - github.com/acme/*
+agent:
+  controller: https://sparkwing.example.com
+  token: swr_...
+  allow_repos:
+    - github.com/acme/*
 ```
 
 Such an agent claims only runs of those repositories, sending the list with
@@ -634,20 +636,20 @@ controller releases for the run, else with the machine owner's own git
 credentials. The list follows the rules in
 [What a laptop runner trusts](#what-a-laptop-runner-trusts).
 `sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
-An `agent.yaml` without `allow_repos` keeps the proxy, as before.
+An agent section without `allow_repos` keeps the proxy, as before.
 
 ### Remote machine capacity
 
 `sparkwing-runner agent` runs claim mode, the mode that executes work. Its
-`agent.yaml` carries no `name` and no `coordinators`; a file that still sets
-either key fails to load and names the removed enrolled mode. The rest of this
+agent section carries no `name` and no `coordinators`; a section that still
+sets either key fails to load and names the removed enrolled mode. The rest of this
 section describes the controller-side enrolled design, which no agent
 configuration selects.
 
 The configuration uses the outbound FIFO `/api/v1/nodes/claim` loop. Its
 `labels` are self-asserted placement terms, not administrator-trusted
 capabilities. `sparkwing cluster runners add` and the bundled service installer
-both write this format. Existing files keep their `local_admission` setting,
+both write this format. Existing sections keep their `local_admission` setting,
 including an explicit `false`; when enabled, legacy local admission happens
 after a claim.
 
@@ -673,7 +675,8 @@ resource budget come only from enrollment. Worker traffic cannot add or widen
 them, and the agents API never returns the credential prefix or principal.
 
 A foreground coordinator reads its trusted helpers from the `executors` list in
-`fleet.yaml`. Write that list by hand; no command edits it. Each entry names an
+the `fleet` section of `config.yaml`. Write that list by hand; no command edits
+it. Each entry names an
 executor that this machine's state database already binds to a live runner
 credential carrying `nodes.claim` and `runs.state`, and a run refuses to start
 when one does not, naming the executor. Create the binding against a controller
@@ -1431,7 +1434,7 @@ that does not mean "wait for the window to age out." There are two:
   truthful -- with an `external: ignored (operator setting, ...)` line that
   names which setting turned it on, and contention detection keeps using
   the real saturation. Use it alone (`ignore-external`) or alongside a cap
-  (`50%,ignore-external`). Put it in the budget config file rather than the
+  (`50%,ignore-external`). Put it in `admission.budget` in `config.yaml` rather than the
   environment when you want it to outlive the daemon running now: the
   daemon is started on demand by whichever run needs it first and inherits
   that process's environment, so an exported variable lasts only as long as
@@ -1605,9 +1608,9 @@ rest of the wing family uses -- the more specific setting wins:
 |---|---|---|
 | Internal daemon `--budget` argument (not a public CLI command) | that daemon process | that daemon exits |
 | `SPARKWING_BUDGET` in the environment | any daemon spawned from that environment | that daemon exits |
-| `~/.config/sparkwing/budget` (or `$XDG_CONFIG_HOME/sparkwing/budget`) | every daemon on the machine | you edit or delete the file |
+| `admission.budget` in `~/.config/sparkwing/config.yaml` (see [Machine settings](machine-config.md)) | every daemon on the machine | you edit or delete the key |
 
-The config file is the durable one, and it is the setting to reach for
+The config.yaml key is the durable one, and it is the setting to reach for
 when you mean "this machine, from now on". The admission daemon is
 started on demand by whichever run needs it first, inheriting that
 process's environment, so a budget exported in one shell applies to
@@ -1615,12 +1618,13 @@ whatever daemon that shell happened to spawn and disappears with it. The
 file is read at daemon startup, so a budget written there is in force
 again the moment a daemon respawns.
 
-The file holds one setting line. Blank lines and `#` comments are
-skipped, so the reason a budget is in force can live next to the budget:
+The key holds one setting in the grammar above, and a YAML comment keeps
+the reason a budget is in force next to the budget:
 
-```
-# host sensor over-reads external load on this box
-50%,ignore-external
+```yaml
+admission:
+  # host sensor over-reads external load on this box
+  budget: 50%,ignore-external
 ```
 
 A value that will not parse fails daemon startup rather than being
@@ -1633,7 +1637,7 @@ The budget caps the admission ledger below the machine total, so it holds
 everywhere admission already runs, with no other change to how runs are
 scheduled. `sparkwing queue` shows it as its own row in the headroom
 arithmetic, naming the setting behind it
-(`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/budget)`),
+(`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/config.yaml admission.budget)`),
 so an operator can revoke a cap they did not set themselves. With no
 budget set anywhere the row says so rather than staying silent, because a
 machine admitting against everything it has looks exactly like a

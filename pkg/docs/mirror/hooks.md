@@ -397,7 +397,7 @@ survey a fleet at all.
 
 A survey that cannot read the registry says so and exits non-zero. It never
 answers with an empty fleet, because that is what a machine with nothing
-registered answers, and one stray character in `repos.yaml` used to make an
+registered answers, and one stray character in the registry used to make an
 unread fleet look like a swept one. `install --fleet` and `fire --fleet` refuse
 for the same reason. `doctor` keeps reporting the rest of its sweep and carries
 the reason in `gates_survey_error`, since the registry says nothing about this
@@ -451,8 +451,9 @@ gate to arm -- `--fleet` counts it apart from the repositories it armed rather
 than among them, because a sweep that reports it as armed reports a gated
 fleet while every commit in that repository still goes unchecked.
 
-The list is the machine's repo registry -- `~/.config/sparkwing/repos.yaml`,
-which `sparkwing configure xrepo add <dir>` writes to and which can name
+The list is the machine's repo registry -- the `repos` section of
+`~/.config/sparkwing/config.yaml`, which `sparkwing configure xrepo add <dir>`
+writes to and which can name
 `fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
 extent of the survey: a checkout the registry does not reach is not surveyed,
 not swept by `--fleet`, and not reported by `doctor`. Register it, or add the

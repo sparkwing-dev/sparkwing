@@ -320,10 +320,9 @@ file. Other syntax and workflow checks remain active.
   per-file overrides, because what lives there is machine-wide and outlives any
   one home. Every config write from a command running under a home of its own
   is refused rather than sent to the machine's config, naming both paths and
-  the value that keeps the write inside the home: `SPARKWING_PROFILES` for
-  `profiles.yaml`, `SPARKWING_REPOS` for `repos.yaml`, `SPARKWING_SECRETS` and
-  `SPARKWING_CONFIG_ENV` for the local secret stores, `SPARKWING_FLEET_CONFIG`
-  for `fleet.yaml`. No variable moves `version-hold`; `SPARKWING_VERSION_HOLD`
+  the value that keeps the write inside the home: `SPARKWING_CONFIG` for
+  `config.yaml`, `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` for the local
+  secret stores. No variable moves `version-hold`; `SPARKWING_VERSION_HOLD`
   holds one shell without writing it.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Among
   the family set it also rejects `_ = call()` on an error-returning call, nil

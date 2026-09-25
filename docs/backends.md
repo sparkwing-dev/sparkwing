@@ -12,11 +12,12 @@ A profile fully describes "where do my runs go and what auth do I need
 to get there." The same pipeline source runs on a laptop with the
 filesystem, in CI with S3, or against a self-hosted controller -- you
 switch by selecting a profile, not by editing a backends file. Laptop
-profiles live in `~/.config/sparkwing/profiles.yaml`; project profiles
+profiles live in the `profiles` section of `~/.config/sparkwing/config.yaml`
+(see [Machine settings](machine-config.md)); project profiles
 in `.sparkwing/sparkwing.yaml` (see [config-reference.md](config-reference.md)).
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   laptop:
     state: { type: sqlite }
@@ -149,7 +150,7 @@ pipeline; that profile then applies to its runs (typically for an audit
 requirement). Project profiles in `.sparkwing/sparkwing.yaml` are
 validated on load and must declare all four surfaces -- secrets, state,
 cache, and logs -- even when only one differs from the shared backends
-(laptop `profiles.yaml` entries are not validated this way):
+(laptop profiles in `config.yaml` are not validated this way):
 
 ```yaml
 # .sparkwing/sparkwing.yaml

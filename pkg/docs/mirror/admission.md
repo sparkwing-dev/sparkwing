@@ -6,11 +6,13 @@ deterministic pipeline contracts and are unaffected by admission mode.
 
 The default `classic` mode preserves Sparkwing's admission behavior from before
 selectable modes. To change the machine-wide
-policy, create `~/.config/sparkwing/admission.yaml` as an owner-only file and
-restart the daemon. `sparkwing queue` reports the active mode.
+policy, set it in the `admission` section of `~/.config/sparkwing/config.yaml`
+(see [Machine settings](machine-config.md)) and restart the daemon.
+`sparkwing queue` reports the active mode.
 
 ```yaml
-mode: classic # classic, off, auto, jev, or custom
+admission:
+  mode: classic # classic, off, auto, jev, or custom
 ```
 
 The modes are:

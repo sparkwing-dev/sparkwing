@@ -492,13 +492,13 @@ against shared infra," use hosted-controller mode instead.
 ## Configuration surface
 
 Each mode is one profile. Laptop profiles live in
-`~/.config/sparkwing/profiles.yaml`; project profiles in the
+`~/.config/sparkwing/config.yaml`; project profiles in the
 `profiles:` map of `.sparkwing/sparkwing.yaml`, where all four
 surfaces are required. Selecting a profile selects a mode -- see
 [docs/backends.md](docs/backends.md).
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   # Mode 1: local-only. Also the built-in default with no profile at all.
   laptop:

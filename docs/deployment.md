@@ -63,8 +63,8 @@ the registries available.
 
 ## Profiles
 
-Profiles map cluster names to controller URLs. Stored in
-`~/.config/sparkwing/profiles.yaml`:
+Profiles map cluster names to controller URLs. Stored in the `profiles`
+section of `~/.config/sparkwing/config.yaml`:
 
 ```yaml
 profiles:

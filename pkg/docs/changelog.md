@@ -701,6 +701,18 @@ unlock.
 
 ### Changed
 
+- **cli + runner (Breaking):** Machine settings move into one file,
+  `~/.config/sparkwing/config.yaml`, with `admission`, `agent`, `fleet`,
+  `profiles` and `repos` sections replacing `admission.yaml`, `budget`,
+  `agent.yaml`, `fleet.yaml`, `profiles.yaml` and `repos.yaml`.
+  `SPARKWING_CONFIG` names the file and replaces `SPARKWING_PROFILES`,
+  `SPARKWING_REPOS` and `SPARKWING_FLEET_CONFIG`, which now refuse to start a
+  command. Commands that write settings rewrite only their own section under
+  a lock, keeping the others and their comments. The first command that reads
+  settings moves each old file into its section and keeps the original as
+  `<name>.migrated`; this automatic move will be removed in a later release.
+  The internal `wingd run --admission-config` flag is gone. See
+  [One config.yaml for machine settings](docs/migrations/_unreleased.md#one-configyaml-for-machine-settings).
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
   Idle-tail appends start after 100 ms. A sequence

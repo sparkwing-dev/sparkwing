@@ -145,7 +145,8 @@ sparkwing cluster runners add --profile prod --name dev-laptop
 
 It mints a runner token scoped to `nodes.claim`, `triggers.claim`,
 `runs.state`, `secrets.read` and `logs.write`, writes
-`~/.config/sparkwing/agent.yaml` at mode `0600`, installs the user service, and
+the `agent` section of `~/.config/sparkwing/config.yaml` at mode `0600`,
+keeping the file's other sections, installs the user service, and
 prints the token prefix with the command that revokes it. The config and the
 machine are checked before the mint, so a host with no `sparkwing-runner` or no
 user service session fails before a credential exists; a failure after the mint
@@ -220,14 +221,17 @@ optional `@version`; it defaults to the SDK at the runner's own version, and
 `off` disables it. The warm runs in the background and a failed download only
 logs, so a cold cache never blocks a claim.
 
-The installer writes the token to `~/.config/sparkwing/agent.yaml` with mode
-`0600`. The service uses that file rather than embedding the token in its
+The installer writes the token to the `agent` section of a new
+`~/.config/sparkwing/config.yaml` with mode `0600`, and refuses when that file
+already exists, because a shell script cannot merge YAML without risking the
+other sections; `sparkwing cluster runners add` merges it instead. The service
+uses that file rather than embedding the token in its
 launchd plist or systemd unit. The contribution caps reported capacity; the
 reserve constrains local admission. Neither enables the reservation-backed
 assisted offer protocol.
 
-The file carries claim-mode keys only. `agent.yaml` has no `name` and no
-`coordinators`; a file that still sets either key fails to load and names the
+The section carries claim-mode keys only. It has no `name` and no
+`coordinators`; a section that still sets either key fails to load and names the
 removed enrolled mode. `allow_repos`, which `runners add --allow-repo` writes,
 makes the agent fetch source directly rather than through the controller's
 gitcache proxy; see [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself). See [local-execution.md](local-execution.md) for the
@@ -265,8 +269,8 @@ remain active after logout.
 
 ### Troubleshooting
 
-**The runner returns `401 unauthorized`.** Confirm that `token:` in
-`~/.config/sparkwing/agent.yaml` is a valid controller token.
+**The runner returns `401 unauthorized`.** Confirm that `token:` in the `agent`
+section of `~/.config/sparkwing/config.yaml` is a valid controller token.
 
 **The runner does not claim work.** Confirm that the pipeline was remotely
 triggered and that the runner can reach the configured controller and logs
