@@ -5990,11 +5990,20 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 // HeartbeatNodeClaim extends the exact claim generation carried by ctx.
 // The lease cannot outrun the claim cap or revive expired capacity.
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
+	_, _, err := s.HeartbeatNodeClaimWithCredits(ctx, runID, nodeID, claimant, holderID, lease, false)
+	return err
+}
+
+// HeartbeatNodeClaimWithCredits renews a claim and charges a licensed metered
+// token in one transaction. It reports the charge and whether the token was
+// metered. A failed ledger write leaves the lease unchanged.
+func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration, meteringLicensed bool) (CreditChargeResult, bool, error) {
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	if !ok || fence.HolderID != holderID || fence.Claimant != claimant || fence.ClaimGeneration < 1 {
-		return ErrLockHeld
+		return CreditChargeResult{}, false, ErrLockHeld
 	}
-	var updated int64
+	var charge CreditChargeResult
+	var metered bool
 	err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
 		var executorName string
 		var currentLease int64
@@ -6022,6 +6031,22 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 		if currentLease < now.UnixNano() {
 			return ErrLockHeld
 		}
+		if meteringLicensed {
+			metered, err = tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
+			if err != nil {
+				return err
+			}
+			if metered {
+				charged, err := s.chargeNodeTx(ctx, tx, runID, nodeID, claimant.TokenPrefix, now, false)
+				if err != nil {
+					return err
+				}
+				charge = charged.CreditChargeResult
+				if charge.Cancel {
+					return nil
+				}
+			}
+		}
 		expires := now.Add(clampNodeLease(lease)).UnixNano()
 		res, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
@@ -6035,16 +6060,19 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 		if err != nil {
 			return err
 		}
-		updated, err = res.RowsAffected()
-		return err
+		updated, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated == 0 {
+			return ErrLockHeld
+		}
+		return nil
 	})
 	if err != nil {
-		return err
+		return CreditChargeResult{}, false, err
 	}
-	if updated == 0 {
-		return ErrLockHeld
-	}
-	return nil
+	return charge, metered, nil
 }
 
 // PrincipalHoldsTriggerClaim reports whether claimant holds the

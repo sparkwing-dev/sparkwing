@@ -1248,6 +1248,10 @@ unlock.
 
 ### Security
 
+- **controller + runner:** A metered node stops when its heartbeat cannot read
+  the token marker or charge credits. The failed renewal preserves the prior
+  lease and ledger state.
+
 - **store:** Finishing a trigger's run at a claim generation now uses the
   trigger's team. A trigger ID shared with another team's run cannot finish
   that run.

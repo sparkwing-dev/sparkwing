@@ -267,11 +267,7 @@ func (s *Server) noteComputeLimitBlocked(
 
 // safety: a run past the wall-clock guard stops in this same request, so the
 // runner learns to abandon the node rather than holding it to the lease.
-func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID string) (stop bool) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
-		return false
-	}
+func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID, prefix string) (stop bool) {
 	ctx := r.Context()
 	now := time.Now()
 	ceiling, over, err := s.store.RunExceedsWallClock(ctx, runID, now)

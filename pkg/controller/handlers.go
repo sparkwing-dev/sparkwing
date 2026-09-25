@@ -2243,17 +2243,24 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
 	lease := time.Duration(body.LeaseSecs) * time.Second
 	claimCtx := store.WithNodeClaimFence(r.Context(), fence)
-	if err := s.store.HeartbeatNodeClaim(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease); err != nil {
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
+	charge, metered, err := s.store.HeartbeatNodeClaimWithCredits(claimCtx, runID, nodeID, fence.Claimant, body.HolderID, lease, s.Metering())
+	if err != nil {
+		if !errors.Is(err, store.ErrLockHeld) {
+			s.logger.Error("heartbeat node claim failed", "run_id", runID, "node_id", nodeID, "err", err)
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
 	// safety: the runner abandons a node whose claim the controller refuses,
 	// which is how a cancellation for an empty balance reaches it.
-	if s.chargeMeteredHeartbeat(r, runID, nodeID) || s.stopForWallClockLimit(r, runID, nodeID) {
+	if charge.ForgivenSeconds > 0 {
+		s.logger.Warn("charge cap engaged; the gap since the previous charge is not billed",
+			"run_id", runID, "node_id", nodeID, "forgiven_s", charge.ForgivenSeconds)
+	}
+	if charge.Cancel {
+		s.cancelForExhaustedCredits(r, runID, nodeID, fence.Claimant.TokenPrefix, charge)
+	}
+	if charge.Cancel || (metered && s.stopForWallClockLimit(r, runID, nodeID, fence.Claimant.TokenPrefix)) {
 		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
