@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -59,6 +60,14 @@ type noopWriter struct{}
 
 func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
+type triggerHeartbeatTransport func(http.ResponseWriter, *http.Request)
+
+func (f triggerHeartbeatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	f(w, req)
+	return w.Result(), nil
+}
+
 func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
 
@@ -86,34 +95,30 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	}
 }
 
-func TestTriggerClaimHeartbeat_ConflictStopsChild(t *testing.T) {
-	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
-	ts, handler, _ := newTriggerHeartbeatServer(t)
-	handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "claim stopped", http.StatusConflict)
-	}))
-	var killed atomic.Bool
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	got := triggerClaimHeartbeat(ctx, client.New(ts.URL, nil), "trig-x", func() { killed.Store(true) }, discardSlog())
-	if got != triggerClaimReaped || !killed.Load() {
-		t.Fatalf("conflict left child running: outcome=%v killed=%v", got, killed.Load())
-	}
-}
-
-func TestTriggerClaimHeartbeat_CancelRequestStopsChild(t *testing.T) {
-	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
-	ts, handler, _ := newTriggerHeartbeatServer(t)
-	handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"cancel_requested":true}`))
-	}))
-	var killed atomic.Bool
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	got := triggerClaimHeartbeat(ctx, client.New(ts.URL, nil), "trig-x", func() { killed.Store(true) }, discardSlog())
-	if got != triggerClaimReaped || !killed.Load() {
-		t.Fatalf("cancel request left child running: outcome=%v killed=%v", got, killed.Load())
+func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		respond triggerHeartbeatTransport
+	}{
+		{"conflict", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "claim stopped", http.StatusConflict)
+		}},
+		{"cancel request", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cancel_requested":true}`))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				killed := false
+				httpClient := &http.Client{Transport: tc.respond}
+				got := triggerClaimHeartbeat(t.Context(), client.New("http://controller.test", httpClient),
+					"trig-x", func() { killed = true }, discardSlog())
+				if got != triggerClaimReaped || !killed {
+					t.Fatalf("%s left child running: outcome=%v killed=%v", tc.name, got, killed)
+				}
+			})
+		})
 	}
 }
 
