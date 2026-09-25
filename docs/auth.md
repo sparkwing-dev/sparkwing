@@ -373,7 +373,7 @@ none behaves as it did before the guards existed.
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
 | `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | the controller's ledger |
+| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | one team's grants |
 | `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
@@ -387,10 +387,10 @@ already finished still occupies the budget until it ages out of the hour.
 
 ### Scaling the per-principal runner cap
 
-`max_concurrent_runners` scales with what the controller loaded recently, so a
+`max_concurrent_runners` scales with what the team loaded recently, so a
 customer that has paid for capacity gets it and one that has paid nothing
 cannot spawn a thousand pods. The cap is the base plus one more base for every
-`runner_scale_step_credits` of `paid` credit granted in the last 30 days, held
+`runner_scale_step_credits` of `paid` credit granted to that team in the last 30 days, held
 under `runner_scale_ceiling`. The base is `runner_scale_base`, or
 `max_concurrent_runners` when that is zero; the ceiling is
 `runner_scale_ceiling`, or `max_global_runners` when that is zero. With a base
@@ -410,9 +410,9 @@ value.
 `reversal` grant naming the payment's reference, and it is matched to that
 payment rather than to its own date: a refund settled after the window still
 takes back the payment that bought the cap, and refunding a payment that has
-already aged out leaves this month's payments alone. The ledger belongs to the
-controller and a controller serves one team, so every metered principal on it
-derives the same cap.
+already aged out leaves this month's payments alone. Every metered principal
+within a team derives its cap from that team's grants. A grant or reversal in
+another team does not change it.
 
 The derivation is held for a minute so a claim costs no ledger query, and any
 grant or reversal retires it at once. A ledger the derivation
@@ -421,10 +421,10 @@ names the failure in the controller log. `max_global_runners` is checked first,
 so the controller's own ceiling still refuses a claim a scaled cap would have
 allowed.
 
-`GET /api/v1/compute-limits` reports the result as `usage.derived_runner_cap`
-with the `usage.recent_paid_micro` it was read from, which is the window's paid
-grants less the reversals of them, and `sparkwing cluster limits show` prints it
-as `DERIVED RUNNER CAP`.
+`GET /api/v1/compute-limits` reports the request team's result as
+`usage.derived_runner_cap` with that team's `usage.recent_paid_micro`, which is
+the window's paid grants less their reversals. `sparkwing cluster limits show`
+prints it as `DERIVED RUNNER CAP` for the team of its credential.
 
 Work a guard refuses answers `429` with `"code": "compute_limit"` naming the
 guard, its ceiling and what was measured, and a `Retry-After` saying how soon

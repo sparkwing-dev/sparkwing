@@ -2026,7 +2026,7 @@ func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, windo
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
-func (s *Store) RunnerCapFor(ctx context.Context, now time.Time) (RunnerCap, error)
+func (s *Store) RunnerCapFor(ctx context.Context, team Team, now time.Time) (RunnerCap, error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
 func (s *Store) SeedStorageRetention(ctx context.Context, days int64) (bool, error)
