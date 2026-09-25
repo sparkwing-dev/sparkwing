@@ -373,6 +373,7 @@ function GettingStarted() {
       <h2 className="text-sm font-semibold">Get started</h2>
       <ol className="mt-2 list-decimal list-inside space-y-1 text-sm text-[var(--muted)]">
         <li>Add a pipeline to your repository.</li>
+        <li><Link href="/team/machines" className="text-indigo-300 underline">Connect a runner</Link> on your machine or in GitHub Actions.</li>
         <li>Trigger a run.</li>
         <li>Follow its result in Runs.</li>
       </ol>

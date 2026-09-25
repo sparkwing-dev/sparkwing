@@ -701,6 +701,7 @@ test("renders the empty production dashboard and passes accessibility smoke", as
 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Connect a runner" })).toHaveAttribute("href", "/team/machines");
   await expect(page.getByRole("link", { name: "Setup docs" })).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(page.getByText("No completed deploys yet.")).toBeVisible();
   await expect(
