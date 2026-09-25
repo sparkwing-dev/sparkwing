@@ -300,6 +300,19 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, cacheGrant string, logger *slog.Logger) error {
 	childArgs := handleTriggerArgs(trigger.ID, opts)
+	homeScratch := filepath.Join(bincache.SparkwingHome(), "tmp")
+	if err := fssecure.EnsureDir(homeScratch); err != nil {
+		return fmt.Errorf("prepare trigger home scratch: %w", err)
+	}
+	childHome, err := os.MkdirTemp(homeScratch, "trigger-home-")
+	if err != nil {
+		return fmt.Errorf("create trigger home: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(childHome) }()
+	childHome, err = filepath.Abs(childHome)
+	if err != nil {
+		return fmt.Errorf("resolve trigger home: %w", err)
+	}
 
 	childCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -307,7 +320,7 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	cmd.Env = triggerChildEnv(ctx, os.Environ(), opts, cacheGrant)
+	cmd.Env = append(triggerChildEnv(ctx, os.Environ(), opts, cacheGrant), "SPARKWING_HOME="+childHome)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	logger.Info("trigger loop: exec child",

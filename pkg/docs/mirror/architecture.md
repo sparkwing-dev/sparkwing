@@ -84,6 +84,12 @@ pending nodes. For per-node isolation it launches a Kubernetes Job that
 runs `sparkwing run-node`. The runner downloads code from the cache,
 compiles and runs the pipeline, and reports results.
 
+The trigger runner fetches and compiles with its shared source and build caches.
+It gives each compiled trigger process a private Sparkwing home and removes it
+when the process exits. Warm-root GC can remove homes left by a crash once they
+are 24 hours old. The trigger process still uses the runner's `GOCACHE` and
+`GOMODCACHE`; its `ToolCacheDir` entries live in its private home.
+
 Off-cluster runners (developer machines, workstations, and servers) connect to
 the controller and claim nodes through its claim API; the route set and scopes
 are in [api-reference.md](api-reference.md).

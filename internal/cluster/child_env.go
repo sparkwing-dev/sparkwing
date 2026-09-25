@@ -55,6 +55,7 @@ var triggerChildSets = map[string]bool{
 	"SPARKWING_AGENT_TOKEN":    true,
 	"SPARKWING_RUNNER_TYPE":    true,
 	"SPARKWING_GITCACHE_URL":   true,
+	"SPARKWING_HOME":           true,
 	authwire.CacheGrantEnv:     true,
 	authwire.CacheTokenEnv:     true,
 	"TRACEPARENT":              true,
