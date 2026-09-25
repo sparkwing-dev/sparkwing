@@ -48,4 +48,28 @@ func TestComputeLimitsPaidCapacityShowsOnlyTheReadersTeam(t *testing.T) {
 	if cap, paid := view(a.SessionID); cap != 2 || paid != 5000*store.MicroCreditsPerCredit {
 		t.Fatalf("payer reads cap %d and paid %d; want 2 and its own payment", cap, paid)
 	}
+	for _, session := range []string{a.SessionID, b.SessionID} {
+		var out struct {
+			Usage map[string]any `json:"usage"`
+		}
+		if code := f.call(http.MethodGet, "/api/v1/compute-limits", sessionAuth(session), nil, &out); code != http.StatusOK {
+			t.Fatalf("team compute limits: %d", code)
+		}
+		for _, field := range []string{"runners", "alarm_reached", "by_principal"} {
+			if _, ok := out.Usage[field]; ok {
+				t.Fatalf("team response exposed global usage %s", field)
+			}
+		}
+	}
+	var operator struct {
+		Usage map[string]any `json:"usage"`
+	}
+	if code := f.call(http.MethodGet, "/api/v1/compute-limits", "Bearer "+f.admin, nil, &operator); code != http.StatusOK {
+		t.Fatalf("operator compute limits: %d", code)
+	}
+	for _, field := range []string{"runners", "alarm_reached"} {
+		if _, ok := operator.Usage[field]; !ok {
+			t.Fatalf("operator response omitted %s", field)
+		}
+	}
 }

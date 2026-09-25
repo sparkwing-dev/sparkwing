@@ -4326,8 +4326,9 @@ paths:
         The runner guards count cloud runners, which are the claims a metered
         token holds; the node and hourly guards count one metered principal's
         runs, and their `max_global_*` counterparts count every run on the
-        controller. `usage` reports the cloud runners claimed right now, in
-        total and per principal, and whether the count reached `runner_alarm`.
+        controller. For an operator, `usage` reports the cloud runners claimed
+        right now, in total and per principal, and whether the count reached
+        `runner_alarm`. Team readers do not receive those global fields.
         It also reports `derived_runner_cap`, the runner ceiling for principals
         in the request's team after that team's recent paid credit has raised
         `max_concurrent_runners`, together with that team's paid credit.
@@ -7555,9 +7556,9 @@ components:
       type: object
       description: The cloud runners claimed right now.
       properties:
-        runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller.}
+        runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller. Operator only; omitted for team readers.}
         by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
-        alarm_reached: {type: boolean, description: Whether the count reached runner_alarm.}
+        alarm_reached: {type: boolean, description: Whether the count reached runner_alarm. Operator only; omitted for team readers.}
         derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal in the request's team is held to once that team's recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
         recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted to the request's team over the scaling window, in micro-credits, less reversals of those grants."}
         scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}

@@ -2179,11 +2179,11 @@ existed.`,
 
 var cmdLimitsShow = Command{
 	Path:     "sparkwing cluster limits show",
-	Synopsis: "Print every compute guard and the cloud runners in use",
+	Synopsis: "Print every compute guard and visible runner usage",
 	Description: `Prints each guard with its ceiling, or "unlimited" when nothing set
-one, then the cloud runners claimed now in total and per principal. A
-cloud runner is a claim a metered token holds, so a controller that
-marks no token metered reads zero.`,
+one. An operator also sees the cloud runners claimed now in total and per
+principal, and whether runner_alarm has been reached. Team readers see their
+own paid runner cap without another team's fleet activity.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},

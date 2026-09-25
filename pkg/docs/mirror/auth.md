@@ -424,7 +424,9 @@ allowed.
 `GET /api/v1/compute-limits` reports the request team's result as
 `usage.derived_runner_cap` with that team's `usage.recent_paid_micro`, which is
 the window's paid grants less their reversals. `sparkwing cluster limits show`
-prints it as `DERIVED RUNNER CAP` for the team of its credential.
+prints it as `DERIVED RUNNER CAP` for the team of its credential. Only an
+operator sees the controller-wide runner count, per-principal counts and
+`runner_alarm` state; team readers receive none of those fields.
 
 Work a guard refuses answers `429` with `"code": "compute_limit"` naming the
 guard, its ceiling and what was measured, and a `Retry-After` saying how soon

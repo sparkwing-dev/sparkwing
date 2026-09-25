@@ -917,7 +917,8 @@ unlock.
 - **controller + store (Breaking):** A team's recent paid grants now raise only
   that team's concurrent runner cap. Refunds lower only the original team's
   cap, and `GET /api/v1/compute-limits` no longer exposes another team's paid
-  total. `Store.RunnerCapFor` now takes the team before the time; see
+  total or global runner activity. `Store.RunnerCapFor` now takes the team
+  before the time; see
   [Team runner cap](docs/migrations/_unreleased.md#team-runner-cap).
 
 - **controller:** Per-principal runner, node and hourly run guards now check
