@@ -1885,13 +1885,8 @@ func settleTriggerWindowTx(
 					return balanceErr
 				}
 				required := w.Rate * over
-				if freezeErr := refuseFrozenTeamTx(ctx, tx, team, balance, required, triggerID, ""); freezeErr != nil {
-					if !errors.Is(freezeErr, ErrInsufficientCredits) {
-						return freezeErr
-					}
-					exhausted = freezeErr
-				}
-				if balance < required && exhausted == nil {
+				// safety: a dispute hold refuses new claims; admitted work keeps paying as it finishes.
+				if balance < required {
 					exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
 				}
 			}

@@ -233,6 +233,39 @@ func TestMeteredTriggerHeartbeatStopsAnEmptyBalance(t *testing.T) {
 	}
 }
 
+func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	rate := floor / store.MinBillableSeconds
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-frozen")
+	claimed, err := st.ClaimSpecificTriggerFor(ctx, "run-frozen", pool, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.HoldTeamForDispute(ctx, store.DefaultTeam, "dispute-trigger", "", "operator hold", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
+	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); err != nil {
+		t.Fatalf("admitted claim stopped on a later dispute hold: %v", err)
+	}
+	if got := balance(t, st); got != 2*floor-5*rate {
+		t.Fatalf("frozen-team balance = %d, want five elapsed seconds charged: %d", got, 2*floor-5*rate)
+	}
+	if got, err := st.GetTrigger(ctx, claimed.ID); err != nil || got.Status != "claimed" {
+		t.Fatalf("dispute hold ended admitted claim: %+v, %v", got, err)
+	}
+	if err := st.FinishTrigger(ctx, claimed.ID); err != nil {
+		t.Fatalf("finish admitted frozen claim: %v", err)
+	}
+}
+
 func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
