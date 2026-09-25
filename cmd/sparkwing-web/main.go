@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	flag "github.com/spf13/pflag"
 
@@ -19,7 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
@@ -36,10 +37,6 @@ func run(args []string) error {
 
 	controllerURL := fs.String("controller", "", "controller URL to read from (legacy; prefer --state-spec=controller://<profile>)")
 	logsURL := fs.String("logs", "", "sparkwing-logs URL (legacy; prefer --logs-spec)")
-	cacheURL := fs.String("cache", "",
-		"sparkwing-cache URL to include in the services health panel. Probe only -- "+
-			"the dashboard reads nothing else from the cache. Empty leaves it off the panel.")
-
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
 	_ = fs.String("api-url", "", "deprecated; the dashboard proxies the API on its own origin")
 	requireLogin := fs.Bool("require-login", false,
@@ -104,7 +101,6 @@ func run(args []string) error {
 			Backend:           b,
 			Paths:             paths,
 			AuthControllerURL: authControllerURL,
-			CacheURL:          *cacheURL,
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,
@@ -126,20 +122,20 @@ func run(args []string) error {
 		}
 		var logStore storage.LogStore
 		if *logsURL != "" {
-			logStore = sparkwinglogs.New(*logsURL, nil, *token)
+			logStore = web.DurableLogStore(*logsURL, *token)
 		}
-		var c *client.Client
-		if *token != "" {
-			c = client.NewWithToken(*controllerURL, nil, *token)
-		} else {
-			c = client.New(*controllerURL, nil)
+		// safety: the backend reads runs, nodes and events while serving a browser, so a
+		// signed-in request reaches the controller as its own session, not the service token.
+		hc := &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: web.SessionForwardingTransport(otelutil.WrapTransport(nil)),
 		}
+		c := client.NewWithToken(*controllerURL, hc, *token)
 		opts := web.HandlerOptions{
 			Backend:           backend.NewClientBackend(c, logStore),
 			Paths:             paths,
 			ControllerURL:     *controllerURL,
 			LogsURL:           *logsURL,
-			CacheURL:          *cacheURL,
 			Token:             *token,
 			RequireLogin:      *requireLogin,
 			TrustedProxyCIDRs: trustedProxyCIDRs,

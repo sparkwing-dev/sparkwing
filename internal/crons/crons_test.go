@@ -48,7 +48,7 @@ func (f *fakeLauncher) Launch(_ context.Context, s store.CronSchedule, due time.
 	return id, nil
 }
 
-func (f *fakeLauncher) Active(_ context.Context, runID string, staleAfter time.Duration) (bool, error) {
+func (f *fakeLauncher) Active(_ context.Context, _ store.CronSchedule, runID string, staleAfter time.Duration) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.staleAfter = append(f.staleAfter, staleAfter)
@@ -1274,5 +1274,19 @@ func TestHealthAcceptsAHostTickingFromItsOwnScheduler(t *testing.T) {
 	}
 	if !lapsed.TickStale || lapsed.Healthy() {
 		t.Fatalf("an hour after the last external tick: %+v", lapsed)
+	}
+}
+
+func TestTeamScheduleIDKeepsTheOperatorsIDsAndSeparatesTeams(t *testing.T) {
+	repo, pipeline := "https://github.com/acme/app.git", "nightly"
+	if got, want := TeamScheduleID(store.DefaultTeam, repo, pipeline, "default"), ScheduleID(repo, pipeline, "default"); got != want {
+		t.Errorf("the operator's id = %s, want the unchanged %s", got, want)
+	}
+	if TeamScheduleID("", repo, pipeline, "default") != ScheduleID(repo, pipeline, "default") {
+		t.Error("an empty team does not name the operator's id")
+	}
+	a, b := TeamScheduleID("team-a", repo, pipeline, "default"), TeamScheduleID("team-b", repo, pipeline, "default")
+	if a == b || a == ScheduleID(repo, pipeline, "default") {
+		t.Errorf("two teams arm one schedule under ids %s and %s", a, b)
 	}
 }

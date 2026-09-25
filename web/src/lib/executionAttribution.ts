@@ -8,6 +8,8 @@ export interface ExecutionDisplay {
   executorLabel: string;
   platformLabel: string | null;
   className: string;
+  icon: "machine" | "cloud" | "github" | "cluster" | null;
+  tooltip: string | null;
 }
 
 export function executionAttempts(node: Node): ExecutionAttempt[] {
@@ -30,6 +32,8 @@ export function executionAttempts(node: Node): ExecutionAttempt[] {
         node_id: node.id,
         executor_kind: node.executor_kind,
         executor_name: node.executor_name,
+        execution_site: node.execution_site,
+        execution_site_name: node.execution_site_name,
         location: node.executor_location ?? "unknown",
         started_at: node.execution_started_at,
         finished_at: node.finished_at,
@@ -83,17 +87,23 @@ export function placementLabel(node: Node): string | null {
 }
 
 export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
-  const location = normalizeLocation(attempt?.location);
+  const location = normalizeLocation(attempt?.location, attempt?.execution_site);
   const locationLabel =
     location === "local"
       ? "Local"
       : location === "cloud"
         ? "Cloud"
         : "Location unknown";
-  const kind = attempt?.executor_kind?.trim();
-  const name = attempt?.executor_name?.trim();
+  const executorKind = attempt?.executor_kind?.trim();
+  const executorName = attempt?.executor_name?.trim();
+  const kind = attempt?.execution_site?.trim() || executorKind;
+  const name = attempt?.execution_site_name?.trim() || executorName;
+  const displayKind = executorKind || kind;
+  const displayName = executorName || name;
   const executorLabel =
-    kind && name ? `${kind} ${name}` : name || kind || "Executor unknown";
+    displayKind && displayName
+      ? `${displayKind} ${displayName}`
+      : displayName || displayKind || "Executor unknown";
   const platform = attempt?.platform?.trim();
   const platformLabel = platform || null;
   const className =
@@ -102,16 +112,46 @@ export function executionDisplay(attempt?: ExecutionAttempt): ExecutionDisplay {
       : location === "cloud"
         ? "border-sky-400/40 bg-sky-400/10 text-sky-200"
         : "border-slate-400/40 bg-slate-400/10 text-slate-300";
+  let icon: ExecutionDisplay["icon"] = null;
+  let tooltip: string | null = null;
+  if (kind === "github-actions") {
+    icon = "github";
+    tooltip = `Ran on GitHub Actions${name ? `: ${name}` : ""}`;
+  } else if (kind === "cluster" || kind === "kubernetes" || kind === "k8s") {
+    icon = "cluster";
+    tooltip = `Ran on the cluster${name ? ` ${name.replaceAll("-", " ")}` : ""}`;
+  } else if (kind === "cloud" || location === "cloud") {
+    icon = "cloud";
+    tooltip = "Ran in Sparkwing Cloud";
+  } else if (kind === "machine" || location === "local") {
+    icon = "machine";
+    tooltip = `Ran on ${name || "your machine"}${name ? " (your machine)" : ""}`;
+  }
   return {
     location,
     locationLabel,
     executorLabel,
     platformLabel,
     className,
+    icon,
+    tooltip,
   };
 }
 
-function normalizeLocation(location?: string): ExecutionLocation {
+// A missing execution site tells the reader nothing in a compact surface.
+export function compactExecutionDisplay(node: Node): ExecutionDisplay | null {
+  const latest = executionAttempts(node).at(-1);
+  const display = executionDisplay(latest ? {
+    ...latest,
+    execution_site: latest.execution_site || node.execution_site,
+    execution_site_name: latest.execution_site_name || node.execution_site_name,
+  } : undefined);
+  return display.icon ? display : null;
+}
+
+function normalizeLocation(location?: string, site?: string): ExecutionLocation {
   if (location === "local" || location === "cloud") return location;
+  if (site === "machine") return "local";
+  if (site === "cluster" || site === "kubernetes" || site === "github-actions" || site === "cloud") return "cloud";
   return "unknown";
 }

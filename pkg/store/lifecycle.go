@@ -31,6 +31,7 @@ const (
 	triggerStatusPending = "pending"
 	triggerStatusClaimed = "claimed"
 	triggerStatusDone    = "done"
+	triggerStatusFailed  = "failed"
 )
 
 const (
@@ -45,5 +46,5 @@ const runTerminalIn = `status IN ('success','failed','cancelled')`
 // IsFinished reports whether this trigger has reached the state it never
 // leaves, so what is keyed to it can be reclaimed.
 func (t Trigger) IsFinished() bool {
-	return t.Status == triggerStatusDone
+	return t.Status == triggerStatusDone || t.Status == triggerStatusFailed
 }

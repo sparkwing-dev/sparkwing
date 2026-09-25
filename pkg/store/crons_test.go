@@ -892,3 +892,32 @@ func TestResolveCronDueSkipsASecondFiredRowForTheSameInstantAndRun(t *testing.T)
 		t.Fatalf("fires = %d, want the deduplicated one plus the second run and the miss: %+v", len(fires), fires)
 	}
 }
+
+// Two teams arm one repository, pipeline and name under their own ids, and
+// each keeps its own row. An id another team holds is still refused.
+func TestArmCronScheduleKeysTheRepositoryPipelineAndNamePerTeam(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	armCron(t, st, "crn_default", "https://github.com/acme/app.git", "nightly", cronBase)
+	if err := st.AsOperator().CreateTeam(ctx, "team-b"); err != nil {
+		t.Fatal(err)
+	}
+	tenantB, err := st.ForTeam(ctx, "team-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched := store.CronSchedule{
+		ID: "crn_team_b", RepoPath: "https://github.com/acme/app.git", Pipeline: "nightly",
+		Cron: "0 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip, CatchUp: time.Hour,
+	}
+	if _, created, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); err != nil || !created {
+		t.Fatalf("team B arming the same repository, pipeline and name = created %v, %v", created, err)
+	}
+	if own, err := st.GetCronSchedule(ctx, "crn_default"); err != nil || own.Team != store.DefaultTeam {
+		t.Fatalf("the default team's schedule after team B's arm: %+v, %v", own, err)
+	}
+	sched.ID, sched.Pipeline = "crn_default", "weekly"
+	if _, _, err := tenantB.ArmCronSchedule(ctx, sched, cronBase); !errors.Is(err, store.ErrCronScheduleTaken) {
+		t.Fatalf("team B arming the default team's id = %v, want ErrCronScheduleTaken", err)
+	}
+}

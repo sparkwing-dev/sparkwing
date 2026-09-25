@@ -1,0 +1,326 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { type ReactNode, useState } from "react";
+import {
+  type Capabilities,
+  type Me,
+  type PendingInvitation,
+  type WaitlistedMe,
+  acceptInvitation,
+  renameTeam,
+  billingEnabled,
+} from "@/lib/teams";
+import { githubAppEnabled } from "@/lib/githubApp";
+import { refreshTeamState, useTeamState } from "@/lib/useTeam";
+import { RolePill } from "@/components/TeamSwitcher";
+import { toast } from "@/components/Toasts";
+import { joinedNotice, rememberTeamNotice } from "@/lib/teamNotice";
+
+const baseTabs = [
+  { href: "/team", label: "Members" },
+  { href: "/team/machines", label: "Machines" },
+  { href: "/team/secrets", label: "Secrets" },
+  { href: "/team/git-credentials", label: "Git credentials" },
+];
+
+export function teamTabs(caps: Capabilities | null) {
+  return [
+    ...baseTabs,
+    ...(githubAppEnabled(caps)
+      ? [{ href: "/team/github", label: "GitHub" }]
+      : []),
+    ...(billingEnabled(caps)
+      ? [{ href: "/team/billing", label: "Billing" }]
+      : []),
+  ];
+}
+
+export function Panel({
+  title,
+  hint,
+  action,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="mb-6">
+      <div className="flex items-end justify-between mb-2 gap-4">
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
+            {title}
+          </h2>
+          {hint ? (
+            <p className="text-xs text-[var(--muted)] mt-0.5">{hint}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+export function Notice({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6 text-sm text-[var(--muted)]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export const buttonClass =
+  "px-3 py-1.5 text-sm rounded-[var(--radius-control)] bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed";
+export const quietButtonClass =
+  "px-2 py-1 text-xs rounded-[var(--radius-control)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)] disabled:opacity-50 disabled:cursor-not-allowed";
+export const dangerButtonClass =
+  "px-2 py-1 text-xs rounded-[var(--radius-control)] border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed";
+export const inputClass =
+  "px-2.5 py-1.5 text-sm rounded-[var(--radius-control)] bg-[var(--background)] border border-[var(--border)] focus:outline-none focus:border-[var(--accent)]";
+
+export function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+export function InvitationsForMe({
+  me,
+}: {
+  me: { invitations: PendingInvitation[] };
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  if (me.invitations.length === 0) return null;
+  async function accept(id: string, team: string) {
+    setBusy(id);
+    try {
+      await acceptInvitation(id);
+      rememberTeamNotice(joinedNotice(team));
+      window.location.reload();
+    } catch (err) {
+      setBusy(null);
+      toast(errorText(err), "error");
+    }
+  }
+  return (
+    <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10">
+      {me.invitations.map((inv) => (
+        <div
+          key={inv.id}
+          className="flex items-center gap-3 px-4 py-3 border-b border-amber-500/20 last:border-0"
+        >
+          <div className="flex-1 text-sm">
+            You are invited to join{" "}
+            <span className="font-medium">{inv.team_display_name}</span> as{" "}
+            <RolePill role={inv.role} />
+            <div className="text-xs text-[var(--muted)] mt-1">
+              Accepting adds it to your teams and switches to it; your current
+              teams stay in the team menu.
+            </div>
+          </div>
+          <button
+            type="button"
+            className={buttonClass}
+            disabled={busy !== null}
+            onClick={() => accept(inv.id, inv.team_display_name)}
+          >
+            {busy === inv.id ? "Joining…" : "Accept"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Shown to an account the sign-up gate placed on the waitlist. It says what
+// happened and what comes next, and offers any invitation, since a team that
+// invites someone admits them to that team.
+export function WaitlistNotice({ me }: { me: WaitlistedMe }) {
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
+      <InvitationsForMe me={me} />
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-6">
+        <h1 className="text-xl font-bold mb-3">You&apos;re on the list</h1>
+        <div className="space-y-3 text-sm text-[var(--muted)]">
+          <p>
+            We&apos;re letting new accounts in gradually, so we saved yours (
+            <span className="text-[var(--foreground)]">{me.user.email}</span>)
+            on a waitlist without a workspace for now. This also happens when
+            the GitHub account you signed in with is only a few days old.
+          </p>
+          <p>
+            Nothing else is needed from you. Once you&apos;re let in, your
+            workspace will be here the next time you open this page.
+          </p>
+          <p>
+            If a team invites you, you can join it right away; the invitation
+            shows above once it is sent to this address.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function TeamShell({
+  children,
+}: {
+  children: (me: Me, caps: Capabilities | null) => ReactNode;
+}) {
+  const state = useTeamState();
+  const pathname = usePathname();
+  if (state.status === "loading") {
+    return <Notice>Loading team…</Notice>;
+  }
+  if (state.status === "single-team") {
+    return (
+      <Notice>
+        Teams are not enabled on this controller. Everything here belongs to the
+        one built-in team.
+      </Notice>
+    );
+  }
+  if (state.status === "waitlisted") {
+    return <WaitlistNotice me={state.me} />;
+  }
+  if (state.status === "operator") {
+    return (
+      <Notice>
+        You are signed in as the deployment operator, which belongs to no team.
+        Sign in with Google or GitHub to manage a team.
+      </Notice>
+    );
+  }
+  if (state.status === "unavailable") {
+    return (
+      <Notice>
+        The controller did not return your account. Reload, or sign in again.
+      </Notice>
+    );
+  }
+  const { me, caps } = state;
+  return (
+    <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
+      <InvitationsForMe me={me} />
+      <TeamHeader me={me} />
+      <div className="flex gap-1 border-b border-[var(--border)] mb-6">
+        {teamTabs(caps).map((t) => {
+          const active =
+            t.href === "/team"
+              ? pathname === "/team"
+              : pathname.startsWith(t.href);
+          return (
+            <Link
+              key={t.href}
+              href={t.href}
+              className={`px-3 py-2 text-sm border-b-2 -mb-px ${
+                active
+                  ? "border-[var(--accent)] text-[var(--foreground)]"
+                  : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              {t.label}
+            </Link>
+          );
+        })}
+      </div>
+      {children(me, caps)}
+    </div>
+  );
+}
+
+function TeamHeader({ me }: { me: Me }) {
+  const team = me.active_team;
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(team.display_name);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    const next = name.trim();
+    if (!next || next === team.display_name) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await renameTeam(next);
+      await refreshTeamState();
+      setEditing(false);
+      toast("Team renamed", "success");
+    } catch (err) {
+      toast(errorText(err), "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-4 mb-4">
+      <div className="min-w-0">
+        {editing ? (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              save();
+            }}
+          >
+            <input
+              autoFocus
+              aria-label="Team name"
+              className={`${inputClass} text-lg w-72`}
+              value={name}
+              maxLength={80}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <button type="submit" className={buttonClass} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              className={quietButtonClass}
+              onClick={() => {
+                setName(team.display_name);
+                setEditing(false);
+              }}
+            >
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold truncate">{team.display_name}</h1>
+            <RolePill role={team.role} />
+            {team.role === "owner" ? (
+              <button
+                type="button"
+                className={quietButtonClass}
+                onClick={() => {
+                  setName(team.display_name);
+                  setEditing(true);
+                }}
+              >
+                Rename
+              </button>
+            ) : null}
+          </div>
+        )}
+        <div className="text-xs font-mono text-[var(--muted)] mt-1">
+          {team.slug}
+        </div>
+      </div>
+      {me.waitlisted ? null : (
+        <Link href="/team/new" className={quietButtonClass}>
+          New team
+        </Link>
+      )}
+    </div>
+  );
+}

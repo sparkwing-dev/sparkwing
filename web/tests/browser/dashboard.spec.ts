@@ -3,6 +3,8 @@ import { type Page, type Route } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { startStaticDashboard } from "./static-server";
 
+
+
 const finishedRun = {
   id: "run-20260827-001",
   pipeline: "deploy-production",
@@ -23,6 +25,60 @@ const runningRun = {
   started_at: "2026-08-27T18:05:00Z",
   finished_at: undefined,
 };
+
+test("keeps activity rows exactly two lines with long metadata and errors", async ({ page }) => {
+  const longRun = {
+    ...finishedRun,
+    id: "run-20260827-long",
+    repo: `owner/${"repository".repeat(15)}`,
+    pipeline: "pipeline".repeat(18),
+    git_branch: "feature/".repeat(20),
+    trigger_source: "trigger".repeat(15),
+    error: "failure detail ".repeat(80),
+    status: "failed",
+  };
+  await installMockAPI(page, { runs: [longRun, finishedRun] });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/runs");
+    const long = page.locator('[data-run-id="run-20260827-long"]').first();
+    const short = page.locator('[data-run-id="run-20260827-001"]').first();
+    await expect(long).toBeVisible();
+    await expect(short).toBeVisible();
+    const sizes = await Promise.all([long, short].map((row) => row.evaluate((el) => ({
+      height: el.getBoundingClientRect().height,
+      overflow: el.scrollHeight - el.clientHeight,
+    }))));
+    expect(sizes[0].height).toBe(sizes[1].height);
+    expect(sizes[0].height).toBe(56);
+    expect(sizes[0].overflow).toBeLessThanOrEqual(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+  }
+});
+
+test("Home shows the latest default-branch failure and optional feature failures", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [
+      { ...finishedRun, id: "old-red", repo: "product", status: "failed", error: "old failure", started_at: "2026-08-27T18:00:00Z" },
+      { ...finishedRun, id: "new-green", repo: "owner/product", status: "success", started_at: "2026-08-27T18:02:00Z" },
+      { ...finishedRun, id: "current-red", repo: "owner/other", status: "failed", error: "current failure reason", started_at: "2026-08-27T18:03:00Z" },
+      { ...finishedRun, id: "feature-red", repo: "owner/product", git_branch: "feature/demo", status: "failed", error: "feature failure reason", started_at: "2026-08-27T18:04:00Z" },
+    ],
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Needs attention" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recently Failed Pipelines (default branch)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recently Recovered Pipelines (default branch)" })).toBeVisible();
+  await expect(page.locator('a[href="/runs?run=new-green"]')).toBeHidden();
+  await page.getByText("Recently Recovered Pipelines (default branch)").click();
+  await expect(page.locator('a[href="/runs?run=new-green"]')).toBeVisible();
+  await expect(page.getByText("current failure reason")).toBeVisible();
+  await expect(page.getByText("old failure")).toHaveCount(0);
+  await expect(page.getByText("feature failure reason")).toHaveCount(0);
+  await page.getByRole("checkbox", { name: "All branches" }).check();
+  await expect(page.getByRole("heading", { name: "Recently Failed Pipelines (all branches)" })).toBeVisible();
+  await expect(page.getByText("feature failure reason")).toBeVisible();
+});
 
 const finishedDetail = {
   run: finishedRun,
@@ -51,6 +107,43 @@ const finishedDetail = {
     },
   ],
 };
+
+test("keeps a long node name visible beside its location icon", async ({ page }) => {
+  const longName = "verify-production-checks";
+  const detail = {
+    ...finishedDetail,
+    nodes: [{
+      ...finishedDetail.nodes[0],
+      id: longName,
+      executor_kind: "agent",
+      executor_name: "moonborn",
+      executor_location: "local",
+    }],
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const row = page.locator(`[data-node-id="${longName}"]`).first();
+  await expect(row).toBeVisible();
+  await expect(row.getByText(longName, { exact: true })).toBeVisible();
+  const label = row.getByText(longName, { exact: true });
+  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
+  const rowSite = row.getByLabel("Ran on moonborn (your machine)");
+  await expect(rowSite).toBeVisible();
+  await rowSite.focus();
+  await expect(rowSite.getByRole("tooltip")).toBeVisible();
+  await page.getByRole("button", { name: /DAG/ }).click();
+  const dagSite = page.locator('svg [role="img"][aria-label="Ran on moonborn (your machine)"]');
+  await expect(dagSite).toBeVisible();
+  await dagSite.hover();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await page.mouse.move(0, 0);
+  await dagSite.focus();
+  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+});
 
 function isoFromNow(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
@@ -330,10 +423,6 @@ async function installMockAPI(page: Page, options: MockAPIOptions = {}) {
       await route.fulfill({ json: { approvals: [] } });
       return;
     }
-    if (request.method() === "GET" && path === "/api/v1/health/services") {
-      await route.fulfill({ json: { services: [] } });
-      return;
-    }
     if (request.method() === "GET" && path === "/api/v1/agents") {
       await route.fulfill({ json: { agents: options.agents ?? [] } });
       return;
@@ -611,10 +700,14 @@ test("renders the empty production dashboard and passes accessibility smoke", as
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Connect a runner" })).toHaveAttribute("href", "/team/machines");
+  await expect(page.getByRole("link", { name: "Setup docs" })).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(page.getByText("No completed deploys yet.")).toBeVisible();
   await expect(
-    page.getByText("Nothing needs attention. Services healthy, no pending approvals."),
+    page.getByText("No pending approvals."),
   ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Browse runs" })).toHaveCount(2);
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa"])
@@ -663,6 +756,91 @@ test("opens a completed run and renders stored node logs", async ({ page }) => {
   await expect(
     page.getByText("PREAMBLE stays outside the tests step", { exact: true }),
   ).toBeVisible();
+});
+
+test("keeps run panes the same size while switching selected runs", async ({ page }) => {
+  const nextRun = {
+    ...finishedRun,
+    id: "run-20260827-next",
+    pipeline: "verify-next",
+  };
+  const nextDetail = {
+    ...finishedDetail,
+    run: nextRun,
+    nodes: [{ ...finishedDetail.nodes[0], id: "next-node" }],
+  };
+  const nextStarted = deferred();
+  const releaseNext = deferred();
+  await installMockAPI(page, {
+    runs: [finishedRun, nextRun],
+    details: { [finishedRun.id]: finishedDetail },
+    onDetail: async (route, runID) => {
+      if (runID !== nextRun.id) return false;
+      nextStarted.resolve();
+      await releaseNext.promise;
+      await route.fulfill({ json: nextDetail });
+      return true;
+    },
+  });
+  await page.goto("/runs");
+  await page.locator(`[data-run-id="${finishedRun.id}"]`).click();
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let frames = 20;
+    const tick = () => --frames ? requestAnimationFrame(tick) : resolve();
+    requestAnimationFrame(tick);
+  }));
+
+  await page.evaluate((firstRunID) => {
+    const row = document.querySelector(`[data-run-id="${firstRunID}"]`);
+    const sidebar = row?.parentElement?.parentElement;
+    const panes = sidebar?.parentElement;
+    if (!sidebar || !panes) throw new Error("run panes missing");
+    const samples: { sidebar: number; detail: number; row: number }[] = [];
+    const state = window as typeof window & {
+      __runPaneSamples?: typeof samples;
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__runPaneSamples = samples;
+    state.__stopRunPaneSamples = false;
+    const sample = () => {
+      const detail = panes.lastElementChild;
+      samples.push({
+        sidebar: sidebar.getBoundingClientRect().width,
+        detail: detail === sidebar ? 0 : detail?.getBoundingClientRect().width ?? 0,
+        row: row.getBoundingClientRect().height,
+      });
+      if (!state.__stopRunPaneSamples) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }, finishedRun.id);
+
+  await page.locator(`[data-run-id="${nextRun.id}"]`).click();
+  await nextStarted.promise;
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(12);
+  releaseNext.resolve();
+  await expect(page.getByText("verify-next", { exact: true }).last()).toBeVisible();
+  await expect(page.locator('[data-node-id="next-node"]').first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __runPaneSamples?: unknown[] }
+  ).__runPaneSamples?.length ?? 0)).toBeGreaterThan(24);
+  const samples = await page.evaluate(() => {
+    const state = window as typeof window & {
+      __runPaneSamples?: { sidebar: number; detail: number; row: number }[];
+      __stopRunPaneSamples?: boolean;
+    };
+    state.__stopRunPaneSamples = true;
+    return state.__runPaneSamples ?? [];
+  });
+  const first = samples[0];
+  expect(first.detail).toBeGreaterThan(0);
+  for (const sample of samples) {
+    expect(sample.sidebar).toBeCloseTo(first.sidebar, 1);
+    expect(sample.detail).toBeCloseTo(first.detail, 1);
+    expect(sample.row).toBeCloseTo(first.row, 1);
+  }
 });
 
 test("keeps interval, command, and process resource evidence distinct", async ({
@@ -844,6 +1022,25 @@ test("shows an empty DAG canvas with the error for a run that never planned", as
   await expect(empty).toContainText("daemon build differs from this client");
 });
 
+test("explains a historical trigger that ended before dispatch", async ({ page }) => {
+  const failed = {
+    ...finishedRun,
+    status: "failed",
+    error: "reaped: trigger consumer finished without dispatching the pipeline",
+  };
+  await installMockAPI(page, {
+    runs: [failed],
+    details: { [failed.id]: { run: failed, nodes: [] } },
+  });
+  await page.goto(`/runs?run=${failed.id}`);
+  await expect(page.getByText("No node started. The trigger worker ended before dispatching the pipeline.")).toBeVisible();
+  await expect(page.getByText(/Rerun this pipeline/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Fleet" }).last()).toHaveAttribute("href", "/cluster");
+  await expect(page.getByText(failed.id, { exact: true }).last()).toBeVisible();
+  await page.getByText("Technical error").click();
+  await expect(page.getByText(failed.error, { exact: true })).toBeVisible();
+});
+
 test("keeps the selected run when an older detail request finishes late", async ({
   page,
 }) => {
@@ -956,6 +1153,238 @@ test("auto-expands the pipeline that owns a selected run", async ({ page }) => {
   await expect
     .poll(() => new URL(page.url()).searchParams.get("exp"))
     .toBe("sparkwing/deploy-production");
+});
+
+test("run rows keep their height while the detail pane closes", async (
+  { page },
+  testInfo,
+) => {
+  const runs = Array.from({ length: 5 }, (_, index) => ({
+    ...finishedRun,
+    id: `run-collapse-${index}`,
+    pipeline: `long-pipeline-name-${index}`,
+    error: "A failed run with a long error message that should take up space in the full activity row layout when the detail pane closes, including additional context for the operator to inspect",
+  }));
+  await installMockAPI(page, {
+    runs,
+    details: Object.fromEntries(
+      runs.map((run) => [run.id, { ...finishedDetail, run }]),
+    ),
+  });
+  await page.goto("/runs");
+  const rows = page.locator("[data-run-id]");
+  await expect(rows).toHaveCount(runs.length);
+  await rows.first().click();
+  await expect(page).toHaveURL(/run=run-collapse-0/);
+  await expect
+    .poll(() =>
+      rows
+        .first()
+        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+    )
+    .toBe(208);
+
+  // Start sampling before the click so the first transition frame is included.
+  const capture = page.evaluate(async () => {
+    const row = document.querySelector<HTMLElement>('[data-run-id="run-collapse-0"]')!;
+    const heights: { height: number; width: number; pane: number }[] = [];
+    for (let frame = 0; frame < 45; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      heights.push({
+        height: row.getBoundingClientRect().height,
+        width: row.getBoundingClientRect().width,
+        pane: row.parentElement!.parentElement!.getBoundingClientRect().width,
+      });
+    }
+    return heights;
+  });
+  await rows.first().click();
+  const samples = await capture;
+  await testInfo.attach("detail-close-row-heights.json", {
+    body: JSON.stringify(samples),
+    contentType: "application/json",
+  });
+  expect(Math.max(...samples.map((sample) => sample.height))).toBeLessThanOrEqual(
+    samples.at(-1)!.height + 2,
+  );
+  await expect(rows.first().locator(".grid").first()).toBeVisible();
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await rows.first().click();
+  await expect
+    .poll(() =>
+      rows
+        .first()
+        .evaluate((row) => row.parentElement!.parentElement!.getBoundingClientRect().width),
+    )
+    .toBe(208);
+  await rows.first().click();
+  await expect(rows.first().locator(".grid").first()).toBeVisible();
+});
+
+test("runs and nodes collapse into selectable rails and remember the viewer's choice", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await installMockAPI(page, {
+    runs: [runningRun, finishedRun],
+    details: {
+      [runningRun.id]: {
+        run: runningRun,
+        nodes: [
+          { id: "compile", status: "success", outcome: "success", duration_ms: 1200 },
+          { id: "publish", status: "running", outcome: "", duration_ms: 2300 },
+        ],
+      },
+      [finishedRun.id]: finishedDetail,
+    },
+  });
+  await page.goto(`/runs?run=${runningRun.id}`);
+
+  const runsRail = page.getByLabel("Runs rail");
+  const nodesRail = page.getByLabel("Nodes rail");
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect(nodesRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect.poll(() => runsRail.evaluate((rail) => rail.parentElement!.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect.poll(() => nodesRail.evaluate((rail) => rail.parentElement!.getBoundingClientRect().width)).toBe(32);
+  await expect(runsRail.locator('[data-rail-id="run-20260827-002"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(runsRail.locator("[data-rail-id]").first()).toHaveAttribute("aria-label", /sparkwing-dev\/sparkwing.*pre-commit.*main.*2026/);
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("deploy-production");
+  await nodesRail.locator('[data-rail-id="publish"]').hover();
+  await expect(page.getByRole("tooltip")).toContainText("publish · 2.3s");
+  await runsRail.locator('[data-rail-id="run-20260827-001"]').click();
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await nodesRail.locator('[data-rail-id="verify"]').click();
+  await expect(page).toHaveURL(/node=verify/);
+  await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
+  await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
+  await expect(page.locator('[data-run-id="run-20260827-001"]')).toBeVisible();
+  await expect.poll(async () => [
+    await page.locator("#runs-column").evaluate((pane) => pane.getBoundingClientRect().width),
+    await page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width),
+  ]).toEqual([208, 208]);
+  const collapseRuns = page.getByRole("button", { name: "Collapse Runs" });
+  await expect(collapseRuns).toHaveAttribute("title", "Collapse Runs");
+  await expect(collapseRuns.locator("svg")).toBeVisible();
+  await expect(collapseRuns).toHaveText("");
+  await collapseRuns.press("Enter");
+  await expect(runsRail.locator("[data-rail-id]")).toHaveCount(2);
+  await expect(nodesRail).toHaveCount(0);
+  await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
+  await expect(runsRail.locator('[data-rail-id="run-20260827-001"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse Nodes" }).click();
+  await expect(nodesRail.locator("[data-rail-id]")).toHaveCount(1);
+  await expect(nodesRail.locator('[data-rail-id="verify"]')).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
+  await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
+  await expect(page).toHaveURL(/run=run-20260827-001/);
+  await expect(page).toHaveURL(/node=verify/);
+  await page.reload();
+  await expect(page.locator("#nodes-column")).toBeVisible();
+  await expect(runsRail).toHaveCount(0);
+  await expect(nodesRail).toHaveCount(0);
+});
+
+test("runs columns follow the viewport until the viewer chooses a width", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const tab = page.getByRole("button", { name: "Activity" });
+  const tabY = await tab.evaluate((element) => element.getBoundingClientRect().top);
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Collapse Runs" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  expect(await tab.evaluate((element) => element.getBoundingClientRect().top)).toBe(tabY);
+  await page.getByRole("button", { name: "Expand Runs and Nodes" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+});
+
+test("starting a run from the middle pane state keeps Nodes expanded", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse Runs" }).click();
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
+  await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await page.getByRole("button", { name: "+ Start a run" }).click();
+  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
+  await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
+});
+
+test("Tab leaves focused Runs and Nodes panes without changing detail tabs", async ({ page }) => {
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: finishedDetail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+  const summary = page.locator('[data-tab-key="summary"]');
+  await expect(summary).toHaveClass(/border-cyan-400/);
+  for (const [name, key] of [["Runs pane", "Tab"], ["Nodes pane", "Shift+Tab"]] as const) {
+    const pane = page.getByLabel(name);
+    await pane.focus();
+    await page.keyboard.press(key);
+    await expect(summary).toHaveClass(/border-cyan-400/);
+    expect(await pane.evaluate((element) => document.activeElement === element)).toBe(false);
+  }
+});
+
+test("Runs and Nodes show slim scroll thumbs during keyboard scrolling", async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 600 });
+  const runs = Array.from({ length: 40 }, (_, index) => ({
+    ...finishedRun,
+    id: `run-scroll-${index}`,
+    started_at: isoFromNow(-index * 60_000),
+  }));
+  const nodes = Array.from({ length: 40 }, (_, index) => ({
+    id: `node-${index}`,
+    status: "success",
+    outcome: "success",
+    duration_ms: 1000,
+  }));
+  await installMockAPI(page, {
+    runs,
+    details: { [runs[0].id]: { run: runs[0], nodes } },
+  });
+  await page.goto(`/runs?run=${runs[0].id}`);
+
+  for (const pane of [page.getByLabel("Runs pane"), page.getByLabel("Nodes pane")]) {
+    await expect(pane).toHaveAttribute("data-scrolling", "false");
+    const before = await pane.evaluate((element) => ({
+      width: element.clientWidth,
+      top: element.scrollTop,
+      color: getComputedStyle(element).getPropertyValue("scrollbar-color"),
+    }));
+    await pane.focus();
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before.top);
+    await expect(pane).toHaveAttribute("data-scrolling", "true");
+    await expect(pane).toBeFocused();
+    const active = await pane.evaluate((element) => ({
+      width: element.clientWidth,
+      color: getComputedStyle(element).getPropertyValue("scrollbar-color"),
+    }));
+    expect(active.width).toBe(before.width);
+    expect(active.color).not.toBe(before.color);
+    await expect(pane).toHaveAttribute("data-scrolling", "false", { timeout: 3000 });
+    await expect.poll(() => pane.evaluate((element) => getComputedStyle(element).getPropertyValue("scrollbar-color"))).toBe(before.color);
+  }
 });
 
 test("renders live structured node logs", async ({ page }) => {
@@ -1094,10 +1523,6 @@ test("resumes the run event stream after a disconnect", async ({ page }) => {
     }
     if (url.pathname === "/api/v1/approvals/pending") {
       sendJSON({ approvals: [] });
-      return true;
-    }
-    if (url.pathname === "/api/v1/health/services") {
-      sendJSON({ services: [] });
       return true;
     }
     if (url.pathname.endsWith("/attempts")) {
@@ -1331,6 +1756,46 @@ test("shows retry lineage from privacy-safe execution attempts", async ({
   ).toHaveAttribute("href", `/runs?run=${finishedRun.id}`);
 });
 
+test("keeps run tabs fixed when selecting a node with execution history", async ({ page }) => {
+  const detail = {
+    ...finishedDetail,
+    nodes: finishedDetail.nodes.map((node) => ({
+      ...node,
+      run_id: finishedRun.id,
+      executor_kind: "agent",
+      executor_name: "design-mac",
+      executor_location: "local",
+      execution_attempts: [{
+        run_id: finishedRun.id,
+        node_id: node.id,
+        attempt: 1,
+        executor_kind: "agent",
+        executor_name: "design-mac",
+        location: "local",
+        started_at: node.started_at,
+        finished_at: node.finished_at,
+        outcome: "success",
+      }],
+    })),
+  };
+  await installMockAPI(page, {
+    runs: [finishedRun],
+    details: { [finishedRun.id]: detail },
+  });
+  await page.goto(`/runs?run=${finishedRun.id}`);
+
+  const summaryTab = page.locator('[data-tab-key="summary"]');
+  await expect(summaryTab).toBeVisible();
+  const before = (await summaryTab.boundingBox())!.y;
+  await page.locator('[data-node-id="verify"]').first().click();
+  const history = page.getByRole("region", { name: "Execution history for verify" });
+  await expect(history).toBeVisible();
+  expect((await summaryTab.boundingBox())!.y).toBe(before);
+  const attempt = history.getByRole("listitem");
+  await expect(attempt).toHaveCount(1);
+  expect((await attempt.boundingBox())!.height).toBeLessThanOrEqual(30);
+});
+
 test("separates fleet policy, observations, and current activity", async ({
   page,
 }) => {
@@ -1365,7 +1830,7 @@ test("separates fleet policy, observations, and current activity", async ({
         last_seen: new Date().toISOString(),
         status: "idle",
         active_jobs: [],
-        max_concurrent: 0,
+        max_concurrent: 2,
       },
     ],
   });
@@ -1383,6 +1848,7 @@ test("separates fleet policy, observations, and current activity", async ({
   await expect(configured.getByText("20 (ceiling 80)")).toBeVisible();
   await expect(observed.getByText("3 cores / 6.0 GiB")).toBeVisible();
   await expect(observed.getByText("headroom observed", { exact: true })).toBeVisible();
+  await expect(observed.getByText("last heartbeat", { exact: true })).toBeVisible();
   await expect(observed.getByText(/controller accepted this headroom/)).toBeVisible();
   await expect(activity.getByText("2", { exact: true })).toBeVisible();
   await expect(
@@ -1390,6 +1856,8 @@ test("separates fleet policy, observations, and current activity", async ({
   ).toBeVisible();
 
   await page.getByRole("button", { name: /old-pool/ }).click();
+  const legacyObserved = page.getByRole("button", { name: /old-pool/ }).locator("..").getByRole("region", { name: "Observed liveness" });
+  await expect(legacyObserved.getByText("last observed", { exact: true })).toBeVisible();
   await expect(
     page.getByText(
       "Configuration unavailable. This executor was inferred from recent activity.",
@@ -1425,6 +1893,52 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(docs).toHaveAttribute("target", "_blank");
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toHaveCount(0);
 });
+
+test("Overview and Compute do not request or show service probes", async ({ page }) => {
+  const probeRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/api/v1/health/services")) {
+      probeRequests.push(request.url());
+    }
+  });
+  await installMockAPI(page);
+  await page.goto("/");
+  await expect(page.getByText("No pending approvals.")).toBeVisible();
+  await page.goto("/cluster");
+  await expect(page.getByRole("heading", { name: "Fleet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Services", exact: true })).toHaveCount(0);
+  expect(probeRequests).toEqual([]);
+});
+
+test("navigation waits for a chosen tab before fetching other routes", async ({ page }) => {
+  await installMockAPI(page);
+  const targets = ["/queue", "/crons", "/capacity", "/cluster", "/analytics"];
+  const speculative = new Set<string>();
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (!url.searchParams.has("_rsc")) return;
+    for (const target of targets) {
+      if (url.pathname === target || url.pathname.startsWith(`${target}/__next`)) {
+        speculative.add(target);
+      }
+    }
+  });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  expect([...speculative]).toEqual([]);
+
+  const crons = page.getByRole("link", { name: "Crons", exact: true });
+  await crons.hover();
+  await crons.click();
+  await expect(page).toHaveURL(/\/crons$/);
+  await page.waitForLoadState("networkidle");
+  expect([...speculative]).toEqual(["/crons"]);
+  const runs = page.getByRole("link", { name: "Runs", exact: true });
+  await runs.focus();
+  await runs.press("Enter");
+  await expect(page).toHaveURL(/\/runs$/);
+});
+
 
 test("promises no analytics section the product does not have", async ({
   page,
@@ -1824,3 +2338,89 @@ for (const count of [999, 1000]) {
     }
   });
 }
+
+test("Search finds an older run through server-side filters", async ({ page }) => {
+  const older = {
+    ...finishedRun,
+    id: "older-match",
+    pipeline: "build",
+    git_branch: "rare",
+    git_sha: "deadbeef1234",
+  };
+  const newer = Array.from({ length: 201 }, (_, index) => ({
+    ...finishedRun,
+    id: `newer-${index}`,
+    pipeline: "build",
+    git_branch: "main",
+    git_sha: "cafebabe1234",
+  }));
+  const searched: URL[] = [];
+  const runLists: URL[] = [];
+  await installMockAPI(page, {
+    runs: newer,
+    onRequest: (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/v1/runs") runLists.push(url);
+    },
+  });
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    searched.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: {
+        query: "needle",
+        matches: [{ run_id: older.id, pipeline: older.pipeline, node_id: "build", line: 1, content: "needle in old archive" }],
+        runs: { [older.id]: older },
+        total: 1,
+        runs_scanned: 1,
+        runs_matching: 1,
+      },
+    });
+  });
+
+  await page.goto("/runs?view=search&pipeline=build&status=success&branch=rare&commit=deadbee&gsince=all&gq=needle");
+  await expect(page.getByText("needle in old archive")).toBeVisible();
+  expect(searched).toHaveLength(1);
+  expect(searched[0].searchParams.getAll("pipeline")).toEqual(["build"]);
+  expect(searched[0].searchParams.getAll("status")).toEqual(["success"]);
+  expect(searched[0].searchParams.getAll("branch")).toEqual(["rare"]);
+  expect(searched[0].searchParams.getAll("sha")).toEqual(["deadbee"]);
+  expect(searched[0].searchParams.has("since")).toBe(false);
+  expect(searched[0].searchParams.getAll("run_id")).toEqual([]);
+  expect(runLists).toHaveLength(0);
+  await expect(page.getByRole("button", { name: /^TRIGGER/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^REPO/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^TAG/ })).toHaveCount(0);
+});
+
+test("Search keeps visible filters aligned with same-view navigation", async ({ page }) => {
+  const searched: URL[] = [];
+  await installMockAPI(page);
+  await page.route("**/api/v1/runs/grep?**", async (route) => {
+    searched.push(new URL(route.request().url()));
+    await route.fulfill({
+      json: { query: "needle", matches: [], runs: {}, total: 0, runs_scanned: 0, runs_matching: 0 },
+    });
+  });
+  await page.goto("/runs?view=search&gq=needle&pipeline=build&commit=deadbee");
+  await expect.poll(() => searched.length).toBe(1);
+  await expect(page.getByLabel("Pipeline")).toHaveValue("build");
+
+  await page.evaluate(() => {
+    history.pushState(null, "", "/runs?view=search&gq=needle&pipeline=deploy&branch=release&commit=cafebabe");
+  });
+  await expect(page.getByLabel("Pipeline")).toHaveValue("deploy");
+  await expect(page.getByLabel("Branch")).toHaveValue("release");
+  await expect(page.getByLabel("Commit")).toHaveValue("cafebabe");
+  await page.getByRole("button", { name: "search", exact: true }).click();
+  await expect.poll(() => searched.length).toBeGreaterThanOrEqual(2);
+  const submitted = searched.at(-1)!;
+  expect(submitted.searchParams.getAll("pipeline")).toEqual(["deploy"]);
+  expect(submitted.searchParams.getAll("branch")).toEqual(["release"]);
+  expect(submitted.searchParams.getAll("sha")).toEqual(["cafebabe"]);
+
+  const beforeInvalid = searched.length;
+  await page.getByLabel("Commit").fill(", ,");
+  await page.getByRole("button", { name: "search", exact: true }).click();
+  await expect(page.getByText("Commit must be a hexadecimal SHA prefix.")).toBeVisible();
+  expect(searched).toHaveLength(beforeInvalid);
+});

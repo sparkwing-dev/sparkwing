@@ -33,7 +33,7 @@ func submitTrigger(t *testing.T, base, pipeline, sha string) (int, string) {
 	t.Helper()
 	return postJSONWithStatus(t, base+"/api/v1/triggers", map[string]any{
 		"pipeline": pipeline,
-		"trigger":  map[string]string{"source": "api", "user": "alice"},
+		"trigger":  map[string]string{"source": "api"},
 		"git":      map[string]string{"branch": "main", "sha": sha},
 	})
 }
@@ -63,7 +63,7 @@ func TestFloodPolicy_CapsRunsPerPrincipalHour(t *testing.T) {
 	resp, err := http.Post(base+"/api/v1/triggers", "application/json",
 		jsonBody(t, map[string]any{
 			"pipeline": "build",
-			"trigger":  map[string]string{"source": "api", "user": "alice"},
+			"trigger":  map[string]string{"source": "api"},
 			"git":      map[string]string{"branch": "main", "sha": fortyHex(9)},
 		}))
 	if err != nil {
@@ -102,7 +102,7 @@ func TestFloodPolicy_ShedsAboveTheQueueDepthThreshold(t *testing.T) {
 	resp, err := http.Post(base+"/api/v1/triggers", "application/json",
 		jsonBody(t, map[string]any{
 			"pipeline": "build",
-			"trigger":  map[string]string{"source": "api", "user": "alice"},
+			"trigger":  map[string]string{"source": "api"},
 			"git":      map[string]string{"branch": "main", "sha": fortyHex(1)},
 		}))
 	if err != nil {
@@ -186,7 +186,7 @@ func TestFloodPolicy_DedupeIsScopedToThePrincipal(t *testing.T) {
 
 	submission := map[string]any{
 		"pipeline": "build",
-		"trigger":  map[string]string{"source": "api", "user": "ci"},
+		"trigger":  map[string]string{"source": "api"},
 		"git":      map[string]string{"branch": "main", "sha": fortyHex(7)},
 	}
 	status, body := postJSONWithBearer(t, ts.URL+"/api/v1/triggers", tenantA, submission)

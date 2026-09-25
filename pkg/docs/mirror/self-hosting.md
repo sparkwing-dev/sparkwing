@@ -38,6 +38,36 @@ The repository's opt-in `k8s-e2e` pipeline exercises this deployment against
 an explicit cluster and caller-supplied images. It does not create or delete a
 cluster.
 
+### Signed downloads through CloudFront
+
+For object-store downloads through a public ingress, configure the controller
+with a CloudFront distribution domain, trusted key pair ID, and private key.
+Point `--cache-blob-store` at the cache service's S3 bucket and prefix; the
+controller announces `data_download_url` to in-cluster callers when that store
+is configured, and to public-ingress callers when CloudFront signing is also
+configured.
+Set `SPARKWING_CLOUDFRONT_DOMAIN` and
+`SPARKWING_CLOUDFRONT_KEY_PAIR_ID`, then provide the signing key with either
+`SPARKWING_CLOUDFRONT_PRIVATE_KEY` or
+`SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE`. Store the key in a Kubernetes Secret
+and mount it as a file; keep it out of Helm values, command arguments, and
+logs. The distribution must serve the private data bucket through its origin
+access control configuration.
+
+The controller returns a 60-second CloudFront URL for requests arriving
+through the public ingress. Requests through the in-cluster Service receive a
+regional S3 URL instead, so runner pods in the bucket's region can use the S3
+gateway endpoint. Local filesystem storage keeps its direct byte-serving path and
+does not need CloudFront signing keys. See [Data downloads](api.md#data-downloads)
+for route behavior.
+The self-hosted controller runs without credit metering unless a signed license
+grants `metering` or `multi-team`. It bills no runner or storage usage, exposes
+no credit or team billing routes, and gives teams unlimited room in the
+controller's storage-tier checks. Operator-set storage quotas still apply.
+The dashboard hides Billing. Customers who need Sparkwing Cloud or enterprise
+metering can contact Korey for help running sparkwing-ops. See
+[Credits](auth.md#credits) for the licensed behavior.
+
 ### Storage class
 
 When you deploy sparkwing in-cluster (Helm chart at `charts/sparkwing-full`),
@@ -126,6 +156,11 @@ yourself, and an existing config is replaced only with `--force`. Retire the
 machine with `sparkwing cluster runners remove --profile prod`, which stops the
 service and then revokes the token.
 
+From a source checkout, `bash bin/install.sh` installs both `sparkwing` and
+`sparkwing-runner` into `~/.local/bin` (or `SPARKWING_INSTALL_BIN`). Each run
+updates both binaries from the same checkout. Keep that directory on the
+service's PATH when using the source installer.
+
 The command needs an admin credential on the profile, because minting a token
 is an admin route. A machine whose operator holds no admin token uses the
 interactive installer with a token an administrator minted for them:
@@ -156,9 +191,10 @@ and memory contribution ceiling is 50%. On macOS it installs a LaunchAgent under
 `~/.config/systemd/user/`.
 
 The agent defaults `gitcache` to the controller's claim-scoped proxy. Set
-`SPARKWING_GITCACHE_URL` and `SPARKWING_CACHE_TOKEN` only for a direct cache on
-a trusted LAN, VPN, or tailnet. The same values are stored in the mode-0600
-agent configuration.
+`SPARKWING_GITCACHE_URL` only for a direct cache on a trusted LAN, VPN, or
+tailnet; the value is stored in the mode-0600 agent configuration. The agent
+holds no cache token: for each claimed run it asks the controller for a cache
+grant, and runs without the binary cache when the controller mints none.
 
 For unattended installation, supply the same values as environment variables:
 
@@ -192,7 +228,9 @@ assisted offer protocol.
 
 The file carries claim-mode keys only. `agent.yaml` has no `name` and no
 `coordinators`; a file that still sets either key fails to load and names the
-removed enrolled mode. See [local-execution.md](local-execution.md) for the
+removed enrolled mode. `allow_repos`, which `runners add --allow-repo` writes,
+makes the agent fetch source directly rather than through the controller's
+gitcache proxy; see [local-execution.md](local-execution.md#an-agent-that-fetches-source-itself). See [local-execution.md](local-execution.md) for the
 controller-side enrolled design.
 
 The native Windows runner uses the same YAML and `sparkwing-runner.exe agent
@@ -241,6 +279,87 @@ reach the repository with its configured Git credentials.
 **A Docker step fails.** Docker is a pipeline dependency, not a Sparkwing
 service requirement. Install and start Docker only on machines assigned jobs
 that invoke it.
+
+## Object storage for logs and the cache
+
+`sparkwing-logs` and `sparkwing-cache` keep their data on a volume by default.
+Pointed at an S3 bucket, each keeps its durable data there instead, one
+namespace per team, and the volume shrinks to working space. Give each service
+its own prefix in the bucket; neither ever writes at the bucket root or lists
+outside its prefix, so a per-service IAM policy scoped to the prefix is enough.
+Region and credentials come from the AWS default chain (IRSA on EKS, with
+`AWS_REGION` set); no static keys are read. `SPARKWING_S3_ENDPOINT` points
+either service at an S3-compatible store.
+
+| Service | Flag | Environment | Keys |
+|---|---|---|---|
+| `sparkwing-cache` | `--blob-store s3://bucket/cache` | `SPARKWING_CACHE_BLOB_STORE` | `cache/teams/<team>/{bins,cache,artifacts}/...`; the operator token's own under `cache/{bins,cache,artifacts}/...` |
+| `sparkwing-logs` | `--archive-store s3://bucket/logs` | `SPARKWING_LOGS_ARCHIVE_STORE` | `logs/teams/<team>/runs/<run>/<node>.log`, plus `logs/index/` |
+
+**The cache** moves its binary, dependency-archive and artifact stores to the
+bucket. Git mirrors, workspace uploads and the registry proxy stay on
+`--data-dir`, because git needs a real filesystem and the others are
+short-lived working state, so the volume and its `--max-store-bytes` ceiling
+remain, sized for the mirrors. A binary is staged under `--data-dir/tmp` to
+learn its digest before it is written. Uploads above 64 MiB go up in 16 MiB
+parts, and an upload that fails or runs past its size cap is aborted, so no
+partial object is ever readable. Every read is served through the pod, never
+redirected to the bucket, so the egress meter and the request budget see every
+byte.
+
+**The logs service** keeps live runs on its volume and moves finished ones to
+the bucket. An append still lands in a file that grows in place and a follower
+still tails that file, so streaming is exactly what it is without a bucket and
+a running node costs the bucket nothing. A run nobody has written for
+`--archive-idle` (`SPARKWING_LOGS_ARCHIVE_IDLE`, 10 minutes by default) is uploaded as one object per node log
+plus two small index objects and leaves the volume; a read or an append of an
+archived run restores it first. `--retention` then deletes archived runs by the
+day of their last write: each pass is one listing of the day index while
+nothing has expired, and a restored run written since its archive waits for
+the archiver to upload it again with the new date. The volume must still outlive a pod restart to keep the
+logs of runs in flight, but it holds only live runs and restored copies.
+
+Neither service counts what each team holds in its bucket: the controller
+does, in its database, and each service asks it for room before a team's
+write and charges each team's download to its day there
+([Tenant limits](limits.md)). The store ceiling on each service covers its
+volume alone; the controller's `--bucket-store` measurement covers the
+bucket. On a multi-team deployment give the cache `--controller`
+(`SPARKWING_CONTROLLER_URL`) and its `--api-token`, the token the controller
+holds as `SPARKWING_CACHE_TOKEN`; a cache with `--grant-key` and
+`--blob-store` refuses to start without them. The logs service reaches the
+same controller through its `--controller` with the appending caller's own
+credential. Give the controller `--cache-blob-store` and
+`--logs-archive-store`, the same URLs the services use, and its hourly
+storage pass lists both to reconcile the counts and expires a team's cache
+objects 30 days after their last write. The controller's role then needs
+`s3:ListBucket` and `s3:DeleteObject` on the cache's prefix and
+`s3:ListBucket` on the logs service's. `GET /api/v1/storage` shows a team
+what it holds.
+
+Deleting a team removes its namespace: `DELETE /admin/teams/{team}` on the
+cache and `DELETE /api/v1/teams/{team}/logs` on the logs service, which also
+removes the team's runs from the index, both idempotent. A team's credential never reaches another team's namespace: the
+cache takes the team from the controller-signed grant, and the logs service
+records a run's team from the first team credential that writes to it and
+refuses every other team the run even when the controller would answer.
+
+Neither service retries on its own. The SDK sends at most four attempts per
+request, and every attempt spends the process's object-store request budget.
+A `403` on a write or a listing, which is what a bucket-level deny returns,
+pauses both for a minute, doubling to five while the deny lasts, and one
+request probes when each pause ends; three other failures in a row pause them
+for five seconds, doubling to two minutes. Reads and deletes keep working
+through a pause. The cache answers a paused write with `503` and
+`Retry-After`, and the logs service leaves finished runs on the volume and
+reports the pause on `/api/v1/health` under `archive`.
+
+Moving an existing deployment: a volume's blobs are not read once
+`--blob-store` is set, so copy them first or accept the misses (dependency
+archives and binaries are caches and repopulate). For logs, the service
+archives whatever runs are on the volume when it starts with `--archive-store`,
+but a run whose directory predates this release has no recorded team and is
+stored under the operator's prefix.
 
 ## Bound storage growth
 
@@ -310,7 +429,10 @@ What counts is what the controller commits durably: a run event is charged its
 payload bytes, and a published artifact manifest is charged one object. Live
 logs are not charged, because the controller holds them in an in-memory ring
 and stores nothing. The team charged is the one the calling token's principal
-names, never a team named in the request, and the charge is written inside the
+names, never a team named in the request. A signed-up team's writes are all
+charged to `team:<slug>`, whatever principal made them, because a team names
+its own principals and two teams can hold the same name; set its quota with
+`PUT /api/v1/storage/quotas/team:<slug>`. The charge is written inside the
 same transaction as the write it pays for, so a write that fails is not billed
 and a retry pays once.
 
@@ -339,7 +461,7 @@ curl -sS -X PUT "$CONTROLLER/api/v1/storage/quotas/acme/allowance" \
 `GET /api/v1/storage` reports the allowance and `retained_bytes`, which is what
 the team still has stored and what the storage charge and the sweep both
 measure. The quota route does not take the allowance: rewriting a quota leaves
-it where it stands, so the two cannot overwrite each other. What a team retains
-is charged against the credit ledger once an operator prices storage;
-[Credits](auth.md) describes the rate, the free allowance, which bytes count,
-and what a spent balance does.
+it where it stands, so the two cannot overwrite each other. A licensed
+metering controller charges retained bytes against the credit ledger when
+the operator prices storage. [Credits](auth.md) describes the rate, the free
+allowance, which bytes count, and what a spent balance does.

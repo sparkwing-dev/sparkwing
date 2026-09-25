@@ -42,6 +42,17 @@ func TestClaimNamedNodeAwardsAnUnqueuedNode(t *testing.T) {
 	if !live {
 		t.Fatal("the fence the award returned does not admit the holder's writes")
 	}
+	fence := store.NodeClaimFence{
+		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}
+	if nodeID, err := s.NodeClaimFenceNodeForRun(ctx, "run-named", fence, time.Now()); err != nil || nodeID != "build" {
+		t.Fatalf("node for live fence = %q, %v", nodeID, err)
+	}
+	fence.ClaimGeneration++
+	if nodeID, err := s.NodeClaimFenceNodeForRun(ctx, "run-named", fence, time.Now()); err != nil || nodeID != "" {
+		t.Fatalf("node for stale fence = %q, %v", nodeID, err)
+	}
 }
 
 func TestClaimNamedNodeRefusesANodeAnotherHolderHas(t *testing.T) {
@@ -93,7 +104,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	seedClaimedNode(t, s, "run-billed", "build")
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCredit, "pay_1", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
@@ -107,7 +118,7 @@ func TestClaimNamedNodeReservesCreditsForAMeteredToken(t *testing.T) {
 	if len(charges) != 1 || charges[0].Kind != store.CreditChargeReservation {
 		t.Fatalf("charges after a named claim = %+v, want one reservation", charges)
 	}
-	if want := int64(store.CreditClaimFloorSeconds) * unpinnedNodeRateMicro; charges[0].AmountMicro != want {
+	if want := int64(store.MinBillableSeconds) * unpinnedNodeRateMicro; charges[0].AmountMicro != want {
 		t.Fatalf("reservation = %d, want %d", charges[0].AmountMicro, want)
 	}
 

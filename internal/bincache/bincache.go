@@ -24,6 +24,7 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -123,6 +124,10 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	if err != nil {
 		return err
 	}
+	return installVerifiedBinary(dest, resp.Body, want, hash)
+}
+
+func installVerifiedBinary(dest string, src io.Reader, want []byte, hash string) error {
 	if err := mkdirCache(filepath.Dir(dest)); err != nil {
 		return err
 	}
@@ -132,7 +137,7 @@ func TryBinary(ctx context.Context, gcURL, token, hash, dest string) error {
 	}
 	tmp := f.Name()
 	sum := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(f, sum), resp.Body); err != nil {
+	if _, err := io.Copy(io.MultiWriter(f, sum), src); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
@@ -199,44 +204,35 @@ func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, paren
 	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "")
 }
 
-// FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
-func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
-}
-
-// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
-func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return FetchPipelineWorkspaceSourceWithCredentials(context.Background(), gcURL, controllerURL, token, "", repoSSH, branch, sha, parentDir)
-}
-
 // FetchPipelineSourceWithCredentials prevents a controller bearer from crossing into a direct cache origin.
 func FetchPipelineSourceWithCredentials(
 	ctx context.Context,
-	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
 		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
 func FetchPipelineWorkspaceSourceWithCredentials(
 	ctx context.Context,
-	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
+	gcURL, controllerURL, controllerToken, cacheGrant, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant),
 		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
 }
 
-// GitcacheBearer resolves the credential a cache read may carry: the controller bearer only for
-// the controller's own proxy origin, otherwise the caller's direct cache token or the environment's.
-func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken string) string {
+// GitcacheBearer resolves the credential a runner's cache read may carry: the controller bearer
+// only for the controller's own proxy origin, otherwise the run's cache grant. A runner never
+// holds the cache's operator token, so it never falls back to one.
+func GitcacheBearer(gcURL, controllerURL, controllerToken, cacheGrant string) string {
 	if bearer := ControllerGitcacheToken(gcURL, controllerURL, controllerToken); bearer != "" {
 		return bearer
 	}
-	if cacheToken != "" {
-		return cacheToken
+	if cacheGrant != "" {
+		return cacheGrant
 	}
-	return CacheToken()
+	return os.Getenv(authwire.CacheGrantEnv)
 }
 
 // ControllerRunGitcacheURL turns the admin cache proxy into the claim-bound route used by node executors.
@@ -254,20 +250,23 @@ func ControllerRunGitcacheURL(gcURL, controllerURL, runID string) string {
 
 // ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and a reviewed proxy path.
 func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
-	if token == "" {
+	if token == "" || !IsControllerGitcache(gcURL, controllerURL) {
 		return ""
 	}
+	return token
+}
+
+// IsControllerGitcache reports whether gcURL is the controller's own gitcache
+// proxy, admin or claim-bound, rather than a cache the caller reaches directly.
+func IsControllerGitcache(gcURL, controllerURL string) bool {
 	cache, cacheErr := parseCacheEndpoint(gcURL)
 	controller, controllerErr := parseCacheEndpoint(controllerURL)
 	if cacheErr != nil || controllerErr != nil ||
 		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
 		!strings.EqualFold(cache.Host, controller.Host) {
-		return ""
+		return false
 	}
-	if !controllerGitcacheProxyPath(cache.Path, controller.Path) {
-		return ""
-	}
-	return token
+	return controllerGitcacheProxyPath(cache.Path, controller.Path)
 }
 
 func controllerGitcachePath(controllerPath string) string {
@@ -318,7 +317,7 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
 	if token == "" {
-		token = CacheToken()
+		token = os.Getenv(authwire.CacheGrantEnv)
 	}
 	repoSSH, err = sourceurl.ValidateCloneURL(repoSSH)
 	if err != nil {
@@ -332,7 +331,10 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		name = sourceurl.ClaimedRepoNameFromURL(repoSSH)
 	}
 
-	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil {
+	// safety: the operator's own grants register a mirror; the cache refuses any other team's, which then reads
+	// only the mirrors already there, so that refusal leaves the clone to answer.
+	if err := registerRepoWithCache(ctx, gcURL, token, name, repoSSH); err != nil &&
+		!(errors.Is(err, errRegisterForbidden) && strings.HasPrefix(token, authwire.CacheGrantPrefix)) {
 		return "", fmt.Errorf("git register: %w", err)
 	}
 
@@ -514,11 +516,17 @@ func registerRepoWithCache(ctx context.Context, gcURL, token, name, repoURL stri
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+		err := fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusForbidden {
+			err = fmt.Errorf("%w: %w", errRegisterForbidden, err)
+		}
+		return err
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
 }
+
+var errRegisterForbidden = errors.New("the cache refused this credential a registration")
 
 func gitHTTPEnv(gcURL, token string) []string {
 	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")

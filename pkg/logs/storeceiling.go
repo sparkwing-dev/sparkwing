@@ -19,8 +19,6 @@ func (s *Server) storeCeilingHealth() (map[string]any, []string) {
 		"enforced":               state.Enforced,
 		"frozen":                 state.Frozen,
 		"warning":                state.Warning,
-		"bytes":                  state.Bytes,
-		"objects":                state.Objects,
 		"measurement_incomplete": state.Incomplete,
 	}
 	if !state.ReconciledAt.IsZero() {

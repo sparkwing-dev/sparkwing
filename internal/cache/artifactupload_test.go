@@ -555,8 +555,14 @@ func TestHealthCarriesTheStoreCeiling(t *testing.T) {
 	if body.Ceiling["enforced"] != true || body.Ceiling["warning"] != true || body.Ceiling["frozen"] != false {
 		t.Errorf("a store past its warning mark reports %v", body.Ceiling)
 	}
-	if body.Ceiling["bytes"].(float64) != 32 || body.Ceiling["objects"].(float64) != 2 {
-		t.Errorf("health reports %v bytes / %v objects, want 32/2", body.Ceiling["bytes"], body.Ceiling["objects"])
+	if _, ok := body.Ceiling["bytes"]; ok {
+		t.Errorf("public health exposed stored bytes: %v", body.Ceiling)
+	}
+	if _, ok := body.Ceiling["objects"]; ok {
+		t.Errorf("public health exposed stored objects: %v", body.Ceiling)
+	}
+	if _, ok := body.Ceiling["max_bytes"]; ok {
+		t.Errorf("public health exposed store limit: %v", body.Ceiling)
 	}
 	if _, ok := body.Ceiling["reconciled_at"]; !ok {
 		t.Error("health reports no reconciled_at after a measurement")

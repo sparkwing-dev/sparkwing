@@ -13,10 +13,12 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 )
 
 type Config struct {
@@ -45,6 +47,11 @@ type Config struct {
 
 	APIToken string
 
+	// GrantKey verifies cache grants. The controller signs grants with the
+	// same key, and no runner holds it. Empty accepts no grants. It must
+	// differ from APIToken.
+	GrantKey string
+
 	AllowUnauthenticated bool
 
 	AutoRegisterRepos string
@@ -68,12 +75,35 @@ type Config struct {
 	WarnStoreObjects int64
 
 	StoreReconcile time.Duration
+	// BlobStore, an s3://bucket/prefix URL, moves the binary,
+	// dependency-archive and artifact stores off the volume into that
+	// bucket, one teams/<team>/ namespace per team. Empty keeps them on
+	// the volume. Credentials and region come from the AWS default chain.
+	BlobStore string
+	// ControllerURL is where the cache asks, with APIToken, to count what
+	// each team a grant names stores in BlobStore and downloads, and where
+	// it keeps its egress totals. Empty counts nothing, which a cache with
+	// both GrantKey and BlobStore refuses.
+	ControllerURL string
+	// DisableProxy serves no registry proxy. The proxy takes no
+	// credential, so a cache published outside the cluster sets it.
+	DisableProxy bool
+	// MetricsAddr moves /metrics and the proxy's /stats off Addr onto a
+	// listener of their own, so a cache published through an ingress on
+	// Addr exposes neither. Empty serves both on Addr.
+	MetricsAddr string
+	// ProxyMaxBytes caps the registry proxy's directory; past it the least
+	// recently served entries are evicted. Zero leaves it unbounded.
+	ProxyMaxBytes int64
 	// EgressDailyAlarmBytes raises the egress alarm, which health
 	// reports, once this pod has sent this many bytes in a UTC day. It
-	// refuses nothing, because this service authenticates one shared
-	// token and so cannot tell one caller's spend from another's. Zero
-	// is off.
+	// refuses nothing. Zero is off.
 	EgressDailyAlarmBytes int64
+	// EgressDailyCapBytes refuses every metered download with 429 once
+	// this pod has sent this many bytes in a UTC day, until the day
+	// rolls. It bounds the pod's bill whoever the callers are. Zero is
+	// off.
+	EgressDailyCapBytes int64
 }
 
 func DefaultConfig() Config {
@@ -93,8 +123,15 @@ func DefaultConfig() Config {
 		StoreReconcile:       objectguard.DefaultCeilingReconcile,
 
 		WorkspaceSeedMaxAge: 24 * time.Hour,
+		ProxyMaxBytes:       DefaultProxyMaxBytes,
 	}
 }
+
+// DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
+// verifies grants starts with when the operator named none: what one pod may
+// send in a UTC day before every metered download is refused until the day
+// rolls.
+const DefaultMultiTeamEgressDailyCapBytes int64 = 200 << 30
 
 const serverReadTimeout = 30 * time.Second
 
@@ -104,7 +141,10 @@ type Server struct {
 	mux     *http.ServeMux
 	handler http.Handler
 	http    *http.Server
-	wg      sync.WaitGroup
+	// metrics serves /metrics and /stats when Config.MetricsAddr is set.
+	metrics     http.Handler
+	metricsHTTP *http.Server
+	wg          sync.WaitGroup
 }
 
 func New(cfg Config) (*Server, error) {
@@ -117,6 +157,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	// safety: a Secret key holding only a newline must not count as a configured credential.
 	cfg.APIToken = strings.TrimSpace(cfg.APIToken)
+	cfg.GrantKey = strings.TrimSpace(cfg.GrantKey)
+	if cfg.GrantKey != "" && cfg.GrantKey == cfg.APIToken {
+		return nil, fmt.Errorf("cache: the grant key (--grant-key or $%s) is the operator token; "+
+			"give it a secret of its own, because whoever holds the key signs access to every team's tree",
+			authwire.CacheGrantKeyEnv)
+	}
 	if cfg.APIToken == "" {
 		if !cfg.AllowUnauthenticated {
 			return nil, fmt.Errorf("cache: an API token is required: set --api-token (or $SPARKWING_API_TOKEN), " +
@@ -160,6 +206,12 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxStoreBytes < 0 || cfg.MaxStoreObjects < 0 || cfg.WarnStoreBytes < 0 || cfg.WarnStoreObjects < 0 {
 		return nil, fmt.Errorf("cache: a store ceiling must not be negative; pass 0 to leave the store unlimited")
 	}
+	// safety: with grants the bucket holds many teams' bytes, and only the
+	// controller can count them, so a cache that could not ask it does not
+	// start rather than store every team's bytes uncounted.
+	if cfg.GrantKey != "" && cfg.BlobStore != "" && cfg.ControllerURL == "" {
+		return nil, fmt.Errorf("cache: --grant-key with --blob-store needs --controller, which counts what each team stores")
+	}
 	if cfg.StoreReconcile < 0 {
 		return nil, fmt.Errorf("cache: --store-reconcile must not be negative; pass 0 to measure the store once at startup")
 	}
@@ -171,6 +223,7 @@ func New(cfg Config) (*Server, error) {
 	binsDir = filepath.Join(cfg.DataDir, "bins")
 	cacheDir = filepath.Join(cfg.DataDir, "cache")
 	uploadsDir = filepath.Join(cfg.DataDir, "uploads")
+	teamsDir = filepath.Join(cfg.DataDir, "teams")
 	namesFile = filepath.Join(cfg.DataDir, "repo-names.json")
 	proxyDir = cfg.ProxyDir
 	proxyCacheTTL = cfg.ProxyCacheTTL
@@ -178,6 +231,7 @@ func New(cfg Config) (*Server, error) {
 	proxyPublicBase = publicBase
 	proxyTrustForwardedHost = cfg.TrustForwardedHost
 	apiToken = cfg.APIToken
+	grantKey = cfg.GrantKey
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
 	fetchFreshWindow = cfg.FetchFreshWindow
@@ -186,6 +240,10 @@ func New(cfg Config) (*Server, error) {
 	workspaceSeedMaxAge = cfg.WorkspaceSeedMaxAge
 	maxArtifactBytes = cfg.MaxArtifactBytes
 	maxCacheArchiveBytes = cfg.MaxCacheArchiveBytes
+	if cfg.ProxyMaxBytes < 0 {
+		return nil, fmt.Errorf("cache: --proxy-max-bytes must not be negative; pass 0 to leave the proxy unbounded")
+	}
+	proxyMaxBytes = cfg.ProxyMaxBytes
 	storeCeiling = objectguard.NewCeiling(objectguard.CeilingConfig{
 		Limit: objectguard.CeilingLimit{
 			MaxBytes:    cfg.MaxStoreBytes,
@@ -198,11 +256,28 @@ func New(cfg Config) (*Server, error) {
 		Remedy:    storeCeilingRemedy,
 	})
 
+	blobStore, counter, counterAuth = nil, nil, ""
+	if cfg.ControllerURL != "" {
+		counter = storagequota.New(cfg.ControllerURL, nil)
+		counterAuth = "Bearer " + cfg.APIToken
+	}
+	if cfg.BlobStore != "" {
+		octx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		store, err := openBlobStore(octx, cfg.BlobStore)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("cache: --blob-store: %w", err)
+		}
+		blobStore = store
+		log.Printf("sparkwing-cache keeps binaries, dependency archives and artifacts in s3://%s/%s",
+			store.Bucket(), store.Prefix())
+	}
+
 	log.Printf("sparkwing-cache caps one artifact at %d bytes and one dependency archive at %d bytes, "+
 		"and the whole store at %d bytes / %d objects (0 means no cap)",
 		maxArtifactBytes, maxCacheArchiveBytes, cfg.MaxStoreBytes, cfg.MaxStoreObjects)
 
-	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
+	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, teamsDir, proxyDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return nil, fmt.Errorf("cache: mkdir %s: %w", d, err)
 		}
@@ -214,9 +289,19 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
-	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
+	egressCfg := egress.Config{
+		GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes,
+		GlobalDailyCapBytes:   cfg.EgressDailyCapBytes,
+	}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
+	if counter != nil {
+		rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := restoreEgressDay(rctx); err != nil {
+			log.Printf("warning: read the day's saved egress total: %v", err)
+		}
+		cancel()
+	}
 
 	loadRepoNames()
 	initProxy()
@@ -237,26 +322,43 @@ func New(cfg Config) (*Server, error) {
 
 	s.mux.HandleFunc("/archive", requireToken(metered(egress.ClassArtifact, handleArchive)))
 	s.mux.HandleFunc("/repos", requireToken(handleRepos))
-	s.mux.HandleFunc("/artifacts/", requireToken(metered(egress.ClassArtifact, handleArtifacts)))
+	s.mux.HandleFunc("/artifacts/", requireCaller(metered(egress.ClassArtifact, handleArtifacts)))
 	s.mux.HandleFunc("/file", requireToken(metered(egress.ClassArtifact, handleFile)))
 	s.mux.HandleFunc("/tree-hash", requireToken(handleTreeHash))
 	s.mux.HandleFunc("/branch-contains", requireToken(handleBranchContains))
-	s.mux.HandleFunc("/bin/", requireToken(metered(egress.ClassArtifact, handleBin)))
-	s.mux.HandleFunc("/cache/", requireToken(metered(egress.ClassArtifact, handleCache)))
+	s.mux.HandleFunc("/bin/", requireCaller(metered(egress.ClassArtifact, handleBin)))
+	s.mux.HandleFunc("/cache/", requireCaller(metered(egress.ClassArtifact, handleCache)))
 	s.mux.HandleFunc("/upload", requireToken(handleUpload))
 	s.mux.HandleFunc("/admin/store-ceiling/thaw", requireToken(handleStoreCeilingThaw))
 	s.mux.HandleFunc("/admin/store-ceiling/measure", requireToken(handleStoreCeilingMeasure))
+	s.mux.HandleFunc("/admin/teams/", requireToken(handleDeleteTeamTree))
 	s.mux.HandleFunc("/uploads/", requireToken(metered(egress.ClassArtifact, handleUploadDownload)))
 	s.mux.HandleFunc("/sync/negotiate", requireToken(handleSyncNegotiate))
 	s.mux.HandleFunc("/sync/seed", requireToken(handleSyncSeed))
-	s.mux.HandleFunc("/git/register", requireToken(handleGitRegister))
+	s.mux.HandleFunc("/git/register", requireCaller(handleGitRegister))
 	s.mux.HandleFunc("/git/refresh", requireToken(handleGitRefresh))
-	s.mux.HandleFunc("/git/", requireToken(metered(egress.ClassGit, handleGit)))
+	s.mux.HandleFunc("/git/", requireCaller(metered(egress.ClassGit, handleGit)))
 
-	s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
-	s.mux.HandleFunc("/stats", handleProxyStats)
-
-	s.mux.Handle("/metrics", s.tel.PromHandler)
+	// safety: runner pods reach the proxy with no credential, so it stays
+	// open; it is served inside the cluster only, and the daily egress cap
+	// bounds what any caller churns through it.
+	operator := s.mux
+	if cfg.MetricsAddr != "" {
+		operator = http.NewServeMux()
+		s.metrics = operator
+		s.metricsHTTP = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           operator,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      30 * time.Second,
+		}
+	}
+	if !cfg.DisableProxy {
+		s.mux.HandleFunc("/proxy/", metered(egress.ClassGit, handleProxy))
+		operator.HandleFunc("/stats", handleProxyStats)
+	}
+	operator.Handle("/metrics", s.tel.PromHandler)
 
 	s.handler = withSecurityHeaders(s.mux)
 
@@ -271,9 +373,25 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
+// Handler serves the cache's routes without the listener, background fetch or
+// store reconcile that Run starts, so a caller can mount the cache on its own
+// listener.
+func (s *Server) Handler() http.Handler { return s.handler }
+
+// MetricsHandler serves /metrics and /stats when Config.MetricsAddr moved
+// them off the main listener, and is nil otherwise.
+func (s *Server) MetricsHandler() http.Handler { return s.metrics }
+
 func (s *Server) Run(ctx context.Context) error {
 	setMeasureContext(ctx)
 	measureStore(ctx)
+	if counter != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			egressDayLoop(ctx)
+		}()
+	}
 	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
@@ -288,7 +406,17 @@ func (s *Server) Run(ctx context.Context) error {
 		proxyCleanupLoop(ctx)
 	}()
 
-	serveErr := make(chan error, 1)
+	serveErr := make(chan error, 2)
+	if s.metricsHTTP != nil {
+		go func() {
+			log.Printf("sparkwing-cache serves /metrics and /stats on %s", s.cfg.MetricsAddr)
+			err := s.metricsHTTP.ListenAndServe()
+			if err == http.ErrServerClosed {
+				return
+			}
+			serveErr <- fmt.Errorf("metrics listener: %w", err)
+		}()
+	}
 	go func() {
 		log.Printf("sparkwing-cache listening on %s (proxy cache: %s)", s.cfg.Addr, s.cfg.ProxyDir)
 		err := s.http.ListenAndServe()
@@ -305,10 +433,15 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	log.Printf("sparkwing-cache shutting down (30s drain)")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := s.http.Shutdown(shutdownCtx); err != nil {
 		log.Printf("http shutdown: %v", err)
+	}
+	if s.metricsHTTP != nil {
+		if err := s.metricsHTTP.Shutdown(shutdownCtx); err != nil {
+			log.Printf("metrics listener shutdown: %v", err)
+		}
 	}
 	_ = s.tel.Shutdown(shutdownCtx)
 	s.wg.Wait()

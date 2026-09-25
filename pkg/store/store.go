@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -111,7 +110,7 @@ type Store struct {
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
 	runnerCapMu     sync.Mutex
-	runnerCapCache  runnerCapEntry
+	runnerCapCache  map[Team]runnerCapEntry
 	runnerCapEpoch  uint64
 }
 
@@ -1064,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 48
+const expectedSchemaVersion = 73
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1444,9 +1443,14 @@ const cronSchedulesUniqueIndex = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
     ON cron_schedules(repo_path, pipeline, schedule_name);`
 
+const cronGitHubIdentityIndex = `CREATE INDEX IF NOT EXISTS idx_cron_schedules_github_identity
+    ON cron_schedules(team, github_installation_id, github_repository_id);`
+
 const cronSchedulesTableSQLite = `CREATE TABLE IF NOT EXISTS cron_schedules (
     id            TEXT PRIMARY KEY,
     repo_path     TEXT NOT NULL,
+    github_installation_id INTEGER NOT NULL DEFAULT 0,
+    github_repository_id INTEGER NOT NULL DEFAULT 0,
     pipeline      TEXT NOT NULL,
     -- 'default' when the repository declares a single schedule for the pipeline.
     schedule_name TEXT NOT NULL DEFAULT 'default',
@@ -1837,6 +1841,10 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
+	51: {teamScopedUserKeysRequirement},
+	71: {"github-app-cron-identity-v1"},
+	72: {"storage-commit-receipts-v1"},
+	73: {"trigger-credit-cursor-v1"},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -1845,6 +1853,12 @@ const (
 	pipelineScopedSecretsRequirement = "pipeline-scoped-secrets"
 	declaredRunRepoRequirement       = "declared-run-repo"
 )
+
+// safety: v51 moves the team into seven primary keys, so a binary
+// predating it names a conflict target that no longer has a unique index
+// behind it and every upsert on those tables fails; the requirement is
+// what makes it refuse the store instead.
+const teamScopedUserKeysRequirement = "team-scoped-user-keys"
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
@@ -1986,6 +2000,80 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
 	case 48:
 		return applyRepoGrantsNothingMigrationSQLite(ctx, tx)
+	case 49:
+		return applyTenantKeyMigrationSQLite(ctx, tx)
+	case 50:
+		return applyTeamCreditStateMigrationSQLite(ctx, tx)
+	case 51:
+		return applyUserKeyTeamScopeMigrationSQLite(ctx, tx)
+	case 52:
+		if err := applyIdentityMigrationSQLite(ctx, tx); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
+	case 53:
+		return ensureColumnsSQLite(ctx, tx, "triggers", triggersCreditCols)
+	case 54:
+		return applyGitHubAppMigrationSQLite(ctx, tx)
+	case 55:
+		return applyDeletionMigrationSQLite(ctx, tx)
+	case 56:
+		return applyFreeSlotsMigrationSQLite(ctx, tx)
+	// safety: v57 is reserved and intentionally empty.
+	case 57:
+		return nil
+	case 58:
+		return applySignUpGateMigrationSQLite(ctx, tx)
+	case 59:
+		if err := ensureColumnsSQLite(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
+		return applyCreditUnitMigration(ctx, tx)
+	case 60:
+		return applyCreditCheckoutMigrationSQLite(ctx, tx)
+	case 61:
+		return applyTeamStorageMigrationSQLite(ctx, tx)
+	case 62:
+		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTableSQLite+"\n"+githubAppExtraReposTableSQLite)
+	case 63:
+		if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerGitHubCheckRunCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerGitHubCommitIndex)
+		return err
+	case 64:
+		return applyIdentityLinkMigrationSQLite(ctx, tx)
+	case 65:
+		return ensureColumnsSQLite(ctx, tx, "github_app_triggers", githubAppTriggerTagsCols)
+	case 66:
+		return ensureColumnsSQLite(ctx, tx, "github_app_triggers", githubAppTriggerPatternsCols)
+	case 67:
+		return ensureColumnsSQLite(ctx, tx, "github_app_triggers", githubAppBranchFilterCols)
+	case 68:
+		return ensureColumnsSQLite(ctx, tx, "github_runner_credentials", githubRunnerRunCols)
+	case 69:
+		return ensureColumnsSQLite(ctx, tx, "github_app_triggers", githubAppTriggerOptionCols)
+	case 70:
+		return applyDirectUploadMigration(ctx, tx)
+	case 71:
+		if err := ensureColumnsSQLite(ctx, tx, "cron_schedules", map[string]string{
+			"github_installation_id": "INTEGER NOT NULL DEFAULT 0",
+			"github_repository_id":   "INTEGER NOT NULL DEFAULT 0",
+		}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
+		return err
+	case 72:
+		return applyStorageCommitReceiptsMigration(ctx, tx, false)
+	case 73:
+		return applyTriggerCreditCursorMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2338,6 +2426,80 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
 	case 48:
 		return applyRepoGrantsNothingMigrationPostgres(ctx, tx)
+	case 49:
+		return applyTenantKeyMigrationPostgres(ctx, tx)
+	case 50:
+		return applyTeamCreditStateMigrationPostgres(ctx, tx)
+	case 51:
+		return applyUserKeyTeamScopeMigrationPostgres(ctx, tx)
+	case 52:
+		if err := applyIdentityMigrationPostgres(ctx, tx); err != nil {
+			return err
+		}
+		if err := addColumnsTx(ctx, tx, "runs", runEventUsageCols); err != nil {
+			return err
+		}
+		if err := backfillRunEventUsageTx(ctx, tx); err != nil {
+			return err
+		}
+		return applyTeamGrantReferenceMigration(ctx, tx)
+	case 53:
+		return addColumnsTx(ctx, tx, "triggers", triggersCreditCols)
+	case 54:
+		return applyGitHubAppMigrationPostgres(ctx, tx)
+	case 55:
+		return applyDeletionMigrationPostgres(ctx, tx)
+	case 56:
+		return applyFreeSlotsMigrationPostgres(ctx, tx)
+	// safety: v57 is reserved and intentionally empty.
+	case 57:
+		return nil
+	case 58:
+		return applySignUpGateMigrationPostgres(ctx, tx)
+	case 59:
+		if err := addColumnsTx(ctx, tx, "nodes", nodesCreditBillingCols); err != nil {
+			return err
+		}
+		return applyCreditUnitMigration(ctx, tx)
+	case 60:
+		return applyCreditCheckoutMigrationPostgres(ctx, tx)
+	case 61:
+		return applyTeamStorageMigrationPostgres(ctx, tx)
+	case 62:
+		return applyGitCredentialsMigration(ctx, tx, gitCredentialsTablePostgres+"\n"+githubAppExtraReposTablePostgres)
+	case 63:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerGitHubCheckRunCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerGitHubCommitIndex)
+		return err
+	case 64:
+		return applyIdentityLinkMigrationPostgres(ctx, tx)
+	case 65:
+		return addColumnsTx(ctx, tx, "github_app_triggers", githubAppTriggerTagsCols)
+	case 66:
+		return addColumnsTx(ctx, tx, "github_app_triggers", githubAppTriggerPatternsCols)
+	case 67:
+		return addColumnsTx(ctx, tx, "github_app_triggers", githubAppBranchFilterCols)
+	case 68:
+		return addColumnsTx(ctx, tx, "github_runner_credentials", githubRunnerRunCols)
+	case 69:
+		return addColumnsTx(ctx, tx, "github_app_triggers", githubAppTriggerOptionCols)
+	case 70:
+		return applyDirectUploadMigration(ctx, tx)
+	case 71:
+		if err := addColumnsTx(ctx, tx, "cron_schedules", map[string]string{
+			"github_installation_id": "BIGINT NOT NULL DEFAULT 0",
+			"github_repository_id":   "BIGINT NOT NULL DEFAULT 0",
+		}); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, cronGitHubIdentityIndex)
+		return err
+	case 72:
+		return applyStorageCommitReceiptsMigration(ctx, tx, true)
+	case 73:
+		return applyTriggerCreditCursorMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3409,7 +3571,10 @@ func (s *Store) CreateRun(ctx context.Context, r Run) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := s.createRunTx(ctx, tx, r); err != nil {
+	// safety: this method has not moved to Tenant yet, so it writes the
+	// team the column's default writes; a run it created landing in any
+	// other team would be invisible to the install that asked for it.
+	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3425,20 +3590,23 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
-	if err := s.createRunTx(ctx, tx, r); err != nil {
+	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (s *Store) createRunTx(ctx context.Context, tx *storeTx, r Run) error {
+func (s *Store) createRunTx(ctx context.Context, tx *storeTx, team Team, r Run) error {
 	if err := ValidateRunInvocation(r); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, r.ID); err != nil {
+	if r.FinishedAt != nil && !isTerminalRunStatus(r.Status) {
+		return fmt.Errorf("%w: a non-terminal run cannot have finished_at", ErrInvalidInput)
+	}
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, r.ID); err != nil {
 		return err
 	}
 	argsJSON, _ := json.Marshal(r.Args)
@@ -3474,12 +3642,16 @@ func (s *Store) createRunTx(ctx context.Context, tx *storeTx, r Run) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := enforceRunsPerHourTx(ctx, tx, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
+	if err := enforceRunsPerHourTx(ctx, tx, team, r.ID, creatingPrincipal(ctx), time.Now()); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `
-INSERT INTO runs (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	// safety: the team is in the conflict guard, not the conflict target,
+	// because the target must name a unique index and runs has only the
+	// primary key on id; a (team, id) target would race that key's own
+	// violation on a same-team re-create.
+	res, err := tx.ExecContext(ctx, `
+INSERT INTO runs (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, last_heartbeat_at, created_principal)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     pipeline        = excluded.pipeline,
     status          = excluded.status,
@@ -3508,8 +3680,8 @@ ON CONFLICT(id) DO UPDATE SET
     invocation_json   = excluded.invocation_json,
     last_heartbeat_at = COALESCE(excluded.last_heartbeat_at, runs.last_heartbeat_at),
     created_principal = CASE WHEN runs.created_principal = '' THEN excluded.created_principal ELSE runs.created_principal END
-WHERE runs.status = '`+runStatusPending+`'`,
-		r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
+WHERE runs.team = excluded.team AND runs.status = '`+runStatusPending+`' AND runs.finished_at IS NULL`,
+		string(team), r.ID, r.Pipeline, r.Status, r.TriggerSource, r.GitBranch, r.GitSHA,
 		argsJSON, r.PlanSnapshot, created.UnixNano(), r.StartedAt.UnixNano(), finished, parent,
 		r.DeclaredRepo, r.RepoURL, r.GithubOwner, r.GithubRepo,
 		r.RetryOf, r.RetriedAs, r.RetrySource, r.RetryCauseNodeID,
@@ -3517,13 +3689,82 @@ WHERE runs.status = '`+runStatusPending+`'`,
 		r.ReplayOfRunID, r.ReplayOfNodeID,
 		invocationJSON, heartbeat, creatingPrincipal(ctx),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// safety: a refused conflict guard is not an error, so without this a
+	// team told its create succeeded could not read the row it "created"
+	// and the other team would run the writer's plan under its own repo.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		owner, found, err := runOwnerTx(ctx, tx, r.ID)
+		if err != nil {
+			return err
+		}
+		if found && owner != team {
+			return fmt.Errorf("%w: run %s", ErrIDOwnedByAnotherTeam, r.ID)
+		}
+	}
+	return nil
+}
+
+// ErrIDOwnedByAnotherTeam reports a write whose key already names a row of
+// a different team. It is not [ErrNotFound] because the caller supplied the
+// id and the id is taken, and it is not success because nothing was written.
+var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another team")
+
+// safety: takes no team because the question is who owns the id, and an
+// answer scoped to the asker is no answer.
+func runOwnerTx(ctx context.Context, tx *storeTx, runID string) (Team, bool, error) {
+	var owner string
+	err := tx.QueryRowContext(ctx, `SELECT team FROM runs WHERE id = ?`, runID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return Team(owner), true, nil
 }
 
 const finishRunStmt = `
 UPDATE runs
    SET status = ?, error = ?, finished_at = ?
- WHERE id = ?`
+ WHERE id = ? AND team = ? AND finished_at IS NULL AND NOT (` + runTerminalIn + `)`
+
+func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg string, team Team) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
+	if team == "" {
+		return ErrNoTeam
+	}
+	res, err := tx.ExecContext(ctx, finishRunStmt,
+		status, errMsg, time.Now().UnixNano(), runID, string(team))
+	if err != nil {
+		return err
+	}
+	if changed, err := res.RowsAffected(); err != nil || changed != 0 {
+		return err
+	}
+	var priorStatus, priorError string
+	err = tx.QueryRowContext(ctx,
+		`SELECT status, error FROM runs WHERE id = ? AND team = ?`, runID, string(team)).
+		Scan(&priorStatus, &priorError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if priorStatus == status && priorError == errMsg {
+		return nil
+	}
+	return fmt.Errorf("%w: run %s already finished as %s", ErrInvalidInput, runID, priorStatus)
+}
 
 // FinishRun marks a run terminal with the given status and optional error.
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error {
@@ -3532,11 +3773,10 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, DefaultTeam); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3546,6 +3786,9 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
 func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
 	if len(runIDs) == 0 {
 		return nil
 	}
@@ -3556,7 +3799,7 @@ func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status,
 	defer func() { _ = tx.Rollback() }()
 	now := time.Now().UnixNano()
 	for _, runID := range runIDs {
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
 			return err
 		}
 	}
@@ -3574,7 +3817,7 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunHeartbeatFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunHeartbeatFenceTx(ctx, tx, DefaultTeam, runID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -3587,6 +3830,17 @@ func (s *Store) TouchRunHeartbeat(ctx context.Context, runID string) error {
 
 // UpdatePlanSnapshot replaces the stored plan JSON for a run.
 func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return s.updatePlanSnapshot(ctx, DefaultTeam, runID, snapshot)
+}
+
+// UpdatePlanSnapshot records the plan of one of t's runs. The trigger fence a
+// runner's request carries is checked in t's team, so an orchestrator of any
+// team can record the plan of the run it holds.
+func (t *Tenant) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error {
+	return t.s.updatePlanSnapshot(ctx, t.team, runID, snapshot)
+}
+
+func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string, snapshot []byte) error {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -3595,16 +3849,18 @@ func (s *Store) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot [
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
-	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
 	sum := sha256.Sum256(snapshot)
 	planHash := "sha256:" + hex.EncodeToString(sum[:])
-	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (run_id, plan_hash)
-SELECT id, ? FROM runs WHERE id = ? ON CONFLICT(run_id) DO NOTHING`, planHash, runID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (team, run_id, plan_hash)
+SELECT team, id, ? FROM runs WHERE team = ? AND id = ?
+ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
+ WHERE run_definition_plans.team = excluded.team`, planHash, string(team), runID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE id = ?`, snapshot, runID)
+	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE team = ? AND id = ?`, snapshot, string(team), runID)
 	if err != nil {
 		return err
 	}
@@ -3625,89 +3881,14 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 	return err
 }
 
-// ListRunRetryTree returns every run in the retry tree that runID
-// belongs to, ordered by created_at (oldest first). The "root" is
-// found by walking retry_of upward until it hits "", then the result
-// includes the root plus every descendant whose retry_of chain leads
-// back to it. Branching is preserved: if attempt #2 was retried twice
-// (creating #3 and #4 with the same retry_of=#2), both #3 and #4
-// appear as siblings in the list.
-//
-// Numbering / display: callers number the returned slice 1..N in
-// order; the chronological position is the user-visible "Attempt N".
-//
-// Cycle guard: a hard cap on the upward walk keeps a corrupted
-// retry_of cycle from spinning forever.
-func (s *Store) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error) {
-	if runID == "" {
-		return nil, nil
-	}
-	const maxDepth = 256
-	rootID := runID
-	for range maxDepth {
-		row := s.queryRow(ctx,
-			`SELECT retry_of FROM runs WHERE id = ?`, rootID)
-		var parent string
-		if err := row.Scan(&parent); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if parent == "" || parent == rootID {
-			break
-		}
-		rootID = parent
-	}
-	collected := map[string]*Run{}
-	root, err := s.GetRun(ctx, rootID)
-	if err != nil {
-		return nil, err
-	}
-	if root == nil {
-		return nil, nil
-	}
-	collected[rootID] = root
-	frontier := []string{rootID}
-	for len(frontier) > 0 {
-		next := frontier[:0:0]
-		for _, id := range frontier {
-			rows, err := s.query(ctx,
-				`SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
-				   FROM runs WHERE retry_of = ?`, id)
-			if err != nil {
-				return nil, err
-			}
-			for rows.Next() {
-				r, scanErr := scanRun(rows)
-				if scanErr != nil {
-					_ = rows.Close()
-					return nil, scanErr
-				}
-				if _, dup := collected[r.ID]; dup {
-					continue
-				}
-				collected[r.ID] = r
-				next = append(next, r.ID)
-			}
-			_ = rows.Close()
-		}
-		frontier = next
-	}
-	out := make([]*Run, 0, len(collected))
-	for _, r := range collected {
-		out = append(out, r)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
-	return out, nil
-}
+// safety: every run read shares this list, because a column added to runs
+// has to reach each of them and scanRun together or the scan misaligns.
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at`
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	row := s.queryRow(ctx, `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT `+runColumns+`
   FROM runs WHERE id = ?`, runID)
 	run, err := scanRun(row)
 	if errors.Is(err, ErrNotFound) {
@@ -3716,7 +3897,7 @@ SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, pla
 	if err != nil {
 		return nil, err
 	}
-	if err := s.loadAgentLossRetry(ctx, run); err != nil {
+	if err := s.loadAgentLossRetry(ctx, DefaultTeam, run); err != nil {
 		return nil, err
 	}
 	return run, nil
@@ -3752,8 +3933,16 @@ func (f RunFilter) HasCursor() bool { return f.AfterID != "" }
 
 // ListRuns returns runs ordered newest-first, then by id descending, filtered
 // by f. The cursor clause depends on that order.
+//
+// Scope: this reads every team. A tenant caller wants [Tenant.ListRuns]
+// and a maintenance caller wants [Operator.ListRunsAcrossTeams]; this
+// twin exists because pkg/storage.StateStore still names it.
 func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error) {
-	where, args, err := runFilterWhere(f)
+	return s.listRuns(ctx, allTeams(), f)
+}
+
+func (s *Store) listRuns(ctx context.Context, scope teamScope, f RunFilter) (_ []*Run, err error) {
+	where, args, err := runFilterWhere(scope, f)
 	if err != nil {
 		return nil, err
 	}
@@ -3766,7 +3955,7 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) (_ []*Run, err error)
 	args = append(args, limit)
 
 	query := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT ` + runColumns + `
   FROM runs` + where + `
  ORDER BY started_at DESC, id DESC
  LIMIT ?`
@@ -3813,8 +4002,14 @@ func runCursorArgs(f RunFilter) []any {
 }
 
 // CountRuns returns how many runs match f, ignoring its Limit.
+//
+// Scope: this counts every team. See [Store.ListRuns].
 func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
-	where, args, err := runFilterWhere(f)
+	return s.countRuns(ctx, allTeams(), f)
+}
+
+func (s *Store) countRuns(ctx context.Context, scope teamScope, f RunFilter) (int, error) {
+	where, args, err := runFilterWhere(scope, f)
 	if err != nil {
 		return 0, err
 	}
@@ -3826,7 +4021,10 @@ func (s *Store) CountRuns(ctx context.Context, f RunFilter) (int, error) {
 	return n, nil
 }
 
-func runFilterWhere(f RunFilter) (string, []any, error) {
+func runFilterWhere(scope teamScope, f RunFilter) (string, []any, error) {
+	if !scope.all && scope.team == "" {
+		return "", nil, ErrNoTeam
+	}
 	normalizedPrefixes := make([]string, len(f.GitSHAPrefixes))
 	for i, prefix := range f.GitSHAPrefixes {
 		prefix = strings.ToLower(strings.TrimSpace(prefix))
@@ -3841,6 +4039,10 @@ func runFilterWhere(f RunFilter) (string, []any, error) {
 
 	where := ""
 	args := []any{}
+	if !scope.all {
+		where = " WHERE team = ?"
+		args = append(args, string(scope.team))
+	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
 			return
@@ -3913,11 +4115,28 @@ func prefixUpperBound(prefix string) (string, bool) {
 // GetLatestRun returns the newest run for pipeline matching statuses
 // within maxAge. ErrNotFound on miss.
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return s.getLatestRun(ctx, allTeams(), pipeline, statuses, maxAge)
+}
+
+// GetLatestRun returns t's newest run for pipeline matching statuses within
+// maxAge. ErrNotFound on miss.
+func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
+	return t.s.getLatestRun(ctx, oneTeam(t.team), pipeline, statuses, maxAge)
+}
+
+func (s *Store) getLatestRun(ctx context.Context, scope teamScope, pipeline string, statuses []string, maxAge time.Duration) (*Run, error) {
 	if pipeline == "" {
 		return nil, errors.New("GetLatestRun: pipeline is required")
 	}
 	where := "WHERE pipeline = ?"
 	args := []any{pipeline}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		where += " AND team = ?"
+		args = append(args, string(scope.team))
+	}
 	if len(statuses) > 0 {
 		ph := make([]string, len(statuses))
 		for i, st := range statuses {
@@ -3931,7 +4150,7 @@ func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []st
 		args = append(args, time.Now().Add(-maxAge).UnixNano())
 	}
 	q := `
-SELECT id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at
+SELECT ` + runColumns + `
   FROM runs ` + where + `
  ORDER BY started_at DESC
  LIMIT 1`
@@ -4106,6 +4325,8 @@ type Node struct {
 	ExecutorName             string             `json:"executor_name,omitempty"`
 	ExecutorID               string             `json:"executor_id,omitempty"`
 	ExecutorLocation         string             `json:"executor_location,omitempty"`
+	ExecutionSite            string             `json:"execution_site,omitempty"`
+	ExecutionSiteName        string             `json:"execution_site_name,omitempty"`
 	RequiredCoordinatorID    string             `json:"required_coordinator_id,omitempty"`
 	RequiredExecutorLocation string             `json:"required_executor_location,omitempty"`
 	ExecutionStartedAt       *time.Time         `json:"execution_started_at,omitempty"`
@@ -4205,12 +4426,18 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.assertRunMutationFenceTx(ctx, tx, n.RunID); err != nil {
+	// safety: the team comes off the run rather than off the caller, so a node
+	// cannot land in a team its run does not belong to.
+	team, err := creditTeamForRunTx(ctx, tx, n.RunID)
+	if err != nil {
+		return err
+	}
+	if err := s.assertRunMutationFenceTx(ctx, tx, team, n.RunID); err != nil {
 		return err
 	}
 	// safety: this transaction takes the compute-guard key alone; a later edit
 	// that adds the executor eligibility lock here must take it first.
-	if err := enforceNodesPerRunTx(ctx, tx, n.RunID, n.NodeID); err != nil {
+	if err := enforceNodesPerRunTx(ctx, tx, team, n.RunID, n.NodeID); err != nil {
 		return err
 	}
 	requestedSlots := n.RequestedSlots
@@ -4263,7 +4490,7 @@ func (s *Store) CreateNode(ctx context.Context, n Node) error {
 		bodyRequirementsHash = persisted.BodyRequirementsHash
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_labels,
+INSERT INTO nodes (team, run_id, node_id, status, deps_json, needs_labels, prefers_labels,
                    requested_cores, requested_memory_bytes, requested_slots,
 			       avoid_coordinator_id, avoid_executor_kind, avoid_executor_id, avoid_until,
 			       attempts_consumed, retry_root_run_id, required_coordinator_id, required_executor_location,
@@ -4271,7 +4498,7 @@ INSERT INTO nodes (run_id, node_id, status, deps_json, needs_labels, prefers_lab
 			       execution_supervisor_requirements_json, execution_supervisor_requirements_hash,
 			       execution_body_requirements_json, execution_body_requirements_hash,
 			       seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_coordinator_id FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_kind FROM runs WHERE id = ?), ''),
 		COALESCE(NULLIF(?, ''), (SELECT retry_avoid_executor_id FROM runs WHERE id = ?), ''),
@@ -4282,7 +4509,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
 		?,
 		?, ?, ?, ?, ?, ?, ?, ?,
 		(SELECT COALESCE(MAX(seq), 0) + 1 FROM nodes WHERE run_id = ?))`,
-		n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
+		string(team), n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON, prefersJSON,
 		n.RequestedCores, n.RequestedMemoryBytes, requestedSlots,
 		n.AvoidCoordinatorID, n.RunID,
 		n.AvoidExecutorKind, n.RunID,
@@ -4790,10 +5017,10 @@ func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string)
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at)
-VALUES (?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
+		runID, runID, nodeID, stepID, StepRunning, time.Now().UnixNano()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4817,12 +5044,12 @@ func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, statu
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, status, now, now); err != nil {
+		runID, runID, nodeID, stepID, status, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4842,12 +5069,12 @@ func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status, started_at, finished_at)
-VALUES (?,?,?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status, started_at, finished_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET
     status      = excluded.status,
     finished_at = excluded.finished_at`,
-		runID, nodeID, stepID, StepSkipped, now, now); err != nil {
+		runID, runID, nodeID, stepID, StepSkipped, now, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4914,11 +5141,11 @@ func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID,
 	// because the row, not the value, is what this needs.
 	var current []byte
 	if err := tx.QueryRowContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO UPDATE SET status = node_steps.status
 RETURNING annotations_json`,
-		runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
+		runID, runID, nodeID, stepID, StepRunning).Scan(&current); err != nil {
 		return err
 	}
 	var list []string
@@ -4965,10 +5192,10 @@ func (s *Store) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md st
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO node_steps (run_id, node_id, step_id, status)
-VALUES (?,?,?,?)
+INSERT INTO node_steps (team, run_id, node_id, step_id, status)
+VALUES (`+runTeamSQL+`,?,?,?,?)
 ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
-		runID, nodeID, stepID, StepRunning); err != nil {
+		runID, runID, nodeID, stepID, StepRunning); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -5286,6 +5513,11 @@ func (s *Store) RevokeNodeReady(ctx context.Context, runID, nodeID string) (bool
 // only that token afterwards. Pass the zero value when the caller is
 // unauthenticated, which leaves the claim unbound. lease is clamped to
 // [MaxLeaseDuration].
+//
+// The claim never crosses teams. The team comes off the claimant's own
+// credential, so a machine holding one team's token cannot see another
+// team's queue at all. A metered credential is no exception, because
+// metering decides who pays and not whose work the claimant may see.
 func (s *Store) ClaimNextReadyNode(ctx context.Context, claimant ClaimIdentity, holderID string, lease time.Duration, runnerLabels []string) (*Node, error) {
 	return s.ClaimNextReadyNodeAs(ctx, claimant, holderID, lease, runnerLabels, ExecutorIdentity{})
 }
@@ -5303,19 +5535,27 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
+	placement, err = s.placementForTeam(ctx, placement, scope.team)
+	if err != nil {
+		return nil, err
+	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm)
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm, scope)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.bumpMismatchedNodes(ctx, mismatched); err != nil {
+		if err := s.bumpMismatchedNodes(ctx, scope, mismatched); err != nil {
 			return nil, err
 		}
 		if target == nil {
 			return nil, notFound("ready node", "")
 		}
-		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true)
+		claimed, err := s.awardScannedNode(ctx, *target, claimant, holderID, coordinatorID, lease, placement, true, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -5425,11 +5665,16 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter) (*claimCandidate, []nodeKey, error) {
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
+	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
+	admitted := map[string]bool{}
+	allow, filtered := RepoFilterFrom(ctx)
+	needRepo := filtered || placement.needsRunRepository()
+	repos := map[string]runRepository{}
 	for range claimScanRounds {
-		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm)
+		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -5437,6 +5682,26 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			n := &batch[i]
 			if !labelsSatisfied(n.needs, labels.hard) {
 				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
+				continue
+			}
+			if scoped {
+				ok, err := ghScope.admitsRun(ctx, s, n.runID, admitted)
+				if err != nil {
+					return nil, nil, err
+				}
+				if !ok {
+					continue
+				}
+			}
+			var repo runRepository
+			if needRepo {
+				if repo, err = s.runRepositoryOf(ctx, scope, n.runID, repos); err != nil {
+					return nil, nil, err
+				}
+			}
+			// safety: the node stays queued for a runner whose list admits its
+			// repository, so passing over it writes nothing.
+			if filtered && !repo.admitsNodeFor(allow) {
 				continue
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
@@ -5450,7 +5715,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			if refused {
 				continue
 			}
-			n.decision = placement.decide(n.needs, n.prefers, labels, n.holdFrom, time.Now())
+			n.decision = placement.decide(n.needs, n.prefers, repo, labels, n.holdFrom, time.Now())
 			if n.decision.hold {
 				continue
 			}
@@ -5465,15 +5730,26 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 }
 
 func (s *Store) readClaimCandidates(
-	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter,
+	ctx context.Context, coordinatorID string, after *claimCandidate, warm warmClassFilter, scope teamScope,
 ) ([]claimCandidate, error) {
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
+	}
 	args := []any{time.Now().UnixNano(), coordinatorID, "", ""}
+	args = append(args, teamArgs...)
 	// safety: the stamped class keeps a queue of large nodes out of the scan
 	// window, so a small node behind thousands of them is still reachable.
 	classClause := ""
 	if warm.metered {
 		classClause = ` AND credit_cpu_class <= ?`
 		args = append(args, warm.warmCores)
+	}
+	scopeClause := ""
+	if ghScope, ok := GitHubRunnerScopeFrom(ctx); ok {
+		var scopeArgs []any
+		scopeClause, scopeArgs = ghScope.nodeClause()
+		args = append(args, scopeArgs...)
 	}
 	keyset := ""
 	if after != nil {
@@ -5487,7 +5763,7 @@ func (s *Store) readClaimCandidates(
 	AND required_coordinator_id = '' AND required_executor_location = ''
 	AND `+nodeExecutionUnsealed+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
-            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+classClause+keyset+`
+            AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
 	 LIMIT ?`, args...)
 	if err != nil {
@@ -5557,9 +5833,13 @@ func decodeCandidateLabels(runID, nodeID string, raw []byte, out *[]string) bool
 
 // safety: moves the nodes this runner's labels rule out behind the clock so
 // they do not starve the queue behind them.
-func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
+func (s *Store) bumpMismatchedNodes(ctx context.Context, scope teamScope, keys []nodeKey) error {
 	if len(keys) == 0 {
 		return nil
+	}
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5567,11 +5847,13 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 	}
 	defer rollbackOrLog(tx)
 	for _, key := range keys {
+		args := []any{time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID}
+		args = append(args, teamArgs...)
 		if _, err := tx.ExecContext(
 			ctx,
 			`UPDATE nodes SET ready_at = `+s.greatest()+`(?, ready_at + ?)
-			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`,
-			time.Now().UnixNano(), int64(time.Microsecond), key.runID, key.nodeID,
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND ready_at IS NOT NULL`+teamClause,
+			args...,
 		); err != nil {
 			return err
 		}
@@ -5582,11 +5864,18 @@ func (s *Store) bumpMismatchedNodes(ctx context.Context, keys []nodeKey) error {
 // safety: returns nil when another runner took the node between the scan and
 // the award, which the caller answers by scanning again.
 func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, claimant ClaimIdentity,
-	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, queued bool, scope teamScope,
 ) (*Node, error) {
 	readyClause := ""
 	if queued {
 		readyClause = ` AND ready_at IS NOT NULL`
+	}
+	// safety: the award repeats the scan's team predicate rather than trusting
+	// it, because [Store.ClaimNamedNode] reaches this with a node the caller
+	// named and no scan behind it.
+	teamClause, teamArgs, err := claimTeamWhere(scope, "team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -5598,6 +5887,11 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	}
 	now := time.Now()
 	expires := now.Add(lease)
+	awardArgs := []any{
+		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
+		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+	}
+	awardArgs = append(awardArgs, teamArgs...)
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
@@ -5608,9 +5902,8 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
 		    AND `+nodeNotDone+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
-		    AND `+nodeExecutionUnsealed,
-		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
-		coordinatorID, candidate.decision.reason, candidate.runID, candidate.nodeID,
+		    AND `+nodeExecutionUnsealed+teamClause,
+		awardArgs...,
 	)
 	if err != nil {
 		return nil, err
@@ -5622,7 +5915,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, queued); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -5702,11 +5995,20 @@ func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) er
 // HeartbeatNodeClaim extends the exact claim generation carried by ctx.
 // The lease cannot outrun the claim cap or revive expired capacity.
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error {
+	_, _, err := s.HeartbeatNodeClaimWithCredits(ctx, runID, nodeID, claimant, holderID, lease, false)
+	return err
+}
+
+// HeartbeatNodeClaimWithCredits renews a claim and charges a licensed metered
+// token in one transaction. It reports the charge and whether the token was
+// metered. A failed ledger write leaves the lease unchanged.
+func (s *Store) HeartbeatNodeClaimWithCredits(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration, meteringLicensed bool) (CreditChargeResult, bool, error) {
 	fence, ok := NodeClaimFenceFromContext(ctx)
 	if !ok || fence.HolderID != holderID || fence.Claimant != claimant || fence.ClaimGeneration < 1 {
-		return ErrLockHeld
+		return CreditChargeResult{}, false, ErrLockHeld
 	}
-	var updated int64
+	var charge CreditChargeResult
+	var metered bool
 	err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
 		var executorName string
 		var currentLease int64
@@ -5734,7 +6036,28 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 		if currentLease < now.UnixNano() {
 			return ErrLockHeld
 		}
-		expires := now.Add(clampNodeLease(lease)).UnixNano()
+		if meteringLicensed {
+			metered, err = tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
+			if err != nil {
+				return err
+			}
+			if metered {
+				charged, err := s.chargeNodeTx(ctx, tx, runID, nodeID, claimant.TokenPrefix, now, false)
+				if err != nil {
+					return err
+				}
+				charge = charged.CreditChargeResult
+				if charge.Cancel {
+					return nil
+				}
+			}
+		}
+		// safety: the ledger can block past the lease, so renewal uses a fresh clock.
+		renewAt := time.Now()
+		if currentLease < renewAt.UnixNano() {
+			return ErrLockHeld
+		}
+		expires := renewAt.Add(clampNodeLease(lease)).UnixNano()
 		res, err := tx.ExecContext(ctx, `UPDATE nodes SET lease_expires_at = ?
 		  WHERE run_id = ? AND node_id = ? AND claimed_by = ?
 		    AND COALESCE(claim_principal, '') = ?
@@ -5743,20 +6066,23 @@ func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, cl
 		    AND COALESCE(reservation_id, '') = ?
 		    AND claim_generation = ? AND `+nodeClaimLiveSQL(""),
 			expires, runID, nodeID, holderID, claimant.Principal, claimant.TokenPrefix,
-			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, now.UnixNano())
+			fence.MembershipID, fence.ReservationID, fence.ClaimGeneration, renewAt.UnixNano())
 		if err != nil {
 			return err
 		}
-		updated, err = res.RowsAffected()
-		return err
+		updated, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updated == 0 {
+			return ErrLockHeld
+		}
+		return nil
 	})
 	if err != nil {
-		return err
+		return CreditChargeResult{}, false, err
 	}
-	if updated == 0 {
-		return ErrLockHeld
-	}
-	return nil
+	return charge, metered, nil
 }
 
 // PrincipalHoldsTriggerClaim reports whether claimant holds the
@@ -5914,7 +6240,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	now := time.Now().UnixNano()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, execution_started_at, credit_charged_through FROM nodes
+		`SELECT run_id, node_id, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
 		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
@@ -5922,18 +6248,17 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	var pairs [][2]string
-	var unstarted [][2]string
+	var lapsed []expiredClaim
 	for rows.Next() {
-		var rid, nid string
-		var started sql.NullInt64
-		var chargeWindow int64
-		if err := rows.Scan(&rid, &nid, &started, &chargeWindow); err != nil {
+		var rid, nid, prefix string
+		var chargeWindow, lease int64
+		if err := rows.Scan(&rid, &nid, &chargeWindow, &lease, &prefix); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		pairs = append(pairs, [2]string{rid, nid})
-		if !started.Valid && chargeWindow != 0 {
-			unstarted = append(unstarted, [2]string{rid, nid})
+		if chargeWindow != 0 {
+			lapsed = append(lapsed, expiredClaim{runID: rid, nodeID: nid, tokenPrefix: prefix, leaseNS: lease})
 		}
 	}
 	_ = rows.Close()
@@ -5943,25 +6268,26 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if len(pairs) == 0 {
 		return nil, nil
 	}
-	if len(unstarted) > 0 {
-		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+	for _, claim := range lapsed {
+		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
 			return nil, err
 		}
-		for _, pair := range unstarted {
-			if _, err := refundUnstartedReservationTx(ctx, tx, pair[0], pair[1], now); err != nil {
-				return nil, err
-			}
-		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
-		        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
-		        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
-		        credit_charged_through = 0
-		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND `+nodeNotDone,
-		now); err != nil {
-		return nil, err
+	// safety: only the rows this pass selected, locked and settled are
+	// cleared. On Postgres the select skips a row another transaction holds,
+	// and clearing every expired claim would clear that one too once its
+	// holder let go, dropping the tail nobody settled.
+	for _, pair := range pairs {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE nodes SET claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
+			        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0,
+			        claim_reservation = '', claim_slot = -1, lease_expires_at = NULL,
+			        credit_charged_through = 0
+			  WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
+			    AND lease_expires_at < ? AND `+nodeNotDone,
+			pair[0], pair[1], now); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -6133,13 +6459,14 @@ SELECT run_id, seq, node_id, kind, ts, payload
 	return out, rows.Err()
 }
 
-// safety: holding the run row is what serializes callers that allocate a
-// per-run sequence number from MAX(seq)+1. A run with no row leaves nothing
-// to lock; the caller's own insert then fails its foreign key, as before.
+// safety: holding the run row serializes callers that allocate a per-run
+// sequence number from MAX(seq)+1. NO KEY UPDATE leaves foreign-key checks
+// on sibling nodes free to proceed while those nodes await their event turn.
+// A missing run leaves nothing to lock; the insert then fails its foreign key.
 func lockRunRow(ctx context.Context, tx *storeTx, runID string) error {
 	var id string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&id)
+		`SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -6157,7 +6484,7 @@ func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, pay
 		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
-	} else if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
 
@@ -6194,14 +6521,26 @@ func appendEventTx(ctx context.Context, tx *storeTx, runID, nodeID, kind string,
 		return 0, err
 	}
 	_, err = tx.ExecContext(ctx, `
-INSERT INTO events (run_id, seq, node_id, kind, ts, payload)
-VALUES (?,?,?,?,?,?)`, runID, seq, nodeID, kind, at.UnixNano(), raw)
+INSERT INTO events (team, run_id, seq, node_id, kind, ts, payload)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)`, runID, runID, seq, nodeID, kind, at.UnixNano(), raw)
+	if err != nil {
+		return 0, err
+	}
+	_, err = tx.ExecContext(ctx,
+		`UPDATE runs SET event_bytes = event_bytes + ?, event_count = event_count + 1 WHERE id = ?`,
+		eventBytes(kind, raw), runID)
 	return seq, err
 }
 
+// safety: an append bumps the run row's event counters, so it takes the run's
+// row lock before the event-sequence lock, the order a claim round takes
+// them in; the other order deadlocks the two on PostgreSQL.
 func lockEventSequenceTx(ctx context.Context, tx *storeTx, runID string) error {
 	if tx.dialect != DialectPostgres {
 		return nil
+	}
+	if err := lockRunRow(ctx, tx, runID); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, runID)
 	return err
@@ -6245,15 +6584,15 @@ type DebugPause struct {
 // CreateDebugPause inserts (or upserts) an open pause row.
 func (s *Store) CreateDebugPause(ctx context.Context, p DebugPause) error {
 	_, err := s.exec(ctx, `
-INSERT INTO debug_pauses (run_id, node_id, reason, paused_at, expires_at)
-VALUES (?,?,?,?,?)
+INSERT INTO debug_pauses (team, run_id, node_id, reason, paused_at, expires_at)
+VALUES (`+runTeamSQL+`,?,?,?,?,?)
 ON CONFLICT(run_id, node_id, reason) DO UPDATE SET
     paused_at = excluded.paused_at,
     expires_at = excluded.expires_at,
     released_at = NULL,
     released_by = '',
     release_kind = ''`,
-		p.RunID, p.NodeID, p.Reason,
+		p.RunID, p.RunID, p.NodeID, p.Reason,
 		p.PausedAt.UnixNano(), p.ExpiresAt.UnixNano())
 	return err
 }
@@ -6343,16 +6682,18 @@ type Trigger struct {
 	GitBranch      string            `json:"git_branch,omitempty"`
 	GitSHA         string            `json:"git_sha,omitempty"`
 	Status         string            `json:"status"`
+	Error          string            `json:"error,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	ClaimedAt      *time.Time        `json:"claimed_at,omitempty"`
 	LeaseExpiresAt *time.Time        `json:"lease_expires_at,omitempty"`
 	// ParentRunID: spawning RunAndAwait; for cycle detection.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// Mirror of Run repo fields; threaded into CreateRun.
-	Repo        string `json:"repo,omitempty"`
-	RepoURL     string `json:"repo_url,omitempty"`
-	GithubOwner string `json:"github_owner,omitempty"`
-	GithubRepo  string `json:"github_repo,omitempty"`
+	Repo         string `json:"repo,omitempty"`
+	RepoURL      string `json:"repo_url,omitempty"`
+	GithubOwner  string `json:"github_owner,omitempty"`
+	GithubRepo   string `json:"github_repo,omitempty"`
+	GithubRepoID int64  `json:"-"`
 	// RepoInherited distinguishes an implicit same-repository await from an
 	// explicit cross-repository request after parent provenance is copied.
 	RepoInherited bool `json:"repo_inherited,omitempty"`
@@ -6424,6 +6765,10 @@ type Trigger struct {
 	// the unique constraint, and [Store.FindTriggerByWebhookReplay]
 	// resolves a collision to the trigger that won it.
 	WebhookReplayKey string `json:"webhook_replay_key,omitempty"`
+	// Team owns the trigger and the run it becomes. A claim and a read
+	// return it so the runner that executes the run can place its work
+	// on nodes no other team's work shares.
+	Team Team `json:"team,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -6515,13 +6860,18 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 		return err
 	}
 	defer rollbackOrLog(tx)
-	if err := createTriggerTx(ctx, tx, t); err != nil {
+	// safety: the unscoped twin writes [DefaultTeam], the team the migration
+	// put every pre-tenant row in.
+	if err := createTriggerTx(ctx, tx, DefaultTeam, t); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
+func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
+	if err := admitFreeTeamRunTx(ctx, tx, team, time.Now()); err != nil {
+		return err
+	}
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status
@@ -6542,14 +6892,14 @@ func createTriggerTx(ctx context.Context, tx *storeTx, t Trigger) error {
 	}
 	_, err := tx.ExecContext(
 		ctx, `
-INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
+INSERT INTO triggers (team, id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+		              repo, repo_url, github_owner, github_repo, github_repo_id, repo_inherited, retry_of, retry_source, parent_node_id, "full",
 		              idempotency_key, webhook_delivery, webhook_replay_key)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		string(team), t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
+		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.GithubRepoID, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 		t.IdempotencyKey, t.WebhookDelivery, t.WebhookReplayKey,
 	)
 	if err != nil && isUniqueViolation(err) {
@@ -6640,7 +6990,7 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 	return s.GetTrigger(ctx, id)
 }
 
-// FinishTriggerAtGeneration marks a trigger done only while seq is still
+// FinishTriggerAtGeneration closes a trigger only while seq is still
 // its current claim generation, reporting false when it is not.
 //
 // This is the fence a superseded dispatch meets. Once a lapsed claim has
@@ -6650,18 +7000,38 @@ func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deliv
 // caller that sees false knows its work was superseded and that the
 // current claim owns the outcome.
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	res, err := s.exec(ctx,
-		`UPDATE triggers SET status = ?, lease_expires_at = NULL
-		  WHERE id = ? AND claim_seq = ?`,
-		triggerStatusDone, id, seq)
+	return s.endTriggerClaim(ctx, id, false,
+		`UPDATE triggers SET status = CASE WHEN EXISTS
+		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
+		  WHERE id = ? AND claim_seq = ?`, id, seq)
+}
+
+// endTriggerClaim settles the claim's credit reservation and applies the
+// guarded write that ends it, in one transaction, reporting whether the guard
+// admitted the write. A refused write rolls the settlement back with it, so a
+// superseded caller cannot settle a claim it no longer holds.
+func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := settleTriggerCreditsTx(ctx, tx, id, time.Now(), refundAll); err != nil {
+		return false, err
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	if err != nil {
+	if err != nil || n == 0 {
 		return false, err
 	}
-	return n > 0, nil
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // FinishLapsedClaim closes out a claimed trigger whose lease expired and whose
@@ -6669,8 +7039,10 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 // not. A re-dispatch inherits the previous attempt's terminal run row, so a run
 // that ended before this claim began says nothing about the dispatch holding it.
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) {
-	res, err := s.exec(ctx,
-		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+	return s.endTriggerClaim(ctx, id, false,
+		`UPDATE triggers SET status = CASE WHEN EXISTS
+		   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+		   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL
 		  WHERE id = ? AND status = ?
 		    AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
 		    AND claimed_at IS NOT NULL
@@ -6679,15 +7051,7 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 		                   AND runs.finished_at IS NOT NULL
 		                   AND runs.finished_at > triggers.claimed_at
 		                   AND `+runTerminalIn+`)`,
-		triggerStatusDone, id, triggerStatusClaimed, time.Now().UnixNano())
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+		id, triggerStatusClaimed, time.Now().UnixNano())
 }
 
 // FinishRunAtGeneration writes a run's terminal status only while seq is
@@ -6698,6 +7062,9 @@ func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error) 
 // is producing. Reports false without writing when the generation has
 // moved on.
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
+	if !isTerminalRunStatus(status) {
+		return false, fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
@@ -6708,17 +7075,19 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	// run write. Read them apart and a re-claim lands between the two, which
 	// is the one interleaving this fence exists to refuse.
 	var current int64
+	var team string
 	switch err := tx.QueryRowContext(ctx,
-		`SELECT claim_seq FROM triggers WHERE id = ?`+tx.forUpdate(), runID).Scan(&current); {
+		`SELECT claim_seq, team FROM triggers WHERE id = ?`+tx.forUpdate(), runID).
+		Scan(&current, &team); {
 	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
 	case err != nil:
 		return false, err
 	case current != seq:
 		return false, nil
 	}
 
-	if _, err := tx.ExecContext(ctx, finishRunStmt,
-		status, errMsg, time.Now().UnixNano(), runID); err != nil {
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, Team(team)); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -6774,21 +7143,13 @@ func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
 // no row at all reads as not started, which is also what an unclaimed
 // trigger looks like before its consumer gets that far.
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, true,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND status = ?
 		    AND COALESCE((SELECT status FROM runs WHERE runs.id = triggers.id), ?) = ?`,
 		triggerStatusPending, id, triggerStatusClaimed, runStatusPending, runStatusPending)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
 }
 
 // ReleaseClaimAtGeneration returns a claimed trigger to the pending
@@ -6799,20 +7160,12 @@ func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, err
 // a lease. The generation guard keeps a shutting-down consumer from
 // yanking a claim another consumer has already taken.
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
-	res, err := s.exec(ctx,
+	return s.endTriggerClaim(ctx, id, false,
 		`UPDATE triggers
 		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL,
 		        claim_principal = '', claim_token_prefix = ''
 		  WHERE id = ? AND claim_seq = ? AND status = ?`,
 		triggerStatusPending, id, seq, triggerStatusClaimed)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
 }
 
 // TriggerClaimGeneration returns a trigger's current claim generation,
@@ -6876,6 +7229,30 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 		return false, err
 	}
 	return true, nil
+}
+
+// cancelRequeuedCancelledTriggersTx finalizes every pending trigger that
+// carries a cancel request, inside a claim's own transaction. A trigger
+// gets there when its run was cancelled while claimed and the claim was
+// then released or lapsed back to the queue: the claim filter already
+// refuses it, and finalizing it here keeps it from sitting in the queue
+// forever.
+func cancelRequeuedCancelledTriggersTx(ctx context.Context, tx *storeTx, now time.Time) error {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs
+		    SET status = ?, finished_at = ?, error = ?
+		  WHERE status = ? AND id IN (
+		        SELECT id FROM triggers
+		         WHERE status = ? AND cancel_requested_at IS NOT NULL)`,
+		runStatusCancelled, now.UnixNano(), "cancelled before dispatch",
+		runStatusPending, triggerStatusPending); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+		  WHERE status = ? AND cancel_requested_at IS NOT NULL`,
+		triggerStatusDone, triggerStatusPending)
+	return err
 }
 
 // SpawnedChild is one row of the cross-pipeline spawn relation. A
@@ -6958,9 +7335,17 @@ func (s *Store) ClaimNextTrigger(ctx context.Context, lease time.Duration) (*Tri
 
 // ClaimNextTriggerFor adds pipeline/source filter sets (AND semantics)
 // and records claimant as the token the claim answers to.
+//
+// The claim never crosses teams: the team comes off the claimant's own
+// credential exactly as for [Store.ClaimNextReadyNode], because a claimed
+// trigger is what a runner's whole run, and every secret it reads, rests on.
 func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity, lease time.Duration, pipelines, sources []string) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -6971,20 +7356,25 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, claimant ClaimIdentity,
 	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
+	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
 
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team, webhook_replay_key
   FROM triggers
- WHERE status = ? AND available_at <= ?
+ WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
+   AND credit_reserved_at = 0
    AND NOT EXISTS (
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
        WHERE alr.run_id = triggers.id
-         AND source_run.status NOT IN ('success','failed','cancelled'))`
+         AND source_run.status NOT IN ('success','failed','cancelled'))` + teamClause
 	args := []any{triggerStatusPending, now.UnixNano()}
+	args = append(args, teamArgs...)
 	if len(pipelines) > 0 {
 		ph := make([]string, len(pipelines))
 		for i, p := range pipelines {
@@ -7001,33 +7391,71 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		}
 		sel += " AND trigger_source IN (" + strings.Join(ph, ",") + ")"
 	}
-	sel += `
- ORDER BY created_at ASC
- LIMIT 1` + s.forUpdateSkipLocked()
-
+	scope, scoped := GitHubRunnerScopeFrom(ctx)
+	if scoped {
+		clause, scopeArgs := scope.triggerClause("")
+		sel += clause
+		args = append(args, scopeArgs...)
+	}
+	allow, filtered := RepoFilterFrom(ctx)
+	// safety: a filtered claimant reads the queue in batches and passes over
+	// every trigger its list does not admit, so another repository's run at the
+	// head of the queue never hides the one it may build.
+	batch, rounds := 1, 1
+	if filtered {
+		batch, rounds = claimScanBatch, claimScanRounds
+	}
 	var t Trigger
 	var argsJSON, envJSON []byte
 	var createdNS int64
-	var parent sql.NullString
-	var fullInt, repoInheritedInt int
-	err = tx.QueryRowContext(ctx, sel, args...).Scan(
-		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
-		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery,
-	)
-	if parent.Valid {
-		t.ParentRunID = parent.String
-	}
-	t.Full = fullInt != 0
-	t.RepoInherited = repoInheritedInt != 0
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			if commitErr := tx.Commit(); commitErr != nil {
-				return nil, commitErr
-			}
-			return nil, notFound("claimable trigger", "")
+	found := false
+	var after *triggerCursor
+	for round := 0; round < rounds && !found; round++ {
+		query, queryArgs := sel, args
+		if after != nil {
+			query += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
+			queryArgs = append(append([]any(nil), args...), after.createdNS, after.createdNS, after.id)
 		}
+		query += `
+ ORDER BY created_at ASC, id ASC
+ LIMIT ` + strconv.Itoa(batch) + s.forUpdateSkipLocked()
+		rows, err := scanTriggerCandidates(ctx, tx, query, queryArgs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range rows {
+			row := &rows[i]
+			if scoped {
+				env, decoded := decodeTriggerEnv(row.envJSON)
+				row.t.TriggerEnv = env
+				// safety: the oldest trigger stays pending for other workers, and this
+				// scope reports an empty queue until one of them takes it.
+				if !decoded || !scope.admits(&row.t) {
+					if commitErr := tx.Commit(); commitErr != nil {
+						return nil, commitErr
+					}
+					return nil, notFound("claimable trigger", "")
+				}
+			}
+			if filtered && !triggerAdmittedBy(allow, &row.t, row.envJSON) {
+				continue
+			}
+			t, argsJSON, envJSON, createdNS, found = row.t, row.argsJSON, row.envJSON, row.createdNS, true
+			break
+		}
+		if len(rows) < batch {
+			break
+		}
+		last := rows[len(rows)-1]
+		after = &triggerCursor{createdNS: last.createdNS, id: last.t.ID}
+	}
+	if !found {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, commitErr
+		}
+		return nil, notFound("claimable trigger", "")
+	}
+	if err := reserveTriggerCreditsTx(ctx, tx, claimant, t.Team, t.ID, now); err != nil {
 		return nil, err
 	}
 
@@ -7063,51 +7491,77 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return &t, nil
 }
 
-// HeartbeatTrigger extends the claim lease and returns whether cancel
-// was requested. ErrNotFound when not claimed.
+// HeartbeatTrigger charges a metered claim through the heartbeat before
+// extending its lease. It returns whether cancel was requested.
+// ErrNotFound when not claimed.
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	expires := time.Now().Add(lease).UnixNano()
-
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := `UPDATE triggers
-		    SET lease_expires_at = ?
-		  WHERE id = ? AND status = ?`
-	args := []any{expires, id, triggerStatusClaimed}
-	_, fenced := TriggerClaimFenceFromContext(ctx)
-	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
-		query += ` AND claim_principal = ? AND claim_token_prefix = ?
-		             AND claim_seq = ? AND lease_expires_at > ?`
-		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-			fence.ClaimGeneration, time.Now().UnixNano())
-	}
-	res, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		if fenced {
+	var team, principal, tokenPrefix string
+	var reservedAt, claimSeq int64
+	var oldLease, cancelNS sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		`SELECT team, credit_reserved_at, lease_expires_at, cancel_requested_at,
+		        claim_principal, claim_token_prefix, claim_seq
+		   FROM triggers WHERE id = ? AND status = ?`+tx.forUpdate(),
+		id, triggerStatusClaimed).Scan(&team, &reservedAt, &oldLease, &cancelNS,
+		&principal, &tokenPrefix, &claimSeq)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, fenced := TriggerClaimFenceFromContext(ctx); fenced {
 			return false, ErrLockHeld
 		}
 		return false, ErrNotFound
 	}
-
-	var cancelNS sql.NullInt64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT cancel_requested_at FROM triggers WHERE id = ?`, id,
-	).Scan(&cancelNS); err != nil {
+	if err != nil {
+		return false, err
+	}
+	if fence, ok := TriggerClaimFenceFromContext(ctx); ok &&
+		(fence.Claimant.Principal != principal || fence.Claimant.TokenPrefix != tokenPrefix ||
+			fence.ClaimGeneration != claimSeq) {
+		return false, ErrLockHeld
+	}
+	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return false, err
+		}
+	}
+	now := time.Now()
+	_, fenced := TriggerClaimFenceFromContext(ctx)
+	if (fenced || reservedAt != 0) && (!oldLease.Valid || oldLease.Int64 <= now.UnixNano()) {
+		return false, ErrLockHeld
+	}
+	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		if err := settleTriggerWindowTx(ctx, tx, Team(team), id, reservedAt, now.UnixNano(), false, false); err != nil {
+			if errors.Is(err, ErrInsufficientCredits) {
+				if _, stopErr := tx.ExecContext(ctx,
+					`UPDATE triggers SET status = ?, lease_expires_at = NULL, credit_reserved_at = 0,
+					        credit_paid_seconds = 0, credit_paid_amount_micro = 0, credit_reservation_id = '',
+					        cancel_requested_at = COALESCE(cancel_requested_at, ?)
+					  WHERE id = ? AND team = ? AND status = ?`,
+					triggerStatusFailed, now.UnixNano(), id, team, triggerStatusClaimed); stopErr != nil {
+					return false, stopErr
+				}
+				if _, stopErr := tx.ExecContext(ctx, finishRunStmt,
+					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, team); stopErr != nil {
+					return false, stopErr
+				}
+				if commitErr := tx.Commit(); commitErr != nil {
+					return false, commitErr
+				}
+			}
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = ?`,
+		now.Add(lease).UnixNano(), id, triggerStatusClaimed); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7116,8 +7570,20 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 	return cancelNS.Valid, nil
 }
 
-// RequestCancel flags a trigger for cancellation; idempotent.
+// RequestCancel cancels a run; idempotent. A trigger no consumer has
+// claimed is finalized on the spot through [Store.CancelPendingTrigger];
+// a claimed one is only flagged, and its holder sees the flag on its next
+// lease renewal and winds the run down. A claim that lands between the
+// two statements leaves the flag on a claimed trigger, which is the
+// cooperative path again.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
+	cancelled, err := s.CancelPendingTrigger(ctx, id)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return nil
+	}
 	now := time.Now().UnixNano()
 	res, err := s.exec(ctx,
 		`UPDATE triggers
@@ -7149,7 +7615,7 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM triggers
 		  WHERE status = ? AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ?`,
+		    AND lease_expires_at < ?`+tx.forUpdate(),
 		triggerStatusClaimed, now)
 	if err != nil {
 		return nil, err
@@ -7170,6 +7636,11 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
+	for _, id := range ids {
+		if err := settleTriggerCreditsTx(ctx, tx, id, time.Unix(0, now), false); err != nil {
+			return nil, err
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE triggers
@@ -7189,32 +7660,24 @@ func (s *Store) reapExpiredTriggers(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// FinishTrigger marks a trigger 'done'; idempotent.
+// FinishTrigger closes a trigger, recording a failed run as a failed trigger; idempotent.
 func (s *Store) FinishTrigger(ctx context.Context, id string) error {
-	query := `UPDATE triggers SET status = ?, lease_expires_at = NULL WHERE id = ?`
-	args := []any{triggerStatusDone, id}
+	query := `UPDATE triggers SET status = CASE WHEN EXISTS
+	   (SELECT 1 FROM runs WHERE runs.id = triggers.id AND runs.status = 'failed')
+	   THEN 'failed' ELSE 'done' END, lease_expires_at = NULL WHERE id = ?`
+	args := []any{id}
 	_, fenced := TriggerClaimFenceFromContext(ctx)
 	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
 		query += ` AND claim_principal = ? AND claim_token_prefix = ? AND claim_seq = ?
-		             AND (status = ? OR (status = ? AND lease_expires_at > ?))`
+		             AND (status IN (?, ?) OR (status = ? AND lease_expires_at > ?))`
 		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-			fence.ClaimGeneration, triggerStatusDone, triggerStatusClaimed, time.Now().UnixNano())
+			fence.ClaimGeneration, triggerStatusDone, triggerStatusFailed, triggerStatusClaimed, time.Now().UnixNano())
 	}
-	res, err := s.exec(ctx, query, args...)
-	if err != nil {
+	finished, err := s.endTriggerClaim(ctx, id, false, query, args...)
+	if err != nil || !fenced || finished {
 		return err
 	}
-	if !fenced {
-		return nil
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return ErrLockHeld
-	}
-	return nil
+	return ErrLockHeld
 }
 
 func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
@@ -7295,9 +7758,9 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 		  AND r.started_at < ?
 		  AND EXISTS (
 		      SELECT 1 FROM triggers t
-		       WHERE t.id = r.id AND t.status = ?
+		       WHERE t.id = r.id AND t.status IN (?, ?)
 		  )
-	`, runStatusPending, cutoff, triggerStatusDone)
+	`, runStatusPending, cutoff, triggerStatusDone, triggerStatusFailed)
 	if err != nil {
 		return nil, err
 	}
@@ -7591,10 +8054,16 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 // recorded, so [Store.PrincipalHoldsTriggerClaim] can later prove the
 // claim and the writes it authorizes. A trigger id is the id of the run
 // it creates, so this claim is what the claimant's whole run rests on.
-// ErrNotFound when the trigger is not pending.
+// ErrNotFound when the trigger is not pending, and equally when it belongs
+// to a team the claimant's credential does not, so naming another team's
+// trigger id learns nothing about whether it exists.
 func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant ClaimIdentity, lease time.Duration) (*Trigger, error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
+	}
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "triggers.team")
+	if err != nil {
+		return nil, err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7604,6 +8073,9 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 
 	now := time.Now()
 	if err := s.expirePendingAgentLossRetriesTx(ctx, tx, now); err != nil {
+		return nil, err
+	}
+	if err := cancelRequeuedCancelledTriggersTx(ctx, tx, now); err != nil {
 		return nil, err
 	}
 	expires := now.Add(lease)
@@ -7618,13 +8090,14 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 	res, err := tx.ExecContext(ctx,
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
 		        claim_principal = ?, claim_token_prefix = ?
-		  WHERE id = ? AND status = ? AND available_at <= ?
+		  WHERE id = ? AND status = ? AND available_at <= ? AND cancel_requested_at IS NULL
+		    AND credit_reserved_at = 0
 		    AND NOT EXISTS (
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
 		        WHERE alr.run_id = triggers.id
-		          AND source_run.status NOT IN ('success','failed','cancelled'))`,
-		append(args, now.UnixNano())...)
+		          AND source_run.status NOT IN ('success','failed','cancelled'))`+teamClause,
+		append(append(args, now.UnixNano()), teamArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -7633,6 +8106,17 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		return nil, err
 	}
 	if n == 0 {
+		var prior int64
+		lookupArgs := append([]any{id, triggerStatusPending}, teamArgs...)
+		lookupErr := tx.QueryRowContext(ctx,
+			`SELECT credit_reserved_at FROM triggers WHERE id = ? AND status = ?`+teamClause,
+			lookupArgs...).Scan(&prior)
+		if lookupErr == nil && prior != 0 {
+			return nil, unsettledTriggerCredits(id)
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, lookupErr
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
@@ -7649,12 +8133,15 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team); err != nil {
+		return nil, err
+	}
+	if err := reserveTriggerCreditsTx(ctx, tx, claimant, t.Team, t.ID, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -7690,12 +8177,13 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery, team,
+       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
-		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery)
+		&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Team, &t.Error)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("trigger", id)
@@ -7750,7 +8238,7 @@ SELECT id FROM triggers
 
 // TriggerFilter narrows ListTriggers; zero value matches all.
 type TriggerFilter struct {
-	Statuses  []string // "pending"|"claimed"|"done"
+	Statuses  []string // "pending"|"claimed"|"done"|"failed"
 	Pipelines []string
 	Repo      string // matches GITHUB_REPOSITORY in trigger_env
 	Limit     int    // <=0 = 20
@@ -7772,6 +8260,16 @@ const (
 // with the limit unfilled is logged, since the caller cannot tell that
 // from a genuinely empty result.
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return s.listTriggers(ctx, allTeams(), f)
+}
+
+// ListTriggers returns t's triggers newest-first, filtered by f, with the
+// same paging and repo matching as [Store.ListTriggers].
+func (t *Tenant) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error) {
+	return t.s.listTriggers(ctx, oneTeam(t.team), f)
+}
+
+func (s *Store) listTriggers(ctx context.Context, scope teamScope, f TriggerFilter) ([]*Trigger, error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 20
@@ -7786,6 +8284,13 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 		} else {
 			where += " AND " + clause
 		}
+	}
+	if !scope.all {
+		if scope.team == "" {
+			return nil, ErrNoTeam
+		}
+		addClause("team = ?")
+		args = append(args, string(scope.team))
 	}
 	addIn := func(col string, values []string) {
 		if len(values) == 0 {
@@ -7806,7 +8311,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
        repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
-       idempotency_key, claim_seq, webhook_delivery
+       idempotency_key, claim_seq, webhook_delivery,
+       COALESCE((SELECT error FROM runs WHERE runs.id = triggers.id), '')
   FROM triggers`
 	const orderAndLimit = `
  ORDER BY created_at DESC, id DESC
@@ -7877,7 +8383,7 @@ func (s *Store) listTriggerPage(ctx context.Context, query string, args []any) (
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
 			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
-			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery); err != nil {
+			&t.IdempotencyKey, &t.ClaimSeq, &t.WebhookDelivery, &t.Error); err != nil {
 			return nil, err
 		}
 		t.Full = fullInt != 0
@@ -8113,8 +8619,8 @@ func (s *Store) CreateApproval(ctx context.Context, a Approval) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO approvals (run_id, node_id, requested_at, message, timeout_ms, on_timeout)
-VALUES (?,?,?,?,?,?)
+INSERT INTO approvals (team, run_id, node_id, requested_at, message, timeout_ms, on_timeout)
+VALUES (`+runTeamSQL+`,?,?,?,?,?,?)
 ON CONFLICT(run_id, node_id) DO UPDATE SET
     requested_at = excluded.requested_at,
     message      = excluded.message,
@@ -8124,7 +8630,7 @@ ON CONFLICT(run_id, node_id) DO UPDATE SET
     resolved_at  = NULL,
     resolution   = '',
     comment      = ''`,
-		a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
+		a.RunID, a.RunID, a.NodeID, a.RequestedAt.UnixNano(),
 		a.Message, a.TimeoutMS, a.OnTimeout); err != nil {
 		return err
 	}
@@ -8248,4 +8754,43 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 		a.ResolvedAt = &t
 	}
 	return &a, nil
+}
+
+type triggerCursor struct {
+	createdNS int64
+	id        string
+}
+
+type triggerCandidate struct {
+	t         Trigger
+	argsJSON  []byte
+	envJSON   []byte
+	createdNS int64
+}
+
+func scanTriggerCandidates(ctx context.Context, tx *storeTx, query string, args []any) (_ []triggerCandidate, err error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []triggerCandidate
+	for rows.Next() {
+		var c triggerCandidate
+		var parent sql.NullString
+		var fullInt, repoInheritedInt int
+		if err := rows.Scan(
+			&c.t.ID, &c.t.Pipeline, &c.argsJSON, &c.t.TriggerSource, &c.t.TriggerUser,
+			&c.envJSON, &c.t.GitBranch, &c.t.GitSHA, &c.t.Status, &c.createdNS, &parent,
+			&c.t.Repo, &c.t.RepoURL, &c.t.GithubOwner, &c.t.GithubRepo, &repoInheritedInt, &c.t.RetryOf, &c.t.RetrySource, &c.t.ParentNodeID, &fullInt,
+			&c.t.IdempotencyKey, &c.t.ClaimSeq, &c.t.WebhookDelivery, &c.t.Team, &c.t.WebhookReplayKey,
+		); err != nil {
+			return nil, err
+		}
+		c.t.ParentRunID = parent.String
+		c.t.Full = fullInt != 0
+		c.t.RepoInherited = repoInheritedInt != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

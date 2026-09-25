@@ -8,17 +8,20 @@ import (
 
 // LegacyAgentClaim is one recent claim made outside enrolled-executor mode.
 type LegacyAgentClaim struct {
-	RunID     string
-	Status    string
-	ClaimedBy string
-	LastSeen  time.Time
+	RunID       string
+	Status      string
+	ClaimedBy   string
+	TokenPrefix string
+	StartedAt   time.Time
+	LastSeen    time.Time
 }
 
 // ListLegacyAgentClaims returns claims whose lease falls inside the observation
 // window. Enrolled executor claims are reported through the executor registry.
 func (s *Store) ListLegacyAgentClaims(ctx context.Context, since time.Time) (_ []LegacyAgentClaim, err error) {
 	rows, err := s.query(ctx, `
-SELECT run_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
+SELECT run_id, status, claimed_by, claim_token_prefix,
+       COALESCE(started_at, 0), COALESCE(lease_expires_at, 0)
   FROM nodes
  WHERE claimed_by IS NOT NULL AND claimed_by != ''
    AND claim_executor = ''
@@ -32,10 +35,13 @@ SELECT run_id, status, claimed_by, COALESCE(started_at, 0), COALESCE(lease_expir
 	for rows.Next() {
 		var claim LegacyAgentClaim
 		var started, expires int64
-		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &started, &expires); err != nil {
+		if err := rows.Scan(&claim.RunID, &claim.Status, &claim.ClaimedBy, &claim.TokenPrefix, &started, &expires); err != nil {
 			return nil, err
 		}
-		claim.LastSeen = time.Unix(0, max(started, expires))
+		if started > 0 {
+			claim.StartedAt = time.Unix(0, started)
+			claim.LastSeen = claim.StartedAt
+		}
 		out = append(out, claim)
 	}
 	return out, rows.Err()
@@ -54,7 +60,7 @@ type RunTrend struct {
 
 // ListRunTrends returns every run in the requested window and whether all of
 // its nodes completed from cached or already-satisfied work.
-func (s *Store) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error) {
+func (t *Tenant) ListRunTrends(ctx context.Context, since time.Time, pipeline string) (_ []RunTrend, err error) {
 	query := `
 SELECT id, pipeline, status, created_at, started_at, finished_at
      , CASE
@@ -68,14 +74,14 @@ SELECT id, pipeline, status, created_at, started_at, finished_at
          THEN 1 ELSE 0
        END AS all_cached
   FROM runs
- WHERE started_at >= ?`
-	args := []any{since.UnixNano()}
+ WHERE team = ? AND started_at >= ?`
+	args := []any{string(t.team), since.UnixNano()}
 	if pipeline != "" {
 		query += " AND pipeline = ?"
 		args = append(args, pipeline)
 	}
 	query += " ORDER BY started_at ASC"
-	rows, err := s.query(ctx, query, args...)
+	rows, err := t.s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

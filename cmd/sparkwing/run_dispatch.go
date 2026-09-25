@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,7 +20,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -533,20 +536,15 @@ func triggerSource(prefix string) string {
 
 func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source string, flags runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
-	var userName string
-	if u, err := user.Current(); err == nil {
-		userName = u.Username
-	}
-
 	branch, sha, repositorySlug, repoURL := detectRemoteGit()
-	if repoURL == "" {
+	if repoURL == "" && !workingTree {
 		return nil, fmt.Errorf("pipeline trigger %q: no git origin detected from cwd. "+
 			"The cluster runner needs a repository URL to clone the pipeline source. "+
 			"Run from inside a checkout with an origin remote", pipelineName)
 	}
 	if repositorySlug != "" {
 		repoURL = bincache.RepoURLFromGitHub(repositorySlug)
-	} else {
+	} else if repoURL != "" {
 		var err error
 		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
 		if err != nil {
@@ -606,7 +604,6 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 		Args:     args,
 		Trigger: client.TriggerMeta{
 			Source: source,
-			User:   userName,
 			Env:    environmentValues,
 		},
 		Git: client.GitMeta{
@@ -620,11 +617,11 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	}
 
 	if snapshot != nil {
-		cacheURL := bincache.CacheURL()
-		seedErr := seedWorkingTreeSnapshot(runProfile, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
-		if seedErr != nil {
-			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, seedErr)
+		key, uploadErr := uploadSourceBundle(runProfile, snapshot)
+		if uploadErr != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, uploadErr)
 		}
+		request.Trigger.Env[bincache.SourceBundleObjectEnvKey] = key
 		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
 			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
 		if snapshot.Baseline.SHA != "" {
@@ -632,14 +629,12 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 				snapshot.Baseline.Ref, snapshot.Baseline.SHA)
 		}
 	} else if repoURL != "" {
-		discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 5*time.Second)
-		services, discoveryErr := discovery.ServicesFor(discoveryContext, runProfile.ControllerURL(), runProfile.ControllerToken())
-		cancelDiscovery()
 		repoDir, cwdErr := os.Getwd()
 		if cwdErr != nil {
-			fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", cwdErr)
-		} else {
-			seedTriggerSource(runProfile, services.CachePod, discoveryErr, repoDir, repoURL, sha)
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, cwdErr)
+		}
+		if err := offerTriggerSource(runProfile, repoDir, repoURL, sha); err != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, err)
 		}
 	}
 
@@ -651,76 +646,64 @@ func createRemoteTrigger(runProfile *profile.Profile, pipelineName, source strin
 	return response, nil
 }
 
-func seedWorkingTreeSnapshot(runProfile *profile.Profile, cacheURL, repoURL string, snapshot *worktreeSnapshot, directTimeout, controllerTimeout time.Duration) error {
-	var directErr error
-	if cacheURL != "" {
-		contextValue, cancel := context.WithTimeout(context.Background(), directTimeout)
-		directErr = bincache.SeedWorkspaceBundle(contextValue, cacheURL, bincache.CacheToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
-		cancel()
-		if directErr == nil {
-			return nil
-		}
+func uploadSourceBundle(runProfile *profile.Profile, snapshot *worktreeSnapshot) (string, error) {
+	f, err := os.Open(snapshot.BundlePath)
+	if err != nil {
+		return "", err
 	}
-	contextValue, cancel := context.WithTimeout(context.Background(), controllerTimeout)
-	controllerErr := bincache.SeedWorkspaceBundleViaController(contextValue, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
-	cancel()
-	if controllerErr == nil {
-		return nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	if directErr != nil {
-		return errors.Join(fmt.Errorf("direct cache: %w", directErr), fmt.Errorf("controller proxy: %w", controllerErr))
+	digest := hex.EncodeToString(h.Sum(nil))
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
 	}
-	return controllerErr
+	key := "sources/" + digest + "/" + hex.EncodeToString(nonce[:])
+	transport := &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	data := directdata.New(runProfile.ControllerURL(), runProfile.ControllerToken(), "", transport)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	available, err := data.SourceAvailable(ctx)
+	if err != nil {
+		return "", fmt.Errorf("check direct source support: %w", err)
+	}
+	if !available {
+		return "", errors.New("controller does not support direct source bundles; upgrade it before --working-tree")
+	}
+	if err := data.Upload(ctx, "source", key, f, snapshot.BundleSize, digest); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
-func seedTriggerSource(runProfile *profile.Profile, cacheURL string, discoveryErr error, repoDir, repoURL, sha string) {
-	if cacheURL != "" {
-		refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := bincache.RefreshRepo(refreshContext, cacheURL, bincache.CacheToken(), repoURL)
-		cancel()
-		if err == nil {
-			return
-		}
-		seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		seedErr := bincache.SeedRepo(seedContext, cacheURL, bincache.CacheToken(), repoURL, repoDir, sha)
-		seedCancel()
-		if seedErr == nil {
-			return
-		}
-		fmt.Fprintf(os.Stderr,
-			"sparkwing run: gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-			err, seedErr)
-		return
+// safety: a durable remote fetch cannot depend on a cache seed from this shell;
+// working-tree submissions upload a separately bound source bundle.
+func offerTriggerSource(_ *profile.Profile, repoDir, _, sha string) error {
+	if !commitOnOrigin(repoDir, sha) {
+		return fmt.Errorf("commit %s is not on origin: push your commit or trigger with --working-tree", shortSHA(sha))
 	}
-
-	refreshContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	err := bincache.RefreshRepoViaController(refreshContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL)
-	cancel()
-	if err == nil {
-		return
-	}
-	seedContext, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	seedErr := bincache.SeedRepoViaController(seedContext, runProfile.ControllerURL(), runProfile.ControllerToken(), repoURL, repoDir, sha)
-	seedCancel()
-	if seedErr == nil {
-		return
-	}
-	if isHTTPNotFound(seedErr) {
-		return
-	}
-	if discoveryErr != nil {
-		fmt.Fprintf(os.Stderr,
-			"sparkwing run: service discovery failed (%v), controller gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-			discoveryErr, err, seedErr)
-		return
-	}
-	fmt.Fprintf(os.Stderr,
-		"sparkwing run: controller gitcache refresh failed (%v), seed failed (%v); continuing; the runner retries if the source commit is unavailable\n",
-		err, seedErr)
+	return nil
 }
 
-func isHTTPNotFound(err error) bool {
-	return err != nil && strings.HasPrefix(err.Error(), "404 ")
+// commitOnOrigin reports whether a remote-tracking branch of origin contains
+// sha, which is what this checkout knows of what has been pushed.
+func commitOnOrigin(repoDir, sha string) bool {
+	if sha == "" {
+		return false
+	}
+	out, err := exec.Command("git", "-C", repoDir, "for-each-ref", "--count=1", "--contains", sha,
+		"--format=%(refname)", "refs/remotes/origin/").Output()
+	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 func detectRemoteGit() (branch, sha, repo, repoURL string) {

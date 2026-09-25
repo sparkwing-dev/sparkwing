@@ -593,7 +593,6 @@ func heartbeatClaimedTrigger(
 
 type triggerHeartbeatStore interface {
 	HeartbeatTrigger(context.Context, string, time.Duration) (bool, error)
-	TriggerClaimGeneration(context.Context, string) (int64, error)
 }
 
 func heartbeatOnce(
@@ -602,19 +601,15 @@ func heartbeatOnce(
 ) (cancelRequested, keepGoing bool) {
 	deadline := time.Now().Add(budget)
 	backoff := 50 * time.Millisecond
+	claimCtx := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: seq})
 	for {
-		cancel, err := st.HeartbeatTrigger(ctx, id, lease)
+		cancel, err := st.HeartbeatTrigger(claimCtx, id, lease)
 		if err == nil {
-
-			if current, gerr := st.TriggerClaimGeneration(ctx, id); gerr == nil && current != seq {
-				logger.Warn("stopping heartbeat; the claim was superseded",
-					"trigger_id", id, "claimed_generation", seq, "current_generation", current)
-				return false, false
-			}
 			return cancel, true
 		}
-		if errors.Is(err, store.ErrNotFound) {
-			return false, false
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) ||
+			errors.Is(err, store.ErrInsufficientCredits) {
+			return true, false
 		}
 		if ctx.Err() != nil {
 			return false, false

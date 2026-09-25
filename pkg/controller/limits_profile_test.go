@@ -31,7 +31,12 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 50,
 				MaxDownloadsPerPrincipal:  20,
-				EnforceIdleClaimPoll:      true,
+				RunsPerPrincipalHour:      600,
+				ShedQueueDepth:            5000,
+
+				EgressMonthlyBytesPerPrincipal: 100 << 30,
+				EgressDailyCapBytes:            200 << 30,
+				EnforceIdleClaimPoll:           true,
 			},
 		},
 		{
@@ -43,7 +48,12 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 10,
 				MaxDownloadsPerPrincipal:  5,
-				EnforceIdleClaimPoll:      true,
+				RunsPerPrincipalHour:      60,
+				ShedQueueDepth:            1000,
+
+				EgressMonthlyBytesPerPrincipal: 5 << 30,
+				EgressDailyCapBytes:            20 << 30,
+				EnforceIdleClaimPoll:           true,
 			},
 		},
 	} {
@@ -93,14 +103,18 @@ func TestLimitsProfile_HostedControllersCarryEveryGuard(t *testing.T) {
 		}
 		for _, guard := range []struct {
 			name  string
-			value int
+			value int64
 		}{
-			{"claims per runner minute", profile.ClaimsPerRunnerMinute},
-			{"heartbeats per runner minute", profile.HeartbeatsPerRunnerMinute},
-			{"requests per token minute", profile.RequestsPerTokenMinute},
-			{"requests per minute alarm", profile.RequestsPerMinuteAlarm},
-			{"max log streams per principal", profile.MaxLogStreamsPerPrincipal},
-			{"max downloads per principal", profile.MaxDownloadsPerPrincipal},
+			{"claims per runner minute", int64(profile.ClaimsPerRunnerMinute)},
+			{"heartbeats per runner minute", int64(profile.HeartbeatsPerRunnerMinute)},
+			{"requests per token minute", int64(profile.RequestsPerTokenMinute)},
+			{"requests per minute alarm", int64(profile.RequestsPerMinuteAlarm)},
+			{"max log streams per principal", int64(profile.MaxLogStreamsPerPrincipal)},
+			{"max downloads per principal", int64(profile.MaxDownloadsPerPrincipal)},
+			{"runs per principal hour", int64(profile.RunsPerPrincipalHour)},
+			{"shed queue depth", int64(profile.ShedQueueDepth)},
+			{"egress monthly bytes per principal", profile.EgressMonthlyBytesPerPrincipal},
+			{"egress daily cap bytes", profile.EgressDailyCapBytes},
 		} {
 			if guard.value <= 0 {
 				t.Errorf("%s leaves %s unlimited", name, guard.name)
@@ -125,13 +139,17 @@ func TestLimitsProfile_TheFreeTierIsTighterThanThePaidOne(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name       string
-		paid, free int
+		paid, free int64
 	}{
-		{"claims per runner minute", paid.ClaimsPerRunnerMinute, free.ClaimsPerRunnerMinute},
-		{"heartbeats per runner minute", paid.HeartbeatsPerRunnerMinute, free.HeartbeatsPerRunnerMinute},
-		{"requests per token minute", paid.RequestsPerTokenMinute, free.RequestsPerTokenMinute},
-		{"max log streams per principal", paid.MaxLogStreamsPerPrincipal, free.MaxLogStreamsPerPrincipal},
-		{"max downloads per principal", paid.MaxDownloadsPerPrincipal, free.MaxDownloadsPerPrincipal},
+		{"claims per runner minute", int64(paid.ClaimsPerRunnerMinute), int64(free.ClaimsPerRunnerMinute)},
+		{"heartbeats per runner minute", int64(paid.HeartbeatsPerRunnerMinute), int64(free.HeartbeatsPerRunnerMinute)},
+		{"requests per token minute", int64(paid.RequestsPerTokenMinute), int64(free.RequestsPerTokenMinute)},
+		{"max log streams per principal", int64(paid.MaxLogStreamsPerPrincipal), int64(free.MaxLogStreamsPerPrincipal)},
+		{"max downloads per principal", int64(paid.MaxDownloadsPerPrincipal), int64(free.MaxDownloadsPerPrincipal)},
+		{"runs per principal hour", int64(paid.RunsPerPrincipalHour), int64(free.RunsPerPrincipalHour)},
+		{"shed queue depth", int64(paid.ShedQueueDepth), int64(free.ShedQueueDepth)},
+		{"egress monthly bytes per principal", paid.EgressMonthlyBytesPerPrincipal, free.EgressMonthlyBytesPerPrincipal},
+		{"egress daily cap bytes", paid.EgressDailyCapBytes, free.EgressDailyCapBytes},
 	} {
 		if tc.free >= tc.paid {
 			t.Errorf("%s: free %d is not below paid %d", tc.name, tc.free, tc.paid)

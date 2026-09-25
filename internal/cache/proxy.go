@@ -82,6 +82,7 @@ func initProxy() {
 			log.Printf("warning: proxy init mkdir %s: %v", name, err)
 		}
 	}
+	enforceProxyCap()
 }
 
 func handleProxy(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +214,11 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 		return false
 	}
 
-	return proxyWriteCachedBody(w, r, registry, meta, bodyPath, "HIT")
+	if !proxyWriteCachedBody(w, r, registry, meta, bodyPath, "HIT") {
+		return false
+	}
+	touchEntry(metaPath)
+	return true
 }
 
 var maxBufferedBodyBytes int64 = 500 << 20
@@ -309,6 +314,7 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 		if err := os.WriteFile(metaPath, metaJSON, 0o644); err != nil {
 			log.Printf("warning: proxy cache meta write: %v", err)
 		}
+		noteProxyStored(int64(len(stored) + len(metaJSON)))
 	}
 
 	// #nosec G706 -- %q escapes control characters in the caller-supplied path
@@ -339,6 +345,7 @@ func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key strin
 	if !proxyWriteCachedBody(w, r, registry, meta, bodyPath, "STALE") {
 		return false
 	}
+	touchEntry(metaPath)
 	log.Printf("proxy: STALE %s/%q (upstream down)", registry, truncatePath(meta.Path))
 	return true
 }
@@ -578,7 +585,7 @@ func isImmutable(path string) bool {
 
 func proxyCleanupLoop(ctx context.Context) {
 	interval := 1 * time.Hour
-	log.Printf("proxy cleanup: every %s, max age %s", interval, proxyMaxAge)
+	log.Printf("proxy cleanup: every %s, max age %s, cap %d bytes (0 means no cap)", interval, proxyMaxAge, proxyMaxBytes)
 
 	for {
 		if !sleepCtx(ctx, interval) {
@@ -626,6 +633,7 @@ func proxyCleanupLoop(ctx context.Context) {
 		if removed > 0 {
 			log.Printf("proxy cleanup: removed %d expired entries", removed)
 		}
+		enforceProxyCap()
 	}
 }
 

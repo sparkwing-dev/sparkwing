@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -221,6 +222,54 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 		return nil, fmt.Errorf("fs list %s: %w", prefix, err)
 	}
 	return out, nil
+}
+
+var _ storage.UsageReporter = (*ArtifactStore)(nil)
+
+// Usage totals every file under Root, as an object store totals every
+// object under its prefix, leaving out in-flight Put temporaries and the
+// conditional-write locks. A walk the caller's context stops early
+// reports a partial total.
+func (s *ArtifactStore) Usage(ctx context.Context) (storage.StoreUsage, error) {
+	var usage storage.StoreUsage
+	err := filepath.WalkDir(s.Root, func(path string, d os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		if d.IsDir() {
+			if rel, relErr := filepath.Rel(s.Root, path); relErr == nil && rel == casLockDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || strings.HasPrefix(d.Name(), ".put-") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		usage.Objects++
+		usage.Bytes += info.Size()
+		return nil
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			return storage.StoreUsage{}, fmt.Errorf("fs usage %s: %w", s.Root, err)
+		}
+		usage.Partial = true
+	}
+	usage.ObservedAt = time.Now().UTC()
+	return usage, nil
 }
 
 func keyFromRelPath(rel string) string {

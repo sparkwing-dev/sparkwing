@@ -40,6 +40,8 @@
         "security",
         "threat-model",
         "auth",
+        "oidc",
+        "limits",
         "hooks",
         "crons",
         "api",
@@ -56,6 +58,8 @@
         "backup-restore",
         "backends",
         "scheduling",
+        "github-actions-runners",
+        "github-app",
         "warm-pool",
         "gitcache"
       ]

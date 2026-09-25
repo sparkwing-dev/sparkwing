@@ -76,12 +76,16 @@ func (s *Server) runStorageMaintenance(ctx context.Context, interval time.Durati
 }
 
 func (s *Server) maintainStorage(ctx context.Context) {
+	s.seedCloudRetention(ctx)
 	settings, err := s.store.StorageSettings(ctx)
 	if err != nil {
 		s.logger.Error("storage settings read failed", "err", err)
 		return
 	}
 	now := time.Now().UTC()
+	if _, err := s.store.PruneStorageCommitReceipts(ctx, now); err != nil {
+		s.logger.Error("prune storage commit receipts failed", "err", err)
+	}
 	if settings.RetentionOn() {
 		swept, serr := s.store.SweepRetention(ctx, now)
 		switch {
@@ -94,6 +98,7 @@ func (s *Server) maintainStorage(ctx context.Context) {
 				"node_metric_retention_days", settings.NodeMetricRetentionDays)
 		}
 	}
+	s.maintainTeamStorage(ctx, now)
 	s.billRetainedStorage(ctx, now)
 	size, err := s.store.DatabaseSize(ctx)
 	if err != nil {
@@ -114,6 +119,9 @@ func (s *Server) maintainStorage(ctx context.Context) {
 // Two passes cannot bill one interval whatever their clocks say, because the
 // store moves each team's watermark by compare-and-set.
 func (s *Server) billRetainedStorage(ctx context.Context, now time.Time) {
+	if !s.Metering() {
+		return
+	}
 	swept, err := s.store.SweepStorageAllowance(ctx, now)
 	if err != nil {
 		s.logger.Error("expiring storage above the allowance failed", "err", err)
@@ -177,11 +185,17 @@ func writeStorageWriteRefusal(w http.ResponseWriter, logger interface{ Warn(stri
 
 // safety: the team a write is charged to comes from the authenticated
 // principal and never from the request, so no caller can spend another's
-// allowance.
+// allowance. A signed-up team names its own principals, so two teams can both
+// hold "agent:eddie"; its writes are charged to "team:<slug>" instead. The
+// operator's team keeps one account per principal, as a self-hosted install
+// always has.
 func chargedPrincipal(r *http.Request) string {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p == nil {
 		return ""
+	}
+	if team := store.NormalizeTeam(p.Team); team != "" && team != store.DefaultTeam {
+		return "team:" + string(team)
 	}
 	return p.Name
 }
@@ -239,6 +253,7 @@ type storageStateJSON struct {
 	Alarm    bool                `json:"alarm"`
 	Quotas   []storageQuotaJSON  `json:"quotas,omitempty"`
 	Teams    []storageTeamJSON   `json:"largest_teams,omitempty"`
+	Team     *teamStandingJSON   `json:"team,omitempty"`
 }
 
 func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +293,10 @@ func (s *Server) handleStorageShow(w http.ResponseWriter, r *http.Request) {
 			RetainedBytes: retained,
 		},
 		Alarm: alarm,
+	}
+	if out.Team, err = s.callerStorageStanding(r); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 	if admin {
 		if sampled {

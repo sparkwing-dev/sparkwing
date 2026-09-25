@@ -66,6 +66,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if req.Metered && !s.Metering() {
+		http.NotFound(w, r)
+		return
+	}
 	if req.Principal == "" {
 		writeError(w, http.StatusBadRequest, errors.New("principal required"))
 		return
@@ -180,6 +184,8 @@ type whoamiResp struct {
 	Kind        string   `json:"kind"`
 	Scopes      []string `json:"scopes"`
 	TokenPrefix string   `json:"token_prefix,omitempty"`
+	Team        string   `json:"team,omitempty"`
+	Role        string   `json:"role,omitempty"`
 }
 
 func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
@@ -197,5 +203,7 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		Kind:        p.Kind,
 		Scopes:      p.Scopes,
 		TokenPrefix: p.TokenPrefix,
+		Team:        string(p.Team),
+		Role:        p.Role,
 	})
 }

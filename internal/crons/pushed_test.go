@@ -106,6 +106,47 @@ func TestArmPushed_FollowingTheBranchTipHasNoPin(t *testing.T) {
 	}
 }
 
+func TestArmPushed_AppIdentityKeepsStateAcrossRepositoryRename(t *testing.T) {
+	svc := pushedService(t)
+	ctx := context.Background()
+	push := crons.ArmPush{
+		RepoURL: pushedRepoURL, Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567",
+		GitHubInstallationID: 7, GitHubRepositoryID: 701,
+		Entries: []crons.Declared{declaredEntry("nightly", "default", "0 3 * * *")},
+	}
+	if _, err := svc.ArmPushed(ctx, push); err != nil {
+		t.Fatal(err)
+	}
+	id := crons.AppScheduleID(store.DefaultTeam, 7, 701, "nightly", "default")
+	if err := svc.Pause(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	override := "0 5 * * *"
+	if _, err := svc.SetOverride(ctx, id, crons.Override{Cron: &override}); err != nil {
+		t.Fatal(err)
+	}
+	cursor := time.Now().Add(time.Hour)
+	if err := svc.Store.ResolveCronDue(ctx, id, cursor, nil, &store.CronFire{
+		ID: "crf_rename", Outcome: store.CronOutcomeFired, RunID: "run-before-rename", DecidedAt: cursor,
+	}, cursor); err != nil {
+		t.Fatal(err)
+	}
+	push.RepoURL = "https://github.com/acme/renamed.git"
+	push.SHA = "fedcba9876543210fedcba9876543210fedcba98"
+	if _, err := svc.ArmPushed(ctx, push); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := svc.List(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %+v, %v", rows, err)
+	}
+	row := rows[0]
+	if row.ID != id || row.RepoPath != push.RepoURL || row.LockedRef != push.SHA || !row.Paused ||
+		!row.CursorAt.Equal(cursor) || row.Override == nil || row.Override.Cron != override || row.LastRunID != "run-before-rename" {
+		t.Fatalf("re-armed App row lost identity or state: %+v", row)
+	}
+}
+
 func TestArmPushed_KeepsPauseCursorAndOverrideAndWithdrawsTheRest(t *testing.T) {
 	svc := pushedService(t)
 	ctx := context.Background()

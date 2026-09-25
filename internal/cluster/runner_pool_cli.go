@@ -12,20 +12,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 type PoolLoopConfig struct {
-	ControllerURL     string
-	LogsURL           string
-	GitcacheURL       string
-	CacheToken        string
+	ControllerURL string
+	LogsURL       string
+	GitcacheURL   string
+	// AllowRepos binds every claimed node the way TriggerLoopOptions.AllowRepos
+	// binds a trigger.
+	AllowRepos        sourceurl.RepoAllowlist
 	Token             string
 	HolderPrefix      string
 	Labels            []string
@@ -36,6 +42,14 @@ type PoolLoopConfig struct {
 	HeartbeatInterval time.Duration
 
 	MaxClaims int
+
+	// IdleExit ends the loop once no node has been held for this long, so a
+	// runner on metered minutes stops paying for an empty queue. Zero polls
+	// until cancelled.
+	IdleExit time.Duration
+	// ClaimUntil stops new claims at this instant and ends the loop once the
+	// nodes already held finish. Zero never stops.
+	ClaimUntil time.Time
 
 	SourceName string
 
@@ -66,10 +80,14 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 		logger = slog.Default()
 	}
 	cfg = normalizePoolLoopConfig(cfg)
+	sweepLeftoverDeployKeys(logger)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	ctrl := client.NewWithToken(cfg.ControllerURL, httpClient, cfg.Token).
 		WithRunnerIdentity(holderRunnerIdentity(cfg.HolderPrefix))
+	if !cfg.AllowRepos.Empty() {
+		ctrl.WithAllowRepos(cfg.AllowRepos.Patterns())
+	}
 
 	var admission *orchestrator.LocalAdmission
 	var provider headroomProvider
@@ -97,7 +115,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	}
 
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
-		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.Token, cfg.CacheToken,
+		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
@@ -137,6 +155,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 		"holder_prefix", cfg.HolderPrefix,
 		"labels", cfg.Labels,
 		"auth", cfg.Token != "",
+		"idle_exit", cfg.IdleExit,
 	)
 
 	advisor, _ := claimer.(client.PollAdvisor)
@@ -155,6 +174,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// the log says so once rather than on every poll.
 	limitLogged := false
 	shed := client.NewShedLog(client.ShedWarnInterval)
+	idleSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
 			logger.Info(cfg.SourceName+" shutting down", "reason", err)
@@ -180,6 +200,17 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			}
 		}
 
+		// safety: checked after the slot wait, because a node that held the
+		// only slot may have run past the deadline.
+		if !cfg.ClaimUntil.IsZero() && !time.Now().Before(cfg.ClaimUntil) {
+			<-sem
+			if sharedSlots != nil {
+				<-sharedSlots
+			}
+			logger.Info(cfg.SourceName+" credential is near expiry; finishing held nodes and exiting",
+				"claimed", claimed)
+			return nil
+		}
 		holderID := fmt.Sprintf("%s:%d", cfg.HolderPrefix, time.Now().UnixNano())
 		report := currentCapacity(ctx, provider)
 		// safety: the loop holds one slot for the claim it is about to make, so
@@ -236,10 +267,20 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 				<-sharedSlots
 			}
 			observeClaimOutcome("empty")
+			// safety: a slot still held means a node is running, and the
+			// runner stays until it finishes however long the queue is empty.
+			if len(sem) > 0 {
+				idleSince = time.Now()
+			} else if cfg.IdleExit > 0 && time.Since(idleSince) >= cfg.IdleExit {
+				logger.Info(cfg.SourceName+" queue empty; exiting",
+					"idle", time.Since(idleSince).Round(time.Second), "claimed", claimed)
+				return nil
+			}
 			sleepOrCancel(ctx, idlePoll())
 			continue
 		}
 		observeClaimOutcome("claimed")
+		idleSince = time.Now()
 		creditsLogged = false
 		limitLogged = false
 		claimed++
@@ -267,6 +308,10 @@ func executorKind(source string) string {
 	return "runner"
 }
 
+// defaultRunnerMetricsAddr is loopback-only because a runner on a laptop would
+// otherwise serve /metrics on every interface; the chart passes its own port.
+const defaultRunnerMetricsAddr = "127.0.0.1:9090"
+
 func runRunnerCLI(args []string, version string) error {
 	fs := flag.NewFlagSet("runner", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
@@ -288,8 +333,8 @@ func runRunnerCLI(args []string, version string) error {
 		"runner label (repeatable, e.g. --label=arm64 --label=arch=arm64)")
 	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),
 		"shared-secret bearer token for controller + logs auth (env: SPARKWING_AGENT_TOKEN)")
-	metricsAddr := fs.String("metrics-addr", ":9090",
-		"address for the /metrics listener (empty disables)")
+	metricsAddr := fs.String("metrics-addr", defaultRunnerMetricsAddr,
+		"address for the /metrics listener (empty disables; a pod that is scraped passes :9090)")
 	maxClaims := fs.Int("max-claims-before-restart", 25,
 		"exit the loop after N successful claims so kubelet restarts the container (0 = unlimited; FOLLOWUPS #12)")
 	alsoClaimTriggers := fs.Bool("also-claim-triggers", false,
@@ -297,7 +342,17 @@ func runRunnerCLI(args []string, version string) error {
 	claimNodes := fs.Bool("claim-nodes", true,
 		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
-		"sparkwing-cache URL for the trigger-loop (required when --also-claim-triggers is set)")
+		"the operator's git cache, which triggers and nodes fetch source through; empty fetches each run's "+
+			"repository directly with the credential the controller releases for the run: the team's GitHub "+
+			"App token, else the git credential the team stored for the host. A node holding its run's cache "+
+			"grant reads the cache the controller announces instead, when this is empty or the controller's own "+
+			"gitcache proxy (env: SPARKWING_GITCACHE_URL)")
+	var allowRepos multiFlag
+	fs.Var(&allowRepos, "allow-repo",
+		"repository this machine may build, as host/path with '*' matching within one path segment "+
+			"(repeatable, e.g. --allow-repo 'github.com/acme/*'); without --gitcache it also lets the runner fetch "+
+			"with this machine's own git credentials when the controller releases none, so name only the "+
+			"repositories you trust: the runner compiles and runs their pipeline code as the user running it")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
@@ -342,8 +397,27 @@ func runRunnerCLI(args []string, version string) error {
 		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
 	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
 		"host capacity held back from advertised headroom in the daemon budget grammar, e.g. 2,4gb or 10% (env: SPARKWING_LOCAL_RESERVE)")
+	githubActions := fs.Bool("github-actions", false,
+		"run inside a GitHub Actions job: exchange the job's ID token for a credential that claims only this repository's work, "+
+			"advertise the github-actions label, and stop claiming before the credential expires")
+	team := fs.String("team", os.Getenv("SPARKWING_TEAM"),
+		"team slug whose work this GitHub Actions job runs; the team's owner must have bound this repository (env: SPARKWING_TEAM)")
+	idleExit := fs.Duration("idle-exit", 0,
+		"exit once no node has been held for this long (0 = poll until stopped)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if *githubActions {
+		if !*claimNodes {
+			return errors.New("--github-actions requires --claim-nodes")
+		}
+		if *triggerRunnerKind != "" && *triggerRunnerKind != "inprocess" {
+			return errors.New("--github-actions requires --trigger-runner=inprocess")
+		}
+		*alsoClaimTriggers = true
+		*triggerRunnerKind = "inprocess"
 	}
 	if *controllerURL == "" {
 		fs.Usage()
@@ -362,6 +436,50 @@ func runRunnerCLI(args []string, version string) error {
 	if !*claimNodes && !*alsoClaimTriggers {
 		return errors.New("--claim-nodes=false requires --also-claim-triggers")
 	}
+	if *idleExit < 0 {
+		return errors.New("--idle-exit must not be negative")
+	}
+	allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
+	if err != nil {
+		return fmt.Errorf("--allow-repo: %w", err)
+	}
+	var claimUntil time.Time
+	if *githubActions {
+		cred, err := githubActionsCredential(context.Background(), &http.Client{Timeout: githubExchangeTimeout},
+			*controllerURL, *team)
+		if err != nil {
+			return fmt.Errorf("--github-actions: %w", err)
+		}
+		*token = cred.Token
+		for _, l := range cred.Labels {
+			labels = withLabel(labels, l)
+		}
+		claimUntil = githubClaimDeadline(cred)
+		if !explicit["holder-prefix"] {
+			*holderPrefix = "github-actions:" + cred.Repository + ":" + os.Getenv("GITHUB_RUN_ID")
+		}
+		// safety: the job itself is the unit that restarts, so the pod-restart
+		// claim budget would only end a job early.
+		if !explicit["max-claims-before-restart"] {
+			*maxClaims = 0
+		}
+		if !explicit["metrics-addr"] {
+			*metricsAddr = ""
+		}
+		// safety: the credential claims only this repository's work, so a job
+		// given no list builds exactly the repository that started it.
+		if allow.Empty() {
+			if allow, err = sourceurl.ParseRepoAllowlist([]string{"github.com/" + cred.Repository}); err != nil {
+				return fmt.Errorf("--github-actions: %w", err)
+			}
+		}
+		slog.Default().Info("github actions runner credential issued",
+			"team", cred.Team, "repository", cred.Repository,
+			"expires_at", time.Unix(cred.ExpiresAt, 0).UTC(), "claim_until", claimUntil.UTC())
+	}
+
+	slog.Default().Info("runner repository allowlist", "allow_repo", allow.String(), "direct_source", *gitcacheURL == "",
+		"owner_credentials", *gitcacheURL == "" && !allow.Empty())
 
 	identity := buildinfo.Read("sparkwing-runner", version)
 	warmList, err := parseWarmModules(*warmModules, identity.Version)
@@ -399,9 +517,6 @@ func runRunnerCLI(args []string, version string) error {
 	}
 
 	if *alsoClaimTriggers {
-		if *gitcacheURL == "" {
-			return errors.New("--also-claim-triggers requires --gitcache or SPARKWING_GITCACHE_URL")
-		}
 		// safety: without this the child rejects each claimed trigger after admission.
 		usesK8sJobs := *triggerRunnerKind == "k8s" ||
 			(*triggerRunnerKind == "warm" && *triggerRunnerImage != "")
@@ -413,6 +528,7 @@ func runRunnerCLI(args []string, version string) error {
 				ControllerURL:   *controllerURL,
 				LogsURL:         *logsURL,
 				GitcacheURL:     *gitcacheURL,
+				AllowRepos:      allow,
 				Token:           *token,
 				RunnerKind:      *triggerRunnerKind,
 				K8sNamespace:    *triggerRunnerNamespace,
@@ -449,7 +565,7 @@ func runRunnerCLI(args []string, version string) error {
 		ControllerURL:     *controllerURL,
 		LogsURL:           *logsURL,
 		GitcacheURL:       *gitcacheURL,
-		CacheToken:        os.Getenv("SPARKWING_CACHE_TOKEN"),
+		AllowRepos:        allow,
 		Token:             *token,
 		HolderPrefix:      *holderPrefix,
 		Labels:            []string(labels),
@@ -458,6 +574,8 @@ func runRunnerCLI(args []string, version string) error {
 		Lease:             *lease,
 		HeartbeatInterval: *heartbeat,
 		MaxClaims:         *maxClaims,
+		IdleExit:          *idleExit,
+		ClaimUntil:        claimUntil,
 		SourceName:        "pool runner",
 		LocalAdmission:    *localAdmission,
 		LocalReserve:      *localReserve,
@@ -474,7 +592,9 @@ func currentCapacity(ctx context.Context, provider headroomProvider) capacityRep
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
-	controllerURL, logsURL, gitcacheURL, token, cacheToken string,
+	controllerURL, logsURL, gitcacheURL string,
+	allow sourceurl.RepoAllowlist,
+	token string,
 	n *store.Node,
 	holderID string,
 	lease, hbInterval time.Duration,
@@ -504,18 +624,74 @@ func executePooledNode(
 		runPoolHeartbeat(heartbeatCtx, ctrl, n.RunID, n.NodeID, holderID, lease, hbInterval, cancel, source, provider, logger)
 	}()
 
-	res, err := orchestrator.RunNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
-		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, cacheToken), orchestrator.ClaimedNodeAttempt(n))
+	grant := orchestrator.RequestRunCacheGrant(heartbeatCtx, controllerURL, token, n.RunID, logger)
+	var announced string
+	if grant != "" {
+		services, err := discovery.ServicesFor(execCtx, controllerURL, token)
+		if err != nil {
+			logger.Debug("controller announces no cache; keeping --gitcache", "run_id", n.RunID, "err", err)
+		}
+		announced = services.CachePod
+	}
+	gitcacheURL = nodeCacheURL(gitcacheURL, controllerURL, announced, grant)
+	res, err := runPooledNodeOnce(execCtx, controllerURL, logsURL, n.RunID, n.NodeID, holderID, token,
+		&stdoutLogger{}, logger, admission, orchestrator.WithGitcache(gitcacheURL, grant), orchestrator.WithRepoAllowlist(allow),
+		orchestrator.ClaimedNodeAttempt(n))
 	cancel()
 	hbWG.Wait()
 
 	if err != nil {
 		logger.Error(source+" setup failure",
 			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
+		failPooledNodeSetup(ctx, ctrl, n, holderID, err, source, logger)
 		return
 	}
 	logger.Info(source+" finished node",
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
+}
+
+// nodeCacheURL is the cache a claimed node reads source, the binary cache and
+// artifacts from. With the run's grant, the cache the controller announces
+// replaces the controller's own gitcache proxy, or no cache at all, so an
+// off-cluster agent reaches the cache directly and the controller carries no
+// data. A cache named directly, such as an in-cluster Service, is kept, and
+// without a grant nothing changes: the announced cache takes only a grant.
+func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
+	if grant == "" || announced == "" {
+		return gitcacheURL
+	}
+	if gitcacheURL == "" || bincache.IsControllerGitcache(gitcacheURL, controllerURL) {
+		return announced
+	}
+	return gitcacheURL
+}
+
+// runPooledNodeOnce is the node execution a pooled claim runs; tests
+// replace it to inject a setup failure.
+var runPooledNodeOnce = orchestrator.RunNodeOnce
+
+// poolSetupFinishTimeout bounds the finish a setup failure sends.
+const poolSetupFinishTimeout = 10 * time.Second
+
+// failPooledNodeSetup finishes a claimed node as failed with the setup
+// error, under the node's claim fence, so the run reports the real cause at
+// once instead of waiting out the claim lease. A runner shutting down leaves
+// the node alone, because its lease lapsing is what hands the node to
+// another runner.
+func failPooledNodeSetup(ctx context.Context, ctrl *client.Client, n *store.Node, holderID string, setupErr error, source string, logger *slog.Logger) {
+	if ctx.Err() != nil {
+		return
+	}
+	finishCtx, cancel := context.WithTimeout(store.WithNodeClaimFence(ctx, store.NodeClaimFence{
+		HolderID: holderID, MembershipID: n.ClaimMembershipID,
+		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
+	}), poolSetupFinishTimeout)
+	defer cancel()
+	msg := source + " could not start the node: " + setupErr.Error()
+	if err := ctrl.FinishNodeWithReason(finishCtx, n.RunID, n.NodeID, string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); err != nil {
+		logger.Warn(source+" could not finish the node after its setup failed; its lease will lapse",
+			"run_id", n.RunID, "node_id", n.NodeID, "err", err)
+	}
 }
 
 var (

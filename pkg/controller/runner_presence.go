@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -29,8 +30,9 @@ type runnerPresence struct {
 	awarded int
 	// safety: a caller that only ever polls has proved nothing, so labels alone
 	// cannot reserve the queue for a machine that never executes.
-	claimed   bool
-	UpdatedAt time.Time
+	claimed    bool
+	allowRepos *sourceurl.RepoAllowlist
+	UpdatedAt  time.Time
 }
 
 func (p runnerPresence) freeSlots() int {
@@ -49,7 +51,7 @@ func newRunnerPresenceRegistry() *runnerPresenceRegistry {
 	return &runnerPresenceRegistry{m: map[presenceKey]runnerPresence{}}
 }
 
-func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, at time.Time) {
+func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, allowRepos *sourceurl.RepoAllowlist, at time.Time) {
 	if r == nil || key.name == "" {
 		return
 	}
@@ -57,7 +59,7 @@ func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capaci
 	defer r.mu.Unlock()
 	p := runnerPresence{
 		Labels: append([]string(nil), labels...), UpdatedAt: at,
-		claimed: r.m[key].claimed,
+		claimed: r.m[key].claimed, allowRepos: allowRepos,
 	}
 	if capacity != nil {
 		p.MaxConcurrent = capacity.MaxConcurrent
@@ -82,25 +84,19 @@ func (r *runnerPresenceRegistry) awarded(key presenceKey) {
 	}
 }
 
-// safety: the agents view knows a runner by the name segment of its holder id
-// and not by the credential behind it, so the newest row under that name wins.
-func (r *runnerPresenceRegistry) lookup(name string, now time.Time, within time.Duration) (runnerPresence, bool) {
+// safety: a different credential can claim the same display name, so only
+// the credential behind the stored claim can refresh its liveness.
+func (r *runnerPresenceRegistry) lookup(key presenceKey, now time.Time, within time.Duration) (runnerPresence, bool) {
 	if r == nil {
 		return runnerPresence{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var newest runnerPresence
-	found := false
-	for key, p := range r.m {
-		if key.name != name || now.Sub(p.UpdatedAt) > within {
-			continue
-		}
-		if !found || p.UpdatedAt.After(newest.UpdatedAt) {
-			newest, found = p, true
-		}
+	p, ok := r.m[key]
+	if !ok || now.Sub(p.UpdatedAt) > within {
+		return runnerPresence{}, false
 	}
-	return newest, found
+	return p, true
 }
 
 // safety: forgetting the rows that fell out of the window here is what bounds
@@ -121,7 +117,8 @@ func (r *runnerPresenceRegistry) live(now time.Time, within time.Duration, exclu
 			continue
 		}
 		out = append(out, store.RunnerPresence{
-			Name: key.name, Labels: p.Labels, FreeSlots: p.freeSlots(),
+			Name: key.name, Labels: p.Labels, FreeSlots: p.freeSlots(), TokenPrefix: key.tokenPrefix,
+			AllowRepos: presenceRepoFilter(p.allowRepos),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -153,4 +150,13 @@ func presenceName(holderID string) string {
 		return name
 	}
 	return holderID
+}
+
+// safety: a nil list must reach the store as a nil interface, or a runner that
+// sent none would read as one whose list admits nothing.
+func presenceRepoFilter(allow *sourceurl.RepoAllowlist) store.RepoFilter {
+	if allow == nil {
+		return nil
+	}
+	return *allow
 }

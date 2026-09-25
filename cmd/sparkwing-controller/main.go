@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,12 +18,17 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/pool"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
@@ -82,6 +88,10 @@ func run(args []string) error {
 		"externally-reachable URL of the dashboard that watches this controller. "+
 			"Announced via GET /api/v1/services, so `sparkwing cloud connect` prints "+
 			"where to watch runs. Empty disables the announcement.")
+	billingURL := fs.String("billing-url", os.Getenv("SPARKWING_BILLING_URL"),
+		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
+			"when a team owner buys credits; the controller authenticates with "+
+			"SPARKWING_BILLING_TOKEN. Empty sells no credits.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
@@ -89,6 +99,18 @@ func run(args []string) error {
 			"where GitHub posts webhook deliveries. `sparkwing cluster webhooks "+
 			"connect` points a repository's webhook at it. Empty answers each "+
 			"connect request with the URL that request arrived at.")
+	oidcKeyFile := fs.String("oidc-key-file", "",
+		"path to an RSA private key PEM (at least 2048 bits) that signs the OIDC ID "+
+			"tokens runs exchange for cloud credentials (alternative to "+oidcKeyEnv+", "+
+			"which carries the PEM itself). The issuer is --external-url. Unset, the "+
+			"controller issues no ID tokens.")
+	oidcPublishedKeyFile := fs.String("oidc-published-key-file", "",
+		"path to a second OIDC key, private or public PEM, that the key set publishes "+
+			"and that never signs (alternative to "+oidcPublishedKeyEnv+"): the next key "+
+			"before a rotation switches signing to it, and the previous key after, so "+
+			"relying parties' cached key sets verify tokens across the switch.")
+	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
+		"lifetime of an OIDC ID token, from 1m to 1h")
 	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
 		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For "+
 			"for login throttling; empty ignores forwarded headers and keys the "+
@@ -140,6 +162,11 @@ func run(args []string) error {
 			"first one started instead of starting a second. GitHub deliveries "+
 			"are deduped by delivery id and body digest regardless. Zero dedupes "+
 			"no API submission.")
+	runnersPerToken := fs.Int("runners-per-token", controller.DefaultRunnersPerToken,
+		"most self-named runners one caller may hold at once on the claim routes, "+
+			"where the runner name is the caller's own word and each name gets its "+
+			"own request budget. A name counts until it goes unused for ten "+
+			"minutes, and a new name past the cap is answered 429.")
 	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the token prefix together with the runner the "+
@@ -211,6 +238,25 @@ func run(args []string) error {
 			"s3://bucket/prefix. It is read on the reconciliation interval and never "+
 			"served, so the controller exposes none of it. Empty counts only the writes "+
 			"this process makes (env: SPARKWING_OBJECT_STORE_URL)")
+	freeTeamSlots := fs.Int64("free-team-slots", store.DefaultFreeTeamSlots,
+		"teams without credits that may hold a free-tier slot on a multi-team controller. A team takes "+
+			"one when it first starts a run and keeps it until the team is deleted, so free storage never "+
+			"passes this many allowances; a team with neither credits nor a slot is refused. Lowering it "+
+			"takes no slot back")
+	cacheBlobStore := fs.String("cache-blob-store", os.Getenv("SPARKWING_CACHE_BLOB_STORE"),
+		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
+			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
+			"team keeps its own. Empty leaves the cache's counts to its writes alone (env: SPARKWING_CACHE_BLOB_STORE)")
+	logsArchiveStore := fs.String("logs-archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
+		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+
+			"what each team's archived logs hold; the logs service keeps its own retention "+
+			"(env: SPARKWING_LOGS_ARCHIVE_STORE)")
+	teamDownloadFree := fs.Int64("team-daily-download-free-bytes", controller.DefaultTeamDailyDownloadFreeBytes,
+		"bytes one team without credits may download through the cache in a UTC day: binaries, artifacts, "+
+			"dependency archives and git fetches. Past it the cache refuses the team's downloads with 429 until "+
+			"midnight UTC. The operator's team is exempt, and 0 turns the cap off")
+	teamDownloadFunded := fs.Int64("team-daily-download-funded-bytes", controller.DefaultTeamDailyDownloadFundedBytes,
+		"the same daily cap for a team with credits; 0 turns it off")
 	bucketMeasurePages := fs.Int("bucket-measure-pages", envMeasurePages(),
 		"listings one bucket measurement may spend before it stops and reports itself "+
 			"incomplete. Each listing covers a thousand objects, so the default bounds a "+
@@ -222,6 +268,37 @@ func run(args []string) error {
 			"listing is the only enumeration the ceiling costs; 0 measures once at "+
 			"startup and never again (env: SPARKWING_OBJECT_STORE_BUCKET_RECONCILE)")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceController, egress.ControllerSurfaces)
+	licenseFile := fs.String("license-file", "",
+		"file holding the signed license that unlocks multi-team hosting. "+
+			"Empty reads the license text from SPARKWING_LICENSE; without a "+
+			"valid license the controller holds one team.")
+	googleClientID := fs.String("google-client-id", os.Getenv("SPARKWING_GOOGLE_CLIENT_ID"),
+		"Google OAuth client id for dashboard sign-in; the secret comes from "+
+			"SPARKWING_GOOGLE_CLIENT_SECRET. Offered only with a multi-team license.")
+	githubClientID := fs.String("github-client-id", os.Getenv("SPARKWING_GITHUB_CLIENT_ID"),
+		"GitHub OAuth app client id for dashboard sign-in; the secret comes from "+
+			"SPARKWING_GITHUB_CLIENT_SECRET. Offered only with a multi-team license.")
+	emailSender := fs.String("email-sender", os.Getenv("SPARKWING_EMAIL_SENDER"),
+		"address invitation emails are sent from through Amazon SES, such as noreply@example.com; "+
+			"credentials and region come from the AWS default chain. Empty sends no email and logs "+
+			"each invitation instead, so the owner shares its link")
+	emailConfigSet := fs.String("email-configuration-set", os.Getenv("SPARKWING_EMAIL_CONFIGURATION_SET"),
+		"SES configuration set every invitation email names, for delivery and bounce events; empty names none")
+	githubAppID := fs.String("github-app-id", os.Getenv("SPARKWING_GITHUB_APP_ID"),
+		"numeric id of the deployment's GitHub App. The App's client id and secret are "+
+			"--github-client-id and SPARKWING_GITHUB_CLIENT_SECRET, its private key comes from "+
+			"SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE or SPARKWING_GITHUB_APP_PRIVATE_KEY, and its "+
+			"webhook secret from SPARKWING_GITHUB_APP_WEBHOOK_SECRET")
+	githubAppSlug := fs.String("github-app-slug", os.Getenv("SPARKWING_GITHUB_APP_SLUG"),
+		"the GitHub App's name in https://github.com/apps/<slug>, where a team owner installs it")
+	oauthRedirectURIs := fs.String("oauth-redirect-uris", os.Getenv("SPARKWING_OAUTH_REDIRECT_URIS"),
+		"comma-separated dashboard callback URLs a sign-in may return to, "+
+			"such as https://app.example.com/auth/google/callback")
+	signUpGate := fs.String("signup-gate", string(store.SignUpOpen),
+		"open or waitlist. waitlist places every new account on the sign-up "+
+			"waitlist whatever the operator's stored setting says; open defers to "+
+			"that setting, which PUT /api/v1/signups changes. Existing accounts are "+
+			"never affected.")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
 		"refuse to start when the tokens table is empty, guarding against "+
 			"accidentally deploying an open controller. Leave unset for "+
@@ -261,6 +338,9 @@ func run(args []string) error {
 	if *triggerDedupeWindow < 0 {
 		return fmt.Errorf("--trigger-dedupe-window cannot be negative")
 	}
+	if *runnersPerToken < 1 {
+		return fmt.Errorf("--runners-per-token must be at least 1")
+	}
 	if *claimsPerMinute < 0 || *heartbeatsPerMinute < 0 {
 		return fmt.Errorf("--claims-per-runner-minute and --heartbeats-per-runner-minute cannot be negative")
 	}
@@ -284,6 +364,10 @@ func run(args []string) error {
 		RequestsPerMinuteAlarm:    *requestsPerMinuteAlarm,
 		MaxLogStreamsPerPrincipal: egressCfg.MaxStreamsPerPrincipal,
 		MaxDownloadsPerPrincipal:  egressCfg.MaxDownloadsPerPrincipal,
+		RunsPerPrincipalHour:      *maxRunsPerPrincipalHour,
+		ShedQueueDepth:            *shedQueueDepth,
+		EgressMonthlyBytes:        egressCfg.PerPrincipalMonthlyBytes,
+		EgressDailyCapBytes:       egressCfg.GlobalDailyCapBytes,
 	}, guardsNamed{
 		ClaimsPerRunnerMinute:     fs.Changed(flagClaimsPerRunnerMinute),
 		HeartbeatsPerRunnerMinute: fs.Changed(flagHeartbeatsPerRunnerMinute),
@@ -291,9 +375,15 @@ func run(args []string) error {
 		RequestsPerMinuteAlarm:    fs.Changed(flagRequestsPerMinuteAlarm),
 		MaxLogStreamsPerPrincipal: egressNamed.MaxLogStreams,
 		MaxDownloadsPerPrincipal:  egressNamed.MaxDownloads,
+		RunsPerPrincipalHour:      fs.Changed("max-runs-per-principal-hour"),
+		ShedQueueDepth:            fs.Changed("shed-queue-depth"),
+		EgressMonthlyBytes:        egressNamed.MonthlyBytes,
+		EgressDailyCapBytes:       egressNamed.DailyCapBytes,
 	})
 	egressCfg.MaxStreamsPerPrincipal = guards.MaxLogStreamsPerPrincipal
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
+	egressCfg.PerPrincipalMonthlyBytes = guards.EgressMonthlyBytes
+	egressCfg.GlobalDailyCapBytes = guards.EgressDailyCapBytes
 	if int64(*liveLogNodeKB)<<10 > int64(*liveLogTotalMB)<<20 {
 		return fmt.Errorf("--live-log-node-kb (%d) exceeds --live-log-total-mb (%d), so one node would never fit",
 			*liveLogNodeKB, *liveLogTotalMB)
@@ -312,6 +402,7 @@ func run(args []string) error {
 	}
 
 	emitStartupProvenance(os.Stderr)
+	stampBinaryVersion()
 
 	p, perr := paths.DefaultPaths()
 	if perr != nil {
@@ -372,28 +463,35 @@ func run(args []string) error {
 			"%d pipelines refusing every repository, %d repository secrets\n",
 		wh.Pipelines, wh.Repos, wh.DenyAll, wh.RepoSecrets)
 
+	if strings.TrimSpace(*billingURL) != "" && os.Getenv("SPARKWING_BILLING_TOKEN") == "" {
+		return errors.New("--billing-url is set but SPARKWING_BILLING_TOKEN is empty; " +
+			"the checkout service refuses a controller without its token")
+	}
+
 	srv := controller.New(st, nil).
 		WithTrustedProxyCIDRs(trustedProxyCIDRs).
-		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
 		WithCachePodURL(*cachePodURL).
+		WithTeamDownloadCaps(*teamDownloadFree, *teamDownloadFunded).
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
+		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
 		WithCacheURL(*cacheURL).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
 		WithLiveLogLimits(*liveLogNodeKB<<10, int64(*liveLogTotalMB)<<20, *liveLogMaxNodes, *liveLogIdle).
 		WithLocalFirstPlacement(splitCSV(*defaultPreferLabels), *placementHold, *placementLiveness).
 		WithFloodPolicy(controller.FloodPolicy{
-			RunsPerPrincipalHour: *maxRunsPerPrincipalHour,
-			ShedQueueDepth:       *shedQueueDepth,
+			RunsPerPrincipalHour: guards.RunsPerPrincipalHour,
+			ShedQueueDepth:       guards.ShedQueueDepth,
 			DedupeWindow:         *triggerDedupeWindow,
 		}).
 		WithRequestBudget(controller.RequestBudget{
 			ClaimsPerMinute:     guards.ClaimsPerRunnerMinute,
 			HeartbeatsPerMinute: guards.HeartbeatsPerRunnerMinute,
+			RunnersPerToken:     *runnersPerToken,
 		}).
 		WithTokenRequestBudget(controller.TokenRequestBudget{
 			PerTokenMinute: guards.RequestsPerTokenMinute,
@@ -402,9 +500,63 @@ func run(args []string) error {
 		WithIdleClaimPoll(*idleClaimPoll).
 		WithIdleClaimPollEnforced(guards.EnforceIdleClaimPoll).
 		WithEgressMeter(egress.New(egressCfg))
-	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
-	if cipher != nil {
-		srv = srv.WithSecretsCipher(cipher)
+	if err := configureIdentity(srv, identityFlags{
+		LicenseFile:        *licenseFile,
+		GoogleClientID:     *googleClientID,
+		GoogleClientSecret: os.Getenv("SPARKWING_GOOGLE_CLIENT_SECRET"),
+		GitHubClientID:     *githubClientID,
+		GitHubClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
+		RedirectURIs:       *oauthRedirectURIs,
+		SignUpGate:         *signUpGate,
+	}, slog.Default()); err != nil {
+		return err
+	}
+	if err := configureMailer(ctx, srv, *emailSender, *emailConfigSet); err != nil {
+		return err
+	}
+	// safety: the log-deletion credential is a token carrying only
+	// logs.delete, which reads nothing; without one a team deletion with logs
+	// to remove waits and records why.
+	logsDeleteToken := strings.TrimSpace(os.Getenv("SPARKWING_LOGS_DELETE_TOKEN"))
+	clearEnv("SPARKWING_LOGS_DELETE_TOKEN")
+	srv.WithTeamStorage(controller.TeamStorage{
+		LogsURL: *logsURL, LogsToken: logsDeleteToken,
+		CacheURL: firstNonEmpty(*cacheURL, *cachePodURL), CacheToken: bincache.CacheToken(),
+	})
+	if err := configureGitHubApp(srv, githubAppFlags{
+		AppID:        *githubAppID,
+		Slug:         *githubAppSlug,
+		ClientID:     *githubClientID,
+		ClientSecret: os.Getenv("SPARKWING_GITHUB_CLIENT_SECRET"),
+	}, os.Getenv); err != nil {
+		return err
+	}
+	oidcIssuer, oerr := loadOIDCIssuer(*oidcKeyFile, *oidcPublishedKeyFile, *externalURL, *oidcTokenTTL, os.Stderr)
+	if oerr != nil {
+		return fmt.Errorf("oidc issuer: %w", oerr)
+	}
+	srv = srv.WithOIDCIssuer(oidcIssuer)
+	if err := checkCacheGrantKey(srv, *cacheURL, *cachePodURL,
+		os.Getenv(authwire.CacheGrantKeyEnv), bincache.CacheToken()); err != nil {
+		return err
+	}
+	if err := checkMultiTeamObjectStore(srv, *bucketStoreURL); err != nil {
+		return err
+	}
+	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
+		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
+	}
+	if *freeTeamSlots < 0 {
+		return fmt.Errorf("--free-team-slots must not be negative; pass 0 to admit no team without credits")
+	}
+	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
+		return fmt.Errorf("--free-team-slots: %w", err)
+	}
+	// The license decides whether an empty tokens table may serve
+	// unauthenticated, so auth is resolved after it is installed.
+	srv.EnableAuthFromStore()
+	if err := configureSecrets(ctx, srv, cipher); err != nil {
+		return err
 	}
 	if *bucketMeasurePages < 1 {
 		return fmt.Errorf("--bucket-measure-pages must be at least 1; a measurement that lists nothing can only be incomplete")
@@ -416,12 +568,48 @@ func run(args []string) error {
 		}
 		srv = srv.WithBucketUsage(bucketStore)
 	}
-	if *requireAuth && !srv.AuthEnabled() {
-		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
-			"the tokens table is empty; supply the first admin token with " +
-			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
-			"mint one with the controller started unauthenticated and restart " +
-			"with --require-auth")
+	if *cacheBlobStore != "" || *logsArchiveStore != "" {
+		cache, err := openTeamStore(ctx, *cacheBlobStore, controller.CacheObjectMaxAge)
+		if err != nil {
+			return fmt.Errorf("--cache-blob-store: %w", err)
+		}
+		logsStore, err := openTeamStore(ctx, *logsArchiveStore, nil)
+		if err != nil {
+			return fmt.Errorf("--logs-archive-store: %w", err)
+		}
+		srv = srv.WithStoragePass(cache, logsStore)
+		privateKey := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY")
+		if keyFile := os.Getenv("SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE"); keyFile != "" {
+			if privateKey != "" {
+				return errors.New("set only one of SPARKWING_CLOUDFRONT_PRIVATE_KEY and SPARKWING_CLOUDFRONT_PRIVATE_KEY_FILE")
+			}
+			// #nosec G703 -- the operator configures this private-key file path
+			keyBytes, err := os.ReadFile(keyFile)
+			if err != nil {
+				return fmt.Errorf("CloudFront private key file: %w", err)
+			}
+			privateKey = string(keyBytes)
+		}
+		domain := os.Getenv("SPARKWING_CLOUDFRONT_DOMAIN")
+		keyPairID := os.Getenv("SPARKWING_CLOUDFRONT_KEY_PAIR_ID")
+		rawStore := firstNonEmpty(*cacheBlobStore, *logsArchiveStore)
+		client, _, _, err := storeurl.OpenS3(ctx, rawStore)
+		if err != nil {
+			return fmt.Errorf("download signer S3: %w", err)
+		}
+		if err := srv.WithSignedDownloads(cache, logsStore, client, domain, keyPairID, privateKey); err != nil {
+			return err
+		}
+	}
+	if strings.HasPrefix(*cacheBlobStore, "s3://") {
+		client, bucket, prefix, err := storeurl.OpenS3(ctx, *cacheBlobStore)
+		if err != nil {
+			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
+		}
+		srv = srv.WithDirectUploads(client, bucket, prefix)
+	}
+	if err := checkRequireAuth(st, *requireAuth); err != nil {
+		return err
 	}
 	if *poolEnabled {
 		if *poolNamespace == "" {
@@ -465,6 +653,10 @@ type guardValues struct {
 	RequestsPerMinuteAlarm    int
 	MaxLogStreamsPerPrincipal int
 	MaxDownloadsPerPrincipal  int
+	RunsPerPrincipalHour      int
+	ShedQueueDepth            int
+	EgressMonthlyBytes        int64
+	EgressDailyCapBytes       int64
 	EnforceIdleClaimPoll      bool
 }
 
@@ -477,6 +669,10 @@ type guardsNamed struct {
 	RequestsPerMinuteAlarm    bool
 	MaxLogStreamsPerPrincipal bool
 	MaxDownloadsPerPrincipal  bool
+	RunsPerPrincipalHour      bool
+	ShedQueueDepth            bool
+	EgressMonthlyBytes        bool
+	EgressDailyCapBytes       bool
 }
 
 // safety: zero is a documented value on every guard here, unlimited, so what
@@ -500,6 +696,18 @@ func applyLimitsProfile(profile controller.LimitsProfileValues, set guardValues,
 	}
 	if !named.MaxDownloadsPerPrincipal {
 		set.MaxDownloadsPerPrincipal = profile.MaxDownloadsPerPrincipal
+	}
+	if !named.RunsPerPrincipalHour {
+		set.RunsPerPrincipalHour = profile.RunsPerPrincipalHour
+	}
+	if !named.ShedQueueDepth {
+		set.ShedQueueDepth = profile.ShedQueueDepth
+	}
+	if !named.EgressMonthlyBytes {
+		set.EgressMonthlyBytes = profile.EgressMonthlyBytesPerPrincipal
+	}
+	if !named.EgressDailyCapBytes {
+		set.EgressDailyCapBytes = profile.EgressDailyCapBytes
 	}
 	set.EnforceIdleClaimPoll = profile.EnforceIdleClaimPoll
 	return set
@@ -579,6 +787,28 @@ func splitCSV(s string) []string {
 	return out
 }
 
+// checkRequireAuth refuses a --require-auth start with no live token. It asks
+// the tokens table rather than whether auth is on, because a multi-team
+// license turns auth on with an empty table and --require-auth promises a
+// token an operator can use.
+func checkRequireAuth(st *store.Store, requireAuth bool) error {
+	if !requireAuth {
+		return nil
+	}
+	toks, err := st.ListTokens("", false)
+	if err != nil {
+		return fmt.Errorf("--require-auth: read the tokens table: %w", err)
+	}
+	if len(toks) > 0 {
+		return nil
+	}
+	return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
+		"the tokens table is empty; supply the first admin token with " +
+		"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN), or " +
+		"mint one with the controller started unauthenticated and restart " +
+		"with --require-auth")
+}
+
 func envTruthy(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on":
@@ -586,6 +816,61 @@ func envTruthy(name string) bool {
 	default:
 		return false
 	}
+}
+
+// checkCacheGrantKey refuses to start a multi-team controller that has a cache
+// but no grant key of its own. The grant is the only boundary between teams
+// inside the cache, and without a usable key every run's grant request fails
+// at request time instead of when the operator deploys. A single-team install
+// keeps its request-time answer.
+func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey, cacheToken string) error {
+	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
+		return nil
+	}
+	if grantKey == "" {
+		return errors.New("the license allows more than one team and a cache is configured, so " +
+			authwire.CacheGrantKeyEnv + " must hold the key the controller signs cache grants with " +
+			"and the cache verifies them with (generate one with `openssl rand -base64 32`)")
+	}
+	if grantKey == cacheToken {
+		return errors.New(authwire.CacheGrantKeyEnv + " equals the cache's operator token " +
+			"(SPARKWING_CACHE_TOKEN); give the grant key a secret of its own, since any holder of " +
+			"the operator token could otherwise mint a grant for any team")
+	}
+	return nil
+}
+
+// checkMultiTeamObjectStore refuses to start a multi-team controller with no
+// object store. A free team is held to its allowance only by the counters the
+// cache and logs services keep over the object store; the disk-backed cache
+// and log volume enforce no allowance at all.
+func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) error {
+	if !srv.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
+		return nil
+	}
+	return errors.New("the license allows more than one team, so an object store is required: set --bucket-store " +
+		"(or SPARKWING_OBJECT_STORE_URL) to the s3:// store the cache (--blob-store) and the logs service " +
+		"(--archive-store) keep their objects in, because free-tier allowances are enforced only there")
+}
+
+// safety: a multi-team controller holds other people's credentials, so it
+// refuses to start rather than store them as plaintext; a single-team
+// install keeps starting without a key, as it always has.
+func configureSecrets(ctx context.Context, srv *controller.Server, cipher *secrets.Cipher) error {
+	if cipher == nil {
+		if srv.MultiTeam() {
+			return errors.New("the license allows more than one team, so stored secrets must be encrypted: " +
+				"set SPARKWING_SECRETS_KEY or --secrets-key-file to a base64-encoded 32-byte key " +
+				"(generate one with `openssl rand -base64 32`)")
+		}
+		return nil
+	}
+	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
+	srv.WithSecretsCipher(cipher)
+	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func loadSecretsCipher(keyFile, previousKeyFile string) (*secrets.Cipher, error) {
@@ -635,6 +920,18 @@ func loadSecretsKey(envName, filePath string) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %w", filePath, derr)
 	}
 	return decoded, nil
+}
+
+func configureMailer(ctx context.Context, srv *controller.Server, sender, configSet string) error {
+	if strings.TrimSpace(sender) == "" {
+		return nil
+	}
+	m, err := mailer.NewSES(ctx, mailer.SESConfig{From: strings.TrimSpace(sender), ConfigurationSet: strings.TrimSpace(configSet)})
+	if err != nil {
+		return fmt.Errorf("--email-sender: %w", err)
+	}
+	srv.WithMailer(m)
+	return nil
 }
 
 // safety: a trailing newline from a mounted file or a heredoc is editor noise, not part of the credential.
@@ -694,6 +991,17 @@ func envMeasurePages() int {
 		return s3store.DefaultMaxUsagePages
 	}
 	return n
+}
+
+func openTeamStore(ctx context.Context, raw string, maxAge func(string) time.Duration) (*teamblob.Store, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	client, bucket, prefix, err := storeurl.OpenS3(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client, TeamObjectMaxAge: maxAge})
 }
 
 // safety: a negative bound would silently remove the ceiling it names, so it stops the controller instead.

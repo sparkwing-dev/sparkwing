@@ -8,12 +8,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func (s *Server) registeredAgents(ctx context.Context, now time.Time) ([]Agent, error) {
-	executors, err := s.store.ListExecutors(ctx)
+// safety: an executor's credential can claim only its own team's nodes, so
+// another team must not see its identity, capacity, or live activity.
+func (s *Server) registeredAgents(ctx context.Context, t *store.Tenant, now time.Time) ([]Agent, error) {
+	executors, err := t.ListExecutors(ctx)
 	if err != nil {
 		return nil, err
 	}
-	active, err := s.store.ActiveExecutorActivity(ctx, now)
+	active, err := t.ActiveExecutorActivity(ctx, now)
 	if err != nil {
 		return nil, err
 	}

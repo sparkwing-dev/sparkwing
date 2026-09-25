@@ -205,52 +205,68 @@ func (s *Server) handleHeartbeatAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	registered, err := s.registeredAgents(r.Context(), time.Now())
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	registered, err := s.registeredAgents(r.Context(), tenant, time.Now())
 	if err != nil {
 		s.writeInternalError(w, r, "list registered agents", err)
 		return
 	}
 	windowStart := time.Now().Add(-1 * time.Hour)
-	claims, err := s.store.ListLegacyAgentClaims(r.Context(), windowStart)
+	claims, err := tenant.ListLegacyAgentClaims(r.Context(), windowStart)
 	if err != nil {
 		s.writeInternalError(w, r, "list legacy agent claims", err)
 		return
 	}
 
 	type holderInfo struct {
-		name, kind string
-		lastSeenNs int64
-		activeRuns map[string]struct{}
+		name, kind, tokenPrefix string
+		lastSeenNs              int64
+		activeRuns              map[string]struct{}
 	}
 	byHolder := map[string]*holderInfo{}
+	sort.Slice(claims, func(i, j int) bool {
+		if !claims[i].StartedAt.Equal(claims[j].StartedAt) {
+			return claims[i].StartedAt.After(claims[j].StartedAt)
+		}
+		if claims[i].TokenPrefix != claims[j].TokenPrefix {
+			return claims[i].TokenPrefix < claims[j].TokenPrefix
+		}
+		return claims[i].RunID < claims[j].RunID
+	})
 
 	for _, claim := range claims {
-		parts := strings.SplitN(claim.ClaimedBy, ":", 3)
-		if len(parts) < 2 {
+		name, kind := holderName(claim.ClaimedBy)
+		if name == "" {
 			continue
 		}
-		kind := ""
-		switch parts[0] {
-		case "runner":
-			kind = "agent"
-		case "pod":
-			kind = "pool"
-		default:
-			kind = parts[0]
-		}
-		name := parts[1]
 		key := kind + ":" + name
 
 		h, ok := byHolder[key]
 		if !ok {
+			lastSeenNs := int64(0)
+			if !claim.LastSeen.IsZero() {
+				lastSeenNs = claim.LastSeen.UnixNano()
+			}
 			h = &holderInfo{
-				name:       name,
-				kind:       kind,
-				activeRuns: map[string]struct{}{},
+				name:        name,
+				kind:        kind,
+				tokenPrefix: claim.TokenPrefix,
+				lastSeenNs:  lastSeenNs,
+				activeRuns:  map[string]struct{}{},
 			}
 			byHolder[key] = h
 		}
-		h.lastSeenNs = max(h.lastSeenNs, claim.LastSeen.UnixNano())
+		if claim.TokenPrefix != h.tokenPrefix {
+			continue
+		}
+		if !claim.LastSeen.IsZero() {
+			if seen := claim.LastSeen.UnixNano(); seen > h.lastSeenNs {
+				h.lastSeenNs = seen
+			}
+		}
 		if claim.Status != "done" {
 			h.activeRuns[claim.RunID] = struct{}{}
 		}
@@ -271,16 +287,25 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			Type:          h.kind,
 			Location:      "unknown",
 			Labels:        map[string]string{},
-			LastSeen:      time.Unix(0, h.lastSeenNs).UTC().Format(time.RFC3339),
 			Status:        status,
 			ActiveJobs:    active,
 			MaxConcurrent: 0,
 		}
-		if presence, ok := s.runnerPresence.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+		if h.lastSeenNs > 0 {
+			agent.LastSeen = time.Unix(0, h.lastSeenNs).UTC().Format(time.RFC3339)
+		}
+		if presence, ok := s.runnerPresence.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Capabilities = presence.Labels
 			agent.MaxConcurrent = presence.MaxConcurrent
+			if presence.UpdatedAt.UnixNano() > h.lastSeenNs {
+				h.lastSeenNs = presence.UpdatedAt.UnixNano()
+				agent.LastSeen = presence.UpdatedAt.UTC().Format(time.RFC3339)
+			}
 		}
-		if hr, ok := s.runnerHeadroom.lookup(h.name, time.Now(), runnerHeadroomStale); ok {
+		if observed, ok := s.runnerHeartbeats.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now()); ok && observed.UnixNano() > h.lastSeenNs {
+			agent.LastSeen = observed.UTC().Format(time.RFC3339)
+		}
+		if hr, ok := s.runnerHeadroom.lookup(presenceKey{tokenPrefix: h.tokenPrefix, name: h.name}, time.Now(), runnerHeadroomStale); ok {
 			agent.Headroom = &AgentHeadroom{
 				Cores:       hr.Cores,
 				MemoryBytes: hr.MemoryBytes,

@@ -147,7 +147,28 @@ func newGitHubCommitStatusReporterWithCapacity(token, dashboardURL, apiBaseURL s
 	return r
 }
 
-func (s *Server) reportGitHubCommitStatus(ctx context.Context, runID, runStatus string) {
+// reportGitHubRunState reports runStatus for runID to GitHub: as a check run
+// when the App started the run, else as a commit status when the operator's
+// token is configured. runStatus is a run status, "pending" for a run not yet
+// started, or "timed_out" for one no runner claimed in time.
+func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
+	if s.githubCommitStatuses == nil && s.githubApp == nil {
+		return
+	}
+	if s.githubApp != nil {
+		trigger, err := s.store.GetTrigger(ctx, runID)
+		if err == nil && trigger.TriggerEnv[envGitHubAppInstallation] != "" {
+			if update, ok := s.githubAppCheckUpdate(ctx, trigger, runStatus); ok {
+				s.githubApp.checks.enqueue(s.logger, update)
+			}
+			return
+		}
+	}
+	// safety: a commit status has no running state, and the pending one
+	// already stands for it.
+	if runStatus == "running" {
+		return
+	}
 	reporter, status, ok := s.githubCommitStatus(ctx, runID, runStatus)
 	if !ok {
 		return
@@ -163,6 +184,7 @@ func (s *Server) reserveGitHubCommitStatus(ctx context.Context, runID, runStatus
 	return reporter.reserve(s.logger, status)
 }
 
+// githubCommitStatus answers the operator's commit status for runID.
 func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string) (*githubCommitStatusReporter, githubCommitStatus, bool) {
 	reporter := s.githubCommitStatuses
 	if reporter == nil {
@@ -176,8 +198,22 @@ func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string
 		s.logger.Warn("github commit status trigger lookup failed", "run_id", runID, "err", err)
 		return nil, githubCommitStatus{}, false
 	}
+	if trigger.TriggerEnv[envGitHubAppInstallation] != "" {
+		return nil, githubCommitStatus{}, false
+	}
 	status, ok := githubCommitStatusFromTrigger(trigger, runStatus)
 	if !ok {
+		return nil, githubCommitStatus{}, false
+	}
+	// safety: another team's delivery was signed with a secret that team chose,
+	// which proves nothing about the repository it names, so only the operator's
+	// team spends the controller's token.
+	operator, err := s.tenantForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		s.logger.Warn("github commit status team lookup failed", "run_id", runID, "err", err)
+		return nil, githubCommitStatus{}, false
+	}
+	if owned, err := operator.OwnsRun(ctx, runID); err != nil || !owned {
 		return nil, githubCommitStatus{}, false
 	}
 	return reporter, status, true
@@ -555,7 +591,7 @@ func githubCommitState(runStatus string) (state, description string) {
 		return "pending", "Sparkwing pipeline is running"
 	case "success":
 		return "success", "Sparkwing pipeline passed"
-	case "failed":
+	case "failed", "timed_out":
 		return "failure", "Sparkwing pipeline failed"
 	default:
 		return "error", "Sparkwing pipeline could not complete"

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -59,6 +60,14 @@ type noopWriter struct{}
 
 func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
+type triggerHeartbeatTransport func(http.ResponseWriter, *http.Request)
+
+func (f triggerHeartbeatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	f(w, req)
+	return w.Result(), nil
+}
+
 func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
 
@@ -83,6 +92,33 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	}
 	if !killed.Load() {
 		t.Error("killChild not invoked on 404")
+	}
+}
+
+func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		respond triggerHeartbeatTransport
+	}{
+		{"conflict", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "claim stopped", http.StatusConflict)
+		}},
+		{"cancel request", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cancel_requested":true}`))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				killed := false
+				httpClient := &http.Client{Transport: tc.respond}
+				got := triggerClaimHeartbeat(t.Context(), client.New("http://controller.test", httpClient),
+					"trig-x", func() { killed = true }, discardSlog())
+				if got != triggerClaimReaped || !killed {
+					t.Fatalf("%s left child running: outcome=%v killed=%v", tc.name, got, killed)
+				}
+			})
+		})
 	}
 }
 

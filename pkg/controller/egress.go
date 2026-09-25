@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -106,18 +105,17 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			return
 		}
 		if slot != egress.SlotNone {
-			// safety: a pool shares one bearer, so the slot counts the pod
-			// the request names and falls back to the principal only when
-			// nothing names one.
-			holder := egress.SlotIdentity(r, principal, store.RunnerIdentityHeader, store.ClaimHolderHeader)
-			release, err := s.egress.Open(holder, slot)
+			// safety: the slot keys on the authenticated principal alone,
+			// because a caller names its own pod and a named pod would buy
+			// another slot.
+			release, err := s.egress.Open(principal, slot)
 			if err != nil {
 				s.writeEgressRefusal(w, r, class, err)
 				return
 			}
 			defer release()
 		}
-		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
+		s.egress.Handle(w, r, principal, class, next)
 	})
 }
 
@@ -167,40 +165,31 @@ func (s *Server) handleEgressState(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "egress": state})
 }
 
-// safety: the alarm is the deployment's bill crossing a daily threshold,
-// which no single request can answer for, so it reaches an operator as a
-// health problem and a warn line rather than as a refusal.
+// safety: public health reports the alarm without exposing usage or budget totals.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {
 		return map[string]any{"enabled": false}, nil
 	}
 	state := s.egress.State()
-	summary := map[string]any{
-		"enabled":                     true,
-		"alarm":                       state.Alarm,
-		"global_day_bytes":            state.GlobalDayBytes,
-		"global_month_bytes":          state.GlobalMonthBytes,
-		"daily_alarm_bytes":           state.DailyAlarmBytes,
-		"monthly_bytes_per_principal": state.MonthlyBytesPerPrincipal,
-		"refused_total":               state.Refused,
-	}
+	summary := map[string]any{"enabled": true, "alarm": state.Alarm}
 	if !state.Alarm {
 		return summary, nil
 	}
-	return summary, []string{fmt.Sprintf(
-		"egress: this controller has sent %s today, at or past the %s daily threshold",
-		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
+	return summary, []string{"egress: daily alarm threshold reached"}
 }
 
-// safety: a restarted controller that started the month over would hand
-// every principal a fresh budget, so this month's totals come back from
-// the store before the listener binds.
+// safety: A day-shaped period cannot collide with the same service's month-shaped row.
+const egressDayPrincipal = "(day)"
+
+// safety: a restarted controller that started the month or the day over
+// would hand every principal a fresh budget and reopen the daily cap, so
+// both come back from the store before the listener binds.
 func (s *Server) loadEgressUsage(ctx context.Context) {
 	if s.egress == nil || s.store == nil {
 		return
 	}
-	month := time.Now().UTC().Format("2006-01")
-	rows, err := s.store.ListEgressUsage(ctx, month)
+	now := time.Now().UTC()
+	rows, err := s.store.ListEgressUsage(ctx, now.Format("2006-01"))
 	if err != nil {
 		s.logger.Warn("egress usage reload failed", "err", err)
 		return
@@ -210,6 +199,18 @@ func (s *Server) loadEgressUsage(ctx context.Context) {
 		usages = append(usages, egress.Usage{Principal: row.Principal, Month: row.Month, Bytes: row.Bytes})
 	}
 	s.egress.Restore(usages)
+
+	day := now.Format("2006-01-02")
+	rows, err = s.store.ListEgressUsage(ctx, day)
+	if err != nil {
+		s.logger.Warn("egress daily usage reload failed", "err", err)
+		return
+	}
+	for _, row := range rows {
+		if row.Principal == egressDayPrincipal {
+			s.egress.RestoreDay(egress.DayUsage{Day: day, Bytes: row.Bytes})
+		}
+	}
 }
 
 // perf: the reaper calls this on its own tick, so metering costs one
@@ -239,6 +240,16 @@ func (s *Server) flushEgressUsage(ctx context.Context) {
 	})
 	if err != nil {
 		s.logger.Warn("egress usage flush failed", "err", err, "principals", principals)
+	}
+	err = s.egress.FlushDay(func(usage egress.DayUsage) error {
+		return s.store.RecordEgressUsage(ctx, []store.EgressUsage{{
+			Principal: egressDayPrincipal,
+			Month:     usage.Day,
+			Bytes:     usage.Bytes,
+		}})
+	})
+	if err != nil {
+		s.logger.Warn("egress daily usage flush failed", "err", err)
 	}
 }
 

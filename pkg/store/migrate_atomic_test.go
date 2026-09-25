@@ -82,8 +82,12 @@ func TestMigrateSQLite_FailedMinVersionStampRollsBackTheVersionRow(t *testing.T)
 		t.Fatal(err)
 	}
 	newest := store.ExpectedSchemaVersion()
+	// safety: the stamp is the only statement here that writes updated_at, so
+	// a bag without that column fails the stamp and leaves the newest
+	// migration, which reads the bag, working.
 	for _, stmt := range []string{
 		`DROP TABLE sparkwing_meta`,
+		`CREATE TABLE sparkwing_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		fmt.Sprintf(`DELETE FROM sparkwing_schema_version WHERE version >= %d`, newest),
 	} {
 		if _, err := st.DB().Exec(stmt); err != nil {

@@ -346,7 +346,7 @@ func TestCipher_PreviousKeyOpensOldEnvelopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
-	bound, err := oldCipher.SealBound("TOKEN", "acme/web", false, true, "bound-value")
+	bound, err := oldCipher.SealBound("acme", "TOKEN", "acme/web", false, true, "bound-value")
 	if err != nil {
 		t.Fatalf("SealBound: %v", err)
 	}
@@ -370,22 +370,22 @@ func TestCipher_PreviousKeyOpensOldEnvelopes(t *testing.T) {
 	if got != "plain-value" {
 		t.Fatalf("Open = %q, want plain-value", got)
 	}
-	got, err = rotating.OpenBound("TOKEN", "acme/web", false, true, bound)
+	got, err = rotating.OpenBound("acme", "TOKEN", "acme/web", false, true, bound)
 	if err != nil {
 		t.Fatalf("OpenBound under the previous key: %v", err)
 	}
 	if got != "bound-value" {
 		t.Fatalf("OpenBound = %q, want bound-value", got)
 	}
-	if _, err := rotating.OpenBound("OTHER", "acme/web", false, true, bound); err == nil {
+	if _, err := rotating.OpenBound("acme", "OTHER", "acme/web", false, true, bound); err == nil {
 		t.Fatal("the previous key opened an envelope bound to another row")
 	}
 
-	resealed, err := rotating.SealBound("TOKEN", "acme/web", false, true, "bound-value")
+	resealed, err := rotating.SealBound("acme", "TOKEN", "acme/web", false, true, "bound-value")
 	if err != nil {
 		t.Fatalf("SealBound: %v", err)
 	}
-	if _, err := current.OpenBound("TOKEN", "acme/web", false, true, resealed); err != nil {
+	if _, err := current.OpenBound("acme", "TOKEN", "acme/web", false, true, resealed); err != nil {
 		t.Fatalf("a rotating cipher sealed under something other than the current key: %v", err)
 	}
 }

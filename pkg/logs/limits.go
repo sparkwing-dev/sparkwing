@@ -129,9 +129,10 @@ func (s *Server) WithStoreCeiling(cfg objectguard.CeilingConfig) *Server {
 // counted against it.
 func (s *Server) StoreCeiling() objectguard.CeilingState { return s.ceiling.State() }
 
-// MeasureStore walks the log store and folds the total into the
+// MeasureStore walks the log volume and folds the total into the
 // ceiling, which is what the sweeper does on the reconciliation
-// interval. It is a no-op while no ceiling is set.
+// interval. It is a no-op while no ceiling is set. The archive's bucket
+// is the controller's to measure.
 func (s *Server) MeasureStore(ctx context.Context) error {
 	return s.ceiling.ReconcileWith(ctx, func(ctx context.Context) (objectguard.Usage, error) {
 		root, err := s.openRunsRoot()
@@ -437,6 +438,14 @@ type appendPlan struct {
 	marker bool
 }
 
+func (p appendPlan) storedBytes() int64 {
+	n := int64(len(p.write))
+	if p.marker {
+		n += int64(len(TruncationMarker))
+	}
+	return n
+}
+
 // safety: room is the smaller of the node and run headroom, so one chatty node cannot spend the whole run budget.
 func (s *Server) planAppend(root *os.Root, runID, nodeID string, rt *runTotal, body []byte) appendPlan {
 	want := int64(len(body))
@@ -527,6 +536,7 @@ func (s *Server) hasFreeSpace() bool {
 // sweep until ctx is done. The sweep half stays idle while retention or
 // the sweep interval is disabled.
 func (s *Server) StartSweeper(ctx context.Context) {
+	s.startArchive(ctx)
 	probing := s.limits.MinFreeBytes > 0
 	sweeping := s.limits.Retention > 0 && s.limits.SweepInterval > 0
 	if !probing && !sweeping {

@@ -22,6 +22,677 @@ unlock.
 
 ### Added
 
+- **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads
+  one source bundle directly to S3 before creating a run, including from a Git
+  checkout with no cloud-reachable origin. The bundle counts against the team's
+  cache share, belongs to one run, and is removed 24 hours after that run
+  finishes (or 24 hours after commit when unused). Retry uploads again.
+  Normal remote triggers require a pushed commit; GitHub App crons remain
+  Git-backed and local working-tree runs are unchanged. Upgrade controller,
+  CLI and runners together. See [Direct source bundles](docs/migrations/_unreleased.md#direct-source-bundles).
+- **controller + GitHub App:** A push of the current default-branch head reads
+  `.sparkwing/sparkwing.yaml` with a repository-scoped `contents: read` token
+  and arms its `where: controller` schedules for the connected team. Removing
+  a declaration withdraws it; unreadable config leaves prior schedules armed.
+  Schema 71 keeps App schedules tied to installation and repository ids across
+  renames and withdraws them on removal, transfer or uninstall. Cloud Crons
+  shows the automatic setup path. Local crons remain manual.
+- **controller + runner:** Signed downloads and direct S3 uploads keep binary
+  and artifact bytes off the controller. A runner reserves storage, PUTs a
+  checksummed object to `pending/`, then commits it under an immutable
+  cloud or local key. Schema 70 records committed objects and provenance.
+  A signing grant stays bound to its exact live claim and active token.
+  Cache grants cannot sign logs; `logs.read` is required. In-cluster downloads
+  use S3, while public-ingress downloads use a 60-second CloudFront URL.
+  Both count against the team's daily download cap. Cloud runners read
+  cloud-built binaries unless the team enables `trust_local_builds`. See
+  [Direct data uploads](docs/data-uploads.md)
+  and [Tenant limits](docs/limits.md).
+- **controller + web:** GitHub App push subscriptions accept `branches` and
+  pull request subscriptions accept `base_branches`, each with up to 10 glob
+  patterns. The controller checks the push branch or pull request base branch
+  before starting a run, including a GitHub rerun. Empty lists keep the existing
+  all-branches behavior. The dashboard edits both filters. Schema 67 adds the
+  stored filters. Set `branches` for any deploy pipeline subscribed to push.
+  Tag pushes follow the `tags` patterns alone.
+- **execution history (Breaking):** node attempts record the executor for trigger-owned,
+  pooled, Kubernetes Job, GitHub Actions, local, and metered cloud execution.
+  Older attempts derive a site from matching claim credentials and holders when
+  available. GitHub Actions attempts include the repository and workflow run
+  ID. Schema 68 adds `github_runner_credentials.run_id`. See
+  [Execution attribution](docs/migrations/_unreleased.md#execution-attribution).
+- **controller:** GitHub App subscriptions can opt into PR closed, labeled and ready-for-review actions, release published and prereleased actions, and branch create and delete events. Runs expose event, ref, action, label, merge and tag environment values; OIDC subjects use the event's ref and trigger. Subscriptions follow a repository id across rename and same-team transfer. Schema 69 adds default-off subscription columns; existing subscriptions retain their behavior. Branch filters also gate branch creation and deletion, and base-branch filters gate every pull request action.
+
+- **dashboard:** the Runs page cycles from full columns to a Runs rail, then
+  both Runs and Nodes rails, and back through an icon-only sidebar control.
+  Each rail keeps selection and shows its labels on hover or focus. Expanded
+  Runs and Nodes panes have equal widths, with slim scrollbar thumbs visible
+  during scrolling. Narrow screens default to both rails; the viewer's choice
+  persists in the browser.
+- **runner image:** Kubernetes Jobs and warm runners have bash, coreutils,
+  git, OpenSSH client, CA certificates, curl, tar, gzip, xz, make, jq, and
+  unzip. The Debian slim runtime supports downloaded glibc-based toolchains;
+  the image keeps the Go toolchain used for pipeline compilation. See
+  [Local execution](docs/local-execution.md).
+
+- **controller + web:** a signed-in user links a Google or GitHub sign-in to
+  their own account from **Account -> Linked sign-ins**, whatever address the
+  provider holds, and unlinks one while another remains. The flow is the
+  provider's PKCE flow with a state the controller signs and binds to the
+  account and session for ten minutes and accepts once; the identity is keyed
+  by the provider's stable subject. A provider account already attached to any
+  account is refused with `409 identity_linked_elsewhere` and nothing changes;
+  accounts are never combined. Linking never changes the account's email.
+  Link start, link completion and unlinking need a sign-in from the last 10
+  minutes. Link attempts are limited to ten a minute per account per controller
+  replica. Unlinking keeps one sign-in method and ends the account's other
+  sessions, including sessions created by a concurrent sign-in. New routes:
+  `GET /api/v1/me/identities`,
+  `POST /api/v1/me/identities/{provider}/link`, `.../link/complete` and
+  `DELETE /api/v1/me/identities/{provider}`. Schema 64 adds
+  `identities.linked`, `identity_link_states` and `identity_unlinks`. See
+  [Linked sign-ins](docs/auth.md#linked-sign-ins).
+- **dashboard + controller:** run node rows and DAG cards show small execution
+  site icons with runner details on hover or focus. Node names use the row width,
+  and the controller derives machine, GitHub Actions, cloud, or cluster sites
+  from the claim credential and holder when available. Unknown sites leave no
+  badge.
+- **controller (Breaking):** GitHub App subscriptions select tag pushes with `tags: ["v*"]` or other explicit tag globs. Empty `tags` selects none; replace any `tags: true` subscription with a pattern list. Existing boolean tag subscriptions stop matching after schema v66 adds the default-off pattern column. Operator GitHub webhooks ignore tag pushes. Tag triggers expose their full ref and tag name, and OIDC subjects use `refs/tags/<tag>`.
+- **controller + web:** Team owners can connect a GitHub App installation made directly on GitHub by authorizing the App, choosing an installation they administer, and binding it to their team. The picker marks installations held by another team without naming that team.
+
+- **runner:** an off-cluster agent reads the cache the controller announces
+  directly. A claimed node asks for its run's cache grant first; with a grant
+  and a `--cache-pod-url` announced on `GET /api/v1/services`, source, the
+  binary cache and artifacts go to that cache with the grant instead of
+  through the controller's `/api/v1/gitcache` proxy, and a pooled agent's
+  artifacts carry the node's grant rather than one from its environment. A
+  `--gitcache` naming a cache directly is kept, and a controller that mints no
+  grant leaves the node on its previous path. See
+  [Cache grants](docs/gitcache.md#cache-grants).
+
+- **cache:** `--metrics-addr` (`SPARKWING_METRICS_ADDR`) moves `/metrics`,
+  and the proxy's `/stats`, off the main listener onto a port of their own,
+  so a cache published through an ingress with `--disable-proxy` answers only
+  `/health` and its credentialed routes. Empty keeps both on `--addr`.
+
+- **cache + controller:** a per-team daily download cap. Every `GET` the
+  cache serves a grant (binaries, artifacts, dependency archives and git
+  mirror fetches) is charged to the grant's team for the UTC day in the
+  controller's database, through `POST /internal/downloads/charge`; past the
+  controller's `--team-daily-download-free-bytes` (5 GiB) for a free team, or
+  `--team-daily-download-funded-bytes` (50 GiB) for a funded one, the team's
+  downloads answer `429` with a `Retry-After` naming the wait until midnight
+  UTC. A download of known length is charged whole under a row lock before
+  its first byte, so two downloads racing for a team's last bytes cannot both
+  start; a stream is checked for room when it starts and charged what it sent.
+  While the controller cannot answer, a free team's download is refused with
+  `503`, and a team answered funded within five minutes proceeds. The
+  operator's team and token are exempt. `0` turns either cap off; the
+  process-wide `--egress-daily-cap-bytes` stays the backstop. See
+  [Egress budgets](docs/observability.md#egress-budgets).
+- **logs + runner:** a node's log says whether it is whole. The runner
+  numbers every line it appends (`X-Sparkwing-Log-Stream`,
+  `X-Sparkwing-Log-Seq`) and, when the node finishes, seals each stream
+  with `POST /api/v1/logs/{runID}/{nodeID}/seal`: the last number, the
+  lines and bytes numbered, the lines it failed to deliver, and a SHA-256
+  of the stream. Only the node's claim holder can seal, and the seal
+  survives the archive. `sparkwing runs logs` and the dashboard read it
+  back as `complete`, `incomplete`, `cut_off` (no seal 60 seconds after
+  the node finished), `unconfirmed` (a runner that never numbers its
+  lines) or `streaming`, judged on the node's newest execution attempt,
+  and draw one line after the log when it is not whole. A pooled agent or
+  Kubernetes Job numbers and seals the lines of a pipeline binary pinned to
+  an SDK without seals, and warns whenever it skips a seal. The dashboard
+  serves the verdict at `GET /api/v1/runs/{id}/logs/{node}/completeness`. See
+  [Log completeness](docs/observability.md#log-completeness).
+
+- **controller:** a free tier bounded by counting teams. A team without
+  credits takes one of `--free-team-slots` (200) the first time it starts a
+  run, in the trigger's transaction, and keeps it until the team is deleted,
+  so free storage never passes slots times the allowance. A team with neither
+  a slot nor credits is refused its runs with `402` "free storage is paused;
+  buy credits or join the waitlist". `PUT /api/v1/storage/teams/{team}/free-slot`
+  (`admin`) grants a slot past the cap, and `Server.SignUpFreeTier` reports the
+  tier closed once every slot is taken. Schema v56 adds `free_slots`. See
+  [Tenant limits](docs/limits.md).
+
+- **storage:** a team without credits is held to its free allowance
+  (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares:
+  the cache keeps 768 MiB, checked before an upload's body is read and cut at
+  the room left when the length is unknown; the logs service keeps 192 MiB,
+  checked after the node and run caps and before the append is written; run
+  events keep 64 MiB, checked in the append's transaction. The controller
+  counts every team's cache and log bytes in its database (schema v61,
+  `team_storage`): a write reserves its size with
+  `POST /internal/storage/reserve`, then commits what it stored or releases
+  the room, under a row lock, so writers on any number of replicas see each
+  other and two racing for a share's last bytes cannot both win. The cache
+  calls these routes with its operator token, once per object, and the logs
+  service forwards the appending caller's credential, which counts only its
+  own team's logs, and draws appends from a 1 MiB block per team and run that
+  it settles in one call when the block runs out and every minute, so a run
+  costs about one controller call per MiB or per minute. The logs service
+  also confirms an append's claim at most once every 30 seconds per run,
+  node, credential and claim. A
+  refused or failed write holds nothing, and while the controller cannot
+  answer a free team's write is refused with `503`. `GET /api/v1/storage`
+  reports what a team holds in each store. See [Tenant limits](docs/limits.md).
+
+- **controller:** an hourly storage pass, run by one replica under a lease,
+  lists the cache's and the logs service's buckets (`--cache-blob-store`,
+  `--logs-archive-store`) and replaces each team's count with what it found
+  plus what was committed while it listed. A store whose listing fails keeps
+  its counts, and `/api/v1/health` reports the failed pass.
+
+- **controller:** a team without credits starts at most 200 runs in any 24
+  hours (`429`), a team binds at most 20 repositories to GitHub runners
+  (`403`), and a signed-up team holds at most 100 secrets of 128 KiB each
+  (`413`).
+
+- **controller:** the hourly storage pass releases runs that finished before
+  the event retention window, keyed on `finished_at`, and deletes invitations
+  and tokens 30 days after they stopped admitting anyone. A multi-team
+  controller writes a 30-day event and node-metric retention window where the
+  operator set none.
+
+- **cache:** team binaries, dependency archives and artifacts written more
+  than 30 days ago are deleted in the controller's hourly storage pass, in the
+  listing that reconciles each team's count. The registry proxy directory is
+  capped at 2 GiB (`--proxy-max-bytes`), evicting the least recently served
+  entries first.
+
+- **cache:** `--blob-store s3://bucket/prefix` keeps the binary,
+  dependency-archive and artifact stores in S3, one `teams/<team>/` namespace
+  per team; git mirrors, uploads and the registry proxy stay on the volume.
+  Uploads above 64 MiB go multipart and abort on failure, and
+  `DELETE /admin/teams/{team}` removes the team's namespace from the bucket. Every read goes through the service, so the egress meter and request
+  budget cover it. See
+  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+
+- **logs:** `--archive-store s3://bucket/prefix` moves a run nobody has written
+  for `--archive-idle` to S3 as one object per node log under
+  `teams/<team>/runs/<run>/`, and restores it on the next read or append. Live
+  appends and follows stay on the volume, so a running node sends the bucket
+  nothing. A retried archive sends only the objects that have not landed.
+  `--retention` deletes archived runs by day through a day index, and keeps a
+  run restored and written since its archive. `DELETE
+  /api/v1/teams/{team}/logs` (`admin`) deletes one team's logs, index entries
+  included, and a run recorded for one team is refused to every other. See
+  [Object storage for logs and the cache](docs/self-hosting.md#object-storage-for-logs-and-the-cache).
+
+- **cache, logs:** a `403` from the bucket on a write or listing pauses both
+  for a minute, doubling to five, with one probe request as each pause ends;
+  three other failures in a row pause them for seconds to minutes. Reads and
+  deletes keep working, the cache answers a paused write with `503` and
+  `Retry-After`, and the logs service reports the pause on its health route.
+- **controller:** team and account deletion. `DELETE /api/v1/team`, confirmed
+  with the team's slug, lets an owner delete a team other than their only one:
+  the team closes at once (members leave, tokens are revoked, runs are
+  cancelled) and, two minutes later, a background pass removes its logs,
+  cached artifacts and every row, secrets included, retrying until it
+  finishes, then deletes its cache tree and sweeps its rows again seven hours
+  later. One replica works on a deletion at a time under a lease;
+  `GET /api/v1/me/team-deletions` shows its state. A deleted team's slug is
+  never registered again. `DELETE /api/v1/me`, confirmed with the account's
+  email from a sign-in in the last 10 minutes, deletes the account, its
+  identities, memberships, sessions and minted tokens, and the teams it was
+  the only member of; rows it left in shared teams name `deleted user`. It
+  answers 409 with the list of teams the account is the last owner of while
+  they have other members. The operator deletes an account with
+  `DELETE /api/v1/accounts/{account}` and a team with
+  `DELETE /api/v1/teams/{team}`. The controller deletes logs with the token
+  in `SPARKWING_LOGS_DELETE_TOKEN`, which carries the new `logs.delete` scope
+  and nothing else; no team token may carry it. Schema v55. See
+  [Authentication](docs/auth.md).
+
+- **controller:** one user creates at most three teams over the account's life,
+  the personal space included; deleting a team no longer gives a creation
+  back.
+
+- **controller:** invitation email. With `--email-sender` set the controller
+  mails each invitation through Amazon SES with the inviter's name, the team,
+  the role, the accept link and its seven-day expiry, at most 5 in any 24
+  hours to one address across every team, counted in a log team deletion does
+  not touch; the response gains `email_sent`.
+  `--email-configuration-set` names the SES configuration set. Without a
+  sender nothing is mailed, as before.
+
+- **web:** team settings gain a **Delete team** panel for owners, confirmed by
+  typing the slug, and the team menu links to a new **Your account** page that
+  shows the progress of team deletions and deletes the account, confirmed by
+  typing the email and listing the teams that block it. The invite form says
+  whether the invitation was emailed.
+
+- **cache:** `DELETE /admin/teams/{team}` removes a team's artifact, binary
+  and build-cache trees for the operator token.
+- **controller:** a GitHub App connects a team to the repositories it
+  controls. A team owner connects an installation through
+  `POST /api/v1/team/github-app/connect` and `.../connect/complete`, which bind
+  it only when the signed-in account's linked GitHub user administers the
+  installation's account; an installation belongs to one team (409 for a
+  second), and a connect state finishes one flow across replicas and restarts.
+  `POST /webhooks/github-app` verifies the App's signature, routes by
+  installation, and starts runs for the pipelines the team subscribed with
+  `PUT /api/v1/team/github-app/triggers`, once GitHub, asked on each delivery,
+  confirms the installation still covers the repository. Pull requests from
+  forks, and events with no readable time, are never run. A
+  delivery's signed body is remembered for every team, so a redelivery or a
+  replay after the installation moves teams starts nothing, and each run a
+  delivery creates spends one of the team's hourly runs; a redelivery spends
+  only on the runs it has not started.
+  `POST /api/v1/runs/{id}/source-token` gives a claim holder one live
+  `contents: read` installation token for the run's repository. Configure with
+  `--github-app-id`, `--github-app-slug`,
+  `SPARKWING_GITHUB_APP_PRIVATE_KEY_FILE` and
+  `SPARKWING_GITHUB_APP_WEBHOOK_SECRET`. Schema 54 adds the App's tables. See
+  [GitHub App](docs/github-app.md).
+
+- **controller:** a run the GitHub App started reports as a GitHub check run
+  named `sparkwing/<pipeline>` on its commit, `queued` through `in_progress`
+  to `completed` with conclusion `success`, `failure`, `cancelled` or
+  `timed_out`, a link to the run and a summary with counts of nodes by
+  outcome. The App posts no commit statuses for its runs,
+  except for an installation whose owner has not accepted the Checks
+  permission, which keeps getting them until it does. A failed check run write
+  is retried up to four times and never fails or delays the run. `check_run`
+  and `check_suite` `rerequested` deliveries re-run the pipeline, or each
+  subscribed pipeline with its own prior run, on a commit the team already
+  ran, under the push delivery's binding, fork, budget and replay rules;
+  `check_suite` `requested`
+  starts nothing because the push already did. The App needs the Checks read
+  and write permission and the Check run and Check suite events. Schema 63
+  records each run's check run and GitHub repository id. See
+  [GitHub App](docs/github-app.md#check-runs).
+
+- **dashboard:** a Team -> GitHub tab, shown when the controller has a GitHub
+  App, lists the team's connected installations with their repositories and
+  the pipelines subscribed to each repository's pushes and pull requests.
+  Owners connect, disconnect and change subscriptions; readers and editors see
+  them read-only. The dashboard serves the App's setup URL
+  (`/github/app/setup`) and connect callback (`/github/app/callback`), keeps
+  the flow's state and verifier in a short-lived `__Host-` cookie, and binds
+  the installation as the signed-in owner's own session.
+
+- **runner:** a runner without `--gitcache` fetches each run's source
+  straight from its host with the credential the controller releases for the
+  run on `POST /api/v1/runs/{id}/git-credential`: the team's GitHub App token
+  when an installation covers the repository, else the git credential the
+  team stored for the host. A run with neither fails with a message naming
+  both remedies. Only a runner its owner fenced with `--allow-repo` falls back
+  to the machine's own git credentials, so `--allow-repo` is no longer
+  required without `--gitcache`. A fetch that presents a released credential
+  reads none of the machine's git config, ssh agent or keys, receives the
+  credential on an inherited pipe, and drops `GIT_TRACE*` and
+  `GIT_CURL_VERBOSE` from its environment. Against a controller without the
+  route the runner asks `POST /api/v1/runs/{id}/source-token` instead.
+- **controller:** team git credentials, a write-only secret bound to one host:
+  an SSH deploy key with a pinned host key, or an HTTPS token. A team owner
+  stores, replaces and deletes them with `/api/v1/team/git-credentials`; the
+  controller reads an ssh host's key when the key is stored, dialing the
+  address it checked rather than resolving the name again, and releases it
+  only after an owner confirms its fingerprint. `POST
+  /api/v1/runs/{id}/git-credential` releases the team's credential for the
+  run's host when no App installation covers the repository, only to a runner
+  holding a live claim on the run with a token of the run's team, re-checked
+  and locked inside the release's own transaction, and only to a cloud runner
+  or a machine an owner opted in with
+  `PUT /api/v1/team/runner-tokens/{prefix}/git-credentials`. Each release
+  writes an audit row, listed at `/api/v1/team/git-credentials/releases`. The
+  runner writes a key to tmpfs at mode 0600 beside the pinned `known_hosts`,
+  fetches with only that identity, and deletes it before compiling anything.
+  A cloud runner without a tmpfs fails the fetch rather than write the key to
+  disk, and a starting runner removes key directories a crashed one of its
+  user left behind.
+  Values are sealed under the secrets key and resealed by
+  `POST /api/v1/secrets/rotate`. Schema 62 adds the tables. See
+  [Team git credentials](docs/git-credentials.md).
+- **web:** a **Git credentials** tab beside Secrets lists the team's git
+  credentials by host, never their values. Owners store or replace an SSH
+  deploy key or HTTPS token, confirm an SSH key's pinned host key after
+  checking its fingerprint, delete credentials and read recent releases; the
+  page points github.com users to the GitHub App. The Machines page gains an
+  owner toggle for whether a machine receives the team's git credentials.
+- **controller + web + runner:** a team owner lists, per source repository,
+  up to 10 more GitHub repositories of its owner that a run's App token also
+  reads, with `PUT /api/v1/team/github-app/extra-repos` or under **Team >
+  GitHub > Extra repositories**. Each must be covered by the installation that
+  covers the source repository when it is listed and again at every mint.
+  The git-credential answer names them in `extra_repositories`, and when the
+  checkout has submodules the runner checks them out with that credential,
+  rewriting ssh submodule URLs to https through `url.insteadOf`. The list is
+  never read from the repository, so a pull request cannot widen its own
+  token. See [Team git credentials](docs/git-credentials.md#extra-repositories).
+- **runner:** `sparkwing-runner agent --allow-repo`, and `allow_repos` in
+  `agent.yaml`, make an agent claim only those repositories and fetch their
+  source directly, with the credential the controller releases or else the
+  machine owner's own, instead of through the controller's gitcache proxy.
+  `sparkwing cluster runners add --allow-repo` writes the list. An agent
+  without one keeps the proxy.
+- **chart:** sparkwing-runner-bundle renders `runner.alsoClaimTriggers=true`
+  without a gitcache; such runners fetch source directly with the credential
+  the controller releases.
+- **web:** `/team/secrets` manages a team's secrets and variables. Owners
+  create, overwrite and delete rows scoped to the team or to one pipeline;
+  editors and readers see the names and the variables' values. A secret is
+  write-only: its value is never shown after it is saved, and **Update** opens
+  an empty field. A variable is shown and edited in place.
+- **controller + sdk:** Sparkwing as an OIDC issuer, so a run assumes AWS,
+  Google Cloud, Azure or Vault roles with no stored cloud key. With
+  `--oidc-key-file` (or `SPARKWING_OIDC_KEY`) and an `https` `--external-url`,
+  the controller serves `/.well-known/openid-configuration` and
+  `/.well-known/jwks.json`, and `POST /api/v1/runs/{id}/oidc-token` signs an
+  RS256 ID token for the claim holder of that run only, with subject
+  `team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>`,
+  where the trigger is `push`, `pull_request`, `cron` or `manual`. A GitHub
+  push delivery now records `GITHUB_EVENT_NAME=push` in its trigger
+  environment, which is what the `push` trigger rests on. Pipeline code calls
+  `sparkwing.OIDCToken(ctx, audience)`. `--oidc-published-key-file` publishes a
+  second key that never signs, for a two-step rotation, and `--oidc-token-ttl`
+  sets the lifetime (default 10m, at most 1h). See
+  [OIDC tokens for cloud roles](docs/oidc.md).
+- **controller:** a sign-up gate bounds what a burst of new Google or GitHub
+  accounts can cost. A new user is admitted with a personal space or placed on
+  the waitlist, where it holds no space, cannot create a team, and may still
+  accept an invitation. It is waitlisted when the operator sets the gate to
+  `waitlist` (`PUT /api/v1/signups` or `--signup-gate=waitlist`), when the last
+  hour or day already admitted 50 or 500 new users (the gate then closes itself
+  until an operator reopens it), when the free tier reports `closed` or cannot
+  be read, or when a GitHub account is younger than 7 days. Existing users are
+  never gated. A waitlisted user who accepts an invitation counts as an
+  admission, and a team that has bought no credits holds at most 10 members
+  (`free_team_members`); existing members are never removed.
+  `GET /api/v1/signups/waitlist` lists the waitlist oldest first and
+  `POST /api/v1/signups/waitlist/approve` admits users by id or the oldest n.
+  `sparkwing_signups_total`, `sparkwing_signup_gate_closed_total` and
+  `sparkwing_signup_velocity_warnings_total` feed alerting, with a warning at
+  20 new users an hour. See [Sign-up gate](docs/auth.md#sign-up-gate).
+
+- **web:** a waitlisted user sees a waitlist page in place of the team views,
+  with any invitations it can accept.
+- **controller:** team billing. `GET /api/v1/team/billing` gives any member of
+  the active team its balance, the price table, recent usage grouped by run,
+  and its purchases and grants. `POST /api/v1/team/billing/checkout` lets an
+  owner buy $5 to $500 of credits: the controller takes the team from the
+  owner's session and asks the hosted checkout service at `--billing-url`
+  (`SPARKWING_BILLING_URL`, authenticated with `SPARKWING_BILLING_TOKEN`) to
+  open a Stripe Checkout Session, and answers with the page to send the owner
+  to. A controller with no billing URL sells no credits. A `reversal` grant
+  may omit `team` and lands in the team its payment funded. See
+  [Buying credits](docs/auth.md#buying-credits).
+
+- **credits:** refunds and chargebacks. Purchases are final, so a refund is
+  the operator's: `sparkwing cluster credits refund --payment <pi_...>` takes
+  back what the purchase still has on the ledger through
+  `POST /api/v1/credits/reversals` and prints the Stripe dashboard page to
+  issue the money back from; the controller never moves money. The whole
+  purchase is reversed even when spent, so the balance may go negative. A team
+  is held per dispute with `POST /api/v1/credits/freezes` or
+  `sparkwing cluster credits freeze`: while any hold stands its metered claims
+  are refused with 402 and `"code": "credits_frozen"`, and Team -> Billing
+  says it is paused. The checkout service holds a team when a dispute opens on
+  its purchase, and reverses the purchase and holds the team when the dispute
+  is lost; it never releases a hold, which is the operator's, by dispute or by
+  team. A dispute is bound to the payment its first hold names, and a hold or
+  reversal naming it for another payment answers 409 `dispute_conflict`.
+  `GET /api/v1/team/billing` gains `frozen`. Schema v60 adds
+  `credit_freezes`. See
+  [Buying credits](docs/auth.md#buying-credits).
+
+- **web:** Team -> Billing shows the team's balance against its $5,000 cap,
+  the price of each class in credits and dollars from the controller's rate
+  table, the minimum billable seconds, recent usage by run and the team's
+  purchases. An owner buys credits there and is sent to Stripe Checkout; the
+  page says that purchases are final and credits never expire.
+
+- **controller:** personal CLI tokens. `POST`, `GET` and `DELETE
+  /api/v1/team/cli-tokens` mint, list and revoke a member's own user token for
+  the active team, from a signed-in session only. The token carries the
+  member's role scopes without `team.admin`, expires after 90 days, and is
+  revoked when the member leaves or drops to `reader`; a member holds at most
+  10 live ones (409). The mint returns the `sparkwing cloud connect` and
+  `sparkwing pipeline trigger` commands that use it. See
+  [Start a run](docs/getting-started.md#start-a-run).
+
+- **web:** on a multi-team controller the run form names a GitHub repository
+  and branch, which a team runner fetches at the branch tip, and takes any
+  pipeline name; **+ Start a run** on the Runs page opens it with no run
+  selected. `/team/machines` gains a CLI access panel that mints a CLI token,
+  shows it and its setup commands once, and lists and revokes the member's
+  tokens.
+
+- **controller:** `GET /api/v1/pipelines` (`runs.read`) lists the caller's
+  team's pipelines, most recently active first, up to 200: every pipeline the
+  team has a run, trigger or declared schedule for, each with its newest run's
+  id, status and times. The dashboard answers a signed-up account's
+  `/api/v1/pipelines` from it, so the Pipelines page and the run form's
+  suggestions show that team's pipelines, newest first; the operator's own
+  session still reads the working directory's.
+
+- **controller:** `GET /api/v1/admin/usage-metrics` (`admin`) reports weekly
+  usage over `?weeks=` whole UTC weeks (default 12, at most 104): teams with a
+  run started, runs split into cloud and connected-machine, how many runs each
+  active team started, new accounts and teams, and for teams created in the
+  window the median, 90th percentile and spread of the time from creation to
+  the first successful run. It reads only the controller's own tables. The
+  default team never counts, and `exclude_team` leaves out more.
+
+- **runner:** Kubernetes runner Jobs carry a `sparkwing.dev/team` label and a
+  required pod anti-affinity on `kubernetes.io/hostname` that refuses any node
+  running another team's Job, so different teams' Jobs never share a node
+  while one team's Jobs still pack together. A claimed or fetched trigger now
+  reports its `team`. See [Runner Job placement](docs/security.md#runner-job-placement).
+
+- **cache:** the cache accepts a cache grant, a bearer a multi-team
+  controller signs with the grant key (`SPARKWING_CACHE_GRANT_KEY` on both,
+  `--grant-key` on the cache), a secret that is neither the cache's operator
+  token nor any runner's token, so a runner need not hold the cache's token.
+  The cache refuses to start, and the controller to mint, when the key equals
+  the operator token. A grant names one run's team, lasts six hours or until
+  the requesting credential expires, whichever is first, and is verified
+  offline. A GitHub Actions runner credential gets no grant (403). A grant
+  reads and writes only its team's `/bin/`, `/cache/` and `/artifacts/` trees
+  under `<data-dir>/teams/<team>/`. A grant for the operator's own team
+  (`default`) reads and registers any mirror, SSH origins included, so the
+  operator's runners still build its private repositories; any other team's
+  grant reads only public `https` mirrors registered under their URL-derived
+  name. Every grant is refused on seeding, refresh, archive, upload and admin
+  routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
+  The operator token is unchanged.
+
+- **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
+  the cache refuses every download a process serves once it has sent that many
+  bytes in the UTC day, answering `429` with a `Retry-After` naming the day
+  roll. The per-principal budgets bound one caller and are multiplied by every
+  account or token a caller mints; this is the backstop that bounds the month.
+  Unlimited by default.
+- **web:** Sign in with Google on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
+  provider, the sign-in page offers Google. `GET /auth/google/start` and
+  `GET /auth/google/callback` run the flow on the dashboard host with the state
+  and PKCE verifier in a short-lived `__Host-sw_oauth` cookie, and a callback
+  whose state does not match that cookie is refused. The nav shows the active
+  team and your role and switches teams. See [auth](docs/auth.md#google-and-github-sign-in).
+- **web:** Sign in with Google or GitHub on a multi-team controller
+  When `GET /api/v1/capabilities` reports `teams.enabled`, the sign-in page
+  offers each provider `auth.providers` lists, `google` with Google's standard
+  dark button and `github` beside it. `GET /auth/<provider>/start` and
+  `GET /auth/<provider>/callback` run the flow on the dashboard host with the
+  provider, state and PKCE verifier in a short-lived `__Host-sw_oauth` cookie,
+  and a callback whose state or provider does not match that cookie is refused.
+  The nav shows the active team and your role and switches teams. See
+  [auth](docs/auth.md#google-and-github-sign-in).
+
+- **web:** team pages on a multi-team controller
+  `/team` lists members, invites by email with a copyable accept link, revokes
+  pending invitations, changes roles and removes members; `/team/machines`
+  mints a runner token for the active team, shows it and its
+  `sparkwing-runner` command once, and lists and revokes tokens; `/team/new`
+  creates a team and `/invitations` accepts one. Controls follow the member's
+  role and the controller decides every request. A local install shows none of
+  them.
+
+- **controller:** Google sign-in, users and teams. `POST
+  /api/v1/auth/oauth/google/start` and `/exchange` run a PKCE flow for the
+  dashboard, verify the ID token against Google's signing keys (issuer,
+  audience, expiry, `email_verified`) and open a session. A new Google identity
+  joins an existing user only when both sides hold the email verified and that
+  user has no other Google identity; a user's email follows what Google
+  asserts at each sign-in. One user creates at most three teams. A user
+  with no team gets a personal space whose slug comes from the email's local
+  part, with the smallest free integer appended on a collision. `GET
+  /api/v1/me`, `POST /api/v1/me/active-team` and `POST /api/v1/teams` serve the
+  signed-in user; the active team is stored on the user, so the next sign-in
+  returns to it. `GET /api/v1/capabilities` answers unauthenticated with
+  `teams.enabled` and `auth.providers`. Every authenticated route now accepts
+  `Authorization: Session <id>`: a password session acts in the `default` team
+  with its user's scopes, and a Google session takes its scopes from the user's
+  role in the session's team on every request (reader: `runs.read`,
+  `logs.read`, `triggers.read`; editor adds `runs.write`, `runs.control`,
+  `approvals.write`; owner adds the new `team.admin`). No role grants `admin`.
+  `whoami` and `auth/session` report `team` and `role`. Schema 52 adds the
+  `accounts`, `identities`, `memberships` and `invitations` tables and is
+  additive.
+- **controller:** GitHub sign-in beside Google. `POST
+  /api/v1/auth/oauth/github/start` and `/exchange` run the same flow with
+  `--github-client-id` (`SPARKWING_GITHUB_CLIENT_ID`) and
+  `SPARKWING_GITHUB_CLIENT_SECRET`, under the same license and redirect
+  allowlist, and `auth.providers` lists `github` when it is configured. The
+  identity is keyed on GitHub's numeric account id, and only the primary email
+  GitHub has verified counts. A GitHub identity joins an existing user on the
+  same verified email unless that user already has a GitHub identity.
+- **controller:** team administration for signed-in users. `PATCH
+  /api/v1/team` renames the active team; `GET`, `PATCH` and `DELETE
+  /api/v1/team/members[/{user_id}]` list members, change roles and remove a
+  member or leave; `GET`, `POST` and `DELETE /api/v1/team/invitations` manage
+  seven-day, single-use invitations whose answer carries an `accept_url`, and
+  `POST /api/v1/invitations/{id}/accept` joins only when the signed-in user's
+  verified email is the invited address. `POST`, `GET` and `DELETE
+  /api/v1/team/runner-tokens` mint, list and revoke runner tokens bound to the
+  active team; an editor mints and revokes their own, an owner revokes any.
+  Every `/team` route acts on the session's team, and another team's id
+  answers 404. Nobody grants a role above their own and the last owner stays.
+  A team holds at most 10 live runner tokens (the next mint answers 409), 50
+  open invitations and 100 invitations created a day (429), and a withdrawn
+  invitation still counts toward the day. `store.Tenant` refuses to mint a
+  token carrying `admin` on every path.
+- **controller:** GitHub Actions runners. A team owner binds a repository by
+  its GitHub repository id and owner id with `POST
+  /api/v1/team/github-runners` (`GET` lists bindings and renders the workflow,
+  `DELETE .../{repository_id}` unbinds and revokes). `POST
+  /api/v1/runners/github/exchange` trades a workflow job's GitHub ID token
+  (audience: the controller's external URL) and the team slug the workflow
+  names for a one-hour runner credential; both the binding and the named team
+  must match, only a `push`, `workflow_dispatch` or `schedule` job on a branch
+  gets one, and a team holds at most 20 live credentials, counted and minted
+  under one lock. The credential claims nodes and triggers, and reaches runs,
+  only of the team's runs for that repository at the branch and commit its
+  ID token names, gets no cache grant, and every other route answers 403. The
+  bindings and credentials tables are a step of schema 52. See [GitHub Actions runners](docs/github-actions-runners.md).
+- **sparkwing-runner:** `runner --github-actions --team <slug>` exchanges the
+  job's ID token, advertises the `github-actions` label and stops claiming ten
+  minutes before its credential expires. `--idle-exit <duration>` ends the
+  loop once no node has been held for that long.
+- **controller:** hosting more than one team needs a signed license
+  (`--license-file`, or the license text in `SPARKWING_LICENSE`). The
+  controller verifies its Ed25519 signature against a public key built into the
+  binary and checks its expiry. Without a valid multi-team license the
+  controller holds one team, refuses `POST /api/v1/teams`, reports
+  `teams.enabled: false`, offers no Google sign-in and refuses sessions a
+  Google sign-in opened; a local install needs no
+  change. Google sign-in reads `--google-client-id`
+  (`SPARKWING_GOOGLE_CLIENT_ID`), `SPARKWING_GOOGLE_CLIENT_SECRET` and the
+  callback allowlist `--oauth-redirect-uris` (`SPARKWING_OAUTH_REDIRECT_URIS`).
+- **store:** schema 49 adds a `team` column to every tenant-owned table and a
+  `teams` table. `Store.ForTeam(ctx, team)` returns a `*store.Tenant` whose
+  methods take no team argument and cannot express a query across teams; it
+  normalizes the name (trimmed, lower-cased, because team subdomains are
+  DNS names) and refuses a team that is not registered. `Store.AsOperator`
+  returns the unscoped handle, which no longer embeds `*Store`: each unscoped
+  operation is a named method, and fleet-wide listing is
+  `ListRunsAcrossTeams` / `CountRunsAcrossTeams`. The runs family (`CreateRun`,
+  `GetRun`, `ListRuns`, `CountRuns`, `FinishRun`, `FinishRunsIfActive`,
+  `TouchRunHeartbeat`) is available on the tenant handle; the rest of the store
+  is unchanged for now. A tenant mutator handed another team's run id reports
+  `ErrNotFound` rather than succeeding silently, and `CreateRun` reports the new
+  `ErrIDOwnedByAnotherTeam` rather than upserting over another team's pending
+  run. The migration is additive: an existing install backfills into a single
+  `default` team and keeps behaving as it did, with no new configuration.
+
+  The port is not finished, and **a missing team scope is not yet a compile
+  error**: every ported method still has a byte-identical twin on `*Store`
+  because `pkg/storage.StateStore` and `internal/backend.Backend` name those
+  methods, and Go satisfies interfaces structurally, so a `*Store` substitutes
+  for a `*Tenant` at every seam until those twins are deleted in one change.
+  What refuses an unscoped statement in the meantime is
+  `pkg/store/tenant_sql_scope_guard_test.go`, which parses the package and
+  fails on any statement touching a tenant-owned table without a team
+  predicate, in a `WHERE` or in an `ON CONFLICT`.
+
+- **store:** the tenant handle mints tokens and writes triggers.
+  `Tenant.CreateToken`, `Tenant.CreateTokenWith`, `Tenant.CreateTrigger` and
+  `Tenant.CreateTriggerWithRun` write into the handle's team, and `store.Token`
+  carries a `Team` field that a bearer lookup reads back, so a request can
+  resolve which team its credential acts for. The `*Store` twins still write
+  the `default` team, so a single-tenant install is unchanged.
+- **store:** a claim never crosses teams. The team a machine may take work for
+  comes off its own credential rather than off the request, so a laptop holding
+  one team's token cannot see, name or take another team's node. The queue scan
+  (`ClaimNextReadyNode`), the named claim (`ClaimNamedNode`), the assisted
+  offer path (`PrepareNextExecutorClaim`, `OfferExecutorClaim`) and both
+  trigger claims (`ClaimNextTriggerFor`, `ClaimSpecificTriggerFor`) all carry
+  the predicate, and a named node or trigger of another team reports
+  `ErrNotFound` rather than held, so a guessed id learns nothing. A metered
+  credential is one team's like any other: metering decides who pays, not
+  whose work a claimant sees, so a cloud runner pool claims only for the team
+  its token was minted in. A credential no token row backs claims nothing once
+  a second team is registered and reports the new `ErrClaimantHasNoTeam`; a
+  single-team install, which is every self-hosted controller, behaves exactly
+  as it did. The local-first placement hold counts only live runners of the
+  node's own team, read off each runner's token row
+  (`RunnerPresence.TokenPrefix`), so another team's laptop advertising the
+  preferred label no longer parks a node its own cloud runner could take.
+- **controller:** a runner's secret read resolves in the team of the run it
+  holds, so a runner holding one team's run reads that team's pipeline and
+  shared rows rather than the default team's. `Store.ClaimedRunFor` and
+  `Store.ClaimedRunsFor` replace `PipelineForClaimedRun` and
+  `PipelinesForClaimant` and return a `store.ClaimedRun` carrying the run's
+  team beside its pipeline. A legacy envelope resealed on read is written back
+  into the team it was read from.
+- **controller:** a manual retry (`POST /api/v1/runs/{id}/retry`, `sparkwing
+  runs retry`) files its trigger and pending run in the source run's team
+  through the new `Store.CreateRetryWithRun`, rather than in the default
+  team, where the team that asked could not see it and the default team's
+  runners could claim it.
+- **store:** an assisted executor's offer for another team's node
+  (`OfferExecutorClaim`) is refused as not found before the attestation check,
+  whose refusals would otherwise confirm that the node exists.
+  `ClaimReadyNodeForExecutorWithReservation` carries the same team predicate.
+- **store:** rows that hang off a run (events, approvals, debug pauses, node
+  steps, metrics, dispatches, execution attempts, claim offers and agent-loss
+  retry records) take the run's team in the statement that writes them. A
+  runner holding another team's trigger can now mutate that run's nodes,
+  events and attempts: its fence was checked in the default team and every
+  such write was refused as held by another holder.
+- **controller:** a claim refused for an empty balance records its
+  `credits_blocked` event on the node it was refused for, which
+  `store.InsufficientCreditsError` now names (`RunID`, `NodeID`), instead of
+  on the oldest waiting node on the controller, which could be another team's.
+  `Store.OldestWaitingReadyNode` is removed.
+- **store:** an assisted executor's offer takes its run's row lock before the
+  run's event-sequence lock, the order a deadline round takes them in, so an
+  offer and a claim round on one run no longer deadlock on PostgreSQL.
+- **store:** stored events are capped per event and per run whether or not a
+  storage quota tier is configured: `DefaultEventLimits` allows 256 KiB per
+  event, 64 MiB and 50,000 events per run, `Store.SetEventLimits` replaces
+  them (zero lifts a cap), and `AppendEventCharged` refuses an event past any
+  of them with a `StorageQuotaError` naming `event_bytes`,
+  `event_bytes_per_run` or `events_per_run`, which the controller answers
+  with 413. An event's bytes are its kind plus its payload. A kind is 1 to
+  128 bytes of `[A-Za-z0-9_.:-]`; any other is refused with
+  `ErrInvalidEventKind`, which the controller answers with 400. Runs keep
+  `event_bytes` and `event_count` counters, backfilled by the v52 migration,
+  so the per-run check reads one row.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite
@@ -29,6 +700,150 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
+  and target 64 KiB per HTTP append, keeping a longer single line intact.
+  Idle-tail appends start after 100 ms. A sequence
+  range lets the logs service account for every line; failed batches count
+  every line dropped. Accepted-range retries on one live logs service write
+  one copy; a restart can still replay an ambiguously acknowledged batch.
+  Upgrade the logs service before runners and pipeline
+  binaries. See [Batched log append protocol](docs/migrations/_unreleased.md#batched-log-append-protocol).
+
+- **controller (Breaking):** The hourly storage pass deletes cache objects older than
+  30 days for the default team and the operator token's cache root, as it
+  already does for other teams. It also removes expired direct-object rows for
+  the default team. Existing older cache objects leave on the first successful
+  storage pass after upgrade. See [Default and operator cache expires after 30 days](docs/migrations/_unreleased.md#default-and-operator-cache-expires-after-30-days).
+
+- **release checks:** The `pkg/store` race suite compiles once and runs every
+  top-level test across four bounded processes, with each test assigned to one
+  shard. The separate store test-helper package still runs once. A local run of
+  1,075 tests finished in 27m20s; hosted timing remains unmeasured.
+- **controller + dashboard (Breaking):** credit and billing routes, metered
+  tokens, claim charges, and storage billing require a signed `metering`
+  license. Existing signed `multi-team` licenses also grant metering.
+  Self-hosted controllers without either feature run claims and storage tiers
+  without credit limits, and the dashboard hides Billing. See
+  [Metering needs a signed license](docs/migrations/_unreleased.md#metering-needs-a-signed-license).
+- **dashboard:** the selected node's execution history now sits below the run
+  summary in the Summary tab. Single attempts use one compact row, and selecting
+  nodes leaves the tab bar in place.
+
+- **cli + controller:** on a multi-team controller, `sparkwing run --on`
+  and `sparkwing crons install` no longer call the cache's `/git/refresh`
+  and `/sync/seed`, which take the cache's operator token and answered a
+  team member `401`. `GET /api/v1/services` reports `multi_team`, and the CLI
+  skips both calls with one debug line unless `SPARKWING_CACHE_TOKEN` is set.
+  A commit not on origin is refused with "push your commit" alone.
+
+- **controller:** `GET /api/v1/secrets` is open to every team member
+  (`runs.read`), not only owners, and lists each unmasked variable with its
+  value. A masked secret still lists with metadata only.
+- **controller:** a multi-team controller refuses to start without
+  `--bucket-store`, because free-tier shares are enforced only over the object
+  store the cache and logs service keep their objects in.
+
+- **cache:** a cache that verifies grants starts with a 200 GiB daily egress
+  cap unless `--egress-daily-cap-bytes` names another value. It bounds what
+  any caller churns through the registry proxy, which takes no credential and
+  belongs inside the cluster only.
+  With `--controller` the day's and the month's egress totals survive a
+  restart, kept in the controller's database. `--disable-proxy`
+  serves no registry proxy, and the runner bundle refuses a cache Service
+  other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which
+  sets it.
+
+- **cache:** a cache that verifies grants and keeps a `--blob-store` refuses
+  to start without `--controller`, which counts what each team stores there.
+
+- **logs:** with `--archive-store`, `--retention` defaults to 30 days.
+- **credits (Breaking):** one credit is one vCPU-second and a dollar buys
+  20,000 of them, $0.18 a vCPU-hour. The ledger still stores micro-credits and
+  a dollar is still 100,000,000 of them, so every balance, grant and charge
+  keeps its dollar value; `micro_per_credit` reads 5,000 and
+  `credits_per_dollar` 20,000, and a client that hardcoded 100 renders balances
+  200 times too small. The default ladder bills each class its core count in
+  credits a second, so the eight-core class moves from 36,667 to 40,000
+  micro-credits a second. Schema v59 multiplies a stored
+  `runner_scale_step_credits` by 200 so the step keeps its dollar value.
+  `sparkwing cluster credits grant --amount` counts the new credit.
+
+- **credits (Breaking):** every metered node and trigger step bills at least
+  20 seconds on every class. `MinBillableSeconds` replaces
+  `CreditClaimFloorSeconds`: a claim reserves 20 seconds at its class rather
+  than 60, and once billing starts the reservation is consumed rather than
+  refunded, so a node that runs four seconds pays for twenty. A claim that
+  never starts is still refunded whole. `Store.CreditClaimFloorMicro` is
+  removed.
+
+- **credits:** a metered node bills from the moment the machine that runs it
+  starts work to its finish, so fetching the source and compiling the
+  pipeline are billed; queueing and provisioning are not. A runner claiming
+  from the queue or accepting an offer bills from its claim, and a node a
+  dispatcher claims before creating its Job bills from the pod's first claim
+  renewal, which `run-node` now sends as the pod starts, or its execution
+  start. A node the platform stops before its execution starts
+  (`queue_timeout`, `logs_auth`, `logs_dropped`) gets back everything its claim
+  billed, as does a dispatcher's claim whose pod never started; a lost runner
+  or lease is billed to the lease's end, and any other end before execution
+  keeps its setup billed. Schema v59 adds
+  `nodes.credit_billing_from`.
+
+- **credits:** a team's balance holds at most $5,000, held when a checkout
+  opens: the balance plus the team's checkouts still open plus the purchase
+  must fit, or the checkout is refused with 409, `"code": "balance_cap"` and
+  `open_micro`. A checkout counts until its payment is granted or its session
+  expires. A `paid` grant is never refused by the cap, because its payment
+  already went through, and is at most one $500 purchase; it names its
+  Checkout Session in `checkout`. A new `free` grant is still refused when
+  it and the open checkouts would pass the cap. A reversal may not take back
+  more than its payment paid. Schema v60 adds `credit_checkouts`.
+
+- **store:** a credit grant's reference is unique within its team rather than
+  across the deployment, so two teams can each hold a `free` grant named
+  `welcome`, and a repeat within a team still returns the grant already
+  written. A `paid` reference is a payment id and stays unique across teams:
+  one already paid to another team is refused with `ErrCreditGrantConflict`.
+  The v52 migration replaces the `(kind, reference)` index with
+  `(team, kind, reference)` on both dialects.
+
+- **controller:** the `cloud` and `cloud-free` limits profiles now also set
+  `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
+  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
+  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
+  with a profile previously left run creation and egress bytes unlimited. A
+  flag or environment variable the operator names still wins.
+- **controller (Breaking):** a metered token's trigger claim names how its
+  nodes run. `POST /api/v1/triggers/claim` and `/api/v1/triggers/{id}/claim`
+  take `node_runner` (`k8s`, `warm` or `inprocess`, the default), and a
+  metered token naming `inprocess` gets `403` `metered_inprocess_nodes`,
+  because in-process nodes hold no node claim and were never charged; a
+  metered pool on the runner-bundle default ran a spent team's whole pipeline
+  free. A metered `k8s` or `warm` claim answers `402` when the team's balance
+  cannot cover the cheapest class's first minute. The trigger loop sends its
+  `--trigger-runner`, and stops with that reason when it is refused. See
+  [migration guide](docs/migrations/_unreleased.md#a-metered-pool-runs-trigger-nodes-through-node-claims).
+- **charts (Breaking):** the cache's operator token and the cache grant key are
+  Secrets of their own, `cache.tokenSecret` and `cache.grantKeySecret` in the
+  runner bundle, instead of the runner's `controller.tokenSecret`. The runner's
+  token reaches the pipeline code it runs, so sharing it let one team's
+  pipeline mint a grant for any team and replace another team's cached
+  binaries. The chart refuses to render when any two of the three name the
+  same Secret key, and a cache-enabled install requires `cache.tokenSecret`.
+  See [migration guide](docs/migrations/_unreleased.md#the-caches-token-and-grant-key-are-secrets-of-their-own).
+- **runner (Breaking):** a runner hands a run a cache grant, never the cache
+  token. After each claim the trigger loop, pool runner and agent ask the
+  controller for a grant for that run with their own runner token, send it on
+  their own cache calls, and pass it to the pipeline as
+  `SPARKWING_CACHE_GRANT`, including into Kubernetes fallback Jobs. A
+  controller that mints no grant leaves the run without the binary cache
+  rather than failing it. The pipeline binary a trigger runs starts from an
+  allowlist of the launcher's environment instead of all of it, so the
+  launcher's credentials no longer reach team code. The runner no longer reads
+  `SPARKWING_CACHE_TOKEN`, the runner-bundle chart no longer sets it on the
+  runner, and `agent.yaml` refuses `cache_token`. See
+  [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
 
 - **web:** the dashboard installs with pnpm instead of npm. `web/pnpm-lock.yaml`
   replaces `web/package-lock.json`, `web/pnpm-workspace.yaml` names the
@@ -99,6 +914,313 @@ unlock.
 
 ### Fixed
 
+- **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
+  coordinator time beyond the 20-second reservation. Exhausted credits close
+  the claim and fail the run; a ledger error refuses renewal. Runners stop on
+  the refusal, and finish or expiry bills only the unpaid tail. Schema 73 adds
+  a claim-specific credit cursor and charge-balance index. Resolve every open
+  trigger credit reservation before upgrading. An unsettled reservation parks
+  its trigger until ledger review; see [Trigger credit cursor](docs/migrations/_unreleased.md#schema-73-trigger-credit-cursor).
+
+- **controller + store (Breaking):** A team's recent paid grants now raise only
+  that team's concurrent runner cap. Refunds lower only the original team's
+  cap, and `GET /api/v1/compute-limits` no longer exposes another team's paid
+  total or global runner activity. `Store.RunnerCapFor` now takes the team
+  before the time; see
+  [Team runner cap](docs/migrations/_unreleased.md#team-runner-cap).
+
+- **controller:** Per-principal runner, node and hourly run guards now check
+  metering and usage within one team. Teams sharing a principal name no longer
+  spend each other's runner or hourly allowance; global caps still count all teams.
+
+- **controller:** GitHub webhook and GitHub App runs now enter the pending run
+  state when their triggers are accepted, allowing claimed warm runners to
+  fetch signed cache binaries before the pipeline starts.
+
+- **controller + web (Breaking):** Browser sign-in cookies now survive restarts for 30 days.
+  Controller sessions expire after seven idle days or 30 days from sign-in,
+  whichever comes first. Logout and server-side revocation still take effect
+  on the next request. `Store.ExtendSession` is replaced by
+  `Store.LookupSessionAndRenew`; see [Browser session renewal](docs/migrations/_unreleased.md#browser-session-renewal).
+
+- **cloud CLI + cache:** `sparkwing cloud status` omits the optional gitcache
+  probe when no cache pod URL is announced, while an announced unhealthy cache
+  still fails. Cloud keeps its cache Service internal; off-cluster source,
+  binary and artifact bytes use signed S3 and CloudFront URLs instead of a
+  public cache ingress.
+
+- **jev-lint:** Root-confined reads keep symlinked Go files and changed paths
+  from adding source outside the checkout to a TypeSafe request. A changed
+  symlink or path swap now fails before any request is made.
+
+- **controller:** Run completion accepts only `success`, `failed`, or
+  `cancelled`. An identical retry keeps the original finish time; a
+  conflicting verdict returns `400`. Creating a run cannot reopen a row
+  already stamped finished.
+
+- **controller:** A storage listing that already sees a smaller overwritten
+  object keeps its listed size instead of applying the same shrink twice.
+
+- **controller:** A committed storage reservation counts once when retried
+  within 24 hours. A renewed block returns the same next reservation on
+  retry, and hourly storage maintenance prunes older receipts. Schema 72 makes
+  older controllers refuse the receipt ledger. See [Storage commit receipts](docs/migrations/_unreleased.md#schema-72-storage-commit-receipts).
+
+- **web:** Navigation fetches a tab's route on hover, focus or touch instead of
+  prefetching every visible tab on page load.
+
+- **CLI:** `runs grep` applies branch and SHA prefix filters before its run
+  limit, so newer unrelated runs do not hide an older matching log. It reads
+  an explicit profile logs URL or the controller's announced logs service,
+  and reports original log line numbers without downloading entire logs.
+
+- **runner:** A trigger that fails setup before pipeline dispatch now records a
+  failed run with an operator troubleshooting step instead of remaining pending
+  until the controller's 15-minute fallback. If its failure cannot be recorded,
+  the claim remains open for lease recovery. Failed trigger closure logs the
+  run ID and controller error for operator investigation.
+
+- **dashboard:** A historical trigger that ended before dispatch shows plain
+  retry, Fleet and run-ID sharing steps in the Runs summary. Its stored error
+  stays available under Technical error.
+- **controller + dashboard:** A busy legacy agent's accepted claim heartbeats
+  keep Fleet's observed liveness fresh without offering a free slot. Recent
+  run failures appear as a separate Home warning and no longer mark a healthy
+  controller as degraded.
+
+- **controller:** Fleet groups claim-mode agents with a plain `holder_prefix`
+  under one stable name and uses their own idle polls for liveness. An unrelated
+  credential cannot keep a stale claim's agent marked live or mix its active
+  runs into the most recently started claimant's row. Legacy last-seen time
+  comes from a node start or live poll, never a future lease deadline.
+- **dashboard:** Fleet shows a low 24-hour run success rate as a separate
+  recent-run warning linked to failed Runs. Controller and service probes stay
+  Healthy when that is their only problem; dependency failures remain Degraded.
+- **controller:** Expired zero-byte storage reservations are removed during
+  cleanup, so empty artifact uploads leave no permanent reservation rows.
+
+- **dashboard + log search:** Search applies pipeline, status, branch, commit,
+  and since filters before limiting candidate runs, so an older archived log
+  remains searchable after newer unrelated runs. The Search view exposes those
+  filters directly; the Run list keeps its broader browsing filters.
+- **runner:** memoized nodes and queued concurrency groups run through off-cluster agents,
+  Kubernetes Jobs, and warm pools. The child broker permits concurrency requests
+  for its claimed node while the controller keeps keys within the runner's team.
+  Runner credentials can cancel a waiter on a run they claim.
+- **dashboard:** A GitHub App repository access update returns to the signed-in
+  team's GitHub tab and confirms the update instead of showing sign-in.
+
+- **controller:** Execution-start rejects executor names over 128 bytes and
+  removes terminal escapes from names shown in attempt history.
+
+- **logs:** A log search returns the same 404 for an unknown run and a run
+  outside the caller's team, whether logs are local or archived.
+
+- **warm-pool + controller:** externally executed nodes share one status poll
+  per run with bounded backoff. Run and trigger heartbeats and node touch
+  requests stay available when a token's request budget is exhausted, so
+  polling cannot cause the controller to reap an active run.
+- **controller:** GitHub Actions runner credentials claim only signed GitHub
+  push deliveries for their repository, branch and commit. A retry, child run,
+  pull request or manually submitted trigger with matching Git fields is
+  refused. GitHub App pushes record their event name for this check. Unbinding
+  a repository during credential exchange now stops or revokes the credential.
+- **source installer:** `bin/install.sh` updates `sparkwing-runner` alongside
+  `sparkwing` instead of removing the runner. Without `pnpm`, it embeds an
+  existing dashboard export when available, or completes with a warning that
+  the dashboard is unavailable.
+- **dashboard:** Switching between selected runs keeps the compact runs list
+  and detail panes in place while the next run loads.
+- **logs + dashboard:** log search reads archived runs from the object store
+  without restoring them, reports the reason when a search budget stops a
+  scan, and keeps archived runs scoped to their team. The runs Search view
+  applies its active filters before reading logs, scans newest runs until its
+  match limit, and reports how many matching runs it searched. Outcome words
+  show a pointer to the Status filter.
+
+- **controller + runner:** A claimed trigger whose pipeline is absent from the
+  fetched repository now produces a failed trigger and run. The failure names
+  the defined pipelines and, when known, the repository revision. It appears
+  in trigger and run API responses and the CLI, and the controller logs it at
+  warn level. A dispatch rejected by a guard still creates no run.
+
+- **Kubernetes runner:** Job CPU and memory requests now follow the pipeline's
+  resource pin or measured profile, with small defaults, instead of the billed
+  class. A request larger than every matching node's allocatable capacity
+  fails before Job creation. Credits still reserve the class rate for at least
+  20 seconds per started node.
+- **controller + runner:** parallel nodes of one run no longer deadlock while
+  recording execution start. The controller logs execution-start and node
+  heartbeat store errors with run and node IDs, answers transient PostgreSQL
+  contention with `503` and `Retry-After`, and runners retry an execution-start
+  request on that response or a transient connection failure.
+- **controller:** selecting an existing GitHub App installation now accepts
+  only IDs in the encrypted picker proof. An unlisted ID answers 404, and a
+  failed selection consumes the connection state.
+
+- **dashboard:** activity rows keep their height while a run's detail pane
+  closes. The queue status dot pulses when the daemon status changes, the
+  overview reserves its card layout while loading, and tooltips appear at
+  their measured position.
+- **runner:** GitHub Actions jobs claim and plan their own push's triggers in
+  process, so App-created pipelines start without a warm runner pool.
+
+- **controller:** the controller measures its `--bucket-store` whether or not
+  a bucket ceiling is set. An unlimited bucket used to report 0 bytes, 0
+  objects and `measurement_incomplete: false` because it was never measured.
+  A measurement that fails now sets `measurement_incomplete`, names the error
+  in the object-store breaker route's `measure_error`, and adds a `problems`
+  entry to `/api/v1/health`.
+- **controller:** a runner holding the claim on a webhook-started trigger can
+  ask for the run's source credential before the run exists. The claim check
+  read only the run row, which the pipeline creates after the fetch, so an App
+  token for a GitHub App run answered 403.
+
+- **controller:** a checkout cannot open for a team whose deletion has begun.
+  `POST /api/v1/team/billing/checkout` answers 409, because the payment would
+  land after the team is purged. A team held over a disputed payment is held
+  to the free tier everywhere: its run and event admissions now read the same
+  funded predicate as its storage tier, so a hold no longer lets its events
+  past the free share.
+- **cache:** the store ceiling counts git mirrors from the moment a clone or
+  fetch finishes, by re-measuring the store then, instead of at the next
+  scheduled measurement.
+
+- **controller:** a team cannot be deleted while money is in flight for it.
+  `DELETE /api/v1/team`, the operator's `DELETE /api/v1/teams/{team}` and an
+  account deletion that would delete a team answer 409 while the team has an
+  unexpired, unpaid credit checkout ("wait for the checkout to expire or
+  complete") or an unreleased dispute hold ("contact support"). A payment that
+  completed after the purge found no team to credit, and a purge erased the
+  rows a dispute is about.
+- **controller:** an agent built before cache grants fetches an operator run's
+  source through `/api/v1/runs/{id}/gitcache` again when no webhook delivery
+  created the run, such as one `sparkwing run` submitted. The proxy answered
+  its register with 403 and the node's claim expired unstarted. A runner token
+  of the `default` team with a live claim on the run now reaches the run's own
+  source, as its cache grant already does; another team's token, a token with
+  no claim, and a repository that is not the run's source are still refused.
+- **runner:** a Kubernetes Job's `run-node` asks the controller for its run's
+  cache grant with the Job's runner token, as the trigger launcher and a pooled
+  runner already do. A Job whose dispatcher handed it no grant failed to fetch
+  its source through the cache with `git register: 401` on a multi-team
+  controller. The grant also opens the binary cache and the artifact store to
+  the node; a controller that mints none (404) leaves the node without the
+  cache.
+- **controller:** the migrations and schema requirements a release controller
+  records carry its version. `min_binary_version` and each requirement's
+  `added_by_version` read `(devel)` even from a tagged build, because only the
+  CLI told the store which version was running.
+- **credits:** a metered node whose runner stopped renewing now pays for the
+  seconds between its last charge and its lease's end, under the per-charge
+  cap, when the reaper or agent-loss recovery clears its claim, whether or not
+  execution had started. Those seconds used to go unbilled, and a lease lost
+  before execution used to be refunded whole although its machine had run.
+  On Postgres the reaper now clears only the claims it selected and settled,
+  so a claim another transaction held during the pass keeps its claim for the
+  next pass rather than being cleared unsettled.
+
+- **runner:** a pooled runner whose node fails before it starts, for example
+  a pipeline that does not compile, finishes the node as failed with that
+  error. The node used to stay claimed until its three-minute lease lapsed and
+  then report a lost runner instead of the cause.
+- **controller:** cancelling a run no runner has claimed finishes it as
+  `cancelled` at once. The cancel only flagged the trigger, so the run stayed
+  `pending` and the runner that later claimed it fetched source and started.
+  A claim now refuses a trigger that carries a cancel request; a run a runner
+  already holds still winds down through its lease heartbeat.
+- **controller:** a metered trigger claim reserves the cheapest class's first
+  minute on the team's ledger, and the trigger step is billed by the wall time
+  its claim ran, with the unused part of the minute refunded. The claim only
+  checked the balance, so every runner polling at once could start a run
+  against the same minute before any node claim charged it. Claims racing for
+  a balance that covers one minute now start one run. Schema 53 adds
+  `triggers.credit_reserved_at`. See [Metered runners](docs/auth.md#metered-runners).
+
+- **controller:** a member removed from a team lands in a team they still
+  belong to. Their session stayed on the team they had left, so every request
+  answered `403 missing_scope` and `/me` showed no active team. Removal now
+  moves the account's sessions to its personal team, or its oldest remaining
+  membership, and an account with no team left is refused with `403 no_team`.
+
+- **web:** a password-signed-in operator no longer reloads the dashboard forever
+  The controller refuses `GET /api/v1/me` for an operator session, which holds
+  no team identity, and the dashboard read that `401` as its own session ending
+  and sent the tab to sign-in, which sent it straight back. A refused `/me` now
+  means "no team": the team switcher and team pages stay hidden and nothing
+  reloads. The members page also disables Leave, demote and remove on a team's
+  last owner, naming why.
+
+- **store:** minted tokens, created nodes and created triggers record the team
+  that owns them. Schema 49 put a `team` column on all three tables and no
+  writer set it, so every row landed on the `default` team whatever team it was
+  created for, and a predicate reading the column answered about the `default`
+  team only. A token now carries the team it was minted for, and a rotation
+  hands that team to the replacement; a node takes the team off the run it
+  belongs to, so it cannot disagree with its run; a trigger takes the team from
+  the handle that created it. The automatic agent-loss retry copies the source
+  run's team onto the retry run and its trigger for the same reason.
+- **controller:** on Postgres, `finalize-ready` no longer returns HTTP 500 when
+  a fanned-out run closes claim rounds while another request records an event
+  on the same run, such as a credit-refused claim. The round locked its run row
+  `FOR UPDATE`, which blocks the key-share lock every event insert takes, while
+  the event writer held the run's event sequence the round needed next;
+  Postgres broke the deadlock after a second by aborting one side. The round
+  now locks the run `FOR NO KEY UPDATE`.
+
+- **controller:** a restart no longer reopens the egress daily cap. Only the
+  per-principal month totals were persisted, so a controller restarted after
+  reaching `--egress-daily-cap-bytes` served the whole cap again that day. The
+  day's process total is now written on the maintenance sweep beside the
+  month totals and restored before the listener binds.
+- **egress:** the daily cap and the monthly budget are hard byte caps. They
+  were checked once before a response started, so parallel downloads begun
+  just under a cap each finished past it. Bytes are now charged as they are
+  written, a write past either budget sends only what is left, and the
+  controller, logs service and cache abort the cut response so the client
+  sees a failed transfer. The download and log-stream concurrency caps key on
+  the authenticated principal alone; they had keyed on the caller's
+  `X-Sparkwing-Runner` or claim-holder header, so a caller multiplied its
+  slots by naming pods. A pool behind one bearer now shares its caps, so size
+  `--egress-max-downloads` and `--egress-max-log-streams` for the pool.
+- **run-node:** a Kubernetes pod stops its node when the controller refuses
+  the claim renewal, which is how a cancellation for exhausted credits, a
+  reaped claim, or a cancelled node reaches it. The refusal was logged and the
+  step ran on, billing compute until the Job deadline of up to 24 hours. The
+  node's process group is now killed within one renewal period, `run-node`
+  exits non-zero, and the Job ends. A controller unreachable for a whole claim
+  lease stops the node the same way.
+- **runners/k8s:** a Kubernetes fallback Job is no longer created when the
+  controller refuses the node's named claim. The claim is where the credit check
+  lives, and a refusal such as `402 insufficient credits` was logged and the Job
+  created anyway, unfenced and uncharged, so a team with no credits ran cloud
+  compute. The node now fails with `credits_exhausted` (or the refusal it got).
+  A controller that does not serve the named-claim route is refused the same
+  way, so no Job runs without a claim. A
+  node's declared timeout now stretches its Job's deadline to at most 24 hours,
+  or the operator's `--k8s-job-deadline` when that is longer.
+- **store:** the credit balance and credit exhaustion are per team. The balance
+  summed every grant and every charge on the controller with no team predicate,
+  so one team spending its grants emptied the balance every other team claimed
+  against, and a funded team silently paid for an unfunded one's compute. A
+  balance is now one team's grants less that team's charges, the claim
+  reservation, the heartbeat charge, the storage-growth refusal and the
+  non-payment storage drain each read the balance of the team that owns the
+  work, and a grant reference, which is a payment id, is refused rather than
+  honored when a second team replays it. Schema 50 moves `credit_exhausted_at`
+  out of `sparkwing_meta` onto a `credit_exhausted_at` column on the team's
+  registry row, because the bag is the deployment's and a team column on it
+  would make the session CSRF key per team; the same migration carries the
+  existing stamp onto the `default` team and moves each
+  `storage_charged_through/<principal>` watermark to
+  `storage_charged_through/<team>/<principal>`. The deployment-wide settings
+  stay in the bag: the rate, the rate table, the grace period, the charge cap,
+  the warm cpu class and the storage rate are one operator's price list and
+  policy for the whole controller. `Tenant` gains `CreditBalanceMicro`,
+  `CreditState`, `GrantCredits` and `RecordCreditGrant`; their `*Store` twins
+  read the `default` team, which is the only team a local or single-tenant
+  install has, so its behavior is unchanged and it is asked for no new
+  configuration.
 - **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
   not one holding a `.sparkwing` directory
   The machine's own state lives in `~/.sparkwing`, so a pipeline running
@@ -141,6 +1263,150 @@ unlock.
 
 ### Security
 
+- **controller + runner:** A metered node stops when its heartbeat cannot read
+  the token marker or charge credits. The failed renewal preserves the prior
+  lease and ledger state.
+
+- **store:** Finishing a trigger's run at a claim generation now uses the
+  trigger's team. A trigger ID shared with another team's run cannot finish
+  that run.
+
+- **controller:** The agents view now shows only executors whose runner
+  credentials belong to the caller's team. Other teams' host names, resource
+  headroom and active slot counts no longer appear.
+
+- **controller:** Forwarded `logs.write` credentials must name a reservation
+  and a nonnegative byte count when committing log storage. The cache's
+  operator credential still records negative overwrite deltas.
+
+- **controller:** Direct upload, commit and download signing spend the existing
+  controller request budget after authentication. Grants from one team share
+  its bucket, so minting another claim grant does not reset the limit.
+
+- **controller:** GitHub check summaries contain only the run outcome,
+  duration, node outcome counts and the console link; private node names and
+  error text stay behind sign-in. GitHub re-runs require the pipeline's own
+  prior App run on the same numeric repository id and a current subscription
+  to that run's event, so a recreated repository or changed subscription
+  cannot inherit the earlier run's context.
+
+- **controller:** `GET /api/v1/secrets/{name}` returns a masked secret's
+  value only to the operator's `admin` bearer token and to a runner reading
+  through its claimed run. A dashboard session, the operator's password
+  session and a `team.admin` bearer get `403` with error `write_only`, and
+  still read an unmasked variable. `sparkwing secret get --profile` keeps
+  working on an operator token. Every secrets response, and the dashboard's
+  proxy of `/api/v1/secrets`, now sends `Cache-Control: no-store` and
+  `Pragma: no-cache`.
+- **controller:** a `credits.grant` scope for the hosted checkout service. It
+  records `paid` grants only on `POST /api/v1/credits/grants`, reverses and
+  holds by payment, and reads `GET /api/v1/credits/units`, and every other
+  route refuses it; only the operator mints it, and no team's token may carry
+  it. The checkout service no longer needs the controller's admin token.
+
+- **runner (Breaking):** a runner without the git cache builds only the
+  repositories its owner allows. It fetched, compiled and ran pipeline code
+  from whatever repository a run named, as the user who started it, so any
+  team editor could run code with a laptop owner's ssh keys and cloud
+  credentials. `--allow-repo` (host/path, `*` within one segment) is now
+  required without `--gitcache`. The runner sends the list as `allow_repos`
+  with each trigger and node claim to a controller whose
+  `/api/v1/capabilities` advertises `claims.allow_repos`, and that controller
+  hands it only runs from those repositories, leaving the rest for other
+  runners; a runner whose list
+  refuses a node's repository no longer holds that node back from the cloud
+  under local-first placement. A run outside the list that still reaches the
+  runner fails before anything is fetched, naming the repository and the list.
+  `POST /api/v1/team/runner-tokens` requires `repos`, and the machines page
+  asks for them. See
+  [migration guide](migrations/_unreleased.md#a-runner-without-the-git-cache-names-the-repositories-it-may-build).
+- **runner:** a direct-source checkout reads no system or global git config
+  and skips LFS smudging, so a fetched tree cannot name a filter driver or
+  hook that runs; the fetch refuses http redirects, hosts that resolve to
+  internal or special-purpose addresses, and cluster names, runs ssh in batch
+  mode with strict host keys and no forwarding, and gives up after ten
+  minutes. Mirrors are keyed by a normalized remote and capped at 20 and
+  10 GiB, and a `.sparkwing` symlink is refused. See
+  [Team runners fetch source themselves](docs/local-execution.md#team-runners-fetch-source-themselves).
+- **controller (Breaking):** a trigger whose `git.repo_url`,
+  `GITHUB_REPOSITORY` and `github_owner`/`github_repo` name different
+  repositories is refused with 400, and a runner refuses such a stored
+  trigger, so a run can no longer show one repository and fetch another. See
+  [migration guide](migrations/_unreleased.md#a-trigger-names-one-repository).
+- **runner:** `sparkwing-runner runner` serves `/metrics` on
+  `127.0.0.1:9090` by default instead of every interface, and the command the
+  machines page prints passes `--metrics-addr=` so a laptop runner opens no
+  listener and a second runner on the machine does not collide. The runner
+  chart passes `:9090` itself and now turns the listener off when
+  `runner.metricsPort` is 0.
+- **controller:** a multi-team controller configured with a cache refuses to
+  start without `SPARKWING_CACHE_GRANT_KEY`, or with it equal to
+  `SPARKWING_CACHE_TOKEN`, instead of failing each grant request at run time.
+- **controller:** a run is attributed to the credential that submitted it.
+  `POST /api/v1/triggers` took the run's user from `trigger.user` in the body,
+  so any caller could put a run under another person's name. The controller
+  now records the token's principal or the signed-in account's email and
+  ignores `trigger.user`, which released CLIs still send; the CLI no longer
+  sends it.
+- **controller:** stored secrets are sealed to their team, and a multi-team
+  controller needs a key. A controller whose license allows more than one team
+  refuses to start without `SPARKWING_SECRETS_KEY` or `--secrets-key-file`,
+  because without one every team's secrets sat in the database as plaintext.
+  A single-team install still starts without a key. A new `enc:v3:` envelope
+  adds the owning team to the additional authenticated data beside the name,
+  pipeline, shared and masked flags, so one team's ciphertext copied into
+  another team's row no longer opens. Every start with a key reseals the table
+  before serving: plaintext rows are sealed and `enc:v1:`/`enc:v2:` envelopes
+  are resealed with their team, in batches, each write conditional on the
+  value it replaces, with the counts logged. An older envelope outside the
+  `default` team is left alone and refused, since only the `default` team ever
+  held one. Reads open only `enc:v3:`, so a row is no longer rebound on first
+  read. The start is refused, before anything is written, when the key opens
+  none of a sample of the envelopes already stored, or when the sample holds
+  envelopes but none that can confirm the key. See
+  [security.md](docs/security.md#secrets-at-rest).
+- **controller (Breaking):** `controller.BoundCipher` takes the owning team.
+  `SealBound` and `OpenBound` gain a leading `team` argument, and a new
+  optional `controller.LegacyCipher` opens envelopes sealed before team
+  binding so the startup reseal can bring them forward. See the
+  [migration guide](docs/migrations/_unreleased.md#boundcipher-takes-the-owning-team).
+- **controller:** a multi-team controller never offers the first-admin web signup
+  With an active multi-team license, `GET /api/v1/auth/bootstrap-needed` answers
+  `false` and the unauthenticated first-user `POST /api/v1/users` answers `403`,
+  so the first visitor to an internet-facing controller cannot make themselves
+  its operator. Provision the operator with `--bootstrap-admin-token-file` or
+  `SPARKWING_BOOTSTRAP_ADMIN_TOKEN`. A single-team install keeps the signup.
+
+- **web:** a signed-in dashboard reaches the controller as that user
+  Under `--require-login` the proxy and the dashboard's own run reads sent the
+  web pod's service token, so on a multi-team controller every browser read
+  with a credential that spans every team. They now send
+  `Authorization: Session <id>` for the browser's own session; the service
+  token keeps the logs service and the health probe. The controller must
+  accept session credentials on the routes the dashboard proxies.
+
+- **store:** a key a user or a client chooses is unique per team
+  Seven primary keys were global across the deployment while every part of
+  them came from a user: `secrets (name, pipeline)`,
+  `github_webhook_bindings (pipeline, repo)`,
+  `pipeline_profiles (pipeline, node_id)`, and the four concurrency tables
+  keyed on a concurrency key authored in pipeline YAML. One team naming
+  `DEPLOY_KEY`, or a pipeline named `ci`, took that name from every other
+  team. `concurrency_cache` was worse than a collision: its read returned
+  `output_ref`, `origin_run_id` and `origin_node_id`, so two teams that
+  authored one concurrency key and hashed the same inputs were handed
+  pointers into each other's outputs. Schema 51 rebuilds all seven keys to
+  lead with the team, and the secrets, webhook-binding, capacity-profile and
+  concurrency families read and write through `*store.Tenant`. Rebuild and
+  backfill are one migration, because these lookups answer a miss with a
+  default rather than an error and a version between the two would read as
+  "nothing configured". A binary predating v51 names conflict targets that no
+  longer have a unique index behind them, so v51 declares the
+  `team-scoped-user-keys` requirement and such a binary refuses the store
+  instead of failing every upsert. `tokens.hash` and `tokens.token_prefix`
+  stay globally unique, because they are system-generated secrets and a
+  collision there is a security bug rather than a namespace question.
+
 - **controller:** a run's repository is metadata and grants nothing (Breaking)
   A run's repository was a free-text field its submitter typed, and three
   checks read it as proof of which repository the caller was working in: the
@@ -161,6 +1427,104 @@ unlock.
   and the cron writes now require `runs.control`. `runs.write` keeps trigger
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
+
+- **controller:** only the operator binds a GitHub repository to a webhook (Breaking)
+  `POST` and `DELETE /api/v1/webhooks/github/bindings` admitted `team.admin`,
+  and nothing proved a team controlled the repository it named. A team that
+  bound another organization's repository with a secret it chose could sign
+  deliveries for it, have the controller post a commit status to that
+  repository with its own GitHub token, and read the operator's cached mirror
+  of it. The routes require `admin` again. A binding stored in any team other
+  than the operator's posts no commit status and opens no Git cache mirror.
+
+- **controller:** a runner token goes with the membership that minted it
+  Removing a member left the runner tokens they minted working, and those
+  tokens never expired and carried `secrets.read` and `nodes.claim`, so a
+  removed editor's machine kept reading the team's pipeline secrets. Removing a
+  member now revokes every token they minted in that team, and demoting one to
+  `reader` revokes their runner tokens, in the same transaction as the role
+  change. A team runner token expires 90 days after it is minted, and
+  `GET /api/v1/team/runner-tokens` reports `expires_at`.
+  `store.Tenant.RemoveMember` and `SetMemberRole` take the time and return the
+  revoked prefixes. `docs/auth.md` now states that an editor can use the
+  secrets the team's pipelines read.
+
+- **controller:** a webhook delivery spends its own team's flood budget
+  The hourly run cap keyed a GitHub delivery on the repository alone, so one
+  team spending its budget for `owner/name` shed another team's deliveries
+  for the same repository. The key now carries the team whose binding signed
+  the delivery.
+
+- **controller:** another team's webhook binding leaves the operator's document alone
+  A binding in any team for a pipeline and repository shut out the
+  `GITHUB_WEBHOOK_BINDINGS` document's secret for that repository, and let a
+  delivery signed by the document's secret skip the document's allow-list.
+  Only the operator's own binding now replaces the document's secret, and a
+  delivery skips the allow-list only when the binding whose secret signed it
+  names the repository.
+
+- **store:** schedule, idempotency, delivery and replay keys are unique per team
+  The unique indexes on `cron_schedules (repo_path, pipeline, schedule_name)`,
+  `triggers (pipeline, idempotency_key)`, `triggers (webhook_delivery)` and
+  `triggers (webhook_replay_key)` predated the team column. One team arming a
+  repository, pipeline and name refused every other team the same schedule and
+  answered `409` naming it, and a delivery id or signed body one team held
+  refused it to the rest. Schema 52 rebuilds all four to lead with the team.
+  A schedule armed in any team but the operator's also takes an id seeded
+  with its team, so two teams' schedules for one repository never share an
+  id; the operator's ids are unchanged.
+
+- **controller:** a signed-up team's storage is charged to its team
+  Storage quotas and monthly usage were keyed on the writing principal's name,
+  and an editor chooses a runner's name, so a team running `agent:eddie`
+  spent the quota and month of every other team's `agent:eddie`. A write from
+  any team but the operator's is now charged to `team:<slug>`; the operator's
+  team keeps one account per principal.
+
+- **dashboard:** account sessions need a dashboard that forwards every read
+  A dashboard started with `--profile` or `--state` checked only that the
+  controller knew a session and then served the operator's own store, and it
+  offered Google and GitHub sign-in whenever the controller was multi-team, so
+  any self-signup could read the operator's runs. Such a dashboard now treats
+  an account session as signed out, hides the provider buttons and answers the
+  sign-in routes `404`; account sign-in needs `--controller`. Also:
+  `/api/v1/health/services` refuses a session holding no role, OAuth start
+  sends the browser's address so the controller budgets each browser, and an
+  OAuth sign-in ends the session the browser held before.
+
+- **controller:** the queue view and compute limits name only the caller's own runners
+  `GET /api/v1/queue/state` listed every team's runners by name, and
+  `GET /api/v1/compute-limits` counted claimed runners per principal across
+  every team. The queue view now lists only the runners the caller's team
+  advertised, and the per-principal counts go to `admin` callers only.
+
+- **controller:** one caller holds at most `--runners-per-token` runner names
+  The claim routes budget each runner by the name it sends, so a caller that
+  varied the name got a fresh claim, heartbeat and idle-poll budget each time.
+  A caller -- its team for a signed-up team, its token in the operator's team --
+  now holds at most `--runners-per-token` (default 64) names at once, a name
+  counting until it goes unused for ten minutes; a new name past the cap is
+  answered `429` naming the cap. Runner names a route derives from its path
+  are not counted.
+
+- **dashboard:** the machines page shows runner token dates in their own year
+  The runner-token list reports unix seconds, which the machines page handed to
+  `Date` as milliseconds, so every created, last-seen and expiry date read as
+  January 1970.
+
+### Removed
+
+- **web (Breaking):** the dashboard no longer probes or displays controller,
+  logs, and cache service health. It no longer serves
+  `GET /api/v1/health/services` or accepts the probe-only `--cache` flag.
+  The full chart no longer uses `web.cache.url`. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-service-probes).
+
+- **cli (Breaking):** the public CLI no longer provides `sparkwing cluster
+  credits`, `sparkwing cluster tokens set-metered`, or `--metered` on token
+  creation. Sparkwing Cloud operators use the private `sparkwing-ops` tool for
+  credit and metering operations. The controller's credit and token routes
+  remain available to that tool. See the [migration guide](docs/migrations/_unreleased.md#cloud-operator-commands-leave-the-public-cli).
 
 ## [v0.60.0] - 2026-09-21
 ### Added

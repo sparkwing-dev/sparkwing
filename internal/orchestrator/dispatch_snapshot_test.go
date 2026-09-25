@@ -21,6 +21,7 @@ type captureBackend struct {
 	captured []store.NodeDispatch
 	writeErr error
 	gitSHA   string
+	trigger  *store.Trigger
 }
 
 func (b *captureBackend) Close() error                                        { return nil }
@@ -92,6 +93,13 @@ func (b *captureBackend) SetNodeArtifactManifest(ctx context.Context, _, _, _ st
 
 func (b *captureBackend) GetRun(ctx context.Context, _ string) (*store.Run, error) {
 	return &store.Run{GitSHA: b.gitSHA}, nil
+}
+
+func (b *captureBackend) GetTrigger(context.Context, string) (*store.Trigger, error) {
+	if b.trigger == nil {
+		return nil, store.ErrNotFound
+	}
+	return b.trigger, nil
 }
 
 func (b *captureBackend) EnqueueTrigger(ctx context.Context, _ string, _ map[string]string, _, _, _, _, _, _, _ string) (string, error) {
@@ -202,6 +210,27 @@ func TestDispatchSnapshot_CapturesEnvelope(t *testing.T) {
 	}
 }
 
+func TestDispatchSnapshot_ExposesTagPushRef(t *testing.T) {
+	be := &captureBackend{
+		gitSHA: "0123456789abcdef0123456789abcdef01234567",
+		trigger: &store.Trigger{TriggerSource: "github", TriggerEnv: map[string]string{
+			"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3",
+		}},
+	}
+	r := NewNodeExecutor(Backends{State: be})
+	if err := r.writeDispatchSnapshot(context.Background(), "run-tag", buildNode(t, "deploy", &stubJob{})); err != nil {
+		t.Fatal(err)
+	}
+	var env map[string]string
+	if err := json.Unmarshal(be.captured[0].EnvJSON, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env["GITHUB_REF"] != "refs/tags/v1.2.3" || env["GITHUB_REF_TYPE"] != "tag" ||
+		env["GITHUB_TAG"] != "v1.2.3" || env["GITHUB_REF_NAME"] != "v1.2.3" {
+		t.Fatalf("dispatched tag env = %v", env)
+	}
+}
+
 func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 	be := &captureBackend{}
 	r := NewNodeExecutor(Backends{State: be})
@@ -274,6 +303,19 @@ func TestCollectDispatchEnv(t *testing.T) {
 	}
 	if got["CUSTOM"] != "node-value" {
 		t.Fatalf("node EnvMap not overlaid: %v", got)
+	}
+}
+
+func TestCollectDispatchEnvExposesTagPushRef(t *testing.T) {
+	node := buildNode(t, "deploy", &stubJob{})
+	run := &store.Run{GitSHA: "0123456789abcdef0123456789abcdef01234567", TriggerSource: "github"}
+	trig := &store.Trigger{TriggerSource: "github", TriggerEnv: map[string]string{
+		"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/v1.2.3", "GITHUB_REF_TYPE": "tag", "GITHUB_TAG": "v1.2.3",
+	}}
+	got := collectDispatchEnv(context.Background(), node, "run-tag", run, trig).values
+	if got["GITHUB_REF"] != "refs/tags/v1.2.3" || got["GITHUB_REF_TYPE"] != "tag" ||
+		got["GITHUB_TAG"] != "v1.2.3" || got["GITHUB_SHA"] != run.GitSHA {
+		t.Fatalf("tag push env = %v", got)
 	}
 }
 

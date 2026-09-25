@@ -9,10 +9,50 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/license"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 const storageAllowancePath = "/api/v1/storage/quotas/acme/allowance"
+
+func licenseStorageMetering(t *testing.T, f storageFixture) {
+	t.Helper()
+	raw, pub := multiTeamLicense(t)
+	f.server.WithLicense(license.Resolve(raw, pub, time.Now(), nil))
+}
+
+func TestUnlicensedStorageWriteIgnoresCreditRate(t *testing.T) {
+	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	rate := int64(store.CloudStorageRateMicroPerGBDay)
+	if _, err := f.store.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
+		StorageRateMicroPerGBDay: &rate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team, eventBody("bytes"), true); code != http.StatusOK {
+		t.Fatalf("unlicensed write with no balance = %d %s, want 200", code, body)
+	}
+}
+
+func TestUnlicensedStorageMaintenanceWritesNoCharges(t *testing.T) {
+	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
+	ctx := context.Background()
+	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
+	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
+		StorageRateMicroPerGBDay: &rate, StorageFreeAllowanceBytes: &free,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedRetainedRuns(t, f.store, "acme", 1, 1<<30)
+	if _, err := f.store.ChargeRetainedStorage(ctx, time.Now().Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	f.server.MaintainStorage(ctx)
+	charges, err := f.store.ListCreditCharges(ctx, 10)
+	if err != nil || len(charges) != 0 {
+		t.Fatalf("unlicensed storage charges = %+v, %v", charges, err)
+	}
+}
 
 func TestStorageAllowanceRouteReadsAndSetsOnTheAdminToken(t *testing.T) {
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
@@ -70,6 +110,7 @@ func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 40})
+	licenseStorageMetering(t, f)
 	ctx := context.Background()
 	rate, free := int64(store.CloudStorageRateMicroPerGBDay), int64(0)
 	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
@@ -81,7 +122,7 @@ func TestTheStoragePassSweepsBeforeItBills(t *testing.T) {
 		t.Fatalf("set allowance: %v", err)
 	}
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		1_000*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		1_000*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	seedRetainedRuns(t, f.store, "acme", 100, 1<<30)
@@ -150,6 +191,7 @@ func TestStorageAllowanceRouteRefusesANonAdminTokenAndABadValue(t *testing.T) {
 
 func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	licenseStorageMetering(t, f)
 	ctx := context.Background()
 	rate := int64(store.CloudStorageRateMicroPerGBDay)
 	if _, err := f.store.SetCreditSettings(ctx, store.CreditSettingsUpdate{
@@ -167,7 +209,7 @@ func TestAnEmptyBalanceRefusesAChargedWriteWithPaymentRequired(t *testing.T) {
 	}
 
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,
@@ -181,6 +223,7 @@ func TestStorageMaintenanceBillsRetainedBytesAndReportsThemOnCreditsShow(t *test
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
 	f := newStorageFixture(t, store.StorageQuota{Principal: "acme", MaxBytesPerRun: 1 << 20})
+	licenseStorageMetering(t, f)
 	ctx := context.Background()
 	// safety: a handful of event bytes at the cloud rate truncates to nothing,
 	// so this rate is what makes a few bytes worth a micro-credit at all.
@@ -191,7 +234,7 @@ func TestStorageMaintenanceBillsRetainedBytesAndReportsThemOnCreditsShow(t *test
 		t.Fatalf("set the storage rate: %v", err)
 	}
 	if _, err := f.store.GrantCredits(ctx, store.CreditGrantPaid,
-		100*store.MicroCreditsPerCredit, "pay_1", "operator"); err != nil {
+		100*store.MicroCreditsPerCent, "pay_1", "operator"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if code, body := f.request(t, http.MethodPost, storageEventPath, f.team,

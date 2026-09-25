@@ -39,9 +39,9 @@ func runComputeLimits(args []string) error {
 type computeLimitsResp struct {
 	Limits map[string]int64 `json:"limits"`
 	Usage  struct {
-		Runners            int64            `json:"runners"`
+		Runners            *int64           `json:"runners,omitempty"`
 		ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
-		AlarmReached       bool             `json:"alarm_reached"`
+		AlarmReached       *bool            `json:"alarm_reached,omitempty"`
 		DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
 		RecentPaidMicro    int64            `json:"recent_paid_micro"`
 		ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
@@ -166,11 +166,13 @@ func renderComputeLimits(w io.Writer, view computeLimitsResp) error {
 	if view.Usage.DerivedRunnerCap > 0 {
 		fmt.Fprintf(tw, "DERIVED RUNNER CAP\t%s\n", derivedRunnerCapLabel(view))
 	}
-	fmt.Fprintf(tw, "CLOUD RUNNERS\t%d claimed now\n", view.Usage.Runners)
+	if view.Usage.Runners != nil {
+		fmt.Fprintf(tw, "CLOUD RUNNERS\t%d claimed now\n", *view.Usage.Runners)
+	}
 	for _, row := range budgetRows(view) {
 		fmt.Fprintf(tw, "%s\t%s\n", strings.ToUpper(row[0]), row[1])
 	}
-	if view.Usage.AlarmReached {
+	if view.Usage.AlarmReached != nil && *view.Usage.AlarmReached {
 		fmt.Fprintf(tw, "ALARM\treached\n")
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
@@ -195,8 +197,10 @@ func writeComputeLimitsPlain(w io.Writer, view computeLimitsResp) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w, "runners\t%d\n", view.Usage.Runners); err != nil {
-		return err
+	if view.Usage.Runners != nil {
+		if _, err := fmt.Fprintf(w, "runners\t%d\n", *view.Usage.Runners); err != nil {
+			return err
+		}
 	}
 	for _, principal := range sortedPrincipals(view.Usage.ByPrincipal) {
 		if _, err := fmt.Fprintf(w, "runners.%s\t%d\n", principal, view.Usage.ByPrincipal[principal]); err != nil {

@@ -1,9 +1,12 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,11 +14,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -253,6 +258,101 @@ func TestRunTriggerLoop_EarlyFailureFinishesWithClaimGeneration(t *testing.T) {
 	}
 }
 
+func TestRunTriggerLoop_ReportsFailedTriggerFinish(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var claimed atomic.Bool
+	var finishAttempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+				Status: "claimed", ClaimSeq: 7,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+			finishAttempts.Add(1)
+			http.Error(w, "finish unavailable", http.StatusServiceUnavailable)
+			cancel()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	var logs bytes.Buffer
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if finishAttempts.Load() != 1 || !strings.Contains(logs.String(), "trigger loop: FinishTrigger failed") ||
+		!strings.Contains(logs.String(), "run_id=bad-source") || !strings.Contains(logs.String(), "finish unavailable") {
+		t.Fatalf("finish attempts = %d; missing claim-finish failure in logs: %s", finishAttempts.Load(), logs.String())
+	}
+}
+
+func TestRunTriggerLoop_ConfirmsRunAfterAmbiguousFinishResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   string
+		wantDone int32
+	}{
+		{name: "write rejected", status: "pending", wantDone: 0},
+		{name: "response lost after commit", status: "failed", wantDone: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			var claimed atomic.Bool
+			var reads, done atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+					if claimed.Swap(true) {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					_ = json.NewEncoder(w).Encode(store.Trigger{
+						ID: "bad-source", Pipeline: "demo", RepoURL: "http://127.0.0.1/repo",
+						Status: "claimed", ClaimSeq: 7,
+					})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/bad-source/finish":
+					http.Error(w, "response unavailable", http.StatusServiceUnavailable)
+					cancel()
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/bad-source":
+					reads.Add(1)
+					_ = json.NewEncoder(w).Encode(store.Run{ID: "bad-source", Status: tc.status})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/bad-source/done":
+					done.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+				ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+				Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !claimed.Load() || reads.Load() != 1 || done.Load() != tc.wantDone {
+				t.Fatalf("claim = %t, run reads = %d, trigger done = %d; want one read and %d done",
+					claimed.Load(), reads.Load(), done.Load(), tc.wantDone)
+			}
+		})
+	}
+}
+
 func waitForTriggerHelper(path string, timeout time.Duration) error {
 	deadlineAt := time.Now().Add(timeout)
 	poll := time.NewTicker(5 * time.Millisecond)
@@ -273,5 +373,106 @@ func waitForTriggerHelper(path string, timeout time.Duration) error {
 		case <-deadline.C:
 			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
 		}
+	}
+}
+
+// A metered credential's trigger claims are all refused while the loop runs
+// nodes in its own process, so the loop stops and says why instead of
+// polling a refusal forever.
+func TestRunTriggerLoopStopsWhenMeteredInProcessClaimsAreRefused(t *testing.T) {
+	var nodeRunner atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/triggers/claim" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var body struct {
+			NodeRunner string `json:"node_runner"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		nodeRunner.Store(body.NodeRunner)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"metered_inprocess_nodes","message":"refused"}`))
+	}))
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: ts.URL, GitcacheURL: ts.URL, WorkRoot: t.TempDir(),
+		Poll: time.Millisecond, MaxConcurrent: 1, Logger: discardLogger(),
+	})
+	if !errors.Is(err, store.ErrMeteredInProcessNodes) {
+		t.Fatalf("RunTriggerLoop = %v, want it to stop with ErrMeteredInProcessNodes", err)
+	}
+	if got, _ := nodeRunner.Load().(string); got != "inprocess" {
+		t.Fatalf("the claim named node runner %q, want inprocess", got)
+	}
+}
+
+// Against a controller older than the claim filter a direct-source runner
+// claims without its list, and fails a run outside the list naming the list,
+// before anything is fetched.
+func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var reason string
+	var sentAllow []string
+	var claimed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			var claim struct {
+				AllowRepos []string `json:"allow_repos"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&claim)
+			sentAllow = claim.AllowRepos
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "evil", Pipeline: "demo", Status: "claimed", ClaimSeq: 1,
+				RepoURL: "https://git.invalid/evil/payload.git",
+				GitSHA:  "0123456789abcdef0123456789abcdef01234567",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/evil/finish":
+			var body struct {
+				Error string `json:"error"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			reason = body.Error
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/evil/done":
+			w.WriteHeader(http.StatusNoContent)
+			cancel()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	allow, err := sourceurl.ParseRepoAllowlist([]string{"github.com/acme/*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, AllowRepos: allow, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// safety: this controller advertises no claim filter, so the runner claims
+	// without the field and its own refusal is what stops the run.
+	if sentAllow != nil {
+		t.Fatalf("claims carried allow_repos %q to a controller that does not advertise it", sentAllow)
+	}
+	if !strings.Contains(reason, "github.com/acme/*") || !strings.Contains(reason, "git.invalid/evil/payload") {
+		t.Fatalf("run finished with %q, want a refusal naming the repository and the allowlist", reason)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "source-direct")); !os.IsNotExist(statErr) {
+		t.Fatalf("a refused run still reached the fetch: %v", statErr)
 	}
 }

@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,6 +11,35 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 )
+
+func TestObjectStoreHealth_HidesStalledObjectPathAndError(t *testing.T) {
+	const path = "private/team-a/runs/secret-key"
+	const reason = "backend refused secret-account"
+	objectguard.ReportStall(path, errors.New(reason))
+	defer objectguard.ClearStall(path)
+	base, _, cleanup := newTestServer(t)
+	defer cleanup()
+
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		ObjectStore map[string]any `json:"object_store"`
+		Problems    []string       `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ObjectStore["stalled"] != true {
+		t.Fatalf("health omits stalled alarm: %+v", body.ObjectStore)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), path) || strings.Contains(string(encoded), reason) {
+		t.Fatalf("public health exposed stalled object path or error: %s", encoded)
+	}
+}
 
 func TestObjectStoreBreaker_RouteReportsEveryClass(t *testing.T) {
 	base, _, cleanup := newTestServer(t)

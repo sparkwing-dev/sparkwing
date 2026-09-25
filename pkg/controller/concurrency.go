@@ -88,11 +88,15 @@ func (s *Server) slotRunFromQueryRun(w http.ResponseWriter, r *http.Request) (st
 // safety: a holder whose lease has lapsed names no run the caller can prove it
 // owns, so the request is refused rather than resolved against a stale row.
 func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holderID string) (string, *http.Request, bool) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return "", r, false
+	}
 	if holderID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return "", r, false
 	}
-	holder, err := s.store.ConcurrencyHolder(r.Context(), r.PathValue("key"), holderID, time.Now())
+	holder, err := tenant.ConcurrencyHolder(r.Context(), r.PathValue("key"), holderID, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			p, _ := PrincipalFromContext(r.Context())
@@ -157,6 +161,10 @@ type acquireSlotResp struct {
 }
 
 func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	var body acquireSlotReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -182,7 +190,7 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		Lease:             time.Duration(body.LeaseSecs) * time.Second,
 		BypassRead:        body.BypassRead,
 	}
-	resp, err := s.store.AcquireConcurrencySlot(r.Context(), req)
+	resp, err := tenant.AcquireConcurrencySlot(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, store.ErrConcurrencySuperseded) {
 			writeError(w, http.StatusConflict, err)
@@ -233,6 +241,10 @@ type heartbeatSlotResp struct {
 }
 
 func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	var body heartbeatSlotReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -244,7 +256,7 @@ func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
-	expires, superseded, err := s.store.HeartbeatConcurrencySlot(r.Context(), key, body.HolderID, lease)
+	expires, superseded, err := tenant.HeartbeatConcurrencySlot(r.Context(), key, body.HolderID, lease)
 	if err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
 			writeError(w, http.StatusConflict, err)
@@ -260,13 +272,17 @@ func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleObserveSlot(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	holderID := r.URL.Query().Get("holder_id")
 	if holderID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	holder, err := s.store.ConcurrencyHolder(r.Context(), key, holderID, time.Now())
+	holder, err := tenant.ConcurrencyHolder(r.Context(), key, holderID, time.Now())
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -287,6 +303,10 @@ type releaseSlotReq struct {
 }
 
 func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	var body releaseSlotReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -297,7 +317,7 @@ func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
 		return
 	}
-	_, _, _, err := s.store.ReleaseAndNotify(
+	_, _, _, err := tenant.ReleaseAndNotify(
 		r.Context(), key, body.HolderID, body.Outcome,
 		body.OutputRef, body.CacheKeyHash,
 		time.Duration(body.CacheTTLNS), store.DefaultConcurrencyLease,
@@ -355,8 +375,12 @@ type stateWaiterResp struct {
 }
 
 func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
-	st, err := s.store.GetConcurrencyState(r.Context(), key)
+	st, err := tenant.GetConcurrencyState(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -404,6 +428,10 @@ type resolveWaiterResp struct {
 }
 
 func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	q := r.URL.Query()
 	runID := q.Get("run_id")
@@ -411,7 +439,7 @@ func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("key and run_id are required"))
 		return
 	}
-	res, err := s.store.ResolveWaiter(
+	res, err := tenant.ResolveWaiter(
 		r.Context(), key, runID, q.Get("node_id"),
 		q.Get("cache_key_hash"), q.Get("leader_run_id"), q.Get("leader_node_id"),
 		q.Get("bypass_read") == "true",
@@ -450,6 +478,10 @@ type cancelWaiterResp struct {
 }
 
 func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	var body cancelWaiterReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -460,7 +492,7 @@ func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
 		return
 	}
-	cancelled, err := s.store.CancelWaiter(r.Context(), key, body.RunID, body.NodeID)
+	cancelled, err := tenant.CancelWaiter(r.Context(), key, body.RunID, body.NodeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -473,14 +505,18 @@ type forceReleaseResp struct {
 }
 
 func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
-	dropped, err := s.store.ForceReleaseSupersededHolders(r.Context(), key)
+	dropped, err := tenant.ForceReleaseSupersededHolders(r.Context(), key)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if len(dropped) > 0 {
-		if _, err := s.store.PromoteNextWaiters(r.Context(), key, store.DefaultConcurrencyLease); err != nil {
+		if _, err := tenant.PromoteNextWaiters(r.Context(), key, store.DefaultConcurrencyLease); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("force-release: promote: %w", err))
 			return
 		}
@@ -498,6 +534,10 @@ const (
 )
 
 func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	key := r.PathValue("key")
 	runID := r.URL.Query().Get("run_id")
 	nodeID := r.URL.Query().Get("node_id")
@@ -554,7 +594,7 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			extendStreamDeadline(w, r, waiterNotifyDeadlineWindow)
 		}
 
-		resolution, err := s.store.ResolveWaiter(ctx, key, runID, nodeID, "", "", "", false)
+		resolution, err := tenant.ResolveWaiter(ctx, key, runID, nodeID, "", "", "", false)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				emit("stream_end", map[string]string{"reason": "key_not_found"})
@@ -575,7 +615,7 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			emit("superseded", map[string]string{})
 			return
 		case store.WaiterCancelled:
-			if _, err := s.store.GetConcurrencyState(ctx, key); errors.Is(err, store.ErrNotFound) {
+			if _, err := tenant.GetConcurrencyState(ctx, key); errors.Is(err, store.ErrNotFound) {
 				emit("stream_end", map[string]string{"reason": "key_not_found"})
 				return
 			}

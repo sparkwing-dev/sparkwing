@@ -84,6 +84,12 @@ pending nodes. For per-node isolation it launches a Kubernetes Job that
 runs `sparkwing run-node`. The runner downloads code from the cache,
 compiles and runs the pipeline, and reports results.
 
+The trigger runner fetches and compiles with its shared source and build caches.
+It gives each compiled trigger process a private Sparkwing home and removes it
+when the process exits. Warm-root GC can remove homes left by a crash once they
+are 24 hours old. The trigger process still uses the runner's `GOCACHE` and
+`GOMODCACHE`; its `ToolCacheDir` entries live in its private home.
+
 Off-cluster runners (developer machines, workstations, and servers) connect to
 the controller and claim nodes through its claim API; the route set and scopes
 are in [api-reference.md](api-reference.md).
@@ -112,25 +118,8 @@ See [Cache](gitcache.md) for endpoints and configuration.
 Next.js web app showing pipeline runs, logs, node status, and
 documentation.
 
-Its services panel (`GET /api/v1/health/services`) probes the health
-endpoint of each service it has been given a URL for: the controller
-and logs service from `--controller` / `--logs`, and the cache from
-`--cache` (probe-only; omit it and the cache is left off the panel).
-The `sparkwing-full` chart fills all three in: `web.cache.url` defaults
-to the runner-bundle's cache Service the same way `web.logs.url`
-defaults to its logs Service, and a release that deploys no cache
-starts the web pod without the flag.
-
-Services report partial failure in the body while still answering
-HTTP 200 -- a filling disk, a stalled fetch loop, an unwritable cache
-directory -- and reserve a 5xx for a total outage. The panel decodes
-that body, so a service reporting `{"status":"degraded","problems":
-[...]}` shows amber with its problems listed, not green. Slowness is
-measured here rather than reported by the service, so a service that is
-both slow and degraded lists both.
-`sparkwing configure profiles test` applies the same rule from the CLI,
-and additionally fails when a health body cannot be read at all: it
-answers an operator once, where the panel repaints on a cycle.
+The Compute page shows team-scoped executors and queue activity. Operators can
+check controller and logs health through their own service endpoints.
 
 ### DinD (Docker-in-Docker)
 
@@ -287,11 +276,11 @@ sparkwing run build-deploy
 ```
 sparkwing pipeline trigger build-deploy --profile <cluster>
   1. sparkwing resolves the profile -> controller URL
-  2. sparkwing refreshes or seeds the exact Git commit in the cache
+  2. sparkwing checks that the exact Git commit is on origin
   3. sparkwing POSTs the trigger with that commit SHA
   4. controller enqueues run
   5. a runner polls the controller and claims the run
-  6. runner clones the exact SHA from cache
+  6. runner fetches the exact SHA from origin
   7. runner compiles and runs the pipeline binary
   8. runner streams logs to logs service
   9. runner sends periodic heartbeats to controller to hold its claim
@@ -299,13 +288,11 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
   11. sparkwing pipeline trigger follows controller state and displays result
 ```
 
-`--working-tree` replaces step 2 with a mandatory synthetic-commit bundle
-seed. The trigger is not admitted if that upload fails. Off-cluster runners can
-read source through the controller's authenticated Git proxy, so they need only
-outbound HTTPS; a private direct cache remains an alternative, uses only
-`SPARKWING_CACHE_TOKEN` for writes, and never receives the controller bearer.
-Login-enabled dashboard ingress exposes the
-same machine-bearer proxy path without browser-session authentication.
+`--working-tree` replaces steps 2 and 6 with a synthetic-commit bundle:
+the CLI reserves and uploads it directly to S3 before trigger admission, and
+the claimed runner requests a signed download for that run. A checkout needs
+no origin. The controller handles authorization and small control requests;
+it does not relay the source bytes.
 
 ### Git Push Trigger
 

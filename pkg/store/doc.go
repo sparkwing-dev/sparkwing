@@ -11,6 +11,28 @@
 // connection; callers can hold one *Store for the process lifetime
 // and share it across goroutines.
 //
+// # Tenancy
+//
+// Every row that belongs to a team carries a team column; the tables
+// that belong to the deployment -- the schema version, the
+// requirements, the meta bag and the executor fleet -- do not. The
+// classification is the tenantTables and operatorTables lists in
+// tenant.go, and a test fails on a table missing from both.
+//
+// [Store.ForTeam] returns a [*Tenant], the handle a request-serving
+// caller uses: its methods take no team, every statement they issue
+// carries team = ?, and the *Store inside it is unexported so no other
+// package can widen it back. [Store.AsOperator] returns [*Operator],
+// the named unscoped handle for reaping, dispatch, migration and
+// fleet-wide listing.
+//
+// The port is in progress. Every method already on Tenant still has a
+// byte-identical twin on *Store that writes [DefaultTeam], because
+// pkg/storage.StateStore and internal/backend.Backend name those
+// methods; those twins are deleted in one change once every family has
+// moved. Until then the compiler does not refuse an unscoped call --
+// the doc comment on [Tenant] says what does, and how to port a family.
+//
 // # Migrations
 //
 // A schema version's statements and its sparkwing_schema_version row

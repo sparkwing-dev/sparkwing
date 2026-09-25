@@ -1,0 +1,88 @@
+import type { Run } from "./api";
+
+export interface PipelineTriage {
+  key: string;
+  repo: string;
+  pipeline: string;
+  branch: string;
+  latest: Run;
+  runs: Run[];
+}
+
+function repoIdentity(run: Run): string {
+  const github = Boolean(run.github_owner && run.github_repo);
+  const raw = (github
+    ? `${run.github_owner}/${run.github_repo}`
+    : run.repo_url || run.repo || run.github_repo || "unknown");
+  let host = github ? "github.com" : "";
+  let path = raw;
+  const ssh = raw.match(/^git@([^:]+):(.+)$/);
+  if (ssh) {
+    host = ssh[1].toLowerCase();
+    path = ssh[2];
+  } else if (/^https?:\/\//.test(raw)) {
+    const url = new URL(raw);
+    host = url.hostname.toLowerCase();
+    path = url.pathname;
+  }
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "").toLowerCase();
+  if (!path.includes("/")) return path;
+  return `${host || "github.com"}/${path}`;
+}
+
+export function recentPipelineTriage(
+  runs: Run[],
+  includeFeatureBranches: boolean,
+): { failed: PipelineTriage[]; recovered: PipelineTriage[] } {
+  const fullByShort = new Map<string, Set<string>>();
+  for (const run of runs) {
+    const repo = repoIdentity(run);
+    if (!repo.includes("/")) continue;
+    const short = repo.slice(repo.lastIndexOf("/") + 1);
+    const full = fullByShort.get(short) || new Set<string>();
+    full.add(repo);
+    fullByShort.set(short, full);
+  }
+
+  const groups = new Map<string, PipelineTriage>();
+  for (const run of runs) {
+    const branch = run.git_branch || "";
+    const defaultBranch = branch === "main" || branch === "master";
+    if (!defaultBranch && (!includeFeatureBranches || !branch)) continue;
+    let repo = repoIdentity(run);
+    if (!repo.includes("/")) {
+      const matches = fullByShort.get(repo);
+      if (matches?.size === 1) repo = [...matches][0];
+    }
+    const branchKey = defaultBranch ? "default" : branch;
+    const key = `${repo}\0${run.pipeline}\0${branchKey}`;
+    const group = groups.get(key);
+    if (group) {
+      group.runs.push(run);
+    } else {
+      groups.set(key, {
+        key, repo, pipeline: run.pipeline, branch: defaultBranch ? "" : branch,
+        latest: run, runs: [run],
+      });
+    }
+  }
+  const sorted = [...groups.values()]
+    .map((group) => {
+      group.runs.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+      group.latest = group.runs.find((run) => run.status === "success" || run.status === "failed") || group.runs[0];
+      return group;
+    })
+    .sort((a, b) => Date.parse(b.latest.started_at) - Date.parse(a.latest.started_at));
+  return {
+    failed: sorted.filter((group) => group.latest.status === "failed"),
+    recovered: sorted.filter((group) => {
+      if (group.latest.status !== "success") return false;
+      const completed = group.runs.filter((run) => run.status === "success" || run.status === "failed");
+      return completed[1]?.status === "failed";
+    }),
+  };
+}
+
+export function latestFailedPipelines(runs: Run[], includeFeatureBranches: boolean): PipelineTriage[] {
+  return recentPipelineTriage(runs, includeFeatureBranches).failed;
+}

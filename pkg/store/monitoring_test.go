@@ -94,7 +94,7 @@ func TestLegacyAgentClaimsUseTheStoreDialect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" {
+	if len(claims) != 1 || claims[0].RunID != "agent-run" || claims[0].ClaimedBy != "runner:laptop:1" || claims[0].TokenPrefix != "swr_runner" {
 		t.Fatalf("legacy claims = %+v", claims)
 	}
 }
@@ -130,7 +130,11 @@ func TestRunTrendsUseTheStoreDialect(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "empty-run", Pipeline: "alpha", Status: "success", StartedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	trends, err := st.ListRunTrends(ctx, now.Add(-time.Hour), "alpha")
+	tenant, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trends, err := tenant.ListRunTrends(ctx, now.Add(-time.Hour), "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}

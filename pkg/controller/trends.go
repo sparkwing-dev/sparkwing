@@ -45,7 +45,11 @@ func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	}
 	bucketNs := int64(bucketDur)
 
-	runs, err := s.store.ListRunTrends(r.Context(), cutoff, pipeline)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	runs, err := tenant.ListRunTrends(r.Context(), cutoff, pipeline)
 	if err != nil {
 		s.writeInternalError(w, r, "list run trends", err)
 		return

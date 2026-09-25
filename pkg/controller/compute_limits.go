@@ -37,9 +37,9 @@ type requestBudgetsJSON struct {
 }
 
 type computeUsageJSON struct {
-	Runners            int64            `json:"runners"`
+	Runners            *int64           `json:"runners,omitempty"`
 	ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
-	AlarmReached       bool             `json:"alarm_reached"`
+	AlarmReached       *bool            `json:"alarm_reached,omitempty"`
 	DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
 	RecentPaidMicro    int64            `json:"recent_paid_micro"`
 	ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
@@ -69,6 +69,9 @@ func (r *setComputeLimitsReq) UnmarshalJSON(raw []byte) error {
 }
 
 func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requestTenant(w, r); !ok {
+		return
+	}
 	out, err := s.computeLimitsView(r)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -78,6 +81,9 @@ func (s *Server) handleComputeLimitsShow(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleComputeLimitsSet(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requestTenant(w, r); !ok {
+		return
+	}
 	var req setComputeLimitsReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -110,25 +116,31 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 }
 
 func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimits) (computeLimitsJSON, error) {
-	usage, err := s.store.ComputeUsage(r.Context())
-	if err != nil {
-		return computeLimitsJSON{}, err
-	}
 	out := computeLimitsJSON{
-		Limits: make(map[string]int64, len(store.ComputeLimitNames())),
-		Usage: computeUsageJSON{
-			Runners:      usage.Runners,
-			ByPrincipal:  usage.ByPrincipal,
-			AlarmReached: usage.AlarmReached,
-		},
+		Limits:  make(map[string]int64, len(store.ComputeLimitNames())),
 		Budgets: s.requestBudgetsView(),
+	}
+	// safety: global runner activity and per-principal counts reveal other
+	// teams' work, so only the operator reads them.
+	if isAdmin(r) {
+		usage, err := s.store.ComputeUsage(r.Context())
+		if err != nil {
+			return computeLimitsJSON{}, err
+		}
+		out.Usage.Runners = &usage.Runners
+		out.Usage.ByPrincipal = usage.ByPrincipal
+		out.Usage.AlarmReached = &usage.AlarmReached
 	}
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)
 		out.Limits[name] = v
 	}
 	if limits.ConcurrentRunners > 0 {
-		derived, err := s.store.RunnerCapFor(r.Context(), time.Now())
+		team, err := requestTeam(r)
+		if err != nil {
+			return computeLimitsJSON{}, err
+		}
+		derived, err := s.store.RunnerCapFor(r.Context(), team, time.Now())
 		if err != nil {
 			return computeLimitsJSON{}, err
 		}
@@ -157,11 +169,25 @@ type computeLimitRefusalJSON struct {
 // often a caller should ask again.
 const ComputeLimitRetryAfterSeconds = 5
 
+// FreeRunLimitRetryAfterSeconds is the Retry-After a refusal past a free
+// team's daily run cap carries: the oldest run in the window ages out within
+// a day, so an hour is a fair time to ask again.
+const FreeRunLimitRetryAfterSeconds = 3600
+
 // safety: a refusal with no run of its own reaches the operator through the
 // log, because there is no run to record it against.
 func (s *Server) writeComputeLimitRefusal(
 	w http.ResponseWriter, r *http.Request, runID, nodeID string, err error,
 ) bool {
+	switch {
+	case errors.Is(err, store.ErrFreeStoragePaused):
+		writeError(w, http.StatusPaymentRequired, err)
+		return true
+	case errors.Is(err, store.ErrFreeRunLimit):
+		w.Header().Set("Retry-After", strconv.Itoa(FreeRunLimitRetryAfterSeconds))
+		writeError(w, http.StatusTooManyRequests, err)
+		return true
+	}
 	var refused *store.ComputeLimitError
 	if !errors.As(err, &refused) {
 		return false
@@ -248,11 +274,7 @@ func (s *Server) noteComputeLimitBlocked(
 
 // safety: a run past the wall-clock guard stops in this same request, so the
 // runner learns to abandon the node rather than holding it to the lease.
-func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID string) (stop bool) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
-		return false
-	}
+func (s *Server) stopForWallClockLimit(r *http.Request, runID, nodeID, prefix string) (stop bool) {
 	ctx := r.Context()
 	now := time.Now()
 	ceiling, over, err := s.store.RunExceedsWallClock(ctx, runID, now)

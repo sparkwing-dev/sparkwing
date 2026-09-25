@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Node } from "./api";
 import {
+  compactExecutionDisplay,
   executionAttemptOrdinal,
   executionAttempts,
   executionAttemptsNewestFirst,
@@ -101,6 +102,34 @@ describe("executionAttempts", () => {
 });
 
 describe("executionDisplay", () => {
+  it("derives placement from a known historical execution site", () => {
+    const display = executionDisplay({ execution_site: "cluster", execution_site_name: "job-a" });
+    assert.equal(display.locationLabel, "Cloud");
+    assert.equal(display.executorLabel, "cluster job-a");
+  });
+  it("maps known execution origins to a compact icon and specific tooltip", () => {
+    assert.deepEqual(
+      [
+        executionDisplay({ executor_kind: "agent", executor_name: "moonborn", location: "local" }),
+        executionDisplay({ executor_kind: "github-actions", executor_name: "koreyGambill/moonborn-ws", location: "unknown" }),
+        executionDisplay({ executor_kind: "cloud", location: "cloud" }),
+        executionDisplay({ executor_kind: "kubernetes", executor_name: "warm-pool", location: "cloud" }),
+      ].map(({ icon, tooltip }) => [icon, tooltip]),
+      [
+        ["machine", "Ran on moonborn (your machine)"],
+        ["github", "Ran on GitHub Actions: koreyGambill/moonborn-ws"],
+        ["cloud", "Ran in Sparkwing Cloud"],
+        ["cluster", "Ran on the cluster warm pool"],
+      ],
+    );
+    assert.equal(executionDisplay({ location: "unknown" }).icon, null);
+    assert.equal(executionDisplay({
+      executor_kind: "agent",
+      executor_name: "runner-1",
+      execution_site: "machine",
+      execution_site_name: "moonborn",
+    }).executorLabel, "agent runner-1");
+  });
   it("uses text and a separate style for every location", () => {
     const local = executionDisplay({
       location: "local",
@@ -120,6 +149,37 @@ describe("executionDisplay", () => {
     assert.equal(unknown.locationLabel, "Location unknown");
     assert.notEqual(local.className, cloud.className);
     assert.notEqual(cloud.className, unknown.className);
+  });
+});
+
+describe("compactExecutionDisplay", () => {
+  it("shows nothing for an attempt whose location is unknown", () => {
+    assert.equal(
+      compactExecutionDisplay(
+        node({
+          execution_attempts: [
+            { run_id: "run-one", node_id: "build", attempt: 1, location: "unknown" },
+          ],
+        }),
+      ),
+      null,
+    );
+  });
+
+  it("shows nothing for a claimed node with no attempt", () => {
+    assert.equal(compactExecutionDisplay(node({ claimed: true })), null);
+  });
+
+  it("shows the latest known location", () => {
+    const display = compactExecutionDisplay(
+      node({
+        execution_attempts: [
+          { run_id: "run-one", node_id: "build", attempt: 1, location: "cloud" },
+          { run_id: "run-one", node_id: "build", attempt: 2, location: "local" },
+        ],
+      }),
+    );
+    assert.equal(display?.location, "local");
   });
 });
 

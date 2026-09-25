@@ -272,7 +272,7 @@ func TestSchemaV23_ExistingSecretsDefaultToUnshared(t *testing.T) {
 	}
 }
 
-func TestPipelineForClaimedRun_NamesThePipelineOfTheRunTheCallerIsExecuting(t *testing.T) {
+func TestClaimedRunFor_NamesThePipelineOfTheRunTheCallerIsExecuting(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -297,11 +297,11 @@ func TestPipelineForClaimedRun_NamesThePipelineOfTheRunTheCallerIsExecuting(t *t
 		}
 	}
 
-	if _, err := st.PipelineForClaimedRun(ctx, "run-web", runner, now); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("PipelineForClaimedRun with no claim err = %v, want ErrNotFound", err)
+	if _, err := st.ClaimedRunFor(ctx, "run-web", runner, now); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ClaimedRunFor with no claim err = %v, want ErrNotFound", err)
 	}
-	if pipelines, err := st.PipelinesForClaimant(ctx, runner, now); err != nil || len(pipelines) != 0 {
-		t.Fatalf("PipelinesForClaimant with no claim = (%v, %v), want none", pipelines, err)
+	if pipelines, err := st.ClaimedRunsFor(ctx, runner, now); err != nil || len(pipelines) != 0 {
+		t.Fatalf("ClaimedRunsFor with no claim = (%v, %v), want none", pipelines, err)
 	}
 
 	for range 2 {
@@ -314,27 +314,27 @@ func TestPipelineForClaimedRun_NamesThePipelineOfTheRunTheCallerIsExecuting(t *t
 		{"run-web", "deploy-web"},
 		{"run-api", "deploy-api"},
 	} {
-		pipeline, err := st.PipelineForClaimedRun(ctx, tc.run, runner, now)
+		pipeline, err := st.ClaimedRunFor(ctx, tc.run, runner, now)
 		if err != nil {
-			t.Fatalf("PipelineForClaimedRun(%s): %v", tc.run, err)
+			t.Fatalf("ClaimedRunFor(%s): %v", tc.run, err)
 		}
-		if pipeline != tc.want {
-			t.Errorf("PipelineForClaimedRun(%s) = %q, want %q", tc.run, pipeline, tc.want)
+		if pipeline.Pipeline != tc.want || pipeline.Team != store.DefaultTeam {
+			t.Errorf("ClaimedRunFor(%s) = %+v, want %q in the default team", tc.run, pipeline, tc.want)
 		}
 	}
-	pipelines, err := st.PipelinesForClaimant(ctx, runner, now)
+	pipelines, err := st.ClaimedRunsFor(ctx, runner, now)
 	if err != nil {
-		t.Fatalf("PipelinesForClaimant: %v", err)
+		t.Fatalf("ClaimedRunsFor: %v", err)
 	}
 	if len(pipelines) != 2 {
-		t.Errorf("PipelinesForClaimant = %v, want both pipelines so the caller must name its run", pipelines)
+		t.Errorf("ClaimedRunsFor = %v, want both pipelines so the caller must name its run", pipelines)
 	}
-	if _, err := st.PipelineForClaimedRun(ctx, "run-web", stranger, now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.ClaimedRunFor(ctx, "run-web", stranger, now); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("a principal holding nothing resolved run-web (err %v)", err)
 	}
 }
 
-func TestPipelineForClaimedRun_AcceptsTheTriggerClaim(t *testing.T) {
+func TestClaimedRunFor_AcceptsTheTriggerClaim(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatal(err)
@@ -362,15 +362,83 @@ func TestPipelineForClaimedRun_AcceptsTheTriggerClaim(t *testing.T) {
 	if err != nil || !held {
 		t.Fatalf("PrincipalHoldsTriggerClaim = (%v, %v), want true", held, err)
 	}
-	pipeline, err := st.PipelineForClaimedRun(ctx, "run-web", dispatcher, now)
+	pipeline, err := st.ClaimedRunFor(ctx, "run-web", dispatcher, now)
 	if err != nil {
-		t.Fatalf("PipelineForClaimedRun: %v", err)
+		t.Fatalf("ClaimedRunFor: %v", err)
 	}
-	if pipeline != "deploy" {
-		t.Errorf("PipelineForClaimedRun = %q, want deploy", pipeline)
+	if pipeline.Pipeline != "deploy" {
+		t.Errorf("ClaimedRunFor = %+v, want deploy", pipeline)
 	}
 	other := store.ClaimIdentity{Principal: "pool", TokenPrefix: "swr_other"}
 	if held, err := st.PrincipalHoldsTriggerClaim(ctx, "run-web", other, now); err != nil || held {
 		t.Errorf("a second token sharing the principal held the claim (%v, %v)", held, err)
+	}
+}
+
+// The controller reads a runner's secrets in the team ClaimedRunFor names,
+// so that team has to be the claimed run's and not the default one.
+func TestClaimedRunForNamesTheRunsTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	now := time.Now()
+	if err := acme.CreateTriggerWithRun(ctx,
+		store.Trigger{ID: "run-acme", Pipeline: "deploy", CreatedAt: now},
+		store.Run{ID: "run-acme", Pipeline: "deploy", Status: "pending", StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	runner := mintTeamClaimant(t, acme, "agent:acme")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-acme", runner, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	want := store.ClaimedRun{Team: "acme", Pipeline: "deploy"}
+	got, err := st.ClaimedRunFor(ctx, "run-acme", runner, time.Now())
+	if err != nil {
+		t.Fatalf("ClaimedRunFor: %v", err)
+	}
+	if got != want {
+		t.Errorf("ClaimedRunFor = %+v, want %+v", got, want)
+	}
+	all, err := st.ClaimedRunsFor(ctx, runner, time.Now())
+	if err != nil {
+		t.Fatalf("ClaimedRunsFor: %v", err)
+	}
+	if len(all) != 1 || all[0] != want {
+		t.Errorf("ClaimedRunsFor = %+v, want [%+v]", all, want)
+	}
+}
+
+// A webhook writes its trigger without a run, and the runner that claims it
+// fetches the run's source before the run exists. That claim names the run,
+// in the trigger's team, until the run is created; after that the run decides.
+func TestClaimedRunFor_CountsATriggerClaimBeforeItsRunExists(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	runner := store.ClaimIdentity{Principal: "runner-a", TokenPrefix: "swr_runner-a"}
+	stranger := store.ClaimIdentity{Principal: "runner-b", TokenPrefix: "swr_runner-b"}
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-hook", Pipeline: "deploy-web"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("before any claim = %v, want ErrNotFound", err)
+	}
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-hook", runner, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now())
+	if err != nil || got.Pipeline != "deploy-web" || got.Team != store.DefaultTeam {
+		t.Fatalf("claimant before the run exists = %+v, %v; want the trigger's pipeline and team", got, err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", stranger, time.Now()); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another claimant = %v, want ErrNotFound", err)
+	}
+	if _, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now().Add(time.Hour)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("after the lease lapsed = %v, want ErrNotFound", err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "run-hook", Pipeline: "deploy-web", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.ClaimedRunFor(ctx, "run-hook", runner, time.Now()); err != nil || got.Pipeline != "deploy-web" {
+		t.Fatalf("after the run exists = %+v, %v", got, err)
 	}
 }

@@ -15,34 +15,52 @@ import (
 	"time"
 )
 
-// Credit ledger arithmetic. One credit is one hundredth of a dollar, so a
-// ten dollar top-up is a thousand credits. Grants and charges are stored in
-// micro-credits because a cloud runner second costs well under one credit
-// and an integer ledger must charge it exactly.
+// Credit ledger arithmetic. One credit is one second of one vCPU, and a
+// dollar buys 20,000 of them, which prices compute at 0.18 dollars a
+// vCPU-hour. Grants and charges are stored in micro-credits, 5,000 to the
+// credit, so a dollar is 100,000,000 micro-credits and a cent is 1,000,000.
 //
-// At the default rate a cloud runner second costs 0.02 credits, so a minute
-// costs 1.2 credits and an hour costs 72 credits ($0.72). Ten dollars is a
-// thousand credits, which buys 50,000 cloud runner seconds, just under
+// A class costs its core count in credits a second: the default four-core
+// rate is 4 credits a second, 240 a minute, 0.72 dollars an hour. Ten dollars
+// is 200,000 credits, which buys 50,000 four-core seconds, just under
 // fourteen hours.
 const (
-	CreditsPerDollar       = 100
-	MicroCreditsPerCredit  = 1_000_000
-	DefaultCreditRateMicro = 20_000
+	CreditsPerDollar       = 20_000
+	MicroCreditsPerCredit  = 5_000
+	DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
+
+	// MicroCreditsPerCent is what one cent of a payment buys, which a
+	// checkout converts by. It is the figure that must not move when the
+	// credit does, because every stored amount is priced by it.
+	MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 
 	// DefaultCreditGraceSeconds is how long a node keeps running after the
 	// balance reaches zero before the controller cancels it.
 	DefaultCreditGraceSeconds = 60
 
-	// CreditClaimFloorSeconds is the runway a claim reserves up front. The
-	// reservation is taken inside the claim transaction and refunded at
-	// finish, so it both guarantees a claimed node a minute of execution and
-	// bounds how far concurrent runners can drive the balance below zero.
-	CreditClaimFloorSeconds = 60
+	// MinBillableSeconds is the least one metered node or trigger step pays
+	// for, on every class. A cold start takes about half a minute of
+	// provisioning nobody is billed for, and a run earns what it costs to
+	// serve once it bills at least half of that, so the minimum is 20 seconds
+	// with margin over the measured 31-second start.
+	//
+	// A claim reserves this many seconds at its class's rate inside the claim
+	// transaction and refuses a balance that cannot cover them. Once billing
+	// starts the reservation is consumed rather than refunded, so a node that
+	// finishes sooner pays the minimum; only a claim that never started, or a
+	// setup the platform failed, gets it back. A claimed node is therefore
+	// guaranteed this long, plus the grace period, before an empty balance
+	// cancels it.
+	//
+	// safety: the reservation also bounds how far concurrent claims can drive
+	// one balance below zero, and a smaller one admits more of them at once;
+	// the per-principal runner caps bound that depth, not this constant.
+	MinBillableSeconds = 20
 
-	// MaxCreditGrantMicro caps the size of one grant at a billion credits,
-	// ten million dollars. A ledger sums grants in SQL, so an amount near the
-	// integer limit turns a later balance read into an overflow rather than a
-	// number, and no real payment reaches this ceiling.
+	// MaxCreditGrantMicro caps the size of one grant at ten billion dollars.
+	// A ledger sums grants in SQL, so an amount near the integer limit turns a
+	// later balance read into an overflow rather than a number, and no real
+	// payment reaches this ceiling.
 	MaxCreditGrantMicro = 1_000_000_000_000_000
 
 	// DefaultCreditMaxChargeSeconds caps the seconds one charge may bill.
@@ -52,9 +70,9 @@ const (
 	DefaultCreditMaxChargeSeconds = 30
 
 	// MaxCreditRateMicro is the highest price an operator may put on a cloud
-	// runner second: a million credits, which is ten thousand dollars. The
-	// ceiling is what keeps the arithmetic the ledger does with the rate inside
-	// int64: the largest reservation is the rate times CreditClaimFloorSeconds
+	// runner second: ten thousand dollars. The ceiling is what keeps the
+	// arithmetic the ledger does with the rate inside int64: the largest
+	// reservation is the rate times MinBillableSeconds
 	// and the largest single charge is the rate times MaxCreditMaxChargeSeconds,
 	// and both stay far below the int64 maximum. Without it a rate near that
 	// maximum wraps a reservation negative, and a claim the ledger must refuse
@@ -124,6 +142,10 @@ const (
 // an [InsufficientCreditsError], which wraps it and names the shortfall.
 var ErrInsufficientCredits = errors.New("insufficient credits")
 
+// ErrReversalExceedsPayment is returned when a reversal would take back more
+// than the payment it names paid, counting the reversals already written.
+var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
+
 // ErrCreditGrantConflict is returned when a grant names a kind and reference
 // another grant already carries but asks for different terms. A replay of the
 // identical request returns the stored grant instead.
@@ -135,9 +157,20 @@ var ErrCreditGrantConflict = errors.New("credits: a different grant already carr
 type InsufficientCreditsError struct {
 	BalanceMicro  int64
 	RequiredMicro int64
+	// RunID and NodeID name the node the claim was refused for, which is in
+	// the claimant's own team; a record of the refusal belongs on that node
+	// and on no other team's.
+	RunID  string
+	NodeID string
+	// Frozen is set when the team's cloud usage is held while a payment
+	// dispute is open, whatever the balance reads.
+	Frozen bool
 }
 
 func (e *InsufficientCreditsError) Error() string {
+	if e.Frozen {
+		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
+	}
 	return fmt.Sprintf("insufficient credits: balance %s, need %s",
 		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
 }
@@ -146,13 +179,28 @@ func (e *InsufficientCreditsError) Error() string {
 // with errors.Is without knowing this type.
 func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredits }
 
+// safety: each of these is one price or one policy the operator sets for the
+// whole controller, so they stay in the deployment's bag; a per-team rate is a
+// discount the product does not sell, and the charge cap is judged against the
+// heartbeat cadence this binary ships rather than against any customer.
 const (
-	metaKeyCreditRateMicro   = "credit_rate_micro_per_second"
-	metaKeyCreditGraceSecs   = "credit_grace_seconds"
-	metaKeyCreditMaxCharge   = "credit_max_charge_seconds"
+	metaKeyCreditRateMicro = "credit_rate_micro_per_second"
+	metaKeyCreditGraceSecs = "credit_grace_seconds"
+	metaKeyCreditMaxCharge = "credit_max_charge_seconds"
+	metaKeyWarmCPUClass    = "warm_cpu_class_cores"
+
+	// safety: the marker moved to the team row, and this key is kept only
+	// because the v50 migration reads it and deletes it.
 	metaKeyCreditExhaustedAt = "credit_exhausted_at"
-	metaKeyWarmCPUClass      = "warm_cpu_class_cores"
 )
+
+// safety: when a balance first read empty is one team's state and the registry
+// holds exactly one row per team, so it lives there. It cannot stay in
+// sparkwing_meta, because a team column on that bag would make the session
+// CSRF key per team and break local sessions. Zero never ran out.
+var teamsCreditExhaustedCols = map[string]string{
+	"credit_exhausted_at": "INTEGER NOT NULL DEFAULT 0",
+}
 
 // CreditHistoryMaxLimit is the most rows of each kind one history read
 // returns.
@@ -199,8 +247,87 @@ CREATE INDEX IF NOT EXISTS idx_credit_charges_node ON credit_charges(run_id, nod
 // safety: a payment webhook redelivers until it sees a 2xx, so the reference a
 // grant carries is the key that keeps the retry from granting twice. An empty
 // reference is an operator note rather than a payment, so it repeats freely.
+// v52 replaces this key with [creditGrantTeamReferenceIndex].
 const creditGrantReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_reference
     ON credit_grants(kind, reference) WHERE reference != ''`
+
+// safety: the reference is unique within a team, because a reference an
+// operator chose, such as a welcome grant, names a different grant in every
+// team; the grant path keeps a payment id unique across teams itself.
+const creditGrantTeamReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_team_reference
+    ON credit_grants(team, kind, reference) WHERE reference != ''`
+
+// applyTeamGrantReferenceMigration moves the grant reference key from
+// (kind, reference) to (team, kind, reference). It is a step of v52.
+func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_credit_grants_reference`); err != nil {
+		return err
+	}
+	dupes, err := duplicateTeamGrantReferences(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if len(dupes) > 0 {
+		slog.Warn("credits: grants repeat a reference within a team, so the database does not enforce the grant key; "+
+			"delete the duplicate rows and recreate the index to enforce it",
+			"references", strings.Join(dupes, ", "))
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, creditGrantTeamReferenceIndex)
+	return err
+}
+
+// creditUnitScale is how many of today's credits one credit bought before a
+// credit became a vCPU-second, when it was a hundredth of a dollar. Micro-credit
+// amounts kept their dollar value across the change, so only a setting written
+// in whole credits needs it.
+const creditUnitScale = 1_000_000 / MicroCreditsPerCredit
+
+// applyCreditUnitMigration restates runner_scale_step_credits, the one setting
+// written in whole credits, in the vCPU-second credit, so a step an operator set
+// keeps its dollar value. It is a step of v59.
+func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
+	key := computeLimitKey(ComputeLimitRunnerScaleStepCredits)
+	var raw string
+	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// safety: a value the guard reader cannot parse reads as unset there, so
+	// it is left for the operator rather than guessed at.
+	step, parsed := wholeCreditSetting(raw)
+	if !parsed || step <= 0 {
+		return nil
+	}
+	return setCreditSettingTx(ctx, tx, key,
+		formatCreditSetting(min(step*creditUnitScale, RunnerScaleMaxStepCredits)))
+}
+
+func wholeCreditSetting(raw string) (int64, bool) {
+	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return v, err == nil
+}
+
+func duplicateTeamGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []string, err error) {
+	rows, err := q.QueryContext(ctx, `SELECT team, kind, reference FROM credit_grants
+	  WHERE reference != '' GROUP BY team, kind, reference HAVING COUNT(*) > 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []string
+	for rows.Next() {
+		var team, kind, reference string
+		if err := rows.Scan(&team, &kind, &reference); err != nil {
+			return nil, err
+		}
+		out = append(out, team+"/"+kind+"/"+reference)
+	}
+	return out, rows.Err()
+}
 
 // safety: the runner cap sums one kind of grant over a date range on every
 // cache miss, so that pair is an index rather than a scan of the ledger.
@@ -260,6 +387,72 @@ var tokensMeteredCols = map[string]string{
 // seconds past it and a requeue that clears it cannot bill the idle gap.
 var nodesCreditCols = map[string]string{
 	"credit_charged_through": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// safety: zero means the machine that runs the node has not started on it, so
+// a claim a dispatcher took before its pod exists bills nothing until the pod
+// renews the claim or starts execution, and a setup that never began is
+// refunded whole.
+var nodesCreditBillingCols = map[string]string{
+	"credit_billing_from": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// platformSetupFailures are the failure reasons that mean the platform, not
+// the customer's pipeline, stopped a node before its execution started: no
+// machine of the class came free, or the log service refused or dropped the
+// node's writes. A node that fails this way before execution gets back
+// everything its claim billed; any other failure before execution, such as a
+// compile error, keeps its setup billed. A lost runner or lease is not here:
+// its machine ran until the lease ran out, and the recovery that clears the
+// claim bills it to there.
+var platformSetupFailures = map[string]bool{
+	FailureQueueTimeout: true,
+	FailureLogsAuth:     true,
+	FailureLogsDropped:  true,
+}
+
+// safety: a metered trigger claim reserves from this instant, and zero means
+// no reservation is open, so a settle that finds it zero bills nothing twice.
+var triggersCreditCols = map[string]string{
+	"credit_reserved_at": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var triggerCreditCursorColsSQLite = map[string]string{
+	"credit_paid_seconds":      "INTEGER NOT NULL DEFAULT 0",
+	"credit_paid_amount_micro": "INTEGER NOT NULL DEFAULT 0",
+	"credit_reservation_id":    "TEXT NOT NULL DEFAULT ''",
+}
+
+var triggerCreditCursorColsPostgres = map[string]string{
+	"credit_paid_seconds":      "BIGINT NOT NULL DEFAULT 0",
+	"credit_paid_amount_micro": "BIGINT NOT NULL DEFAULT 0",
+	"credit_reservation_id":    "TEXT NOT NULL DEFAULT ''",
+}
+
+func applyTriggerCreditCursorMigration(ctx context.Context, tx *storeTx) error {
+	if tx.dialect == DialectPostgres {
+		if _, err := tx.ExecContext(ctx, `LOCK TABLE triggers IN ACCESS EXCLUSIVE MODE`); err != nil {
+			return err
+		}
+	}
+	var openReservations int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM triggers WHERE credit_reserved_at != 0`).Scan(&openReservations); err != nil {
+		return err
+	}
+	if openReservations != 0 {
+		return fmt.Errorf("%d open trigger credit reservation(s) remain; drain live claims and review backed-up terminal or pending rows before upgrading", openReservations)
+	}
+	if tx.dialect == DialectPostgres {
+		if err := addColumnsTx(ctx, tx, "triggers", triggerCreditCursorColsPostgres); err != nil {
+			return err
+		}
+	} else if err := ensureColumnsSQLite(ctx, tx, "triggers", triggerCreditCursorColsSQLite); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_credit_charges_team_amount ON credit_charges(team, amount_micro)`)
+	return err
 }
 
 // safety: a node's grace clock starts where its paid runway ended, which is a
@@ -364,7 +557,10 @@ func duplicateGrantReferences(ctx context.Context, q migrationQueryExecer) (_ []
 
 // CreditGrant is one row of credit_grants: credits the operator added.
 type CreditGrant struct {
-	ID          string
+	ID string
+	// Team is whose balance the grant pays for. Only this team's charges
+	// draw on it.
+	Team        Team
 	Kind        string
 	AmountMicro int64
 	Reference   string
@@ -379,7 +575,9 @@ type CreditGrant struct {
 // interval of a node's execution, or the refund of a reservation the node
 // did not use.
 type CreditCharge struct {
-	ID          string
+	ID string
+	// Team is whose balance the row drew on.
+	Team        Team
 	RunID       string
 	NodeID      string
 	TokenPrefix string
@@ -460,6 +658,9 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
+	// Checkout names the payment session a paid grant settles, so the
+	// checkout it opened stops counting against the balance cap.
+	Checkout string
 }
 
 // CreditGrantResult is the row the ledger holds for a request together with
@@ -480,6 +681,13 @@ func (req CreditGrantRequest) validate() error {
 		}
 		if req.AmountMicro > MaxCreditGrantMicro {
 			return fmt.Errorf("credits: a grant may not exceed %d micro-credits", MaxCreditGrantMicro)
+		}
+		// safety: a paid grant is one checkout's payment, so it is bounded by
+		// the largest purchase; that bounds what a leaked grant credential can
+		// add, since the balance cap does not refuse a paid grant.
+		if req.Kind == CreditGrantPaid && req.AmountMicro > CreditPurchaseMaxCents*MicroCreditsPerCent {
+			return fmt.Errorf("credits: a paid grant is one purchase, at most %d micro-credits",
+				int64(CreditPurchaseMaxCents*MicroCreditsPerCent))
 		}
 		if req.Reverses != "" {
 			return fmt.Errorf("credits: only a %s grant reverses another grant", CreditGrantReversal)
@@ -502,15 +710,31 @@ func (req CreditGrantRequest) validate() error {
 	return nil
 }
 
-// GrantCredits adds credits to the ledger and returns the row it holds for
-// them. A grant that lifts the balance above zero clears the exhaustion stamp,
-// so a node cancelled for an empty balance is the last one cancelled. A
-// non-empty reference is idempotent: the row already written under that kind
-// and reference is returned instead of a second one.
+// GrantCredits adds credits to the default team's balance and returns the row
+// it holds for them. A grant that lifts that balance above zero clears the
+// team's exhaustion stamp, so a node cancelled for an empty balance is the
+// last one cancelled. A non-empty reference is idempotent: the row already
+// written under that kind and reference is returned instead of a second one.
 func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error) {
-	res, err := s.RecordCreditGrant(ctx, CreditGrantRequest{
+	return grantCredits(ctx, s.RecordCreditGrant, kind, amountMicro, reference, createdBy)
+}
+
+// GrantCredits adds credits to t's balance and returns the row it holds for
+// them. It reads the same as [Store.GrantCredits] otherwise.
+func (t *Tenant) GrantCredits(
+	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
+) (*CreditGrant, error) {
+	return grantCredits(ctx, t.RecordCreditGrant, kind, amountMicro, reference, createdBy)
+}
+
+func grantCredits(
+	ctx context.Context,
+	record func(context.Context, CreditGrantRequest) (CreditGrantResult, error),
+	kind string, amountMicro int64, reference, createdBy string,
+) (*CreditGrant, error) {
+	res, err := record(ctx, CreditGrantRequest{
 		Kind: kind, AmountMicro: amountMicro, Reference: reference, CreatedBy: createdBy,
 	})
 	if err != nil {
@@ -520,12 +744,29 @@ func (s *Store) GrantCredits(
 	return &grant, nil
 }
 
-// RecordCreditGrant writes req and reports whether it wrote a new row. It
-// refuses a reversal whose Reverses names no paid grant, so a refund can only
-// take back a payment the ledger recorded. A reversal may take the balance
-// below zero; the claim path then refuses new metered work.
+// RecordCreditGrant writes req against the default team's balance and reports
+// whether it wrote a new row. It refuses a reversal whose Reverses names no
+// paid grant of that team, so a refund can only take back a payment the
+// team's ledger recorded, and a free grant that would lift the balance above
+// [MaxTeamBalanceMicro] with a [CreditBalanceCapError]; a paid grant is never
+// held to the cap, because its payment already went through. A reversal may take the balance below zero; the
+// claim path then refuses that team's new metered work.
 func (s *Store) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
+) (CreditGrantResult, error) {
+	return s.recordCreditGrant(ctx, DefaultTeam, req)
+}
+
+// RecordCreditGrant writes req against t's balance and reports whether it
+// wrote a new row. It reads the same as [Store.RecordCreditGrant] otherwise.
+func (t *Tenant) RecordCreditGrant(
+	ctx context.Context, req CreditGrantRequest,
+) (CreditGrantResult, error) {
+	return t.s.recordCreditGrant(ctx, t.team, req)
+}
+
+func (s *Store) recordCreditGrant(
+	ctx context.Context, team Team, req CreditGrantRequest,
 ) (_ CreditGrantResult, err error) {
 	if err := req.validate(); err != nil {
 		return CreditGrantResult{}, err
@@ -536,7 +777,7 @@ func (s *Store) RecordCreditGrant(
 	}
 	now := time.Now().UTC()
 	grant := CreditGrant{
-		ID: id, Kind: req.Kind, AmountMicro: req.AmountMicro,
+		ID: id, Team: team, Kind: req.Kind, AmountMicro: req.AmountMicro,
 		Reference: req.Reference, Reverses: req.Reverses,
 		CreatedBy: req.CreatedBy, CreatedAt: now,
 	}
@@ -551,41 +792,72 @@ func (s *Store) RecordCreditGrant(
 		return CreditGrantResult{}, err
 	}
 	if req.Reference != "" {
-		existing, found, err := creditGrantByReferenceTx(ctx, tx, req.Kind, req.Reference)
+		// safety: a payment id is the processor's, so one already paid to
+		// another team is a caller mistake and must not pay this team too; any
+		// other reference is the team's own name for its grant.
+		lookup := team
+		if req.Kind == CreditGrantPaid {
+			lookup = ""
+		}
+		existing, found, err := creditGrantByReferenceTx(ctx, tx, lookup, req.Kind, req.Reference)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
 		if found {
-			if err := sameGrantTerms(existing, req); err != nil {
+			if err := sameGrantTerms(existing, team, req); err != nil {
 				return CreditGrantResult{}, err
 			}
 			return CreditGrantResult{Grant: existing}, tx.Commit()
 		}
 	}
 	if req.Kind == CreditGrantReversal {
-		_, found, err := creditGrantByReferenceTx(ctx, tx, CreditGrantPaid, req.Reverses)
+		// safety: the reversal has to find the payment inside this team,
+		// because reversing another team's grant would move credits between
+		// balances that never traded.
+		reversed, found, err := creditGrantByReferenceTx(ctx, tx, team, CreditGrantPaid, req.Reverses)
 		if err != nil {
 			return CreditGrantResult{}, err
 		}
-		if !found {
+		if !found || reversed.Team != team {
 			return CreditGrantResult{}, fmt.Errorf(
 				"credits: no %s grant carries the reference %q", CreditGrantPaid, req.Reverses)
 		}
+		already, err := reversedMicroTx(ctx, tx, team, req.Reverses)
+		if err != nil {
+			return CreditGrantResult{}, err
+		}
+		if already-req.AmountMicro > reversed.AmountMicro {
+			return CreditGrantResult{}, fmt.Errorf("%w: %q paid %d micro-credits, %d are already reversed, not %d more",
+				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
+		}
+	}
+	// safety: a paid grant is money that already moved, so the cap was held
+	// when its checkout opened and is not held again here; refusing it would
+	// leave a payment with no credits. Only an operator's free grant meets the
+	// cap at the ledger.
+	if req.Kind == CreditGrantFree {
+		if err := refuseAboveBalanceCapTx(ctx, tx, team, req.AmountMicro, now.UnixNano()); err != nil {
+			return CreditGrantResult{}, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO credit_grants (id, kind, amount_micro, reference, reverses, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, req.Kind, req.AmountMicro, req.Reference, req.Reverses,
+        INSERT INTO credit_grants (team, id, kind, amount_micro, reference, reverses, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(team), id, req.Kind, req.AmountMicro, req.Reference, req.Reverses,
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
-	balance, err := creditBalanceTx(ctx, tx)
+	if req.Kind == CreditGrantPaid {
+		if err := markCreditCheckoutPaidTx(ctx, tx, team, req.Checkout, now.UnixNano()); err != nil {
+			return CreditGrantResult{}, err
+		}
+	}
+	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
 		return CreditGrantResult{}, err
 	}
 	if balance > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
+		if err := clearTeamCreditExhaustedTx(ctx, tx, team, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err
 		}
 	}
@@ -599,7 +871,14 @@ func (s *Store) RecordCreditGrant(
 // safety: a webhook replay carries the terms it carried the first time, so
 // different terms under one reference are a caller mistake rather than a
 // retry, and answering with the stored row would swallow the difference.
-func sameGrantTerms(stored CreditGrant, req CreditGrantRequest) error {
+func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error {
+	// safety: the reference is the deployment's idempotency key, a payment id
+	// rather than a name a team chose, so one seen under a second team is a
+	// caller mistake and must not grant that team the first team's credits.
+	if stored.Team != team {
+		return fmt.Errorf("%w: %q belongs to team %s, not %s",
+			ErrCreditGrantConflict, req.Reference, stored.Team, team)
+	}
 	if stored.AmountMicro != req.AmountMicro {
 		return fmt.Errorf("%w: %q holds %d micro-credits, not %d",
 			ErrCreditGrantConflict, req.Reference, stored.AmountMicro, req.AmountMicro)
@@ -611,51 +890,96 @@ func sameGrantTerms(stored CreditGrant, req CreditGrantRequest) error {
 	return nil
 }
 
+// reversedMicroTx is how much of a payment the team's reversals already
+// took back, as a positive amount.
+func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string) (int64, error) {
+	var sum sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
+	  WHERE team = ? AND kind = ? AND reverses = ?`, string(team), CreditGrantReversal, payment).Scan(&sum)
+	return -sum.Int64, err
+}
+
+// creditGrantByReferenceTx finds the grant of kind carrying reference in
+// team, or in any team when team is empty.
 func creditGrantByReferenceTx(
-	ctx context.Context, tx *storeTx, kind, reference string,
+	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
 	var g CreditGrant
 	var created int64
-	err := tx.QueryRowContext(ctx, `SELECT id, kind, amount_micro, reference, reverses, created_by, created_at
-	  FROM credit_grants WHERE kind = ? AND reference = ?
-	  ORDER BY created_at ASC, id ASC LIMIT 1`, kind, reference).
-		Scan(&g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
+	var owner string
+	err := tx.QueryRowContext(ctx, `SELECT team, id, kind, amount_micro, reference, reverses, created_by, created_at
+	  FROM credit_grants WHERE (? = '' OR team = ?) AND kind = ? AND reference = ?
+	  ORDER BY created_at ASC, id ASC LIMIT 1`, string(team), string(team), kind, reference).
+		Scan(&owner, &g.ID, &g.Kind, &g.AmountMicro, &g.Reference, &g.Reverses, &g.CreatedBy, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreditGrant{}, false, nil
 	}
 	if err != nil {
 		return CreditGrant{}, false, err
 	}
+	g.Team = Team(owner)
 	g.CreatedAt = time.Unix(0, created).UTC()
 	return g, true, nil
 }
 
-// CreditBalanceMicro returns grants minus charges, in micro-credits. A
-// controller that was never granted anything reads zero.
+// CreditBalanceMicro returns the default team's grants minus its charges, in
+// micro-credits. A controller that was never granted anything reads zero.
+//
+// safety: the unscoped twin reads [DefaultTeam] because a local install holds
+// exactly that one team; summing every team would let a funded team pay for
+// an unfunded one's work.
 func (s *Store) CreditBalanceMicro(ctx context.Context) (int64, error) {
+	return s.creditBalanceMicro(ctx, DefaultTeam)
+}
+
+// CreditBalanceMicro returns t's grants minus t's charges, in micro-credits.
+// Another team's grants are not in it, so a team that has spent its own
+// grants reads an empty balance however well funded its neighbors are.
+func (t *Tenant) CreditBalanceMicro(ctx context.Context) (int64, error) {
+	return t.s.creditBalanceMicro(ctx, t.team)
+}
+
+func (s *Store) creditBalanceMicro(ctx context.Context, team Team) (int64, error) {
 	var granted, charged sql.NullInt64
-	if err := s.queryRow(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
+	if err := s.queryRow(ctx, creditBalanceSQL,
+		string(team), string(team)).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil
 }
 
-const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants),
-        (SELECT SUM(amount_micro) FROM credit_charges)`
+const creditBalanceSQL = `SELECT (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
 // safety: a reversal is a grant row with a negative amount, so a reader that
 // wants the two apart asks for them apart; the balance is the same either way.
 const creditGrantSplitSQL = `SELECT
-        (SELECT SUM(amount_micro) FROM credit_grants WHERE kind != ?),
-        (SELECT -SUM(amount_micro) FROM credit_grants WHERE kind = ?),
-        (SELECT SUM(amount_micro) FROM credit_charges)`
+        (SELECT SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind != ?),
+        (SELECT -SUM(amount_micro) FROM credit_grants WHERE team = ? AND kind = ?),
+        (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?)`
 
-func creditBalanceTx(ctx context.Context, tx *storeTx) (int64, error) {
+func creditBalanceTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
 	var granted, charged sql.NullInt64
-	if err := tx.QueryRowContext(ctx, creditBalanceSQL).Scan(&granted, &charged); err != nil {
+	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
+		string(team), string(team)).Scan(&granted, &charged); err != nil {
 		return 0, err
 	}
 	return granted.Int64 - charged.Int64, nil
+}
+
+// safety: an executor enrolls with the deployment and is offered work from
+// every team on it, so the team a charge bills comes off the run row rather
+// than off the caller. A run the store has lost reads as [DefaultTeam]
+// because that is the team every row written before the tenant key lives in.
+func creditTeamForRunTx(ctx context.Context, tx *storeTx, runID string) (Team, error) {
+	team, found, err := runOwnerTx(ctx, tx, runID)
+	if err != nil {
+		return "", err
+	}
+	if !found || team == "" {
+		return DefaultTeam, nil
+	}
+	return team, nil
 }
 
 // safety: Postgres runs concurrent claims in their own transactions, so the
@@ -669,13 +993,28 @@ func lockCreditLedgerTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// CreditState reports the ledger together with the rate, the grace period,
-// and the credits burned over window.
+// CreditState reports the default team's ledger together with the rate, the
+// grace period, and the credits it burned over window.
+//
+// safety: the unscoped twin reads [DefaultTeam] for the same reason
+// [Store.CreditBalanceMicro] does.
 func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
+	return s.creditState(ctx, DefaultTeam, window)
+}
+
+// CreditState reports t's ledger together with the rate, the grace period,
+// and the credits t burned over window. The rate, the grace period and the
+// charge cap are the deployment's and are the same for every team.
+func (t *Tenant) CreditState(ctx context.Context, window time.Duration) (CreditState, error) {
+	return t.s.creditState(ctx, t.team, window)
+}
+
+func (s *Store) creditState(ctx context.Context, team Team, window time.Duration) (CreditState, error) {
 	out := CreditState{BurnWindow: window}
 	var granted, reversed, charged sql.NullInt64
 	if err := s.queryRow(ctx, creditGrantSplitSQL,
-		CreditGrantReversal, CreditGrantReversal).Scan(&granted, &reversed, &charged); err != nil {
+		string(team), CreditGrantReversal, string(team), CreditGrantReversal,
+		string(team)).Scan(&granted, &reversed, &charged); err != nil {
 		return out, err
 	}
 	out.GrantedMicro = granted.Int64
@@ -685,8 +1024,8 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 
 	var storageCharged sql.NullInt64
 	if err := s.queryRow(ctx,
-		`SELECT SUM(amount_micro) FROM credit_charges WHERE kind = ?`,
-		CreditChargeStorage).Scan(&storageCharged); err != nil {
+		`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND kind = ?`,
+		string(team), CreditChargeStorage).Scan(&storageCharged); err != nil {
 		return out, err
 	}
 	out.StorageChargedMicro = storageCharged.Int64
@@ -694,8 +1033,8 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 	if window > 0 {
 		var burn sql.NullInt64
 		if err := s.queryRow(ctx,
-			`SELECT SUM(amount_micro) FROM credit_charges WHERE charged_at >= ?`,
-			time.Now().Add(-window).UnixNano()).Scan(&burn); err != nil {
+			`SELECT SUM(amount_micro) FROM credit_charges WHERE team = ? AND charged_at >= ?`,
+			string(team), time.Now().Add(-window).UnixNano()).Scan(&burn); err != nil {
 			return out, err
 		}
 		out.BurnMicro = burn.Int64
@@ -713,7 +1052,7 @@ func (s *Store) CreditState(ctx context.Context, window time.Duration) (CreditSt
 	out.MaxChargeSeconds = settings.MaxChargeSeconds
 	out.StorageRateMicroPerGBDay = settings.StorageRateMicroPerGBDay
 	out.StorageFreeAllowanceBytes = settings.StorageFreeAllowanceBytes
-	exhausted, err := s.creditExhaustedAt(ctx)
+	exhausted, err := s.creditExhaustedAt(ctx, team)
 	if err != nil {
 		return out, err
 	}
@@ -798,20 +1137,26 @@ func (s *Store) CreditLedgerTotals(ctx context.Context) (_ CreditLedgerTotals, e
 	}
 
 	// safety: counting a reservation whole would make the seconds total fall
-	// by its refund, so the part a finish right now would still return is held
-	// back. The database's clock measures that part, because a sampler's own
-	// clock lets a second controller or an NTP step pull the figure backwards.
+	// by its refund, so a reservation a finish could still return is held
+	// back: a node's until its machine starts on it, a trigger's until its
+	// claim settles. Past that point the minimum is consumed rather than
+	// refunded; only a setup the platform fails returns billed seconds, and
+	// that is the one refund that lowers this total.
 	var refundable int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(CASE WHEN execution_started_at IS NULL THEN ?
-	                                         WHEN credit_charged_through / 1000000000 > `+s.nowSeconds()+`
-	                                         THEN credit_charged_through / 1000000000 - `+s.nowSeconds()+`
-	                                         ELSE 0 END), 0)
+		`SELECT COALESCE(SUM(CASE WHEN credit_billing_from = 0 AND execution_started_at IS NULL
+	                                  THEN ? ELSE 0 END), 0)
 	                   FROM nodes WHERE credit_charged_through != 0`,
-		int64(CreditClaimFloorSeconds)).Scan(&refundable); err != nil {
+		int64(MinBillableSeconds)).Scan(&refundable); err != nil {
 		return out, err
 	}
-	out.SettledSeconds = charged - refundable
+	var triggerRefundable int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(COUNT(*), 0) * ? FROM triggers WHERE credit_reserved_at != 0`,
+		int64(MinBillableSeconds)).Scan(&triggerRefundable); err != nil {
+		return out, err
+	}
+	out.SettledSeconds = charged - refundable - triggerRefundable
 
 	out.BalanceMicro = out.GrantedFreeMicro + out.GrantedPaidMicro - out.ReversedMicro - settled
 	return out, tx.Commit()
@@ -836,7 +1181,9 @@ func (s *Store) CreditMaxChargeSeconds(ctx context.Context) (int64, error) {
 	return s.creditSetting(ctx, metaKeyCreditMaxCharge, DefaultCreditMaxChargeSeconds)
 }
 
-// CreditSettings are the values the ledger prices work with.
+// CreditSettings are the values the ledger prices work with. Every one of
+// them is the deployment's, so a controller serving many teams prices them
+// all the same way.
 type CreditSettings struct {
 	// RateMicroPerSecond is the price of one cloud runner second.
 	RateMicroPerSecond int64
@@ -846,7 +1193,7 @@ type CreditSettings struct {
 	RateTableSet bool
 	// WarmCPUClassCores is the largest cpu class a warm runner pool serves. A
 	// node above it is never offered to or claimed by a warm runner and is
-	// executed on a Kubernetes node sized to its class instead.
+	// executed by a class-routed Kubernetes Job instead.
 	WarmCPUClassCores int64
 	// GraceSeconds is how long a node that has consumed its claim reservation
 	// on an empty balance keeps running before the controller cancels it.
@@ -1242,21 +1589,100 @@ func creditSettingRawTx(ctx context.Context, tx *storeTx, key string) (string, e
 
 const selectCreditSettingSQL = `SELECT value FROM sparkwing_meta WHERE key = ?`
 
-func (s *Store) creditExhaustedAt(ctx context.Context) (*time.Time, error) {
-	var raw string
-	err := s.queryRow(ctx, `SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&raw)
+func (s *Store) creditExhaustedAt(ctx context.Context, team Team) (*time.Time, error) {
+	var ns int64
+	err := s.queryRow(ctx,
+		`SELECT credit_exhausted_at FROM teams WHERE name = ?`, string(team)).Scan(&ns)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	ns := parseCreditSetting(raw, 0)
 	if ns == 0 {
 		return nil, nil
 	}
 	at := time.Unix(0, ns).UTC()
 	return &at, nil
+}
+
+// safety: the first stamp is the one that stands, because the marker records
+// when this team's balance first read empty and every later heartbeat would
+// otherwise push it forward. The answer is the instant in force after the
+// write, so a caller reads what it stamped or what got there first.
+func stampTeamCreditExhaustedTx(
+	ctx context.Context, tx *storeTx, team Team, nowNS int64,
+) (int64, error) {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE teams SET credit_exhausted_at = ?, updated_at = ?
+		  WHERE name = ? AND credit_exhausted_at = 0`,
+		nowNS, nowNS, string(team)); err != nil {
+		return 0, err
+	}
+	return teamCreditExhaustedAtTx(ctx, tx, team)
+}
+
+// safety: a team the registry does not hold reads zero rather than failing,
+// because the marker only reports how long a balance has been empty and the
+// cancellation deadline is the node's own anchor.
+func teamCreditExhaustedAtTx(ctx context.Context, tx *storeTx, team Team) (int64, error) {
+	var at int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT credit_exhausted_at FROM teams WHERE name = ?`, string(team)).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return at, err
+}
+
+func clearTeamCreditExhaustedTx(ctx context.Context, tx *storeTx, team Team, nowNS int64) error {
+	// safety: the predicate keeps a funded team from writing the row on every
+	// heartbeat.
+	_, err := tx.ExecContext(ctx,
+		`UPDATE teams SET credit_exhausted_at = 0, updated_at = ?
+		  WHERE name = ? AND credit_exhausted_at != 0`,
+		nowNS, string(team))
+	return err
+}
+
+// safety: the column and the backfill land together, because a stamp left
+// behind in sparkwing_meta would read as a team that has never run out and
+// would start that team's grace clock over.
+func applyTeamCreditStateMigrationSQLite(ctx context.Context, tx *storeTx) error {
+	if err := ensureColumnsSQLite(ctx, tx, "teams", teamsCreditExhaustedCols); err != nil {
+		return err
+	}
+	return backfillTeamCreditStateTx(ctx, tx)
+}
+
+func applyTeamCreditStateMigrationPostgres(ctx context.Context, tx *storeTx) error {
+	if err := addColumnsTx(ctx, tx, "teams", teamsCreditExhaustedCols); err != nil {
+		return err
+	}
+	return backfillTeamCreditStateTx(ctx, tx)
+}
+
+func backfillTeamCreditStateTx(ctx context.Context, tx *storeTx) error {
+	var raw string
+	err := tx.QueryRowContext(ctx,
+		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&raw)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if err == nil {
+		if at := parseCreditSetting(raw, 0); at != 0 {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE teams SET credit_exhausted_at = ? WHERE name = ?`,
+				at, string(DefaultTeam)); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
+			return err
+		}
+	}
+	return backfillStorageWatermarkTeamTx(ctx, tx)
 }
 
 // ListCreditGrants returns grants newest first, at most limit rows and never
@@ -1317,22 +1743,50 @@ func creditLimit(limit int) int {
 	return limit
 }
 
-// CreditClaimFloorMicro is one minute of cloud runner time at the four-core
-// rate. A claim reserves this minute at the class of the node it takes, so a
-// claim on another class reserves the same minute at that class's price.
-func (s *Store) CreditClaimFloorMicro(ctx context.Context) (int64, error) {
-	rate, err := s.CreditRateMicroPerSecond(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return rate * CreditClaimFloorSeconds, nil
+// ErrMeteredInProcessNodes is returned when a metered credential claims a
+// trigger without naming a node runner that claims each node, such as k8s or
+// warm. Nodes a trigger holder runs in its own process hold no node claim,
+// so no credit is ever charged for them.
+var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
+
+type creditMeteringDisabledKey struct{}
+
+// WithoutCreditMetering keeps claims, trigger settlement and storage writes
+// out of the credit ledger while preserving token-bound claim ownership.
+func WithoutCreditMetering(ctx context.Context) context.Context {
+	return context.WithValue(ctx, creditMeteringDisabledKey{}, true)
 }
 
-// safety: reserving inside the claim's own transaction is what keeps concurrent
-// runners from each reading the same balance and claiming against it.
-func (s *Store) reserveNodeCreditsTx(
-	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
+func creditMeteringDisabled(ctx context.Context) bool {
+	return ctx.Value(creditMeteringDisabledKey{}) == true
+}
+
+// triggerCreditNodeID is the node id on the ledger rows that bill a trigger's
+// own step, the planning and orchestration its holder runs on the claiming
+// pool, which is no node of the run.
+const triggerCreditNodeID = ""
+
+// safety: the trigger step runs on the paid pool, so a metered claim reserves
+// its minimum here, inside the claim's transaction and under the ledger lock,
+// the way a node claim does; a check alone let every poller admit a run
+// against the same minimum. The claim names no pool size, so the step is billed
+// at the cheapest class. A refusal leaves the trigger pending, because it rolls
+// the claim back.
+func reserveTriggerCreditsTx(
+	ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, triggerID string, now time.Time,
 ) error {
+	var prior int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT credit_reserved_at FROM triggers WHERE team = ? AND id = ?`,
+		string(team), triggerID).Scan(&prior); err != nil {
+		return err
+	}
+	if prior != 0 {
+		return unsettledTriggerCredits(triggerID)
+	}
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
 	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
 	if err != nil || !metered {
 		return err
@@ -1344,7 +1798,211 @@ func (s *Store) reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
-	balance, err := creditBalanceTx(ctx, tx)
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	class := table.Sorted()[0]
+	required := class.MicroPerSecond * MinBillableSeconds
+	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, triggerID, ""); err != nil {
+		return err
+	}
+	if balance < required {
+		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
+	}
+	principal, err := runPrincipalTx(ctx, tx, triggerID)
+	if err != nil {
+		return err
+	}
+	charge, err := insertCreditChargeTx(ctx, tx, chargeWindow{
+		Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
+		TokenPrefix: claimant.TokenPrefix, Principal: principal,
+		NowNS: now.UnixNano(), Rate: class.MicroPerSecond, Class: class.Cores,
+	}, CreditChargeReservation, MinBillableSeconds, required)
+	if err != nil {
+		return err
+	}
+	// safety: a new claim resets its cursor and reservation identity together,
+	// so no charge from a prior generation can enter this claim's refund.
+	_, err = tx.ExecContext(ctx,
+		`UPDATE triggers SET credit_reserved_at = ?, credit_paid_seconds = ?,
+		        credit_paid_amount_micro = ?, credit_reservation_id = ?
+		  WHERE team = ? AND id = ?`,
+		now.UnixNano(), MinBillableSeconds, required, charge.ID, string(team), triggerID)
+	return err
+}
+
+func unsettledTriggerCredits(triggerID string) error {
+	return fmt.Errorf("%w: trigger %s has an unsettled prior metered claim; review its credit ledger before retrying", ErrLockHeld, triggerID)
+}
+
+// safety: a frozen team is refused the way an empty balance is, so every
+// runner already backs off from it; the claim rolls back and the work waits.
+func refuseFrozenTeamTx(
+	ctx context.Context, tx *storeTx, team Team, balance, required int64, runID, nodeID string,
+) error {
+	freeze, err := teamCreditFreezeTx(ctx, tx, team)
+	if err != nil || !freeze.Frozen {
+		return err
+	}
+	return &InsufficientCreditsError{
+		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
+	}
+}
+
+// safety: every path that ends a trigger claim settles here before its own
+// write, in the same transaction, so a fence that refuses the write rolls the
+// settlement back with it. The step is billed through the lease's end when the
+// lease lapsed first, because a holder that stopped heartbeating is not
+// running. A step shorter than the minimum pays the minimum, and a claim that
+// never started its run is refunded whole.
+func settleTriggerCreditsTx(ctx context.Context, tx *storeTx, triggerID string, now time.Time, refundAll bool) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
+	var team string
+	var reservedAt int64
+	var lease sql.NullInt64
+	err := tx.QueryRowContext(ctx,
+		`SELECT team, credit_reserved_at, lease_expires_at FROM triggers WHERE id = ?`+tx.forUpdate(),
+		triggerID).Scan(&team, &reservedAt, &lease)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil || reservedAt == 0 {
+		return err
+	}
+	settleNS := now.UnixNano()
+	if lease.Valid && lease.Int64 < settleNS {
+		settleNS = lease.Int64
+	}
+	settleNS = max(settleNS, reservedAt)
+	return settleTriggerWindowTx(ctx, tx, Team(team), triggerID, reservedAt, settleNS, refundAll, true)
+}
+
+func settleTriggerWindowTx(
+	ctx context.Context, tx *storeTx, team Team, triggerID string, reservedAt, settleNS int64, refundAll, final bool,
+) error {
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return err
+	}
+	var paidSeconds, paidAmount int64
+	var reservationID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
+		   FROM triggers WHERE team = ? AND id = ?`, string(team), triggerID,
+	).Scan(&paidSeconds, &paidAmount, &reservationID); err != nil {
+		return err
+	}
+	if reservationID == "" {
+		return errors.New("credits: active trigger has no reservation id")
+	}
+	var tokenPrefix, principal string
+	var class, rate int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second
+		  FROM credit_charges
+		 WHERE team = ? AND id = ? AND run_id = ? AND node_id = ? AND kind = ?`,
+		string(team), reservationID, triggerID, triggerCreditNodeID, CreditChargeReservation,
+	).Scan(&tokenPrefix, &principal, &class, &rate); err != nil {
+		return err
+	}
+	w := chargeWindow{
+		Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
+		TokenPrefix: tokenPrefix, Principal: principal,
+		NowNS: settleNS, Rate: rate, Class: class,
+	}
+	elapsed := (settleNS - reservedAt) / int64(time.Second)
+	switch {
+	case refundAll:
+		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -paidSeconds, -paidAmount); err != nil {
+			return err
+		}
+	case elapsed > paidSeconds:
+		table, err := creditRateTableTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		w.Rate = chargeRate(table, class)
+		over := elapsed - paidSeconds
+		if over > (1<<63-1)/w.Rate {
+			return errors.New("credits: trigger window charge exceeds int64")
+		}
+		amount := w.Rate * over
+		var exhausted error
+		if !final {
+			balance, err := creditBalanceTx(ctx, tx, team)
+			if err != nil {
+				return err
+			}
+			// safety: a dispute hold refuses new claims; admitted work keeps paying as it finishes.
+			if balance < amount {
+				exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: amount, RunID: triggerID}
+			}
+		}
+		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, over, amount); err != nil {
+			return err
+		}
+		updated, err := tx.ExecContext(ctx,
+			`UPDATE triggers SET credit_paid_seconds = credit_paid_seconds + ?,
+			        credit_paid_amount_micro = credit_paid_amount_micro + ?
+			  WHERE team = ? AND id = ? AND credit_reservation_id = ?`,
+			over, amount, string(team), triggerID, reservationID)
+		if err != nil {
+			return err
+		}
+		rows, err := updated.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errors.New("credits: trigger cursor update missed its claim")
+		}
+		if exhausted != nil {
+			return exhausted
+		}
+	}
+	if final {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE triggers SET credit_reserved_at = 0, credit_paid_seconds = 0,
+			        credit_paid_amount_micro = 0, credit_reservation_id = ''
+			  WHERE team = ? AND id = ?`, string(team), triggerID)
+		return err
+	}
+	return nil
+}
+
+// safety: reserving inside the claim's own transaction is what keeps concurrent
+// runners from each reading the same balance and claiming against it.
+//
+// executing reports that the claimant is the machine that runs the node, as a
+// runner polling the queue or accepting an offer is, so billing starts at the
+// claim and covers its fetch and compile. A dispatcher that claims a node
+// before creating the pod that runs it passes false, and billing starts when
+// that pod first renews the claim or starts execution.
+func (s *Store) reserveNodeCreditsTx(
+	ctx context.Context, tx *storeTx, claimant ClaimIdentity, runID, nodeID string, now time.Time,
+	executing bool,
+) error {
+	if creditMeteringDisabled(ctx) {
+		return nil
+	}
+	metered, err := tokenMeteredTx(ctx, tx, claimant.TokenPrefix)
+	if err != nil || !metered {
+		return err
+	}
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return err
+	}
+	table, err := creditRateTableTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
@@ -1353,14 +2011,17 @@ func (s *Store) reserveNodeCreditsTx(
 	if classErr != nil && !errors.As(classErr, &unpriced) {
 		return classErr
 	}
-	required := class.MicroPerSecond * CreditClaimFloorSeconds
+	required := class.MicroPerSecond * MinBillableSeconds
 	if unpriced != nil {
-		required = table.BaseRate() * CreditClaimFloorSeconds
+		required = table.BaseRate() * MinBillableSeconds
+	}
+	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, runID, nodeID); err != nil {
+		return err
 	}
 	// safety: an empty balance is the refusal a runner already understands, so
 	// it is reported before a guard that would mask it with a different code.
 	if balance < required {
-		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required}
+		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID}
 	}
 	if unpriced != nil {
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
@@ -1375,7 +2036,7 @@ func (s *Store) reserveNodeCreditsTx(
 		return err
 	}
 	if limits.Any() {
-		if err := s.enforceClaimComputeLimitsTx(ctx, tx, limits, claimant, runID, now); err != nil {
+		if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
 			return err
 		}
 	}
@@ -1384,23 +2045,27 @@ func (s *Store) reserveNodeCreditsTx(
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
-		int64(CreditClaimFloorSeconds), required, class.Cores, class.MicroPerSecond,
+		string(team), id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
+		int64(MinBillableSeconds), required, class.Cores, class.MicroPerSecond,
 		now.UnixNano()); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
 	}
-	through := now.Add(CreditClaimFloorSeconds * time.Second).UnixNano()
+	through := now.Add(MinBillableSeconds * time.Second).UnixNano()
+	billingFrom := int64(0)
+	if executing {
+		billingFrom = now.UnixNano()
+	}
 	_, err = tx.ExecContext(ctx,
-		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?
+		`UPDATE nodes SET credit_charged_through = ?, credit_cpu_class = ?, credit_billing_from = ?
 		  WHERE run_id = ? AND node_id = ?`,
-		through, class.Cores, runID, nodeID)
+		through, class.Cores, billingFrom, runID, nodeID)
 	return err
 }
 
 const insertCreditChargeSQL = `
-        INSERT INTO credit_charges (id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
+        INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
                 cpu_class, rate_micro_per_second, charged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
@@ -1429,16 +2094,17 @@ type creditChargeTxResult struct {
 // charge and reports whether the balance can still pay for it. Charging is
 // idempotent within a second: a second call in the same second advances
 // nothing and writes no row. A node still inside its claim reservation is
-// charged nothing, because the reservation already paid for that minute.
+// charged nothing, because the reservation already paid for those seconds.
 func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
 	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, false)
 }
 
 // FinalizeNodeCredits settles a metered node when it stops running: it bills
-// the tail since the last charge, refunds whatever is left of the claim
-// reservation, and releases the node's charge window so a later attempt
-// starts its own. It is a no-op for a node that was never metered and for one
-// already settled.
+// the tail since the last charge and releases the node's charge window so a
+// later attempt starts its own. A node that finishes inside its reservation
+// pays the whole reservation, which is [MinBillableSeconds]; one whose
+// execution never started gets the reservation back. It is a no-op for a node
+// that was never metered and for one already settled.
 func (s *Store) FinalizeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefix string, now time.Time) (CreditChargeResult, error) {
 	return s.chargeNode(ctx, runID, nodeID, tokenPrefix, now, true)
 }
@@ -1465,12 +2131,14 @@ func (s *Store) chargeNodeTx(
 	ctx context.Context, tx *storeTx, runID, nodeID, tokenPrefix string, now time.Time, final bool,
 ) (creditChargeTxResult, error) {
 	var out creditChargeTxResult
-	var anchor, class int64
+	var anchor, class, billingFrom int64
 	var startedAt sql.NullInt64
+	var failureReason string
 	err := tx.QueryRowContext(ctx,
-		`SELECT credit_charged_through, credit_cpu_class, execution_started_at FROM nodes
+		`SELECT credit_charged_through, credit_cpu_class, execution_started_at,
+		        credit_billing_from, failure_reason FROM nodes
 		  WHERE run_id = ? AND node_id = ?`+tx.forUpdate(),
-		runID, nodeID).Scan(&anchor, &class, &startedAt)
+		runID, nodeID).Scan(&anchor, &class, &startedAt, &billingFrom, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, notFound("node", runID+"/"+nodeID)
 	}
@@ -1496,33 +2164,54 @@ func (s *Store) chargeNodeTx(
 	if err != nil {
 		return out, err
 	}
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return out, err
+	}
 
+	// safety: a node claimed by an older binary has no billing start, and its
+	// execution start is where that binary began billing.
+	if billingFrom == 0 && startedAt.Valid {
+		billingFrom = startedAt.Int64
+	}
 	nowNS := now.UnixNano()
-	// safety: cancellation can wait on transaction locks while a fenced attempt
-	// starts. A stale caller timestamp must not refund time before that boundary.
+	// safety: cancellation can wait on transaction locks while billing or a
+	// fenced attempt starts. A stale caller timestamp must neither refund time
+	// before that boundary nor finish a node before its execution began.
+	if billingFrom != 0 && nowNS < billingFrom {
+		nowNS = billingFrom
+	}
 	if startedAt.Valid && nowNS < startedAt.Int64 {
 		nowNS = startedAt.Int64
 	}
 	out.settledAt = time.Unix(0, nowNS)
 	rate := chargeRate(table, class)
 	through := anchor
-	if !startedAt.Valid {
+	switch {
+	case anchor != 0 && billingFrom == 0 && !final:
+		// safety: only the machine running the node renews its claim, so the
+		// first renewal is where its work began; the reservation covers the
+		// minimum from here rather than from a claim the pod never saw.
+		through = nowNS + MinBillableSeconds*int64(time.Second)
+		_, err := tx.ExecContext(ctx,
+			`UPDATE nodes SET credit_billing_from = ?, credit_charged_through = ?
+			  WHERE run_id = ? AND node_id = ?`,
+			nowNS, through, runID, nodeID)
+		return out, err
+	case billingFrom == 0 || (!startedAt.Valid && platformSetupFailures[failureReason]):
 		if final && anchor != 0 {
-			out.Charge, err = refundUnstartedReservationTx(ctx, tx, runID, nodeID, nowNS)
+			out.Charge, err = refundClaimTx(ctx, tx, team, runID, nodeID, nowNS)
 			if err != nil {
 				return out, err
 			}
 			through = 0
 		}
-	} else {
-		refundRate, err := refundRateTx(ctx, tx, runID, nodeID, rate, final && nowNS <= anchor)
-		if err != nil {
-			return out, err
-		}
+	default:
 		out.Charge, out.ForgivenSeconds, through, err = settleChargeWindow(
 			ctx, tx, chargeWindow{
+				Team:  team,
 				RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-				Anchor: anchor, NowNS: nowNS, Rate: rate, RefundRate: refundRate, Class: class,
+				Anchor: anchor, NowNS: nowNS, Rate: rate, Class: class,
 				MaxCharge: maxCharge, Final: final,
 			})
 		if err != nil {
@@ -1540,16 +2229,16 @@ func (s *Store) chargeNodeTx(
 		return out, nil
 	}
 
-	balance, err := creditBalanceTx(ctx, tx)
+	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil {
 		return out, err
 	}
 	out.BalanceMicro = balance
-	if !startedAt.Valid && !final {
+	if billingFrom == 0 && !final {
 		return out, nil
 	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
-		Balance: balance, NowNS: nowNS, Grace: grace,
+		Team: team, Balance: balance, NowNS: nowNS, Grace: grace,
 		RunID: runID, NodeID: nodeID, Anchor: anchor,
 	})
 	if err != nil {
@@ -1560,64 +2249,77 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
+// expiredClaim is a node whose claim lapsed with its charge window open, the
+// token that held it, and when the lease that stopped being renewed ran out.
+type expiredClaim struct {
+	runID, nodeID, tokenPrefix string
+	leaseNS                    int64
+}
+
+// safety: the holder stopped renewing, so the node ran until its lease ran
+// out and no later; the interval since the last charge is billed to there,
+// under the same per-charge cap a heartbeat is held to, before the claim that
+// anchors it is cleared. Billing starts when the machine starts work, so a
+// lease lost before execution began is billed the same way; a claim whose
+// machine never started is refunded whole by the settle itself.
+func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
+	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
+		time.Unix(0, min(claim.leaseNS, nowNS)), true)
+	return err
+}
+
+// safety: the team travels in this struct rather than as a Team parameter,
+// because the statements around it also read and write `nodes`, whose rows do
+// not carry a usable team yet; a parameter would make the scope guard demand a
+// predicate on a column every node row still defaults.
 type chargeWindow struct {
+	Team                                  Team
 	RunID, NodeID, TokenPrefix, Principal string
 	Anchor, NowNS                         int64
-	Rate, RefundRate, Class, MaxCharge    int64
+	Rate, Class, MaxCharge                int64
 	Final                                 bool
 }
 
-// safety: the tail of a reservation is returned at the price it was taken at,
-// because a table raised between the claim and the finish would otherwise
-// refund more than the reservation took out.
-func refundRateTx(
-	ctx context.Context, tx *storeTx, runID, nodeID string, fallback int64, refunding bool,
-) (int64, error) {
-	if !refunding {
-		return fallback, nil
-	}
-	var reserved int64
-	err := tx.QueryRowContext(ctx,
-		`SELECT rate_micro_per_second FROM credit_charges
-		  WHERE run_id = ? AND node_id = ? AND kind = ?
-		  ORDER BY charged_at DESC, id DESC LIMIT 1`,
-		runID, nodeID, CreditChargeReservation).Scan(&reserved)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fallback, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	if reserved <= 0 {
-		return fallback, nil
-	}
-	return reserved, nil
-}
-
-func refundUnstartedReservationTx(
-	ctx context.Context, tx *storeTx, runID, nodeID string, nowNS int64,
+// refundClaimTx returns everything the node's current claim billed: its
+// reservation and any usage charged since. It serves a claim whose machine
+// never started and a setup the platform failed, which are the two ways a
+// customer pays nothing for a node.
+//
+// safety: the refund carries the reservation's terms, and the claim is
+// bounded by its reservation row, so an earlier attempt of the same node
+// keeps what it paid.
+func refundClaimTx(
+	ctx context.Context, tx *storeTx, team Team, runID, nodeID string, nowNS int64,
 ) (*CreditCharge, error) {
-	// safety: use the reservation's stored terms so a later rate-table change
-	// cannot return more or less than the claim took.
 	var tokenPrefix, principal string
-	var seconds, amount, class, rate int64
+	var class, rate, reservedAt int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at
 		  FROM credit_charges
-		 WHERE run_id = ? AND node_id = ? AND kind = ?
+		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
 		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
-		runID, nodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &seconds, &amount, &class, &rate)
+		string(team), runID, nodeID, CreditChargeReservation).Scan(
+		&tokenPrefix, &principal, &class, &rate, &reservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	var seconds, amount sql.NullInt64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT SUM(seconds), SUM(amount_micro) FROM credit_charges
+		  WHERE team = ? AND run_id = ? AND node_id = ? AND charged_at >= ?`,
+		string(team), runID, nodeID, reservedAt).Scan(&seconds, &amount); err != nil {
+		return nil, err
+	}
+	if amount.Int64 <= 0 {
+		return nil, nil
+	}
 	return insertCreditChargeTx(ctx, tx, chargeWindow{
-		RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
+		Team: team, RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
 		NowNS: nowNS, Rate: rate, Class: class,
-	}, CreditChargeRefund, -seconds, -amount)
+	}, CreditChargeRefund, -seconds.Int64, -amount.Int64)
 }
 
 // safety: a node claimed before the rate table carries no class, so it keeps
@@ -1641,17 +2343,13 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 		}
 		return nil, 0, w.NowNS, nil
 	}
+	// safety: the reservation paid through the anchor and is the minimum, so a
+	// finish inside it releases the window and returns nothing.
 	if w.NowNS <= w.Anchor {
 		if !w.Final {
 			return nil, 0, w.Anchor, nil
 		}
-		refund := (w.Anchor - w.NowNS) / int64(time.Second)
-		if refund <= 0 {
-			return nil, 0, 0, nil
-		}
-		charge, err := insertCreditChargeTx(ctx, tx, w.refunding(), CreditChargeRefund, -refund,
-			-w.RefundRate*refund)
-		return charge, 0, 0, err
+		return nil, 0, 0, nil
 	}
 
 	seconds := (w.NowNS - w.Anchor) / int64(time.Second)
@@ -1675,13 +2373,6 @@ func settleChargeWindow(ctx context.Context, tx *storeTx, w chargeWindow) (*Cred
 	return charge, forgiven, settled, err
 }
 
-// safety: the row records the price it moved credits at, which for a refund is
-// the reservation's price rather than the one in force now.
-func (w chargeWindow) refunding() chargeWindow {
-	w.Rate = w.RefundRate
-	return w
-}
-
 func insertCreditChargeTx(
 	ctx context.Context, tx *storeTx, w chargeWindow, kind string, seconds, amount int64,
 ) (*CreditCharge, error) {
@@ -1690,12 +2381,12 @@ func insertCreditChargeTx(
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
+		string(w.Team), id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
 		w.Class, w.Rate, w.NowNS); err != nil {
 		return nil, fmt.Errorf("credits: insert charge: %w", err)
 	}
 	return &CreditCharge{
-		ID: id, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,
+		ID: id, Team: w.Team, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,
 		Principal: w.Principal, Kind: kind, Seconds: seconds, AmountMicro: amount,
 		CPUClassCores: w.Class, RateMicroPerSecond: w.Rate,
 		ChargedAt: time.Unix(0, w.NowNS).UTC(),
@@ -1705,7 +2396,11 @@ func insertCreditChargeTx(
 // safety: Anchor is the instant the node is paid through, read before this
 // charge advanced it. Zero means no charge has anchored the node yet, which is
 // a node still inside the claim that will set one.
+// safety: Team travels in this struct rather than as a Team parameter, for
+// the same reason [chargeWindow] carries it: the helpers beside it update
+// `nodes`, whose rows do not carry a usable team yet.
 type creditExhaustion struct {
+	Team                  Team
 	Balance, NowNS, Grace int64
 	RunID, NodeID         string
 	Anchor                int64
@@ -1715,8 +2410,7 @@ func settleCreditExhaustionTx(
 	ctx context.Context, tx *storeTx, e creditExhaustion,
 ) (time.Duration, bool, error) {
 	if e.Balance > 0 {
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt); err != nil {
+		if err := clearTeamCreditExhaustedTx(ctx, tx, e.Team, e.NowNS); err != nil {
 			return 0, false, err
 		}
 		// safety: credit bought the node fresh runway, so the clock it was
@@ -1727,18 +2421,13 @@ func settleCreditExhaustionTx(
 		}
 		return 0, false, nil
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO sparkwing_meta (key, value, updated_at) VALUES (?, ?, ?)
-		 ON CONFLICT (key) DO NOTHING`,
-		metaKeyCreditExhaustedAt, strconv.FormatInt(e.NowNS, 10), e.NowNS); err != nil {
+	stamped, err := stampTeamCreditExhaustedTx(ctx, tx, e.Team, e.NowNS)
+	if err != nil {
 		return 0, false, err
 	}
-	var raw string
-	if err := tx.QueryRowContext(ctx,
-		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeyCreditExhaustedAt).Scan(&raw); err != nil {
-		return 0, false, err
+	if stamped == 0 {
+		stamped = e.NowNS
 	}
-	stamped := parseCreditSetting(raw, e.NowNS)
 	exhaustedFor := time.Duration(e.NowNS - stamped)
 	if exhaustedFor < 0 {
 		exhaustedFor = 0
@@ -1972,22 +2661,6 @@ func (s *Store) cancelMeteredNode(
 	return tx.Commit()
 }
 
-// OldestWaitingReadyNode names the ready node a claim would have been given,
-// so a refusal can be recorded against the run that is waiting for it. It
-// returns empty strings when nothing is waiting.
-func (s *Store) OldestWaitingReadyNode(ctx context.Context) (runID, nodeID string, err error) {
-	err = s.queryRow(ctx, `SELECT run_id, node_id FROM nodes
-	  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
-	  ORDER BY ready_at ASC LIMIT 1`).Scan(&runID, &nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	return runID, nodeID, nil
-}
-
 func newCreditID(prefix string) (string, error) {
 	var suffix [12]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
@@ -1996,8 +2669,9 @@ func newCreditID(prefix string) (string, error) {
 	return prefix + "-" + hex.EncodeToString(suffix[:]), nil
 }
 
-// FormatCredits renders micro-credits as credits with two decimal places,
-// which is the resolution an operator reads a balance at.
+// FormatCredits renders micro-credits as credits with two decimal places.
+// Every class bills whole credits a second, so the decimals show only on a
+// storage charge or a rate an operator set off the ladder.
 func FormatCredits(micro int64) string {
 	neg := ""
 	if micro < 0 {

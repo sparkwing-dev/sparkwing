@@ -996,14 +996,14 @@ func (l *Loopback) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	if withEnv, ok := l.state.(loopbackTriggerEnqueuerWithEnv); ok {
 		runID, err = withEnv.EnqueueTriggerWithEnv(r.Context(), body.Pipeline, body.Args,
 			body.ParentRunID, body.ParentNodeID, body.RetryOf,
-			body.Trigger.Source, body.Trigger.User, body.Git.Repo, body.Git.Branch, env)
+			body.Trigger.Source, "", body.Git.Repo, body.Git.Branch, env)
 	} else if len(env) > 0 {
 		writeError(w, http.StatusBadRequest, errors.New("state backend cannot persist trigger env"))
 		return
 	} else {
 		runID, err = l.state.EnqueueTrigger(r.Context(), body.Pipeline, body.Args,
 			body.ParentRunID, body.ParentNodeID, body.RetryOf,
-			body.Trigger.Source, body.Trigger.User, body.Git.Repo, body.Git.Branch)
+			body.Trigger.Source, "", body.Git.Repo, body.Git.Branch)
 	}
 	if err != nil {
 		writeError(w, triggerErrorStatus(err), err)
@@ -1119,7 +1119,7 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 
 func writeStateError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, store.ErrSecretInputHash):
+	case errors.Is(err, store.ErrSecretInputHash), errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, storage.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)

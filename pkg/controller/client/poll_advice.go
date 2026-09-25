@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -41,6 +43,96 @@ func (c *Client) WithRunnerIdentity(id string) *Client {
 	return c
 }
 
+// WithTriggerNodeRunner names how this client runs the nodes of the triggers
+// it claims: "inprocess", "k8s" or "warm". The controller refuses a metered
+// credential's trigger claim unless it names k8s or warm, because only those
+// run every node under a node claim that credits pay for. It returns the same
+// client for chaining; set it before the client serves requests.
+func (c *Client) WithTriggerNodeRunner(kind string) *Client {
+	c.triggerNodeRunner = kind
+	return c
+}
+
+// WithAllowRepos sends patterns, the repository list this runner's owner
+// allows, with every trigger and node claim, so the controller hands this
+// client only work from those repositories. An empty non-nil list claims
+// nothing; nil sends no list. The list goes only to a controller whose
+// GET /api/v1/capabilities advertises claims.allow_repos, because an older
+// one refuses a claim that carries it; against that controller the client
+// claims without it and the runner refuses a disallowed run itself.
+func (c *Client) WithAllowRepos(patterns []string) *Client {
+	if patterns == nil {
+		c.allowRepos = nil
+		return c
+	}
+	c.allowRepos = append([]string{}, patterns...)
+	return c
+}
+
+const (
+	repoFilterUnknown int32 = iota
+	repoFilterAdvertised
+	repoFilterAbsent
+)
+
+// perf: A slow capabilities read may delay one claim, not hold it indefinitely.
+const capabilitiesReadTimeout = 5 * time.Second
+
+// bug: A failed capabilities read is not cached as unsupported; the next claim rechecks.
+func (c *Client) claimAllowRepos(ctx context.Context) []string {
+	if c.allowRepos == nil {
+		return nil
+	}
+	switch c.repoFilter.Load() {
+	case repoFilterAdvertised:
+		return c.allowRepos
+	case repoFilterAbsent:
+		return nil
+	}
+	advertised, known := c.readRepoFilterCapability(ctx)
+	if !known {
+		return nil
+	}
+	if advertised {
+		c.repoFilter.Store(repoFilterAdvertised)
+		return c.allowRepos
+	}
+	c.repoFilter.Store(repoFilterAbsent)
+	return nil
+}
+
+func (c *Client) readRepoFilterCapability(ctx context.Context) (advertised, known bool) {
+	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
+	if err != nil {
+		return false, false
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return false, false
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return false, true
+	default:
+		return false, false
+	}
+	var caps struct {
+		Claims struct {
+			AllowRepos bool `json:"allow_repos"`
+		} `json:"claims"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
+		return false, false
+	}
+	return caps.Claims.AllowRepos, true
+}
+
+const meteredInProcessNodesCode = "metered_inprocess_nodes"
+
 // RunnerIdentity reports the identity this client sends, or the empty string
 // when it sends none.
 func (c *Client) RunnerIdentity() string {
@@ -57,6 +149,10 @@ func (c *Client) setRunnerIdentity(req *http.Request) {
 }
 
 func pollAdviceOf(resp *http.Response) time.Duration {
+	return min(pollAdviceOfResponse(resp), MaxPollAdvice)
+}
+
+func pollAdviceOfResponse(resp *http.Response) time.Duration {
 	if resp == nil {
 		return 0
 	}
@@ -68,5 +164,5 @@ func pollAdviceOf(resp *http.Response) time.Duration {
 	if err != nil || seconds <= 0 {
 		return 0
 	}
-	return min(time.Duration(seconds)*time.Second, MaxPollAdvice)
+	return time.Duration(seconds) * time.Second
 }

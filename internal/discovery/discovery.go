@@ -11,11 +11,14 @@ import (
 )
 
 type Services struct {
-	CachePod string `json:"cache_pod,omitempty"`
+	CachePod        string `json:"cache_pod,omitempty"`
+	DataDownloadURL string `json:"data_download_url,omitempty"`
 
 	Logs string `json:"logs,omitempty"`
 
 	Dashboard string `json:"dashboard,omitempty"`
+
+	MultiTeam bool `json:"multi_team,omitempty"`
 }
 
 var ErrNoController = errors.New("discovery: no controller URL configured")

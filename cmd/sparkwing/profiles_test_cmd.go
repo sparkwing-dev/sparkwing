@@ -280,8 +280,7 @@ func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResul
 	}
 	r.Target = services.CachePod
 	if services.CachePod == "" {
-		r.Status = "warn"
-		r.Detail = "controller announced no cache pod URL"
+		r.Status = "skip"
 		return r
 	}
 	start := time.Now()

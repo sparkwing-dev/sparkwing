@@ -61,6 +61,7 @@ func runRunnersAdd(args []string) error {
 	maxConcurrent := fs.Int("max-concurrent", 2, "concurrent jobs this machine accepts")
 	contribution := fs.String("contribution", "50%,50%", "CPU and memory this machine contributes")
 	labels := fs.String("labels", "", "comma-separated self-asserted placement labels")
+	allowRepos := fs.StringArray("allow-repo", nil, "repository this machine may build and fetch directly (repeatable)")
 	logsURL := fs.String("logs", "", "logs service URL (default: the profile's logs surface)")
 	configPath := fs.String("config", "", "agent config to write (default: ~/.config/sparkwing/agent.yaml)")
 	force := fs.Bool("force", false, "replace an existing agent config")
@@ -99,6 +100,7 @@ func runRunnersAdd(args []string) error {
 		MaxConcurrent:  *maxConcurrent,
 		HolderPrefix:   *name,
 		Labels:         splitCSV(*labels),
+		AllowRepos:     *allowRepos,
 		Contribution:   *contribution,
 		LocalAdmission: true,
 	}
@@ -280,6 +282,7 @@ type agentFileConfig struct {
 	MaxConcurrent  int      `yaml:"max_concurrent"`
 	HolderPrefix   string   `yaml:"holder_prefix"`
 	Labels         []string `yaml:"labels,omitempty"`
+	AllowRepos     []string `yaml:"allow_repos,omitempty"`
 	Contribution   string   `yaml:"contribution,omitempty"`
 	LocalAdmission bool     `yaml:"local_admission"`
 }

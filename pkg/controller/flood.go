@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // FloodPolicy bounds how many runs a burst of webhook deliveries or API
@@ -22,9 +23,11 @@ import (
 // the principal and the reason at warn. Nothing is dropped silently.
 type FloodPolicy struct {
 	// RunsPerPrincipalHour caps the runs one principal may create in a rolling
-	// hour. Zero is unlimited. A webhook delivery counts against the
-	// repository it names, because an unauthenticated delivery has no
-	// principal of its own.
+	// hour. Zero is unlimited. A delivery to an operator webhook binding
+	// counts against the team and repository it names, because an
+	// unauthenticated delivery has no principal of its own; each run a GitHub
+	// App delivery creates counts against the team the installation is bound
+	// to.
 	RunsPerPrincipalHour int
 
 	// ShedQueueDepth is the pending-trigger depth past which a new submission
@@ -80,13 +83,36 @@ func newFloodControl(p FloodPolicy) *floodControl {
 
 // safety: a refusal is written here, so a caller that gets false must return without writing its own answer.
 func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, key, source string) bool {
+	refusal := s.triggerFloodRefusal(r.Context(), key, source)
+	if refusal == nil {
+		return true
+	}
+	refusal.write(w)
+	return false
+}
+
+type floodRefusal struct {
+	status int
+	wait   time.Duration
+	msg    string
+}
+
+func (f *floodRefusal) write(w http.ResponseWriter) {
+	if f.status == http.StatusServiceUnavailable {
+		writeRetryAfterStatus(w, f.status, f.wait, f.msg)
+		return
+	}
+	writeRetryAfter(w, f.wait, f.msg)
+}
+
+func (s *Server) triggerFloodRefusal(ctx context.Context, key, source string) *floodRefusal {
 	f := s.flood
 	if f == nil {
-		return true
+		return nil
 	}
 	now := time.Now()
 	if f.depth != nil {
-		depth, err := f.depth.read(r.Context(), s.store, now)
+		depth, err := f.depth.read(ctx, s.store, now)
 		if err != nil {
 			// safety: a depth this controller cannot read is not grounds to
 			// refuse work, so the submission proceeds and the cap still binds.
@@ -98,9 +124,10 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
-			writeRetryAfterStatus(w, http.StatusServiceUnavailable, shedRetryAfter,
-				"controller queue is above its shed threshold")
-			return false
+			return &floodRefusal{
+				status: http.StatusServiceUnavailable, wait: shedRetryAfter,
+				msg: "controller queue is above its shed threshold",
+			}
 		}
 	}
 	if f.runs != nil {
@@ -110,17 +137,25 @@ func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, 
 			s.logger.Warn("trigger shed",
 				"principal", key, "source", source, "reason", "hourly run cap reached",
 				"cap_per_hour", f.policy.RunsPerPrincipalHour, "retry_after", wait)
-			writeRetryAfter(w, wait, "hourly run cap reached for this principal")
-			return false
+			return &floodRefusal{
+				status: http.StatusTooManyRequests, wait: wait,
+				msg: "hourly run cap reached for this principal",
+			}
 		}
 	}
-	return true
+	return nil
 }
 
 // safety: an unauthenticated delivery has no principal, so the caller supplies
 // the fallback the budget is keyed on rather than every such delivery sharing one.
 func (s *Server) floodKey(r *http.Request, fallback string) string {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
+		// safety: a signed-up team mints as many tokens as it likes, so its
+		// submissions share one bucket; the operator's own team keeps one per
+		// token, which is what a self-hosted install has always had.
+		if team := store.NormalizeTeam(p.Team); team != "" && team != store.DefaultTeam {
+			return "team:" + string(team)
+		}
 		if p.TokenPrefix != "" {
 			return "token:" + p.TokenPrefix
 		}

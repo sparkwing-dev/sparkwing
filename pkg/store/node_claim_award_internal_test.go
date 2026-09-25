@@ -32,7 +32,7 @@ func TestAwardScannedNodeHonoursTheQueueRequirement(t *testing.T) {
 	}
 
 	awarded, err := s.awardScannedNode(ctx, candidate, ClaimIdentity{}, "agent:box-a",
-		coordinatorID, time.Minute, ClaimPlacement{}, true)
+		coordinatorID, time.Minute, ClaimPlacement{}, true, oneTeam(DefaultTeam))
 	if err != nil {
 		t.Fatalf("queued award: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestAwardScannedNodeHonoursTheQueueRequirement(t *testing.T) {
 	}
 
 	awarded, err = s.awardScannedNode(ctx, candidate, ClaimIdentity{}, "k8s-job:sw-1",
-		coordinatorID, time.Minute, ClaimPlacement{}, false)
+		coordinatorID, time.Minute, ClaimPlacement{}, false, oneTeam(DefaultTeam))
 	if err != nil {
 		t.Fatalf("named award: %v", err)
 	}

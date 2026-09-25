@@ -8,6 +8,8 @@ type RuntimeWindow = {
 let getNodeStreamUrl!: typeof import("./api").getNodeStreamUrl;
 let cancelRun!: typeof import("./api").cancelRun;
 let getConnectionStatus!: typeof import("./api").getConnectionStatus;
+let triggerRun!: typeof import("./api").triggerRun;
+let pipelinesByName!: typeof import("./api").pipelinesByName;
 
 before(async () => {
   const runtime = globalThis as unknown as { window?: RuntimeWindow };
@@ -19,6 +21,8 @@ before(async () => {
       getNodeStreamUrl,
       cancelRun,
       getConnectionStatus,
+      triggerRun,
+      pipelinesByName,
     } = await import("./api"));
   } finally {
     if (hadWindow) runtime.window = previousWindow;
@@ -99,6 +103,44 @@ describe("authenticated mutations", () => {
   });
 });
 
+describe("triggerRun", () => {
+  async function sentBody(
+    git?: Parameters<typeof triggerRun>[2],
+  ): Promise<Record<string, unknown>> {
+    const runtime = globalThis as unknown as { fetch: typeof fetch };
+    const previousFetch = runtime.fetch;
+    let body = "";
+    runtime.fetch = async (_input, init) => {
+      body = String(init?.body ?? "");
+      return new Response(JSON.stringify({ run_id: "run-one" }), { status: 202 });
+    };
+    try {
+      await triggerRun("build", {}, git);
+    } finally {
+      runtime.fetch = previousFetch;
+    }
+    return JSON.parse(body) as Record<string, unknown>;
+  }
+
+  it("names the repository and branch a team runner fetches", async () => {
+    const git = {
+      repo_url: "https://github.com/acme/app",
+      branch: "main",
+      repo: "app",
+      github_owner: "acme",
+      github_repo: "app",
+    };
+    const body = await sentBody(git);
+    assert.deepEqual(body.git, git);
+    assert.deepEqual(body.trigger, { source: "dashboard" });
+  });
+
+  it("sends no git block when the form names no repository", async () => {
+    const body = await sentBody();
+    assert.equal("git" in body, false);
+  });
+});
+
 describe("session expiry", () => {
   it("keeps the token banner when a token mode dashboard is refused", async () => {
     const runtime = globalThis as unknown as {
@@ -172,5 +214,21 @@ describe("session expiry", () => {
       if (hadDocument) runtime.document = previousDocument;
       else delete runtime.document;
     }
+  });
+});
+
+describe("pipelinesByName", () => {
+  it("keeps a team list's newest-first order and its last run", () => {
+    const got = pipelinesByName([
+      { name: "deploy", last_status: "failed", last_run_at: "2026-09-23T10:00:00Z" },
+      { name: "build" },
+    ]);
+    assert.deepEqual(Object.keys(got), ["deploy", "build"]);
+    assert.equal(got.deploy.last_status, "failed");
+    assert.deepEqual(got.build.args, []);
+  });
+
+  it("passes the local name-keyed map through", () => {
+    assert.deepEqual(pipelinesByName({ lint: { args: [] } }), { lint: { args: [] } });
   });
 });

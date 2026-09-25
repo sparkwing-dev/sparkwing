@@ -31,6 +31,9 @@ the cache's bare repos would drift from upstream.
 in-cluster, no GitHub rate limits.
 
 **Writes** (gitops deploy push) go directly to GitHub via HTTPS + PAT.
+
+Binary and artifact uploads use the controller's [direct data routes](data-uploads.md)
+when it announces an S3 data store. An older controller keeps the cache path.
 Runners have `GITHUB_TOKEN` from the `github-config` k8s secret.
 
 ## Repo Registration
@@ -82,49 +85,22 @@ curl -X POST -H "Authorization: Bearer $SPARKWING_CACHE_TOKEN" \
   --data-binary @/tmp/repo.bundle
 ```
 
-## Operator Discovery
+## Cloud cache paths
 
-Some operator flows -- the eager-refresh on
-`sparkwing pipeline trigger --profile <controller-profile>` and the
-profile health probe -- talk to the cache pod directly over HTTP. They
-discover the cache pod's URL from the controller -- no per-profile
-configuration required on the operator side.
+Cloud keeps `--cache-url` pointed at its in-cluster cache Service. It does not
+expose the cache through a public Ingress or set `CACHE_POD_URL` or
+`--cache-pod-url`. `GET /api/v1/services` therefore has no `cache_pod` URL,
+and `sparkwing cloud status` omits that optional probe. Do not open a public
+cache host to make a health check pass.
 
-Wire it up on the controller deployment:
-
-```yaml
-env:
-  - name: CACHE_POD_URL
-    value: "https://cache-sparkwing.example.dev"
-```
-
-(Or pass `--cache-pod-url=https://cache-sparkwing.example.dev` on
-the controller's command line.) The controller announces this URL
-via `GET /api/v1/services`; operator CLIs fetch it once per session
-and cache in-process.
-
-If `CACHE_POD_URL` is unset the announce endpoint returns 404. The
-profile health probe then reports a warning (`controller announced no
-cache pod URL`) instead of a pass, and eager-refresh falls back to the
-controller's gitcache proxy routes (`POST /api/v1/gitcache/refresh`,
-then a SHA-scoped bundle seed via `POST /api/v1/gitcache/seed`); if
-those also fail the CLI prints a note and the runner retries on a stale
-SHA. The controller serves the proxy routes only when started with
-`--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
-cache Service, so set both: `--cache-pod-url` for the
-externally-reachable URL operators hit directly, `--cache-url` for the
-controller-to-cache proxy target.
-
-Off-cluster agents default `gitcache` to
-`https://<controller>/api/v1/gitcache`. During node execution the runner
-narrows that URL to `/api/v1/runs/<run>/gitcache`; the `nodes.claim` bearer may
-register and read only the repository of its live run claim. The controller
-removes that bearer before contacting the internal cache. The unscoped
-`/api/v1/gitcache/git/...` routes remain admin-only. This keeps the raw cache
-private while a workstation or server uses outbound HTTPS only. The dashboard
-ingress exposes these routes to machine bearers without accepting browser
-session credentials. A direct cache URL over a LAN, VPN, or tailnet remains
-supported through `agent.yaml` `gitcache` and `cache_token`.
+The controller announces `direct_data` when its S3 cache blob store is
+configured. `--working-tree` uploads a one-run source bundle to S3 before
+admission; only that run's live claim can obtain a signed CloudFront download.
+Claimed runners reserve binary and artifact writes through the controller,
+send bytes to S3, and use signed CloudFront reads when off-cluster. See
+[Direct data uploads](data-uploads.md). A pushed-commit run fetches its Git
+source from origin. Warm cloud runners use the internal cache Service for
+Git mirrors and artifacts; no public cache URL is needed.
 
 ## On-Demand Fetch
 
@@ -309,31 +285,24 @@ runner        -> cache /git/<name>           (clone at SHA)
 ```
 
 With `--working-tree`, the CLI captures tracked changes plus untracked
-non-ignored files as a deterministic synthetic child commit. It seeds that
-bundle before creating the trigger and never refreshes the origin for the
-synthetic SHA. Capture rejects conflicts, submodules, sparse or shallow
+non-ignored files as a deterministic synthetic child commit. It uploads that
+bundle directly to S3 before creating the trigger and never refreshes the
+origin for the synthetic SHA. Capture rejects conflicts, submodules, sparse or shallow
 checkouts, SHA-256 repositories, and configured Git content filters. The source
 repository is not mutated.
 The runner sees a clean detached checkout at the synthetic SHA rather than the
 laptop's staged-versus-unstaged split.
-Capture also records the commit HEAD shares with the origin default branch. The
-runner fetches that commit through the same cache, names it with the
-remote-tracking ref it had locally, and grafts the parentless snapshot commit
-onto it with a `refs/replace/` entry, so a step scoped by `git merge-base
-origin/main HEAD` reads the range the laptop would. `git rev-parse HEAD` still
-answers with the snapshot SHA. A checkout with no origin remote records no
-baseline, and a step that needs one reports the ref it cannot resolve. A source
-that advertises only the snapshot, which is what a local fleet run serves, has
-no baseline to give and the runner skips the fetch. A mirror that has not caught
-up yet is retried, and a baseline that stays unreachable is named in the run's
-log so the widened scope has a stated cause.
-The cache moves each accepted snapshot from the transient seed namespace into
-`refs/sparkwing-workspace/*` and retains at most 128 distinct workspace refs per
-repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is
-rejected before trigger admission when the repository is full; Sparkwing never
-evicts an admitted snapshot to make room. Treat those refs as retained
-unpublished source and keep the cache private. Before retrying a rejected
-upload, delete workspace refs that no admitted run needs.
+Capture also records the commit HEAD shares with the origin default branch
+when one exists. A runner with a reachable origin tries to fetch that baseline
+and graft the parentless snapshot onto it with a `refs/replace/` entry, so
+`git merge-base origin/main HEAD` can retain its local meaning. If the remote
+cannot serve the baseline, the runner logs the failure and keeps the snapshot
+usable. A checkout with no origin records no baseline; `git rev-parse HEAD`
+still answers with the snapshot SHA.
+Each Cloud snapshot has a unique S3 key bound to one run. The controller's
+hourly storage pass removes an orphan 24 hours after commit, or a bound
+snapshot 24 hours after the run finishes. A retry uploads a new object. This
+source path does not use cache workspace refs.
 
 The cache also exposes tarball-upload and ancestor-negotiation endpoints
 (`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
@@ -374,18 +343,71 @@ Authorization: Bearer <SPARKWING_API_TOKEN>
 Every caller presents the token, in-cluster ones included. Reaching the
 cache through the k8s Service rather than the ingress proves nothing about
 the caller, so requests to those endpoints without a valid bearer get 401
-wherever they come from. Runners and the controller read the token from
-`SPARKWING_CACHE_TOKEN`.
+wherever they come from. The controller and an operator's own shell read the
+token from `SPARKWING_CACHE_TOKEN`; runners never hold it and present a cache
+grant instead.
 
 `POST /git/register` accepts a `name` of 1-64 alphanumeric, dash, underscore,
 or dot characters, and refuses to repoint a name that is already registered to
 a different repository unless the request carries the token. Registering the
 same name to the same URL stays idempotent.
 
+### Cache grants
+
+A multi-team controller gives runners a cache grant instead of the cache's
+token. `POST /api/v1/runs/<run>/cache-grant` answers `{grant, team,
+expires_at}`: a bearer the controller signs with the grant key
+(`SPARKWING_CACHE_GRANT_KEY`), naming the run's team and valid for six hours
+or until the requesting credential expires, whichever comes first. The cache
+verifies it with the same key (`--grant-key` or `SPARKWING_CACHE_GRANT_KEY`)
+without calling the controller and confines the request to that team. The
+grant key is a secret of its own: the cache refuses to start when it equals
+the cache's operator token, and it is never a runner's token, because pipeline
+code can read that token. A multi-team controller configured with the internal
+cache (`--cache-url`) refuses to start without a grant key or
+with one equal to `SPARKWING_CACHE_TOKEN`. A single-team controller starts
+either way: without a key it answers the route with 404, and with the operator
+token as its key it answers 503. A cache without a grant key accepts no grants. A GitHub Actions runner credential gets 403: it is confined to one
+repository, and a grant opens the team's whole tree.
+
+- `/bin/...`, `/cache/...` and `/artifacts/...` read and write the team's own
+  tree under `<data-dir>/teams/<team>/`, so two teams naming the same key never
+  see or replace each other's bytes. A team's bins count toward the store
+  ceiling.
+- `/git/<name>/...` with a grant for the operator's own team (`default`, a
+  slug no other team can take) reads any registered mirror, SSH origins
+  included: every mirror is the operator's, because only the operator token
+  and such a grant register one. Any other team's grant reads only an `https`
+  repository registered under the name `repo-<sha256 of the URL>`, the name
+  runners already derive, so it never reads a mirror cloned through the
+  cache's SSH key. Private repositories of other teams reach their runners
+  through the GitHub App's per-run tokens instead.
+- `/git/register` accepts the operator token and a grant for the operator's
+  own team, which is how the operator's runners register a repository on its
+  first run as they did with the operator token. It refuses any other team's
+  grant with 403, because a registration clones onto the cache volume with the
+  cache's own credentials; such a runner asks anyway and fetches from a mirror
+  already registered. The mirrors count toward the store ceiling.
+- Every other route (`/sync/...`, `/git/refresh`, `/archive`, `/file`,
+  `/tree-hash`, `/branch-contains`, `/repos`, `/upload`, `/uploads/...`,
+  `/admin/...`) refuses a grant with 401.
+
+The operator token keeps its unscoped access, and a cache started with
+`--allow-unauthenticated` accepts no grants because it has no key to verify
+them with.
+
 Every response carries `X-Content-Type-Options: nosniff`, and artifact
 downloads carry `Content-Type: application/octet-stream` with
 `Content-Disposition: attachment`, so a stored HTML or SVG artifact cannot
 execute in a browser on the cache's origin.
+
+A cache published outside the cluster starts with `--disable-proxy` and
+`--metrics-addr`. The first drops `/proxy/` and `/stats`; the second moves
+`/metrics`, and `/stats` when the proxy is on, to a listener of its own
+(`--metrics-addr=:9090`, falling back to `SPARKWING_METRICS_ADDR`) that the
+ingress does not route to. The main listener then answers only `/health`
+and the credentialed routes. Without `--metrics-addr` an ingress rule is
+the only thing keeping `/metrics` private.
 
 The cache refuses to start without a token. A laptop or test setup that
 wants the endpoints open passes `--allow-unauthenticated` (or
@@ -405,7 +427,7 @@ different release; both default to this release's own pods. Override
 `app.kubernetes.io/name: sparkwing-runner`, when the Job template carries
 other labels. Add peers through `networkPolicy.extraIngress` for an
 out-of-cluster runner pool. The chart refuses to render a non-`ClusterIP`
-`cache.service.type` unless `controller.tokenSecret.name` is set and
+`cache.service.type` unless `cache.tokenSecret.name` is set and
 `cache.allowUnauthenticated` is false, so a published cache always demands a
 bearer.
 
@@ -517,6 +539,7 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch, bounding a caller to one origin fetch per repository per window (default: `10s`; negative disables) |
 | `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones, and between clone-if-missing attempts, for one repo (default: `1h`; negative disables) |
 | `WORKSPACE_SEED_MAX_AGE` | How long a working-tree snapshot ref is retained before the next seed archives it under `refs/sparkwing-workspace-archive/`, where it survives another seven times this window so a retry still finds its snapshot (default: `24h`; negative disables expiry) |
+| `SPARKWING_METRICS_ADDR` | Bind address for `/metrics` and `/stats`, off the main listener (default: empty, both on the main listener) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 
@@ -529,8 +552,9 @@ when `SPARKWING_GITCACHE` is empty, so a chart-deployed runner already
 names its cache. With neither set, sparkwing auto-detects a cache on
 `localhost:18090` and falls back to a direct clone when none answers.
 
-A clone through a named cache carries `SPARKWING_CACHE_TOKEN` as its
-bearer, so a cache that guards its git routes still serves it. The bearer
+A clone through a named cache carries the run's `SPARKWING_CACHE_GRANT`, or
+else `SPARKWING_CACHE_TOKEN`, as its bearer, so a cache that guards its git
+routes still serves it. The bearer
 travels in the environment as a cache-scoped header, never on the command
 line, and never goes to the auto-detected cache: only an operator naming
 the cache in one of those two variables authorizes sending a credential to

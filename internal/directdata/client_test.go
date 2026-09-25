@@ -1,0 +1,74 @@
+package directdata
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestDownloadUsesTheSignedRouteWithoutAnUploadRunField(t *testing.T) {
+	object := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "bytes")
+	}))
+	defer object.Close()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if len(request) != 2 || request["kind"] != "artifact" || request["key"] != "artifacts/blobs/hash" {
+			t.Errorf("download request = %+v", request)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"url": object.URL, "sha256": "hash", "size": 5,
+			"expires": "2030-01-01T00:00:00Z",
+		})
+	}))
+	defer controller.Close()
+	client := New(controller.URL, "grant", "run", nil)
+	body, answer, err := client.Download(context.Background(), "artifact", "artifacts/blobs/hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.ExpiresAt.Format(time.RFC3339) != "2030-01-01T00:00:00Z" {
+		t.Fatalf("signed URL expiry = %s", answer.ExpiresAt)
+	}
+	defer body.Close()
+	got, err := io.ReadAll(body)
+	if err != nil || string(got) != "bytes" {
+		t.Fatalf("download = %q, %v", got, err)
+	}
+}
+
+func TestPartialDirectCapabilitiesRefuseLegacyFallback(t *testing.T) {
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"upload":true,"download":false}`)
+	}))
+	defer controller.Close()
+	available, err := New(controller.URL, "grant", "run", nil).Available(context.Background())
+	if available || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("partial capabilities = %v, %v", available, err)
+	}
+}
+
+func TestSourceCapabilityRequiresExplicitAnnouncementBeforeRun(t *testing.T) {
+	var advertised atomic.Bool
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]bool{"upload": true, "download": true, "source": advertised.Load()})
+	}))
+	defer controller.Close()
+	client := New(controller.URL, "user-bearer", "", nil)
+	if ok, err := client.SourceAvailable(t.Context()); err != nil || ok {
+		t.Fatalf("old controller source support = %t, %v", ok, err)
+	}
+	advertised.Store(true)
+	if ok, err := client.SourceAvailable(t.Context()); err != nil || !ok {
+		t.Fatalf("new controller pretrigger support = %t, %v", ok, err)
+	}
+}

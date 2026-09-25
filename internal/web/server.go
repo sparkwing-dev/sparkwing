@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,11 +91,9 @@ type HandlerOptions struct {
 	ControllerURL     string
 	AuthControllerURL string // safety: login stays controller-backed when data reads a shared store directly
 	LogsURL           string
-	CacheURL          string
 	Token             string
 
-	Version       string
-	ExtraServices []HealthService
+	Version string
 
 	RequireLogin      bool
 	TrustedProxyCIDRs []netip.Prefix
@@ -239,25 +238,22 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/runs/grep", runsGrepHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}", nodeLogsHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/stream", nodeLogStreamHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness", nodeLogCompletenessHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/events/stream", eventsStreamHandler(opts.Backend))
 
-	services := append(defaultServices(opts, opts.LogsURL), opts.ExtraServices...)
-	authedMux.HandleFunc("/api/v1/health/services", healthServicesHandler(services, opts.Token))
-
-	authedMux.HandleFunc("GET /api/v1/capabilities", CapabilitiesHandler(opts.Backend))
-	authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler())
+	authedMux.HandleFunc("GET /api/v1/capabilities", dashboardCapabilitiesHandler(opts))
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles", capacityProfilesHandler(opts.Backend))
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/",
-			logsProxyAllowList(withLogsIdentityHeader(
-				controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))))
+		authedMux.Handle("/api/v1/logs/", logsProxy(opts))
 	}
 	if opts.ControllerURL != "" {
-		authedMux.Handle("/api/v1/",
-			proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts))))
+		controllerAPI := proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true))
+		authedMux.Handle("/api/v1/", controllerAPI)
+		authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler(controllerAPI))
 	} else {
+		authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler(nil))
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)
@@ -277,6 +273,13 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.Handle("GET /docs/{rest...}", http.NotFoundHandler())
 
 	authedMux.HandleFunc("GET "+runtimeConfigPath, runtimeConfigHandler(opts))
+	authedMux.HandleFunc("POST /github/app/connect", githubAppConnectHandler(opts, false))
+	authedMux.HandleFunc("POST /github/app/connect/existing", githubAppConnectHandler(opts, true))
+	authedMux.HandleFunc("GET "+githubAppCompletePath, githubAppCompleteHandler(opts))
+	authedMux.HandleFunc("POST /auth/{provider}/link", identityLinkHandler(opts))
+	authedMux.HandleFunc("GET /auth/{provider}/link/complete", identityLinkCompleteHandler(opts))
+	authedMux.HandleFunc("GET "+githubAppAvailablePath, githubAppAvailableHandler(opts))
+	authedMux.HandleFunc("POST /github/app/select", githubAppSelectHandler(opts))
 
 	authedMux.Handle("/", spaHandler(bundleFS, opts))
 
@@ -289,8 +292,12 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.Handle("POST /login/bootstrap",
 		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
+	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
+	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
+	router.HandleFunc("GET /github/app/setup", githubAppSetupHandler(opts))
+	router.HandleFunc("GET "+githubAppCallbackPath, githubAppCallbackHandler(opts))
 	if opts.ControllerURL != "" {
-		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false))
+		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)
 		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
@@ -409,6 +416,11 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		p = strings.TrimSuffix(p, "/")
+		if p == "favicon.ico" && strings.EqualFold(r.Host, "console.sparkwing.dev") {
+			p = "favicon-orange.ico"
+			r = r.Clone(r.Context())
+			r.URL.Path = "/favicon-orange.ico"
+		}
 		if p == "" {
 			serveTemplatedHTML(w, r, bundleFS, "index.html", opts)
 			return
@@ -454,8 +466,11 @@ func serveTemplatedHTML(w http.ResponseWriter, r *http.Request, bundleFS fs.FS, 
 		return
 	}
 	body := raw
+	if strings.EqualFold(r.Host, "console.sparkwing.dev") {
+		body = bytes.ReplaceAll(body, []byte("/favicon.ico"), []byte("/favicon-orange.ico"))
+	}
 	if nonce := cspNonceFrom(r.Context()); nonce != "" {
-		body = nonceInlineScripts(raw, nonce)
+		body = nonceInlineScripts(body, nonce)
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeGeneratedHTML(w, r, body)
@@ -598,7 +613,10 @@ func jsStringLiteral(s string) string {
 	return strings.ReplaceAll(literal, "\u2029", `\u2029`)
 }
 
-func controllerProxy(controllerURL, token string, loginRequired bool) http.Handler {
+// safety: on a multi-team controller one service bearer reads every team, so a
+// signed-in browser reaches the controller and the logs service only as its
+// own session; the logs service resolves that session through the controller.
+func controllerProxy(controllerURL, token string, loginRequired, forwardSession bool) http.Handler {
 	u, err := url.Parse(controllerURL)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -614,12 +632,27 @@ func controllerProxy(controllerURL, token string, loginRequired bool) http.Handl
 			if loginRequired {
 				pr.Out.Header.Del("Authorization")
 			}
-			if token != "" {
+			if id := sessionIDFromContext(pr.In.Context()); forwardSession && id != "" {
+				pr.Out.Header.Set("Authorization", sessionAuthorization(id))
+			} else if token != "" {
 				pr.Out.Header.Set("Authorization", "Bearer "+token)
 			}
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			// safety: a variable's value rides this response, so no browser or
+			// intermediary cache may keep it even if the controller omits the header.
+			if resp.Request != nil && isSecretsPath(resp.Request.URL.Path) {
+				resp.Header.Set("Cache-Control", "no-store")
+				resp.Header.Set("Pragma", "no-cache")
+			}
+			return nil
+		},
 	}
 	return proxy
+}
+
+func isSecretsPath(path string) bool {
+	return path == "/api/v1/secrets" || strings.HasPrefix(path, "/api/v1/secrets/")
 }
 
 func notImplementedHandler(w http.ResponseWriter, _ *http.Request) {
@@ -1062,10 +1095,22 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 				maxMatches = n
 			}
 		}
+		shaPrefixes := r.URL.Query()["sha"]
+		for _, prefix := range shaPrefixes {
+			prefix = strings.TrimSpace(prefix)
+			if prefix == "" || strings.IndexFunc(prefix, func(ch rune) bool {
+				return !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F'))
+			}) >= 0 {
+				writeErr(w, http.StatusBadRequest, errors.New("sha must be a hexadecimal prefix"))
+				return
+			}
+		}
 		filter := store.RunFilter{
-			Pipelines: r.URL.Query()["pipeline"],
-			Statuses:  r.URL.Query()["status"],
-			Limit:     runLimit,
+			Pipelines:      r.URL.Query()["pipeline"],
+			Statuses:       r.URL.Query()["status"],
+			GitBranches:    r.URL.Query()["branch"],
+			GitSHAPrefixes: shaPrefixes,
+			Limit:          runLimit,
 		}
 		if sinceStr := r.URL.Query().Get("since"); sinceStr != "" {
 			if d, err := time.ParseDuration(sinceStr); err == nil && d > 0 {
@@ -1083,48 +1128,51 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 			branches:    r.URL.Query()["nbranch"],
 			shaPrefixes: r.URL.Query()["nsha"],
 		})
-		branches := r.URL.Query()["branch"]
-		shaPrefixes := r.URL.Query()["sha"]
-		if len(branches) > 0 || len(shaPrefixes) > 0 {
-			runs = filterRunsByBranchSHA(runs, branches, shaPrefixes)
+		if ids, specified := r.URL.Query()["run_id"]; specified {
+			allowed := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				allowed[id] = true
+			}
+			kept := runs[:0]
+			for _, run := range runs {
+				if allowed[run.ID] {
+					kept = append(kept, run)
+				}
+			}
+			runs = kept
 		}
-		type work struct {
-			run    *store.Run
-			nodeID string
-		}
-		var units []work
+		var matches []match
+		total := 0
+		truncated := false
+		searched := 0
+		runsMeta := make(map[string]*store.Run)
 		for _, run := range runs {
+			if r.Context().Err() != nil || (maxMatches > 0 && len(matches) >= maxMatches) {
+				truncated = true
+				break
+			}
 			nodes, err := b.ListNodes(r.Context(), run.ID)
 			if err != nil {
+				truncated = true
 				continue
 			}
-			for _, n := range nodes {
-				units = append(units, work{run: run, nodeID: n.NodeID})
-			}
-		}
-		const fanout = 8
-		sem := make(chan struct{}, fanout)
-		type unitResult struct {
-			matches   []match
-			count     int
-			truncated bool
-		}
-		results := make([]unitResult, len(units))
-		var wg sync.WaitGroup
-		for i, u := range units {
-			wg.Add(1)
-			sem <- struct{}{}
-			go func(i int, u work) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				content, err := b.ReadNodeLog(r.Context(), u.run.ID, u.nodeID, backend.ReadOpts{})
-				if err != nil || len(content) == 0 {
-					return
+			searched++
+			for _, node := range nodes {
+				if maxMatches > 0 && len(matches) >= maxMatches {
+					truncated = true
+					break
+				}
+				content, err := b.ReadNodeLog(r.Context(), run.ID, node.NodeID, backend.ReadOpts{})
+				if err != nil {
+					truncated = true
+					continue
+				}
+				if len(content) == 0 {
+					continue
 				}
 				sc := bufio.NewScanner(bytes.NewReader(content))
 				sc.Buffer(make([]byte, 1<<16), 1<<20)
 				displayLine := 0
-				var local unitResult
 				for sc.Scan() {
 					d := parseDisplayLine(sc.Text())
 					if !d.show {
@@ -1134,52 +1182,25 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 					if !strings.Contains(strings.ToLower(d.body), needle) {
 						continue
 					}
-					local.count++
-					if maxMatches == 0 || local.count <= maxMatches {
-						local.matches = append(local.matches, match{
-							RunID:    u.run.ID,
-							Pipeline: u.run.Pipeline,
-							NodeID:   u.nodeID,
-							StepID:   d.step,
-							Line:     displayLine,
-							Content:  d.body,
-						})
+					total++
+					matches = append(matches, match{RunID: run.ID, Pipeline: run.Pipeline, NodeID: node.NodeID, StepID: d.step, Line: displayLine, Content: d.body})
+					runsMeta[run.ID] = store.RedactedRun(run)
+					if maxMatches > 0 && len(matches) >= maxMatches {
+						truncated = true
+						break
 					}
 				}
-				local.truncated = errors.Is(sc.Err(), bufio.ErrTooLong)
-				results[i] = local
-			}(i, u)
-		}
-		wg.Wait()
-		var matches []match
-		total := 0
-		truncated := false
-		hitRuns := map[string]bool{}
-		for _, res := range results {
-			total += res.count
-			truncated = truncated || res.truncated
-			for _, m := range res.matches {
-				hitRuns[m.RunID] = true
-			}
-			matches = append(matches, res.matches...)
-		}
-		runIndex := make(map[string]*store.Run, len(runs))
-		for _, run := range runs {
-			runIndex[run.ID] = run
-		}
-		runsMeta := make(map[string]*store.Run, len(hitRuns))
-		for id := range hitRuns {
-			if run := runIndex[id]; run != nil {
-				runsMeta[id] = store.RedactedRun(run)
+				truncated = truncated || errors.Is(sc.Err(), bufio.ErrTooLong)
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"query":        q,
-			"matches":      matches,
-			"runs":         runsMeta,
-			"total":        total,
-			"runs_scanned": len(runs),
-			"truncated":    truncated,
+			"query":         q,
+			"matches":       matches,
+			"runs":          runsMeta,
+			"total":         total,
+			"runs_scanned":  searched,
+			"runs_matching": len(runs),
+			"truncated":     truncated,
 		})
 	}
 }
@@ -1221,31 +1242,6 @@ func applyGrepExcludes(runs []*store.Run, ex grepExcludes) []*store.Run {
 	return out
 }
 
-func filterRunsByBranchSHA(runs []*store.Run, branches, shaPrefixes []string) []*store.Run {
-	out := runs[:0]
-	for _, run := range runs {
-		if len(branches) > 0 {
-			if !containsExact(branches, run.GitBranch) {
-				continue
-			}
-		}
-		if len(shaPrefixes) > 0 {
-			matched := false
-			for _, p := range shaPrefixes {
-				if p != "" && strings.HasPrefix(run.GitSHA, p) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
-		}
-		out = append(out, run)
-	}
-	return out
-}
-
 func containsExact(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {
@@ -1258,6 +1254,30 @@ func containsExact(list []string, v string) bool {
 func nodeLogsHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serveLogs(b, w, r, r.PathValue("id"), r.PathValue("node"))
+	}
+}
+
+// nodeLogCompletenessHandler answers whether a node's log is whole, so the
+// dashboard can draw the synthetic line that says so after the log.
+func nodeLogCompletenessHandler(b backend.Backend) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID, nodeID := r.PathValue("id"), r.PathValue("node")
+		nodes, err := b.ListNodes(r.Context(), runID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		i := slices.IndexFunc(nodes, func(n *store.Node) bool { return n.NodeID == nodeID })
+		if i < 0 {
+			writeErr(w, http.StatusNotFound, fmt.Errorf("node %s not found in run %s", nodeID, runID))
+			return
+		}
+		c, err := backend.NodeLogCompleteness(r.Context(), b, runID, nodes[i], time.Now())
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, c)
 	}
 }
 

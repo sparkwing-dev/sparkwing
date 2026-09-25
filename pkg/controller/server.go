@@ -14,9 +14,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
+	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,6 +35,15 @@ type Server struct {
 	store      *store.Store
 	dispatcher Dispatcher
 	logger     *slog.Logger
+
+	// hostKeyScan reads a host's ssh key for a new git credential; nil
+	// dials the host.
+	hostKeyScan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
+	// gitCredentialLimit holds a claim to a few credential releases a
+	// minute, so a looping pipeline cannot flood the audit trail.
+	gitCredentialLimit perMinuteLimiter
+	// identityLinkLimit holds an account to a few link attempts a minute.
+	identityLinkLimit perMinuteLimiter
 
 	pool *poolBinding
 
@@ -72,6 +88,12 @@ type Server struct {
 	artifactStore storage.ArtifactStore
 
 	bucketUsageStore storage.ArtifactStore
+	storagePass      *storagePass
+	downloadStores   map[store.StorageKind]*teamblob.Store
+	downloadS3       *s3.PresignClient
+	downloadCDN      *sign.URLSigner
+	downloadDomain   string
+	directUploads    *directUploadS3
 	egress           *egress.Meter
 	// safety: the reaper goroutine is this field's only reader and
 	// writer, which is what lets the once-a-month prune gate skip a lock.
@@ -81,9 +103,16 @@ type Server struct {
 	logsURL      string
 	dashboardURL string
 	externalURL  string
+	oidc         oidcState
 
-	cacheURL   string
-	cacheToken string
+	cacheURL                     string
+	cacheToken                   string
+	downloadFree, downloadFunded int64
+
+	teamStorage        TeamStorage
+	mailer             mailer.Mailer
+	deletionHolderOnce sync.Once
+	deletionHolderID   string
 
 	metricsAddr string
 	metricsLn   net.Listener
@@ -92,9 +121,10 @@ type Server struct {
 
 	runnerHeadroom *runnerHeadroomRegistry
 
-	liveLogs       *liveLogs
-	runnerPresence *runnerPresenceRegistry
-	placement      placementPolicy
+	liveLogs         *liveLogs
+	runnerPresence   *runnerPresenceRegistry
+	runnerHeartbeats *runnerHeartbeatRegistry
+	placement        placementPolicy
 
 	assistedRunID string
 	draining      atomic.Bool
@@ -114,6 +144,15 @@ type Server struct {
 	storage storageSample
 
 	localExecution bool
+
+	identity identityConfig
+
+	tenants tenantCache
+
+	githubRunners githubRunnerConfig
+
+	githubApp *githubAppState
+	checkout  *billingCheckout
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -213,9 +252,12 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		runnerHeadroom:      newRunnerHeadroomRegistry(),
 		liveLogs:            newLiveLogs(),
 		runnerPresence:      newRunnerPresenceRegistry(),
+		runnerHeartbeats:    newRunnerHeartbeatRegistry(),
 		cronHolder:          defaultCronHolder(),
 		requestBudget:       newPrincipalBudget(RequestBudget{}),
 		idleClaimPoll:       DefaultMaxIdleClaimPoll,
+		downloadFree:        DefaultTeamDailyDownloadFreeBytes,
+		downloadFunded:      DefaultTeamDailyDownloadFundedBytes,
 	}
 	srv.recordQueueActivity(time.Now())
 	return srv
@@ -749,25 +791,50 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server {
 // tokens table IF the table has any non-revoked rows. Empty table =
 // auth stays disabled (pass-through), and the server logs a loud
 // warning so an operator has a signal that every endpoint is open.
+// A multi-team controller is the exception: see requireAuthForTeams.
 //
 // The tokens-table check happens ONCE at startup: a fresh row added
 // via POST /api/v1/tokens takes effect on the next controller restart.
 func (s *Server) EnableAuthFromStore() *Server {
-	if !s.tokensTableNonEmpty() {
+	if !s.tokensTableNonEmpty() && !s.MultiTeam() {
 		s.auth = nil
 		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
 		return s
 	}
-	s.auth = NewAuthenticator(s.store, 60*time.Second).
+	if !s.tokensTableNonEmpty() {
+		s.logger.Warn("multi-team controller requires authentication with an empty tokens table: " +
+			"only signed-in sessions are accepted until an admin token exists; supply one with " +
+			"--bootstrap-admin-token-file (SPARKWING_BOOTSTRAP_ADMIN_TOKEN)")
+	}
+	s.auth = s.storeAuthenticator()
+	return s
+}
+
+// tokenCacheTTL is how long a replica keeps accepting a token it looked up,
+// so a revocation on another replica reaches it at most this late.
+const tokenCacheTTL = 60 * time.Second
+
+func (s *Server) storeAuthenticator() *Authenticator {
+	return NewAuthenticator(s.store, tokenCacheTTL).
 		WithTrustedProxyCIDRs(s.loginLimit.trusted).
 		WithLogger(s.logger)
-	return s
+}
+
+// safety: a request with no credential acts as the operator of the default
+// team, which on a multi-team controller is every other team's operator too,
+// so the multi-team license turns token auth on whatever the tokens table
+// holds. It runs again when the handler is built because the license may be
+// installed after EnableAuthFromStore.
+func (s *Server) requireAuthForTeams() {
+	if s.auth == nil && s.store != nil && s.MultiTeam() {
+		s.auth = s.storeAuthenticator()
+	}
 }
 
 // AuthEnabled reports whether the controller is enforcing bearer-token
 // auth. False means every endpoint is served unauthenticated -- either
-// laptop-local mode (auth never wired) or a cluster whose tokens table
-// was empty at startup.
+// laptop-local mode (auth never wired) or a single-team cluster whose
+// tokens table was empty at startup.
 func (s *Server) AuthEnabled() bool {
 	return s.auth != nil
 }
@@ -812,10 +879,24 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
+	s.requireAuthForTeams()
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
-	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
+	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
+	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.Metering() {
+			path := r.URL.Path
+			if strings.HasPrefix(path, "/api/v1/credits") ||
+				strings.HasPrefix(path, "/api/v1/team/billing") ||
+				(strings.HasPrefix(path, "/api/v1/tokens/") && strings.HasSuffix(path, "/metered")) {
+				http.NotFound(w, r)
+				return
+			}
+			r = r.WithContext(store.WithoutCreditMetering(r.Context()))
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // safety: neither mux is wired to the other and no handler runs, so a caller
@@ -846,19 +927,27 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
 
 	mux.Handle("POST /api/v1/runs/{id}/events", requireScope(ScopeRunsState, http.HandlerFunc(s.handleAppendEvent)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleTrigger)))
 	mux.Handle("POST /api/v1/triggers/claim", requireScope(ScopeTriggersClaim, s.idlePollBudgeted(http.HandlerFunc(s.handleClaimTrigger))))
-	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.heartbeatBudgeted(s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat)))))
+	mux.Handle("POST /api/v1/triggers/{id}/heartbeat", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleHeartbeat))))
 	mux.Handle("POST /api/v1/triggers/{id}/done", requireScope(ScopeTriggersClaim, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinishTrigger))))
 	mux.Handle("GET /api/v1/triggers", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleListTriggers)))
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
+	// safety: a refresh fetches any caller-named repository with the operator's
+	// cache credential and holds a mirror fetch open, so it is the operator's
+	// alone; the CLI's warm-up before a trigger is best-effort without it.
+	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh)))
+	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/git-credential", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunGitCredential), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/oidc-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))
@@ -882,6 +971,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/retry", requireScope(ScopeRunsControl, http.HandlerFunc(s.handleRetry)))
 	mux.Handle("GET /api/v1/runs/{id}/attempts", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListAttempts)))
 
+	mux.Handle("GET /api/v1/pipelines", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListPipelines)))
 	mux.Handle("GET /api/v1/pipelines/{name}/latest", requireScope(ScopeRunsRead, http.HandlerFunc(s.handlePipelineLatest)))
 	mux.Handle("GET /api/v1/pipelines/{name}/profile", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleGetPipelineProfile)))
 	// safety: a pin becomes a hard Kubernetes limit for every later run of that pipeline,
@@ -914,7 +1004,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	// safety: a slot is a cross-run lock, so the routes that move one bind to the
 	// live claim on the run they name rather than to the scope alone. force-release
-	// and cancel-waiter act on rows another run owns and stay admin.
+	// acts on holders from other runs and stays admin.
 	mux.Handle("POST /api/v1/concurrency/{key}/acquire", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleAcquireSlot))))
 	mux.Handle("POST /api/v1/concurrency/{key}/heartbeat", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleHeartbeatSlot))))
 	mux.Handle("POST /api/v1/concurrency/{key}/release", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBodyHolder, http.HandlerFunc(s.handleReleaseSlot))))
@@ -923,9 +1013,10 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/queue/state", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleQueueStateView)))
 	mux.Handle("GET /api/v1/concurrency/{key}/notify", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleWaiterNotify)))
 	mux.Handle("GET /api/v1/concurrency/{key}/resolve", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromQueryRun, http.HandlerFunc(s.handleResolveWaiter))))
-	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCancelWaiter)))
+	mux.Handle("POST /api/v1/concurrency/{key}/cancel-waiter", requireScope(ScopeRunsState, s.claimedSlot(s.slotRunFromBody, http.HandlerFunc(s.handleCancelWaiter))))
 	mux.Handle("POST /api/v1/concurrency/{key}/force-release", requireScope(ScopeAdmin, http.HandlerFunc(s.handleForceRelease)))
 
+	mux.Handle("GET /api/v1/admin/usage-metrics", requireScope(ScopeAdmin, http.HandlerFunc(s.handleUsageMetrics)))
 	mux.Handle("GET /api/v1/egress", requireScope(ScopeAdmin, http.HandlerFunc(s.handleEgressState)))
 
 	mux.Handle("GET /api/v1/object-store/breaker", requireScope(ScopeAdmin, http.HandlerFunc(s.handleObjectStoreBreaker)))
@@ -946,7 +1037,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
-	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat)))))
+	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))
@@ -999,8 +1090,57 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/auth/whoami", http.HandlerFunc(s.handleWhoami))
 
+	mux.Handle("GET /api/v1/me", http.HandlerFunc(s.handleMe))
+	mux.Handle("DELETE /api/v1/me", http.HandlerFunc(s.handleDeleteMe))
+	mux.Handle("GET /api/v1/me/team-deletions", http.HandlerFunc(s.handleMyTeamDeletions))
+	mux.Handle("POST /api/v1/me/active-team", http.HandlerFunc(s.handleSetActiveTeam))
+	mux.Handle("GET /api/v1/me/identities", http.HandlerFunc(s.handleIdentities))
+	mux.Handle("POST /api/v1/me/identities/{provider}/link", http.HandlerFunc(s.handleIdentityLinkStart))
+	mux.Handle("POST /api/v1/me/identities/{provider}/link/complete", http.HandlerFunc(s.handleIdentityLinkComplete))
+	mux.Handle("DELETE /api/v1/me/identities/{provider}", http.HandlerFunc(s.handleIdentityUnlink))
+	mux.Handle("POST /api/v1/teams", http.HandlerFunc(s.handleCreateTeam))
+	mux.Handle("POST /api/v1/invitations/{id}/accept", http.HandlerFunc(s.handleAcceptInvitation))
+	mux.Handle("PATCH /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRenameTeam)))
+	mux.Handle("DELETE /api/v1/team", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteTeam)))
+	mux.Handle("GET /api/v1/team/members", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListMembers)))
+	mux.Handle("PATCH /api/v1/team/members/{user_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetMemberRole)))
+	mux.Handle("DELETE /api/v1/team/members/{user_id}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRemoveMember)))
+	mux.Handle("GET /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListInvitations)))
+	mux.Handle("POST /api/v1/team/invitations", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleInvite)))
+	mux.Handle("DELETE /api/v1/team/invitations/{id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteInvitation)))
+	mux.Handle("POST /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCreateRunnerToken)))
+	mux.Handle("GET /api/v1/team/build-trust", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetBuildTrust)))
+	mux.Handle("PUT /api/v1/team/build-trust", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutBuildTrust)))
+	mux.Handle("GET /api/v1/team/runner-tokens", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleListRunnerTokens)))
+	mux.Handle("DELETE /api/v1/team/runner-tokens/{prefix}", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRevokeRunnerToken)))
+	mux.Handle("PUT /api/v1/team/runner-tokens/{prefix}/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleSetRunnerGitCredentials)))
+	mux.Handle("GET /api/v1/team/git-credentials", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitCredentials)))
+	mux.Handle("POST /api/v1/team/git-credentials", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitCredential)))
+	mux.Handle("POST /api/v1/team/git-credentials/{host}/confirm", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleConfirmGitCredential)))
+	mux.Handle("DELETE /api/v1/team/git-credentials/{host}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitCredential)))
+	mux.Handle("GET /api/v1/team/git-credentials/releases", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleListGitCredentialReleases)))
+	mux.Handle("POST /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreateCLIToken)))
+	mux.Handle("GET /api/v1/team/cli-tokens", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListCLITokens)))
+	mux.Handle("DELETE /api/v1/team/cli-tokens/{prefix}", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleRevokeCLIToken)))
+	mux.Handle("GET /api/v1/team/github-runners", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubRunnerBindings)))
+	mux.Handle("POST /api/v1/team/github-runners", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleAddGitHubRunnerBinding)))
+	mux.Handle("DELETE /api/v1/team/github-runners/{repository_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleRemoveGitHubRunnerBinding)))
+	mux.Handle("GET /api/v1/team/github-app", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppShow)))
+	mux.Handle("POST /api/v1/team/github-app/connect", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnect)))
+	mux.Handle("POST /api/v1/team/github-app/connect/complete", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppConnectComplete)))
+	mux.Handle("POST /api/v1/team/github-app/connect/available", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppAvailable)))
+	mux.Handle("POST /api/v1/team/github-app/connect/select", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppSelect)))
+	mux.Handle("DELETE /api/v1/team/github-app/installations/{installation_id}", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleGitHubAppUnbind)))
+	mux.Handle("GET /api/v1/team/github-app/installations/{installation_id}/repositories", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGitHubAppRepositories)))
+	mux.Handle("GET /api/v1/team/github-app/triggers", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppTriggers)))
+	mux.Handle("PUT /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppTrigger)))
+	mux.Handle("DELETE /api/v1/team/github-app/triggers", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleDeleteGitHubAppTrigger)))
+	mux.Handle("GET /api/v1/team/github-app/extra-repos", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListGitHubAppExtraRepos)))
+	mux.Handle("PUT /api/v1/team/github-app/extra-repos", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handlePutGitHubAppExtraRepos)))
+	mux.Handle("DELETE /api/v1/github-app/installations/{installation_id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorGitHubAppUnbind)))
+
 	// safety: service discovery names internal cache and logs URLs, so any bearer will do but anonymity will not.
-	mux.Handle("GET /api/v1/services", http.HandlerFunc(s.handleServices))
+	mux.Handle("GET /api/v1/services", refuseRoleless(http.HandlerFunc(s.handleServices)))
 
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 	mux.Handle("POST /api/v1/tokens/{prefix}/metered", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetTokenMetered)))
@@ -1009,38 +1149,75 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("PUT /api/v1/storage/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageSettings)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageQuota)))
 	mux.Handle("PUT /api/v1/storage/quotas/{principal}/allowance", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetStorageAllowance)))
+	mux.Handle("PUT /api/v1/storage/teams/{team}/free-slot", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGrantFreeSlot)))
 
+	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
+	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
-	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
+	mux.Handle("POST /api/v1/credits/reversals", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
+	mux.Handle("POST /api/v1/credits/freezes", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
+	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
+	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
 	mux.Handle("PUT /api/v1/credits/settings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreditsSettingsSet)))
 	mux.Handle("GET /api/v1/compute-limits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleComputeLimitsShow)))
 	mux.Handle("PUT /api/v1/compute-limits", requireScope(ScopeAdmin, http.HandlerFunc(s.handleComputeLimitsSet)))
 
+	mux.Handle("DELETE /api/v1/accounts/{account}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteAccount)))
+	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
+	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
+	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
+	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
+	mux.Handle("POST /api/v1/signups/waitlist/approve", requireScope(ScopeAdmin, http.HandlerFunc(s.handleApproveWaitlist)))
+
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
 	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))
 
-	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret)))
-	mux.Handle("GET /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListSecrets)))
-	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret)))
-	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret)))
+	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret), ScopeTeamAdmin))
+	mux.Handle("GET /api/v1/secrets", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListSecrets), ScopeTeamAdmin))
+	mux.Handle("GET /api/v1/secrets/{name}", requireScope(ScopeSecretsRead, http.HandlerFunc(s.handleGetSecret), ScopeTeamAdmin))
+	mux.Handle("DELETE /api/v1/secrets/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteSecret), ScopeTeamAdmin))
 	mux.Handle("POST /api/v1/secrets/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateSecrets)))
 
+	// safety: nothing proves a team controls the repository it would bind, and a
+	// binding lets its secret sign for that repository, so binding is the operator's.
 	mux.Handle("POST /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleConnectGitHubWebhook)))
 	mux.Handle("DELETE /api/v1/webhooks/github/bindings", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDisconnectGitHubWebhook)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/v1/health", s.handleHealth)
+	// safety: the cache proves itself with its operator token and the logs
+	// service with the caller's forwarded credential, which these handlers check.
+	router.HandleFunc("POST /internal/storage/reserve", s.handleStorageReserve)
+	router.HandleFunc("POST /api/v1/data/upload", s.handleDirectUpload)
+	router.HandleFunc("POST /api/v1/data/commit", s.handleDirectCommit)
+	router.HandleFunc("GET /api/v1/data/capabilities", s.handleDirectCapabilities)
+	router.HandleFunc("POST /internal/storage/commit", s.handleStorageCommit)
+	router.HandleFunc("POST /internal/storage/release", s.handleStorageRelease)
+	router.HandleFunc("POST /internal/downloads/charge", s.handleDownloadCharge)
+	router.HandleFunc("POST /api/v1/data/download", s.handleDataDownload)
+	router.HandleFunc("POST /internal/egress/totals", s.handleEgressTotals)
 	router.Handle("POST /api/v1/auth/login", s.loginLimit.middleware(http.HandlerFunc(s.handleLogin)))
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
+	router.Handle("GET /api/v1/capabilities", http.HandlerFunc(s.handleCapabilities))
+	router.Handle("POST /api/v1/auth/oauth/google/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleStart)))
+	router.Handle("POST /api/v1/auth/oauth/google/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGoogleExchange)))
+	router.Handle("POST /api/v1/auth/oauth/github/start", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubStart)))
+	router.Handle("POST /api/v1/auth/oauth/github/exchange", s.loginLimit.middleware(http.HandlerFunc(s.handleGitHubExchange)))
 	if s.metricsAddr == "" {
 		router.Handle("GET /metrics", metricsHandler())
 	}
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
+	router.Handle("POST /webhooks/github-app", http.HandlerFunc(s.handleGitHubAppWebhook))
+	// safety: the caller proves itself with a GitHub Actions ID token, not a bearer, so this route is public.
+	router.Handle("POST /api/v1/runners/github/exchange", http.HandlerFunc(s.handleGitHubRunnerExchange))
+	router.HandleFunc("GET /.well-known/openid-configuration", s.handleOIDCDiscovery)
+	router.HandleFunc("GET /.well-known/jwks.json", s.handleOIDCKeys)
 
 	return mux, router
 }
@@ -1076,11 +1253,15 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) authenticated(next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
-	if s.peerPrincipal == nil {
-		return byToken
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
+		// safety: a session is resolved even while bearer auth is off, because
+		// a signed-in account's team and role come only from its session and a
+		// request carrying one must not fall through as an anonymous caller.
+		if raw := extractSessionHeader(r); raw != "" {
+			s.serveSession(w, r, raw, next)
+			return
+		}
+		if s.peerPrincipal == nil || r.Header.Get("Authorization") != "" {
 			byToken.ServeHTTP(w, r)
 			return
 		}
@@ -1186,6 +1367,8 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runCronTick(ctx, cronTickOffer)
 	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
 	go s.runBucketCeiling(ctx)
+	go s.runStoragePass(ctx)
+	go s.runTeamDeletions(ctx, TeamDeletionInterval)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)
@@ -1256,10 +1439,14 @@ func (s *Server) drainGitHubCommitStatuses() {
 // Shutdown drains server-owned background work until ctx expires. ServeWith
 // calls Shutdown automatically; callers serving Handler directly must call it.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.githubCommitStatuses == nil {
-		return nil
+	var errs []error
+	if s.githubCommitStatuses != nil {
+		errs = append(errs, s.githubCommitStatuses.shutdown(ctx))
 	}
-	return s.githubCommitStatuses.shutdown(ctx)
+	if s.githubApp != nil {
+		errs = append(errs, s.githubApp.checks.shutdown(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 // safety: a run-level heartbeat this old means no orchestrator is driving the
@@ -1281,7 +1468,7 @@ func (s *Server) settleExpiredTriggerClaim(ctx context.Context, id string) {
 		if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
 			s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
 		} else {
-			s.reportGitHubCommitStatus(ctx, id, "failed")
+			s.reportGitHubRunState(ctx, id, "failed")
 		}
 		if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 			"runner lease expired before node reported completion",
@@ -1365,13 +1552,17 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"run_id", p[0], "node_id", p[1])
 				}
 			}
-			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, ctx)
+			reapCtx := ctx
+			if !s.Metering() {
+				reapCtx = store.WithoutCreditMetering(ctx)
+			}
+			ids, err := store.Maintenance.ReapExpiredTriggers(s.store, reapCtx)
 			if err != nil {
 				s.logger.Error("reap failed", "err", err)
 				continue
 			}
 			for _, id := range ids {
-				s.settleExpiredTriggerClaim(ctx, id)
+				s.settleExpiredTriggerClaim(reapCtx, id)
 			}
 			if ids, err := store.Maintenance.ReapStalePendingRuns(s.store, ctx,
 				5*store.DefaultLeaseDuration,
@@ -1380,7 +1571,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "failed")
 				}
 			}
 
@@ -1391,7 +1582,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "failed")
 				}
 			}
 
@@ -1403,7 +1594,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 				for _, id := range ids {
 					s.logger.Warn("reaped run whose trigger outlived the queue deadline",
 						"run_id", id, "queue_timeout", s.queueTimeout)
-					s.reportGitHubCommitStatus(ctx, id, "failed")
+					s.reportGitHubRunState(ctx, id, "timed_out")
 				}
 			}
 
@@ -1456,6 +1647,10 @@ func (s *Server) runCreditSampler(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) sampleCreditLedger(ctx context.Context) {
+	if !s.Metering() {
+		ledgerSnapshot.set(store.CreditLedgerTotals{})
+		return
+	}
 	totals, err := s.store.CreditLedgerTotals(ctx)
 	if err != nil {
 		if ctx.Err() == nil {

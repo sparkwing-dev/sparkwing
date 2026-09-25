@@ -28,6 +28,11 @@ type Client struct {
 
 	runnerIdentity atomic.Pointer[string]
 
+	triggerNodeRunner string
+	// bug: Old controllers reject allow_repos, so send it only after capability discovery.
+	allowRepos []string
+	repoFilter atomic.Int32
+
 	pollAdvice atomic.Int64
 }
 
@@ -539,9 +544,9 @@ type HeartbeatStatus struct {
 	CancelRequested bool `json:"cancel_requested"`
 }
 
-// HeartbeatTrigger extends the claim lease on a trigger and returns
-// whether cancellation has been requested. ErrNotFound means the
-// trigger was reaped or never existed; the worker should abort.
+// HeartbeatTrigger charges a metered claim and extends its lease, returning
+// whether cancellation was requested. ErrNotFound or ErrLockHeld means the
+// claim is no longer live and the worker should abort.
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error) {
 	path := fmt.Sprintf("/api/v1/triggers/%s/heartbeat", url.PathEscape(id))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
@@ -594,7 +599,6 @@ type TriggerRequest struct {
 // internal schema changes.
 type TriggerMeta struct {
 	Source string            `json:"source,omitempty"`
-	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
 }
 
@@ -625,7 +629,7 @@ func (c *Client) CreateTrigger(ctx context.Context, req TriggerRequest) (*Trigge
 	return &resp, nil
 }
 
-// FinishTrigger flips a trigger to 'done' after the worker's Run
+// FinishTrigger closes a trigger after the worker's Run
 // terminates. Without this the reaper re-queues the trigger and the
 // next claim fails on the UNIQUE(runs.id) constraint.
 func (c *Client) FinishTrigger(ctx context.Context, triggerID string) error {
@@ -795,14 +799,21 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // trigger_source filters. The controller returns only triggers that
 // match both lists. Empty/nil on either axis means "accept any".
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
+	allowRepos := c.claimAllowRepos(ctx)
 	var body io.Reader
-	if len(pipelines) > 0 || len(sources) > 0 {
+	if len(pipelines) > 0 || len(sources) > 0 || c.triggerNodeRunner != "" || allowRepos != nil {
 		req := map[string]any{}
 		if len(pipelines) > 0 {
 			req["pipelines"] = pipelines
 		}
 		if len(sources) > 0 {
 			req["trigger_sources"] = sources
+		}
+		if c.triggerNodeRunner != "" {
+			req["node_runner"] = c.triggerNodeRunner
+		}
+		if allowRepos != nil {
+			req["allow_repos"] = allowRepos
 		}
 		buf, _ := json.Marshal(req)
 		body = bytes.NewReader(buf)
@@ -899,7 +910,7 @@ func (c *Client) EnqueueTriggerWithEnv(
 	parentNodeID string,
 	retryOf string,
 	source string,
-	user string,
+	_ string, // safety: The controller attributes the run to this client's credential, not a caller-provided principal.
 	repo string,
 	branch string,
 	triggerEnv map[string]string,
@@ -912,7 +923,6 @@ func (c *Client) EnqueueTriggerWithEnv(
 		RetryOf:      retryOf,
 		Trigger: TriggerMeta{
 			Source: source,
-			User:   user,
 			Env:    triggerEnv,
 		},
 	}
@@ -1224,6 +1234,9 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 	if capacity != nil {
 		body["capacity"] = capacity
 	}
+	if allowRepos := c.claimAllowRepos(ctx); allowRepos != nil {
+		body["allow_repos"] = allowRepos
+	}
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
@@ -1261,8 +1274,8 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 // A node another claim holds, a finished node, a node of a finished run, or one
 // the caller may not name returns [store.ErrLockHeld]; an unknown node returns
 // [store.ErrNotFound]. A controller too old to serve the route returns
-// [ErrControllerLacksRoute], which a dispatcher answers by running the node the
-// way it did before the fence existed.
+// [ErrControllerLacksRoute], which a dispatcher treats as a refusal: the claim
+// is where the credit check lives, so no node runs without one.
 //
 // sizesToClass reports that the caller creates the node's executor at the cpu
 // class the claim bills; a metered caller that does not is refused a class
@@ -1874,13 +1887,20 @@ func controllerLacksRoute(route string) error {
 
 func readHTTPError(resp *http.Response) error {
 	err := classifyHTTPError(resp)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if wait, ok := parseRetryAfter(resp); ok {
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
+		if wait := pollAdviceOfResponse(resp); wait > 0 {
+			return &RateLimitedError{RetryAfter: wait, Err: err}
+		}
+		return err
+	}
 	// safety: a server that named a Retry-After is asking to be polled again, which a claim loop must not log as a failure.
 	if wait, ok := parseRetryAfter(resp); ok {
 		switch resp.StatusCode {
 		case http.StatusServiceUnavailable:
 			return &UnavailableError{RetryAfter: wait, Err: err}
-		case http.StatusTooManyRequests:
-			return &RateLimitedError{RetryAfter: wait, Err: err}
 		}
 	}
 	return err
@@ -1907,6 +1927,14 @@ func classifyHTTPError(resp *http.Response) error {
 	}
 	if resp.StatusCode == http.StatusConflict {
 		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		var refusal struct {
+			Code string `json:"error"`
+		}
+		if json.Unmarshal(body, &refusal) == nil && refusal.Code == meteredInProcessNodesCode {
+			return fmt.Errorf("%w: %s", store.ErrMeteredInProcessNodes, bytes.TrimSpace(body))
+		}
 	}
 	// safety: a spent credit balance is a standing condition, not a transport
 	// failure, so the caller can tell it apart and keep polling.

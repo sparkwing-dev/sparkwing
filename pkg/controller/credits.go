@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -226,10 +225,44 @@ type createGrantReq struct {
 	AmountMicro int64  `json:"amount_micro"`
 	Reference   string `json:"reference,omitempty"`
 	Reverses    string `json:"reverses,omitempty"`
+	// safety: The operator names the funded team; a reversal inherits its original payment's team.
+	Team string `json:"team,omitempty"`
+	// safety: Settling a checkout releases that session's hold on the team balance cap.
+	Checkout string `json:"checkout,omitempty"`
 }
 
 func (s *Server) handleCreditsShow(w http.ResponseWriter, r *http.Request) {
-	state, err := s.store.CreditState(r.Context(), creditsBurnWindow)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	s.writeCreditState(w, r, tenant)
+}
+
+func (s *Server) handleTeamCreditsShow(w http.ResponseWriter, r *http.Request) {
+	tenant, ok := s.namedTenant(w, r, r.PathValue("team"))
+	if !ok {
+		return
+	}
+	s.writeCreditState(w, r, tenant)
+}
+
+// safety: An unregistered team must read as not found, never as an empty operator balance.
+func (s *Server) namedTenant(w http.ResponseWriter, r *http.Request, slug string) (*store.Tenant, bool) {
+	t, err := s.tenantForTeam(r.Context(), store.Team(slug))
+	if errors.Is(err, store.ErrUnknownTeam) || errors.Is(err, store.ErrNoTeam) {
+		writeError(w, http.StatusNotFound, fmt.Errorf("team %q is not registered", slug))
+		return nil, false
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "team handle", err)
+		return nil, false
+	}
+	return t, true
+}
+
+func (s *Server) writeCreditState(w http.ResponseWriter, r *http.Request, tenant *store.Tenant) {
+	state, err := tenant.CreditState(r.Context(), creditsBurnWindow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -328,20 +361,56 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("kind must be free, paid or reversal"))
 		return
 	}
+	// safety: the checkout service's credential records a verified payment and
+	// nothing else; a free grant or a hand-sized reversal is the operator's.
+	if req.Kind != store.CreditGrantPaid && !isAdmin(r) {
+		writeError(w, http.StatusForbidden, fmt.Errorf(
+			"a %s grant needs the %s scope; %s records paid grants only", req.Kind, ScopeAdmin, ScopeCreditsGrant))
+		return
+	}
 	if err := grantAmountRule(req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	who := authwire.AnonymousPrincipal
-	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil {
-		who = p.Name
+	if req.Team == "" && req.Kind == store.CreditGrantReversal && req.Reverses != "" {
+		team, found, err := s.store.PaidGrantTeam(r.Context(), req.Reverses)
+		if err != nil {
+			s.writeInternalError(w, r, "reversal team", err)
+			return
+		}
+		if !found {
+			writeError(w, http.StatusBadRequest,
+				fmt.Errorf("no paid grant carries the reference %q", req.Reverses))
+			return
+		}
+		req.Team = string(team)
 	}
-	res, err := s.store.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
+	// safety: on a controller serving several teams an unnamed grant would fund
+	// whichever team the operator's token acts for, which is never the team a
+	// payment was for, so the team is required there.
+	if req.Team == "" && s.MultiTeam() {
+		writeError(w, http.StatusBadRequest, errors.New("team is required: name the team whose balance the grant funds"))
+		return
+	}
+	if req.Team == "" {
+		req.Team = string(store.DefaultTeam)
+	}
+	tenant, ok := s.namedTenant(w, r, req.Team)
+	if !ok {
+		return
+	}
+	who := principalName(r)
+	res, err := tenant.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: req.Kind, AmountMicro: req.AmountMicro,
-		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who,
+		Reference: req.Reference, Reverses: req.Reverses, CreatedBy: who, Checkout: req.Checkout,
 	})
 	if errors.Is(err, store.ErrCreditGrantConflict) {
 		writeError(w, http.StatusConflict, err)
+		return
+	}
+	if s.writeBalanceCapRefusal(w, err) {
+		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
+			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
 		return
 	}
 	if err != nil {
@@ -356,7 +425,7 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, creditGrantToJSON(res.Grant))
 		return
 	}
-	s.logger.Info("credits granted",
+	s.logger.Info("credits granted", "team", string(tenant.Team()),
 		"kind", res.Grant.Kind, "amount_micro", res.Grant.AmountMicro,
 		"reference", res.Grant.Reference, "reverses", res.Grant.Reverses, "by", who)
 	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
@@ -390,12 +459,16 @@ func (s *Server) handleCreditsHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = v
 	}
-	grants, err := s.store.ListCreditGrants(r.Context(), limit)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	grants, err := tenant.ListCreditGrants(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	charges, err := s.store.ListCreditCharges(r.Context(), limit)
+	charges, err := tenant.ListCreditCharges(r.Context(), limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -440,6 +513,10 @@ type creditsRefusalJSON struct {
 // heartbeat the ledger refused.
 const CreditsRefusedCode = "insufficient_credits"
 
+// CreditsFrozenCode is the code on a 402 refusing a claim for a team whose
+// cloud usage is held while a payment dispute is open.
+const CreditsFrozenCode = "credits_frozen"
+
 // safety: the refusal is a standing condition, so it is recorded once against
 // the run whose node is waiting rather than on every poll.
 func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err error) bool {
@@ -454,8 +531,11 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	if errors.As(err, &shortfall) {
 		refusal.BalanceMicro = shortfall.BalanceMicro
 		refusal.RequiredMicro = shortfall.RequiredMicro
+		if shortfall.Frozen {
+			refusal.Error, refusal.Code = shortfall.Error(), CreditsFrozenCode
+		}
+		s.noteCreditsBlocked(r, shortfall)
 	}
-	s.noteCreditsBlocked(r, refusal.BalanceMicro, refusal.RequiredMicro)
 	writeJSON(w, http.StatusPaymentRequired, refusal)
 	return true
 }
@@ -500,13 +580,16 @@ func (s *Server) writeUnpricedClassRefusal(w http.ResponseWriter, r *http.Reques
 }
 
 // safety: the poller asks twice a second, so the waiting run records the
-// refusal once per node rather than on every poll.
-func (s *Server) noteCreditsBlocked(r *http.Request, balance, required int64) {
+// refusal once per node rather than on every poll. It lands on the node the
+// claim was refused for, which is the claimant's own team's; the oldest
+// waiting node on the controller may be another team's.
+func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.InsufficientCreditsError) {
 	ctx := r.Context()
-	runID, nodeID, err := s.store.OldestWaitingReadyNode(ctx)
-	if err != nil || runID == "" {
+	runID, nodeID := shortfall.RunID, shortfall.NodeID
+	if runID == "" {
 		return
 	}
+	balance, required := shortfall.BalanceMicro, shortfall.RequiredMicro
 	payload, err := json.Marshal(map[string]int64{
 		"balance_micro": balance, "required_micro": required,
 	})
@@ -526,18 +609,52 @@ func (s *Server) noteCreditsBlocked(r *http.Request, balance, required int64) {
 	}
 }
 
-// safety: a token the operator never marked metered is never charged, so an
-// install with no metered token behaves as it did before the ledger existed.
-func (s *Server) meteredTokenPrefix(r *http.Request) string {
+// MeteredInProcessNodesCode is the machine-readable code on the 403 a metered
+// trigger claim gets when it names no node runner that claims each node.
+const MeteredInProcessNodesCode = "metered_inprocess_nodes"
+
+// safety: credits are charged on node claims, and a trigger holder that runs
+// nodes in its own process never makes one, so a metered credential claims a
+// trigger only when it runs the nodes through k8s Jobs or warm capacity,
+// which claim each node themselves.
+func (s *Server) refuseMeteredInProcessNodes(w http.ResponseWriter, r *http.Request, nodeRunner string) bool {
+	if nodeRunner == "k8s" || nodeRunner == "warm" {
+		return false
+	}
+	prefix, err := s.meteredTokenPrefix(r)
+	if err != nil {
+		s.writeInternalError(w, r, "read metered token", err)
+		return true
+	}
+	if prefix == "" {
+		return false
+	}
+	p, _ := PrincipalFromContext(r.Context())
+	writeAuthError(w, http.StatusForbidden, authErrorBody{
+		Code: MeteredInProcessNodesCode, Principal: p.label(),
+		Message: store.ErrMeteredInProcessNodes.Error() + "; run the trigger runner as k8s or warm",
+	})
+	return true
+}
+
+// safety: a stored marker may outlive its license, so the controller checks
+// the license before treating that token as a billable claimant.
+func (s *Server) meteredTokenPrefix(r *http.Request) (string, error) {
+	if !s.Metering() {
+		return "", nil
+	}
 	prefix := claimIdentity(r).TokenPrefix
 	if prefix == "" {
-		return ""
+		return "", nil
 	}
 	metered, err := s.store.TokenMetered(r.Context(), prefix)
-	if err != nil || !metered {
-		return ""
+	if err != nil {
+		return "", err
 	}
-	return prefix
+	if !metered {
+		return "", nil
+	}
+	return prefix, nil
 }
 
 // safety: the node's own claim carries the credential the ledger priced the
@@ -550,9 +667,8 @@ func (s *Server) settleFinishedNode(r *http.Request, runID, nodeID string) {
 		return
 	}
 	s.settleNodeLedger(r, runID, nodeID, settlement)
-	// safety: an open window means the ledger priced this node as cloud work,
-	// whatever the credential says now, so a token un-metered mid-run is not
-	// counted under both placements.
+	// safety: an earlier licensed charge window must not also count as local
+	// work when the license expires before this node finishes.
 	if settlement.Metering == store.MeteringFree && !settlement.ChargeWindowOpen {
 		addLocalNodeSeconds(settlement.Seconds)
 	}
@@ -565,31 +681,6 @@ func (s *Server) nodeSettlement(r *http.Request, runID, nodeID string) (store.No
 			"run_id", runID, "node_id", nodeID, "err", err)
 	}
 	return settlement, err
-}
-
-// safety: a balance spent past the grace period cancels the node in this same
-// request, so the run records why instead of waiting out the lease.
-func (s *Server) chargeMeteredHeartbeat(r *http.Request, runID, nodeID string) (stop bool) {
-	prefix := s.meteredTokenPrefix(r)
-	if prefix == "" {
-		return false
-	}
-	ctx := r.Context()
-	res, err := s.store.ChargeNodeCredits(ctx, runID, nodeID, prefix, time.Now())
-	if err != nil {
-		s.logger.Warn("charging a metered node failed",
-			"run_id", runID, "node_id", nodeID, "err", err)
-		return false
-	}
-	if res.ForgivenSeconds > 0 {
-		s.logger.Warn("charge cap engaged; the gap since the previous charge is not billed",
-			"run_id", runID, "node_id", nodeID, "forgiven_s", res.ForgivenSeconds)
-	}
-	if !res.Cancel {
-		return false
-	}
-	s.cancelForExhaustedCredits(r, runID, nodeID, prefix, res)
-	return true
 }
 
 func (s *Server) cancelForExhaustedCredits(
@@ -632,7 +723,7 @@ func (s *Server) finalizeMeteredNode(r *http.Request, runID, nodeID string) {
 // keeps a node in the reservation index, so it is released whatever the
 // finishing principal presents.
 func (s *Server) settleNodeLedger(r *http.Request, runID, nodeID string, settlement store.NodeSettlement) {
-	if !settlement.ChargeWindowOpen {
+	if !s.Metering() || !settlement.ChargeWindowOpen {
 		return
 	}
 	res, err := s.store.FinalizeNodeCredits(r.Context(), runID, nodeID, settlement.ClaimTokenPrefix, time.Now())

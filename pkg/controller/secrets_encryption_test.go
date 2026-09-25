@@ -102,8 +102,8 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSecretForPipeline: %v", err)
 	}
-	if !strings.HasPrefix(row.Value, "enc:v2:") {
-		t.Fatalf("stored envelope = %q, want an enc:v2: prefix", row.Value)
+	if !strings.HasPrefix(row.Value, secrets.BoundPrefix) {
+		t.Fatalf("stored envelope = %q, want a %s prefix", row.Value, secrets.BoundPrefix)
 	}
 
 	for _, c2 := range []struct {
@@ -144,7 +144,9 @@ func TestSecrets_EnvelopeIsBoundToNameAndPipeline(t *testing.T) {
 	}
 }
 
-func TestSecrets_ReadsEnvelopesWrittenBeforeBinding(t *testing.T) {
+// An envelope sealed before team binding could have been copied from another
+// team's row, so a read refuses it; the startup reseal is what brings it back.
+func TestSecrets_ReadRefusesEnvelopesSealedBeforeTeamBinding(t *testing.T) {
 	key, _ := secrets.GenerateKey()
 	c, _ := secrets.NewCipher(key)
 	srv, st := newSecretsTestServer(t, c)
@@ -160,36 +162,18 @@ func TestSecrets_ReadsEnvelopesWrittenBeforeBinding(t *testing.T) {
 	}
 
 	status, body := getSecretStatus(t, srv.URL+"/api/v1/secrets/LEGACY")
-	if status != http.StatusOK {
-		t.Fatalf("GET status = %d, body = %s", status, body)
+	if status != http.StatusInternalServerError {
+		t.Fatalf("GET status = %d, want 500, body = %s", status, body)
 	}
-	var got struct {
-		Value string `json:"value"`
-		Bound bool   `json:"bound"`
+	if strings.Contains(body, "older secret") {
+		t.Fatalf("refused read leaked the value: %s", body)
 	}
-	if err := json.Unmarshal([]byte(body), &got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got.Value != "older secret" {
-		t.Fatalf("Value = %q, want %q", got.Value, "older secret")
-	}
-	if !got.Bound {
-		t.Fatal("read of an unbound row reported bound=false; the read should have rebound it")
-	}
-
 	row, err := st.GetSecret("LEGACY")
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
-	if !strings.HasPrefix(row.Value, "enc:v2:") {
-		t.Fatalf("stored value after read = %q, want it resealed under an enc:v2: prefix", row.Value)
-	}
-	status, body = getSecretStatus(t, srv.URL+"/api/v1/secrets/LEGACY")
-	if status != http.StatusOK {
-		t.Fatalf("GET after rebinding status = %d, body = %s", status, body)
-	}
-	if !strings.Contains(body, "older secret") {
-		t.Fatalf("rebound row no longer reads back: %s", body)
+	if row.Value != legacy {
+		t.Fatalf("a refused read rewrote the row to %q", row.Value)
 	}
 }
 

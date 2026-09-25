@@ -24,6 +24,93 @@ func (authFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
+type afterHookAuthFailPipe struct{ sparkwing.Base }
+
+func (afterHookAuthFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "only", func(context.Context) error { return nil }).AfterRun(func(ctx context.Context, _ error) {
+		sparkwing.Info(ctx, "after hook")
+	})
+	return nil
+}
+
+func TestHTTPLogs_AfterHookAuthFailureStillFailsTheNode(t *testing.T) {
+	register("afterhook-authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return afterHookAuthFailPipe{} })
+	var appends atomic.Int64
+	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/seal") && appends.Add(1) > 1 {
+			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer logsSrv.Close()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	paths := orchestrator.PathsAt(t.TempDir())
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	local := orchestrator.LocalBackends(paths, st, nil)
+	res, err := orchestrator.Run(context.Background(), orchestrator.Backends{
+		State: local.State, Logs: orchestrator.NewHTTPLogs(logsSrv.URL, nil, nil), Concurrency: local.Concurrency,
+	}, orchestrator.Options{Pipeline: "afterhook-authfail-demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "failed" || appends.Load() < 2 {
+		t.Fatalf("status = %s after %d appends; want failed after hook refusal", res.Status, appends.Load())
+	}
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureLogsAuth {
+		t.Fatalf("nodes = %+v, want logs auth failure", nodes)
+	}
+}
+
+func TestHTTPLogs_TerminalBatchAuthFailureStillFailsTheNode(t *testing.T) {
+	register("terminal-authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return authFailPipe{} })
+	var appends atomic.Int64
+	logsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/seal") && appends.Add(1) > 1 {
+			http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer logsSrv.Close()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	paths := orchestrator.PathsAt(t.TempDir())
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	local := orchestrator.LocalBackends(paths, st, nil)
+	res, err := orchestrator.Run(context.Background(), orchestrator.Backends{
+		State: local.State, Logs: orchestrator.NewHTTPLogs(logsSrv.URL, nil, nil), Concurrency: local.Concurrency,
+	}, orchestrator.Options{Pipeline: "terminal-authfail-demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "failed" || appends.Load() < 2 {
+		t.Fatalf("status = %s after %d appends; want failed after terminal append refusal", res.Status, appends.Load())
+	}
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureLogsAuth {
+		t.Fatalf("nodes = %+v, want logs auth failure", nodes)
+	}
+}
+
 func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 	register("authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return authFailPipe{} })
 

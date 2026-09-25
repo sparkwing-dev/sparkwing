@@ -50,7 +50,11 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	if logger == nil {
 		logger = slog.Default()
 	}
+	finishTrigger := true
 	defer func() {
+		if !finishTrigger {
+			return
+		}
 		if ferr := stateClient.FinishTrigger(ctx, trigger.ID); ferr != nil {
 			logger.Warn("finish trigger failed",
 				"trigger_id", trigger.ID, "err", ferr)
@@ -94,7 +98,12 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 	res, err := Run(runCtx, backends, runOpts)
 	cancelRun()
 	if err != nil {
-		logger.Error(
+		if ferr := recordClaimedTriggerSetupFailure(ctx, backends.State, trigger, err); ferr != nil {
+			finishTrigger = false
+			logger.Error("record failed trigger run",
+				"run_id", trigger.ID, "err", ferr)
+		}
+		logger.Warn(
 			"run failed setup",
 			"run_id", trigger.ID,
 			"err", err,
@@ -129,6 +138,50 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		"pipeline", trigger.Pipeline,
 		"status", finalStatus,
 	)
+}
+
+func recordClaimedTriggerSetupFailure(ctx context.Context, state StateBackend, trigger *store.Trigger, cause error) error {
+	reason := cause.Error()
+	_, defined := sparkwing.Lookup(trigger.Pipeline)
+	if defined {
+		reason = "pipeline setup failed before dispatch; retry the run, check Fleet or local agent status, and give this run ID to an operator if it repeats"
+	}
+	run, err := state.GetRun(ctx, trigger.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		if err := state.CreateRun(ctx, store.Run{
+			ID: trigger.ID, Pipeline: trigger.Pipeline, Status: "running",
+			TriggerSource: trigger.TriggerSource, GitBranch: trigger.GitBranch, GitSHA: trigger.GitSHA,
+			RepoURL:   trigger.RepoURL,
+			StartedAt: time.Now(), ParentRunID: trigger.ParentRunID,
+		}); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if run.Status != "pending" && run.Status != "running" {
+		return nil
+	}
+	if err := state.FinishRun(ctx, trigger.ID, "failed", reason); err != nil {
+		if ConfirmTerminalRunAfterWriteError(ctx, state, trigger.ID) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// ConfirmTerminalRunAfterWriteError checks whether a failed finish response
+// followed a committed terminal write. Its read is bounded independently of
+// the write's context, which may have expired before its response arrived.
+func ConfirmTerminalRunAfterWriteError(ctx context.Context, state interface {
+	GetRun(context.Context, string) (*store.Run, error)
+}, runID string,
+) bool {
+	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	run, err := state.GetRun(checkCtx, runID)
+	return err == nil && run != nil &&
+		(run.Status == "success" || run.Status == "failed" || run.Status == "cancelled")
 }
 
 func HandleClaimedTrigger(ctx context.Context, opts WorkerOptions, triggerID string) error {
@@ -205,9 +258,9 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 			status, err := c.HeartbeatTrigger(hbCtx, triggerID)
 			cancel()
 			if err != nil {
-				if errors.Is(err, store.ErrNotFound) {
-					logger.Warn("heartbeat: trigger reaped; cancelling run",
-						"trigger_id", triggerID)
+				if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+					logger.Warn("heartbeat: trigger claim ended; cancelling run",
+						"trigger_id", triggerID, "err", err)
 					cancelRun()
 					return
 				}

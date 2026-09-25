@@ -273,7 +273,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
 function recordToLine(rec: LogRecord): string {
   const parts: string[] = [];
   const ts = fmtTSInline(rec.ts);
-  if (ts) parts.push(ts);
   if (rec.event === "retry") parts.push("↻");
   if (rec.level === "error") parts.push("ERROR");
   if (rec.msg) parts.push(rec.msg);
@@ -284,7 +283,9 @@ function recordToLine(rec: LogRecord): string {
   ) {
     parts.push(JSON.stringify(rec.attrs));
   }
-  return parts.join(" ");
+  // safety: the viewer splits the timestamp off at its trailing space, so an
+  // empty line keeps the space to stay a timestamp with no text.
+  return ts ? `${ts} ${parts.join(" ")}` : parts.join(" ");
 }
 
 function fmtTSInline(ts?: string): string {

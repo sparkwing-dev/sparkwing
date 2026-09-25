@@ -34,6 +34,18 @@ sparkwing_lock_web_build "$ROOT"
 
 if [ "${SKIP_WEB_BUILD:-0}" = "1" ]; then
   echo "SKIP_WEB_BUILD=1 set; using existing internal/web/next-out/ as-is"
+elif ! command -v pnpm >/dev/null 2>&1; then
+  if [ -f "$ROOT/web/out/index.html" ]; then
+    echo "warning: pnpm unavailable; using prebuilt web/out for the dashboard" >&2
+    rm -rf "$ROOT/internal/web/next-out"
+    mkdir -p "$ROOT/internal/web/next-out"
+    cp -R "$ROOT/web/out/." "$ROOT/internal/web/next-out/"
+    touch "$ROOT/internal/web/next-out/.gitkeep"
+  elif [ -f "$ROOT/internal/web/next-out/index.html" ]; then
+    echo "warning: pnpm unavailable; using existing embedded dashboard" >&2
+  else
+    echo "warning: pnpm unavailable and no prebuilt web/out; dashboard unavailable in this build" >&2
+  fi
 else
   if (( reuse_web )); then
     bash "$ROOT/bin/build-web.sh" --reuse
@@ -52,19 +64,21 @@ fi
 echo "build $NAME $VERSION"
 # -trimpath and -s -w are the flags .github/workflows/release.yaml passes, so a
 # local install and a released binary strip and trim the same way.
-go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME" ./cmd/sparkwing
+GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/$NAME" ./cmd/sparkwing
 if [ "$NAME" != sparkwing ]; then
   echo
   echo "Installed to $DEST/$NAME (the sparkwing beside it is untouched)"
   exit 0
 fi
 
+echo "build sparkwing-runner $VERSION"
+GOWORK=off go -C "$ROOT" build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$DEST/sparkwing-runner" ./cmd/sparkwing-runner
+
 declare -a STALE=(
   sparkwing-cache
   sparkwing-controller
   sparkwing-local-ws
   sparkwing-logs
-  sparkwing-runner
   sparkwing-web
   sparkwing.dev
   sparkwing.predeploy

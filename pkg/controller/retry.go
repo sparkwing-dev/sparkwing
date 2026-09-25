@@ -3,8 +3,10 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -12,7 +14,11 @@ import (
 
 func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	runs, err := s.store.ListRunRetryTree(r.Context(), id)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	runs, err := tenant.ListRunRetryTree(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -27,6 +33,34 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	full := r.URL.Query().Get("full") == "1"
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	source, err := tenant.GetRun(r.Context(), srcID)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "read retry source", err)
+		return
+	}
+	if strings.HasPrefix(source.TriggerSource, "pipeline-working-tree@") {
+		trigger, triggerErr := s.store.GetTrigger(r.Context(), srcID)
+		if triggerErr != nil && !errors.Is(triggerErr, store.ErrNotFound) {
+			s.writeInternalError(w, r, "read retry source trigger", triggerErr)
+			return
+		}
+		// A local working-tree run can have no trigger row; its source remains retryable.
+		if triggerErr == nil && trigger.Team == tenant.Team() && trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] != "" {
+			writeError(w, http.StatusUnprocessableEntity, errors.New("cloud working-tree retry needs a new source upload; rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
+			return
+		}
+	}
+	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "retry:"+srcID), "retry") {
+		return
+	}
 	// safety: a retry creates a run, so the hourly guard measures the principal
 	// that asked for it exactly as a direct create does.
 	retryCtx := store.WithCreatingPrincipal(r.Context(), claimIdentity(r).Principal)

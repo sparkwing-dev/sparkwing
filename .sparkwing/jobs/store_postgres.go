@@ -255,7 +255,7 @@ func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 }
 
 func storePostgresGoCommand(h hostShape) string {
-	return boundedGoCommand(h, "test", "-count=1 ./pkg/store/...")
+	return boundedGoCommand(h, "test", "-timeout 15m -count=1 ./pkg/store/...")
 }
 
 func init() {

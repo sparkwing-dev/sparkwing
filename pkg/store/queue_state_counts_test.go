@@ -101,7 +101,7 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 		t.Errorf("grants = free %d / paid %d, want 5000000 / 20000000",
 			totals.GrantedFreeMicro, totals.GrantedPaidMicro)
 	}
-	wantReserved := unpinnedNodeRateMicro * store.CreditClaimFloorSeconds
+	wantReserved := unpinnedNodeRateMicro * store.MinBillableSeconds
 	if totals.ReservedMicro != wantReserved {
 		t.Errorf("reserved = %d, want the claim floor %d", totals.ReservedMicro, wantReserved)
 	}
@@ -119,16 +119,16 @@ func TestCreditLedgerTotals_SplitsGrantsAndCharges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreditLedgerTotals after settle: %v", err)
 	}
-	if settled.RefundedMicro <= 0 {
-		t.Errorf("refunded = %d, want the unused reservation tail returned", settled.RefundedMicro)
+	if settled.RefundedMicro != 0 {
+		t.Errorf("refunded = %d, want nothing: a node billing from its claim consumes the minimum",
+			settled.RefundedMicro)
 	}
-	if settled.BalanceMicro <= totals.BalanceMicro {
-		t.Errorf("balance = %d, want the refund to raise it above %d",
-			settled.BalanceMicro, totals.BalanceMicro)
+	if settled.BalanceMicro != totals.BalanceMicro {
+		t.Errorf("balance = %d, want it unchanged at %d", settled.BalanceMicro, totals.BalanceMicro)
 	}
-	if settled.SettledSeconds < 0 || settled.SettledSeconds > store.CreditClaimFloorSeconds {
-		t.Errorf("settled seconds = %d, want the net of a reservation the node barely used",
-			settled.SettledSeconds)
+	if settled.SettledSeconds != store.MinBillableSeconds {
+		t.Errorf("settled seconds = %d, want the %d-second minimum",
+			settled.SettledSeconds, store.MinBillableSeconds)
 	}
 	if want := settled.SettledSeconds * unpinnedNodeRateMicro; want != 25_000_000-settled.BalanceMicro {
 		t.Errorf("settled seconds %d price to %d micro, but the balance fell by %d: the seconds and the bill disagree",
@@ -155,7 +155,7 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 	s := storetest.OpenPostgres(t)
 	ctx := context.Background()
 
-	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100_000_000_000, "invoice", "admin"); err != nil {
+	if _, err := s.GrantCredits(ctx, store.CreditGrantFree, 100_000_000_000, "invoice", "admin"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	claimant := meteredClaimant(t, s, "pool")
@@ -244,16 +244,19 @@ func assertSettledSecondsNeverFall(t *testing.T, s *store.Store) {
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "holder-mono", time.Minute, nil); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
+	// safety: a runner that claims its own work starts billing at the claim, so
+	// the minimum is consumed there and nothing later refunds it.
 	atClaim := sample("claim")
-	if atClaim > 1 {
-		t.Errorf("settled seconds = %d right after the claim, want the unconsumed reservation held back", atClaim)
+	if atClaim != store.MinBillableSeconds {
+		t.Errorf("settled seconds = %d right after the claim, want the %d-second minimum consumed",
+			atClaim, store.MinBillableSeconds)
 	}
 
 	// safety: rewinding the charge window is how a test advances the clock the
 	// ledger measures against without sleeping through a reservation.
 	rewindChargeWindow(t, s, "run-mono", "node-a", time.Now().Add(-10*time.Second))
 	afterWait := sample("reservation partly consumed")
-	if afterWait < store.CreditClaimFloorSeconds-10 {
+	if afterWait < store.MinBillableSeconds-10 {
 		t.Errorf("settled seconds = %d once the window had 10s left, want near the consumed minute", afterWait)
 	}
 

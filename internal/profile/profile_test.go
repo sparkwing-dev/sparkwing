@@ -39,6 +39,36 @@ func TestInheritControllerDefaults(t *testing.T) {
 	if p.Logs.URL != "/var/sw.db"[:0]+"" || p.Logs.Path != "/var/sw.db" {
 		t.Errorf("Logs (non-controller type) must not be touched: %+v", p.Logs)
 	}
+	explicit := &profile.Profile{
+		Controller: &profile.ControllerSpec{URL: "https://ctrl.example"},
+		Logs:       &backends.Spec{Type: backends.TypeController, URL: "https://ctrl.example"},
+	}
+	explicit.InheritControllerDefaults()
+	if got := explicit.ExplicitLogsURL(); got != "https://ctrl.example" {
+		t.Errorf("explicit colocated logs URL = %q", got)
+	}
+}
+
+func TestSaveKeepsInheritedLogsURLDiscoverable(t *testing.T) {
+	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
+	if err := os.WriteFile(path, []byte("profiles:\n  prod:\n    controller: {url: https://ctrl.example}\n    logs: {type: controller}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := profile.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := profile.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := profile.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prod := reloaded.Profiles["prod"]
+	if prod.Logs.URL != prod.ControllerURL() || prod.ExplicitLogsURL() != "" {
+		t.Fatalf("saved inherited logs URL became explicit: %+v", prod.Logs)
+	}
 }
 
 func TestLoad_MissingFile(t *testing.T) {

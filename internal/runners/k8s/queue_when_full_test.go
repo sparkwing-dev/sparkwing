@@ -138,6 +138,28 @@ func poolNode(name, band string, cores int64) *corev1.Node {
 	}
 }
 
+func TestRunNode_ImpossibleRequestFailsBeforeCreatingJob(t *testing.T) {
+	ctx := context.Background()
+	_, srv := queueTestStore(t, nil)
+	node := poolNode("small", "", 1)
+	node.Status.Allocatable[corev1.ResourceCPU] = resource.MustParse("250m")
+	kcli := fake.NewSimpleClientset(node)
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		CPURequest: "100m", MemoryRequest: "128Mi",
+	}, nil)
+	pin := (&sparkwing.JobNode{}).Resources(sparkwing.Cores(1))
+	result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build", Node: pin})
+	if result.Outcome != sparkwing.Failed || result.Err == nil ||
+		!strings.Contains(result.Err.Error(), "allocatable") {
+		t.Fatalf("result = %+v, want immediate allocatable-capacity failure", result)
+	}
+	jobs, err := kcli.BatchV1().Jobs("default").List(ctx, metav1.ListOptions{})
+	if err != nil || len(jobs.Items) != 0 {
+		t.Fatalf("jobs = %+v, err = %v, want none", jobs, err)
+	}
+}
+
 // A pod the pool could hold if one of its machines were empty is waiting on
 // occupancy, so it queues and says so, and it runs once a machine frees. The
 // pod stays unschedulable for more polls than the grace period covers, so a

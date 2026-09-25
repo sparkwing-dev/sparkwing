@@ -30,16 +30,23 @@ func TestFullChartVersion(t *testing.T) {
 	}
 }
 
-func tokenSecretDefault(chart string) string {
+// tokenSecretDefaults names the runner's token, the cache's operator token
+// and the grant key as three Secrets, the shape the charts require.
+func tokenSecretDefaults(chart string) []string {
+	prefix := ""
 	if strings.Contains(chart, "sparkwing-full") {
-		return "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"
+		prefix = "sparkwing-runner-bundle."
 	}
-	return "controller.tokenSecret.name=sparkwing-token"
+	return []string{
+		prefix + "controller.tokenSecret.name=sparkwing-token",
+		prefix + "cache.tokenSecret.name=sparkwing-cache-token",
+		prefix + "cache.grantKeySecret.name=sparkwing-cache-grant-key",
+	}
 }
 
 func helmArgs(chart, release string, sets []string, extra ...string) []string {
 	args := append([]string{"template", release, chart}, extra...)
-	for _, s := range append([]string{tokenSecretDefault(chart)}, sets...) {
+	for _, s := range append(tokenSecretDefaults(chart), sets...) {
 		args = append(args, "--set", s)
 	}
 	return args
@@ -153,20 +160,11 @@ func hasFlag(args []string, prefix string) (string, bool) {
 	return "", false
 }
 
-func TestWebIsPointedAtTheBundledCache(t *testing.T) {
+func TestWebIsPointedAtTheBundledLogs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.4s of real work; the fast class runs under -short")
 	}
 	args := webArgs(t, helmTemplate(t, "sparkwing"))
-	got, ok := hasFlag(args, "--cache=")
-	if !ok {
-		t.Fatalf("no --cache flag in %v", args)
-	}
-	const want = "--cache=http://sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
-	if got != want {
-		t.Errorf("cache flag = %q, want %q", got, want)
-	}
-
 	if got, _ := hasFlag(args, "--logs="); got !=
 		"--logs=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local" {
 		t.Errorf("logs flag = %q, want the bundled logs Service", got)
@@ -284,53 +282,6 @@ func TestWebDeploymentDropsAPIURL(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing", "web.apiUrl=https://api.example"))
 	if got, ok := hasFlag(args, "--api-url="); ok {
 		t.Errorf("api-url flag = %q, want the deprecated flag gone", got)
-	}
-}
-
-func TestWebCacheURLOverrideWins(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := webArgs(t, helmTemplate(t, "sparkwing", "web.cache.url=http://cache.elsewhere:8090"))
-	if got, _ := hasFlag(args, "--cache="); got != "--cache=http://cache.elsewhere:8090" {
-		t.Errorf("cache flag = %q, want the explicit override", got)
-	}
-}
-
-func TestWebHasNoCacheFlagWhenNoCacheIsDeployed(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	for _, tc := range []struct {
-		name string
-		sets []string
-	}{
-		{
-			name: "cache component disabled for a node-only pool",
-			sets: []string{
-				"sparkwing-runner-bundle.cache.enabled=false",
-				"sparkwing-runner-bundle.runner.alsoClaimTriggers=false",
-			},
-		},
-		{name: "whole bundle disabled", sets: []string{"sparkwing-runner-bundle.enabled=false"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			args := webArgs(t, helmTemplate(t, "sparkwing", tc.sets...))
-			if got, ok := hasFlag(args, "--cache="); ok {
-				t.Errorf("rendered %q with no cache deployed", got)
-			}
-		})
-	}
-}
-
-func TestWebCacheURLFollowsTheSubChartNaming(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	args := webArgs(t, helmTemplate(t, "sparkwing-runner-bundle"))
-	if got, _ := hasFlag(args, "--cache="); got !=
-		"--cache=http://sparkwing-runner-bundle-cache.default.svc.cluster.local" {
-		t.Errorf("cache flag = %q, want the collapsed release name", got)
 	}
 }
 
@@ -1329,14 +1280,14 @@ func TestCachePublicURLIsUnsetWhenClientsDialMoreThanOneAddress(t *testing.T) {
 		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
 	}
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
-		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType))
+		env := runnerEnv(t, renderCache(t, "cache.service.type="+serviceType, "cache.dependencyProxy.enabled=false"))
 		if got, ok := env["SPARKWING_CACHE_PUBLIC_URL"]; ok {
 			t.Errorf("%s Service set SPARKWING_CACHE_PUBLIC_URL = %q, want it unset so the proxy rewrites per request", serviceType, got)
 		}
 	}
 
 	env := runnerEnv(t, renderCache(t,
-		"cache.service.type=LoadBalancer",
+		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false",
 		"cache.publicUrl=http://cache.example.com"))
 	if got := env["SPARKWING_CACHE_PUBLIC_URL"]; got != "http://cache.example.com" {
 		t.Errorf("SPARKWING_CACHE_PUBLIC_URL = %q, want the explicit override", got)
@@ -1392,13 +1343,22 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 	}
 }
 
-func TestTriggerClaimingWithoutGitcacheFailsAtRender(t *testing.T) {
+// A runner with no gitcache claims triggers and fetches each run's source
+// directly with the credential the controller releases, so the chart renders
+// trigger claiming without one.
+func TestTriggerClaimingRendersWithoutAGitcache(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.enabled=false")
-	if !strings.Contains(out, "runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL") {
-		t.Fatalf("render error does not identify the missing gitcache URL:\n%s", out)
+	rendered := renderRunner(t, "cache.enabled=false")
+	args := runnerContainer(t, rendered).Args
+	if !containsArg(args, "--also-claim-triggers") {
+		t.Errorf("runner args = %v, want trigger claiming", args)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--gitcache") || strings.HasPrefix(arg, "--allow-repo") {
+			t.Errorf("runner args carry %q; a direct runner fetches only with what the controller releases", arg)
+		}
 	}
 }
 
@@ -1646,7 +1606,7 @@ func TestConfiguredSecretRefsAreRequired(t *testing.T) {
 	if strings.Contains(cache, "optional: true") {
 		t.Fatalf("configured cache Secret is optional:\n%s", cache)
 	}
-	for _, name := range []string{"sparkwing-token", "sparkwing-ssh"} {
+	for _, name := range []string{"sparkwing-cache-token", "sparkwing-cache-grant-key", "sparkwing-ssh"} {
 		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
 			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
 		}
@@ -1677,6 +1637,18 @@ func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
 				"sparkwing-runner-bundle.controller.tokenSecret.key=",
 			},
 			want: "controller.tokenSecret.key is required",
+		},
+		{
+			name:  "cache operator token",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"cache.tokenSecret.key="},
+			want:  "cache.tokenSecret.key is required",
+		},
+		{
+			name:  "cache grant key",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"cache.grantKeySecret.key="},
+			want:  "cache.grantKeySecret.key is required",
 		},
 		{
 			name:  "controller webhook",
@@ -1723,12 +1695,8 @@ func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			web := webArgs(t, helmTemplate(t, "sparkwing", test.set))
 			logsURL := "http://" + test.fullname + "-logs.default.svc.cluster.local"
-			cacheURL := "http://" + test.fullname + "-cache.default.svc.cluster.local"
 			if got, _ := hasFlag(web, "--logs="); got != "--logs="+logsURL {
 				t.Errorf("web logs flag = %q, want nested bundle Service %q", got, logsURL)
-			}
-			if got, _ := hasFlag(web, "--cache="); got != "--cache="+cacheURL {
-				t.Errorf("web cache flag = %q, want nested bundle Service %q", got, cacheURL)
 			}
 
 			controller := webArgs(t, helmRender(t, "./sparkwing-full",
@@ -1772,7 +1740,7 @@ func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testin
 	logsURL := serviceURL(logsService)
 	cacheURL := serviceURL(cacheService)
 	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
-	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL, "--cache=" + cacheURL} {
+	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL} {
 		if !containsArg(webArgs, want) {
 			t.Errorf("web args = %v, want %q", webArgs, want)
 		}
@@ -1853,9 +1821,8 @@ func TestParentURLsMatchMaximumLengthBundleOverrides(t *testing.T) {
 		t.Fatalf("bundle Service names do not preserve suffixes: logs=%q cache=%q", logsService, cacheService)
 	}
 	logsURL := "http://" + logsService + "." + namespace + ".svc.cluster.local"
-	cacheURL := "http://" + cacheService + "." + namespace + ".svc.cluster.local"
 	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
-	for _, want := range []string{"--logs=" + logsURL, "--cache=" + cacheURL} {
+	for _, want := range []string{"--logs=" + logsURL} {
 		if !containsArg(webArgs, want) {
 			t.Errorf("web args = %v, want %q", webArgs, want)
 		}
@@ -2090,33 +2057,21 @@ func envSecretRef(t *testing.T, rendered, envName string) renderedSecretKeyRef {
 	return renderedSecretKeyRef{}
 }
 
-func TestRunnerAndCacheShareOneCacheTokenSecret(t *testing.T) {
+// The runner runs team code, so it holds no cache operator token; it asks the
+// controller for a per-run grant instead.
+func TestRunnerCarriesNoCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
 	}
-	sets := []string{
-		"controller.tokenSecret.name=sparkwing-token",
-		"controller.tokenSecret.key=bearer",
-	}
-	runner := envSecretRef(t, renderRunner(t, sets...), "SPARKWING_CACHE_TOKEN")
-	cache := envSecretRef(t, renderCache(t, sets...), "SPARKWING_API_TOKEN")
-	if runner != cache {
-		t.Fatalf("runner SPARKWING_CACHE_TOKEN = %+v, cache SPARKWING_API_TOKEN = %+v; want one source", runner, cache)
-	}
-	if runner.Name != "sparkwing-token" || runner.Key != "bearer" {
-		t.Errorf("token source = %+v, want the configured Secret and key", runner)
-	}
-}
-
-func TestFullChartVendorsTheRunnerCacheToken(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	rendered := helmRenderInNamespace(t, "./sparkwing-full",
-		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
-		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
-	if ref := envSecretRef(t, rendered, "SPARKWING_CACHE_TOKEN"); ref.Name != "sparkwing-token" {
-		t.Errorf("SPARKWING_CACHE_TOKEN source = %+v, want the release token Secret", ref)
+	for name, rendered := range map[string]string{
+		"runner bundle": renderRunner(t, "controller.tokenSecret.name=sparkwing-token", "controller.tokenSecret.key=bearer"),
+		"full chart": helmRenderInNamespace(t, "./sparkwing-full",
+			"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing",
+			"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token"),
+	} {
+		if strings.Contains(rendered, "SPARKWING_CACHE_TOKEN") {
+			t.Errorf("%s: the runner Deployment carries SPARKWING_CACHE_TOKEN:\n%s", name, rendered)
+		}
 	}
 }
 
@@ -2124,8 +2079,8 @@ func TestCacheWithoutATokenSecretFailsAtRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "controller.tokenSecret.name=")
-	for _, want := range []string{"controller.tokenSecret.name", "cache.allowUnauthenticated=true"} {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.tokenSecret.name=")
+	for _, want := range []string{"cache.tokenSecret.name", "cache.allowUnauthenticated=true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("render error does not name %q:\n%s", want, out)
 		}
@@ -2341,16 +2296,40 @@ func TestPublishedCacheWithoutATokenFailsAtRender(t *testing.T) {
 	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
 		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing",
 			"cache.service.type="+serviceType, "cache.allowUnauthenticated=true")
-		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "controller.tokenSecret.name"} {
+		for _, want := range []string{"cache.service.type=" + serviceType, "ClusterIP", "cache.tokenSecret.name"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s render error does not name %q:\n%s", serviceType, want, out)
 			}
 		}
 	}
 	rendered := helmRender(t, "./sparkwing-runner-bundle", "templates/cache-service.yaml", "sparkwing",
-		"cache.service.type=LoadBalancer")
+		"cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
 	if !strings.Contains(rendered, "type: LoadBalancer") {
 		t.Errorf("a tokened cache refused a LoadBalancer Service:\n%s", rendered)
+	}
+}
+
+// The registry proxy takes no credential, so a cache published outside the
+// cluster must not serve it: a LoadBalancer or NodePort Service renders only
+// with the proxy off, and the cache is then told to serve none.
+func TestAPublishedCacheServesNoRegistryProxy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 1.0s of real work; the fast class runs under -short")
+	}
+	for _, serviceType := range []string{"LoadBalancer", "NodePort"} {
+		out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.service.type="+serviceType)
+		for _, want := range []string{"cache.service.type=" + serviceType, "cache.dependencyProxy.enabled=false"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s with the proxy on: render error does not name %q:\n%s", serviceType, want, out)
+			}
+		}
+	}
+	published := renderCache(t, "cache.service.type=LoadBalancer", "cache.dependencyProxy.enabled=false")
+	if !strings.Contains(published, "- --disable-proxy") {
+		t.Errorf("a published cache with the proxy off does not pass --disable-proxy:\n%s", published)
+	}
+	if internal := renderCache(t); strings.Contains(internal, "--disable-proxy") {
+		t.Errorf("the default in-cluster cache disabled its proxy:\n%s", internal)
 	}
 }
 
@@ -2358,8 +2337,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
 	}
-	controller := renderController(t, "sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
-		"sparkwing-runner-bundle.controller.tokenSecret.key=bearer")
+	controller := renderController(t, "sparkwing-runner-bundle.cache.tokenSecret.name=cache-operator",
+		"sparkwing-runner-bundle.cache.tokenSecret.key=bearer")
 	for _, env := range controller.Env {
 		if env.Name != "SPARKWING_CACHE_TOKEN" {
 			continue
@@ -2368,8 +2347,8 @@ func TestControllerCarriesTheCacheToken(t *testing.T) {
 			t.Fatalf("SPARKWING_CACHE_TOKEN is not a secretKeyRef: %+v", env)
 		}
 		ref := *env.ValueFrom.SecretKeyRef
-		if ref.Name != "sparkwing-token" || ref.Key != "bearer" {
-			t.Errorf("controller cache token = %+v, want the release token Secret", ref)
+		if ref.Name != "cache-operator" || ref.Key != "bearer" {
+			t.Errorf("controller cache token = %+v, want the cache's operator token Secret", ref)
 		}
 		return
 	}
@@ -3079,5 +3058,23 @@ func TestLogsStoreCeilingFlagsComeFromValues(t *testing.T) {
 		if got := argValue(args, flag); got != want {
 			t.Errorf("%s = %q, want %q (args %v)", flag, got, want, args)
 		}
+	}
+}
+
+// The runner's own default listens on loopback only, so the chart names the
+// port a scrape reaches and turns the listener off when told to.
+func TestRunnerMetricsFlagFollowsMetricsPort(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: helm renders twice; the fast class runs under -short")
+	}
+	render := func(sets ...string) []string {
+		return webArgs(t, helmRender(t, "./sparkwing-runner-bundle",
+			"templates/runner-deployment.yaml", "sparkwing", sets...))
+	}
+	if got, _ := hasFlag(render(), "--metrics-addr="); got != "--metrics-addr=:9090" {
+		t.Fatalf("default metrics flag = %q, want --metrics-addr=:9090", got)
+	}
+	if got, ok := hasFlag(render("runner.metricsPort=0"), "--metrics-addr"); !ok || got != "--metrics-addr=" {
+		t.Fatalf("metricsPort=0 metrics flag = %q, want --metrics-addr= to disable the listener", got)
 	}
 }

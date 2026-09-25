@@ -388,6 +388,47 @@ profile and touches no credential.
 To run work on this machine for that controller, enroll it as a runner with
 `sparkwing cluster runners add --profile prod --name this-laptop`.
 
+### Start a run
+
+On a controller with teams, a team's runners fetch each run's source from
+GitHub themselves, so every run names a repository. A runner claims only
+runs whose repository matches one of its `--allow-repo` patterns, and a run
+nothing may build stays pending. There are two ways to start one.
+
+**From the dashboard.** On the Runs page, **+ Start a run** opens a form that
+takes a pipeline name, a repository such as `https://github.com/acme/app`,
+and a branch (`main` unless you change it). The runner that claims it fetches
+the branch tip.
+
+Selecting a run opens its detail beside the compact runs list. Switching to
+another run keeps both panes in place while its detail loads; clearing the
+selection closes the detail.
+
+When viewing a run, the chevron above the runs list collapses both the runs
+and nodes columns into status-dot rails. Hover or focus a dot to see its full
+label; select it to open that run or node. Screens narrower than 1100px start
+with the rails collapsed. Your choice to expand or collapse them is saved in
+this browser.
+
+**From a terminal.** Under **Team > Machines > CLI access**, **Create CLI
+token** mints a personal token and shows it once with two commands:
+
+```bash
+sparkwing cloud connect --controller https://api.sparkwing.example --name acme --token-stdin
+sparkwing pipeline trigger <pipeline> --profile acme
+```
+
+The first prompts for the token without echoing it and saves a profile named
+after the team. Run the second inside a checkout whose commit is pushed: the
+run records the checkout's `origin` repository and commit, and a team runner
+fetches that commit. `--working-tree` sends uncommitted changes as a direct source bundle. It
+works when the local checkout has no origin the cloud can reach. The CLI token
+needs `runs.write`; the bundle counts against the team's cache storage share. The token carries your role's scopes
+except team administration, so a reader's token only reads. It lapses after
+90 days, and leaving the team or dropping to `reader` revokes it.
+
+Runs started by a push come with the Sparkwing GitHub App.
+
 ## Advanced deployments
 
 Everything below is optional. A team on the two paths above never has to

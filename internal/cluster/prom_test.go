@@ -67,6 +67,10 @@ func TestObserveNodeExecution_SkipsEmpty(t *testing.T) {
 }
 
 func TestStartMetricsListener_ServesMetrics(t *testing.T) {
+	// safety: a vector with no observed series renders nothing, so the test
+	// records one itself rather than relying on an earlier test having done so.
+	observeNodeExecution("metrics-listener-test", "Success", time.Second)
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -90,8 +94,8 @@ func TestStartMetricsListener_ServesMetrics(t *testing.T) {
 		t.Fatalf("status=%d want 200", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "sparkwing_") {
-		t.Errorf("/metrics output missing sparkwing_ prefix:\n%s", string(body))
+	if !strings.Contains(string(body), `sparkwing_node_execution_seconds_count{outcome="Success",pipeline="metrics-listener-test"}`) {
+		t.Errorf("/metrics output missing the recorded node execution:\n%s", string(body))
 	}
 
 	cancel()

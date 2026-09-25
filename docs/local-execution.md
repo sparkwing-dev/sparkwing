@@ -405,7 +405,7 @@ because the box paid for it.
 ```
 Your laptop:
   1. sparkwing resolves the origin, branch, and commit
-  2. sparkwing refreshes or seeds that commit, then POSTs the trigger
+  2. sparkwing requires a pushed commit, then POSTs the trigger
 
 Remote runner:
   3. Controller records the trigger; a polling runner claims it
@@ -424,6 +424,11 @@ reaches a terminal state -- full log streaming when the profile defines a
 logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
+
+If the checked-out code does not define the requested pipeline, the trigger
+and run fail with an error that lists the defined pipelines. The error includes
+the repository and revision when both are known. A dispatch rejected by a
+pipeline guard leaves no run row.
 
 Add `--working-tree` to run current tracked edits and untracked non-ignored
 files remotely without committing or pushing them. Sparkwing freezes those
@@ -512,6 +517,124 @@ fresh 15-minute controller fallback. Manual retries and same-repository
 placement source.
 Do not leave an unrestricted cluster runner racing for the same trigger source
 when testing deterministic placement.
+
+### Team runners fetch source themselves
+
+The git cache and its controller proxy belong to the operator, so a runner that
+holds a team's runner token starts without `--gitcache`. Such a runner fetches
+each claimed run's source directly: it fetches the commit the trigger recorded
+from the remote the trigger recorded. It asks the controller for the run's
+credential first: the team's GitHub App token when an installation covers the
+repository, else the git credential the team stored for the host and opted
+this machine into (see [Team git credentials](git-credentials.md)). When the
+controller releases none, a runner given `--allow-repo` fetches with the
+machine's own git config and credentials. The dashboard's machines page asks
+which repositories the machine may build and prints this command:
+
+```bash
+SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+  --controller https://sparkwing.example.com --logs https://logs.example.com \
+  --allow-repo 'github.com/acme/*' \
+  --also-claim-triggers --max-claims-before-restart 0 --metrics-addr= \
+  --holder-prefix my-laptop
+```
+
+#### What a laptop runner trusts
+
+A runner compiles the pipeline code it fetches and runs it as the user who
+started the runner. That code reads what that user can read: ssh keys,
+`~/.aws`, other tokens in the home directory, and the runner token itself,
+which it receives to report its run. Any team member who can trigger a run
+chooses which repository and commit that is. So the machine's owner, not the
+team, decides what the machine builds:
+
+- `--allow-repo` names the repositories the machine may build, as host and
+  path with no scheme. It repeats, matches without regard to case, and `*`
+  matches within one path segment: `github.com/acme/*` admits
+  `github.com/acme/app` but not `github.com/acme/app/sub` or
+  `github.com/other/app`. Quote a pattern that holds `*`, since the shell
+  expands it.
+- Without `--gitcache` and without `--allow-repo`, the runner fetches only
+  with the credential the controller releases for each run, and a run it
+  releases none for fails. That is how a cloud runner holds no credential of
+  its own. `--allow-repo` is what lets the runner fall back to the machine's
+  own credentials. A list binds only when given. A `--github-actions` runner
+  given no list builds only the repository whose job started it.
+- The runner sends its list with every trigger and node claim to a controller
+  that advertises `claims.allow_repos` in `GET /api/v1/capabilities`, and the
+  controller hands it only runs whose repository the list admits, passing over
+  the rest so another runner can take them. A trigger that names no repository
+  is never handed to a runner with a list; a node whose run names none is,
+  since it fetches nothing. A runner whose list refuses a node's repository
+  does not count toward the local-first hold, so the cloud is not kept waiting
+  for a runner that could never take the node.
+- The runner checks again before fetching: the remote it would fetch, after it
+  rewrites a GitHub ssh remote to https, and the repository the trigger's GitHub
+  fields name. A run outside the list that reaches it anyway, from a controller
+  older than the claim filter, fails before anything is fetched, and the
+  failure names the repository and the list.
+- The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
+  and `github_owner`/`github_repo` name different repositories, so the run page
+  always shows the repository the runner fetched.
+
+Allow only repositories whose every committer you would trust to run code under
+your account. Only an allowlist stands between a run and your files: the
+pipeline is not sandboxed. On a machine that holds credentials you would not
+hand to those committers, run the runner as a separate user or in a container
+or VM.
+
+Nodes the run dispatches to a pool runner fetch the same commit the same way,
+and a pool runner holds each node to its own `--allow-repo` list. A Kubernetes
+Job that the run's trigger runner created builds that runner's repository and
+carries no list of its own. A cloud pod holds no git credential, so it fetches
+only with the one the controller releases, fitting the remote to it: a GitHub
+App token or an HTTPS token fetches the https form of an ssh remote, and an SSH
+deploy key the ssh form of an https remote. The
+runner keeps one bare mirror per remote under `$SPARKWING_HOME/source-direct`
+and checks out each run in its own worktree. It refuses any remote that is not
+https or ssh, a remote that carries a credential, and a commit that is not a
+full hex object id. A normal `sparkwing pipeline trigger` therefore needs a commit already pushed.
+`--working-tree` uploads its exact source bundle to S3 before admission and
+needs no cloud-reachable Git origin.
+
+Only a fetch with the machine's own credentials reads the machine's git
+config, for its credential helpers, `insteadOf` rules and ssh command; a fetch
+with a released credential reads none of it. Every other git step, the checkout
+included, runs with no system or global config and with LFS smudging off, so a
+filter driver, hook or fsmonitor that the fetched tree's `.gitattributes`
+names cannot run. The fetch refuses http redirects, and ssh runs with
+`BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no` and
+`ClearAllForwardings=yes` appended to the machine's own ssh command. Before
+fetching, the runner resolves the host and refuses one that resolves to a
+loopback, private, link-local, CGNAT, NAT64 or other special-purpose address,
+and it refuses cluster names such as `kubernetes` and `*.svc`. git resolves
+the name again when it connects, so a name whose answer changes in between
+(DNS rebinding) is only narrowed, not stopped. A fetch gives up after ten
+minutes. The runner keeps at most 20 mirrors and 10 GiB of them, evicting the
+least recently used, and deletes a mirror that alone exceeds the size cap
+after its fetch, failing the run. A `.sparkwing` that is a symlink, or that
+resolves outside the checkout, is refused.
+
+### An agent that fetches source itself
+
+`sparkwing-runner agent` fetches source through the controller's gitcache
+proxy unless its `agent.yaml` names `allow_repos` and no `gitcache`, or it
+starts with `--allow-repo`, which replaces the file's list:
+
+```yaml
+controller: https://sparkwing.example.com
+token: swr_...
+allow_repos:
+  - github.com/acme/*
+```
+
+Such an agent claims only runs of those repositories, sending the list with
+every claim, and fetches each one's source directly: with the credential the
+controller releases for the run, else with the machine owner's own git
+credentials. The list follows the rules in
+[What a laptop runner trusts](#what-a-laptop-runner-trusts).
+`sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
+An `agent.yaml` without `allow_repos` keeps the proxy, as before.
 
 ### Remote machine capacity
 
@@ -604,6 +727,16 @@ when those labels satisfy all of its requirements. These labels do not inherit
 the outer pool's `runner.labels`, and the Job reports the configured set as its
 runtime runner metadata. Saturated or offline agents therefore spill eligible
 work to Kubernetes without weakening placement requirements.
+
+The published runner image uses Debian slim, so downloaded Linux Go and Node
+toolchains can use glibc. It supplies bash, coreutils, git, OpenSSH client,
+CA certificates, curl, tar, gzip, xz, make, jq, and unzip for pipeline steps.
+It also carries the Go version needed to compile Sparkwing pipelines on a
+cache miss. Pipeline steps install other language toolchains at the version
+their project needs; `.CacheDir(...)` can retain downloaded dependencies
+between runs. The chart can persist `GOCACHE` and `GOMODCACHE` on a PVC with
+`runner.goCache.persistence.enabled`. The image runs as UID/GID 65534 and
+keeps the runner entrypoint for credential setup.
 
 Before it creates the Job the dispatcher claims that one node for itself with
 its own token, through `POST /api/v1/runs/{id}/nodes/{nodeID}/claim`, and hands

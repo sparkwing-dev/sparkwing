@@ -79,7 +79,7 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 			fmt.Fprintln(w, `{"value":"remote-token","masked":true}`)
 		case r.URL.Path == "/bin/probe":
 			w.WriteHeader(http.StatusNotFound)
-		case r.URL.Path == "/api/v1/logs/run/node":
+		case r.URL.Path == "/api/v1/logs/run/node", r.URL.Path == "/api/v1/logs/run/node/seal":
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
@@ -108,8 +108,8 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 	if err := nodeLog.Close(); err != nil {
 		t.Fatalf("close remote log: %v", err)
 	}
-	if got := requests.Load(); got != 3 {
-		t.Fatalf("normal child made %d controller request(s), want secrets, cache, and logs", got)
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("normal child made %d controller request(s), want secrets, cache, a log line and its seal", got)
 	}
 }
 

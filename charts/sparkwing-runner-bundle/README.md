@@ -31,17 +31,19 @@ exists somewhere else and you just need a runner pool.
 
 ## Render the chart
 
-`helm template` stops on this chart's own `validate.yaml` unless the token
-Secret is named, because `cache.enabled` defaults to true. The minimal
-read-only render is:
+`helm template` stops on this chart's own `validate.yaml` unless the cache's
+operator token Secret is named, because `cache.enabled` defaults to true. The
+minimal read-only render is:
 
 ```bash
 helm template runners ./charts/sparkwing-runner-bundle \
-  --set controller.tokenSecret.name=sparkwing-token
+  --set controller.tokenSecret.name=sparkwing-token \
+  --set cache.tokenSecret.name=sparkwing-cache-token \
+  --set cache.grantKeySecret.name=sparkwing-cache-grant-key
 ```
 
-`charts/render_test.go` injects that same value, so what it exercises is what
-this renders.
+`charts/render_test.go` injects those same values, so what it exercises is
+what this renders.
 
 ## Topology
 
@@ -92,18 +94,29 @@ logs:
 # 1. Create the namespace.
 kubectl create namespace sparkwing
 
-# 2. Create the agent bearer-token Secret.
+# 2. Create the runner's bearer token, the cache's operator token and the
+#    cache grant key as three Secrets. Each is a different secret.
 kubectl -n sparkwing create secret generic sparkwing-token \
     --from-literal=token=<your-token>
+kubectl -n sparkwing create secret generic sparkwing-cache-token \
+    --from-literal=token="$(openssl rand -hex 32)"
+kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
+    --from-literal=key="$(openssl rand -hex 32)"
 
 # 3. Install the chart.
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing \
     -f compatible-images.yaml \
-    --set controller.url=https://app.sparkwing.dev \
+    --set controller.url=https://api.sparkwing.dev \
     --set controller.tokenSecret.name=sparkwing-token \
+    --set cache.tokenSecret.name=sparkwing-cache-token \
+    --set cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set runner.labels='{cluster,arch=amd64}'
 ```
+
+The controller the runners claim from needs the same cache token as
+`SPARKWING_CACHE_TOKEN` and the same grant key as
+`SPARKWING_CACHE_GRANT_KEY`.
 
 For a fully unauthenticated test cluster, opt the cache and the logs
 service out of their token requirement explicitly:
@@ -126,11 +139,13 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.url` | Where the runner claims from. **Required.** | `""` |
 | `controller.tokenSecret.name` | Existing Secret holding the bearer token. | `""` |
 | `controller.tokenSecret.key` | Key inside the Secret. | `token` |
+| `cache.tokenSecret.name` | Existing Secret holding the cache's operator token. Never the runner's token. | `""` |
+| `cache.grantKeySecret.name` | Existing Secret holding the key cache grants are signed and verified with. Never either token. | `""` |
 | `runner.replicas` | Pool size. | `2` |
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
-| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. | `inprocess` |
+| `runner.triggerRunner.kind` | Node execution for claimed triggers: `inprocess`, `k8s`, or agent-first `warm`. A metered token's pool needs `k8s` or `warm`; the controller refuses its `inprocess` trigger claims. | `inprocess` |
 | `runner.triggerRunner.labels` | Static capabilities every trigger-spawned Kubernetes Job advertises. | `[]` |
 | `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
@@ -140,7 +155,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.goCache.persistence.accessModes` | Access modes on that claim. Needs `ReadWriteMany` above one replica. | `[ReadWriteMany]` |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
 | `cache.allowUnauthenticated` | Serve the cache's blob and sync endpoints without a token. | `false` |
-| `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
+| `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy; `false` also stops the cache serving it. Must be `false` when `cache.service.type` is not `ClusterIP`, because the proxy takes no credential. | `true` |
 | `cache.publicUrl` | Base URL the proxy rewrites registry bodies against. Empty on a non-ClusterIP Service means each response is rewritten from its own request `Host`. | in-cluster Service URL on a ClusterIP Service |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
 | `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
@@ -199,12 +214,22 @@ the exception and keeps an `admin` token. Configuring that Secret
 also enables logs-service auth: the logs service forwards each caller's
 incoming Authorization header to the resolved controller's
 `/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
-receive a second service bearer. The same Secret becomes the runner's
-`SPARKWING_CACHE_TOKEN` and the cache's `SPARKWING_API_TOKEN`, so both sides of
-the binary and dependency cache share one bearer. Once a Secret name is
-configured, its key and the Secret itself are required.
+receive a second service bearer. Once a Secret name is configured, its key
+and the Secret itself are required.
 
-A cache-enabled install without that Secret fails at render time. Set
+The cache reads its operator token from `cache.tokenSecret` as
+`SPARKWING_API_TOKEN`, and the key it verifies cache grants with from
+`cache.grantKeySecret` as `SPARKWING_CACHE_GRANT_KEY`. The runner holds
+neither: for each claimed run it asks the controller for a cache grant, which
+the controller signs with the grant key, and it hands the run only that grant.
+Pipeline code can read the runner's token, so the chart refuses to render when
+any two of `controller.tokenSecret`, `cache.tokenSecret` and
+`cache.grantKeySecret` name the same Secret key: a runner token that was also
+the operator token would open every team's cache, and one that was also the
+grant key would sign a grant for any team. Without `cache.grantKeySecret` no
+grants are minted and runs go without the binary and dependency caches.
+
+A cache-enabled install without `cache.tokenSecret` fails at render time. Set
 `cache.allowUnauthenticated=true` to serve the cache's blob and sync endpoints
 to anything that can reach the Service, which is appropriate only on a
 bootstrap install, before the Secret exists.
@@ -216,11 +241,13 @@ open. Set `logs.allowUnauthenticated=true` to let anything that can reach the
 Service read, forge, and delete every run's logs, which is again a bootstrap
 setting to turn back off with the token upgrade.
 
-Trigger claiming always needs a gitcache because it clones and compiles the
-repository before creating a run. If `cache.enabled=false` while
-`runner.alsoClaimTriggers=true`, add a non-empty `SPARKWING_GITCACHE_URL` to
-`runner.extraEnv`; the chart rejects the incomplete combination at render
-time. A node-only pool can instead set `runner.alsoClaimTriggers=false`.
+With `cache.enabled=false` and no `SPARKWING_GITCACHE_URL` in
+`runner.extraEnv`, runners fetch each run's source straight from its host.
+The controller releases the credential for each run: the team's GitHub App
+token when an installation covers the repository, else the git credential
+the team stored for the host. A run with neither fails with a message naming
+both, and a runner never falls back to credentials of its own. Working-tree
+runs (`sparkwing pipeline trigger --working-tree`) still need a gitcache.
 
 The chart does NOT create the Secret -- bring your own. This means
 rotating the token is `kubectl create secret ... --dry-run=client -o
@@ -230,8 +257,10 @@ not a `helm upgrade`.
 ## Storage
 
 Both `sparkwing-cache` and `sparkwing-logs` use `ReadWriteOnce`
-PVCs. That bounds them to 1 replica each (`replicas: 1`,
-`strategy: Recreate`). For an HA log store, point your runners at
+PVCs, which bounds them to 1 replica each (`replicas: 1`,
+`strategy: Recreate`). The per-team counts that hold free teams to
+their storage shares live in the controller's database; see
+[Tenant limits](../../docs/limits.md). For an HA log store, point your runners at
 an external S3-backed log service (out of scope for this chart;
 see the full self-host docs).
 
@@ -339,7 +368,8 @@ enabled component to images built from one Sparkwing revision.
 > The runner Deployment's command is
 > `/usr/local/bin/runner-entrypoint.sh /usr/local/bin/sparkwing-runner`,
 > so the runner image must be built from `build/Dockerfile.runner`
-> (git + Go toolchain + the netrc-seeding entrypoint). Point
+> (Debian slim, the pipeline compilation Go toolchain, bash, common CLI
+> tools, and the netrc-seeding entrypoint). Point
 > `runner.image.repository` at an image built from that Dockerfile.
 
 

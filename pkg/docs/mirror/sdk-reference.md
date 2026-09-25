@@ -34,6 +34,7 @@ Part of the authoring surface too -- a pipeline that builds an image or reads th
 - `func MustConfig(ctx context.Context, name string) string` -- MustConfig is Config that panics on error.
 - `func MustSecret(ctx context.Context, name string) string` -- MustSecret is Secret that panics on error.
 - `func NodeFromContext(ctx context.Context) string` -- NodeFromContext returns the currently-executing node ID, or "" if unset.
+- `func OIDCToken(ctx context.Context, audience string) (string, error)` -- OIDCToken returns an ID token the controller signed for this run, with aud set to audience.
 - `func Path(parts ...string) string` -- Path joins parts onto WorkDir() and returns the absolute path.
 - `func PipelineSecrets[T any](ctx context.Context) *T` -- PipelineSecrets returns the typed Secrets struct installed on ctx, or nil when the pipeline doesn't implement SecretsProvider.
 - `func ReadFile(path string) ([]byte, error)` -- ReadFile reads the named file.
@@ -938,6 +939,15 @@ NoInputs is the empty-struct convention for pipelines that take no flags.
 
 ```
 type NoInputs struct{}
+```
+
+
+### type OIDCTokenSource
+
+OIDCTokenSource signs an ID token for the current run with the given audience.
+
+```
+type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 ```
 
 
@@ -2048,6 +2058,10 @@ var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd
 ```
 
 ```
+var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
+```
+
+```
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 ```
 
@@ -2076,6 +2090,7 @@ var RuntimePlumbing = struct {
         ResolvedArgs:      keyResolvedArgs,
         ProfileResolution: keyProfileResolution,
         Admission:         keyAdmission,
+        OIDCTokenSource:   oidcTokenSourceKey{},
     },
     Fns: runtimePlumbingFns{
         PlanInsertChild:        (*Plan).insertChild,

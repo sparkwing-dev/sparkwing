@@ -558,3 +558,44 @@ func createRetryNodeFromSnapshot(t *testing.T, st *Store, retryID string) {
 		t.Fatal(err)
 	}
 }
+
+// A retry of a run whose team is being deleted would write rows under a slug
+// the purge is emptying, so agent-loss recovery leaves that run alone.
+func TestAgentLossRetrySkipsATeamBeingDeleted(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	plan := []byte(`{"nodes":[{"id":"a","modifiers":{"retry":1}}]}`)
+	if err := st.CreateRun(ctx, Run{
+		ID: "source", Pipeline: "release", Status: "running", TriggerSource: "manual",
+		RepoURL: "https://example.invalid/repo.git", GitSHA: strings.Repeat("d", 40), PlanSnapshot: plan,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	node := retryNodeFromSnapshot("source")
+	node.NodeID = "a"
+	if err := st.CreateNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO team_deletions (slug, requested_at, state)
+		SELECT team, 1, 'pending' FROM runs WHERE id = 'source'`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := st.beginTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	retryID, _, decisions, err := st.createAgentLossRetryTx(ctx, tx, "source", []expiredAgentNode{{
+		runID: "source", nodeID: "a",
+	}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retryID != "" || decisions["a"] != "source_not_active" {
+		t.Fatalf("retry = %q, decisions = %v; want no retry for a team being deleted", retryID, decisions)
+	}
+}

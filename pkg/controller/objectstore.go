@@ -73,12 +73,13 @@ func (s *Server) handleResetObjectStoreBreaker(w http.ResponseWriter, _ *http.Re
 }
 
 // safety: the health route answers without a token, so the summary says which
-// classes refuse and never what their limits are.
-func objectStoreHealth() (map[string]any, []string) {
+// classes refuse and never what their limits are, and a failed measurement is
+// named here while its error goes to the log and the admin breaker route.
+func objectStoreHealth(bucket bool) (map[string]any, []string) {
 	limiter, err := objectguard.Shared()
 	if err != nil {
-		return map[string]any{"tripped": false, "error": err.Error()},
-			[]string{"object-store budget: " + err.Error()}
+		return map[string]any{"tripped": false},
+			[]string{"object-store budget unavailable"}
 	}
 	state := limiter.State()
 	summary := map[string]any{"tripped": state.Tripped, "enabled": state.Enabled}
@@ -98,13 +99,15 @@ func objectStoreHealth() (map[string]any, []string) {
 	}
 
 	ceiling := state.Ceiling
-	if ceiling.Enforced {
+	if ceiling.Enforced || bucket {
 		// safety: the totals and the ceilings stay on the admin-scoped breaker route,
 		// so an anonymous caller learns that writes are frozen and not how large the bucket is.
 		summary["ceiling"] = map[string]any{
+			"enforced":               ceiling.Enforced,
 			"frozen":                 ceiling.Frozen,
 			"warning":                ceiling.Warning,
 			"measurement_incomplete": ceiling.Incomplete,
+			"measured_at":            ceiling.ReconciledAt,
 		}
 		switch {
 		case ceiling.Frozen:
@@ -115,17 +118,15 @@ func objectStoreHealth() (map[string]any, []string) {
 		}
 		if ceiling.Incomplete {
 			problems = append(problems,
-				"object-store bucket ceiling: the last measurement did not finish, so the total is the running count")
+				"object-store bucket: the last measurement failed or did not finish, so the total is the running count; "+
+					"the controller log and the admin object-store route name the error")
 		}
 	}
 
 	stalls := objectguard.Stalls()
 	if len(stalls) > 0 {
-		summary["stalled"] = stalls
-	}
-	for _, st := range stalls {
-		problems = append(problems, fmt.Sprintf(
-			"object-store replay stalled since %s: %s", st.Since.Format(time.RFC3339), st.Path))
+		summary["stalled"] = true
+		problems = append(problems, "object-store replay stalled")
 	}
 	return summary, problems
 }
@@ -167,7 +168,7 @@ func (s *Server) measureBucketLeased(ctx context.Context, ceiling *objectguard.C
 			ctx, cancel = context.WithTimeout(ctx, window/2)
 			defer cancel()
 		}
-		return ceiling.ReconcileWith(ctx, s.bucketUsage)
+		return ceiling.Measure(ctx, s.bucketUsage)
 	}
 	if s.store == nil || window <= 0 {
 		return true, measure(ctx)
@@ -182,8 +183,12 @@ func (s *Server) measureHolder() string {
 	return "controller"
 }
 
-// perf: an unlimited bucket returns before the first listing, so an install that
-// sets no ceiling never pays to enumerate its object store.
+func (s *Server) bucketMeasured() bool {
+	return s.bucketUsageStore != nil || s.artifactStore != nil
+}
+
+// perf: an install with neither a bucket nor a ceiling returns before the
+// first listing, so it never pays to enumerate anything.
 func (s *Server) runBucketCeiling(ctx context.Context) {
 	limiter, err := objectguard.Shared()
 	if err != nil {
@@ -191,7 +196,7 @@ func (s *Server) runBucketCeiling(ctx context.Context) {
 		return
 	}
 	ceiling := limiter.Ceiling()
-	if !ceiling.Enforced() {
+	if !ceiling.Enforced() && !s.bucketMeasured() {
 		return
 	}
 	interval := ceiling.Reconcile()

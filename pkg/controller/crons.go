@@ -44,9 +44,9 @@ type cronLauncher struct {
 }
 
 // Launch records the trigger, the pending run and the dispatch for one due
-// instant. The idempotency key is the schedule and the instant, so a second
-// tick that resolves the same minute reaches the first run instead of starting
-// a second.
+// instant, in the team that armed the schedule. The idempotency key is the
+// schedule and the instant, so a second tick that resolves the same minute
+// reaches the first run instead of starting a second.
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error) {
 	repoURL, err := sourceurl.ValidateCloneURL(s.RepoPath)
 	if err != nil {
@@ -54,7 +54,11 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	key := CronIdempotencyKey(s.ID, due)
 	runID := newRunID()
-	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), triggerIntake{
+	tenant, err := l.server.tenantForTeam(ctx, s.Team)
+	if err != nil {
+		return "", err
+	}
+	err = l.server.admitTrigger(store.WithCreatingPrincipal(ctx, s.ArmedBy), tenant, triggerIntake{
 		RunID:    runID,
 		Pipeline: s.Pipeline,
 		Args:     s.Effective().Args,
@@ -69,7 +73,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 		At:             time.Now(),
 	})
 	if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-		existing, ferr := l.server.store.FindTriggerByIdempotencyKey(ctx, s.Pipeline, key)
+		existing, ferr := tenant.FindTriggerByIdempotencyKey(ctx, s.Pipeline, key)
 		if ferr != nil {
 			return "", fmt.Errorf("another tick already resolved %s, and its run could not be read: %w", key, ferr)
 		}
@@ -85,8 +89,12 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 // nothing has claimed for longer than staleAfter is not active: nothing is
 // going to pick it up, and a schedule whose policy is skip would otherwise stop
 // firing for good.
-func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error) {
-	run, err := l.server.store.GetRun(ctx, runID)
+func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error) {
+	tenant, err := l.server.tenantForTeam(ctx, sched.Team)
+	if err != nil {
+		return false, err
+	}
+	run, err := tenant.GetRun(ctx, runID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return false, nil
@@ -121,14 +129,17 @@ func CronIdempotencyKey(scheduleID string, due time.Time) string {
 	return scheduleID + "@" + due.UTC().Format(time.RFC3339)
 }
 
+// safety: Each tick launches a schedule in its own team, never the service's team.
 func (s *Server) cronService() *crons.Service {
-	return s.cronServiceArmedBy("")
+	return s.cronServiceFor(nil, "")
 }
 
-// safety: the principal that armed a schedule owns the runs it fires, so the
-// per-principal guards measure it rather than leaving cron launches unowned.
-func (s *Server) cronServiceArmedBy(principal string) *crons.Service {
-	return &crons.Service{
+// safety: a route acts on its caller's team alone, so its service reads and
+// writes schedules only through that team's handle, and the principal that
+// armed a schedule owns the runs it fires, so the per-principal guards measure
+// it rather than leaving cron launches unowned.
+func (s *Server) cronServiceFor(tenant *store.Tenant, principal string) *crons.Service {
+	svc := &crons.Service{
 		Store:    s.store,
 		Launcher: cronLauncher{server: s},
 		Now:      s.cronNow,
@@ -137,6 +148,10 @@ func (s *Server) cronServiceArmedBy(principal string) *crons.Service {
 		Side:     store.CronWhereController,
 		ArmedBy:  principal,
 	}
+	if tenant != nil {
+		svc.Schedules = tenant
+	}
+	return svc
 }
 
 func defaultCronHolder() string {
@@ -164,6 +179,9 @@ func (s *Server) runCronTick(ctx context.Context, interval time.Duration) {
 }
 
 func (s *Server) cronTickOnce(ctx context.Context) {
+	if !s.Metering() {
+		ctx = store.WithoutCreditMetering(ctx)
+	}
 	var report crons.TickReport
 	ran, err := s.store.RunCronTickLeased(ctx, s.cronHolder, cronTickLeaseTTL, func(tickCtx context.Context) error {
 		// safety: a tick that outlives the lease is a tick running beside
@@ -238,7 +256,10 @@ type cronOverrideRequest struct {
 }
 
 func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request) {
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	health, err := svc.ControllerHealth(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("read cron health: %w", err))
@@ -260,7 +281,11 @@ func (s *Server) handleListCrons(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request) {
-	svc := s.cronService()
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	svc := s.cronServiceFor(tenant, "")
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
@@ -281,7 +306,7 @@ func (s *Server) handleGetCron(w http.ResponseWriter, r *http.Request) {
 		Upcoming: make([]string, 0, len(upcoming)),
 	}
 	for _, fire := range fires {
-		out.Fires = append(out.Fires, crons.NewFireView(fire, s.cronRunStatus(r.Context(), fire.RunID)))
+		out.Fires = append(out.Fires, crons.NewFireView(fire, cronRunStatus(r.Context(), tenant, fire.RunID)))
 	}
 	for _, at := range upcoming {
 		out.Upcoming = append(out.Upcoming, crons.RFC3339(at))
@@ -328,12 +353,23 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	report, err := s.cronServiceArmedBy(claimIdentity(r).Principal).ArmPushed(r.Context(), crons.ArmPush{
+	svc, ok := s.requestCronService(w, r, claimIdentity(r).Principal)
+	if !ok {
+		return
+	}
+	if !s.cronRepoWithinCaps(w, r, svc, repoURL, len(entries)) {
+		return
+	}
+	report, err := svc.ArmPushed(r.Context(), crons.ArmPush{
 		RepoURL: repoURL,
 		Branch:  body.Branch,
 		SHA:     sha,
 		Entries: entries,
 	})
+	if errors.Is(err, store.ErrCronScheduleTaken) {
+		writeError(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -342,7 +378,6 @@ func (s *Server) handlePutCronRepo(w http.ResponseWriter, r *http.Request) {
 		Schedules: make([]crons.ScheduleView, 0, len(report.Schedules)),
 		Withdrawn: report.Withdrawals,
 	}
-	svc := s.cronService()
 	for _, sched := range report.Schedules {
 		row, _, rerr := svc.Show(r.Context(), sched.ID, 1)
 		if rerr != nil {
@@ -425,7 +460,11 @@ func (s *Server) handleDeleteCronRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("repo_url: %w", err))
 		return
 	}
-	removed, err := s.cronService().DisarmRepoURL(r.Context(), repoURL)
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
+	removed, err := svc.DisarmRepoURL(r.Context(), repoURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -442,7 +481,10 @@ func (s *Server) handleResumeCron(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) setCronPaused(w http.ResponseWriter, r *http.Request, paused bool) {
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
@@ -461,9 +503,15 @@ func (s *Server) setCronPaused(w http.ResponseWriter, r *http.Request, paused bo
 }
 
 func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
+		return
+	}
+	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "cron:"+sched.ID), cronTriggerSource) {
 		return
 	}
 	runID, err := svc.RunNow(r.Context(), sched.ID)
@@ -483,7 +531,10 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDisarmCron(w http.ResponseWriter, r *http.Request) {
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
@@ -540,7 +591,10 @@ func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, refusal)
 		return
 	}
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
@@ -554,7 +608,10 @@ func (s *Server) handleSetCronOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClearCronOverride(w http.ResponseWriter, r *http.Request) {
-	svc := s.cronService()
+	svc, ok := s.requestCronService(w, r, "")
+	if !ok {
+		return
+	}
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
@@ -585,15 +642,72 @@ func (s *Server) writeCronSchedule(w http.ResponseWriter, r *http.Request, svc *
 	writeJSON(w, http.StatusOK, crons.ScheduleEnvelope{Schedule: crons.NewScheduleView(row)})
 }
 
+func (s *Server) requestCronService(w http.ResponseWriter, r *http.Request, principal string) (*crons.Service, bool) {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return nil, false
+	}
+	return s.cronServiceFor(tenant, principal), true
+}
+
 // safety: a run the store no longer holds reads as no status, not an error; the
 // fire is still history.
-func (s *Server) cronRunStatus(ctx context.Context, runID string) string {
+func cronRunStatus(ctx context.Context, tenant *store.Tenant, runID string) string {
 	if runID == "" {
 		return ""
 	}
-	run, err := s.store.GetRun(ctx, runID)
+	run, err := tenant.GetRun(ctx, runID)
 	if err != nil || run == nil {
 		return ""
 	}
 	return run.Status
+}
+
+// safety: every schedule is a stream of runs the team pays for and the
+// controller evaluates each minute, so a push is bounded per repository and a
+// team's repositories are bounded in count. Re-pushing a repository the team
+// already arms replaces its schedules and does not count as another.
+const (
+	maxCronSchedulesPerRepo = 20
+	maxCronReposPerTeam     = 10
+)
+
+func (s *Server) cronRepoWithinCaps(w http.ResponseWriter, r *http.Request, svc *crons.Service, repoURL string, entries int) bool {
+	status, err := s.cronRepoCapRefusal(r.Context(), svc, repoURL, 0, entries)
+	if err != nil {
+		writeError(w, status, err)
+		return false
+	}
+	return true
+}
+
+func (s *Server) cronRepoCapRefusal(ctx context.Context, svc *crons.Service, repoURL string, githubRepoID int64, entries int) (int, error) {
+	if entries > maxCronSchedulesPerRepo {
+		return http.StatusBadRequest, fmt.Errorf(
+			"a repository may declare at most %d schedules; this push declares %d", maxCronSchedulesPerRepo, entries)
+	}
+	rows, err := svc.List(ctx)
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("list cron schedules: %w", err)
+	}
+	repos := map[string]bool{}
+	for _, row := range rows {
+		if !row.Declared {
+			continue
+		}
+		key := row.RepoPath
+		if row.GitHubRepositoryID > 0 {
+			key = fmt.Sprintf("github:%d", row.GitHubRepositoryID)
+		}
+		repos[key] = true
+	}
+	key := repoURL
+	if githubRepoID > 0 {
+		key = fmt.Sprintf("github:%d", githubRepoID)
+	}
+	if !repos[key] && len(repos) >= maxCronReposPerTeam {
+		return http.StatusConflict, fmt.Errorf(
+			"this team already schedules %d repositories, the most it may; disarm one first", len(repos))
+	}
+	return 0, nil
 }

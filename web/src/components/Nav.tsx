@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { readCSRFCookie } from "@/lib/csrfCookie";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
+import TeamSwitcher from "@/components/TeamSwitcher";
+import { useTeamState } from "@/lib/useTeam";
 
 type Tab = { href: string; label: string; external?: boolean };
 
@@ -20,12 +22,29 @@ const tabs: Tab[] = [
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 
+const teamTab: Tab = { href: "/team", label: "Team" };
+const cloudTabs: Tab[] = [
+  { href: "/", label: "Home" },
+  { href: "/runs", label: "Runs" },
+  { href: "/cluster", label: "Compute" },
+  { href: "/crons", label: "Crons" },
+];
+
 const APPROVALS_POLL_MS = 10_000;
 
 export default function Nav() {
   const pathname = usePathname();
+  const router = useRouter();
+  const prefetchHome = () => router.prefetch("/");
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
+  const team = useTeamState();
+  const visibleTabs =
+    team.status === "single-team"
+      ? tabs
+      : team.status === "ready"
+        ? [...cloudTabs, teamTab]
+        : cloudTabs;
 
   useEffect(() => {
     let cancelled = false;
@@ -42,19 +61,27 @@ export default function Nav() {
   }, []);
 
   return (
-    <div className="flex items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
-      <Link href="/" className="text-lg font-bold py-2">
+    <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 px-4 border-b border-[var(--border)] bg-[var(--surface)]">
+      <Link
+        href="/"
+        prefetch={false}
+        onMouseEnter={prefetchHome}
+        onFocus={prefetchHome}
+        onTouchStart={prefetchHome}
+        className="text-lg font-bold py-2"
+      >
         sparkwing
       </Link>
       <VersionPill />
-      <div className="flex items-center gap-1 flex-1 ml-4">
-        {tabs.map((tab) => {
+      <TeamSwitcher />
+      <div className="order-last sm:order-none flex items-center gap-1 w-full sm:w-auto sm:flex-1 min-w-0 overflow-x-auto ml-0 sm:ml-4 whitespace-nowrap">
+        {visibleTabs.map((tab) => {
           const active = tab.external
             ? false
             : tab.href === "/"
               ? pathname === "/"
               : pathname.startsWith(tab.href);
-          const className = `px-3 py-2 text-sm border-b-2 transition-colors ${
+          const className = `shrink-0 px-3 py-2 text-sm border-b-2 transition-colors ${
             active
               ? "border-[var(--accent)] text-[var(--foreground)]"
               : "border-transparent text-[var(--muted)] hover:text-[var(--foreground)]"
@@ -86,8 +113,17 @@ export default function Nav() {
               </a>
             );
           }
+          const onIntent = () => router.prefetch(tab.href);
           return (
-            <Link key={tab.href} href={tab.href} className={className}>
+            <Link
+              key={tab.href}
+              href={tab.href}
+              prefetch={false}
+              onMouseEnter={onIntent}
+              onFocus={onIntent}
+              onTouchStart={onIntent}
+              className={className}
+            >
               {tab.label}
             </Link>
           );

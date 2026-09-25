@@ -22,8 +22,7 @@ Every profile with a controller follows the same dispatch flow:
 ```
 sparkwing pipeline trigger <pipeline> --profile <profile>
   → CLI reads the origin URL + branch/SHA from your checkout and POSTs the trigger
-  → CLI seeds that commit into the cluster's gitcache (best effort, so an unpushed
-     SHA is still fetchable)
+  → CLI requires the commit on an origin-tracking branch
   → controller enqueues the run
   → a runner in the pool claims it on its next poll
   → runner clones the ref and executes the pipeline
@@ -34,8 +33,9 @@ The default clones the named commit and excludes uncommitted files.
 changes and untracked non-ignored files, uploads its Git bundle before trigger
 admission, and runs that exact snapshot without pushing it to the origin. The
 capture rejects conflicts, submodules, sparse checkouts, and Git content
-filters. It also requires a complete SHA-1 repository. Both modes require an
-`origin` URL as the cache namespace.
+filters. It also requires a complete SHA-1 repository. The default requires an `origin` URL and a pushed commit. `--working-tree`
+needs a local Git checkout with a HEAD commit, but no origin: it uploads one
+source bundle directly to S3 before admitting the run.
 A runner started with `--trigger-runner k8s` creates one Kubernetes Job per
 node. `--trigger-runner warm` offers nodes to remote agents first and uses
 Kubernetes for unlabeled overflow. Both modes are opt-in; the runner-bundle
@@ -52,7 +52,10 @@ A Job for a cpu class above the warm one selects and tolerates the
 tolerations the runner was configured with. A cluster offering those classes
 needs a node pool labeled and tainted with that key and value; on a cluster
 without one the pod never schedules and the node fails with the scheduler's
-message. See [Runner classes](auth.md#runner-classes).
+message. Requests use the pipeline's pinned or measured resources, independently
+of the billed class. On fixed node pools, a request exceeding every matching
+node's allocatable capacity fails before the Job is created; band pools can add
+larger nodes. See [Runner classes](auth.md#runner-classes).
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

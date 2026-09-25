@@ -202,6 +202,36 @@ func (s *controllerState) handler(w http.ResponseWriter, r *http.Request) {
 		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
 		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	case "/api/v1/team/github-app/connect":
+		if err := json.NewEncoder(w).Encode(map[string]string{
+			"install_url":   "https://github.example/apps/sparkwing/installations/new?state=picker-state",
+			"authorize_url": "https://github.example/login/oauth/authorize?state=picker-state",
+			"state":         "picker-state", "verifier": "picker-verifier",
+		}); err != nil {
+			log.Printf("browser fixture connect: %v", err)
+		}
+	case "/api/v1/team/github-app/connect/available":
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"authorization": "picker-proof",
+			"installations": []map[string]any{
+				{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization", "connected_elsewhere": false},
+				{"installation_id": 43, "account_login": "bound-org", "account_type": "Organization", "connected_elsewhere": true},
+			},
+		}); err != nil {
+			log.Printf("browser fixture available: %v", err)
+		}
+	case "/api/v1/team/github-app/connect/select":
+		var body struct {
+			InstallationID int64 `json:"installation_id"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.InstallationID != 42 {
+			http.Error(w, "invalid selection", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(map[string]any{"installation_id": 42, "account_login": "octo-org"}); err != nil {
+			log.Printf("browser fixture select: %v", err)
+		}
 	default:
 		http.NotFound(w, r)
 	}

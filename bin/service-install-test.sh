@@ -43,19 +43,19 @@ run_install() {
 }
 
 home_bad="$CASE_ROOT/home-bad"
-if run_install "$home_bad" SPARKWING_CACHE_TOKEN='x"
+if run_install "$home_bad" SPARKWING_GITCACHE_URL='x"
 labels:
   - "injected"' >"$CASE_ROOT/out-bad" 2>&1; then
-  fail "installer accepted a cache token carrying a double quote and a newline" "$CASE_ROOT/out-bad"
+  fail "installer accepted a gitcache URL carrying a double quote and a newline" "$CASE_ROOT/out-bad"
 fi
-grep -q "Cache token contains" "$CASE_ROOT/out-bad" \
-  || fail "rejection does not name the cache token" "$CASE_ROOT/out-bad"
+grep -q "Gitcache URL contains" "$CASE_ROOT/out-bad" \
+  || fail "rejection does not name the gitcache URL" "$CASE_ROOT/out-bad"
 [ ! -e "$home_bad/.config/sparkwing/agent.yaml" ] \
-  || fail "installer wrote a config despite rejecting the cache token" "$CASE_ROOT/out-bad"
+  || fail "installer wrote a config despite rejecting the gitcache URL" "$CASE_ROOT/out-bad"
 
 home_name="$CASE_ROOT/home-name"
 if run_install "$home_name" RUNNER_NAME='box" spawn_policy: "always' \
-  SPARKWING_CACHE_TOKEN=swc_good >"$CASE_ROOT/out-name" 2>&1; then
+  >"$CASE_ROOT/out-name" 2>&1; then
   fail "installer accepted a runner name carrying a double quote" "$CASE_ROOT/out-name"
 fi
 grep -q "Runner name contains" "$CASE_ROOT/out-name" \
@@ -68,8 +68,10 @@ if ! run_install "$home_ok" SPARKWING_CACHE_TOKEN=swc_good \
 fi
 config="$home_ok/.config/sparkwing/agent.yaml"
 [ -f "$config" ] || fail "clean install wrote no config at $config" "$CASE_ROOT/out-ok"
-grep -qx 'cache_token: "swc_good"' "$config" \
-  || fail "clean install did not record the cache token" "$config"
+! grep -q 'cache_token' "$config" \
+  || fail "clean install recorded a cache token; the agent asks the controller for per-run grants" "$config"
+! grep -q 'swc_good' "$config" \
+  || fail "clean install copied SPARKWING_CACHE_TOKEN into the agent config" "$config"
 grep -qx 'holder_prefix: "test-runner"' "$config" \
   || fail "clean install did not record the runner name" "$config"
 grep -qx 'contribution: "50%,50%"' "$config" \

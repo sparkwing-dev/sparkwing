@@ -2,6 +2,8 @@ package controller_test
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -21,6 +23,11 @@ func newBudgetServer(t *testing.T, b controller.RequestBudget) string {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	// safety: a route scoped to a run answers 404 at the team boundary before its
+	// budget when the run is missing, so the budgets are measured against a real one.
+	if err := st.CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
 	ts := httptest.NewServer(controller.New(st, nil).WithRequestBudget(b).Handler())
 	t.Cleanup(ts.Close)
 	return ts.URL
@@ -224,5 +231,30 @@ func TestRequestBudget_SharedTokenFleetStaysAliveUnderTheRecommendedBudget(t *te
 		if status == http.StatusTooManyRequests {
 			t.Fatalf("%s liveness heartbeat was shed under fleet load", name)
 		}
+	}
+}
+
+// A runner names itself on the claim routes, so each new name buys a fresh
+// budget; the number of names one caller may hold at once is capped, and a
+// name already held keeps working past the cap.
+func TestRequestBudget_CapsTheRunnerNamesOneCallerHolds(t *testing.T) {
+	base := newBudgetServer(t, controller.RequestBudget{ClaimsPerMinute: 100, RunnersPerToken: 2})
+	for _, runner := range []string{"runner-1", "runner-2"} {
+		resp := claimAs(t, base, runner)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s status=%d want 204", runner, resp.StatusCode)
+		}
+	}
+	third := claimAs(t, base, "runner-3")
+	defer func() { _ = third.Body.Close() }()
+	body, _ := io.ReadAll(third.Body)
+	if third.StatusCode != http.StatusTooManyRequests || !bytes.Contains(body, []byte("2 runner")) {
+		t.Fatalf("a third runner name status=%d body=%s, want 429 naming the cap of 2", third.StatusCode, body)
+	}
+	again := claimAs(t, base, "runner-1")
+	defer func() { _ = again.Body.Close() }()
+	if again.StatusCode != http.StatusNoContent {
+		t.Fatalf("a runner name already held status=%d want 204", again.StatusCode)
 	}
 }

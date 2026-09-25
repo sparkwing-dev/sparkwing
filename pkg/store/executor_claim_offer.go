@@ -39,6 +39,7 @@ type executorPrepareCandidate struct {
 }
 
 type executorPreparePlan struct {
+	team     string
 	pipeline string
 	raw      []byte
 }
@@ -169,8 +170,15 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		return nil, err
 	}
 	activeAfter := now.Add(-ExecutorRegistrationActiveWindow)
+	// safety: the enrollment's own credential decides the team, and the
+	// credential was matched against the enrollment above, so an executor
+	// cannot be offered a node of a team its token does not belong to.
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
 	cursor := s.loadExecutorPrepareCursor(executorName, runID)
-	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor)
+	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -300,26 +308,29 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 }
 
 func (s *Store) loadExecutorPrepareCandidates(ctx context.Context, runID, executorName string, now time.Time,
-	cursor executorPrepareCursor,
+	cursor executorPrepareCursor, scope teamScope,
 ) ([]executorPrepareCandidate, error) {
 	if cursor == (executorPrepareCursor{}) {
 		return s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-			executorPrepareFromStart, cursor, executorPrepareCandidateLimit)
+			executorPrepareFromStart, cursor, executorPrepareCandidateLimit, scope)
 	}
 	page, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-		executorPrepareAfterCursor, cursor, executorPrepareCandidateLimit)
+		executorPrepareAfterCursor, cursor, executorPrepareCandidateLimit, scope)
 	if err != nil || len(page) == executorPrepareCandidateLimit {
 		return page, err
 	}
 	wrapped, err := s.loadExecutorPrepareCandidateRange(ctx, runID, executorName, now,
-		executorPrepareThroughCursor, cursor, executorPrepareCandidateLimit-len(page))
+		executorPrepareThroughCursor, cursor, executorPrepareCandidateLimit-len(page), scope)
 	return append(page, wrapped...), err
 }
 
 func (s *Store) loadExecutorPrepareCandidateRange(ctx context.Context, runID, executorName string, now time.Time,
-	rangeKind executorPrepareRange, cursor executorPrepareCursor, limit int,
+	rangeKind executorPrepareRange, cursor executorPrepareCursor, limit int, scope teamScope,
 ) ([]executorPrepareCandidate, error) {
-	query, args := executorPrepareCandidateQuery(runID, executorName, now, rangeKind, cursor, limit)
+	query, args, err := executorPrepareCandidateQuery(runID, executorName, now, rangeKind, cursor, limit, scope)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -345,8 +356,12 @@ func (s *Store) loadExecutorPrepareCandidateRange(ctx context.Context, runID, ex
 }
 
 func executorPrepareCandidateQuery(runID, executorName string, now time.Time, rangeKind executorPrepareRange,
-	cursor executorPrepareCursor, limit int,
-) (string, []any) {
+	cursor executorPrepareCursor, limit int, scope teamScope,
+) (string, []any, error) {
+	teamClause, teamArgs, err := claimTeamWhere(scope, "n.team")
+	if err != nil {
+		return "", nil, err
+	}
 	cursorPredicate := ""
 	args := []any{
 		executionpolicy.NodeExecutionPolicyVersion, executionpolicy.MaxEncodedPolicyBytes,
@@ -354,6 +369,7 @@ func executorPrepareCandidateQuery(runID, executorName string, now time.Time, ra
 		executorPrepareNeedsJSONMaxSize,
 		runID, runID, executorName, now.Add(-executorOfferLiveness).UnixNano(),
 	}
+	args = append(args, teamArgs...)
 	switch rangeKind {
 	case executorPrepareAfterCursor:
 		cursorPredicate = `
@@ -394,9 +410,9 @@ SELECT n.run_id, n.node_id, n.ready_at, n.needs_labels,
 	       SELECT 1 FROM node_claim_offers o
 	        WHERE o.run_id = n.run_id AND o.node_id = n.node_id
 	          AND o.executor_name = ? AND o.last_seen_at >= ?)
-	` + cursorPredicate + `
+	` + teamClause + cursorPredicate + `
 	ORDER BY n.ready_at, n.run_id, n.node_id
-	LIMIT ?`, args
+	LIMIT ?`, args, nil
 }
 
 func isExecutorRuntimeRefusal(err error) bool {
@@ -439,7 +455,7 @@ func (s *Store) loadExecutorPreparePlans(ctx context.Context, candidates []execu
 		args = append(args, runID)
 	}
 	rows, err := s.query(ctx, `
-SELECT id, pipeline, plan_json FROM runs
+SELECT id, team, pipeline, plan_json FROM runs
  WHERE COALESCE(LENGTH(plan_json), 0) <= ? AND id IN (`+
 		strings.TrimSuffix(strings.Repeat("?,", len(runIDs)), ",")+`)`, args...)
 	if err != nil {
@@ -450,7 +466,7 @@ SELECT id, pipeline, plan_json FROM runs
 	for rows.Next() {
 		var runID string
 		var plan executorPreparePlan
-		if err := rows.Scan(&runID, &plan.pipeline, &plan.raw); err != nil {
+		if err := rows.Scan(&runID, &plan.team, &plan.pipeline, &plan.raw); err != nil {
 			return nil, err
 		}
 		plans[runID] = plan
@@ -461,11 +477,15 @@ SELECT id, pipeline, plan_json FROM runs
 func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []executorPrepareCandidate,
 	plans map[string]executorPreparePlan,
 ) (map[string]*PipelineProfile, error) {
-	type profileIdentity struct{ pipeline, nodeID string }
+	// safety: the team is part of the identity because it leads the
+	// profile key, and the prepare scan crosses teams by construction;
+	// without it two teams sharing a pipeline name would be served one
+	// team's measurements for both.
+	type profileIdentity struct{ team, pipeline, nodeID string }
 	identities := make(map[profileIdentity]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		if plan, ok := plans[candidate.runID]; ok {
-			identities[profileIdentity{pipeline: plan.pipeline, nodeID: candidate.nodeID}] = struct{}{}
+			identities[profileIdentity{team: plan.team, pipeline: plan.pipeline, nodeID: candidate.nodeID}] = struct{}{}
 		}
 	}
 	ordered := make([]profileIdentity, 0, len(identities))
@@ -473,6 +493,9 @@ func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []ex
 		ordered = append(ordered, identity)
 	}
 	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].team != ordered[j].team {
+			return ordered[i].team < ordered[j].team
+		}
 		if ordered[i].pipeline != ordered[j].pipeline {
 			return ordered[i].pipeline < ordered[j].pipeline
 		}
@@ -482,13 +505,13 @@ func (s *Store) loadExecutorPrepareProfiles(ctx context.Context, candidates []ex
 		return map[string]*PipelineProfile{}, nil
 	}
 	var predicate strings.Builder
-	args := make([]any, 0, len(ordered)*2)
+	args := make([]any, 0, len(ordered)*3)
 	for i, identity := range ordered {
 		if i != 0 {
 			predicate.WriteString(" OR ")
 		}
-		predicate.WriteString("(pipeline = ? AND node_id = ?)")
-		args = append(args, identity.pipeline, identity.nodeID)
+		predicate.WriteString("(team = ? AND pipeline = ? AND node_id = ?)")
+		args = append(args, identity.team, identity.pipeline, identity.nodeID)
 	}
 	rows, err := s.query(ctx, `SELECT pipeline, node_id, `+profileColumns+`
   FROM pipeline_profiles WHERE `+predicate.String(), args...)
@@ -548,6 +571,12 @@ func (s *Store) offerExecutorClaimAt(ctx context.Context, claimant ClaimIdentity
 	if offer.ExecutorName == "" || offer.HolderID == "" || offer.RunID == "" || offer.NodeID == "" ||
 		offer.ReservationID == "" || offer.ResourceDigest == "" || offer.Slot < 0 {
 		return ExecutorClaimOfferResult{}, errors.New("executor offer requires executor, holder, node, reservation, digest, and slot")
+	}
+	// safety: the offer names its own node, so the team boundary the
+	// preparation scan drew is redrawn here, and before the attestation check,
+	// whose refusals would tell another team's executor the node exists.
+	if err := s.assertClaimantOwnsNode(ctx, claimant, offer.RunID, offer.NodeID); err != nil {
+		return ExecutorClaimOfferResult{}, err
 	}
 	if err := s.rejectUnattestedExecutorOffer(ctx, claimant, offer); err != nil {
 		return ExecutorClaimOfferResult{}, err
@@ -676,10 +705,10 @@ func (s *Store) recordExecutorOfferAt(ctx context.Context, claimant ClaimIdentit
 
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_claim_offers
-       (claim_token_prefix, claim_principal, holder_id, run_id, node_id,
+       (team, claim_token_prefix, claim_principal, holder_id, run_id, node_id,
         executor_name, membership_id, worker_id, executor_kind, reservation_id,
         resource_digest, slot, base_priority, effective_priority, offered_at, last_seen_at, lease_ns)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        run_id = excluded.run_id, node_id = excluded.node_id,
        executor_name = excluded.executor_name, membership_id = excluded.membership_id,
@@ -688,7 +717,7 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
        slot = excluded.slot, base_priority = excluded.base_priority,
        effective_priority = excluded.effective_priority, offered_at = excluded.offered_at,
        last_seen_at = excluded.last_seen_at, lease_ns = excluded.lease_ns`,
-		claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
+		offer.RunID, claimant.TokenPrefix, claimant.Principal, offer.HolderID, offer.RunID, offer.NodeID,
 		offer.ExecutorName, membership.MembershipID, membership.WorkerID, membership.Kind, offer.ReservationID,
 		offer.ResourceDigest, offer.Slot, membership.RegisteredBasePriority, membership.EffectivePriority,
 		offeredAt, now.UnixNano(), int64(offer.Lease)); err != nil {
@@ -700,6 +729,14 @@ ON CONFLICT (claim_token_prefix, claim_principal, holder_id) DO UPDATE SET
 	if newOffer {
 		executor, err := s.getExecutorTx(ctx, tx, offer.ExecutorName)
 		if err != nil {
+			return ExecutorClaimOfferResult{}, err
+		}
+		// safety: a deadline round holds the run's row lock and then takes its
+		// event-sequence lock, so the offer takes them in the same order; event
+		// first and award second deadlocked the two on Postgres.
+		var lockedRun string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(),
+			offer.RunID).Scan(&lockedRun); err != nil {
 			return ExecutorClaimOfferResult{}, err
 		}
 		if _, err := appendEventTx(ctx, tx, offer.RunID, offer.NodeID, "executor_offer_received",
@@ -795,7 +832,7 @@ func (s *Store) awardBestExecutorOffer(ctx context.Context, tx *storeTx, runID, 
 		return nil, err
 	}
 	var lockedRun string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&lockedRun); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE id = ?`+tx.forNoKeyUpdate(), runID).Scan(&lockedRun); err != nil {
 		return nil, err
 	}
 	summary, err := s.schedulingSummaryTx(ctx, tx, runID, nodeID)
@@ -995,7 +1032,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	if changed != 1 {
 		return nil, ErrLockHeld
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, item.Claimant, runID, nodeID, now); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, item.Claimant, runID, nodeID, now, true); err != nil {
 		return nil, err
 	}
 	n.ClaimedBy = item.HolderID

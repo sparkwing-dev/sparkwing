@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -30,14 +32,21 @@ const RecommendedHeartbeatsPerMinute = 1200
 // heartbeat is never budgeted: losing it takes an agent and every node it runs
 // down with it.
 //
-// This bounds a cooperating runner. On the two claim routes the identity is
-// the runner's own word, so a holder of a valid token that varies it gets a
-// fresh budget each time; the budget is a guard against a runaway loop, not
-// against a caller who already authenticated and means harm.
+// On the claim routes the identity is the runner's own word, so each new name
+// buys a fresh budget. RunnersPerToken caps how many such names one caller may
+// hold at once, a name counting until it has gone unused for ten minutes; zero
+// means [DefaultRunnersPerToken]. A new name past the cap is answered 429.
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int
+	RunnersPerToken     int
 }
+
+// DefaultRunnersPerToken is the number of self-named runners one caller may
+// hold at once when [RequestBudget.RunnersPerToken] names none.
+const DefaultRunnersPerToken = 64
+
+const runnerNameIdle = 10 * time.Minute
 
 // WithRequestBudget installs b as the per-runner budget on the claim and
 // heartbeat routes. A refused request is answered 429 with a Retry-After
@@ -53,16 +62,22 @@ const (
 	budgetClassClaim    = "claim"
 	budgetClassBeat     = "heartbeat"
 	budgetClassIdlePoll = "idle_poll"
+
+	budgetClassRunnerNames = "runner_names"
 )
 
 type principalBudget struct {
 	policy     RequestBudget
 	claims     *ratelimit.Limiter
 	heartbeats *ratelimit.Limiter
+	names      *runnerNames
 }
 
 func newPrincipalBudget(b RequestBudget) *principalBudget {
-	p := &principalBudget{policy: b}
+	if b.RunnersPerToken <= 0 {
+		b.RunnersPerToken = DefaultRunnersPerToken
+	}
+	p := &principalBudget{policy: b, names: &runnerNames{max: b.RunnersPerToken, held: map[string]map[string]time.Time{}}}
 	if b.ClaimsPerMinute > 0 {
 		p.claims = ratelimit.New(b.ClaimsPerMinute, budgetWindow)
 	}
@@ -98,7 +113,10 @@ func (s *Server) budgeted(class string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := s.runnerBudgetKey(r)
+		key, ok := s.runnerBudgetKey(w, r)
+		if !ok {
+			return
+		}
 		allowed, wait := limiter.AllowWithRetry(key, time.Now())
 		if !allowed {
 			observePrincipalThrottled(class)
@@ -113,29 +131,81 @@ func (s *Server) budgeted(class string, next http.Handler) http.Handler {
 }
 
 // safety: budgeting a bare token would let one runner's loop starve every
-// other runner sharing it, so the budget is keyed on the runner as well.
-func (s *Server) runnerBudgetKey(r *http.Request) string {
-	return s.floodKey(r, "") + "/" + runnerIdentity(r)
+// other runner sharing it, so the budget is keyed on the runner as well. A name
+// the caller supplied is admitted only while the caller holds fewer than the
+// cap, so varying it cannot multiply the budget without bound; a refusal is
+// already written when this reports false.
+func (s *Server) runnerBudgetKey(w http.ResponseWriter, r *http.Request) (string, bool) {
+	principal := s.floodKey(r, "")
+	identity, supplied := runnerIdentity(r)
+	if supplied && !s.requestBudget.admitName(principal, identity, time.Now()) {
+		limit := s.requestBudget.values().RunnersPerToken
+		observePrincipalThrottled(budgetClassRunnerNames)
+		s.logger.Warn("request shed",
+			"principal", principal, "runner", identity, "route_class", budgetClassRunnerNames,
+			"reason", "caller already holds the most runner names it may", "cap", limit)
+		writeRetryAfter(w, runnerNameIdle,
+			fmt.Sprintf("this caller already holds %d runner names, the most it may; reuse one", limit))
+		return "", false
+	}
+	return principal + "/" + identity, true
 }
 
 // safety: a client-supplied name is taken only where the controller can derive
 // none, so a runner cannot widen its own budget on any route that names a run,
-// a node or an agent.
-func runnerIdentity(r *http.Request) string {
+// a node or an agent. The flag reports a name the caller supplied.
+func runnerIdentity(r *http.Request) (string, bool) {
 	for _, value := range []string{"nodeID", "name", "id"} {
 		if v := r.PathValue(value); v != "" {
-			return v
+			return v, false
 		}
 	}
 	for _, header := range []string{store.ClaimHolderHeader, store.ClaimMembershipHeader, store.RunnerIdentityHeader} {
 		if v := r.Header.Get(header); v != "" {
-			return v
+			return v, true
 		}
 	}
 	// safety: a runner too old to name itself shares this bucket with its
 	// peers for the length of a rolling upgrade, which is why the budgets
 	// are sized per runner rather than per fleet.
-	return "unnamed"
+	return "unnamed", false
+}
+
+type runnerNames struct {
+	mu   sync.Mutex
+	max  int
+	held map[string]map[string]time.Time
+}
+
+func (p *principalBudget) admitName(principal, name string, now time.Time) bool {
+	if p == nil || p.names == nil {
+		return true
+	}
+	return p.names.admit(principal, name, now)
+}
+
+func (n *runnerNames) admit(principal, name string, now time.Time) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	names := n.held[principal]
+	if names == nil {
+		names = map[string]time.Time{}
+		n.held[principal] = names
+	}
+	if _, ok := names[name]; ok {
+		names[name] = now
+		return true
+	}
+	for held, at := range names {
+		if now.Sub(at) > runnerNameIdle {
+			delete(names, held)
+		}
+	}
+	if len(names) >= n.max {
+		return false
+	}
+	names[name] = now
+	return true
 }
 
 // safety: an award is work this controller chose to hand out, and the loop that
@@ -149,7 +219,10 @@ func (s *Server) claimBudgeted(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := s.runnerBudgetKey(r)
+		key, ok := s.runnerBudgetKey(w, r)
+		if !ok {
+			return
+		}
 		now := time.Now()
 		if !limiter.Peek(key, now) {
 			// safety: the refusal is charged, so a runner that keeps knocking

@@ -187,3 +187,72 @@ func TestLoginForwardsBrowserAddressToController(t *testing.T) {
 		})
 	}
 }
+
+func TestDashboardSessionCookiesPersistAcrossBrowserRestarts(t *testing.T) {
+	t.Parallel()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			_ = json.NewEncoder(w).Encode(loginResp{
+				SessionID: "session", CSRFToken: "csrf", Principal: "admin",
+				ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
+			})
+		case "/api/v1/auth/session":
+			if r.Header.Get("Authorization") != "Session session" {
+				http.Error(w, "invalid session", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(sessionResp{
+				Principal: "admin", CSRFToken: "csrf",
+				ExpiresAt: time.Now().Add(7 * 24 * time.Hour).Unix(),
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+
+	form := url.Values{"username": {"admin"}, "password": {"correct-horse"}, "csrf_token": {"tok"}}
+	login := httptest.NewRequest(http.MethodPost, "https://dashboard.example/login", strings.NewReader(form.Encode()))
+	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	login.Header.Set("Origin", "https://dashboard.example")
+	login.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "tok"})
+	issued := httptest.NewRecorder()
+	handler.ServeHTTP(issued, login)
+	if issued.Code != http.StatusSeeOther {
+		t.Fatalf("login = %d, want redirect", issued.Code)
+	}
+	assertPersistentAuthCookies(t, issued.Result().Cookies())
+
+	reopened := httptest.NewRequest(http.MethodGet, "https://dashboard.example/", nil)
+	addAuthCookies(t, reopened, issued.Result().Cookies())
+	active := httptest.NewRecorder()
+	handler.ServeHTTP(active, reopened)
+	if active.Code != http.StatusOK {
+		t.Fatalf("authenticated page after browser restart = %d, want 200", active.Code)
+	}
+}
+
+func assertPersistentAuthCookies(t *testing.T, cookies []*http.Cookie) {
+	t.Helper()
+	for _, name := range []string{sessionCookieName, csrfCookieName} {
+		cookie := findCookie(cookies, name)
+		if cookie == nil {
+			t.Fatalf("%s was not refreshed", name)
+		}
+		wantSameSite := http.SameSiteStrictMode
+		if name == sessionCookieName {
+			wantSameSite = http.SameSiteLaxMode
+		}
+		if cookie.MaxAge != int(30*24*time.Hour/time.Second) || !cookie.Secure || cookie.SameSite != wantSameSite || cookie.Path != "/" || cookie.Domain != "" {
+			t.Errorf("%s persistence or security attributes = MaxAge %d, Secure %t, SameSite %d, Path %q, Domain %q", name, cookie.MaxAge, cookie.Secure, cookie.SameSite, cookie.Path, cookie.Domain)
+		}
+		if name == sessionCookieName && !cookie.HttpOnly {
+			t.Error("session cookie is not HttpOnly")
+		}
+	}
+}

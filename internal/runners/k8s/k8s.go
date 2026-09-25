@@ -10,11 +10,12 @@ import (
 	"maps"
 	"math"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -58,6 +59,10 @@ type Config struct {
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
 
+	// Team owns the run whose nodes this runner places. Its Jobs carry
+	// [TeamLabel] and never share a node with another team's Jobs.
+	Team string
+
 	CPURequest    string
 	CPULimit      string
 	MemoryRequest string
@@ -95,7 +100,8 @@ type Config struct {
 	FleetFullWait time.Duration
 
 	// JobActiveDeadline bounds a fallback Job whose node declared no timeout.
-	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it.
+	// Zero means [DefaultJobActiveDeadline]; a node's own timeout outranks it
+	// up to the longer of this and [MaxDeclaredJobActiveDeadline].
 	JobActiveDeadline time.Duration
 }
 
@@ -142,17 +148,18 @@ func (r *Runner) AdvertisedLabels() []string {
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	name := JobName(req.RunID, req.NodeID, 0)
 	res := r.resolveResources(ctx, req)
-	fence, class, claimed := r.claimNode(ctx, req, name)
-	if claimed {
-		// safety: the dispatcher reached here holding the run's trigger claim,
-		// and the controller refuses a request that carries both identities.
-		ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
+	fence, class, refused := r.claimNode(ctx, req, name)
+	if refused != nil {
+		return r.refuseUnclaimedJob(ctx, req, refused)
 	}
-	if msg := r.ceilingUnderClass(class); msg != "" {
+	// safety: the dispatcher reached here holding the run's trigger claim,
+	// and the controller refuses a request that carries both identities.
+	ctx = store.WithNodeClaimFence(store.WithoutClaimFences(ctx), fence)
+	job := r.buildJob(name, req, res, class, fence)
+	if msg := r.impossibleShape(ctx, job); msg != "" {
 		r.failNode(ctx, req, msg, store.FailureUnknown, eventClassRefused)
 		return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 	}
-	job := r.buildJob(name, req, res, class, fence)
 
 	// safety: idempotent on AlreadyExists; a racing orchestrator may have dispatched the same node
 	_, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
@@ -412,25 +419,36 @@ func unschedulableEvent(queued bool) string {
 	return eventClassRefused
 }
 
-// safety: a customer is billed for the class at the claim, so a pod that cannot
-// be given that class fails the node instead of running smaller for the same
-// price.
-func (r *Runner) ceilingUnderClass(class store.CPUClass) string {
-	if class.Cores <= 0 {
+// safety: a request larger than every matching fixed node cannot become
+// schedulable by waiting for current jobs to finish.
+func (r *Runner) impossibleShape(ctx context.Context, job *batchv1.Job) string {
+	pod := &corev1.Pod{Spec: job.Spec.Template.Spec}
+	// safety: a band pool can add a larger node than any one currently running.
+	if pod.Spec.NodeSelector[cpuBandKey] != "" {
 		return ""
 	}
-	if r.cfg.CPUCeiling > 0 && r.cfg.CPUCeiling < float64(class.Cores) {
-		return fmt.Sprintf(
-			"K8sRunner: this node is billed at the %d-core class and the runner cpu ceiling is %g cores; "+
-				"raise the ceiling or lower the pin", class.Cores, r.cfg.CPUCeiling)
+	cpu, memory := podRequestTotals(pod)
+	nodes, err := r.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		LabelSelector: labels.Set(pod.Spec.NodeSelector).String(),
+	})
+	if err != nil || len(nodes.Items) == 0 {
+		return ""
 	}
-	if r.cfg.MemoryCeiling > 0 && r.cfg.MemoryCeiling < class.MemoryBytes {
-		return fmt.Sprintf(
-			"K8sRunner: this node is billed at the %d-core class, which carries %s, and the runner memory "+
-				"ceiling is %s; raise the ceiling or lower the pin",
-			class.Cores, gib(class.MemoryBytes), gib(r.cfg.MemoryCeiling))
+	var maxCPU, maxMemory resource.Quantity
+	for i := range nodes.Items {
+		alloc := nodes.Items[i].Status.Allocatable
+		if alloc.Cpu().Cmp(cpu) >= 0 && alloc.Memory().Cmp(memory) >= 0 {
+			return ""
+		}
+		if alloc.Cpu().Cmp(maxCPU) > 0 {
+			maxCPU = *alloc.Cpu()
+		}
+		if alloc.Memory().Cmp(maxMemory) > 0 {
+			maxMemory = *alloc.Memory()
+		}
 	}
-	return ""
+	return fmt.Sprintf("K8sRunner: pod requests %s cpu and %s memory, but no matching node has that allocatable capacity (largest cpu %s, memory %s); lower the resource pin or add a larger node",
+		cpu.String(), memory.String(), maxCPU.String(), maxMemory.String())
 }
 
 func (r *Runner) failNode(ctx context.Context, req runner.Request, msg, reason, event string) {
@@ -498,12 +516,18 @@ const DefaultJobActiveDeadline = 6 * time.Hour
 // rather than vanishing with the pod Kubernetes deleted.
 const jobDeadlineSlack = 10 * time.Minute
 
-// safety: a controller that does not carry the targeted-claim route, or a node
-// some other holder already took, leaves the Job running exactly as it did
-// before the fence existed rather than failing the node here.
+// MaxDeclaredJobActiveDeadline is the longest a node's declared timeout can
+// stretch its Job's deadline, unless the operator configured a longer one. A
+// pod whose dispatcher died stops heartbeating and so stops being charged, and
+// the timeout is the pipeline author's to choose.
+const MaxDeclaredJobActiveDeadline = 24 * time.Hour
+
+// safety: every refusal is returned, including a controller that does not
+// serve the named-claim route, because the claim is where the credit check
+// lives and an unfenced Job would run on compute nobody paid for.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
-) (store.NodeClaimFence, store.CPUClass, bool) {
+) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
 	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
 	// safety: only the operator's metered pool may claim it sizes a node to its
@@ -512,20 +536,31 @@ func (r *Runner) claimNode(
 	if errors.Is(err, store.ErrLockHeld) {
 		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false)
 	}
-	if errors.Is(err, client.ErrControllerLacksRoute) {
-		r.logger.Info("k8s: this controller does not award a named node, so the Job runs unfenced",
-			"run_id", req.RunID, "node_id", req.NodeID)
-		return store.NodeClaimFence{}, store.CPUClass{}, false
-	}
 	if err != nil {
-		r.logger.Warn("k8s: claiming the node for its Job failed",
+		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
 			"run_id", req.RunID, "node_id", req.NodeID, "holder_id", holderID, "err", err)
-		return store.NodeClaimFence{}, store.CPUClass{}, false
+		return store.NodeClaimFence{}, store.CPUClass{}, err
 	}
 	return store.NodeClaimFence{
 		HolderID: n.ClaimedBy, MembershipID: n.ClaimMembershipID,
 		ReservationID: n.ReservationID, ClaimGeneration: n.ClaimGeneration,
-	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, true
+	}, store.CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}, nil
+}
+
+const eventClaimRefused = "job_claim_refused"
+
+// safety: a node another holder took is that holder's to finish, so only the
+// other refusals fail it here; the dispatcher still learns this Job never ran.
+func (r *Runner) refuseUnclaimedJob(ctx context.Context, req runner.Request, refused error) runner.Result {
+	msg := fmt.Sprintf("K8sRunner: the controller refused this node's claim, so no Job was created: %v", refused)
+	if !errors.Is(refused, store.ErrLockHeld) {
+		reason := store.FailureUnknown
+		if errors.Is(refused, store.ErrInsufficientCredits) {
+			reason = store.FailureCreditsExhausted
+		}
+		r.failNode(ctx, req, msg, reason, eventClaimRefused)
+	}
+	return runner.Result{Outcome: sparkwing.Failed, Err: errors.New(msg)}
 }
 
 // safety: this is a wall-clock backstop for a pod Kubernetes would otherwise
@@ -539,7 +574,7 @@ func (r *Runner) jobActiveDeadline(req runner.Request) *int64 {
 	}
 	if req.Node != nil {
 		if declared := req.Node.TimeoutDuration(); declared > 0 {
-			deadline = declared + jobDeadlineSlack
+			deadline = min(declared+jobDeadlineSlack, max(deadline, MaxDeclaredJobActiveDeadline))
 		}
 	}
 	secs := int64(deadline.Seconds())
@@ -787,9 +822,10 @@ func (r *Runner) buildJob(
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
 	}
-	// safety: the pod reads and writes the cache's guarded /bin/ routes, which reject the controller bearer.
-	if tok := bincache.CacheToken(); tok != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_CACHE_TOKEN", Value: tok})
+	// safety: the pod runs the team's code, so of the cache credentials it gets only
+	// the run's grant, which opens that team's trees and no other's.
+	if grant := os.Getenv(authwire.CacheGrantEnv); grant != "" {
+		env = append(env, corev1.EnvVar{Name: authwire.CacheGrantEnv, Value: grant})
 	}
 	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 	env = append(env, claimFenceEnv(fence)...)
@@ -801,7 +837,7 @@ func (r *Runner) buildJob(
 		Command:         []string{JobBinary},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
-		Resources:       podResources(res, class, r.cfg),
+		Resources:       podResources(res, r.cfg),
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
 			RunAsNonRoot:             boolPtr(true),
@@ -814,6 +850,7 @@ func (r *Runner) buildJob(
 		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolumeName, MountPath: "/tmp"}},
 	}
 
+	team := TeamLabelValue(r.cfg.Team)
 	band := cpuBand(class.Cores)
 	selector := bandNodeSelector(r.cfg.NodeSelector, band)
 	placed := ""
@@ -830,6 +867,7 @@ func (r *Runner) buildJob(
 		AutomountServiceAccountToken: boolPtr(false),
 		NodeSelector:                 selector,
 		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
+		Affinity:                     teamAntiAffinity(team),
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -853,6 +891,7 @@ func (r *Runner) buildJob(
 		"app.kubernetes.io/managed-by": r.labelInstance,
 		"sparkwing.dev/run-id":         sanitizeK8sName(truncate(req.RunID, 63)),
 		"sparkwing.dev/node-id":        sanitizeK8sName(truncate(req.NodeID, 63)),
+		TeamLabel:                      team,
 	}
 
 	ttl := r.cfg.TTLSecondsAfterFinished
@@ -992,18 +1031,7 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 
 // safety: cluster profiles use peak CPU because the resolved core value is a
 // hard CFS limit here; sustained local-host demand would throttle spiky pods.
-func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) corev1.ResourceRequirements {
-	// safety: the class the controller billed outranks the operator ceiling,
-	// which RunNode has already refused when it sits below the class, so a pod
-	// is never smaller than what the customer paid for.
-	if class.Cores > 0 {
-		cpu := milliCores(float64(class.Cores))
-		memory := *resource.NewQuantity(class.MemoryBytes, resource.BinarySI)
-		return corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
-			Limits:   corev1.ResourceList{corev1.ResourceCPU: cpu, corev1.ResourceMemory: memory},
-		}
-	}
+func podResources(res capacity.Resolution, cfg Config) corev1.ResourceRequirements {
 	// safety: an operator ceiling outranks a pipeline pin, which is otherwise unbounded on this path
 	res = capacity.ApplyCeiling(res, cfg.CPUCeiling, cfg.MemoryCeiling)
 	req := corev1.ResourceList{}
@@ -1016,9 +1044,11 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 		req[corev1.ResourceCPU] = milliCores(cores)
 		lim[corev1.ResourceCPU] = milliCores(cappedCores(cores*podCPULimitFactor, cfg.CPUCeiling))
 	} else {
-		if cfg.CPURequest != "" {
-			req[corev1.ResourceCPU] = resource.MustParse(cfg.CPURequest)
+		cpuRequest := cfg.CPURequest
+		if cpuRequest == "" {
+			cpuRequest = "100m"
 		}
+		req[corev1.ResourceCPU] = resource.MustParse(cpuRequest)
 		if cfg.CPULimit != "" {
 			lim[corev1.ResourceCPU] = milliCores(cappedCores(quantityCores(cfg.CPULimit), cfg.CPUCeiling))
 		}
@@ -1029,9 +1059,11 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
 		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)
 	} else {
-		if cfg.MemoryRequest != "" {
-			req[corev1.ResourceMemory] = resource.MustParse(cfg.MemoryRequest)
+		memoryRequest := cfg.MemoryRequest
+		if memoryRequest == "" {
+			memoryRequest = "128Mi"
 		}
+		req[corev1.ResourceMemory] = resource.MustParse(memoryRequest)
 		if cfg.MemoryLimit != "" {
 			lim[corev1.ResourceMemory] = *resource.NewQuantity(
 				cappedBytes(quantityBytes(cfg.MemoryLimit), cfg.MemoryCeiling), resource.BinarySI)

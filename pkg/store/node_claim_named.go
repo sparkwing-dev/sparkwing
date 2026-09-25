@@ -34,6 +34,11 @@ type NamedClaimOptions struct {
 // the node in the same breath as the controller withdraws it from the queue.
 // Deciding who may name a node is the caller's gate, not this one.
 //
+// Naming a node is not a way past the team boundary: the award carries the
+// claimant's own team, so a named node of another team is refused exactly as
+// an unnamed one is. A metered credential is no exception: metering decides
+// who pays, not whose work the claimant may see.
+//
 // claimant is the authenticated token the claim answers to, exactly as for
 // [Store.ClaimNextReadyNode]: a metered token reserves credits here, and
 // [Store.HeartbeatNodeClaim] admits only that token afterwards. lease is
@@ -54,12 +59,24 @@ func (s *Store) ClaimNamedNode(
 	if err != nil {
 		return nil, err
 	}
+	scope, err := s.claimScope(ctx, claimant)
+	if err != nil {
+		return nil, err
+	}
+	// safety: the team is in this read and not only in the award, so a node of
+	// another team reports not-found rather than held; the held answer would
+	// tell a caller its guessed node id exists.
+	teamClause, teamArgs, err := claimTeamWhere(scope, "n.team")
+	if err != nil {
+		return nil, err
+	}
 	var status, runStatus string
 	var claimedBy sql.NullString
 	var needsJSON, prefersJSON []byte
+	args := append([]any{runID, nodeID}, teamArgs...)
 	err = s.queryRow(ctx, `SELECT n.status, n.claimed_by, n.needs_labels, n.prefers_labels, r.status
  FROM nodes n JOIN runs r ON r.id = n.run_id
-	WHERE n.run_id = ? AND n.node_id = ?`, runID, nodeID).Scan(
+	WHERE n.run_id = ? AND n.node_id = ?`+teamClause, args...).Scan(
 		&status, &claimedBy, &needsJSON, &prefersJSON, &runStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("node", runID+"/"+nodeID)
@@ -100,7 +117,7 @@ func (s *Store) ClaimNamedNode(
 	if len(placement.prefersFor(candidate.prefers)) == 0 {
 		candidate.decision = placementDecision{reason: PlacementNone}
 	}
-	n, err := s.awardScannedNode(ctx, candidate, claimant, holderID, coordinatorID, lease, placement, false)
+	n, err := s.awardScannedNode(ctx, candidate, claimant, holderID, coordinatorID, lease, placement, false, scope)
 	if err != nil {
 		return nil, err
 	}

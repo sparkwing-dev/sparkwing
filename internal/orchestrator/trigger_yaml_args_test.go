@@ -213,8 +213,16 @@ pipelines:
 	if logged := rig.logs.String(); !strings.Contains(logged, "arg:region=prod") {
 		t.Fatalf("guard did not reject the trigger; log:\n%s", logged)
 	}
-	if _, err := rig.st.GetRun(context.Background(), trig.ID); err == nil {
-		t.Error("a rejected dispatch created a run row")
+	run, err := rig.st.GetRun(context.Background(), trig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") {
+		t.Fatalf("rejected dispatch run = status %q, error %q", run.Status, run.Error)
+	}
+	nodes, err := rig.st.ListNodes(context.Background(), trig.ID)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("rejected dispatch nodes = %d, err %v", len(nodes), err)
 	}
 }
 

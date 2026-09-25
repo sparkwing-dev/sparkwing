@@ -324,11 +324,27 @@ func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix stri
 
 // ListExecutors returns every registered executor, including stale entries.
 func (s *Store) ListExecutors(ctx context.Context) ([]Executor, error) {
-	rows, err := s.query(ctx, `
+	return s.listExecutors(ctx, "", false)
+}
+
+// ListExecutors returns the executors whose credential belongs to t's team.
+func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error) {
+	return t.s.listExecutors(ctx, t.team, true)
+}
+
+func (s *Store) listExecutors(ctx context.Context, team Team, scoped bool) ([]Executor, error) {
+	query := `
 SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
-  FROM executors ORDER BY kind, name`)
+  FROM executors`
+	var args []any
+	if scoped {
+		query += ` WHERE EXISTS (SELECT 1 FROM tokens WHERE prefix = executors.token_prefix AND team = ?)`
+		args = append(args, string(team))
+	}
+	query += ` ORDER BY kind, name`
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -382,6 +398,24 @@ SELECT claim_executor, run_id, COUNT(*) FROM nodes
 	if err != nil {
 		return nil, err
 	}
+	return scanExecutorActivity(rows)
+}
+
+// ActiveExecutorActivity returns only claims on t's nodes.
+func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error) {
+	rows, err := t.s.query(ctx, `
+SELECT claim_executor, run_id, COUNT(*) FROM nodes
+ WHERE claim_executor != '' AND claimed_by IS NOT NULL
+   AND lease_expires_at >= ? AND team = ? AND `+nodeNotDone+`
+ GROUP BY claim_executor, run_id ORDER BY claim_executor, run_id`,
+		now.UnixNano(), string(t.team))
+	if err != nil {
+		return nil, err
+	}
+	return scanExecutorActivity(rows)
+}
+
+func scanExecutorActivity(rows *sql.Rows) (map[string]ExecutorActivity, error) {
 	defer func() { _ = rows.Close() }()
 	out := map[string]ExecutorActivity{}
 	for rows.Next() {
@@ -1130,12 +1164,17 @@ SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_
 // ClaimReadyNodeForExecutorWithReservation claims only the named ready node,
 // recomputes its scheduling resource digest, and persists the supplied
 // reservation and slot binding. The offer layer must validate reservation
-// liveness before calling it.
+// liveness before calling it. A node of a team the claimant's credential
+// does not belong to reports not found, as on every other claim path.
 func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
 	if executorName == "" || runID == "" || nodeID == "" || holderID == "" || reservationID == "" || slot < 0 || resourceDigest == "" {
 		return nil, ErrLockHeld
 	}
 	lease = clampNodeLease(lease)
+	teamClause, teamArgs, err := s.claimTeamClause(ctx, claimant, "team")
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -1144,7 +1183,8 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
-	n, err := s.claimReadyNodeForExecutorTx(ctx, tx, claimant, executorName, runID, nodeID, holderID, lease, reservationID, slot, resourceDigest)
+	n, err := s.claimReadyNodeForExecutorTx(ctx, tx, claimant, executorName, runID, nodeID, holderID, lease,
+		reservationID, slot, resourceDigest, teamClause, teamArgs)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,11 +1194,14 @@ func (s *Store) ClaimReadyNodeForExecutorWithReservation(ctx context.Context, cl
 	return n, nil
 }
 
-func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string) (*Node, error) {
+func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, claimant ClaimIdentity, executorName, runID, nodeID, holderID string, lease time.Duration, reservationID string, slot int, resourceDigest string,
+	teamClause string, teamArgs []any,
+) (*Node, error) {
 	n := &nodeRecord{}
 	err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+tx.forUpdate(), runID, nodeID), n)
+ WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+teamClause+tx.forUpdate(),
+		append([]any{runID, nodeID}, teamArgs...)...), n)
 	if errors.Is(err, ErrNotFound) {
 		return nil, notFound("ready node for executor", "")
 	}
@@ -1364,17 +1407,23 @@ func (s *Store) executorNodeCharge(ctx context.Context, tx *storeTx, n *Node) (E
 // credit ledger can price a node by the same cpu figure the scheduler sizes it
 // by, inside the claim transaction that is already open.
 func nodeChargeTx(ctx context.Context, q rowQuerier, runID, nodeID string) (ExecutorResource, error) {
-	var pipeline string
+	var team, pipeline string
 	var plan []byte
-	if err := q.QueryRowContext(ctx, `SELECT pipeline, plan_json FROM runs WHERE id = ?`, runID).Scan(&pipeline, &plan); err != nil {
+	if err := q.QueryRowContext(ctx,
+		`SELECT team, pipeline, plan_json FROM runs WHERE id = ?`, runID,
+	).Scan(&team, &pipeline, &plan); err != nil {
 		return ExecutorResource{}, err
 	}
 	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin, nil
 	}
+	// safety: the team comes off the run rather than off the caller,
+	// because this runs on the claim path, which is cross-team by
+	// construction; without it a pipeline name two teams share prices
+	// one team's node off the other's measurements.
 	row := q.QueryRowContext(ctx, `
 SELECT `+profileColumns+`
-  FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`, pipeline, nodeID)
+  FROM pipeline_profiles WHERE team = ? AND pipeline = ? AND node_id = ?`, team, pipeline, nodeID)
 	profile, err := scanProfile(row, pipeline, nodeID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return ExecutorResource{}, err

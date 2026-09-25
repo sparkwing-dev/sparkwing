@@ -75,11 +75,17 @@ type StorageQuotaError struct {
 	Used      int64
 	Allowed   int64
 	Requested int64
+	// Remedy, when set, tells the caller what lifts the limit.
+	Remedy string
 }
 
 func (e *StorageQuotaError) Error() string {
-	return fmt.Sprintf("storage quota exceeded: %s for team %s: %d of %d %s used and this write adds %d",
+	msg := fmt.Sprintf("storage quota exceeded: %s for team %s: %d of %d %s used and this write adds %d",
 		e.Limit, e.Principal, e.Used, e.Allowed, e.Unit, e.Requested)
+	if e.Remedy != "" {
+		msg += "; " + e.Remedy
+	}
+	return msg
 }
 
 // Unwrap reports [ErrStorageQuota], so a caller matches the condition without
@@ -639,12 +645,28 @@ func (s *Store) chargeStorageTx(
 	if principal == "" || runID == "" || (bytes <= 0 && objects <= 0) {
 		return nil
 	}
-	rate, err := creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
-	if err != nil {
-		return err
+	var rate int64
+	var team Team
+	var free bool
+	if !creditMeteringDisabled(ctx) {
+		var err error
+		rate, err = creditSettingTx(ctx, tx, metaKeyStorageRateMicroPerGBDay, 0)
+		if err != nil {
+			return err
+		}
+		team, err = creditTeamForRunTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		free = holdsFreeAllowance(team)
+	}
+	if free {
+		if err := admitFreeEventsTx(ctx, tx, team, principal, bytes, now); err != nil {
+			return err
+		}
 	}
 	if rate > 0 && bytes > 0 {
-		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, principal, bytes); err != nil {
+		if err := refuseStorageGrowthOnEmptyBalanceTx(ctx, tx, team, principal, bytes); err != nil {
 			return err
 		}
 	}
@@ -652,9 +674,10 @@ func (s *Store) chargeStorageTx(
 	if err != nil {
 		return err
 	}
-	// safety: priced storage bills every team's bytes, so the total is kept
-	// for all of them; unpriced storage keeps it only where a limit reads it.
-	if rate <= 0 && quota.Unlimited() && quota.AllowanceBytes <= 0 {
+	// safety: priced storage bills every team's bytes and a signed-up team's
+	// event share is counted from them, so the total is kept for all of
+	// those; otherwise it is kept only where a limit reads it.
+	if !free && rate <= 0 && quota.Unlimited() && quota.AllowanceBytes <= 0 {
 		return nil
 	}
 	if err := lockStorageUsageTx(ctx, tx, principal); err != nil {
@@ -689,15 +712,17 @@ ON CONFLICT (principal, run_id) DO UPDATE SET
 		principal, runID, bytes, objects, now.UnixNano()); err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 INSERT INTO storage_month_usage (principal, month, bytes, objects, updated_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (principal, month) DO UPDATE SET
         bytes = storage_month_usage.bytes + excluded.bytes,
         objects = storage_month_usage.objects + excluded.objects,
         updated_at = excluded.updated_at`,
-		principal, month, bytes, objects, now.UnixNano())
-	return err
+		principal, month, bytes, objects, now.UnixNano()); err != nil {
+		return err
+	}
+	return addFreeEventBytesTx(ctx, tx, team, bytes)
 }
 
 func storageQuotaForTx(ctx context.Context, tx *storeTx, principal string) (StorageQuota, error) {
@@ -759,9 +784,10 @@ func lockStorageUsageTx(ctx context.Context, tx *storeTx, principal string) erro
 	return err
 }
 
-// AppendEventCharged appends an event and charges its payload to principal's
-// storage quota in the same transaction, so a refused event is never written
-// and a written event is always paid for. An empty principal charges nothing
+// AppendEventCharged appends an event and charges its kind and payload to
+// principal's storage quota in the same transaction, so a refused event is
+// never written and a written event is always paid for. A kind that fails
+// [ValidateEventKind] is refused before anything is read. An empty principal charges nothing
 // and appends exactly as [Store.AppendEvent] does.
 func (s *Store) AppendEventCharged(
 	ctx context.Context, principal, runID, nodeID, kind string, payload []byte,
@@ -775,10 +801,17 @@ func (s *Store) AppendEventCharged(
 		if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 			return 0, err
 		}
-	} else if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+	} else if err := s.assertRunMutationFenceInRunsTeamTx(ctx, tx, runID); err != nil {
 		return 0, err
 	}
-	if err := s.chargeStorageTx(ctx, tx, principal, runID, int64(len(payload)), 0, time.Now().UTC()); err != nil {
+	if err := ValidateEventKind(kind); err != nil {
+		return 0, err
+	}
+	size := eventBytes(kind, payload)
+	if err := refuseEventOverLimitsTx(ctx, tx, principal, runID, size); err != nil {
+		return 0, err
+	}
+	if err := s.chargeStorageTx(ctx, tx, principal, runID, size, 0, time.Now().UTC()); err != nil {
 		return 0, err
 	}
 	seq, err := appendEventTx(ctx, tx, runID, nodeID, kind, payload, time.Now())

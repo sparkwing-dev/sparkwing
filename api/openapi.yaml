@@ -82,6 +82,8 @@ tags:
     description: Local-account CRUD + bootstrap.
   - name: auth
     description: Login / logout / session + introspection.
+  - name: teams
+    description: Signed-in users, their teams, memberships, invitations and runner tokens.
   - name: secrets
     description: Named secret material.
   - name: agents
@@ -1208,6 +1210,15 @@ paths:
                 trigger_sources:
                   type: array
                   items: {type: string}
+                node_runner:
+                  type: string
+                  enum: [inprocess, k8s, warm]
+                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
+                allow_repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
       responses:
         "200":
           description: Claimed trigger.
@@ -1654,7 +1665,7 @@ paths:
   /api/v1/concurrency/{key}/cancel-waiter:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.state
       tags: [concurrency]
       summary: Drop one waiter from a key's queue.
       requestBody:
@@ -1822,6 +1833,11 @@ paths:
                   nullable: true
                   description: >-
                     The runner's own slot ceiling and in-flight claim count, which local-first placement reads to tell a saturated runner from an idle one. Omit it to advertise no ceiling, which counts as having room.
+                allow_repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
       responses:
         "200":
           description: Claimed node.
@@ -2021,6 +2037,67 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreateTokenResponse"}
 
+  /api/v1/accounts/{account}:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Delete an account on the operator's word.
+      description: >-
+        Carries out a deletion request that reached the operator by other means. The path names the account by id or by email; an address held by more than one account, none verified, answers 409 and needs the id. The deletion is the one `DELETE /api/v1/me` performs, including its 409 for a last owner of a team with other members.
+      parameters:
+        - {name: account, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
+                type: object
+                required: [error, teams]
+                properties:
+                  error: {type: string}
+                  teams:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+
+  /api/v1/teams/{team}:
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Delete a team on the operator's word.
+      description: The deletion `DELETE /api/v1/team` performs, without its owner and only-team checks. The default team cannot be deleted.
+      parameters:
+        - {name: team, in: path, required: true, schema: {type: string}}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
+
   /api/v1/users:
     get:
       x-sparkwing-scope: admin
@@ -2162,6 +2239,16 @@ paths:
                     type: string
                     description: Token the dashboard echoes on each state-changing request.
                   expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  team:
+                    type: string
+                    description: Team the session acts for. `default` for a password session.
+                  role:
+                    type: string
+                    enum: [owner, editor, reader]
+                    description: The signed-in user's role in `team`, read from the membership on this request. Absent for a password session or a user no longer in `team`.
+                  user_id:
+                    type: string
+                    description: Signed-in user behind an identity-provider session. Absent for a password session.
 
   /api/v1/auth/whoami:
     get:
@@ -2185,6 +2272,13 @@ paths:
                   token_prefix:
                     type: string
                     description: Prefix of the bearer token that answered, absent for a session or anonymous principal.
+                  team:
+                    type: string
+                    description: Team the request acts for, from the token or the session. Absent for an anonymous principal.
+                  role:
+                    type: string
+                    enum: [owner, editor, reader]
+                    description: The signed-in user's role in `team`. Absent for a token or a password session.
         "401": {$ref: "#/components/responses/Unauthorized"}
 
   /api/v1/auth/bootstrap-needed:
@@ -2206,7 +2300,7 @@ paths:
 
   /api/v1/secrets:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: admin or team.admin
       tags: [secrets]
       summary: Create or replace a secret.
       requestBody:
@@ -2232,9 +2326,14 @@ paths:
       responses:
         "201": {description: Created.}
     get:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: runs.read or team.admin
       tags: [secrets]
-      summary: List secrets (metadata only; values are never returned in list).
+      summary: List secrets and variables.
+      description: |
+        Lists every row in the caller's team. A masked row (a secret) lists
+        with its metadata only; its value is never returned here. An unmasked
+        row (a variable) lists with its value, so any member who reads runs
+        sees the team's variables.
       responses:
         "200":
           description: Secrets list.
@@ -2256,18 +2355,25 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: secrets.read
+      x-sparkwing-scope: secrets.read or team.admin
       tags: [secrets]
       summary: Read one secret (value included).
+      description: |
+        A masked row's value goes only to the operator's bearer token and to
+        a runner reading through the run it has claimed. Every other caller,
+        a dashboard session or a team owner's token included, gets `403`
+        with error `write_only`; it may still read an unmasked variable.
+        Every secrets response carries `Cache-Control: no-store`.
       responses:
         "200":
           description: Secret.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Secret"}
+        "403": {description: The caller may not read this value.}
         "404": {$ref: "#/components/responses/NotFound"}
     delete:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: admin or team.admin
       tags: [secrets]
       summary: Delete a secret.
       responses:
@@ -2277,7 +2383,7 @@ paths:
     get:
       x-sparkwing-scope: runs.read
       tags: [agents]
-      summary: List recently-heartbeating runners.
+      summary: List runners whose credentials belong to the caller's team.
       responses:
         "200":
           description: Agents.
@@ -2326,6 +2432,30 @@ paths:
                   pipeline:
                     type: string
                     description: Echoed back only when the request filtered by pipeline.
+
+  /api/v1/pipelines:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [pipelines]
+      summary: List the caller's team's pipelines, most recently active first.
+      description: |
+        A pipeline appears once the caller's team has a run, a trigger or a
+        declared schedule for it. Each entry carries the pipeline's newest run
+        by start time; a pipeline that has only been queued or scheduled has
+        none. The team is the caller's, never one named in the request.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, minimum: 1, maximum: 200, default: 200}
+          description: Most pipelines to return; values above 200 read as 200.
+      responses:
+        "200":
+          description: The team's pipelines.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PipelinesList"}
+        "400": {description: limit is not a positive integer.}
+        "403": {description: The credential lacks the scope or acts for no team.}
 
   /api/v1/pipelines/{name}/latest:
     parameters:
@@ -2412,7 +2542,7 @@ paths:
 
   /api/v1/gitcache/refresh:
     post:
-      x-sparkwing-scope: runs.write
+      x-sparkwing-scope: admin
       tags: [gitcache]
       summary: Refresh the cache's mirror of a repository.
       description: |
@@ -2557,13 +2687,17 @@ paths:
     get:
       x-sparkwing-scope: authenticated
       tags: [health]
-      summary: Announce the cache, logs, and dashboard URLs a client should use.
+      summary: Announce the data download, cache, logs, and dashboard URLs a client should use.
       description: |
         Any valid bearer satisfies this route, and every client that reads
         it already holds one. A field is absent when the controller was
-        started without the matching flag; a co-located laptop deployment
-        announces none of them, because there the controller URL is already
-        the right answer.
+        started without the matching configuration; `data_download_url` is
+        absent when the controller cannot sign downloads on the request's path;
+        a public-ingress request needs CloudFront signing configured. A co-located laptop
+        deployment announces no service URLs, because there the controller
+        URL is already the right answer. `multi_team` is true on a controller
+        that may hold more than one team, which answers 200 even with no URL
+        announced.
       responses:
         "200":
           description: The announced URLs.
@@ -2573,9 +2707,12 @@ paths:
                 x-sparkwing-go-type: pkg/controller.ServicesResponse
                 type: object
                 properties:
+                  data_download_url: {type: string, description: Controller endpoint for requesting signed team-object downloads.}
                   cache_pod: {type: string}
                   logs: {type: string}
                   dashboard: {type: string}
+                  multi_team: {type: boolean}
+                  direct_data: {type: boolean, description: Direct S3 uploads and committed-object reads are available.}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: This controller announces no services.}
 
@@ -2584,6 +2721,7 @@ paths:
       x-sparkwing-scope: public
       tags: [health]
       summary: Process liveness probe.
+      description: Reports service availability without tenant workload counts.
       security: []
       responses:
         "200":
@@ -2858,6 +2996,10 @@ paths:
               type: object
               properties:
                 lease_nanos: {type: integer, format: int64}
+                node_runner:
+                  type: string
+                  enum: [inprocess, k8s, warm]
+                  description: How the claimant runs the trigger's nodes; empty means inprocess. A metered credential claiming for inprocess nodes is refused with 403.
       responses:
         "200":
           description: The claimed trigger.
@@ -3159,12 +3301,15 @@ paths:
                 attempt_ordinal: {type: integer, minimum: 1}
                 executor_kind:
                   type: string
-                  enum: [local]
-                  description: Opens the attempt for a node its dispatcher runs in its own process. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
+                  enum: [local, kubernetes]
+                  description: local opens the attempt for a node its dispatcher runs in its own process; a trigger claim may send kubernetes with its pod's executor_name. For local, no claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it. No claim identity is carried, executor_id is required, and only a host's own admission daemon or loopback controller accepts it.
                 executor_id:
                   type: string
                   maxLength: 128
                   description: The host a locally executed node ran on. It is the attempt's executor id and its display name.
+                executor_name:
+                  type: string
+                  description: At most 128 UTF-8 bytes. The Kubernetes Job pod or trigger runner a claimed attempt ran on. Ignored for GitHub Actions credentials, whose attempts name the repository and workflow run.
       responses:
         "204": {description: Attempt started. Empty body.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -3538,11 +3683,14 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.secretsRotateResponse
                 type: object
-                required: [rotated, skipped]
+                required: [rotated, skipped, git_credentials]
                 properties:
                   rotated:
                     type: integer
                     description: Secret rows rewritten under the current key.
+                  git_credentials:
+                    type: integer
+                    description: Team git credentials resealed under the current key. One that opens under no configured key fails the rotation with 500.
                   skipped:
                     type: array
                     description: Rows left as they were because they opened under no configured key.
@@ -3601,9 +3749,9 @@ paths:
       tags: [credits]
       summary: Read the prepaid credit balance, the rate, and the recent burn.
       description: |
-        Cloud runner time is prepaid. Amounts are micro-credits: a million
-        of them is one credit, and a hundred credits is one dollar, so a
-        ten dollar top-up is a thousand credits. The balance is the sum of
+        Cloud runner time is prepaid. One credit is one vCPU-second and
+        20,000 credits is one dollar; amounts are micro-credits, 5,000 to the
+        credit, so a ten dollar top-up is 200,000 credits. The balance is the sum of
         grants less the sum of charges, computed in SQL. `rate_micro_per_second`
         prices one cloud runner second, `grace_seconds` is how long a node runs
         past its claim reservation on an empty balance, and `burn_micro` is what the last
@@ -3618,7 +3766,7 @@ paths:
 
   /api/v1/credits/grants:
     post:
-      x-sparkwing-scope: admin
+      x-sparkwing-scope: credits.grant
       tags: [credits]
       summary: Add free or paid credits to the ledger, or reverse a paid grant.
       description: |
@@ -3636,12 +3784,28 @@ paths:
         negative `amount_micro`, its own `reference` (the refund id, so
         partial refunds each land), and `reverses` naming the paid grant's
         reference. A reversal whose `reverses` matches no paid grant is
-        refused, and one that takes the balance below zero stops new
-        metered claims.
+        refused, as is one that with the reversals already written would take
+        back more than the payment paid; one that takes the balance below
+        zero stops new metered claims. A reversal may omit `team`: the
+        payment it reverses was granted to exactly one team, and the
+        reversal lands there.
 
         A replay must carry the terms it carried the first time: a request
         naming a `kind` and `reference` another grant holds under a different
         `amount_micro` or `reverses` is refused with 409.
+
+        A new `free` grant that would lift the team's balance above $5,000
+        is refused with 409 and `"code": "balance_cap"`, naming the balance,
+        the amount and the cap. A `paid` grant is never refused by the cap,
+        because its payment already went through and the cap was held when
+        its checkout opened; it is at most one purchase, $500, and names the
+        Checkout Session it settles in `checkout`. A replay of a grant
+        already written is answered as usual, so a redelivered payment still
+        succeeds.
+
+        A caller holding only the checkout service's scope records `paid`
+        grants and is answered 403 for any other kind; a `free` grant or a
+        reversal is the operator's.
       requestBody:
         required: true
         content:
@@ -3660,10 +3824,124 @@ paths:
               schema: {$ref: "#/components/schemas/CreditGrant"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "409":
-          description: Another grant holds this kind and reference under different terms.
+          description: >-
+            Another grant holds this kind and reference under different terms, or the grant would lift the balance above the cap (`balance_cap`, with `balance_micro`, `cap_micro` and `amount_micro`).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/credits/reversals:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Take back what a payment still has on the ledger.
+      description: |
+        Writes one `reversal` of what the paid grant carrying `payment_id`
+        still has, less what earlier reversals of it took back, in the team
+        the payment funded. The balance may go below zero, which stops the
+        team's new metered claims. `reference` names the reversal, such as
+        `refund:<payment id>` for an operator's refund or the dispute id for
+        a lost chargeback; a repeat under it answers 200 with the reversal
+        already written, and a payment already taken back whole answers 200
+        with no `grant`. The controller never moves money: an operator's
+        refund is issued in the Stripe dashboard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.reversePaymentReq
+              type: object
+              required: [payment_id, reference]
+              properties:
+                payment_id: {type: string, description: The payment id the paid grant carries as its reference.}
+                reference: {type: string, description: This reversal's own reference.}
+      responses:
+        "200":
+          description: The reversal this reference already wrote, or nothing left to take back.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PaymentReversal"}
+        "201":
+          description: The reversal written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PaymentReversal"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No paid grant carries the payment id.}
+        "409": {description: "The reference already names a reversal of another payment, or a dispute held for another payment (`dispute_conflict`)."}
+
+  /api/v1/credits/freezes:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Hold a team's cloud usage for a dispute, or release holds.
+      description: |
+        A hold is one per dispute, and a team is held while any of its holds
+        stands: its metered claims are refused with 402 and
+        `"code": "credits_frozen"`, so no new cloud work starts, while work
+        already running finishes. A hold names the team by `payment_id`, a
+        payment it made, or by `team`, and names the `dispute_id`. A dispute
+        is bound to the payment and team its first hold named: holding it
+        again for them, released or not, writes nothing, and holding it for
+        another payment is refused with 409.
+        `release` lifts the hold of `dispute_id`, or every hold on the team
+        when no dispute is named. Naming a team and releasing are the
+        operator's; the checkout service holds by payment and never releases.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.creditFreezeReq
+              type: object
+              properties:
+                payment_id: {type: string}
+                team: {type: string}
+                dispute_id: {type: string, description: The dispute the hold is for.}
+                reason: {type: string}
+                release: {type: boolean, description: "Lift the dispute's hold, or every hold on the team."}
+      responses:
+        "200":
+          description: The team's holds as they now stand.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.creditFreezeJSON
+                type: object
+                required: [team, frozen, disputes]
+                properties:
+                  team: {type: string}
+                  frozen: {type: boolean}
+                  disputes: {type: array, items: {type: string}, description: The disputes still holding the team.}
+                  released: {type: integer, format: int64, description: How many holds a release lifted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
+        "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
+
+  /api/v1/credits/units:
+    get:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Read the units the ledger prices in.
+      description: >-
+        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with.
+      responses:
+        "200":
+          description: The ledger's units.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.creditUnitsJSON
+                type: object
+                required: [micro_per_credit, credits_per_dollar, micro_per_cent]
+                properties:
+                  micro_per_credit: {type: integer, format: int64}
+                  credits_per_dollar: {type: integer, format: int64}
+                  micro_per_cent: {type: integer, format: int64}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/credits/history:
     get:
@@ -3921,6 +4199,37 @@ paths:
               schema: {$ref: "#/components/schemas/StorageQuota"}
         "400": {$ref: "#/components/responses/BadRequest"}
 
+  /api/v1/storage/teams/{team}/free-slot:
+    parameters:
+      - in: path
+        name: team
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: admin
+      tags: [storage]
+      summary: Grant a team a free-tier slot.
+      description: |
+        Admits a team without credits to the free tier whether or not a slot
+        is left, which is how an operator admits a team once every one of
+        `--free-team-slots` is taken. The slot lasts until the team is
+        deleted. The answer is the team's tier and the allowance its
+        per-store shares are cut from.
+      responses:
+        "200":
+          description: The team's storage tier.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/controller.StorageTierResponse
+                properties:
+                  team: {type: string}
+                  tier: {type: string, enum: [funded, free, none]}
+                  allowance_bytes: {type: integer, format: int64}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/storage/settings:
     put:
       x-sparkwing-scope: admin
@@ -3951,6 +4260,38 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/StorageSettings"}
         "400": {$ref: "#/components/responses/BadRequest"}
+
+  /api/v1/admin/usage-metrics:
+    get:
+      x-sparkwing-scope: admin
+      tags: [cluster]
+      summary: Read the deployment's weekly usage for its operator.
+      description: |
+        Counts, per Monday-to-Monday UTC week, the teams with at least one
+        run started, those runs split into cloud and connected-machine runs,
+        how many runs each active team started, and the accounts and teams
+        created. For teams created in the window it reports the time from
+        the team's creation to the finish of its first successful run. Every
+        figure comes from the controller's own tables and names no team,
+        account or source. The default team never counts.
+      parameters:
+        - in: query
+          name: weeks
+          schema: {type: integer, minimum: 1, maximum: 104, default: 12}
+          description: Whole weeks to report, ending with the week in progress.
+        - in: query
+          name: exclude_team
+          schema: {type: array, items: {type: string}}
+          style: form
+          explode: true
+          description: More teams to leave out, such as the operator's own test teams.
+      responses:
+        "200":
+          description: The weekly usage.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UsageMetrics"}
+        "400": {description: weeks is outside 1 to 104.}
 
   /api/v1/egress:
     get:
@@ -3985,11 +4326,12 @@ paths:
         The runner guards count cloud runners, which are the claims a metered
         token holds; the node and hourly guards count one metered principal's
         runs, and their `max_global_*` counterparts count every run on the
-        controller. `usage` reports the cloud runners claimed right now, in
-        total and per principal, and whether the count reached `runner_alarm`.
-        It also reports `derived_runner_cap`, the per-principal runner ceiling
-        after `runner_scale_step_credits` of recent paid credit has raised
-        `max_concurrent_runners`, together with the credit it was read from.
+        controller. For an operator, `usage` reports the cloud runners claimed
+        right now, in total and per principal, and whether the count reached
+        `runner_alarm`. Team readers do not receive those global fields.
+        It also reports `derived_runner_cap`, the runner ceiling for principals
+        in the request's team after that team's recent paid credit has raised
+        `max_concurrent_runners`, together with that team's paid credit.
       responses:
         "200":
           description: Guards and current usage.
@@ -4097,6 +4439,2316 @@ paths:
           description: >-
             Another claim holds the node, the node or its run finished, or its placement is pinned.
 
+  /api/v1/capabilities:
+    get:
+      x-sparkwing-scope: public
+      tags: [teams]
+      summary: Report which licensed team and billing features this controller offers.
+      description: >-
+        Unauthenticated, because a signed-out browser draws the sign-in page from it. `teams.enabled` is true only with a valid multi-team license. `billing.enabled` is true with a valid metering or multi-team license. `auth.providers` lists `google` only when a multi-team license is present and a Google client is configured.
+      security: []
+      responses:
+        "200":
+          description: Capabilities.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.capabilitiesResp
+                type: object
+                required: [teams, billing, auth, claims]
+                properties:
+                  teams:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesTeams
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  billing:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesBilling
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  auth:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesAuth
+                    type: object
+                    required: [providers]
+                    properties:
+                      providers:
+                        type: array
+                        items: {type: string, enum: [google, github]}
+                  claims:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesClaims
+                    type: object
+                    required: [allow_repos]
+                    properties:
+                      allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
+                  github_app:
+                    x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
+                    type: object
+                    description: Present only when the controller has a GitHub App configured.
+                    required: [slug, source_tokens]
+                    properties:
+                      slug: {type: string, description: "The App's name in https://github.com/apps/<slug>."}
+                      source_tokens: {type: boolean, description: "A runner holding a claim may ask POST /api/v1/runs/{id}/source-token for a fetch credential."}
+
+  /api/v1/auth/oauth/google/start:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Begin a Google sign-in and return the authorization URL with its state and PKCE verifier.
+      description: >-
+        The controller stores nothing. The caller keeps `state` and `verifier` in a short-lived `__Host-` cookie on the browser that started the flow and checks `state` against it at the callback. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist. Answers 404 unless Google sign-in is offered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/google/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/auth/oauth/google/exchange:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Finish a Google sign-in and open a session.
+      description: >-
+        Redeems `code` with `verifier`, verifies the returned ID token (signature against Google's keys, issuer, audience, expiry, and `email_verified`), and resolves the user. A new identity joins an existing user only when both Google and that user hold the email verified and that user has no other Google identity. A user with no team gets a personal space: a team whose only member is its owner, slugged from the email's local part. A new user the sign-up gate waitlists gets none, and `waitlisted` says so. The session opens in the user's active team.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
+              type: object
+              required: [code, verifier, redirect_uri]
+              properties:
+                code: {type: string}
+                verifier: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
+                type: object
+                required: [session_id, csrf_token, expires_at, user, active_team]
+                properties:
+                  session_id: {type: string, description: "Send as `Authorization: Session <id>`."}
+                  csrf_token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+                    description: Null for a new user the sign-up gate placed on the waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Google has not verified the account's email address.
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: Google could not be reached.}
+
+  /api/v1/me:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Describe the signed-in user, the active team, every membership, and open invitations.
+      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      responses:
+        "200":
+          description: The signed-in user.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.meResp
+                type: object
+                required: [user, active_team, memberships, invitations]
+                properties:
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+                    description: Null when the user is no longer a member of the session's team, or belongs to no team while on the sign-up waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space, cannot create a team, and may accept invitations.
+                  memberships:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+                  invitations:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.invitationRefJSON
+                      type: object
+                      required: [id, team_slug, team_display_name, role]
+                      properties:
+                        id: {type: string}
+                        team_slug: {type: string}
+                        team_display_name: {type: string}
+                        role: {type: string, enum: [owner, editor, reader]}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+    delete:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Delete the signed-in user's account.
+      description: >-
+        Needs an identity-provider session signed in within the last 10 minutes, and `confirm_email` equal to the account's address. Removes the account, its sign-in identities, memberships and sessions, and revokes every token it minted in any team. Teams the account is the only member of, its personal space included, are queued for deletion with all their data. Rows that recorded the account in teams it shared (runs, triggers, approvals, schedules, bounces, pause releases, credit grants, node claims, secrets, egress usage, event payloads) stay with those teams and name `deleted user`. While the account is the last owner of a team that has other members the request answers 409 and lists those teams.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.deleteAccountReq
+              type: object
+              required: [confirm_email]
+              properties:
+                confirm_email: {type: string}
+      responses:
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.deletedAccountJSON
+                type: object
+                required: [account_id, deleted_teams]
+                properties:
+                  account_id: {type: string}
+                  deleted_teams:
+                    type: array
+                    items: {type: string}
+                    description: Teams the account was the only member of, now queued for deletion.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
+        "409":
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.lastOwnerRefusalJSON
+                type: object
+                required: [error, teams]
+                properties:
+                  error: {type: string}
+                  teams:
+                    type: array
+                    items: {$ref: "#/components/schemas/TeamRef"}
+
+  /api/v1/me/team-deletions:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: List the team deletions the signed-in user asked for.
+      description: A requester no longer belongs to a team being deleted, so this is where the deletion's progress stays visible.
+      responses:
+        "200":
+          description: Deletions, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/TeamDeletion"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/me/active-team:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Switch the session to another team the user belongs to.
+      description: >-
+        Records the team as the user's sticky team, so the next sign-in returns to it. A team the user is not in answers 404, the same as a team that does not exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.activeTeamReq
+              type: object
+              required: [slug]
+              properties:
+                slug: {type: string}
+      responses:
+        "204": {description: Switched.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/me/identities:
+    get:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: List the signed-in user's sign-in methods and the providers the account can link.
+      description: "Needs an identity-provider session (`Authorization: Session <id>`); a bearer token answers 401."
+      responses:
+        "200":
+          description: The account's sign-in methods.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.identitiesResp
+                type: object
+                required: [identities, providers]
+                properties:
+                  identities:
+                    type: array
+                    items: {$ref: "#/components/schemas/LinkedIdentity"}
+                  providers:
+                    type: array
+                    items: {type: string, enum: [google, github]}
+                    description: The sign-in providers this controller offers, which are the ones an account can link.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /api/v1/me/identities/{provider}:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    delete:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Unlink one of the signed-in user's sign-in methods.
+      description: >-
+        Needs an identity-provider session signed in within the last 10 minutes. The account keeps at least one sign-in method, and its email does not change. Every other session of the account ends. The unlinked provider account then signs in as a new account, even when it asserts the account's own address. Unlinking GitHub leaves any GitHub App installation the user connected bound to its team.
+      responses:
+        "204": {description: Unlinked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "It is the account's only sign-in method (`error: last_sign_in_method`)."}
+
+  /api/v1/me/identities/{provider}/link:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Begin adding a provider's sign-in to the signed-in user's account.
+      description: >-
+        Needs an identity-provider session signed in within the last 10 minutes. Returns the provider's authorization URL, a state the controller signs and binds to the account, the session and the provider for ten minutes, and a PKCE verifier. The caller keeps `state` and `verifier` on the browser that started the flow. `redirect_uri` must be on the controller's `--oauth-redirect-uris` allowlist; the dashboard uses its sign-in callback. An account holds at most ten link attempts, starts and completions together, a minute. Answers 404 unless the provider's sign-in is offered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Dashboard callback URL, such as https://app.example.com/auth/github/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string, description: PKCE code verifier. The authorize URL carries only its S256 challenge.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`)."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The account already has a sign-in from this provider (`error: provider_already_linked`); unlink it first."}
+        "429": {description: "Too many link attempts this minute (`error: rate_limited`); `Retry-After` says when to try again."}
+
+  /api/v1/me/identities/{provider}/link/complete:
+    parameters:
+      - in: path
+        name: provider
+        required: true
+        schema: {type: string, enum: [google, github]}
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Finish adding a provider's sign-in to the signed-in user's account.
+      description: >-
+        Attaches the provider account, keyed by the provider's stable subject (Google's `sub`, GitHub's numeric id), when the state is this controller's, unexpired, unused, and names the caller's account, session and this provider, and the verifier matches it. The provider's email plays no part and the account's email does not change. A provider account already attached to any account, this one included, is refused and nothing changes. Every refusal carries `error` (a code) and `message`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.identityLinkCompleteReq
+              type: object
+              required: [state, verifier, code, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string, description: The code the provider returned to the callback.}
+                redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Linked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LinkedIdentity"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {description: "No account session, or the provider did not confirm the sign-in (`error: provider_rejected`)."}
+        "403": {description: "The state is invalid, expired, used, or another account's or session's (`error: link_state_invalid`), or the provider has not verified the account's email (`error: provider_unverified`)."}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The provider account is attached to another account (`error: identity_linked_elsewhere`) or to this one (`error: identity_already_linked`), or this account already has a sign-in from the provider (`error: provider_already_linked`)."}
+        "429": {description: "Too many link attempts this minute (`error: rate_limited`)."}
+        "502": {description: "The provider could not be reached (`error: provider_unreachable`)."}
+
+  /api/v1/teams:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Create a team with the caller as owner and switch to it.
+      description: >-
+        Refused with 403 unless the controller holds a multi-team license. The slug is 3 to 30 lowercase letters, digits and hyphens, becomes the team's hostname label and never changes here; reserved names such as `default`, `api` and anything starting `demo-` answer 400. One user creates at most ten teams over the account's life, the personal space included, and deleting one does not give it back; the eleventh answers 403. A slug that ever named a team, including a deleted one, answers 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.createTeamReq
+              type: object
+              required: [slug]
+              properties:
+                slug: {type: string}
+                display_name: {type: string, description: Free text. Defaults to the slug.}
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Team"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The slug is taken.}
+
+  /api/v1/runs/{id}/cache-grant:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/runs/{id}/log-access:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: logs.read or logs.write or runs.read or nodes.claim or triggers.claim
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/credits/teams/{team}:
+    parameters:
+      - in: path
+        name: team
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/invitations/{id}/accept:
+    post:
+      x-sparkwing-scope: authenticated
+      tags: [teams]
+      summary: Accept an invitation and switch the session to its team.
+      description: >-
+        The signed-in user's verified email must equal the invited address; any other user answers 403. A team that has bought no credits and already holds the sign-up gate's `free_team_members` answers 403. A used or expired invitation answers 410. Invitations live seven days. A user on the sign-up waitlist may accept, and the acceptance counts toward the gate's hourly and daily limits as an admission.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Joined.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Already a member.}
+        "410": {description: The invitation is used or expired.}
+
+  /api/v1/team:
+    patch:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Rename the active team.
+      description: Changes the display name. The slug is the tenant key and stays.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.renameTeamReq
+              type: object
+              required: [display_name]
+              properties:
+                display_name: {type: string}
+      responses:
+        "200":
+          description: Renamed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Team"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Delete the active team and everything it holds.
+      description: >-
+        An owner confirms by sending the team's slug as `confirm_slug`. The request closes the team at once: members leave it, their sessions move to another team they belong to, every token the team holds is revoked, open invitations are withdrawn, queued runs are cancelled and running ones asked to stop. At least two minutes later a background pass removes the team's logs, cached artifacts and rows in every table, secrets included, retrying until it finishes, and seven hours after that deletes its cache tree and sweeps its rows once more; `GET /api/v1/me/team-deletions` shows its state. The slug is never registered again. An owner whose only team this is answers 409 and deletes their account instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.deleteTeamReq
+              type: object
+              required: [confirm_slug]
+              properties:
+                confirm_slug: {type: string}
+      responses:
+        "202":
+          description: Deletion queued; the team is closed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/TeamDeletion"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "This is the owner's only team, or the team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
+
+  /api/v1/team/members:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's members.
+      responses:
+        "200":
+          description: Members.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.memberJSON
+                  type: object
+                  required: [user_id, email, name, role]
+                  properties:
+                    user_id: {type: string}
+                    email: {type: string}
+                    name: {type: string}
+                    role: {type: string, enum: [owner, editor, reader]}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/members/{user_id}:
+    patch:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Change a member's role.
+      description: >-
+        Nobody grants a role above their own or re-roles someone who outranks them, and the last owner cannot be demoted. A user who is not a member of the active team answers 404.
+      parameters:
+        - {name: user_id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.setRoleReq
+              type: object
+              required: [role]
+              properties:
+                role: {type: string, enum: [owner, editor, reader]}
+      responses:
+        "204": {description: Changed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Remove a member, or leave the team when `user_id` is the caller.
+      description: >-
+        Removing another member needs the owner role. The last owner cannot leave. The removed user's sessions lose every scope in the team on their next request.
+      parameters:
+        - {name: user_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Removed.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/invitations:
+    get:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List the active team's open invitations.
+      responses:
+        "200":
+          description: Open invitations.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.invitationJSON
+                  type: object
+                  required: [id, email, role, expires_at]
+                  properties:
+                    id: {type: string}
+                    email: {type: string}
+                    role: {type: string, enum: [owner, editor, reader]}
+                    expires_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Invite an email address to the active team.
+      description: >-
+        When the controller has a mail service (`--email-sender`) it emails the invitation, naming the inviter, the team, the role and the link, and `email_sent` is true. One address, compared without regard to case, receives at most 5 invitation emails in any 24 hours from every team together, counted in a log that deleting a team does not touch; past that, and without a mail service, nothing is mailed and `email_sent` is false. Either way the answer carries `accept_url`, a dashboard link built from the origin of the first `--oauth-redirect-uris` entry, which the inviter can hand on. The role cannot exceed the inviter's own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.inviteReq
+              type: object
+              required: [email, role]
+              properties:
+                email: {type: string}
+                role: {type: string, enum: [owner, editor, reader]}
+      responses:
+        "201":
+          description: Invited.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.inviteResp
+                type: object
+                required: [id, accept_url, email_sent]
+                properties:
+                  id: {type: string}
+                  accept_url: {type: string}
+                  email_sent: {type: boolean, description: Whether the controller mailed the invitation.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The address is already a member or already has an open invitation.}
+        "429": {description: The team holds 50 open invitations or has created 100 in the last day.}
+
+  /api/v1/team/invitations/{id}:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Withdraw an open invitation.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Withdrawn.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/cli-tokens:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the caller's live CLI tokens in the active team.
+      description: Any member lists the CLI tokens they minted; nobody sees another member's.
+      responses:
+        "200":
+          description: CLI tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.cliTokenJSON
+                  type: object
+                  required: [prefix, scopes, created_at, expires_at, last_used_at]
+                  properties:
+                    prefix: {type: string}
+                    scopes: {type: array, items: {type: string}}
+                    created_at: {type: integer, format: int64, description: Unix seconds.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; a CLI token lapses after 90 days."}
+                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Mint a CLI token that acts for the caller in the active team.
+      description: >-
+        Needs a signed-in session; a bearer token cannot mint one. The token carries the scopes of the caller's role except team administration, so a reader's token only reads, and it lapses after 90 days. Removing the member, or demoting them to reader, revokes it. The plaintext is returned once, with the `sparkwing cloud connect` command that stores it in a profile named for the team and the `sparkwing pipeline trigger` command that starts a run with it.
+      responses:
+        "201":
+          description: Minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.cliTokenResp
+                type: object
+                required: [token, prefix, scopes, expires_at, profile, setup, run]
+                properties:
+                  token: {type: string}
+                  prefix: {type: string}
+                  scopes: {type: array, items: {type: string}}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  profile: {type: string, description: "The profile name the setup command writes, which is the team slug."}
+                  setup: {type: string, description: A command that reads the token from a no-echo prompt and writes the profile.}
+                  run: {type: string, description: "The command that starts a run from a pushed checkout, with a pipeline placeholder."}
+        "409": {description: The caller already holds 10 live CLI tokens in this team.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/cli-tokens/{prefix}:
+    delete:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Revoke one of the caller's CLI tokens.
+      description: A member revokes only the CLI tokens they minted; another member's prefix answers 404.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/runner-tokens:
+    get:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: List the active team's live runner tokens.
+      description: Needs the editor role.
+      responses:
+        "200":
+          description: Runner tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  x-sparkwing-go-type: pkg/controller.runnerTokenJSON
+                  type: object
+                  required: [prefix, name, created_by, created_at, expires_at, last_used_at, git_credentials]
+                  properties:
+                    prefix: {type: string}
+                    name: {type: string}
+                    created_by: {type: string, description: User id of the minter; empty for an operator-minted token.}
+                    created_at: {type: integer, format: int64, description: Unix seconds.}
+                    expires_at: {type: integer, format: int64, nullable: true, description: Unix seconds; a runner token minted here lapses after 90 days.}
+                    last_used_at: {type: integer, format: int64, nullable: true, description: Unix seconds.}
+                    git_credentials: {type: boolean, description: "A team owner opted this machine in to receiving the team's git credentials."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: Mint a runner token for the active team.
+      description: >-
+        Needs the editor role. The token carries the runner scope set the CLI's `runners add` mints and belongs to the active team. The plaintext is returned once, with a `sparkwing-runner` command that connects a machine.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.runnerTokenReq
+              type: object
+              required: [name]
+              properties:
+                name: {type: string, description: "1 to 63 letters, digits, '-', '_' or '.'."}
+                repos:
+                  type: array
+                  items: {type: string}
+                  description: >-
+                    Repositories the machine may build, as host/path patterns such as github.com/acme/*. They go into the returned command as --allow-repo flags, since the allowlist belongs to the machine's owner. At most 32.
+      responses:
+        "201":
+          description: Minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runnerTokenResp
+                type: object
+                required: [token, prefix, command]
+                properties:
+                  token: {type: string}
+                  prefix: {type: string}
+                  command: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {description: The team already holds 10 live runner tokens.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/runner-tokens/{prefix}:
+    delete:
+      x-sparkwing-scope: runs.write
+      tags: [teams]
+      summary: Revoke one of the active team's runner tokens.
+      description: An owner revokes any of the team's runner tokens; an editor revokes only the ones they minted.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Revoked.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/runner-tokens/{prefix}/git-credentials:
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Opt one of the team's machines in to, or out of, receiving the team's git credentials.
+      description: An owner. A cloud runner receives the team's git credentials without this; any other runner token of the team receives them only once opted in. Answers 404 for a prefix that is no live runner token of the team.
+      parameters:
+        - {name: prefix, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+      responses:
+        "200":
+          description: The machine's setting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.runnerGitCredentialsReq
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/git-credentials:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's git credentials, without their values.
+      description: Any member. No route returns a credential's value; only a release to a runner does.
+      responses:
+        "200":
+          description: The team's credentials by host.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: none
+                required: [credentials]
+                properties:
+                  credentials:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitCredential"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Store, or replace, the team's git credential for a host.
+      description: >-
+        An owner. Kind ssh takes an unencrypted private_key; the controller reads the host's ssh host key now (on port, default 22, refusing an address inside its own network) and pins it, and the credential is released only after an owner confirms its fingerprint. Replacing an ssh key keeps a confirmation only while the host key is unchanged. Kind https takes a token and an optional username (default x-access-token) and is usable at once. The value is sealed under the controller's secrets key, and 409 secrets_key_required answers a controller without one. A team stores at most 50 credentials.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialPutReq
+              type: object
+              required: [host, kind]
+              properties:
+                host: {type: string, description: "A hostname such as gitlab.com, with no scheme, port or path."}
+                kind: {type: string, enum: [ssh, https]}
+                port: {type: integer, description: "The ssh port the host key is read from; 22 when absent."}
+                private_key: {type: string, description: "An unencrypted PEM or OpenSSH private key, for kind ssh."}
+                username: {type: string, description: "The https username, for kind https."}
+                token: {type: string, description: "The https token, for kind https."}
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitCredential"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "The controller has no secrets key, or the team holds 50 credentials."}
+        "502": {description: "The host's ssh host key could not be read."}
+
+  /api/v1/team/git-credentials/{host}/confirm:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Confirm the host key an ssh git credential pinned.
+      description: An owner, naming the SHA256 fingerprint the credential showed when stored. Answers 409 for any other fingerprint, and 404 when the team holds no credential for the host.
+      parameters:
+        - {name: host, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.gitCredentialConfirmReq
+              type: object
+              required: [fingerprint]
+              properties:
+                fingerprint: {type: string, description: "SHA256:..."}
+      responses:
+        "200":
+          description: Confirmed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitCredential"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "The fingerprint is not the host key the credential pinned."}
+
+  /api/v1/team/git-credentials/{host}:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Delete the team's git credential for a host.
+      description: An owner. Every release after the delete fails.
+      parameters:
+        - {name: host, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Deleted.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/git-credentials/releases:
+    get:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List the most recent releases of the team's git credentials.
+      description: An owner. Each release to a runner writes one row, newest first, at most 200.
+      responses:
+        "200":
+          description: Recent releases.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: none
+                required: [releases]
+                properties:
+                  releases:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.GitCredentialReleaseJSON
+                      type: object
+                      required: [host, run_id, runner, token_prefix, released_at]
+                      properties:
+                        host: {type: string}
+                        run_id: {type: string}
+                        runner: {type: string, description: "The runner principal the credential went to."}
+                        token_prefix: {type: string}
+                        released_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/auth/oauth/github/start:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Begin a GitHub sign-in and return the authorization URL with its state and PKCE verifier.
+      description: >-
+        Mirrors the Google start. The authorize URL asks for `read:user user:email` only. `redirect_uri` must be on the `--oauth-redirect-uris` allowlist. Answers 404 unless GitHub sign-in is offered.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthStartReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthStartResp
+                type: object
+                required: [authorize_url, state, verifier]
+                properties:
+                  authorize_url: {type: string}
+                  state: {type: string}
+                  verifier: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/auth/oauth/github/exchange:
+    post:
+      x-sparkwing-scope: public
+      tags: [auth]
+      summary: Finish a GitHub sign-in and open a session.
+      description: >-
+        Redeems `code`, reads the account's numeric id, which keys the identity so a renamed login keeps its account, and the primary email GitHub has verified from `/user/emails`; the profile's public email is never used. A GitHub identity joins an existing user only when that user holds the same email verified and has no other GitHub identity. Otherwise it behaves as the Google exchange.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.oauthExchangeReq
+              type: object
+              required: [code, verifier, redirect_uri]
+              properties:
+                code: {type: string}
+                verifier: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.oauthExchangeResp
+                type: object
+                required: [session_id, csrf_token, expires_at, user, active_team]
+                properties:
+                  session_id: {type: string}
+                  csrf_token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds.}
+                  user: {$ref: "#/components/schemas/IdentityUser"}
+                  active_team:
+                    allOf: [{$ref: "#/components/schemas/TeamRef"}]
+                    nullable: true
+                    description: Null for a new user the sign-up gate placed on the waitlist.
+                  waitlisted:
+                    type: boolean
+                    description: True while the user waits for admission; it holds no personal space and may only accept invitations.
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: The GitHub account has no primary email address GitHub has verified.
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: GitHub could not be reached.}
+
+  /api/v1/runners/github/exchange:
+    post:
+      x-sparkwing-scope: public
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/team/github-runners:
+    get:
+      x-sparkwing-scope: runs.read
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+    post:
+      x-sparkwing-scope: team.admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/team/github-runners/{repository_id}:
+    parameters:
+      - in: path
+        name: repository_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: team.admin
+      summary: Registered route awaiting a description.
+      description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
+      responses:
+        default: {description: Undescribed.}
+
+  /api/v1/github-app/installations/{installation_id}:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Unbind a GitHub App installation from whichever team holds it.
+      description: >-
+        The operator's route for moving an installation: once it is unbound, an owner of the new team connects it. Drops that team's subscriptions to the installation. Does not uninstall the App from GitHub. Answers 404 when no team holds the installation, and 404 when the controller has no GitHub App.
+      responses:
+        "204": {description: Unbound.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/source-token:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Mint a short-lived GitHub token that reads the run's repository.
+      description: >-
+        For a runner holding a live node or trigger claim on the run. The controller finds the installation GitHub reports for the run's repository, requires it to be bound to the run's team and not suspended, and mints an installation token restricted to that one repository with contents:read. A claim gets one live token: asking again returns the same token until five minutes before it expires, and a claim that asks more than ten times a minute answers 429 with Retry-After. A runner hands the token to git through a credential helper reading an inherited pipe. Answers 403 without a claim on the run, 404 when the run names no GitHub repository or no installation the team holds covers it, and 502 when GitHub cannot be reached.
+      responses:
+        "200":
+          description: Token minted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.SourceTokenResponse
+                type: object
+                required: [token, expires_at, repository]
+                properties:
+                  token: {type: string}
+                  expires_at: {type: integer, format: int64, description: Unix seconds; at most an hour away.}
+                  repository: {type: string, description: owner/name.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: Never set on this route; the git-credential route fills it from the team owner's list.
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/git-credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Release the one credential a runner fetches the run's source with.
+      description: >-
+        For a runner holding a live node or trigger claim on the run, with a token of the run's own team. The controller resolves the credential in a fixed order: the team's GitHub App token when an installation bound to the team covers the run's github.com repository (restricted to that repository and contents:read, reused per claim like source-token); otherwise the git credential the team stored for the host of the run's repository; otherwise 404 with error no_source_credential and a message naming both remedies. A runner never falls back to credentials of its own. The App token also reads the extra repositories a team owner listed for the run's repository (PUT /api/v1/team/github-app/extra-repos), each checked again to be covered by the installation that covers the run's repository (403 otherwise); the route reads no request body, so nothing a runner sends widens it. A team credential is released only while the claim is still live inside the transaction that records the release. Answers 403 without a claim on the run and 502 when GitHub cannot be reached.
+      responses:
+        "200":
+          description: Credential released.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.GitCredentialResponse
+                type: object
+                required: [kind, host]
+                properties:
+                  kind: {type: string, enum: [github_app, ssh, https]}
+                  host: {type: string, description: "The host the credential is bound to; the runner refuses to present it to any other."}
+                  token: {type: string, description: "The App token, for kind github_app."}
+                  expires_at: {type: integer, format: int64, description: Unix seconds the App token expires at.}
+                  repository: {type: string, description: owner/name the App token reads.}
+                  extra_repositories:
+                    type: array
+                    items: {type: string}
+                    description: The owner/name repositories a team owner listed for the run's repository. An App token reads them too; the runner checks out submodules only when this names any.
+                  username: {type: string, description: "The https username, for kind https."}
+                  secret: {type: string, description: "The https token, or the ssh private key, for kind https or ssh."}
+                  known_hosts: {type: string, description: "The known_hosts entry of the host key the owner confirmed, for kind ssh."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for App tokens more than ten times in a minute; Retry-After says when to ask again.}
+        "502": {description: GitHub could not be reached to find the repository's installation or mint its token.}
+
+  /api/v1/team/github-app:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the GitHub App installations the active team holds.
+      description: Any member. Answers 404 when the controller has no GitHub App.
+      responses:
+        "200":
+          description: The App and the team's installations.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppResp
+                type: object
+                required: [slug, installations]
+                properties:
+                  slug: {type: string}
+                  installations:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/connect:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Start connecting a GitHub App installation to the active team.
+      description: >-
+        Owner only, and only for an account with a linked GitHub sign-in (403 otherwise). Stores nothing. The dashboard keeps `state` and `verifier` in a short-lived `__Host-` cookie. To install, it sends the browser to `install_url`, then sends the setup return to `authorize_url`. To connect an existing installation, it sends the browser straight to `authorize_url` and calls connect/available after GitHub returns. `redirect_uri` is the dashboard's App callback and must be on `--oauth-redirect-uris`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppConnectReq
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, description: "Such as https://app.example.com/github/app/callback."}
+      responses:
+        "200":
+          description: Flow started.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppConnectResp
+                type: object
+                required: [install_url, authorize_url, state, verifier]
+                properties:
+                  install_url: {type: string}
+                  authorize_url: {type: string}
+                  state: {type: string, description: Signed; names the account and team and expires in ten minutes.}
+                  verifier: {type: string, description: PKCE verifier; the browser keeps it and returns it to connect/complete.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/connect/available:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: List existing App installations the authorized user administers.
+      description: >-
+        Owner only. Redeems the GitHub authorization code with PKCE and checks the linked GitHub identity. Reads GET /user/installations with the user token and returns only this App's installations whose accounts the user administers. The encrypted authorization proof expires with the signed state. An installation bound to another team is marked without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppAvailableReq
+              type: object
+              required: [state, verifier, code, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        "200":
+          description: Administered installations and a proof for selecting one.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppAvailableResp
+                type: object
+                required: [authorization, installations]
+                properties:
+                  authorization: {type: string, description: Encrypted proof bound to the state.}
+                  installations:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppAvailableInstallation
+                      type: object
+                      required: [installation_id, account_login, account_type, connected_elsewhere]
+                      properties:
+                        installation_id: {type: integer, format: int64}
+                        account_login: {type: string}
+                        account_type: {type: string}
+                        connected_elsewhere: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/connect/complete:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Finish connecting a GitHub App installation to the active team.
+      description: >-
+        Owner only. Binds the installation when the state is this controller's, unexpired, unused, and names the caller's account and active team; the verifier matches the state; the code redeems for the GitHub user linked to the caller's account; and that user administers the installation's account (is the account, or an active owner of the organization). Answers 403 for any of those failing, 404 when GitHub reports no such installation, 409 when another team holds it, and 502 when GitHub cannot be reached. Reconnecting an installation the team holds refreshes it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppCompleteReq
+              type: object
+              required: [state, verifier, code, installation_id, redirect_uri]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                code: {type: string, description: The code GitHub returned to the callback.}
+                installation_id: {type: integer, format: int64, description: From the setup redirect.}
+                redirect_uri: {type: string}
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Another team holds the installation.}
+
+  /api/v1/team/github-app/connect/select:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Bind one existing installation to the active team.
+      description: >-
+        Owner only. Checks the signed state, PKCE verifier, linked GitHub identity, encrypted authorization proof, and live GitHub administration of the chosen installation. Consumes the state once in the store before binding. Answers 409 when another team holds the installation without naming that team.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppSelectReq
+              type: object
+              required: [state, verifier, authorization, installation_id]
+              properties:
+                state: {type: string}
+                verifier: {type: string}
+                authorization: {type: string}
+                installation_id: {type: integer, format: int64}
+      responses:
+        "201":
+          description: Bound.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppInstallation"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Another team holds the installation.}
+
+  /api/v1/team/github-app/installations/{installation_id}:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Disconnect an installation from the active team.
+      description: Owner only. Drops the team's subscriptions to it. Does not uninstall the App from GitHub; `manage_url` is where the account's owner does that.
+      responses:
+        "204": {description: Disconnected.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/installations/{installation_id}/repositories:
+    parameters:
+      - in: path
+        name: installation_id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the repositories an installation the team holds covers, as GitHub reports them now.
+      description: Any member. Up to 1000 repositories. Answers 404 for an installation the team does not hold and 502 when GitHub cannot be reached.
+      responses:
+        "200":
+          description: Repositories.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [repositories]
+                properties:
+                  repositories:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppRepositoryJSON
+                      type: object
+                      required: [repository_id, full_name, private]
+                      properties:
+                        repository_id: {type: integer, format: int64}
+                        full_name: {type: string}
+                        private: {type: boolean}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/team/github-app/triggers:
+    delete:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Remove a pipeline's subscription to a repository.
+      description: Owner only.
+      parameters:
+        - {in: query, name: repository_id, required: true, schema: {type: integer, format: int64}}
+        - {in: query, name: pipeline, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Removed.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the active team's pipeline subscriptions to App repositories.
+      description: Any member.
+      responses:
+        "200":
+          description: Subscriptions.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [triggers]
+                properties:
+                  triggers:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppTrigger"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Subscribe a pipeline to a repository's branch pushes, matching tag pushes and pull requests.
+      description: >-
+        Owner only. The repository must be covered by an installation the team holds and that is not suspended (404 otherwise). Replaces the subscription of the same repository and pipeline. Branch patterns use Go path.Match against the pushed branch or pull request base branch; an empty list matches every branch. A pull request from a fork is never run, and a body naming `fork_pull_requests` answers 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.githubAppTriggerReq
+              type: object
+              required: [repository, pipeline]
+              properties:
+                repository: {type: string, description: owner/name.}
+                pipeline: {type: string}
+                push: {type: boolean}
+                tags:
+                  type: array
+                  maxItems: 10
+                  items: {type: string, maxLength: 128}
+                  description: Tag name globs matched with Go path.Match; empty selects no tags.
+                pull_request: {type: boolean, description: "Runs on opened, synchronize and reopened, for pull requests whose head is in the repository itself."}
+                branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Branch push, creation and deletion glob patterns, at most 128 bytes each. Empty matches all branches."}
+                base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}, description: "Pull request base branch glob patterns, applied to every pull request action, at most 128 bytes each. Empty matches all base branches."}
+                pull_request_closed: {type: boolean, description: "Runs when a pull request closes, merged or not."}
+                pull_request_labeled: {type: boolean, description: "Runs when a pull request gains one of pull_request_labels; requires a nonempty list."}
+                pull_request_labels: {type: array, items: {type: string}, description: "Labels compared without case."}
+                pull_request_ready_for_review: {type: boolean, description: "Runs when a draft pull request is marked ready."}
+                release_published: {type: boolean, description: "Runs at a published release's tag commit."}
+                release_prereleased: {type: boolean, description: "Runs at a prereleased release's tag commit."}
+                branch_create: {type: boolean, description: "Runs when a branch matching branches is created."}
+                branch_delete: {type: boolean, description: "Runs at the default branch commit when a branch matching branches is deleted."}
+      responses:
+        "200":
+          description: Written.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppTrigger"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: This claim asked for source tokens too often; Retry-After says when to ask again.}
+
+  /api/v1/team/github-app/extra-repos:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: List the further repositories each repository's App token also reads.
+      description: Any member. One entry per source repository with a list, sorted by repository.
+      responses:
+        "200":
+          description: Lists.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [extra_repos]
+                properties:
+                  extra_repos:
+                    type: array
+                    items: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Set the further repositories a run of a repository's App token also reads.
+      description: >-
+        Owner only. Replaces the list for repository; an empty list clears it. At most 10 owner/name repositories, all of the repository's owner, and each covered by the installation of the team's that covers the repository (400 otherwise; 404 when no installation the team holds covers the repository). The controller checks the coverage again at every mint. The list lives in the controller, never in the repository, so a repository's own code cannot widen its token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+      responses:
+        "200":
+          description: Written, folded to lower case and sorted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GitHubAppExtraRepos"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {description: GitHub could not be reached to find the installations.}
+
+  /webhooks/github-app:
+    post:
+      x-sparkwing-scope: public
+      tags: [webhooks]
+      summary: Receive a delivery from the deployment's GitHub App.
+      description: >-
+        Verifies X-Hub-Signature-256 with the App's webhook secret (401 on mismatch) and requires X-GitHub-Delivery. Routes by the payload's installation id to the team holding it. `push` and `pull_request` start one run per subscribed pipeline, after GitHub confirms, asked on each delivery, that the installation still covers the repository; a pull request from a fork, a push of no commit, an event with no readable time, and an event older than the team's binding start nothing. `check_run` rerequested re-runs that check run's pipeline and `check_suite` rerequested re-runs every pipeline the team subscribes to the repository, on the same commit, copying the branch and pull request of a run the team already made of that commit; a commit the team never ran, a fork's pull request head, and a check run or suite of another App start nothing, and `check_suite` requested starts nothing because the push delivery starts the commit's runs. `installation` deleted unbinds and suspend or unsuspend marks the binding; anything else is acknowledged with 202 and starts nothing. A delivery whose signed body was processed before, for any team, answers 200 with status `duplicate` and spends nothing. Each run spends one of the team's hourly runs: once the cap is reached the first run answers 429 with Retry-After, and a later run of the same delivery is listed with status `shed`. A redelivery lists the runs it already started as `duplicate` without spending, and spends only on the runs that were shed.
+      security: []
+      responses:
+        "200": {description: "Ping answered, installation event applied, or a duplicate delivery answered with the runs it started (status duplicate)."}
+        "202":
+          description: Accepted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.githubAppWebhookResp
+                type: object
+                required: [status]
+                properties:
+                  status: {type: string, enum: [dispatched, ignored, duplicate]}
+                  reason: {type: string}
+                  runs:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.githubAppRun
+                      type: object
+                      required: [pipeline, run_id, status]
+                      properties:
+                        pipeline: {type: string}
+                        run_id: {type: string}
+                        status: {type: string, enum: [dispatched, duplicate, shed]}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {description: The team's hourly run cap is reached; Retry-After says when.}
+        "502": {description: GitHub could not be reached to confirm the repository's installation.}
+        "503": {description: The controller's queue is above its shed threshold; Retry-After says when.}
+
+  /.well-known/jwks.json:
+    get:
+      x-sparkwing-scope: public
+      summary: The OIDC issuer's public signing keys.
+      description: >-
+        The RS256 keys that verify the ID tokens this controller signs: the active key, then the previous one while a rotation is in progress. Each kid is the key's RFC 7638 thumbprint. Cacheable for one hour. See docs/oidc.md.
+      responses:
+        "200":
+          description: The key set.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: internal/oidcissuer.JWKS
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: internal/oidcissuer.JWK
+                      type: object
+                      properties:
+                        kty: {type: string}
+                        kid: {type: string}
+                        use: {type: string}
+                        alg: {type: string}
+                        n: {type: string}
+                        e: {type: string}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /.well-known/openid-configuration:
+    get:
+      x-sparkwing-scope: public
+      summary: The OIDC issuer's discovery document.
+      description: >-
+        OpenID provider metadata for the issuer, which is the controller's external URL. Cloud providers read jwks_uri from it to verify run ID tokens. Answers 404 when the controller holds no OIDC signing key. Cacheable for one hour.
+      responses:
+        "200":
+          description: The discovery document.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: internal/oidcissuer.Discovery
+                type: object
+                properties:
+                  issuer: {type: string}
+                  jwks_uri: {type: string}
+                  response_types_supported: {type: array, items: {type: string}}
+                  subject_types_supported: {type: array, items: {type: string}}
+                  id_token_signing_alg_values_supported: {type: array, items: {type: string}}
+                  claims_supported: {type: array, items: {type: string}}
+                  scopes_supported: {type: array, items: {type: string}}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/oidc-token:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+    post:
+      x-sparkwing-scope: nodes.claim or triggers.claim
+      tags: [runs]
+      summary: Sign an OIDC ID token for a run the caller holds a claim on.
+      description: >-
+        Returns an RS256 ID token whose sub is team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. See docs/oidc.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.OIDCTokenRequest
+              type: object
+              required: [audience]
+              properties:
+                audience: {type: string, maxLength: 256}
+      responses:
+        "200":
+          description: The signed token.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.OIDCTokenResponse
+                type: object
+                properties:
+                  token: {type: string}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {description: A run value cannot appear in the subject.}
+        "429": {description: The claim spent its token budget for this run; see Retry-After.}
+
+  /api/v1/signups:
+    get:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Read the sign-up gate and the sign-up counts alerting keys on.
+      description: >-
+        The gate decides whether a new user is admitted with a personal space or placed on the waitlist. Users that already exist are never gated.
+      responses:
+        "200":
+          description: The gate.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.signUpStatusJSON
+                type: object
+                required: [state, reasons, mode, source, reason, set_by, updated_at, deployment_waitlist, free_tier, limits, counts, velocity_warning]
+                properties:
+                  state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
+                  reasons:
+                    type: array
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, free_tier_unreadable]}
+                    description: Every condition holding the gate at waitlist; empty while it is open.
+                  mode: {type: string, enum: [open, waitlist], description: The stored mode.}
+                  source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
+                  reason: {type: string}
+                  set_by: {type: string}
+                  updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
+                  deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
+                  free_tier: {type: string, enum: [open, throttled, closed, unreadable], description: "`unreadable` when the free-tier source failed, which waitlists new users as `closed` does."}
+                  limits:
+                    x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
+                    type: object
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members]
+                    properties:
+                      hourly_limit: {type: integer, description: "Admissions the last hour may hold before the gate closes itself, counting new users admitted and waitlisted users who accepted an invitation; 0 is off."}
+                      daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
+                      hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
+                      github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                      free_team_members: {type: integer, description: Most members a team that has bought no credits may hold; 0 is off.}
+                  counts:
+                    x-sparkwing-go-type: pkg/controller.signUpCountsJSON
+                    type: object
+                    required: [last_hour, last_day, waitlisted]
+                    properties:
+                      last_hour: {type: integer}
+                      last_day: {type: integer}
+                      waitlisted: {type: integer}
+                  velocity_warning: {type: boolean, description: True while the last hour's new users exceed `hourly_warn`.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Set the sign-up gate's mode, its limits, or both.
+      description: >-
+        Fields left out keep their values. Setting the mode records the caller and the reason; setting it to `open` also restarts the hourly and daily windows, so a burst that closed the gate does not close it again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.signUpSetReq
+              type: object
+              properties:
+                mode: {type: string, enum: [open, waitlist]}
+                reason: {type: string}
+                hourly_limit: {type: integer, minimum: 0}
+                daily_limit: {type: integer, minimum: 0}
+                hourly_warn: {type: integer, minimum: 0}
+                github_min_account_days: {type: integer, minimum: 0}
+                free_team_members: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: The gate after the change.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.signUpStatusJSON
+                type: object
+                required: [state, reasons, mode, source, reason, set_by, updated_at, deployment_waitlist, free_tier, limits, counts, velocity_warning]
+                properties:
+                  state: {type: string, enum: [open, waitlist], description: What a new user meets now.}
+                  reasons:
+                    type: array
+                    items: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, free_tier_unreadable]}
+                    description: Every condition holding the gate at waitlist; empty while it is open.
+                  mode: {type: string, enum: [open, waitlist], description: The stored mode.}
+                  source: {type: string, description: "What set the stored mode: `operator`, `hourly_signups`, `daily_signups`, or `default` when nothing has."}
+                  reason: {type: string}
+                  set_by: {type: string}
+                  updated_at: {type: integer, format: int64, description: Unix seconds; the velocity windows start no earlier than this while the mode is open.}
+                  deployment_waitlist: {type: boolean, description: True when the controller runs with `--signup-gate=waitlist`.}
+                  free_tier: {type: string, enum: [open, throttled, closed, unreadable], description: "`unreadable` when the free-tier source failed, which waitlists new users as `closed` does."}
+                  limits:
+                    x-sparkwing-go-type: pkg/controller.signUpLimitsJSON
+                    type: object
+                    required: [hourly_limit, daily_limit, hourly_warn, github_min_account_days, free_team_members]
+                    properties:
+                      hourly_limit: {type: integer, description: "Admissions the last hour may hold before the gate closes itself, counting new users admitted and waitlisted users who accepted an invitation; 0 is off."}
+                      daily_limit: {type: integer, description: The same bound over the last 24 hours; 0 is off.}
+                      hourly_warn: {type: integer, description: Hourly count past which the controller warns; 0 is off.}
+                      github_min_account_days: {type: integer, description: Youngest GitHub account a sign-up admits; 0 is off.}
+                      free_team_members: {type: integer, description: Most members a team that has bought no credits may hold; 0 is off.}
+                  counts:
+                    x-sparkwing-go-type: pkg/controller.signUpCountsJSON
+                    type: object
+                    required: [last_hour, last_day, waitlisted]
+                    properties:
+                      last_hour: {type: integer}
+                      last_day: {type: integer}
+                      waitlisted: {type: integer}
+                  velocity_warning: {type: boolean, description: True while the last hour's new users exceed `hourly_warn`.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/signups/waitlist:
+    get:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: List waitlisted users, oldest first.
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}, description: At most this many; defaults to 1000.}
+      responses:
+        "200":
+          description: The waitlist.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.waitlistedJSON
+                      type: object
+                      required: [id, email, name, reason, created_at, waitlisted_at]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        name: {type: string}
+                        reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+                        waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/signups/waitlist/approve:
+    post:
+      x-sparkwing-scope: admin
+      tags: [users]
+      summary: Admit waitlisted users by id, or the oldest n.
+      description: >-
+        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. The controller runs the deployment's approval notifier for each admission.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.approveWaitlistReq
+              type: object
+              description: Name exactly one of `account_ids` and `oldest`, at most 1000.
+              properties:
+                account_ids:
+                  type: array
+                  items: {type: string}
+                oldest: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: The users admitted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [approved]
+                properties:
+                  approved:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.approvedJSON
+                      type: object
+                      required: [id, email, active_team]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        active_team: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /internal/storage/reserve:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Reserve room in a team's cache or log store before a write.
+      description: |
+        The cache calls it with its operator token for any team; the logs
+        service forwards the appending caller's credential, which must be
+        allowed to write logs and names only its own team's `logs` store. A free
+        team is held to its share of the allowance, three quarters for the
+        cache and three sixteenths for logs, counting what it stores and
+        every reservation still held; a funded team is counted without a
+        limit. `up_to` grants as much of `bytes` as the team has room for,
+        zero or less asking for all of it. A reservation expires after an
+        hour unless it is committed or released.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageReserveReq
+              required: [team, store, bytes]
+              properties:
+                team: {type: string}
+                store: {type: string, enum: [cache, logs]}
+                bytes: {type: integer, format: int64}
+                up_to: {type: boolean}
+      responses:
+        "200":
+          description: The reservation. A single-team controller answers funded with no id.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.StorageReservation
+                properties:
+                  reservation: {type: string}
+                  tier: {type: string, enum: [funded, free]}
+                  granted_bytes: {type: integer, format: int64}
+                  unlimited: {type: boolean}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "402": {description: The team has neither credits nor a free-tier slot.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: The write would pass the team's free share of this store.}
+
+  /internal/storage/commit:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Count what a write stored and drop its reservation.
+      description: |
+        `bytes` is what the write added to the store: its size, or for an
+        overwrite the difference from what it replaced, which may be
+        negative. A reservation that already expired, or that is not the
+        named team's, drops nothing and the bytes still count. Callers are
+        authorized as for the reserve route. `next_bytes` above zero also
+        reserves up to that many bytes more in the same transaction and
+        answers the new reservation, for a writer that draws many small
+        writes from one block; the commit lands even when the next block is
+        refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageCommitReq
+              required: [team, store, bytes]
+              properties:
+                team: {type: string}
+                store: {type: string, enum: [cache, logs]}
+                reservation: {type: string}
+                bytes: {type: integer, format: int64}
+                next_bytes: {type: integer, format: int64}
+      responses:
+        "200":
+          description: Counted, and the next block when `next_bytes` asked for one.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.StorageReservation
+                properties:
+                  reservation: {type: string}
+                  tier: {type: string, enum: [funded, free]}
+                  granted_bytes: {type: integer, format: int64}
+                  unlimited: {type: boolean}
+                  expires_at: {type: string, format: date-time}
+        "204": {description: Counted.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "402": {description: "The next block was refused: the team has neither credits nor a free-tier slot. The commit landed."}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: "The next block was refused: the team's share is spent. The commit landed."}
+
+  /internal/storage/release:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Give back a reservation whose write stored nothing.
+      description: A reservation already committed, released or expired is not an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.storageReleaseReq
+              required: [team, reservation]
+              properties:
+                team: {type: string}
+                reservation: {type: string}
+      responses:
+        "204": {description: Released.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /internal/downloads/charge:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Charge a download to its team's UTC day.
+      description: |
+        Only the cache's operator token reaches it. A download whose size is
+        known is charged whole before its first byte and refused when it
+        would pass the team's daily cap, `--team-daily-download-free-bytes`
+        or `--team-daily-download-funded-bytes` by whether the team pays.
+        Zero `bytes` checks that room is left. `record` charges a finished
+        stream whatever the cap says. The operator's team has no cap.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/controller.downloadChargeReq
+              required: [team, bytes]
+              properties:
+                team: {type: string}
+                bytes: {type: integer, format: int64}
+                record: {type: boolean}
+      responses:
+        "200":
+          description: The team's day after the charge.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: pkg/store.DownloadCharged
+                properties:
+                  tier: {type: string, enum: [funded, free]}
+                  day_bytes: {type: integer, format: int64}
+                  cap_bytes: {type: integer, format: int64, description: The cap the charge was held to; zero is none.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {description: "The team's day is spent; Retry-After names the seconds until midnight UTC."}
+
+  /internal/egress/totals:
+    post:
+      x-sparkwing-scope: public
+      tags: [storage]
+      summary: Keep a service's day and month egress totals.
+      description: |
+        Only the cache's operator token reaches it. Each stored total keeps
+        the larger of itself and what the call reports, and the answer is
+        the stored totals, so a restarted cache reports zeros to read back
+        where its day and month stood.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EgressTotals"
+      responses:
+        "200":
+          description: The stored totals.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EgressTotals"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/billing:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Read the active team's balance, prices, recent usage and grants.
+      description: >-
+        Any member of the active team reads it. One credit is one vCPU-second and `credits_per_dollar` of them make a dollar; amounts are micro-credits, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them.
+      responses:
+        "200":
+          description: Team billing.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.teamBillingJSON
+                type: object
+                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, checkout_enabled, can_purchase, usage, grants]
+                properties:
+                  team: {type: string}
+                  balance_micro: {type: integer, format: int64}
+                  balance_cap_micro: {type: integer, format: int64, description: The most a team's balance may hold.}
+                  frozen: {type: boolean, description: "True while the team's cloud usage is held over a payment dispute; its metered claims are refused."}
+                  micro_per_credit: {type: integer, format: int64}
+                  credits_per_dollar: {type: integer, format: int64}
+                  min_billable_seconds: {type: integer, format: int64, description: The least one node or trigger step is billed for.}
+                  purchase_min_cents: {type: integer, format: int64}
+                  purchase_max_cents: {type: integer, format: int64}
+                  rate_table:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.creditRateJSON
+                      type: object
+                      required: [cores, micro_per_second]
+                      properties:
+                        cores: {type: integer, format: int64}
+                        micro_per_second: {type: integer, format: int64}
+                  storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Zero when retained storage is not billed."}
+                  storage_free_allowance_bytes: {type: integer, format: int64}
+                  storage_charged_micro: {type: integer, format: int64}
+                  checkout_enabled: {type: boolean}
+                  can_purchase: {type: boolean}
+                  usage:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.teamBillingUsageJSON
+                      type: object
+                      required: [run_id, seconds, amount_micro, last_charged_at]
+                      properties:
+                        run_id: {type: string}
+                        seconds: {type: integer, format: int64}
+                        amount_micro: {type: integer, format: int64}
+                        last_charged_at: {type: integer, format: int64, description: Unix seconds.}
+                  grants:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.teamBillingGrantJSON
+                      type: object
+                      required: [id, kind, amount_micro, created_at]
+                      properties:
+                        id: {type: string}
+                        kind: {type: string, enum: [free, paid, reversal]}
+                        amount_micro: {type: integer, format: int64}
+                        reference: {type: string}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/team/billing/checkout:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Open a Stripe Checkout page to buy credits for the active team.
+      description: >-
+        An owner of the active team buys between `purchase_min_cents` and `purchase_max_cents`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.teamCheckoutReq
+              type: object
+              required: [amount_cents]
+              properties:
+                amount_cents: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The Stripe Checkout page.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.teamCheckoutJSON
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        "400": {description: "The amount is outside the purchase range (`amount_out_of_range`) or the body is malformed."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409":
+          description: >-
+            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`, the body below). A team whose deletion has begun also answers 409, with only `error`.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
+                type: object
+                required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [balance_cap]}
+                  balance_micro: {type: integer, format: int64}
+                  open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
+                  cap_micro: {type: integer, format: int64}
+                  amount_micro: {type: integer, format: int64}
+        "502": {description: The checkout service or Stripe did not open a session.}
+        "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
+
+  /api/v1/data/capabilities:
+    get:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Report whether direct uploads and committed-object downloads are available.
+      responses:
+        "200":
+          description: Direct data capabilities.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  upload: {type: boolean}
+                  download: {type: boolean}
+                  source: {type: boolean}
+        "404": {description: Direct uploads are unavailable.}
+
+  /api/v1/data/upload:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Reserve storage and sign a checksum-bound S3 PUT.
+      description: A binary or artifact requires a cache grant minted for an exact live claim. A source bundle requires a user bearer authorized to start runs before a run exists, and an empty run_id. A raw runner token cannot sign.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.directUploadRequest
+              type: object
+              required: [kind, key, size, sha256, run_id]
+              properties:
+                kind: {type: string, enum: [binary, artifact, source]}
+                key: {type: string}
+                size: {type: integer, format: int64}
+                sha256: {type: string}
+                run_id: {type: string}
+      responses:
+        "200":
+          description: Pending-object PUT and required signed headers.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.DirectUploadResponse
+                type: object
+                required: [upload_id, url, headers, expires_at]
+                properties:
+                  upload_id: {type: string}
+                  url: {type: string, format: uri}
+                  headers: {type: object, additionalProperties: {type: string}}
+                  expires_at: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The immutable object already exists.}
+        "413": {description: The upload exceeds its size or storage allowance.}
+
+  /api/v1/data/commit:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Verify the pending S3 object and publish it under an immutable key.
+      description: Requires the same live claim-bound cache grant, or for a pretrigger source bundle the same user bearer, used to reserve the upload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.directCommitRequest
+              type: object
+              required: [upload_id, run_id]
+              properties:
+                upload_id: {type: string}
+                run_id: {type: string}
+      responses:
+        "204": {description: The committed object is visible to authorized readers.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The pending object is absent or its final key holds other content.}
+        "422": {description: The pending object's size or checksum differs from the reservation.}
+
+  /api/v1/team/build-trust:
+    get:
+      x-sparkwing-scope: runs.read
+      tags: [teams]
+      summary: Read whether this team trusts local builds on cloud runners.
+      responses:
+        "200":
+          description: The team's build trust setting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.buildTrustRequest
+                type: object
+                required: [trust_local_builds]
+                properties:
+                  trust_local_builds: {type: boolean}
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Let the team owner set whether cloud runners trust local builds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.buildTrustRequest
+              type: object
+              required: [trust_local_builds]
+              properties:
+                trust_local_builds: {type: boolean}
+      responses:
+        "200": {description: The stored build trust setting.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/data/download:
+    post:
+      x-sparkwing-scope: public
+      tags: [artifacts]
+      summary: Sign a short-lived URL for one team object.
+      description: >-
+        A cache grant signs binary, artifact and bound source downloads only while its exact issuing claim and claimant token remain active. A source key must belong to the grant's run. Log downloads require a bearer authorized for log reads; cache grants cannot sign logs. The object key is resolved under the credential's team. `binary` keys name `bin/<input-hash>` for committed builds or `bins/<hash>` for legacy cache data. The response includes the stored SHA-256 when present, size, and a URL that expires after 60 seconds. Ingress requests use a CloudFront signed URL; direct in-cluster requests use an S3 presigned URL. The controller charges the object size against the team's daily download cap before returning the URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.dataDownloadRequest
+              type: object
+              required: [kind, key]
+              properties:
+                kind: {type: string, enum: [binary, artifact, source, log]}
+                key: {type: string, description: Team-relative object key.}
+      responses:
+        "200":
+          description: The signed URL and the object metadata.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.DataDownloadResponse
+                type: object
+                required: [url, sha256, size, expires]
+                properties:
+                  url: {type: string, format: uri}
+                  sha256: {type: string, description: Stored object digest; binary downloads always include a valid SHA-256 digest.}
+                  size: {type: integer, format: int64}
+                  expires: {type: string, format: date-time}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429":
+          description: The team's daily download cap was reached; `Retry-After` gives the delay before retrying.
+          headers:
+            Retry-After:
+              schema: {type: integer}
+              description: Seconds until the cap resets.
+        "503": {description: No signer is configured for the selected request path.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -4178,6 +6830,116 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    GitCredential:
+      x-sparkwing-go-type: pkg/controller.GitCredentialJSON
+      type: object
+      required: [host, kind, confirmed, created_by, created_at, updated_at]
+      properties:
+        host: {type: string}
+        kind: {type: string, enum: [ssh, https]}
+        username: {type: string, description: "The https username."}
+        fingerprint: {type: string, description: "SHA256 fingerprint of the ssh host key the credential pins."}
+        host_key: {type: string, description: "The known_hosts entry the credential pins."}
+        public_key: {type: string, description: "The deploy key's public half, returned when the key is stored, to add to the forge."}
+        confirmed: {type: boolean, description: "An owner confirmed the pinned host key; https credentials are confirmed when stored."}
+        created_by: {type: string, description: User id of the owner who stored it.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
+    GitHubAppInstallation:
+      x-sparkwing-go-type: pkg/controller.githubAppInstallationJSON
+      type: object
+      required: [installation_id, account_id, account_login, account_type, suspended, connected_by, created_at, updated_at, manage_url]
+      properties:
+        installation_id: {type: integer, format: int64}
+        account_id: {type: integer, format: int64}
+        account_login: {type: string}
+        account_type: {type: string, enum: [User, Organization]}
+        suspended: {type: boolean, description: GitHub suspended the installation; it starts no runs and mints no tokens.}
+        connected_by: {type: string, description: User id of the owner who connected it.}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+        updated_at: {type: integer, format: int64, description: Unix seconds.}
+        manage_url: {type: string, description: The GitHub page where the account's owner changes the repositories it covers or uninstalls it.}
+    GitHubAppTrigger:
+      x-sparkwing-go-type: pkg/controller.githubAppTriggerJSON
+      type: object
+      required: [repository, repository_id, installation_id, pipeline, push, tags, pull_request, branches, base_branches, pull_request_closed, pull_request_labeled, pull_request_labels, pull_request_ready_for_review, release_published, release_prereleased, branch_create, branch_delete, created_by, created_at]
+      properties:
+        repository: {type: string, description: owner/name as GitHub spells it.}
+        repository_id: {type: integer, format: int64}
+        installation_id: {type: integer, format: int64}
+        pipeline: {type: string}
+        push: {type: boolean}
+        tags:
+          type: array
+          maxItems: 10
+          items: {type: string, maxLength: 128}
+        pull_request: {type: boolean}
+        branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        base_branches: {type: array, maxItems: 10, items: {type: string, maxLength: 128}}
+        pull_request_closed: {type: boolean}
+        pull_request_labeled: {type: boolean}
+        pull_request_labels: {type: array, items: {type: string}}
+        pull_request_ready_for_review: {type: boolean}
+        release_published: {type: boolean}
+        release_prereleased: {type: boolean}
+        branch_create: {type: boolean}
+        branch_delete: {type: boolean}
+        created_by: {type: string}
+        created_at: {type: integer, format: int64, description: Unix seconds.}
+    GitHubAppExtraRepos:
+      x-sparkwing-go-type: pkg/controller.githubAppExtraReposJSON
+      type: object
+      required: [repository, extra_repos]
+      properties:
+        repository: {type: string, description: The source repository, owner/name.: ''}
+        extra_repos:
+          type: array
+          maxItems: 10
+          items: {type: string}
+          description: owner/name repositories of the same owner that a run of repository's App token also reads.
+    LinkedIdentity:
+      x-sparkwing-go-type: pkg/controller.identityJSON
+      type: object
+      required: [provider, email, created_at]
+      properties:
+        provider: {type: string, enum: [google, github]}
+        email: {type: string, description: The address the provider last asserted. It never sets the account's email for a linked sign-in.}
+        created_at: {type: integer, format: int64, description: Unix seconds when the sign-in was attached.}
+    IdentityUser:
+      x-sparkwing-go-type: pkg/controller.userJSONBody
+      type: object
+      required: [id, email, name]
+      properties:
+        id: {type: string}
+        email: {type: string, description: The email Google verified.}
+        name: {type: string}
+    TeamDeletion:
+      x-sparkwing-go-type: pkg/controller.teamDeletionJSON
+      type: object
+      required: [slug, state, requested_at, finished_at, attempts, last_error]
+      properties:
+        slug: {type: string}
+        state: {type: string, enum: [pending, done]}
+        requested_at: {type: integer, format: int64, description: Unix seconds.}
+        finished_at: {type: integer, format: int64, nullable: true, description: "Unix seconds; null while pending. A done deletion sweeps its cache and rows once more seven hours later."}
+        attempts: {type: integer, description: Passes that failed to finish the deletion.}
+        last_error: {type: string, description: Why the last failed pass stopped; empty once one succeeds.}
+    TeamRef:
+      x-sparkwing-go-type: pkg/controller.teamRefJSON
+      type: object
+      required: [slug, display_name, role]
+      properties:
+        slug: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [owner, editor, reader]}
+    Team:
+      x-sparkwing-go-type: pkg/controller.teamJSON
+      type: object
+      required: [slug, display_name, role]
+      properties:
+        slug: {type: string}
+        display_name: {type: string}
+        role: {type: string, enum: [owner, editor, reader], description: The caller's role in the team.}
     LiveLogRead:
       x-sparkwing-go-type: pkg/controller.LiveLogRead
       type: object
@@ -4306,6 +7068,11 @@ components:
         executor_location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived from the claim credential and holder; absent without enough evidence.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         required_executor_location:
           type: string
           enum: ["", local, cloud, unknown]
@@ -4376,6 +7143,11 @@ components:
         location:
           type: string
           enum: [local, cloud, unknown]
+        execution_site:
+          type: string
+          enum: [machine, cloud, github-actions, cluster]
+          description: Display site derived for the current claim's attempt when available.
+        execution_site_name: {type: string, description: Public runner or repository name for the execution site.}
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
         outcome: {type: string}
@@ -4476,7 +7248,8 @@ components:
         git_sha: {type: string}
         status:
           type: string
-          enum: [pending, claimed, done]
+          enum: [pending, claimed, done, failed]
+        error: {type: string}
         created_at: {type: string, format: date-time}
         claimed_at: {type: string, format: date-time, nullable: true}
         lease_expires_at: {type: string, format: date-time, nullable: true}
@@ -4511,6 +7284,10 @@ components:
           type: string
           description: >-
             Digest of the material the webhook signature covered. Unique across the store, so re-sending an accepted body is refused however its delivery id reads.
+        team:
+          type: string
+          description: >-
+            The team that owns the trigger and its run. A Kubernetes runner labels the run's Job pods with it and keeps them off nodes that run another team's Jobs.
     TriggerRequest:
       x-sparkwing-go-type: pkg/controller.triggerReq
       type: object
@@ -4524,10 +7301,15 @@ components:
         trigger:
           type: object
           x-sparkwing-go-type: pkg/controller.triggerReqMeta
+          description: >-
+            The run is attributed to the authenticated principal that submits it; a `user` field is accepted and ignored.
           required: [source]
           properties:
             source: {type: string}
-            user: {type: string}
+            user:
+              type: string
+              deprecated: true
+              description: Ignored. Released CLIs send it; the run's user is the authenticated principal.
             env:
               type: object
               additionalProperties: {type: string}
@@ -4664,6 +7446,65 @@ components:
       properties:
         name: {type: string}
         bytes: {type: integer, format: int64}
+    PipelinesList:
+      x-sparkwing-go-type: pkg/controller.pipelinesList
+      type: object
+      properties:
+        pipelines: {type: array, items: {$ref: "#/components/schemas/PipelineSummary"}}
+    PipelineSummary:
+      x-sparkwing-go-type: pkg/store.PipelineSummary
+      type: object
+      description: One pipeline a team has run, queued or scheduled.
+      properties:
+        name: {type: string}
+        last_activity_at: {type: string, format: date-time, description: Newest run start or trigger; absent for a pipeline known only from a schedule.}
+        last_run_id: {type: string}
+        last_status: {type: string}
+        last_run_at: {type: string, format: date-time}
+        last_finished_at: {type: string, format: date-time}
+    UsageMetrics:
+      x-sparkwing-go-type: pkg/controller.usageMetricsResponse
+      type: object
+      properties:
+        generated_at: {type: string, format: date-time}
+        excluded_teams: {type: array, items: {type: string}}
+        weeks: {type: array, description: Oldest first; the last entry is the week in progress., items: {$ref: "#/components/schemas/UsageWeek"}}
+        time_to_first_green: {$ref: "#/components/schemas/FirstGreenStats"}
+    UsageWeek:
+      x-sparkwing-go-type: pkg/store.UsageWeek
+      type: object
+      properties:
+        week_start: {type: string, format: date-time}
+        active_teams: {type: integer}
+        runs: {type: integer}
+        cloud_runs: {type: integer, description: Runs with at least one node on a cloud runner.}
+        connected_runs: {type: integer, description: Runs whose every node ran on a machine the team connected.}
+        teams_by_runs: {$ref: "#/components/schemas/RunsBands"}
+        median_runs_per_active_team: {type: number}
+        new_accounts: {type: integer}
+        new_teams: {type: integer}
+    RunsBands:
+      x-sparkwing-go-type: pkg/store.RunsBands
+      type: object
+      description: Active teams counted by how many runs each started in the week.
+      properties:
+        runs_1: {type: integer}
+        runs_2_to_9: {type: integer}
+        runs_10_to_49: {type: integer}
+        runs_50_plus: {type: integer}
+    FirstGreenStats:
+      x-sparkwing-go-type: pkg/store.FirstGreenStats
+      type: object
+      description: Time from a team's creation to the finish of its first successful run, for teams created in the window.
+      properties:
+        teams_created: {type: integer}
+        teams_green: {type: integer}
+        median_seconds: {type: integer, format: int64}
+        p90_seconds: {type: integer, format: int64}
+        within_hour: {type: integer}
+        within_day: {type: integer}
+        within_week: {type: integer}
+        later: {type: integer}
     StorageState:
       x-sparkwing-go-type: pkg/controller.storageStateJSON
       type: object
@@ -4676,6 +7517,32 @@ components:
         alarm: {type: boolean, description: Whether the last size sample passed the alarm size.}
         quotas: {type: array, description: Every team with a quota row; admin only., items: {$ref: "#/components/schemas/StorageQuota"}}
         largest_teams: {type: array, description: The month's heaviest teams; admin only., items: {$ref: "#/components/schemas/StorageTeamUsage"}}
+        team: {$ref: "#/components/schemas/TeamStorageStanding"}
+    TeamStorageStanding:
+      x-sparkwing-go-type: pkg/controller.teamStandingJSON
+      type: object
+      description: "A signed-up caller's own team on a multi-team controller: its free-tier standing and the per-store shares of its allowance."
+      properties:
+        team: {type: string}
+        tier: {type: string, enum: [funded, free, none], description: "funded stores without a byte limit; free holds a free-tier slot; none has neither credits nor a slot."}
+        allowance_bytes: {type: integer, format: int64, description: "The whole free allowance the shares are cut from."}
+        cache_share_bytes: {type: integer, format: int64, description: "Three quarters of the allowance, what the cache holds a free team to."}
+        log_share_bytes: {type: integer, format: int64, description: "Three sixteenths of the allowance, what the logs service holds a free team to."}
+        event_share_bytes: {type: integer, format: int64, description: "One sixteenth of the allowance, what the team's run events are held to."}
+        event_bytes: {type: integer, format: int64, description: "What the team's retained run events hold."}
+        cache_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the cache, as the controller counts it."}
+        log_bytes: {type: integer, format: int64, description: "What the team stores and holds reserved in the logs service, as the controller counts it."}
+    EgressTotals:
+      x-sparkwing-go-type: pkg/store.EgressTotals
+      type: object
+      description: What one service sent in a UTC day and in that day's month.
+      required: [service, day, month]
+      properties:
+        service: {type: string}
+        day: {type: string, description: "2006-01-02"}
+        day_bytes: {type: integer, format: int64}
+        month: {type: string, description: "2006-01"}
+        month_bytes: {type: integer, format: int64}
     ComputeLimits:
       x-sparkwing-go-type: pkg/controller.computeLimitsJSON
       type: object
@@ -4689,11 +7556,11 @@ components:
       type: object
       description: The cloud runners claimed right now.
       properties:
-        runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller.}
+        runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller. Operator only; omitted for team readers.}
         by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
-        alarm_reached: {type: boolean, description: Whether the count reached runner_alarm.}
-        derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal is held to once recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
-        recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted over the scaling window, in micro-credits, less the reversals of grants inside it."}
+        alarm_reached: {type: boolean, description: Whether the count reached runner_alarm. Operator only; omitted for team readers.}
+        derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal in the request's team is held to once that team's recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
+        recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted to the request's team over the scaling window, in micro-credits, less reversals of those grants."}
         scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}
     RequestBudgets:
       x-sparkwing-go-type: pkg/controller.requestBudgetsJSON
@@ -4872,14 +7739,28 @@ components:
         amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
+        team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller except on a reversal, which lands in the team its payment was granted to; defaults to the default team otherwise."}
+        checkout: {type: string, description: "Checkout Session id a paid grant settles, so the checkout it opened stops counting against the team's balance cap."}
+    PaymentReversal:
+      x-sparkwing-go-type: pkg/controller.reversePaymentJSON
+      type: object
+      required: [team, payment_id, paid_micro, reversed_micro, balance_micro, created]
+      properties:
+        team: {type: string, description: The team the payment funded.}
+        payment_id: {type: string}
+        paid_micro: {type: integer, format: int64, description: What the payment granted.}
+        reversed_micro: {type: integer, format: int64, description: What the payment's reversals have taken back in total.}
+        balance_micro: {type: integer, format: int64, description: "The team's balance afterwards, which may be negative."}
+        created: {type: boolean, description: Whether this call wrote the reversal.}
+        grant: {$ref: "#/components/schemas/CreditGrant"}
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object
-      description: A claim or heartbeat the credit balance could not pay for.
+      description: A claim or heartbeat the credit balance could not pay for, or a claim for a team whose cloud usage is held.
       required: [error, code, balance_micro, required_micro]
       properties:
         error: {type: string}
-        code: {type: string, description: Always insufficient_credits.}
+        code: {type: string, enum: [insufficient_credits, credits_frozen], description: "credits_frozen when the team is held over a payment dispute."}
         balance_micro: {type: integer, format: int64}
         required_micro: {type: integer, format: int64}
     CreateTokenRequest:
@@ -4912,7 +7793,7 @@ components:
     Secret:
       x-sparkwing-go-type: pkg/controller.secretJSON
       type: object
-      description: One stored secret. List endpoints redact `value`.
+      description: One stored secret. The list carries `value` for unmasked rows only.
       required: [name]
       properties:
         name: {type: string}
@@ -5527,6 +8408,7 @@ components:
         freezes_total: {type: integer}
         refused_total: {type: integer}
         measurement_incomplete: {type: boolean}
+        measure_error: {type: string, description: Why the last measurement was discarded.}
     ObjectStoreBreakerClass:
       x-sparkwing-go-type: internal/objectguard.ClassState
       type: object

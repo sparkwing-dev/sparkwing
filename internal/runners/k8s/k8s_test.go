@@ -390,13 +390,25 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "done"}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.MarkNodeReady(ctx, "run-1", "build"); err != nil {
+		t.Fatalf("MarkNodeReady: %v", err)
 	}
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
+	// safety: a done node refuses a named claim, so the node turns done with
+	// no outcome only once the Job exists, which is the state a pod that died
+	// between its two writes leaves.
 	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("create", "jobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if err := st.SetNodeStatus(ctx, "run-1", "build", "done"); err != nil {
+			t.Errorf("SetNodeStatus: %v", err)
+		}
+		return false, nil, nil
+	})
 	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
 	})
@@ -418,19 +430,23 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 }
 
 func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+	setup := context.Background()
+	if err := st.CreateRun(setup, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+	if err := st.CreateNode(setup, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
+	// safety: opening and migrating the store under -race takes longer than
+	// the budget, so the budget starts once setup is done and bounds only the
+	// runner's handling of the missing Job.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
@@ -529,63 +545,67 @@ func bytesOf(q resource.Quantity) int64 {
 	return v
 }
 
-func TestPodResources_ABilledClassIsTheWholePodShape(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		class     store.CPUClass
-		res       capacity.Resolution
-		cfg       Config
-		wantCPU   int64
-		wantBytes int64
-	}{
-		{
-			name:      "the eight-core class",
-			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
-			res:       capacity.Resolution{Cores: 8, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
-			cfg:       defaultsCfg,
-			wantCPU:   8000,
-			wantBytes: 32 << 30,
-		},
-		{
-			name:      "a class an operator ladder priced, not the default one",
-			class:     store.CPUClass{Cores: 64, MemoryBytes: 256 << 30},
-			res:       capacity.Resolution{Cores: 3, MemoryBytes: 1 << 30, Source: store.CostSourcePin},
-			cfg:       defaultsCfg,
-			wantCPU:   64000,
-			wantBytes: 256 << 30,
-		},
-		{
-			name:      "a ceiling never shrinks the class the claim billed",
-			class:     store.CPUClass{Cores: 8, MemoryBytes: 32 << 30},
-			res:       capacity.Resolution{Cores: 8, MemoryBytes: 32 << 30, Source: store.CostSourcePin},
-			cfg:       ceilingCfg,
-			wantCPU:   8000,
-			wantBytes: 32 << 30,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, tc.class, tc.cfg)
-			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPU {
-				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPU)
-			}
-			if got := milli(rr.Limits[corev1.ResourceCPU]); got != tc.wantCPU {
-				t.Errorf("cpu limit = %dm, want the request %dm", got, tc.wantCPU)
-			}
-			if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != tc.wantBytes {
-				t.Errorf("mem request = %d, want %d", got, tc.wantBytes)
-			}
-			if got := bytesOf(rr.Limits[corev1.ResourceMemory]); got != tc.wantBytes {
-				t.Errorf("mem limit = %d, want the request %d", got, tc.wantBytes)
-			}
-		})
+func TestBuildJob_QuarterCorePinKeepsItsRequestWithTwoCoreBill(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "quarter-core"},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("512Mi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner", CPURequest: "100m", MemoryRequest: "128Mi"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 0.25, MemoryBytes: 256 << 20, Source: store.CostSourcePin},
+		store.CPUClass{Cores: 2, MemoryBytes: 8 << 30}, store.NodeClaimFence{})
+	request := job.Spec.Template.Spec.Containers[0].Resources.Requests
+	if got := milli(request[corev1.ResourceCPU]); got != 250 {
+		t.Errorf("cpu request = %dm, want 250m for a quarter-core node", got)
+	}
+	if got := bytesOf(request[corev1.ResourceMemory]); got != 256<<20 {
+		t.Errorf("memory request = %d, want 256Mi", got)
+	}
+	if msg := r.impossibleShape(t.Context(), job); msg != "" {
+		t.Fatalf("quarter-core node rejected: %s", msg)
 	}
 }
 
-// A controller too old to price the node sends no class, and the pod keeps the
-// shape it had before classes existed.
-func TestPodResources_NoBilledClassKeepsTheBurstLimits(t *testing.T) {
+func TestImpossibleShapeFailsBeforeJobCreation(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "small"},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("1Gi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 1, MemoryBytes: 512 << 20, Source: store.CostSourcePin},
+		store.CPUClass{}, store.NodeClaimFence{})
+	msg := r.impossibleShape(t.Context(), job)
+	if !strings.Contains(msg, "1 cpu") || !strings.Contains(msg, "allocatable") {
+		t.Fatalf("impossible shape = %q, want clear CPU and allocatable error", msg)
+	}
+}
+
+func TestImpossibleShapeAllowsLargerJobPoolNodeToScale(t *testing.T) {
+	client := fake.NewSimpleClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "small-band-node", Labels: map[string]string{cpuBandKey: cpuBandSmall},
+		},
+		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("3"), corev1.ResourceMemory: resource.MustParse("12Gi"),
+		}},
+	})
+	r := New(client, nil, Config{Image: "runner"}, nil)
+	job := r.buildJob("job", runner.Request{RunID: "run-1", NodeID: "build"},
+		capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin},
+		store.CPUClass{Cores: 4, MemoryBytes: 16 << 30}, store.NodeClaimFence{})
+	if msg := r.impossibleShape(t.Context(), job); msg != "" {
+		t.Fatalf("autoscaling job pool refused larger pod: %s", msg)
+	}
+}
+
+func TestPodResources_KeepsBurstLimits(t *testing.T) {
 	res := capacity.Resolution{Cores: 4, MemoryBytes: 8 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 4000 {
 		t.Errorf("cpu request = %dm, want 4000m", got)
 	}
@@ -597,46 +617,13 @@ func TestPodResources_NoBilledClassKeepsTheBurstLimits(t *testing.T) {
 	}
 }
 
-// A customer billed for a class the operator's ceiling forbids is told so at
-// once, rather than running smaller for the same price.
-func TestCeilingUnderClass(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		cfg   Config
-		class store.CPUClass
-		want  string
-	}{
-		{name: "no class", cfg: ceilingCfg, class: store.CPUClass{}, want: ""},
-		{name: "no ceiling", cfg: defaultsCfg, class: store.CPUClass{Cores: 64, MemoryBytes: 256 << 30}, want: ""},
-		{
-			name: "cpu ceiling under the class", cfg: ceilingCfg,
-			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "cpu ceiling",
-		},
-		{
-			name:  "memory ceiling under the class",
-			cfg:   Config{MemoryCeiling: 2 << 30},
-			class: store.CPUClass{Cores: 2, MemoryBytes: 8 << 30},
-			want:  "memory",
-		},
-		{
-			name:  "a ceiling above the class allows it",
-			cfg:   Config{CPUCeiling: 16, MemoryCeiling: 64 << 30},
-			class: store.CPUClass{Cores: 8, MemoryBytes: 32 << 30}, want: "",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := &Runner{cfg: tc.cfg}
-			got := r.ceilingUnderClass(tc.class)
-			if tc.want == "" {
-				if got != "" {
-					t.Fatalf("refusal = %q, want none", got)
-				}
-				return
-			}
-			if !strings.Contains(got, tc.want) {
-				t.Fatalf("refusal = %q, want it to name %q", got, tc.want)
-			}
-		})
+func TestPodResources_DefaultRequestFitsSmallNodes(t *testing.T) {
+	rr := podResources(capacity.Resolution{Source: store.CostSourceDefault}, Config{})
+	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 100 {
+		t.Errorf("cpu request = %dm, want 100m", got)
+	}
+	if got := bytesOf(rr.Requests[corev1.ResourceMemory]); got != 128<<20 {
+		t.Errorf("memory request = %d, want 128Mi", got)
 	}
 }
 
@@ -712,7 +699,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := podResources(tc.res, store.CPUClass{}, tc.cfg)
+			rr := podResources(tc.res, tc.cfg)
 			if got := milli(rr.Requests[corev1.ResourceCPU]); got != tc.wantCPUReq {
 				t.Errorf("cpu request = %dm, want %dm", got, tc.wantCPUReq)
 			}
@@ -732,7 +719,7 @@ func TestPodResources_ClampsChargeToTheOperatorCeiling(t *testing.T) {
 func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 	for _, cores := range []float64{0.0004, 1e-9, 0.05} {
 		res := capacity.Resolution{Cores: cores, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-		rr := podResources(res, store.CPUClass{}, defaultsCfg)
+		rr := podResources(res, defaultsCfg)
 		want := int64(capacity.MeasuredCoreFloor * 1000)
 		if got := milli(rr.Requests[corev1.ResourceCPU]); got != want {
 			t.Errorf("pin %v cores: cpu request = %dm, want the %dm floor", cores, got, want)
@@ -746,7 +733,7 @@ func TestPodResources_FloorsATinyPinAtTheMeasuredCoreFloor(t *testing.T) {
 func TestPodResources_CeilingUnderTheFloorStillWins(t *testing.T) {
 	cfg := Config{CPURequest: "100m", MemoryRequest: "128Mi", CPUCeiling: 0.05}
 	res := capacity.Resolution{Cores: 0.0004, MemoryBytes: 1 << 30, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, cfg)
+	rr := podResources(res, cfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 50 {
 		t.Errorf("cpu request = %dm, want the 50m ceiling, which outranks the core floor", got)
 	}
@@ -804,7 +791,7 @@ func TestParseCeilingRejectsWhatItCannotEnforce(t *testing.T) {
 
 func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 	res := capacity.Resolution{Cores: 1.5, MemoryBytes: 3 << 30, Source: store.CostSourceMeasured}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 1500 {
 		t.Errorf("cpu request = %dm, want 1500m", got)
 	}
@@ -815,7 +802,7 @@ func TestPodResources_MeasuredPeaksDriveRequest(t *testing.T) {
 
 func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 	res := capacity.Resolution{Cores: 8, Source: store.CostSourceDefault}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 100 {
 		t.Errorf("default cpu request = %dm, want 100m (config, not half-machine)", got)
 	}
@@ -829,7 +816,7 @@ func TestPodResources_DefaultTierFallsBackToConfig(t *testing.T) {
 
 func TestPodResources_PinCoresOnlyFallsBackForMemory(t *testing.T) {
 	res := capacity.Resolution{Cores: 2, Source: store.CostSourcePin}
-	rr := podResources(res, store.CPUClass{}, defaultsCfg)
+	rr := podResources(res, defaultsCfg)
 	if got := milli(rr.Requests[corev1.ResourceCPU]); got != 2000 {
 		t.Errorf("cpu request = %dm, want 2000m", got)
 	}
@@ -952,17 +939,29 @@ func TestBuildJob_MountsNoServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestBuildJob_PassesTheCacheTokenThrough(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "s3cret")
-	if got := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; got != "s3cret" {
-		t.Fatalf("SPARKWING_CACHE_TOKEN = %q, want the runner's own cache bearer", got)
+// The pod runs the team's code, so it carries the run's grant and never the
+// operator cache token, even when the dispatcher's own environment holds one.
+func TestBuildJob_PassesTheRunGrantAndNeverTheCacheToken(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_TOKEN", "operator-cache-token")
+	t.Setenv("SPARKWING_CACHE_GRANT", "swcg1.run-grant")
+	env := jobEnv(t, Config{Image: "img"})
+	if got := env["SPARKWING_CACHE_GRANT"]; got != "swcg1.run-grant" {
+		t.Fatalf("SPARKWING_CACHE_GRANT = %q, want the run's grant", got)
+	}
+	if got, ok := env["SPARKWING_CACHE_TOKEN"]; ok {
+		t.Fatalf("SPARKWING_CACHE_TOKEN = %q reached the pod", got)
+	}
+	for name, value := range env {
+		if value == "operator-cache-token" {
+			t.Fatalf("%s carries the operator cache token into the pod", name)
+		}
 	}
 }
 
-func TestBuildJob_OmitsTheCacheTokenWhenTheRunnerHasNone(t *testing.T) {
-	t.Setenv("SPARKWING_CACHE_TOKEN", "")
-	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_TOKEN"]; ok {
-		t.Fatal("SPARKWING_CACHE_TOKEN should be absent when the runner has none")
+func TestBuildJob_OmitsTheGrantWhenTheRunHasNone(t *testing.T) {
+	t.Setenv("SPARKWING_CACHE_GRANT", "")
+	if _, ok := jobEnv(t, Config{Image: "img"})["SPARKWING_CACHE_GRANT"]; ok {
+		t.Fatal("SPARKWING_CACHE_GRANT should be absent when the run has none")
 	}
 }
 
@@ -1117,6 +1116,24 @@ func TestBuildJob_LetsTheNodeTimeoutFireBeforeKubernetesKillsThePod(t *testing.T
 		capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
 	if want := int64((time.Hour + jobDeadlineSlack).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
 		t.Fatalf("ActiveDeadlineSeconds = %d, want the node's timeout plus slack (%d)",
+			*job.Spec.ActiveDeadlineSeconds, want)
+	}
+}
+
+func TestBuildJob_ADeclaredTimeoutCannotOutliveTheCeiling(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	node := sparkwing.Job(plan, "forever", func(context.Context) error { return nil }).Timeout(30 * 24 * time.Hour)
+	req := runner.Request{RunID: "run-1", NodeID: "forever", Node: node}
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	if want := int64(MaxDeclaredJobActiveDeadline.Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the %s ceiling (%d)",
+			*job.Spec.ActiveDeadlineSeconds, MaxDeclaredJobActiveDeadline, want)
+	}
+	operator := &Runner{cfg: Config{Image: "img", JobActiveDeadline: 48 * time.Hour}}
+	job = operator.buildJob("job-name", req, capacity.Resolution{}, store.CPUClass{}, store.NodeClaimFence{})
+	if want := int64((48 * time.Hour).Seconds()); *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("ActiveDeadlineSeconds = %d, want the operator's longer deadline (%d)",
 			*job.Spec.ActiveDeadlineSeconds, want)
 	}
 }
@@ -1283,8 +1300,8 @@ func TestBuildJob_PlacesEachClassOnItsCPUBand(t *testing.T) {
 				if tol := bandToleration(pod); tol != nil {
 					t.Fatalf("toleration = %#v, want none for a warm-pool class", tol)
 				}
-				if pod.Affinity != nil {
-					t.Fatalf("affinity = %#v, want none for a warm-pool class", pod.Affinity)
+				if pod.Affinity.NodeAffinity != nil {
+					t.Fatalf("node affinity = %#v, want none for a warm-pool class", pod.Affinity.NodeAffinity)
 				}
 				return
 			}
@@ -1300,8 +1317,8 @@ func TestBuildJob_PlacesEachClassOnItsCPUBand(t *testing.T) {
 				tol.Operator != corev1.TolerationOpEqual {
 				t.Fatalf("toleration = %#v, want %s NoSchedule on Equal", tol, tc.band)
 			}
-			if pod.Affinity != nil {
-				t.Fatalf("affinity = %#v, want none: one pool serves every class", pod.Affinity)
+			if pod.Affinity.NodeAffinity != nil {
+				t.Fatalf("node affinity = %#v, want none: one pool serves every class", pod.Affinity.NodeAffinity)
 			}
 		})
 	}

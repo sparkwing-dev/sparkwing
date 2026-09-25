@@ -29,6 +29,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -40,10 +41,13 @@ const maxAppendRequestBytes = 4 << 20
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
-	root     string
-	logger   *slog.Logger
-	dirMode  os.FileMode
-	fileMode os.FileMode
+	root      string
+	logger    *slog.Logger
+	counter   *storagequota.Client
+	logBlocks logBlocks
+	claims    claimCache
+	dirMode   os.FileMode
+	fileMode  os.FileMode
 
 	limits    Limits
 	ceiling   *objectguard.Ceiling
@@ -57,10 +61,14 @@ type Server struct {
 
 	egress *egress.Meter
 
+	archive *archive
+	seals   sealTrackers
+
 	controllerURL string
 	authCache     sync.Map
 	authCacheTTL  time.Duration
 	authHTTP      *http.Client
+	runAccess     sync.Map
 }
 
 // New constructs a Server rooted at dir (created if absent). A nil
@@ -157,6 +165,10 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 	s.controllerURL = controllerURL
 	s.authCacheTTL = cacheTTL
 	s.authHTTP = &http.Client{Timeout: 5 * time.Second}
+	s.counter = nil
+	if controllerURL != "" {
+		s.counter = storagequota.New(controllerURL, s.authHTTP)
+	}
 	return s
 }
 
@@ -175,13 +187,17 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleAppend)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))
-	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))
-	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, http.HandlerFunc(s.handleDeleteRun)))
-	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
+	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
+	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun)), scopeLogsDelete))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
+	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
-	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch))))
+	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
+
+	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs), scopeLogsDelete))
 
 	authed := s.authMiddleware(mux)
 
@@ -196,13 +212,22 @@ const (
 	scopeLogsRead  = "logs.read"
 	scopeLogsWrite = "logs.write"
 	scopeAdmin     = "admin"
+	// scopeLogsDelete deletes any run's logs and reads none; the controller
+	// holds it to delete a team's logs.
+	scopeLogsDelete = "logs.delete"
 )
 
 type logsPrincipal struct {
-	Name        string
-	Kind        string
+	Name string
+	Kind string
+	// Team is the team a non-admin credential acts for, as whoami names
+	// it; the archive keys a run's objects by it.
+	Team        string
 	Scopes      []string
 	TokenPrefix string
+	// credential is the Authorization header the caller sent, forwarded to
+	// the controller when a request needs it to decide for this caller.
+	credential string
 }
 
 func (p *logsPrincipal) hasScope(s string) bool {
@@ -242,7 +267,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, err := extractBearer(r)
+		raw, err := extractCredential(r)
 		if err != nil {
 			writeAuthErrorJSON(w, http.StatusUnauthorized, AuthErrorBody{
 				Error:   "unauthenticated",
@@ -262,14 +287,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
+func (s *Server) requireScope(scope string, next http.Handler, also ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if p.hasScope(scopeAdmin) || p.hasScope(scope) {
+		if p.hasScope(scopeAdmin) || p.hasScope(scope) || slices.ContainsFunc(also, p.hasScope) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -298,13 +323,17 @@ func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func extractBearer(r *http.Request) (string, error) {
-	h := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if !strings.HasPrefix(h, prefix) {
-		return "", errors.New("missing bearer token")
+// extractCredential returns the caller's Authorization header: a bearer token,
+// or the session a signed-in account's dashboard forwards. The controller is
+// what resolves either, so the header travels to it unchanged.
+func extractCredential(r *http.Request) (string, error) {
+	h := strings.TrimSpace(r.Header.Get("Authorization"))
+	for _, scheme := range []string{"Bearer ", "Session "} {
+		if strings.HasPrefix(h, scheme) && strings.TrimSpace(strings.TrimPrefix(h, scheme)) != "" {
+			return h, nil
+		}
 	}
-	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
+	return "", errors.New("missing bearer token")
 }
 
 func (s *Server) authenticate(ctx context.Context, raw string) (*logsPrincipal, error) {
@@ -348,15 +377,16 @@ type whoamiResp struct {
 	Kind        string   `json:"kind"`
 	Scopes      []string `json:"scopes"`
 	TokenPrefix string   `json:"token_prefix"`
+	Team        string   `json:"team"`
 }
 
-func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, error) {
+func (s *Server) whoami(ctx context.Context, credential string) (*logsPrincipal, error) {
 	url := strings.TrimRight(s.controllerURL, "/") + "/api/v1/auth/whoami"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("Authorization", credential)
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("whoami: %w", err)
@@ -378,6 +408,8 @@ func (s *Server) whoami(ctx context.Context, rawToken string) (*logsPrincipal, e
 		Kind:        body.Kind,
 		Scopes:      body.Scopes,
 		TokenPrefix: body.TokenPrefix,
+		Team:        body.Team,
+		credential:  credential,
 	}, nil
 }
 
@@ -426,6 +458,9 @@ type ServeOptions struct {
 	// Egress bounds the bytes reads and streams send to clients. Nil
 	// leaves every read unmetered.
 	Egress *egress.Meter
+	// Archive moves idle runs to an object store. Nil keeps every run on
+	// the volume.
+	Archive *ArchiveOptions
 }
 
 // ServeWith starts the HTTP listener described by opts and blocks
@@ -451,6 +486,9 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	}
 	if opts.Egress != nil {
 		s.WithEgressMeter(opts.Egress)
+	}
+	if opts.Archive != nil {
+		s.WithArchive(*opts.Archive)
 	}
 	s.StartSweeper(ctx)
 	root, addr, controllerURL := opts.Root, opts.Addr, opts.ControllerURL
@@ -527,8 +565,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	problems = append(problems, ceilingProblems...)
 	egressState, egressProblems := s.egressHealth()
 	problems = append(problems, egressProblems...)
+	archiveState, archiveProblems := s.archiveHealth()
+	problems = append(problems, archiveProblems...)
 
-	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling, "egress": egressState}
+	body := map[string]any{"status": "ok", "auth": authState, "store_ceiling": ceiling, "egress": egressState, "archive": archiveState}
 	if len(problems) > 0 {
 		body["status"] = "degraded"
 		body["problems"] = problems
@@ -584,6 +624,11 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	seq, numbered, err := appendSequenceFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	defer func() { _ = r.Body.Close() }()
 	reserved := int64(maxAppendRequestBytes)
@@ -609,20 +654,12 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read request body", http.StatusBadRequest)
 		return
 	}
+	if numbered && seq.end > seq.seq && (len(body) == 0 || body[len(body)-1] != '\n' || int64(bytes.Count(body, []byte{'\n'})) != seq.end-seq.seq+1) {
+		http.Error(w, "log sequence range does not match newline-delimited records", http.StatusBadRequest)
+		return
+	}
 	if len(body) == 0 {
 		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if status, err := s.validateAppendClaim(r, runID, nodeID); err != nil {
-		http.Error(w, err.Error(), status)
-		return
-	}
-	if !s.hasFreeSpace() {
-		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
-		return
-	}
-	if err := s.ceiling.Allow(); err != nil {
-		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}
 
@@ -632,38 +669,117 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
-	if err := s.ensureRunDir(root, runID); err != nil {
-		s.storeError(w, "create run dir", err)
-		return
-	}
-
 	name := identity.path(runID, nodeID)
-	if name != nodePath(runID, nodeID) {
-		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {
-			s.storeError(w, "create attempt log dir", err)
-			return
-		}
-	}
 	rt := s.runTotals.acquire(runID)
 	defer s.runTotals.release(rt)
 	lock := s.appendNodeLock(runID, nodeID)
 	lock.Lock()
 	defer lock.Unlock()
-
-	if looksBinary(body, s.limits.BinaryRatio) {
-		if !rt.noteBinary(name) {
-			w.WriteHeader(http.StatusNoContent)
+	_, status, err := s.validateAppendClaim(r, runID, nodeID)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	if numbered && seq.end > seq.seq {
+		state := s.numberedRangeState(runID, nodeID, seq)
+		if state != rangeFresh {
+			if err := s.ensureRunDir(root, runID); err != nil {
+				s.storeError(w, "create run dir", err)
+				return
+			}
+			if err := s.labelRun(r, root, runID); err != nil {
+				if errors.Is(err, errRunOfAnotherTeam) {
+					http.Error(w, err.Error(), http.StatusForbidden)
+					return
+				}
+				s.storeError(w, "label run", err)
+				return
+			}
+			if state == rangeDuplicate {
+				if err := s.ensureSequenceOpenRecord(root, runID, nodeID, name, seq.stream); err != nil {
+					s.storeError(w, "confirm log sequence", err)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				http.Error(w, "log sequence range partially overlaps received records", http.StatusUnprocessableEntity)
+			}
 			return
 		}
+	}
+
+	binaryDrop := false
+	if looksBinary(body, s.limits.BinaryRatio) {
+		binaryDrop = true
 		body = []byte(BinaryDropMarker)
 	} else {
 		body = capLines(body, s.limits.MaxLineBytes)
 	}
-
+	// safety: a binary append after the first stores nothing, so it is
+	// planned as empty, but its claim is still checked.
+	if binaryDrop && !rt.noteBinary(name) {
+		body = nil
+	}
 	plan := s.planAppend(root, runID, nodeID, rt, body)
+	// safety: every refusal from here on gives back what planAppend
+	// reserved against the run, so a refused append costs the run nothing.
+	refuse := func() { rt.unreserve(int64(len(plan.write))) }
+	// safety: a numbered line counts as received once its claim is checked,
+	// even when a cap stores none of it, because the writer delivered it.
+	observe := func() error {
+		if !numbered {
+			return nil
+		}
+		return s.observeSequence(root, runID, nodeID, name, seq)
+	}
 	if len(plan.write) == 0 {
+		if err := observe(); err != nil {
+			s.storeError(w, "record log sequence", err)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return
+	}
+	if !s.hasFreeSpace() {
+		refuse()
+		http.Error(w, "log store is out of space", http.StatusInsufficientStorage)
+		return
+	}
+	if err := s.ceiling.Allow(); err != nil {
+		refuse()
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
+	team := principalTeam(r)
+	// safety: the reservation is taken after the node and run caps cut the
+	// append, so a team is held to what this append stores rather than to
+	// what it was sent.
+	counted, ok := s.reserveLogBytes(w, r, team, runID, plan.storedBytes())
+	if !ok {
+		refuse()
+		return
+	}
+	defer counted.finish()
+	if err := s.ensureRunDir(root, runID); err != nil {
+		refuse()
+		s.storeError(w, "create run dir", err)
+		return
+	}
+	if err := s.labelRun(r, root, runID); err != nil {
+		refuse()
+		if errors.Is(err, errRunOfAnotherTeam) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		s.storeError(w, "label run", err)
+		return
+	}
+	if name != nodePath(runID, nodeID) {
+		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {
+			refuse()
+			s.storeError(w, "create attempt log dir", err)
+			return
+		}
 	}
 	// safety: existence, not size, decides whether this append adds an object, so
 	// an empty node log is not counted again on every line it receives.
@@ -694,6 +810,11 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		objects = 1
 	}
 	s.ceiling.Record(stored, objects)
+	counted.stored = stored
+	if err := observe(); err != nil {
+		s.storeError(w, "record log sequence", err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -701,51 +822,54 @@ func (s *Server) appendNodeLock(runID, nodeID string) *sync.Mutex {
 	return s.appendLock(nodePath(runID, nodeID))
 }
 
-func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (int, error) {
+// validateAppendClaim asks the controller whether the caller holds the
+// node's claim, and returns the headers it answered with, which name the
+// run's team's storage tier.
+func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (http.Header, int, error) {
 	if s.authDisabled() {
-		return 0, nil
+		return nil, 0, nil
 	}
 	p, _ := logsPrincipalFromContext(r.Context())
 	if p != nil && p.hasScope(scopeAdmin) {
-		return 0, nil
+		return nil, 0, nil
 	}
-	raw, err := extractBearer(r)
+	credential, err := extractCredential(r)
 	if err != nil {
-		return http.StatusUnauthorized, err
+		return nil, http.StatusUnauthorized, err
+	}
+	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
+	if cacheable && s.claims.valid(key, time.Now()) {
+		return nil, 0, nil
 	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
 	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, nil)
 	if err != nil {
-		return http.StatusBadGateway, err
+		return nil, http.StatusBadGateway, err
 	}
-	req.Header.Set("Authorization", "Bearer "+raw)
-	for _, name := range []string{
-		"X-Sparkwing-Claim-Holder",
-		"X-Sparkwing-Claim-Membership",
-		"X-Sparkwing-Claim-Reservation",
-		"X-Sparkwing-Claim-Generation",
-		"X-Sparkwing-Attempt-Ordinal",
-		"X-Sparkwing-Trigger-Generation",
-	} {
+	req.Header.Set("Authorization", credential)
+	for _, name := range claimHeaders {
 		req.Header.Set(name, r.Header.Get(name))
 	}
 	// #nosec G704 -- the validated request retains the same operator-configured origin
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
-		return http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
+		return nil, http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return 0, nil
+		if cacheable && s.claimCacheTTL() > 0 {
+			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
+		}
+		return resp.Header, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		message = http.StatusText(resp.StatusCode)
 	}
-	return resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
+	return nil, resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
 }
 
 type appendIdentity struct {
@@ -887,6 +1011,13 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "open node log", err)
 		return
 	}
+	if filter.lineNumbers {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		if err := filter.writeNumbered(w, data); err != nil {
+			s.logger.Warn("write numbered log matches", "err", err)
+		}
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	if filter.passThrough() {
@@ -899,15 +1030,30 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 }
 
 type logFilter struct {
-	tail  int
-	head  int
-	lines string
-	grep  string
+	tail        int
+	head        int
+	lines       string
+	grep        string
+	lineNumbers bool
+	maxMatches  int
 }
 
 func parseLogFilter(r *http.Request) (logFilter, error) {
 	q := r.URL.Query()
 	f := logFilter{lines: q.Get("lines"), grep: q.Get("grep")}
+	if raw := q.Get("line_numbers"); raw != "" {
+		if raw != "1" || f.grep == "" || f.lines != "" || q.Get("head") != "" || q.Get("tail") != "" {
+			return f, errors.New("line_numbers requires grep without other line filters")
+		}
+		f.lineNumbers = true
+	}
+	if raw := q.Get("max_matches"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || !f.lineNumbers {
+			return f, fmt.Errorf("invalid max_matches: %q", raw)
+		}
+		f.maxMatches = n
+	}
 	if v := q.Get("tail"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
@@ -932,6 +1078,31 @@ func parseLogFilter(r *http.Request) (logFilter, error) {
 
 func (f logFilter) passThrough() bool {
 	return f.tail == 0 && f.head == 0 && f.lines == "" && f.grep == ""
+}
+
+func (f logFilter) writeNumbered(w io.Writer, data []byte) error {
+	encoder := json.NewEncoder(w)
+	count := 0
+	needle := []byte(f.grep)
+	for lineNo := 1; len(data) > 0; lineNo++ {
+		line := data
+		if end := bytes.IndexByte(data, '\n'); end >= 0 {
+			line, data = data[:end], data[end+1:]
+		} else {
+			data = nil
+		}
+		if !bytes.Contains(line, needle) {
+			continue
+		}
+		if err := encoder.Encode(GrepLine{LineNo: lineNo, Line: string(line)}); err != nil {
+			return err
+		}
+		count++
+		if f.maxMatches > 0 && count >= f.maxMatches {
+			break
+		}
+	}
+	return nil
 }
 
 func (f logFilter) apply(data []byte) []byte {
@@ -1029,6 +1200,14 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = root.Close() }()
+	if s.archive != nil {
+		l := s.archive.lock(runID)
+		l.rw.Lock()
+		defer l.rw.Unlock()
+		if !s.mayDeleteArchivedRun(w, r, root, runID) {
+			return
+		}
+	}
 	if err := root.RemoveAll(runID); err != nil {
 		s.storeError(w, "remove run dir", err)
 		return

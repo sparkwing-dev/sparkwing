@@ -261,7 +261,7 @@ func ReconcileSubmissionEnvironments(ctx context.Context, home string, st *store
 			continue
 		}
 		trig, getErr := st.GetTrigger(ctx, snapshot.RunID)
-		terminal := getErr == nil && trig.Status == "done"
+		terminal := getErr == nil && trig.IsFinished()
 		if errors.Is(getErr, store.ErrNotFound) {
 			info, infoErr := entry.Info()
 			if infoErr != nil {

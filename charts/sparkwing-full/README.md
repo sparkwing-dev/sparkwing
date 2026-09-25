@@ -28,17 +28,19 @@ instead -- this chart pulls it in as a dependency.
 
 ## Render the chart
 
-`helm template` stops on the sub-chart's `validate.yaml` unless the runner
-token Secret is named, and the value lives under the sub-chart's key. The
-minimal read-only render is:
+`helm template` stops on the sub-chart's `validate.yaml` unless the cache's
+operator token Secret is named, and the values live under the sub-chart's
+key. The minimal read-only render is:
 
 ```bash
 helm template sparkwing ./charts/sparkwing-full \
-  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token
+  --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
+  --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
+  --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key
 ```
 
-`charts/render_test.go` injects that same value, so what it exercises is what
-this renders. The sub-chart is vendored in the repository, so this works in a
+`charts/render_test.go` injects those same values, so what it exercises is
+what this renders. The sub-chart is vendored in the repository, so this works in a
 fresh clone with no `helm dependency update` first.
 
 ## Topology
@@ -113,6 +115,16 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # Deleting a run from the dashboard needs `admin` on the web token AND
 # on the signed-in account; leave it off to keep deletion on the CLI.
 # Mint the two separately so neither carries the other's reach.
+
+# The cache's operator token and the key cache grants are signed with.
+# Both are random secrets of their own and neither is ever a runner token:
+# pipeline code can read the runner's token, and either of these opens
+# every team's cache. The chart refuses to render when two of the three
+# name the same Secret key.
+kubectl -n sparkwing create secret generic sparkwing-cache-token \
+    --from-literal=token="$(openssl rand -hex 32)"
+kubectl -n sparkwing create secret generic sparkwing-cache-grant-key \
+    --from-literal=key="$(openssl rand -hex 32)"
 ```
 
 ## Install from source
@@ -197,6 +209,8 @@ helm install sparkwing ./charts/sparkwing-full \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set web.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
+    --set sparkwing-runner-bundle.cache.tokenSecret.name=sparkwing-cache-token \
+    --set sparkwing-runner-bundle.cache.grantKeySecret.name=sparkwing-cache-grant-key \
     --set web.requireLogin=true \
     --set ingress.enabled=true \
     --set ingress.hosts[0].host=sparkwing.example.com \
@@ -253,7 +267,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.replicas` | Replica count (web is stateless). | `1` |
 | `web.controller.url` | Override controller URL. | (auto-computed in-cluster) |
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
-| `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
 | `web.addr` | Address the web pod binds. Empty binds `0.0.0.0:<web.port>`, which the Service needs; a loopback value is reachable only through a port-forward. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
@@ -289,7 +302,9 @@ for the full schema; a few commonly overridden keys:
 | --- | --- | --- |
 | `sparkwing-runner-bundle.enabled` | Toggle the whole runner side. | `true` |
 | `sparkwing-runner-bundle.controller.url` | Where the runner claims from. | (in-cluster controller Service) |
-| `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret, shared by the runner and the cache. | `""` |
+| `sparkwing-runner-bundle.controller.tokenSecret.name` | The runner's bearer-token Secret. | `""` |
+| `sparkwing-runner-bundle.cache.tokenSecret.name` | The cache's operator token, which the controller also holds. Never the runner's token. | `""` |
+| `sparkwing-runner-bundle.cache.grantKeySecret.name` | The key the controller signs cache grants with and the cache verifies them with. | `""` |
 | `sparkwing-runner-bundle.cache.allowUnauthenticated` | Serve the cache without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.logs.allowUnauthenticated` | Serve every run's logs without a token (bootstrap only). | `false` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
@@ -350,12 +365,15 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    A configured Secret name requires a non-empty key; the chart rejects
    incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
-   `sparkwing-runner-bundle.controller.tokenSecret` is also what the cache
-   reads as `SPARKWING_API_TOKEN`, the runner as `SPARKWING_CACHE_TOKEN`, and
-   the logs service as the signal to resolve callers against the controller;
-   a cache-enabled install without it fails at render time unless
+   `sparkwing-runner-bundle.controller.tokenSecret` is also the logs
+   service's signal to resolve callers against the controller.
+   `sparkwing-runner-bundle.cache.tokenSecret` is what the cache reads as
+   `SPARKWING_API_TOKEN` and the controller as `SPARKWING_CACHE_TOKEN`, and
+   `sparkwing-runner-bundle.cache.grantKeySecret` what both read as
+   `SPARKWING_CACHE_GRANT_KEY`. A cache-enabled install without the cache
+   token fails at render time unless
    `sparkwing-runner-bundle.cache.allowUnauthenticated=true`, and a
-   logs-enabled one unless
+   logs-enabled one without the runner token unless
    `sparkwing-runner-bundle.logs.allowUnauthenticated=true`. The bootstrap
    window above needs both and the token upgrade should turn both back off.
 

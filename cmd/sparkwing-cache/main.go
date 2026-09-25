@@ -11,6 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/cache"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
@@ -59,6 +60,10 @@ func run(args []string) error {
 	fs.StringVar(&cfg.APIToken, "api-token",
 		envOr("SPARKWING_API_TOKEN", cfg.APIToken),
 		"bearer token required on the git, blob, artifact, and sync endpoints. Required unless --allow-unauthenticated is set. Falls back to $SPARKWING_API_TOKEN.")
+	fs.StringVar(&cfg.GrantKey, "grant-key",
+		envOr(authwire.CacheGrantKeyEnv, cfg.GrantKey),
+		"key that verifies cache grants, the one the controller signs them with. No runner holds it, and it "+
+			"must differ from --api-token. Empty accepts no grants. Falls back to $"+authwire.CacheGrantKeyEnv+".")
 	fs.BoolVar(&cfg.AllowUnauthenticated, "allow-unauthenticated",
 		envBool("SPARKWING_CACHE_ALLOW_UNAUTHENTICATED", cfg.AllowUnauthenticated),
 		"start without a bearer token, leaving the git, blob, artifact, and sync endpoints open to anyone who can reach the port. Falls back to $SPARKWING_CACHE_ALLOW_UNAUTHENTICATED.")
@@ -79,7 +84,7 @@ func run(args []string) error {
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
 		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
-		"stored bytes across the artifact, dependency-archive and upload trees at or above which every "+
+		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which every "+
 			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
 			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",
@@ -96,17 +101,42 @@ func run(args []string) error {
 		"how often the service walks its stored trees and replaces the running count with the measurement. "+
 			"Uploads are counted as they happen, so this walk is the only enumeration the ceiling costs; "+
 			"0 measures once at startup. Falls back to $SPARKWING_CACHE_STORE_RECONCILE.")
+	fs.StringVar(&cfg.BlobStore, "blob-store",
+		envOr("SPARKWING_CACHE_BLOB_STORE", cfg.BlobStore),
+		"s3://bucket/prefix that holds the binary, dependency-archive and artifact stores instead of the volume, "+
+			"one teams/<team>/ namespace per team. Region and credentials come from the AWS default chain (IRSA on EKS); "+
+			"$SPARKWING_S3_ENDPOINT points it at an S3-compatible store. Git mirrors, uploads and the registry proxy stay "+
+			"on --data-dir. Empty keeps everything on the volume. Falls back to $SPARKWING_CACHE_BLOB_STORE.")
+	fs.StringVar(&cfg.ControllerURL, "controller",
+		envOr("SPARKWING_CONTROLLER_URL", cfg.ControllerURL),
+		"controller URL the cache asks, with --api-token, to count what each team a grant names stores in "+
+			"--blob-store and downloads in a UTC day, and where it keeps its egress totals. When the controller cannot "+
+			"answer, a team without credits is refused with 503. Required with --grant-key and --blob-store. Falls "+
+			"back to $SPARKWING_CONTROLLER_URL.")
+	fs.BoolVar(&cfg.DisableProxy, "disable-proxy", cfg.DisableProxy,
+		"serve no registry proxy (/proxy/ and /stats). The proxy takes no credential, so a cache reachable "+
+			"from outside the cluster sets this.")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr",
+		envOr("SPARKWING_METRICS_ADDR", cfg.MetricsAddr),
+		"bind address for /metrics and the proxy's /stats. Set it to move both off --addr, and off any ingress "+
+			"fronting that listener, onto a port of their own; a cache published outside the cluster sets it with "+
+			"--disable-proxy. Empty serves both on --addr. Falls back to $SPARKWING_METRICS_ADDR.")
+	fs.Int64Var(&cfg.ProxyMaxBytes, "proxy-max-bytes",
+		envInt64("SPARKWING_CACHE_PROXY_MAX_BYTES", cfg.ProxyMaxBytes),
+		"size cap for the registry proxy's directory; past it the least recently served entries are evicted, "+
+			"which costs one upstream fetch each. 0 leaves the proxy unbounded. Falls back to $SPARKWING_CACHE_PROXY_MAX_BYTES.")
 	fs.IntVar(&cfg.GitForkLimit, "git-fork-limit",
 		envInt("SPARKWING_GITCACHE_CONCURRENCY", cfg.GitForkLimit),
 		"max concurrent git subprocesses. Falls back to $SPARKWING_GITCACHE_CONCURRENCY.")
 	readEgress := egress.Bind(fs, os.Getenv, egress.ServiceCache, egress.CacheSurfaces)
 	_ = fs.Parse(args)
 
-	egressCfg, _, err := readEgress()
+	egressCfg, named, err := readEgress()
 	if err != nil {
 		return err
 	}
 	cfg.EgressDailyAlarmBytes = egressCfg.GlobalDailyAlarmBytes
+	cfg.EgressDailyCapBytes = egressDailyCap(cfg, egressCfg, named)
 
 	srv, err := cache.New(cfg)
 	if err != nil {
@@ -116,6 +146,16 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return srv.Run(ctx)
+}
+
+// safety: a cache that verifies grants serves more than one team, and its
+// proxy and blob downloads are what an abusive team churns, so it starts
+// with a finite daily cap unless the operator named one, zero included.
+func egressDailyCap(cfg cache.Config, egressCfg egress.Config, named egress.Named) int64 {
+	if cfg.GrantKey != "" && !named.DailyCapBytes {
+		return cache.DefaultMultiTeamEgressDailyCapBytes
+	}
+	return egressCfg.GlobalDailyCapBytes
 }
 
 func envOr(name, fallback string) string {

@@ -101,9 +101,11 @@ file. Other syntax and workflow checks remain active.
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
   a 40-minute execution deadline, which gives the dispatcher 41 minutes with
-  its drain margin inside the hosted job's 45 minutes. This is a liveness
-  boundary for the long test and change-sensitive post-test fanout, not a claim
-  that every gate completes in 40 minutes. A failed hosted canonical run gets
+  its drain margin. Pre-release declares a 75-minute execution deadline, which
+  gives the dispatcher 76 minutes. Their shared hosted job allows 80 minutes,
+  leaving five minutes beyond the longer node deadline for setup and cleanup.
+  These are liveness boundaries, not claims that either check normally takes
+  that long. A failed hosted canonical run gets
   two minutes to print its stored status and the last 500 log lines from the
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
@@ -117,8 +119,21 @@ file. Other syntax and workflow checks remain active.
   over 828 tests rather than a few, so there is nothing to trim that fits it:
   the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
   Left in, the step always times out, which is a check that cannot pass.
-  `pre-release` runs it instead, as `race-store`, where nothing bounds it to
-  30 minutes and no release ships past it. A Go step's own parallelism depends on who else holds the
+  `pre-release` runs it instead, as `race-store`, and no release ships past it.
+  That step compiles one race-enabled `pkg/store` test binary, lists its top-level
+  Test, Example and Fuzz names, sorts them and assigns each exactly once across
+  four processes. Every shard runs with `GOMAXPROCS=1`; the separate
+  `pkg/store/internal/storetest` package runs once. The step stops sibling
+  processes on a failure and retains each shard's output in the run log. It
+  gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
+  and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
+  A complete local run on 16 logical CPUs covered 1,075 top-level names in
+  27m20s; its four shards took 21m45s, 23m15s, 23m40s and 27m20s. A prior
+  pre-release run without this step took 13m03s, so 40m23s is a local estimate
+  for the whole release check, not a hosted measurement. Hosted four-core CPU
+  and memory use still need verification. Each shard has a 55-minute test
+  timeout, followed by later checks under the 75-minute node deadline.
+  A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
   one gate and is discarded after it, so it holds nothing back for a neighbor
@@ -181,13 +196,15 @@ file. Other syntax and workflow checks remain active.
   pipeline module.
 - **Why the whole-tree vet, test and lint are in neither hook:** the house
   standard puts them in the pre-commit chain, and this repo runs them in `gate`
-  on purpose. The broad tier takes 12 to 24 minutes through the shared
-  admission daemon (the Postgres suite 401 s, the race tests 401 s, the full
-  unit suite 315 s, lint 117 s), a hook that long is a hook everyone passes
-  `--no-verify`, and it loses the fast-forward race whenever a co-maintainer
-  lands first. Hosted CI runs `gate` and `pre-release` on every pull request
-  and every push to main, so a landing pays for them there. What the push tier
-  keeps of the four is the packages the change touches: `go build`, `go vet`,
+  on purpose. Earlier broad-tier runs took 12 to 24 minutes through the shared
+  admission daemon. At that time, the Postgres suite took 401 s, race tests
+  401 s, the full unit suite 315 s, and lint 117 s. The Postgres lane now takes
+  693 s end to end. No new broad-tier total has been measured. A hook that
+  long is a hook everyone passes `--no-verify`, and it loses the fast-forward
+  race whenever a co-maintainer lands first. Hosted CI runs `gate` and
+  `pre-release` on every pull request and push to main, so a landing pays for
+  them there. What the push tier keeps of the four is the packages the change
+  touches: `go build`, `go vet`,
   and the fast linter subset, the whole-tree linters minus the type-and-SSA
   family, which costs minutes. Every touched package is checked even on a
   wide push; the file-count waiver relaxes only elapsed time. No test suite
@@ -212,6 +229,8 @@ file. Other syntax and workflow checks remain active.
   findings may recommend either existing package or a focused shared package.
   Store the API key as the masked `TYPESAFE_API_KEY` Sparkwing secret. Use
   `--dry-run` to inspect every bounded request without a key or network call.
+  Jev skips symlinked Go candidates and refuses changed files or invariant
+  config reached through a symlink, so a request reads only checkout files.
   Findings are advisory; configuration, analysis, transport, and
   response-schema failures fail the run. Cached exact requests can be read
   without the key.
@@ -324,7 +343,17 @@ file. Other syntax and workflow checks remain active.
   origin/main when nothing is staged, so a new offender fails from the first
   run while the tests written before the rule keep passing until they are
   edited. `GOWORK=off go run ./internal/sleepcheck .` judges every test file in
-  the tree, which is how to size the remaining purge.
+  the tree, which is how to size the remaining purge. Korey approved four
+  external-boundary exceptions: two real HTTP claim-refusal bounds in
+  `internal/orchestrator/run_node_claim_refused_test.go`, and the process-exit
+  bound and paced status poll in `pkg/controller/direct_source_e2e_test.go`.
+  The former prevent a test from hanging if a pod ignores a refused claim;
+  the latter bound cleanup of an external runner and avoid a busy HTTP loop.
+  Each `time.After` has a `// sleepcheck:external-boundary` reason immediately
+  above its select receive arm. The checker allows only the listed path,
+  function, duration, select arm and exact marker, and fails if an exception
+  disappears or changes or a marker has no approved wait. New waits and sleeps
+  still fail.
 - **Expensive or release-boundary:** `sparkwing run pre-release` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
@@ -405,8 +434,10 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
-  the first run downloads the Postgres binaries.
+  thirty-minute timeout. The Go package has a fixed 15-minute timeout because
+  1,076 passing tests took 656 seconds in an isolated measurement and 679
+  seconds in the pipeline, with seven workers. The pipeline took 693 seconds
+  end to end. The first run may also download the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

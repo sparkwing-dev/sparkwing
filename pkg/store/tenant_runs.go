@@ -1,0 +1,231 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+)
+
+// CreateRun writes the run into t's team.
+func (t *Tenant) CreateRun(ctx context.Context, r Run) error {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// GetRun fetches one of t's runs by id. A run of another team reads as
+// [ErrNotFound], because a caller told the row exists but is not yours
+// learns that the id is in use elsewhere.
+func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error) {
+	row := t.s.queryRow(ctx, `
+SELECT `+runColumns+`
+  FROM runs WHERE team = ? AND id = ?`, string(t.team), runID)
+	run, err := scanRun(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, notFound("run", runID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := t.s.loadAgentLossRetry(ctx, t.team, run); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// ListRuns returns t's runs, newest first, filtered by f.
+func (t *Tenant) ListRuns(ctx context.Context, f RunFilter) ([]*Run, error) {
+	return t.s.listRuns(ctx, oneTeam(t.team), f)
+}
+
+// CountRuns returns how many of t's runs match f, ignoring its Limit.
+func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error) {
+	return t.s.countRuns(ctx, oneTeam(t.team), f)
+}
+
+// FinishRun marks one of t's runs terminal with the given status and
+// optional error. A run of another team reads as [ErrNotFound], the same
+// as [Tenant.GetRun] reports it, because a mutator that quietly matched
+// nothing would let a cancel endpoint answer 200 and cancel nothing.
+func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return err
+	}
+	if err := t.s.assertRunMutationFenceTx(ctx, tx, t.team, runID); err != nil {
+		return err
+	}
+	if err := finishRunOnceTx(ctx, tx, runID, status, errMsg, t.team); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// FinishRunsIfActive atomically finalizes the named non-terminal runs
+// of t's team. A failure rolls back every member, so one shared lease
+// cannot be partly cancelled, and a member of another team fails the
+// whole batch with [ErrNotFound] rather than being skipped.
+func (t *Tenant) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
+	if !isTerminalRunStatus(status) {
+		return fmt.Errorf("%w: %q is not a terminal run status", ErrInvalidInput, status)
+	}
+	if len(runIDs) == 0 {
+		return nil
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	now := time.Now().UnixNano()
+	for _, runID := range runIDs {
+		if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE runs SET status = ?, error = ?, finished_at = ?
+			  WHERE team = ? AND id = ? AND finished_at IS NULL AND status NOT IN ('success','failed','cancelled')`,
+			status, errMsg, now, string(t.team), runID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// TouchRunHeartbeat stamps last_heartbeat_at=now on one of t's runs. A
+// run of another team reads as [ErrNotFound].
+func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := assertRunBelongsToTeamTx(ctx, tx, t.team, runID); err != nil {
+		return err
+	}
+	if err := t.s.assertRunHeartbeatFenceTx(ctx, tx, t.team, runID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs SET last_heartbeat_at = ? WHERE team = ? AND id = ?`,
+		time.Now().UnixNano(), string(t.team), runID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// safety: every tenant mutator runs this first, because a scoped UPDATE
+// matching nothing cannot be told from one that matched and changed
+// nothing, and a caller told "no error" for another team's id reads and
+// writes two different worlds.
+func assertRunBelongsToTeamTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
+	var found int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	return err
+}
+
+// ListRunRetryTree returns every run of t's team in the retry tree runID
+// belongs to, oldest first: the root found by walking retry_of upward, plus
+// every descendant whose retry_of chain leads back to it. Siblings retried
+// from one attempt both appear. A run of another team reads as no run.
+//
+// safety: every step of the walk, up and down, carries the team predicate,
+// because retry_of is a bare id and a pointer that crosses teams would
+// otherwise hand the caller the other team's run.
+func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, error) {
+	if runID == "" {
+		return nil, nil
+	}
+	// A corrupted retry_of cycle would otherwise spin the upward walk forever.
+	const maxDepth = 256
+	rootID := ""
+	next := runID
+	for range maxDepth {
+		var parent string
+		err := t.s.queryRow(ctx,
+			`SELECT retry_of FROM runs WHERE team = ? AND id = ?`, string(t.team), next).Scan(&parent)
+		if errors.Is(err, sql.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		rootID = next
+		if parent == "" || parent == next {
+			break
+		}
+		next = parent
+	}
+	if rootID == "" {
+		return nil, nil
+	}
+	root, err := t.GetRun(ctx, rootID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	collected := map[string]*Run{rootID: root}
+	frontier := []string{rootID}
+	for len(frontier) > 0 {
+		var below []string
+		for _, id := range frontier {
+			children, err := t.retriesOf(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range children {
+				if _, dup := collected[r.ID]; dup {
+					continue
+				}
+				collected[r.ID] = r
+				below = append(below, r.ID)
+			}
+		}
+		frontier = below
+	}
+	out := make([]*Run, 0, len(collected))
+	for _, r := range collected {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+func (t *Tenant) retriesOf(ctx context.Context, id string) (_ []*Run, err error) {
+	rows, err := t.s.query(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE team = ? AND retry_of = ?`, string(t.team), id)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var out []*Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

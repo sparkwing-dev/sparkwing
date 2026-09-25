@@ -20,6 +20,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -27,10 +28,16 @@ import (
 type Config struct {
 	Contribution string `yaml:"contribution"`
 
-	Controller    string        `yaml:"controller"`
-	Logs          string        `yaml:"logs"`
-	Gitcache      string        `yaml:"gitcache"`
-	CacheToken    string        `yaml:"cache_token"`
+	Controller string `yaml:"controller"`
+	Logs       string `yaml:"logs"`
+	// Gitcache is the git cache source is fetched through. Empty means the
+	// controller's gitcache proxy, unless AllowRepos is set.
+	Gitcache string `yaml:"gitcache"`
+	// AllowRepos names the repositories this machine may build, as host/path
+	// patterns. Given without a gitcache, the agent fetches each run's source
+	// directly: with the credential the controller releases, else with the
+	// machine owner's own git credentials.
+	AllowRepos    []string      `yaml:"allow_repos"`
 	Profile       string        `yaml:"profile"`
 	Token         string        `yaml:"token"`
 	MaxConcurrent int           `yaml:"max_concurrent"`
@@ -135,7 +142,16 @@ func Validate(in Config) (Config, error) {
 	if out.Controller == "" {
 		return out, errors.New("agent.yaml: controller is required")
 	}
-	if out.Gitcache == "" {
+	allow, err := sourceurl.ParseRepoAllowlist(out.AllowRepos)
+	if err != nil {
+		return out, fmt.Errorf("agent.yaml: allow_repos: %w", err)
+	}
+	if !allow.Empty() {
+		out.AllowRepos = allow.Patterns()
+	}
+	// safety: an agent with no list keeps the proxy, since without one it
+	// would fetch whatever a run names with its owner's credentials.
+	if out.Gitcache == "" && allow.Empty() {
 		out.Gitcache = strings.TrimRight(out.Controller, "/") + "/api/v1/gitcache"
 	}
 	if out.SpawnPolicy == "" {

@@ -13,15 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-const (
-	sessionTTL    = 12 * time.Hour
-	sessionExtend = 1 * time.Hour
-)
+const sessionTTL = 7 * 24 * time.Hour
 
 // DefaultSessionMaxLifetime bounds how long a browser session lives from
 // its creation, however often the dashboard renews it. Override it with
 // Server.WithSessionMaxLifetime.
-const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
+const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
 
 var errSessionLifetimeExceeded = errors.New("session exceeded its maximum lifetime")
 
@@ -65,7 +62,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, sessionTTL, now)
+	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, s.sessionInitialTTL(), now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -122,6 +119,9 @@ type sessionResp struct {
 	Scopes    []string `json:"scopes"`
 	CSRFToken string   `json:"csrf_token"`
 	ExpiresAt int64    `json:"expires_at"`
+	Team      string   `json:"team,omitempty"`
+	Role      string   `json:"role,omitempty"`
+	UserID    string   `json:"user_id,omitempty"`
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +132,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	sess, err := s.store.LookupSession(raw, now)
+	sess, err := s.store.LookupSessionAndRenew(raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
 		if errors.Is(err, store.ErrSessionBackend) {
@@ -148,17 +148,26 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, errSessionLifetimeExceeded)
 		return
 	}
-	if sess.ExpiresAt.Sub(now) < sessionExtend {
-		ttl := s.sessionExtensionTTL(sess.CreatedAt, now)
-		_ = s.store.ExtendSession(sess.ID, ttl, now)
-		sess.ExpiresAt = now.Add(ttl)
-	}
-	writeJSON(w, http.StatusOK, sessionResp{
+	resp := sessionResp{
 		Principal: sess.Principal,
 		Scopes:    sess.Scopes,
 		CSRFToken: sess.CSRFToken,
 		ExpiresAt: sess.ExpiresAt.Unix(),
-	})
+		Team:      string(sess.Team),
+	}
+	if sess.AccountID != "" {
+		if !s.MultiTeam() {
+			writeError(w, http.StatusUnauthorized, errAccountSessionsDisabled)
+			return
+		}
+		role, err := s.memberRole(r.Context(), sess.Team, sess.AccountID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		resp.Scopes, resp.Role, resp.UserID = ScopesForRole(role), string(role), sess.AccountID
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) sessionExpired(createdAt, now time.Time) bool {
@@ -169,11 +178,11 @@ func (s *Server) sessionExpired(createdAt, now time.Time) bool {
 	return s.sessionMaxLifetime > 0 && !now.Before(createdAt.Add(s.sessionMaxLifetime))
 }
 
-func (s *Server) sessionExtensionTTL(createdAt, now time.Time) time.Duration {
+func (s *Server) sessionInitialTTL() time.Duration {
 	if s.sessionMaxLifetime <= 0 {
 		return sessionTTL
 	}
-	return min(createdAt.Add(s.sessionMaxLifetime).Sub(now), sessionTTL)
+	return min(s.sessionMaxLifetime, sessionTTL)
 }
 
 func extractSessionHeader(r *http.Request) string {
@@ -255,6 +264,12 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		s.handleCreateUser(w, r)
 		return
 	}
+	// safety: a multi-team controller faces the internet, so the first web visitor
+	// must not become its operator; the operator arrives through the bootstrap admin token.
+	if s.MultiTeam() {
+		writeError(w, http.StatusForbidden, errors.New("a multi-team controller provisions its operator with the bootstrap admin token, not a web signup"))
+		return
+	}
 	var req createUserReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -299,7 +314,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleBootstrapNeeded(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{
-		"needed": !s.AuthEnabled() && s.bootstrapAllowed(),
+		"needed": !s.AuthEnabled() && !s.MultiTeam() && s.bootstrapAllowed(),
 	})
 }
 

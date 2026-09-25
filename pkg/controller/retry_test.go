@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -31,7 +32,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		ID:           "src-run",
 		Pipeline:     "deploy",
 		Args:         map[string]string{"env": "prod", "tag": "v1"},
-		Status:       "failed",
+		Status:       "running",
 		GitBranch:    "main",
 		GitSHA:       "abc123",
 		DeclaredRepo: "owner/repo-a",
@@ -145,6 +146,40 @@ func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
 	}
 	if trigger.RetryOf != "workspace-run" {
 		t.Fatalf("retry_of = %q", trigger.RetryOf)
+	}
+}
+
+func TestRetry_WorkingTreeRunIgnoresAnotherTeamsTriggerWithSameID(t *testing.T) {
+	f := newAppFixture(t)
+	alice := f.ghUser(601, "alice")
+	bob := f.ghUser(602, "bob")
+	aliceTeam, err := f.store.ForTeam(t.Context(), store.Team(alice.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobTeam, err := f.store.ForTeam(t.Context(), store.Team(bob.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runID = "local-worktree"
+	if err := aliceTeam.CreateRun(t.Context(), store.Run{
+		ID: runID, Pipeline: "build", Status: "failed",
+		TriggerSource: "pipeline-working-tree@desktop", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bobTeam.CreateTrigger(t.Context(), store.Trigger{
+		ID: runID, Pipeline: "build", TriggerSource: "pipeline-working-tree@cloud",
+		TriggerEnv: map[string]string{bincache.SourceBundleObjectEnvKey: "sources/other-team"},
+		CreatedAt:  time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call(http.MethodPost, "/api/v1/runs/"+runID+"/retry", bob.auth, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("another team's run retry = %d, want 404", code)
+	}
+	if code := f.call(http.MethodPost, "/api/v1/runs/"+runID+"/retry", alice.auth, nil, nil); code != http.StatusAccepted {
+		t.Fatalf("local working-tree retry with another team's trigger = %d, want 202", code)
 	}
 }
 

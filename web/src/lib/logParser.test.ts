@@ -119,6 +119,17 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     assert.ok(push.lines.some((l) => l.includes("pushing image")));
   });
 
+  it("keeps an empty line's timestamp separate from its empty text", () => {
+    const lines = [
+      nodeStart("build", "2026-04-23T00:00:00Z"),
+      stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
+      execLine("build", "", "2026-04-23T00:00:00.200Z", "compile"),
+    ];
+    const compile = parseLogLines(lines).sections[0] as StepSection;
+    const blank = compile.lines.at(-1) ?? "";
+    assert.match(blank, /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] $/);
+  });
+
   it("keeps the in-flight step as 'running' until the next step or node_end", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),

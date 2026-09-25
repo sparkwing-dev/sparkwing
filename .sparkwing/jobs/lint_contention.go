@@ -83,7 +83,11 @@ func fastLintCommand(cores int, pkgs []string) string {
 
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
-	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
+	// A runner hands the run a grant for its team's trees; an operator's own shell carries the cache token.
+	gcToken := os.Getenv("SPARKWING_CACHE_GRANT")
+	if gcToken == "" {
+		gcToken = os.Getenv("SPARKWING_CACHE_TOKEN")
+	}
 
 	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, gcURL)
 	switch {

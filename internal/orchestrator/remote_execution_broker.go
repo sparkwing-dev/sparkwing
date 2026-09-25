@@ -43,6 +43,8 @@ type remoteExecutionBroker struct {
 	artifact       storage.ArtifactStore
 	controllerHost string
 	logsHost       string
+	logsURL        string
+	logSeal        childLogSeal
 }
 
 func startRemoteExecutionBroker(
@@ -79,6 +81,8 @@ func startRemoteExecutionBroker(
 	if logsTarget != nil {
 		b.logs = httputil.NewSingleHostReverseProxy(logsTarget)
 		b.logsHost = logsTarget.Host
+		b.logsURL = logsURL
+		b.logSeal.init()
 	}
 	b.controller.ErrorHandler = executionBrokerProxyError(logger)
 	if b.logs != nil {
@@ -154,6 +158,10 @@ func (b *remoteExecutionBroker) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if logsRequest {
 		r.Host = b.logsHost
+		if b.isChildLogAppend(r) {
+			b.forwardChildLogAppend(w, r)
+			return
+		}
 		b.logs.ServeHTTP(w, r)
 		return
 	}
@@ -268,6 +276,9 @@ func (b *remoteExecutionBroker) allowController(r *http.Request) bool {
 	nodePath := runPath + "/nodes/" + url.PathEscape(b.nodeID)
 	triggerPath := "/api/v1/triggers/" + url.PathEscape(b.runID)
 	path := r.URL.EscapedPath()
+	if strings.HasPrefix(path, "/api/v1/concurrency/") {
+		return b.allowConcurrency(r)
+	}
 	if r.Method == http.MethodGet {
 		if path == runPath || path == triggerPath || path == nodePath || path == nodePath+"/output" || path == nodePath+"/bounce" || path == runPath+"/steps" {
 			return true
@@ -296,6 +307,59 @@ func (b *remoteExecutionBroker) allowController(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+func (b *remoteExecutionBroker) allowConcurrency(r *http.Request) bool {
+	parts := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/api/v1/concurrency/"), "/")
+	if len(parts) != 2 || parts[0] == "" {
+		return false
+	}
+	key, err := url.PathUnescape(parts[0])
+	if err != nil || key == "" || strings.Contains(key, "/") {
+		return false
+	}
+	holder := b.runID + "/" + b.nodeID
+	if r.Method == http.MethodGet {
+		switch parts[1] {
+		case "holder":
+			return r.URL.Query().Get("holder_id") == holder
+		case "resolve":
+			return r.URL.Query().Get("run_id") == b.runID && r.URL.Query().Get("node_id") == b.nodeID
+		}
+		return false
+	}
+	if r.Method != http.MethodPost {
+		return false
+	}
+	if parts[1] != "acquire" && parts[1] != "heartbeat" && parts[1] != "release" && parts[1] != "cancel-waiter" {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	if err != nil || len(body) > 1<<20 {
+		return false
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var slot struct {
+		HolderID          string `json:"holder_id"`
+		InheritedHolderID string `json:"inherited_holder_id"`
+		RunID             string `json:"run_id"`
+		NodeID            string `json:"node_id"`
+	}
+	if json.Unmarshal(body, &slot) != nil {
+		return false
+	}
+	if parts[1] == "cancel-waiter" {
+		return slot.RunID == b.runID && slot.NodeID == b.nodeID
+	}
+	if slot.HolderID != holder {
+		return false
+	}
+	if parts[1] == "acquire" {
+		return slot.RunID == b.runID && slot.NodeID == b.nodeID &&
+			slot.InheritedHolderID == ""
+	}
+	return true
 }
 
 func (b *remoteExecutionBroker) bindRequest(r *http.Request) error {

@@ -239,8 +239,8 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 
 // A pipeline that declares a concurrency group or a memoized node moves its
 // slot from the process holding the run's claim, on the documented runner scope
-// set. Another bearer of the same scopes reaches none of it, and the two
-// cross-run routes stay admin.
+// set. Another bearer of the same scopes reaches none of it; force release
+// stays admin.
 func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -309,18 +309,20 @@ func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 		!strings.Contains(err.Error(), "controller 403: claim_required") {
 		t.Fatalf("ResolveWaiter on another run = %v, want 403 claim_required", err)
 	}
+	if _, err := stranger.CancelWaiter(ctx, key, trigger.ID, "build"); err == nil ||
+		!strings.Contains(err.Error(), "controller 403: claim_required") {
+		t.Fatalf("CancelWaiter on another run = %v, want 403 claim_required", err)
+	}
 
 	if _, err := c.ForceReleaseSuperseded(ctx, key); err == nil ||
 		!strings.Contains(err.Error(), "controller 403: missing_scope") {
 		t.Fatalf("ForceReleaseSuperseded on the runner scope set = %v, want 403 missing_scope", err)
 	}
-	if _, err := c.CancelWaiter(ctx, key, trigger.ID, "build"); err == nil ||
-		!strings.Contains(err.Error(), "controller 403: missing_scope") {
-		t.Fatalf("CancelWaiter on the runner scope set = %v, want 403 missing_scope", err)
-	}
-
 	if err := c.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err != nil {
 		t.Fatalf("ReleaseSlot holding the run's claim: %v", err)
+	}
+	if _, err := c.CancelWaiter(ctx, key, trigger.ID, "build"); err != nil {
+		t.Fatalf("CancelWaiter holding the run's claim: %v", err)
 	}
 
 	admin := client.NewWithToken(f.url, nil, adminRaw)
@@ -612,13 +614,9 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	}
 	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
 	if err := c.CreateRun(ctx, store.Run{
-		ID: "run-web", Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
+		ID: "run-web", Pipeline: "deploy", Status: "pending", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("CreateRun: %v", err)
-	}
-
-	if err := c.FinishRun(ctx, "run-web", "pending", ""); err != nil {
-		t.Fatalf("FinishRun(pending): %v", err)
 	}
 	if err := c.CreateRun(ctx, store.Run{
 		ID: "run-web", Pipeline: "deploy", Status: "running",
@@ -645,6 +643,49 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 	}
 	if sec.Value != "web-key" {
 		t.Errorf("GetSecretForRun value = %q, want web-key", sec.Value)
+	}
+}
+
+func TestRunnerScopes_FinishRunKeepsTheFirstTerminalVerdict(t *testing.T) {
+	f, raw := newScopedFixture(t, runnerScopes)
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "run-terminal", "acme/web")
+	ctx := context.Background()
+	trig, err := c.ClaimTrigger(ctx)
+	if err != nil || trig == nil {
+		t.Fatalf("claim = %+v, %v", trig, err)
+	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
+	if err := c.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: "deploy", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.FinishRun(ctx, trig.ID, "pending", ""); err == nil {
+		t.Error("pending finish accepted")
+	}
+	run, err := f.store.GetRun(ctx, trig.ID)
+	if err != nil || run.Status != "running" || run.FinishedAt != nil {
+		t.Fatalf("invalid finish changed run: %+v, %v", run, err)
+	}
+	if err := c.FinishRun(ctx, trig.ID, "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	run, err = f.store.GetRun(ctx, trig.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := *run.FinishedAt
+	if err := c.FinishRun(ctx, trig.ID, "success", ""); err != nil {
+		t.Fatalf("identical retry = %v", err)
+	}
+	if err := c.FinishRun(ctx, trig.ID, "success", "rewritten error"); err == nil {
+		t.Error("same status with changed error accepted")
+	}
+	if err := c.FinishRun(ctx, trig.ID, "failed", "rewrite"); err == nil {
+		t.Error("terminal rewrite accepted")
+	}
+	run, err = f.store.GetRun(ctx, trig.ID)
+	if err != nil || run.Status != "success" || run.Error != "" || run.FinishedAt == nil || !run.FinishedAt.Equal(finished) {
+		t.Fatalf("terminal verdict rewritten: %+v, %v", run, err)
 	}
 }
 

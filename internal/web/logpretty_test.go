@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -286,5 +289,106 @@ func TestRunsGrep_FlagsTruncationAfterAnOverLongLine(t *testing.T) {
 	}
 	if body.Total != 1 {
 		t.Errorf("expected the one match before the over-long line, got %d", body.Total)
+	}
+}
+
+func TestRunsGrep_OnlyReadsRequestedRuns(t *testing.T) {
+	var read []string
+	b := &fakeBackend{
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{ID: "included"}, {ID: "filtered-out"}}, nil
+		},
+		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
+		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
+			read = append(read, runID)
+			return []byte(`{"msg":"needle"}` + "\n"), nil
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&run_id=included", nil)
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, req)
+	if len(read) != 1 || read[0] != "included" {
+		t.Fatalf("log endpoints called for %v, want only included", read)
+	}
+	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) {
+		t.Fatalf("response: %s", rec.Body.String())
+	}
+}
+
+func TestRunsGrep_FindsOlderFilteredMatchBeyondRecentRuns(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	base := time.Now().Add(-time.Hour)
+	if err := st.CreateRun(ctx, store.Run{ID: "older-match", Pipeline: "build", Status: "success", GitBranch: "rare", GitSHA: "deadbeef1234", StartedAt: base}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 201 {
+		if err := st.CreateRun(ctx, store.Run{ID: fmt.Sprintf("newer-%03d", i), Pipeline: "build", Status: "success", GitBranch: "main", GitSHA: "cafebabe1234", StartedAt: base.Add(time.Duration(i+1) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := &fakeBackend{
+		listRuns:    func(f store.RunFilter) ([]*store.Run, error) { return st.ListRuns(ctx, f) },
+		listNodes:   func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "hello"}}, nil },
+		readNodeLog: func(string, string, backend.ReadOpts) ([]byte, error) { return []byte("{\"msg\":\"needle\"}\n"), nil },
+	}
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&branch=rare&limit=200", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Matches []struct {
+			RunID string `json:"run_id"`
+		} `json:"matches"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Matches) != 1 || body.Matches[0].RunID != "older-match" {
+		t.Fatalf("branch search matches = %+v, want older-match", body.Matches)
+	}
+	rec = httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=deadbee&limit=200", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SHA search = %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Matches) != 1 || body.Matches[0].RunID != "older-match" {
+		t.Fatalf("SHA search matches = %+v, want older-match", body.Matches)
+	}
+	rec = httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&sha=not-a-sha", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid SHA search = %d, want 400", rec.Code)
+	}
+}
+
+func TestRunsGrep_StopsAtMatchLimitInRunOrder(t *testing.T) {
+	var read []string
+	b := &fakeBackend{
+		listRuns: func(store.RunFilter) ([]*store.Run, error) {
+			return []*store.Run{{ID: "newest"}, {ID: "older"}}, nil
+		},
+		listNodes: func(string) ([]*store.Node, error) { return []*store.Node{{NodeID: "node"}}, nil },
+		readNodeLog: func(runID, _ string, _ backend.ReadOpts) ([]byte, error) {
+			read = append(read, runID)
+			return []byte(`{"msg":"needle"}` + "\n"), nil
+		},
+	}
+	rec := httptest.NewRecorder()
+	runsGrepHandler(b)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/runs/grep?q=needle&max_matches=1", nil))
+	if len(read) != 1 || read[0] != "newest" {
+		t.Fatalf("read %v, want newest only", read)
+	}
+	if !strings.Contains(rec.Body.String(), `"runs_scanned":1`) || !strings.Contains(rec.Body.String(), `"runs_matching":2`) {
+		t.Fatalf("response: %s", rec.Body.String())
 	}
 }

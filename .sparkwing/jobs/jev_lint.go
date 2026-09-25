@@ -74,7 +74,7 @@ func (JevLint) ShortHelp() string {
 }
 
 func (JevLint) Help() string {
-	return "Compares the working tree with the merge base of --base (origin/main by default). Repository invariants in .sparkwing/jev-invariants.yaml become independent Jev questions over one shared bounded diff. The linter also parses changed non-test Go functions and selects likely duplicate responsibilities, multi-part conditions, and suspicious literals. Bounded Jev requests judge each invariant, responsibility ownership, unnamed complex conditions, unexplained magic values, and whether a large change builds a workaround around a reversible premise. Cross-package findings can recommend moving ownership to either package or extracting a shared package. Findings are advisory and never fail the run; configuration, repository analysis, credential, transport, and response-schema failures do. Exact requests are cached in Sparkwing's jev-lint tool cache and can be read without an API key. Selected source leaves the machine for TypeSafe unless --dry-run is set."
+	return "Compares the working tree with the merge base of --base (origin/main by default). Repository invariants in .sparkwing/jev-invariants.yaml become independent Jev questions over one shared bounded diff. The linter also parses changed non-test Go functions and selects likely duplicate responsibilities, multi-part conditions, and suspicious literals. Bounded Jev requests judge each invariant, responsibility ownership, unnamed complex conditions, unexplained magic values, and whether a large change builds a workaround around a reversible premise. Cross-package findings can recommend moving ownership to either package or extracting a shared package. Findings are advisory and never fail the run; configuration, repository analysis, credential, transport, and response-schema failures do. Exact requests are cached in Sparkwing's jev-lint tool cache and can be read without an API key. It skips symlinked Go candidates and refuses changed symlink paths. Selected source leaves the machine for TypeSafe unless --dry-run is set."
 }
 
 func (JevLint) Examples() []sparkwing.Example {
@@ -294,7 +294,7 @@ type jevLintInvariantAnalysis struct {
 }
 
 func collectJevLintInvariants(ctx context.Context, root, base string) (jevLintInvariantAnalysis, error) {
-	config, err := readJevLintInvariants(filepath.Join(root, jevLintInvariantFile))
+	config, err := readJevLintInvariants(root, jevLintInvariantFile)
 	if err != nil {
 		return jevLintInvariantAnalysis{}, err
 	}
@@ -347,7 +347,7 @@ func collectJevLintInvariants(ctx context.Context, root, base string) (jevLintIn
 		if !untrackedSet[changedPath] {
 			continue
 		}
-		body, readErr := os.ReadFile(filepath.Join(root, changedPath))
+		body, readErr := readJevLintFile(root, changedPath)
 		if readErr != nil {
 			return jevLintInvariantAnalysis{}, fmt.Errorf("read untracked invariant change %s: %w", changedPath, readErr)
 		}
@@ -360,16 +360,15 @@ func collectJevLintInvariants(ctx context.Context, root, base string) (jevLintIn
 	}, nil
 }
 
-func readJevLintInvariants(filename string) (jevLintInvariantConfig, error) {
-	file, err := os.Open(filename)
+func readJevLintInvariants(root, relative string) (jevLintInvariantConfig, error) {
+	body, err := readJevLintFile(root, relative)
 	if errors.Is(err, os.ErrNotExist) {
 		return jevLintInvariantConfig{}, nil
 	}
 	if err != nil {
 		return jevLintInvariantConfig{}, fmt.Errorf("read %s: %w", jevLintInvariantFile, err)
 	}
-	defer file.Close()
-	decoder := yaml.NewDecoder(file)
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)
 	var config jevLintInvariantConfig
 	if err := decoder.Decode(&config); err != nil {
@@ -490,7 +489,7 @@ func collectJevLintAnalysis(ctx context.Context, root, base string, maxPairs int
 	}
 	var changed []jevLintFunction
 	for _, path := range changedPaths {
-		afterBody, readErr := os.ReadFile(filepath.Join(root, path))
+		afterBody, readErr := readJevLintFile(root, path)
 		if readErr != nil {
 			return jevLintAnalysis{}, "", fmt.Errorf("read changed file %s: %w", path, readErr)
 		}
@@ -562,7 +561,7 @@ func collectJevLintChange(ctx context.Context, root, mergeBase string, changedPa
 		if !untracked[path] {
 			continue
 		}
-		body, readErr := os.ReadFile(filepath.Join(root, path))
+		body, readErr := readJevLintFile(root, path)
 		if readErr != nil {
 			return nil, fmt.Errorf("read untracked change %s: %w", path, readErr)
 		}
@@ -669,6 +668,88 @@ func setJevLintModule(functions []jevLintFunction, module string) {
 	}
 }
 
+// safety: Jev sends source to an external service, so a checkout path must
+// neither follow a symlink nor escape its root between the check and read.
+func readJevLintFile(root, relative string) (_ []byte, err error) {
+	return readJevLintFileWithHook(root, relative, nil)
+}
+
+func readJevLintFileWithHook(root, relative string, afterCheck func(string)) (_ []byte, err error) {
+	if relative == "" || filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
+		return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	roots := []*os.Root{dir}
+	defer func() {
+		for i := len(roots) - 1; i >= 0; i-- {
+			if closeErr := roots[i].Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
+		}
+	}()
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	current, checkedPath := dir, ""
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." {
+			return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
+		}
+		checkedPath = filepath.Join(checkedPath, part)
+		info, err := current.Lstat(part)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("jev-lint: symlink in checkout path %q", relative)
+		}
+		if afterCheck != nil {
+			afterCheck(checkedPath)
+		}
+		if i < len(parts)-1 {
+			if !info.IsDir() {
+				return nil, fmt.Errorf("jev-lint: checkout path %q has a non-directory parent", relative)
+			}
+			child, err := current.OpenRoot(part)
+			if err != nil {
+				return nil, err
+			}
+			roots = append(roots, child)
+			opened, err := child.Stat(".")
+			if err != nil {
+				return nil, err
+			}
+			if !os.SameFile(info, opened) {
+				return nil, fmt.Errorf("jev-lint: checkout path %q changed during read", relative)
+			}
+			current = child
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("jev-lint: checkout path %q is not a regular file", relative)
+		}
+		file, err := current.Open(part)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
+		}()
+		opened, err := file.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if !os.SameFile(info, opened) {
+			return nil, fmt.Errorf("jev-lint: checkout path %q changed during read", relative)
+		}
+		return io.ReadAll(file)
+	}
+	return nil, fmt.Errorf("jev-lint: invalid checkout path %q", relative)
+}
+
 func collectCurrentGoFunctions(root string, moduleDirs []string) ([]jevLintFunction, error) {
 	var functions []jevLintFunction
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -684,14 +765,14 @@ func collectCurrentGoFunctions(root string, moduleDirs []string) ([]jevLintFunct
 			}
 			return nil
 		}
-		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+		if entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
 			return nil
 		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		body, err := os.ReadFile(path)
+		body, err := readJevLintFile(root, relative)
 		if err != nil {
 			return err
 		}

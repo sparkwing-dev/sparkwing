@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,7 @@ type stubClaimer struct {
 	responses []claimResp
 	calls     atomic.Int64
 	capacity  atomic.Pointer[client.ClaimCapacity]
+	observe   func()
 }
 
 type claimResp struct {
@@ -30,6 +32,9 @@ func (s *stubClaimer) ClaimNodeWithCapacity(ctx context.Context, holderID string
 ) (*store.Node, error) {
 	s.capacity.Store(capacity)
 	idx := int(s.calls.Add(1)) - 1
+	if s.observe != nil {
+		s.observe()
+	}
 	if idx >= len(s.responses) {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -271,5 +276,28 @@ func TestPoolLoop_AdvertisesItsSlotsWithEachClaim(t *testing.T) {
 	}
 	if capacity.MaxConcurrent != 3 || capacity.ActiveClaims != 0 {
 		t.Fatalf("advertised capacity = %+v, want 3 slots with none in flight", capacity)
+	}
+}
+
+func TestRunRunnerCLI_RefusesABadAllowRepoPattern(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--allow-repo=https://github.com/acme/*",
+	}, "")
+	if err == nil || !strings.Contains(err.Error(), "--allow-repo") {
+		t.Fatalf("runRunnerCLI() error = %v, want the pattern refused", err)
+	}
+}
+
+// A runner on a laptop would otherwise serve /metrics on every interface and
+// collide with a second runner on the same machine; a pod names its port.
+func TestRunnerMetricsDefaultListensOnLoopbackOnly(t *testing.T) {
+	host, _, err := net.SplitHostPort(defaultRunnerMetricsAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		t.Fatalf("default --metrics-addr %q is not a loopback address", defaultRunnerMetricsAddr)
 	}
 }

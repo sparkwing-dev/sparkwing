@@ -216,8 +216,10 @@ what it always did.
 `--max-runs-per-principal-hour N` (chart
 `controller.maxRunsPerPrincipalHour`) caps the runs one principal may
 create in a rolling hour. An authenticated submission spends its own
-token's budget; a webhook delivery carries no principal, so it spends the
-budget of the repository it names. Past the cap the controller answers
+token's budget, or its team's for any team but the operator's; a webhook
+delivery carries no principal, so it spends the budget of the team whose
+binding signed it and the repository it names. A [GitHub App](github-app.md)
+delivery spends its team's budget once for every run it creates. Past the cap the controller answers
 `429` with a `Retry-After` naming the real refill delay, which lengthens
 while a caller keeps knocking at an empty budget. The budget lives in
 controller memory, so a restart or a rollout refills every principal;
@@ -262,8 +264,10 @@ re-claims at once rather than waiting its poll interval, so charging it
 would bound how fast a runner may execute rather than how fast it may
 ask. What the budget bounds is empty polling, which a runner can do
 without limit: a pool runner polls every 500ms, or 120 a minute, so 480
-allows four times that cadence. Heartbeats carry no such exemption; 1200
-suits the 3s cadence the shipped runners keep.
+allows four times that cadence. Node claim heartbeats carry no such
+exemption; 1200 suits the 3s cadence the shipped runners keep. Run and
+trigger claim heartbeats are unbudgeted because losing either can reap
+an active run.
 
 The budget is keyed on the runner, not the token. The controller derives
 the runner from the route wherever it can -- the node, run, or agent the
@@ -275,13 +279,18 @@ process id, an enrolled agent its name), not one per poll: a value that
 changed per request would buy a fresh budget on every claim and grow the
 controller's bucket table at the fleet's poll rate.
 
-**What this bounds is a cooperating runner.** On those three claim routes
-the identity is the runner's own word, so a holder of a valid token that
-varies it gets a fresh budget each time. The budget stops a runaway loop
-and keeps one misbehaving runner in a shared-token fleet from spending
-its peers' claim budget; it is not a defence against an authenticated
-caller who means harm. The per-token budget below is what bounds that
-caller, and the token itself is the control that ends it -- revoke it.
+On those three claim routes the identity is the runner's own word, so a
+holder of a valid token that varies it gets a fresh budget each time.
+`--runners-per-token` (default 64) caps how many such names one caller --
+its team for a signed-up team, its token in the operator's team -- may hold
+at once. A name counts until it has gone unused for ten minutes, a name
+already held keeps working, and a new name past the cap is answered `429`
+naming the cap and counted under
+`sparkwing_principal_throttled_total{route_class="runner_names"}`. So varying
+the name multiplies a caller's budget at most that many times. Size the cap
+above the largest fleet that shares one token. The per-token budget below
+bounds the caller's total, and the token itself is the control that ends it
+-- revoke it.
 
 A runner too old to send an identity shares one bucket with its peers on
 those routes, so during a rolling upgrade a shared-token fleet is
@@ -293,10 +302,10 @@ the rollout finishes.
 carries one setting rather than one per guard. It is described under
 [Limits profiles](#limits-profiles) below.
 
-The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`, is
-never budgeted. An agent that loses it tears down its membership and
-every node under it, which is a far worse outcome than the load one
-heartbeat every few seconds represents.
+The agent liveness heartbeat, `POST /api/v1/agents/{name}/heartbeat`,
+is never shed. Run and trigger heartbeats and node touch requests are
+unbudgeted when the caller owns the claim. Losing those updates can
+tear down an active run or executor.
 
 Past a budget the route answers `429` with a `Retry-After` naming the
 real refill delay, and `sparkwing_principal_throttled_total{route_class}`
@@ -307,12 +316,12 @@ because their callers are unauthenticated and would share one bucket.
 
 ## Per-token request budget
 
-`--requests-per-token-minute` bounds every route one token can reach,
-keyed on the token prefix alone. It is the guard that binds a caller
-varying the runner it says it is: on the two claim routes the runner name
+`--requests-per-token-minute` bounds ordinary and signed-data requests,
+keyed by signed-up team or by token prefix in the operator's team. It binds
+a caller varying the runner it says it is: on the two claim routes the runner name
 is the caller's own word, so the per-runner budgets above bound a runaway
 loop rather than a holder of a valid token who means harm. The agent
-liveness heartbeat is spared here too. Past the budget a request answers
+liveness routes above are spared here too. Past the budget a request answers
 `429` with a `Retry-After`, counted under
 `sparkwing_principal_throttled_total{route_class="token"}`.
 
@@ -375,6 +384,10 @@ poll, which is what it served before profiles existed.
 | `--requests-per-minute-alarm` | 5000 | 5000 |
 | `--egress-max-log-streams` | 50 | 10 |
 | `--egress-max-downloads` | 20 | 5 |
+| `--max-runs-per-principal-hour` | 600 | 60 |
+| `--shed-queue-depth` | 5000 | 1000 |
+| `--egress-monthly-bytes` | 100 GiB | 5 GiB |
+| `--egress-daily-cap-bytes` | 200 GiB | 20 GiB |
 | Idle-poll enforcement | on | on |
 
 The claim budgets are worked from the cadence the shipped claim loop
@@ -392,6 +405,11 @@ so the free tier carries one such runner and the paid tier several under
 one token. The alarm is what one controller pod is sized to serve. The
 egress caps are the concurrency one team is expected to read logs and
 artifacts at.
+The run cap bounds the pending triggers one principal can queue when no
+runner claims them, and the shed depth is the fleet's backstop behind it.
+The egress byte budgets bound the bill a free account can run up with no
+compute at all: one principal's month, and the controller's day however
+many principals share it, which caps a month at 31 times the daily figure.
 
 A profile fills a guard only where the command line and the environment
 named none, and a guard the operator named wins whatever its value,
@@ -470,11 +488,11 @@ status reporting.
 
 ## Secrets at rest
 
-Encryption at rest is **opt-in and off by default.** Configure a master
-key and secret values are encrypted with an XChaCha20-Poly1305 AEAD
-cipher (`internal/secrets`) before they hit the database. With no key
-configured the controller stores secret values as plaintext and logs a
-warning at startup. Provide the key via:
+Configure a master key and secret values are encrypted with an
+XChaCha20-Poly1305 AEAD cipher (`internal/secrets`), under a fresh random
+nonce per value, before they reach the database. The key is 32 random
+bytes, base64-encoded; generate one with `openssl rand -base64 32`.
+Provide it via:
 
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key, or
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key.
@@ -485,20 +503,47 @@ renders the flag, because an environment entry is readable through
 clears either variable from its own environment as soon as it reads it,
 so a value supplied that way does not outlive startup.
 
-Each envelope is bound to the fields of the row that decide who may
-read it: the secret name, the owning repository (empty for an unscoped
-secret), whether an unscoped row is shared with every run, and whether
-the value is masked in run output. Anyone with database write access
-who copies a ciphertext onto another name, into another repository, or
-onto the unscoped row, or who edits a row to widen its own access, gets
-a value that fails to open rather than one that answers there.
+A controller whose license allows more than one team refuses to start
+without a key, because it holds other people's credentials. A
+single-team install, a laptop controller included, still starts without
+one: it stores secret values as plaintext and logs a warning at startup.
+Nothing generates a key on its own; losing the key loses every value
+sealed under it, so it is backed up beside the database (see
+[backup-restore.md](backup-restore.md)).
 
-Values sealed before binding (`enc:v1:` envelopes) still open, and they
-are still substitutable until they are rebound. `sparkwing secrets list`
-reports `BOUND false` for them (`"bound": false` on the API), and the
-controller reseals such a row into a bound envelope the first time it
-is read, so rows migrate as they are used. Re-setting a secret rebinds
-it as well.
+Each envelope (`enc:v3:`) is bound, as additional authenticated data, to
+the fields of the row that decide who may read it: the team that owns
+the row, the secret name, the owning pipeline (empty for an unscoped
+secret), whether an unscoped row is shared with every run, and whether
+the value is masked in run output. Anyone with database write access who
+copies a ciphertext into another team's row, onto another name, into
+another pipeline or onto the unscoped row, or who edits a row to widen
+its own access, gets a value that fails to open rather than one that
+answers there. A read that fails to open answers `500`, never an empty
+value.
+
+Every start with a key reseals the table before the controller serves a
+request. A row held as plaintext, because it was written while the
+controller ran without a key, is sealed. An envelope from before team
+binding (`enc:v1:`, bound to nothing, or `enc:v2:`, bound to the row but
+not its team) is opened and resealed with its team. Those older envelopes
+were only ever written into the `default` team, so one found in any other
+team was copied there: it is left as it is, logged, and refused on read.
+The pass walks the table in batches, writes a row only if it still holds
+the value the pass read, and logs how many rows it resealed and skipped,
+so a restart repeats nothing. Reads open only `enc:v3:` envelopes, so an
+older envelope written into a row after the pass does not open either.
+
+Before it writes anything, the pass opens a sample of the envelopes
+already stored. If the key opens none of them, it is not the key the
+table was sealed under, and the controller refuses to start instead of
+sealing plaintext rows under it. It refuses the same way when the sample
+holds envelopes but every one is an older envelope outside the `default`
+team, which cannot confirm the key either way.
+
+`sparkwing secrets list` reports `BOUND true` for a row sealed to its
+team (`"bound"` on the API) and `false` for one that is plaintext or an
+older envelope.
 
 A stored envelope carries no key id, so the controller opens it by
 trying the keys it holds. Name the key values were sealed under before
@@ -511,11 +556,9 @@ A value that does not open under the current key is tried against that
 one, which keeps every value readable across a key change. Close the
 window with `sparkwing secrets rotate --profile <name>`
 (`POST /api/v1/secrets/rotate`, admin): it opens every row with the keys
-the controller holds and writes it back sealed and bound under the
-current key, in one transaction, so the rotation lands for the whole
-table or for none of it. The same command turns encryption on for a
-database that already holds plaintext values, which come out encrypted
-with no re-set by hand.
+the controller holds and writes it back sealed and bound to its team
+under the current key, in one transaction, so the rotation lands for the
+whole table or for none of it.
 
 A row that opens under neither key keeps the bytes it had and is named
 in the response, which is what a value written as plaintext before
@@ -589,7 +632,10 @@ without the bearer, because a caller-controlled header cannot prove where a
 request came from. `/health`, `/metrics`, `/stats`, and the pull-through
 package proxy under `/proxy/` stay open, because package managers fetch
 through the proxy without a credential and it serves upstream registry bytes
-rather than repository content.
+rather than repository content. A cache published outside the cluster starts
+with `--disable-proxy`, which drops `/proxy/` and `/stats`, and
+`--metrics-addr`, which moves `/metrics` to a listener the ingress does not
+route to.
 
 Registering a repository name validates it against
 `^[A-Za-z0-9._-]{1,64}$`, and repointing a name that already maps to a
@@ -606,7 +652,8 @@ permits only registration and upload-pack reads. A login-enabled dashboard
 exposes those paths to machine bearers without accepting browser sessions:
 the mount rejects a request carrying no bearer before it extends the half-hour
 stream deadline or proxies anything, and caps concurrent Git streams. A
-direct cache uses the separately configured `cache_token` instead.
+direct cache receives the run's cache grant instead, which opens only that
+team's blob trees.
 
 The runner-bundle chart ships a default-deny ingress NetworkPolicy for the
 cache pod (`networkPolicy.enabled`, on by default). It admits the release's
@@ -624,12 +671,13 @@ credential vocabulary the detached-run environment filter uses. An operator send
 with `--allow-secret-file`, so the audit of what left the laptop is the command
 itself.
 
-`pipeline trigger --working-tree` may seed uncommitted source; the cache
-retains up to 128 workspace refs per repository and expires them after
-`WORKSPACE_SEED_MAX_AGE` (24 hours by default). Expiry moves the ref into
-`refs/sparkwing-workspace-archive/` rather than dropping it, so a retry of an
-older working-tree run still finds its snapshot; archived refs are dropped
-after seven times `WORKSPACE_SEED_MAX_AGE`, or once 128 of them accumulate.
+`pipeline trigger --working-tree` uploads one immutable source object per
+submission. The controller binds it to one run and signs reads only for that
+run's live claim. An unused upload expires 24 hours after commit; a bound
+upload stays through a queued or running run and expires 24 hours after that
+run finishes. A retry uploads a new bundle. Source bytes count against the
+team's cache storage share. The hourly storage pass deletes the S3 object
+before releasing its database row and quota.
 
 The cache's unauthenticated `/metrics` carries no per-repository label, so
 scraping it does not enumerate or confirm the mirror set.
@@ -690,6 +738,26 @@ launches an ephemeral `docker:27-dind` pod with `privileged: true` so
 it can run dockerd and pre-pull images into a warm PVC. It is
 short-lived, single-container, and the only privileged workload
 sparkwing creates. See [warm-pool.md](warm-pool.md).
+
+## Runner Job placement
+
+The Kubernetes runner keeps each team's Jobs on nodes of their own, because a
+node also carries state that team code can reach, such as a Docker daemon. Every
+Job and its pod carry the label `sparkwing.dev/team` with the run's team, and
+every pod requires, on `kubernetes.io/hostname`, that no pod in any namespace
+with that label and a different value runs on its node. Jobs of one team still
+share nodes; a Job of another team waits for, or makes an autoscaler such as
+Karpenter provision, a node with no other team's Job on it.
+
+The label value is the team name when it is a DNS label (lowercase letters,
+digits and inner hyphens, at most 63 characters) and does not start with
+`sha256-`. Any other name becomes `sha256-` and the first 40 hex digits of the
+SHA-256 of the name. A run whose trigger names no team is labeled `default`.
+
+The runner that creates these Jobs runs the team's pipeline binary, so the
+placement holds against a mistake, not against a pipeline that talks to the
+Kubernetes API itself. Enforcing it against team code takes an admission policy
+that refuses a runner pod without the label and the term.
 
 ## Verified self-update
 
@@ -771,7 +839,8 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   cluster status` flags the controller probe as a warning -- fine for a
   laptop, not for a shared deployment. Set `SPARKWING_REQUIRE_AUTH=1`
   (or `--require-auth`) so the pod refuses to start with an empty tokens
-  table. See [auth.md](auth.md).
+  table. A controller with a multi-team license never serves
+  unauthenticated, whatever the tokens table holds. See [auth.md](auth.md).
 - **Provision the first admin token.** Hand the controller the first
   admin credential and it never serves a request unauthenticated:
   `SPARKWING_BOOTSTRAP_ADMIN_TOKEN` carries the token itself, and
@@ -822,7 +891,7 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   | `--max-run-bytes` (`SPARKWING_LOGS_MAX_RUN_BYTES`) | 1GiB | Same cap across every node log in one run. |
   | `--max-inflight-bytes` (`SPARKWING_LOGS_MAX_INFLIGHT_BYTES`) | 32MiB | Request-body bytes all in-flight appends may hold in memory at once; further appends are refused with `503`. Keep it well under the pod's memory limit. |
   | `--min-free-bytes` (`SPARKWING_LOGS_MIN_FREE_BYTES`) | 512MiB | Free space on the volume below which appends are rejected with `507`, leaving room to read and delete what is already stored. A volume the service cannot measure is treated as full. |
-  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off) | Age after a run's last write at which the sweeper deletes its logs. Off by default so an upgrade deletes nothing; `168h` is a common choice. |
+  | `--retention` (`SPARKWING_LOGS_RETENTION`) | 0 (off); 720h with `--archive-store` | Age after a run's last write at which the sweeper deletes its logs. Off by default without an archive so an upgrade deletes nothing; with one, 30 days unless the operator names another value, zero included. |
   | `--sweep-interval` (`SPARKWING_LOGS_SWEEP_INTERVAL`) | 1h | How often the sweeper runs. |
   | `--search-max-bytes` (`SPARKWING_LOGS_SEARCH_MAX_BYTES`) | 256MiB | Bytes one `GET /api/v1/logs/search` may read. |
   | `--search-timeout` (`SPARKWING_LOGS_SEARCH_TIMEOUT`) | 10s | How long one search may scan. |
@@ -835,7 +904,10 @@ scanner failure on `main` is what holds a release back, before the tag exists.
   | `--store-reconcile` (`SPARKWING_LOGS_STORE_RECONCILE`) | 1h | How often the service walks the store and replaces its running count with the measurement. `0` measures once at startup. Deleting a run measures it again straight away. |
 
   A search that hits either budget, or whose caller disconnects, returns
-  the matches it found with `"truncated": true`. Search also requires
+  the matches it found with `"truncated": true` and a `reason` naming the
+  limit. Archived runs are scanned from their object-store logs without
+  restoring the run to the local volume. The archive's recorded team is
+  checked before reading a log object. Search also requires
   `run_id`; a query without one is refused with `400` rather than
   walking every stored run.
 

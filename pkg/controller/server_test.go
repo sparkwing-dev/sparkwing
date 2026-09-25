@@ -3,7 +3,9 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +54,94 @@ func TestController_Health(t *testing.T) {
 	}
 	if objectStore["tripped"] != false {
 		t.Errorf("object_store.tripped=%v want false on a fresh controller", objectStore["tripped"])
+	}
+}
+
+func TestController_HealthHidesDatabaseErrors(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("health status=%d, want 503", resp.StatusCode)
+	}
+	var body struct {
+		Status   string   `json:"status"`
+		Problems []string `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "degraded" || len(body.Problems) != 1 || body.Problems[0] != "db: unavailable" {
+		t.Fatalf("public health exposed database failure details: %+v", body)
+	}
+}
+
+func TestController_HealthDoesNotExposeRunFailures(t *testing.T) {
+	base, st, cleanup := newTestServer(t)
+	defer cleanup()
+	for i := range 20 {
+		if err := st.CreateRun(t.Context(), store.Run{
+			ID: fmt.Sprintf("failed-%d", i), Pipeline: "demo", Status: "failed", StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp := mustGet(t, base+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		Status           string   `json:"status"`
+		Problems         []string `json:"problems"`
+		RecentRunWarning string   `json:"recent_run_warning"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "ok" || len(body.Problems) != 0 || body.RecentRunWarning != "" {
+		t.Fatalf("public health exposed workload history: %+v", body)
+	}
+}
+
+func TestController_HealthDoesNotExposeClaimedTriggers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateTrigger(t.Context(), store.Trigger{
+		ID: "stuck", Pipeline: "demo", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ClaimNextTrigger(t.Context(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(t.Context(), "UPDATE triggers SET claimed_at = ? WHERE id = ?", time.Now().Add(-time.Hour).UnixNano(), "stuck"); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp := mustGet(t, srv.URL+"/api/v1/health")
+	defer resp.Body.Close()
+	var body struct {
+		Status   string   `json:"status"`
+		Problems []string `json:"problems"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "ok" || len(body.Problems) != 0 {
+		t.Fatalf("public health exposed trigger activity: %+v", body)
 	}
 }
 
@@ -476,14 +566,17 @@ func TestController_ListPausesAlias(t *testing.T) {
 }
 
 func TestController_ValidationErrors(t *testing.T) {
-	base, _, cleanup := newTestServer(t)
+	base, st, cleanup := newTestServer(t)
 	defer cleanup()
 
 	mustPostJSON(t, base+"/api/v1/runs",
 		map[string]any{"pipeline": "only-pipeline"},
 		http.StatusBadRequest)
 
-	mustPostJSON(t, base+"/api/v1/runs/none/finish",
+	if err := st.CreateRun(context.Background(), store.Run{ID: "run-1", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	mustPostJSON(t, base+"/api/v1/runs/run-1/finish",
 		map[string]any{},
 		http.StatusBadRequest)
 }

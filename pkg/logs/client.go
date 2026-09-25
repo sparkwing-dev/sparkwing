@@ -199,39 +199,20 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 		return err
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
-	if fence, ok := store.NodeClaimFenceFromContext(ctx); ok {
-		req.Header.Set(store.ClaimHolderHeader, fence.HolderID)
-		req.Header.Set(store.ClaimMembershipHeader, fence.MembershipID)
-		req.Header.Set(store.ClaimReservationHeader, fence.ReservationID)
-		req.Header.Set(store.ClaimGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
-	}
-	if ordinal, ok := store.ExecutionAttemptOrdinalFromContext(ctx); ok {
-		req.Header.Set(store.AttemptOrdinalHeader, fmt.Sprint(ordinal))
-	}
-	if fence, ok := store.TriggerClaimFenceFromContext(ctx); ok {
-		req.Header.Set(store.TriggerGenerationHeader, fmt.Sprint(fence.ClaimGeneration))
+	setClaimHeaders(ctx, req)
+	if seq, ok := appendSequenceFromContext(ctx); ok {
+		req.Header.Set(LogStreamHeader, seq.stream)
+		req.Header.Set(LogSeqHeader, fmt.Sprint(seq.seq))
+		if seq.end != seq.seq {
+			req.Header.Set(LogSeqEndHeader, fmt.Sprint(seq.end))
+		}
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	body, _ := io.ReadAll(resp.Body)
-	trimmed := string(bytes.TrimSpace(body))
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return &AuthError{
-			Status:  resp.StatusCode,
-			Scope:   parseMissingScope(trimmed),
-			RawBody: trimmed,
-		}
-	}
-	if resp.StatusCode == http.StatusConflict {
-		return fmt.Errorf("%w: %s", ErrClaimConflict, trimmed)
-	}
-	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
+	return writeResponseError("logs append", resp)
 }
 
 func parseMissingScope(body string) string {
@@ -272,6 +253,50 @@ type ReadFilter struct {
 	Head  int    // first N lines; 0 disables
 	Lines string // "A:B" inclusive 1-indexed range
 	Grep  string // substring filter (case-sensitive)
+}
+
+// GrepLine is a matching node log line with its position in the full log.
+type GrepLine struct {
+	LineNo int    `json:"line_no"`
+	Line   string `json:"line"`
+}
+
+// Grep reads matching lines with their original line numbers from the logs service.
+func (c *Client) Grep(ctx context.Context, runID, nodeID, pattern string, maxMatches int) ([]GrepLine, error) {
+	q := url.Values{"grep": {pattern}, "line_numbers": {"1"}}
+	if maxMatches > 0 {
+		q.Set("max_matches", fmt.Sprint(maxMatches))
+	}
+	u := fmt.Sprintf("%s/api/v1/logs/%s/%s?%s", c.baseURL,
+		url.PathEscape(runID), url.PathEscape(nodeID), q.Encode())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setRunnerIdentity(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if err != nil {
+			return nil, fmt.Errorf("logs grep %d: read error response: %w", resp.StatusCode, err)
+		}
+		return nil, fmt.Errorf("logs grep %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	}
+	var matches []GrepLine
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var line GrepLine
+		if err := decoder.Decode(&line); errors.Is(err, io.EOF) {
+			return matches, nil
+		} else if err != nil {
+			return nil, err
+		}
+		matches = append(matches, line)
+	}
 }
 
 // ReadFiltered is Read with server-side line filters. Matches the

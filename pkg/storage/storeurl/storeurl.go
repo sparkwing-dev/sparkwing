@@ -7,8 +7,8 @@
 //	s3://bucket/prefix       pkg/storage/s3 (any S3-compatible store)
 //	http(s)://host           pkg/storage/sparkwingcache
 //
-// An http(s) store authenticates with $SPARKWING_CACHE_TOKEN, the bearer
-// the cache requires on its /bin/ routes.
+// An http(s) store authenticates with the run's $SPARKWING_CACHE_GRANT, or
+// else $SPARKWING_CACHE_TOKEN, the bearer the cache requires on its routes.
 //
 // S3 credentials + region come from the standard AWS credential
 // chain. $SPARKWING_S3_ENDPOINT overrides BaseEndpoint (R2, MinIO, etc.).
@@ -28,7 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
@@ -61,7 +61,7 @@ func OpenArtifactStore(ctx context.Context, raw string) (storage.ArtifactStore, 
 		}
 		return s3store.NewArtifactStore(bucket, prefix, client), nil
 	case "http", "https":
-		return sparkwingcache.New(raw, bincache.CacheToken(), nil), nil
+		return sparkwingcache.New(raw, authwire.CacheBearerFromEnv(), nil), nil
 	default:
 		return nil, fmt.Errorf("storeurl: unsupported scheme %q in %q", scheme, raw)
 	}
@@ -215,3 +215,28 @@ func newS3Client(ctx context.Context, budgeted bool) (*awss3.Client, error) {
 // hack: an indirection so a test can hand newS3Client a budget of its own
 // instead of the process-wide one, which is built once and never rebuilt.
 var sharedLimiter = objectguard.Shared
+
+// OpenS3 parses an s3://bucket/prefix URL and returns a client built
+// the one way this repository builds them: region and credentials from
+// the AWS default chain (IRSA on EKS), the SDK retryer capped at
+// [SDKMaxAttempts], and every attempt spent against the process-wide
+// request budget. A service that keeps its own layout inside the bucket
+// uses it instead of [OpenArtifactStore].
+func OpenS3(ctx context.Context, raw string) (client *awss3.Client, bucket, prefix string, err error) {
+	scheme, rest, err := splitScheme(raw)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if scheme != "s3" {
+		return nil, "", "", fmt.Errorf("storeurl: want an s3:// URL, got %q", raw)
+	}
+	bucket, prefix, err = s3BucketPrefix(rest)
+	if err != nil {
+		return nil, "", "", err
+	}
+	client, err = newS3Client(ctx, true)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return client, bucket, prefix, nil
+}

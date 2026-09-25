@@ -1330,12 +1330,14 @@ export function FilterableValue({
   ctx,
   tooltip,
   children,
+  className = "",
 }: {
   facet: FilterFacet;
   value: string;
   ctx: FilterCtx;
   tooltip?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
 }) {
   const incl = ctx.isIncluded(facet, value);
   const excl = ctx.isExcluded(facet, value);
@@ -1356,7 +1358,7 @@ export function FilterableValue({
   return (
     <span
       ref={ref}
-      className="relative inline-flex items-center"
+      className={`relative inline-flex items-center ${className}`}
       onClick={(e) => {
         e.stopPropagation();
         setOpen((o) => !o);

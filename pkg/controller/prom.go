@@ -22,6 +22,29 @@ import (
 var (
 	metricsRegistry = prometheus.NewRegistry()
 
+	signUpsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sparkwing_signups_total",
+			Help: "New accounts, partitioned by whether the sign-up gate admitted or waitlisted them and why.",
+		},
+		[]string{"outcome", "reason"},
+	)
+
+	signUpGateClosedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sparkwing_signup_gate_closed_total",
+			Help: "Times the sign-up gate closed itself because the hourly or daily sign-up limit was crossed.",
+		},
+		[]string{"reason"},
+	)
+
+	signUpVelocityWarningsTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "sparkwing_signup_velocity_warnings_total",
+			Help: "Times the last hour's new accounts crossed the warn threshold, counted once per crossing.",
+		},
+	)
+
 	runsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_runs_total",
@@ -192,6 +215,9 @@ func observeAuthCache(result string) {
 var sparkwingCollectors = []prometheus.Collector{
 	runsTotal,
 	runDurationSeconds,
+	signUpsTotal,
+	signUpGateClosedTotal,
+	signUpVelocityWarningsTotal,
 	nodesClaimedTotal,
 	pendingNodesGauge,
 	activeRunnersGauge,
@@ -270,6 +296,26 @@ func initZeroSeries() {
 	for _, class := range []string{budgetClassClaim, budgetClassBeat} {
 		principalThrottledTotal.WithLabelValues(class)
 	}
+	signUpsTotal.WithLabelValues("admitted", "none")
+	signUpsTotal.WithLabelValues("admitted", "invitation")
+	for _, reason := range store.WaitlistReasons() {
+		signUpsTotal.WithLabelValues("waitlisted", reason)
+	}
+	for _, reason := range []string{store.WaitlistReasonHourly, store.WaitlistReasonDaily} {
+		signUpGateClosedTotal.WithLabelValues(reason)
+	}
+}
+
+func observeSignUpOutcome(outcome, reason string) {
+	signUpsTotal.WithLabelValues(outcome, reason).Inc()
+}
+
+func observeSignUpGateClosed(reason string) {
+	signUpGateClosedTotal.WithLabelValues(reason).Inc()
+}
+
+func observeSignUpVelocityWarning() {
+	signUpVelocityWarningsTotal.Inc()
 }
 
 func metricsHandler() http.Handler {

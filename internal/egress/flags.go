@@ -32,6 +32,7 @@ const (
 type FlagNames struct {
 	MonthlyBytes    string
 	DailyAlarmBytes string
+	DailyCapBytes   string
 	MaxLogStreams   string
 	MaxDownloads    string
 }
@@ -41,6 +42,7 @@ type FlagNames struct {
 const (
 	FlagMonthlyBytes    = "--egress-monthly-bytes"
 	FlagDailyAlarmBytes = "--egress-daily-alarm-bytes"
+	FlagDailyCapBytes   = "--egress-daily-cap-bytes"
 	FlagMaxLogStreams   = "--egress-max-log-streams"
 	FlagMaxDownloads    = "--egress-max-downloads"
 )
@@ -51,6 +53,9 @@ func (f FlagNames) orDefault() FlagNames {
 	}
 	if f.DailyAlarmBytes == "" {
 		f.DailyAlarmBytes = FlagDailyAlarmBytes
+	}
+	if f.DailyCapBytes == "" {
+		f.DailyCapBytes = FlagDailyCapBytes
 	}
 	if f.MaxLogStreams == "" {
 		f.MaxLogStreams = FlagMaxLogStreams
@@ -92,6 +97,7 @@ func EnvName(svc Service, suffix string) string {
 const (
 	EnvMonthlyBytes    = "MONTHLY_BYTES"
 	EnvDailyAlarmBytes = "DAILY_ALARM_BYTES"
+	EnvDailyCapBytes   = "DAILY_CAP_BYTES"
 	EnvMaxLogStreams   = "MAX_LOG_STREAMS"
 	EnvMaxDownloads    = "MAX_DOWNLOADS"
 )
@@ -110,6 +116,7 @@ const (
 type Named struct {
 	MonthlyBytes    bool
 	DailyAlarmBytes bool
+	DailyCapBytes   bool
 	MaxLogStreams   bool
 	MaxDownloads    bool
 }
@@ -118,6 +125,7 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 	names := FlagNames{
 		MonthlyBytes:    FlagMonthlyBytes,
 		DailyAlarmBytes: FlagDailyAlarmBytes,
+		DailyCapBytes:   FlagDailyCapBytes,
 		MaxLogStreams:   FlagMaxLogStreams,
 		MaxDownloads:    FlagMaxDownloads,
 	}
@@ -126,6 +134,7 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 	fromEnv := map[string]*bool{
 		EnvMonthlyBytes:    &named.MonthlyBytes,
 		EnvDailyAlarmBytes: &named.DailyAlarmBytes,
+		EnvDailyCapBytes:   &named.DailyCapBytes,
 		EnvMaxLogStreams:   &named.MaxLogStreams,
 		EnvMaxDownloads:    &named.MaxDownloads,
 	}
@@ -146,6 +155,12 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		"bytes this process may send in a UTC day before it raises the egress alarm, which "+
 			"the health route reports and the log carries at warn level. It refuses nothing. "+
 			"0, the default, disables the alarm (env: "+EnvName(svc, EnvDailyAlarmBytes)+")")
+	dailyCap := read(EnvDailyCapBytes)
+	dailyCapFlag := fs.Int64("egress-daily-cap-bytes", *dailyCap,
+		"bytes this process may send in a UTC day, after which every download it serves is "+
+			"refused with 429 until the day rolls, whoever asks. It is the backstop that bounds "+
+			"the month's bill at 31 times this figure however many principals share it. "+
+			"0, the default, is unlimited (env: "+EnvName(svc, EnvDailyCapBytes)+")")
 
 	var monthlyFlag, downloadsFlag, streamsFlag *int64
 	if surfaces.PerPrincipal {
@@ -157,9 +172,8 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		downloads := read(EnvMaxDownloads)
 		downloadsFlag = fs.Int64("egress-max-downloads", *downloads,
 			"metered downloads one principal may hold open at once; a further one is refused "+
-				"with 429. It bounds how far a burst carries a principal past the monthly "+
-				"budget, to this many times the largest object. 0, the default, is unlimited "+
-				"(env: "+EnvName(svc, EnvMaxDownloads)+")")
+				"with 429. Every pod sharing a bearer counts against the same cap. 0, the "+
+				"default, is unlimited (env: "+EnvName(svc, EnvMaxDownloads)+")")
 	}
 	if surfaces.LogStreams {
 		streams := read(EnvMaxLogStreams)
@@ -173,12 +187,13 @@ func Bind(fs *flag.FlagSet, getenv func(string) string, svc Service, surfaces Su
 		// spelled on the command line is named however the environment reads.
 		named.MonthlyBytes = named.MonthlyBytes || fs.Changed(trimFlag(names.MonthlyBytes))
 		named.DailyAlarmBytes = named.DailyAlarmBytes || fs.Changed(trimFlag(names.DailyAlarmBytes))
+		named.DailyCapBytes = named.DailyCapBytes || fs.Changed(trimFlag(names.DailyCapBytes))
 		named.MaxLogStreams = named.MaxLogStreams || fs.Changed(trimFlag(names.MaxLogStreams))
 		named.MaxDownloads = named.MaxDownloads || fs.Changed(trimFlag(names.MaxDownloads))
 		if len(errs) > 0 {
 			return Config{}, Named{}, errs[0]
 		}
-		cfg := Config{GlobalDailyAlarmBytes: *dailyFlag, Flags: names}
+		cfg := Config{GlobalDailyAlarmBytes: *dailyFlag, GlobalDailyCapBytes: *dailyCapFlag, Flags: names}
 		if monthlyFlag != nil {
 			cfg.PerPrincipalMonthlyBytes = *monthlyFlag
 		}
@@ -208,6 +223,7 @@ func (c Config) Validate() error {
 	}{
 		{names.MonthlyBytes, c.PerPrincipalMonthlyBytes},
 		{names.DailyAlarmBytes, c.GlobalDailyAlarmBytes},
+		{names.DailyCapBytes, c.GlobalDailyCapBytes},
 		{names.MaxLogStreams, int64(c.MaxStreamsPerPrincipal)},
 		{names.MaxDownloads, int64(c.MaxDownloadsPerPrincipal)},
 	} {

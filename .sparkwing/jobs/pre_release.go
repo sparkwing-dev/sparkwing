@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
 
@@ -16,6 +18,8 @@ import (
 const (
 	markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
 	actionlintCommand   = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
+	// safety: the hosted job keeps five minutes for setup and diagnostics after this node ends.
+	preReleaseRunTimeout = 75 * time.Minute
 	// safety: no --target-seconds, so a loaded builder records a slow
 	// measurement instead of reddening the release lane.
 	installToGreenCommand = "bash bin/install-to-green.sh --build --output json"
@@ -106,8 +110,19 @@ func (PreRelease) Examples() []sparkwing.Example {
 }
 
 func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
-	sparkwing.Job(plan, runContext.Pipeline, preRelease)
+	plan.Resources(sparkwing.Cores(preReleaseCoreReservation(runtime.NumCPU())))
+	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout)
 	return nil
+}
+
+func preReleaseCoreReservation(cpus int) float64 {
+	if cpus < 4 {
+		return 1
+	}
+	if cpus == 4 {
+		return 3
+	}
+	return 4
 }
 
 type preReleaseCheck struct {
@@ -146,9 +161,8 @@ func preReleaseChecks() []preReleaseCheck {
 		{id: "gofmt", run: checkPreReleaseGofmt},
 		{id: "lint", run: runGolangciLint},
 		{id: "race", run: preReleaseShell("go -C .sparkwing test -race ./...")},
-		// safety: the gate cannot finish this one inside its budget, so the
-		// release boundary is where a store race is caught before it ships.
-		{id: "race-store", run: preReleaseShell("go test -race -count=1 -timeout 75m ./pkg/store/...")},
+		// safety: the gate defers this race suite to the release boundary.
+		{id: "race-store", run: runStoreRaceShards},
 		{id: "store-postgres", run: checkPreReleaseStorePostgres},
 		{id: "chaos", run: preReleaseShell("go test -count=1 -run TestChaos_CI ./internal/chaos")},
 		{id: "release-vulnerability", run: runReleaseBinaryVulnerabilityScan},

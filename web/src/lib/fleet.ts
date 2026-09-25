@@ -28,7 +28,7 @@ export function fleetLocation(agent: Agent): "local" | "cloud" | "unknown" {
 }
 
 export function fleetRegistration(agent: Agent): FleetRegistration {
-  return agent.max_concurrent > 0 ? "registered" : "legacy";
+  return agent.active_slots != null ? "registered" : "legacy";
 }
 
 export function fleetHeadroomState(agent: Agent): FleetHeadroomState {

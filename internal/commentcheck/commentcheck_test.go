@@ -288,16 +288,32 @@ func TestIsDirective(t *testing.T) {
 		"//nolint:errcheck":               true,
 		"//lint:ignore U1000 reason":      true,
 		"//lint:file-ignore U1000 reason": true,
-		"//why:not allowed":               false,
-		"// hack: not a dir":              false,
-		"// regular comment":              false,
-		"//just text":                     false,
-		"//TODO:nope":                     false,
+		"// sleepcheck:external-boundary real HTTP process bound": true,
+		"//why:not allowed":  false,
+		"// hack: not a dir": false,
+		"// regular comment": false,
+		"//just text":        false,
+		"//TODO:nope":        false,
 	}
 	for text, want := range cases {
 		if got := isDirective(text); got != want {
 			t.Errorf("isDirective(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+func TestExternalBoundaryMarkerOnlyBelongsInTests(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "widget.go")
+	src := "package widget\n// sleepcheck:external-boundary unused marker\nfunc helper() {}\n"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].line != 2 {
+		t.Fatalf("production marker verdict = %v, want one rejection", got)
 	}
 }
 

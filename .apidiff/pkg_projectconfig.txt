@@ -23,5 +23,6 @@ func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err
 const Filename = "sparkwing.yaml"
 func Load(path string) (*Config, error)
 func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
+func Parse(raw []byte) (*Config, error)
 func SetDefaultProfile(path, name string) error
 func WriteSparksSection(path string, libs []sparks.Library) error

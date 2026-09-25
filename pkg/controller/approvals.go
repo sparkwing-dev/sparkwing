@@ -140,7 +140,11 @@ func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.store.ListPendingApprovals(r.Context())
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	rows, err := tenant.ListPendingApprovals(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

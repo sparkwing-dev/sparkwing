@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
@@ -21,6 +22,9 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if !safeArtifactKey(key) {
 		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
+	if !s.artifactKeyReadable(w, r, key) {
 		return
 	}
 	rc, err := s.artifactStore.Get(r.Context(), key)
@@ -42,4 +46,30 @@ func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 // path or object key.
 func safeArtifactKey(key string) bool {
 	return storage.SafeArtifactKey(key) == nil
+}
+
+// safety: Run artifact keys resolve to their owner team; unowned content-addressed keys stay operator-only.
+func (s *Server) artifactKeyReadable(w http.ResponseWriter, r *http.Request, key string) bool {
+	if runID, ok := strings.CutPrefix(key, "runs/"); ok {
+		runID, _, _ = strings.Cut(runID, "/")
+		t, ok := s.requestTenant(w, r)
+		if !ok {
+			return false
+		}
+		owned, err := t.OwnsRun(r.Context(), runID)
+		if err != nil {
+			s.writeInternalError(w, r, "artifact run team", err)
+			return false
+		}
+		if !owned {
+			http.NotFound(w, r)
+			return false
+		}
+		return true
+	}
+	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeAdmin) {
+		http.NotFound(w, r)
+		return false
+	}
+	return true
 }

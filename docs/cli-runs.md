@@ -543,11 +543,21 @@ sparkwing runs get --run run-fictional --profile prod
 
 Search log bodies across recent runs for a substring
 
-Walks the runs matching the filter set and substring-greps
-every node's log. Reuses the same filter flags as `runs list` so
-the candidate set is identical to what that verb would return.
-In cluster mode the grep runs server-side per (run, node), so only
-matching bytes come back over the wire.
+Walks runs selected by pipeline, status, branch, SHA prefix, and since,
+then substring-greps every node's log. Those positive filters apply before
+the run limit. Exclusions and started-date bounds apply after fetching at
+most 1,000 runs. In cluster mode the grep runs server-side per (run, node),
+so only matching lines and their original line numbers come back over the wire.
+A profile logs URL supplied explicitly is used directly; otherwise grep
+requires the logs service URL the controller announces.
+
+CLI log text matching is case-sensitive and --max-matches caps each node.
+Dashboard Search matches text without case and caps its whole response.
+
+The dashboard Search view applies pipeline, status, branch, commit SHA prefix,
+and since before its 200-run candidate limit. Its All time choice can reach
+older runs. The Run list has additional filters for browsing runs; those do
+not narrow log Search.
 
 Default output is a table of RUN / NODE / LINE / TEXT. -q
 (quiet) prints the unique matching run ids -- the usual
@@ -734,6 +744,12 @@ backend emits that run's stored event records instead (admission_wait,
 concurrency_wait, cache_hit, ...) -- a different record shape. That is
 any profile whose state is a shared database, an object store or a
 controller, and any profile that declares its own logs surface.
+
+When a node's logs live in a logs service, a line framed by em dashes
+follows its log when the log is not known to be whole: lines missing
+after the runner sealed it, a stream that ended without the runner's
+seal, or a runner that does not seal. The line is the reader's, never
+part of the stored log, and JSON output omits it.
 
 ### Flags
 
@@ -1130,7 +1146,7 @@ Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.
 
 ### Subcommands
 
-- `list` -- List pending / claimed / done triggers
+- `list` -- List pending / claimed / done / failed triggers
 - `get` -- Inspect one trigger's full metadata by id
 
 ### Examples
@@ -1175,7 +1191,7 @@ sparkwing runs triggers get --id run-fictional --profile prod -o json
 
 ## `sparkwing runs triggers list`
 
-List pending / claimed / done triggers
+List pending / claimed / done / failed triggers
 
 Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
@@ -1193,7 +1209,7 @@ an older entry is not reported.
 
 | Flag | Description |
 |---|---|
-| `--status STATUS` | Filter by status: pending \| claimed \| done |
+| `--status STATUS` | Filter by status: pending \| claimed \| done \| failed |
 | `--pipeline NAME` | Filter by pipeline name |
 | `--repo OWNER/NAME` | Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers |
 | `--limit N` | Maximum triggers to show (default: 20) |

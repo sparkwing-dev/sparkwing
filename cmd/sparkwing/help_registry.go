@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"runtime"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -186,7 +184,7 @@ Configure profiles with 'sparkwing configure profiles'.
 'worker' executes queued triggers on this machine. 'gc' removes stale
 warm-runner storage. Manage secrets with 'sparkwing secrets' and the
 local dashboard with 'sparkwing serve'.`,
-	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "credits", "limits", "image", "webhooks", "concurrency", "object-store"},
+	SubcommandOrder: []string{"status", "agents", "runners", "worker", "gc", "users", "tokens", "limits", "image", "webhooks", "concurrency", "object-store"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents list --profile prod"},
@@ -2139,7 +2137,7 @@ var cmdTokens = Command{
 profile named by --profile.
 Token creation prints the raw value to stdout once --
 save it before leaving this command.`,
-	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate", "set-metered"},
+	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
 }
 
 var cmdTokensCreate = Command{
@@ -2154,197 +2152,11 @@ this command exits it cannot be recovered.`,
 		{Name: "principal", Argument: "NAME", Desc: "Name identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes; use sparkwing docs read --topic auth for the supported set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (30d, 720h, and similar durations). 0 = never expires", Group: "Input"},
-		{Name: "metered", Desc: "Mark the token as one whose node claims cost credits", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
 		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
 		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod"},
-		{"Mint a metered cloud runner token", "sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod"},
-	},
-}
-
-var cmdTokensSetMetered = Command{
-	Path:     "sparkwing cluster tokens set-metered",
-	Synopsis: "Mark an existing token as one credits pay for",
-	Description: `Sets or clears the metering marker on a token that is already
-minted, which is how a warm pool already running starts costing
-credits without a new credential. Metering is an operator
-decision: a runner's own labels never make its work billable.
-A claim by a metered token reserves a minute of cloud runner
-time and is refused when the balance cannot cover it.`,
-	Flags: []FlagSpec{
-		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
-		{Name: "metered", Argument: "BOOL", Desc: "true to charge this token's claims, false to stop", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Start charging the warm pool", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod"},
-		{"Stop charging a token", "sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod"},
-	},
-}
-
-var cmdCredits = Command{
-	Path:     "sparkwing cluster credits",
-	Synopsis: "Inspect and top up the prepaid credit balance",
-	Description: `Cloud runner time is prepaid. One hundred credits is one dollar,
-so a ten dollar top-up is a thousand credits. The balance is
-grants minus charges: a claim reserves a minute of cloud runner
-time before it is granted, heartbeats charge the seconds they
-cover, and the finish refunds whatever of the reservation the
-node did not use. Runners the operator did not mark metered are
-never charged.`,
-	SubcommandOrder: []string{"show", "grant", "history", "settings", "allowance"},
-	Examples: []Example{
-		{"Read the balance and the burn", "sparkwing cluster credits show --profile prod"},
-		{"Load ten dollars", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
-	},
-}
-
-var cmdCreditsShow = Command{
-	Path:     "sparkwing cluster credits show",
-	Synopsis: "Print the balance, the rate table, and the recent burn",
-	Description: `Prints the balance in credits, what was granted and charged, the
-price of a cloud runner second at every cpu class, the credits
-burned over the last day, the grace period a node gets past the
-reservation its claim paid for, and the cap on what any one
-charge may bill. A
-controller that was never granted anything reads a zero balance
-and charges nothing, because nothing is metered until an
-operator marks a token.`,
-	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Read the balance", "sparkwing cluster credits show --profile prod"},
-		{"Read the balance as JSON", "sparkwing cluster credits show --profile prod -o json"},
-	},
-}
-
-var cmdCreditsAllowance = Command{
-	Path:     "sparkwing cluster credits allowance",
-	Synopsis: "Read or set how many retained bytes a team keeps",
-	Description: `Retained bytes are what a team still has stored after its
-runs end, and the storage pass bills them at the storage rate.
-The allowance is how many of them the team asked to keep: the
-pass expires its oldest finished runs above the allowance before
-it bills and never bills above it, so the allowance is both what
-the team keeps and the most it pays for. An allowance of zero
-keeps everything and caps nothing. This verb is the only writer;
-rewriting a team's quota leaves the allowance alone.
-
-Reading with no flag reports the calling token's own allowance
-and what it currently retains. An admin token reads another
-team by naming it. Setting one needs the admin scope and names
-the team. The free allowance every team keeps unbilled and the
-price of a gibibyte-day are controller-wide settings on
-` + "`sparkwing cluster credits settings`" + `.`,
-	Flags: []FlagSpec{
-		{Name: "principal", Argument: "NAME", Desc: "Team whose allowance to read or set; required to set one", Group: "Input"},
-		{Name: "gb", Argument: "N", Desc: "Gibibytes of retained storage to keep; 0 keeps everything", Group: "Input"},
-		{Name: "bytes", Argument: "N", Desc: "Bytes of retained storage to keep; 0 keeps everything", Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Read what this token's team keeps", "sparkwing cluster credits allowance --profile prod"},
-		{"Keep fifty gibibytes for a team", "sparkwing cluster credits allowance --principal acme --gb 50 --profile prod"},
-	},
-}
-
-var cmdCreditsGrant = Command{
-	Path:     "sparkwing cluster credits grant",
-	Synopsis: "Add free or paid credits to the ledger, or reverse a paid grant",
-	Description: `Adds credits and records who added them, which kind they are, and
-the payment they came from. One hundred credits is one dollar.
-A grant that lifts the balance above zero lets metered runners
-claim again and stops the cancellation of nodes running on an
-empty balance. A reference is the payment id: granting it twice
-returns the first grant rather than adding the credits again. A
-reversal takes a refunded payment back out with a negative
-amount, its own reference (the refund id) and --reverses naming
-the paid grant's reference. Requires the admin scope.`,
-	Flags: []FlagSpec{
-		{Name: "kind", Argument: "KIND", Desc: "Grant kind: free | paid | reversal", Required: true, Group: "Input"},
-		{Name: "amount", Argument: "N", Desc: "Credits to add, negative on a reversal; 100 credits is one dollar", Required: true, Group: "Input"},
-		{Name: "reference", Argument: "REF", Desc: "Payment id or operator note recorded with the grant; granting the same one twice returns the first grant", Group: "Input"},
-		{Name: "reverses", Argument: "REF", Desc: "Reference of the paid grant a reversal takes back", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Load ten dollars against a payment", "sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod"},
-		{"Hand out trial credits", "sparkwing cluster credits grant --kind free --amount 500 --profile prod"},
-		{"Take a refunded payment back out", "sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod"},
-	},
-}
-
-var cmdCreditsHistory = Command{
-	Path:     "sparkwing cluster credits history",
-	Synopsis: "List grants and charges, newest first",
-	Description: `Lists every movement of the ledger newest first: grants with
-their kind and reference, and the reservation a claim took, the
-usage an interval billed, and the refund of a reservation a node
-did not use, each with the run, node, token prefix and seconds
-it covered, and the cpu class and rate it was billed at. Charges
-render negative because they take credits
-out and a refund renders positive. -o json emits one JSON record
-per line.`,
-	Flags: []FlagSpec{
-		{Name: "limit", Argument: "N", Desc: "Maximum rows of each kind, up to 1000 (0 = the controller's default)", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Read the ledger", "sparkwing cluster credits history --profile prod"},
-		{"Sum today's charges", "sparkwing cluster credits history --profile prod -o json | jq 'select(.type==\"charge\") | .amount_micro'"},
-	},
-}
-
-var cmdCreditsSettings = Command{
-	Path:     "sparkwing cluster credits settings",
-	Synopsis: "Read or set the credit rate table, the grace period, and the charge cap",
-	Description: `Prints the runtime settings the ledger prices work with, and
-sets the ones named by a flag. The rate table prices one cloud
-runner second at every cpu class, and a node is billed at the
-smallest class covering the cpu and memory it pinned; a request
-above the largest class fails the node. The rate is what a
-four-core second costs, which is the four-core entry of the
-table under another name, so a body may name one or the other,
-never both. The warm cpu class is the largest class the warm
-runner pool serves: a node above it starts a Kubernetes node
-sized to its class instead, and zero starts a node of its own
-for every class. The grace period
-is how long a node keeps running after it has consumed the
-reservation its claim paid for with the balance at zero: a node
-inside that reservation is never cancelled, because the ledger
-already took payment for it. The charge cap is the most seconds
-any one charge may bill, which forgives a controller outage or a
-stalled heartbeat loop rather than billing the gap. A flag left
-off leaves that setting alone, and a refused value moves
-nothing. Grace zero cancels a metered node at the first
-heartbeat past its reservation, which bounds the unpaid overrun
-to one heartbeat interval per node. An installation that never
-set a table bills the default ladder. Reading needs the
-runs.read scope and setting needs admin.`,
-	Flags: []FlagSpec{
-		{Name: "rate-table", Argument: "PAIRS", Desc: "Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667", Group: "Input"},
-		{Name: "warm-cpu-class-cores", Argument: "N", Desc: "Largest cpu class the warm runner pool serves; a larger class starts a node of its own", Group: "Input"},
-		{Name: "rate-micro", Argument: "N", Desc: fmt.Sprintf(
-			"Micro-credits one four-core cloud runner second costs, 1 to %d; refused once a rate table exists",
-			int64(store.MaxCreditRateMicro)), Group: "Input"},
-		{Name: "grace-seconds", Argument: "N", Desc: "Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat", Group: "Input"},
-		{Name: "max-charge-seconds", Argument: "N", Desc: fmt.Sprintf(
-			"The most seconds any one charge may bill, %d to %d",
-			store.MinCreditMaxChargeSeconds, int64(store.MaxCreditMaxChargeSeconds)), Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-	},
-	Examples: []Example{
-		{"Read the settings", "sparkwing cluster credits settings --profile prod"},
-		{"Cut a node off at the first heartbeat past its reservation", "sparkwing cluster credits settings --grace-seconds 0 --profile prod"},
-		{"Reprice a cloud runner second at 0.03 credits", "sparkwing cluster credits settings --rate-micro 30000 --profile prod"},
-		{"Price the three sizes at the GitHub Actions rates", "sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667 --profile prod"},
 	},
 }
 
@@ -2367,11 +2179,11 @@ existed.`,
 
 var cmdLimitsShow = Command{
 	Path:     "sparkwing cluster limits show",
-	Synopsis: "Print every compute guard and the cloud runners in use",
+	Synopsis: "Print every compute guard and visible runner usage",
 	Description: `Prints each guard with its ceiling, or "unlimited" when nothing set
-one, then the cloud runners claimed now in total and per principal. A
-cloud runner is a claim a metered token holds, so a controller that
-marks no token metered reads zero.`,
+one. An operator also sees the cloud runners claimed now in total and per
+principal, and whether runner_alarm has been reached. Team readers see their
+own paid runner cap without another team's fleet activity.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty on TTY, json when piped", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
@@ -2390,10 +2202,11 @@ max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
 max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
 runner_scale_step_credits and runner_scale_ceiling. The per-principal
-guards bind a principal holding a metered token; the two max_global settings bind
-every run. The three runner_scale settings raise max_concurrent_runners by one
-runner_scale_base for every runner_scale_step_credits of paid credit granted in
-the last 30 days, held under runner_scale_ceiling. Work past a guard answers
+guards bind a principal holding a metered token in its team; the two max_global
+settings bind every run. The three runner_scale settings raise
+max_concurrent_runners by one runner_scale_base for every
+runner_scale_step_credits of paid credit granted to that team in the last 30
+days, held under runner_scale_ceiling. Work past a guard answers
 429 with a Retry-After and the run records a compute_limit_blocked event.
 Requires the admin scope.`,
 	Flags: []FlagSpec{
@@ -2698,7 +2511,13 @@ local run (run_start, node_start, run_finish, ...). A run read through a
 backend emits that run's stored event records instead (admission_wait,
 concurrency_wait, cache_hit, ...) -- a different record shape. That is
 any profile whose state is a shared database, an object store or a
-controller, and any profile that declares its own logs surface.`,
+controller, and any profile that declares its own logs surface.
+
+When a node's logs live in a logs service, a line framed by em dashes
+follows its log when the log is not known to be whole: lines missing
+after the runner sealed it, a stream that ended without the runner's
+seal, or a runner that does not seal. The line is the reader's, never
+part of the stored log, and JSON output omits it.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Limit output to one node id", Group: "Filter"},
@@ -2973,11 +2792,16 @@ infrastructure error.`,
 var cmdJobsGrep = Command{
 	Path:     "sparkwing runs grep",
 	Synopsis: "Search log bodies across recent runs for a substring",
-	Description: `Walks the runs matching the filter set and substring-greps
-every node's log. Reuses the same filter flags as ` + "`runs list`" + ` so
-the candidate set is identical to what that verb would return.
-In cluster mode the grep runs server-side per (run, node), so only
-matching bytes come back over the wire.
+	Description: `Walks runs selected by pipeline, status, branch, SHA prefix, and since,
+then substring-greps every node's log. Those positive filters apply before
+the run limit. Exclusions and started-date bounds apply after fetching at
+most 1,000 runs. In cluster mode the grep runs server-side per (run, node),
+so only matching lines and their original line numbers come back over the wire.
+A profile logs URL supplied explicitly is used directly; otherwise grep
+requires the logs service URL the controller announces.
+
+CLI log text matching is case-sensitive and --max-matches caps each node.
+Dashboard Search matches text without case and caps its whole response.
 
 Default output is a table of RUN / NODE / LINE / TEXT. -q
 (quiet) prints the unique matching run ids -- the usual
@@ -3523,7 +3347,7 @@ Submit work with 'sparkwing pipeline trigger <pipeline> --profile NAME'.`,
 
 var cmdTriggersList = Command{
 	Path:     "sparkwing runs triggers list",
-	Synopsis: "List pending / claimed / done triggers",
+	Synopsis: "List pending / claimed / done / failed triggers",
 	Description: `Queries GET /api/v1/triggers on the selected profile's
 controller. Empty filters return the most recent 20 entries
 across all statuses.
@@ -3536,7 +3360,7 @@ entries match the selected repository; that value is not indexed, so the
 search covers the newest 5,000 triggers matching the other filters and
 an older entry is not reported.`,
 	Flags: []FlagSpec{
-		{Name: "status", Argument: "STATUS", Desc: "Filter by status: pending | claimed | done", Group: "Filter"},
+		{Name: "status", Argument: "STATUS", Desc: "Filter by status: pending | claimed | done | failed", Group: "Filter"},
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name", Group: "Filter"},
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "Match GITHUB_REPOSITORY on the trigger env, over the newest 5,000 triggers", Group: "Filter"},
 		{Name: "limit", Argument: "N", Desc: "Maximum triggers to show", Default: "20", Group: "Output"},
@@ -3640,9 +3464,9 @@ service (if configured), and gitcache (if configured). Each
 probe prints ok / warn / fail along with latency and any
 error detail.
 
-Exit code is non-zero when any probe fails. Missing optional
-services (logs, gitcache) count as warn, not fail, so a
-minimally-configured laptop profile can still exit 0.`,
+Exit code is non-zero when any probe fails. Missing optional logs
+can warn without failing. A controller that announces no cache pod URL
+omits the gitcache probe; direct-data Cloud needs no public cache pod.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
@@ -3857,10 +3681,16 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
+With --allow-repo the agent fetches each run's source itself, from the
+repositories the list names, with the credential the controller releases or
+else this machine's own git credentials. Without it the agent fetches through
+the controller's gitcache proxy.
+
 The command prints the token prefix and the revoke command. The raw token
 reaches only the config file.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Runner name, shown in the dashboard", Required: true, Group: "Identity"},
+		{Name: "allow-repo", Argument: "PATTERN", Desc: "Repository this machine may build and fetch directly, as host/path with '*' within one segment (repeatable)", Group: "Identity"},
 		{Name: "labels", Argument: "CSV", Desc: "Comma-separated self-asserted placement labels", Group: "Identity"},
 		{Name: "max-concurrent", Argument: "N", Desc: "Concurrent jobs this machine accepts", Default: "2", Group: "Limits"},
 		{Name: "contribution", Argument: "SPEC", Desc: "CPU and memory this machine contributes (4,8gb or 50%,50%)", Default: "50%,50%", Group: "Limits"},
@@ -3875,6 +3705,7 @@ reaches only the config file.`,
 		{"Enroll this machine", "sparkwing cluster runners add --profile prod --name dev-laptop"},
 		{"Enroll with a capacity ceiling and labels", "sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4 --contribution 4,8gb --labels linux,arch=amd64"},
 		{"Write the config and supervise the agent yourself", "sparkwing cluster runners add --profile prod --name dev-laptop --no-service"},
+		{"Fetch source directly for the team's repositories", "sparkwing cluster runners add --profile prod --name dev-laptop --allow-repo 'github.com/acme/*'"},
 	},
 }
 

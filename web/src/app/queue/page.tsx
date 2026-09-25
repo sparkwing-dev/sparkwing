@@ -36,10 +36,13 @@ import {
 } from "@/lib/resourceObservability";
 import HostPressureChart from "@/components/HostPressureChart";
 import Tooltip from "@/components/Tooltip";
+import { useTeamState } from "@/lib/useTeam";
 
 const POLL_MS = 3000;
 
 export default function QueuePage() {
+  const team = useTeamState();
+  const localAdmission = team.status === "single-team";
   const [qs, setQs] = useState<QueueState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -47,8 +50,10 @@ export default function QueuePage() {
     HostPressureSample[]
   >([]);
   const pulseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousRunning = useRef<boolean | null>(null);
 
   useEffect(() => {
+    if (!localAdmission) return;
     const stop = startSerialPolling({
       load: getQueue,
       publish: (next) => {
@@ -59,9 +64,13 @@ export default function QueuePage() {
           );
         }
         setLoaded(true);
-        setPulse(true);
-        if (pulseTimer.current) clearTimeout(pulseTimer.current);
-        pulseTimer.current = setTimeout(() => setPulse(false), 600);
+        const running = next != null && hasDaemon(next);
+        if (previousRunning.current !== null && previousRunning.current !== running) {
+          setPulse(true);
+          if (pulseTimer.current) clearTimeout(pulseTimer.current);
+          pulseTimer.current = setTimeout(() => setPulse(false), 600);
+        }
+        previousRunning.current = running;
       },
       intervalMS: POLL_MS,
       active: () => !document.hidden,
@@ -70,7 +79,19 @@ export default function QueuePage() {
       stop();
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };
-  }, []);
+  }, [localAdmission]);
+
+  if (!localAdmission) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">
+        <h1 className="text-xl font-bold">Queue is local to a machine</h1>
+        <p className="mt-3 text-sm text-[var(--muted)]">
+          Cloud runner availability is in <Link href="/cluster" className="text-[var(--accent)]">Fleet</Link>.
+          Pending Cloud work is in <Link href="/runs" className="text-[var(--accent)]">Runs</Link>.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-5xl mx-auto w-full">
@@ -111,7 +132,7 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
             <span
               className={`inline-block w-2 h-2 rounded-full cursor-default ${
                 running
-                  ? `bg-[var(--success)] ${pulse ? "animate-ping-once" : ""}`
+                  ? `bg-[var(--success)] ${pulse ? "animate-ping-once motion-reduce:animate-none" : ""}`
                   : "bg-[var(--muted)]"
               }`}
             />

@@ -98,11 +98,14 @@ func (s *Store) expirePendingAgentLossRetriesTx(ctx context.Context, tx *storeTx
 	return nil
 }
 
-func (s *Store) loadAgentLossRetry(ctx context.Context, run *Run) error {
+// safety: this reads a tenant-owned table on behalf of a run its caller
+// already scoped, so it takes the team rather than trusting the run id to
+// be unique across teams.
+func (s *Store) loadAgentLossRetry(ctx context.Context, team Team, run *Run) error {
 	var causesJSON []byte
 	var availableAt, deadlineAt int64
 	err := s.queryRow(ctx, `SELECT cause_nodes_json, available_at, deadline_at, retry_count
-  FROM agent_loss_retries WHERE run_id = ?`, run.ID).Scan(
+  FROM agent_loss_retries WHERE team = ? AND run_id = ?`, string(team), run.ID).Scan(
 		&causesJSON, &availableAt, &deadlineAt, &run.AgentLossRetryCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -129,6 +132,8 @@ type expiredAgentNode struct {
 	started                                               bool
 	chargeWindowOpen                                      bool
 	invocations                                           int
+	leaseNS                                               int64
+	tokenPrefix                                           string
 }
 
 type agentLossPlan struct {
@@ -153,7 +158,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 
 	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
 	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,
-	       execution_started_at, attempts_consumed, credit_charged_through
+	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at, claim_token_prefix
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdate(), now.UnixNano())
@@ -168,7 +173,8 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		var chargeWindow int64
 		if err := rows.Scan(&item.runID, &item.nodeID, &item.coordinatorID, &item.executorKind,
 			&item.executorName, &item.executorID, &item.executorLocation, &item.membershipID, &item.reservationID,
-			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations, &chargeWindow); err != nil {
+			&item.requiredCoordinatorID, &item.requiredLocation, &started, &item.invocations, &chargeWindow,
+			&item.leaseNS, &item.tokenPrefix); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
@@ -188,7 +194,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	needsLedger := false
 	for _, items := range byRun {
 		for _, item := range items {
-			needsLedger = needsLedger || (!item.started && item.chargeWindowOpen)
+			needsLedger = needsLedger || item.chargeWindowOpen
 		}
 	}
 	if needsLedger {
@@ -201,8 +207,10 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	for _, runID := range runOrder {
 		items := byRun[runID]
 		for _, item := range items {
-			if !item.started && item.chargeWindowOpen {
-				if _, err := refundUnstartedReservationTx(ctx, tx, item.runID, item.nodeID, now.UnixNano()); err != nil {
+			if item.chargeWindowOpen {
+				if err := s.settleExpiredClaimTx(ctx, tx, expiredClaim{
+					runID: item.runID, nodeID: item.nodeID, tokenPrefix: item.tokenPrefix, leaseNS: item.leaseNS,
+				}, now.UnixNano()); err != nil {
 					return nil, err
 				}
 			}
@@ -341,6 +349,17 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	if status != runStatusRunning {
 		return "", nil, decisionsFor(items, "source_not_active"), nil
 	}
+	// safety: a retry of a run whose team is being deleted would write new
+	// rows under a slug the purge is emptying.
+	var deleting int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM team_deletions
+		WHERE state = ? AND slug = (SELECT team FROM runs WHERE id = ?)`, TeamDeletionPending, sourceRunID).Scan(&deleting); err != nil {
+		return "", nil, nil, err
+	}
+	if deleting > 0 {
+		return "", nil, decisionsFor(items, "source_not_active"), nil
+	}
 	if len(planJSON) == 0 {
 		return "", nil, decisionsFor(items, "missing_plan"), nil
 	}
@@ -445,12 +464,14 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 	if first.executorID != "" {
 		retryAvoidUntil = now.Add(agentLossAvoidWindow).UnixNano()
 	}
+	// safety: the retry and its trigger copy the source run's team, because a
+	// retry filed under another team is invisible to whoever lost the agent.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runs
-    (id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json,
+    (team, id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json,
      created_at, started_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, retry_cause_node_id, retry_avoid_coordinator_id,
      retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, invocation_json)
- SELECT ?, pipeline, ?, ?, git_branch, git_sha, args_json, plan_json,
+ SELECT team, ?, pipeline, ?, ?, git_branch, git_sha, args_json, plan_json,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, ?, ?, ?, ?, ?, invocation_json
    FROM runs WHERE id = ?`, retryID, runStatusPending, triggerSource,
@@ -459,10 +480,10 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO triggers
-    (id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
+    (team, id, pipeline, args_json, trigger_source, trigger_user, trigger_env, git_branch, git_sha,
      status, created_at, parent_run_id, repo, repo_url, github_owner, github_repo,
      retry_of, retry_source, "full", available_at)
- SELECT ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
+ SELECT team, ?, pipeline, args_json, ?, '', ?, git_branch, git_sha,
         ?, ?, parent_run_id, declared_repo, repo_url, github_owner, github_repo,
         id, ?, 0, ?
    FROM runs WHERE id = ?`, retryID, triggerSource, provenanceJSON, triggerStatusPending,
@@ -470,8 +491,8 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_loss_retries
-    (run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
-VALUES (?, ?, ?, ?, ?, ?, ?)`, retryID, sourceRunID, rootRunID, causesJSON,
+    (team, run_id, source_run_id, root_run_id, cause_nodes_json, available_at, deadline_at, retry_count)
+VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?, ?)`, retryID, retryID, sourceRunID, rootRunID, causesJSON,
 		availableAt.UnixNano(), deadline.UnixNano(), retryCount); err != nil {
 		return "", nil, nil, err
 	}

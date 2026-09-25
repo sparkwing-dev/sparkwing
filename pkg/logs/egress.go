@@ -3,13 +3,11 @@ package logs
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // WithEgressMeter bounds the bytes this service sends to clients. The
@@ -89,18 +87,17 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			return
 		}
 		if slot != egress.SlotNone {
-			// safety: a pool shares one bearer, so the slot counts the pod
-			// the request names and falls back to the principal only when
-			// nothing names one.
-			holder := egress.SlotIdentity(r, principal, store.RunnerIdentityHeader, store.ClaimHolderHeader)
-			release, err := s.egress.Open(holder, slot)
+			// safety: the slot keys on the authenticated principal alone,
+			// because a caller names its own pod and a named pod would buy
+			// another slot.
+			release, err := s.egress.Open(principal, slot)
 			if err != nil {
 				s.writeEgressRefusal(w, r, class, err)
 				return
 			}
 			defer release()
 		}
-		next.ServeHTTP(s.egress.Serve(w, r, principal, class), r)
+		s.egress.Handle(w, r, principal, class, next)
 	})
 }
 
@@ -154,27 +151,15 @@ func concurrencyCode(slot egress.Slot) string {
 	return EgressStreamLimitCode
 }
 
-// safety: the alarm is this process's bill crossing a daily threshold,
-// which no single read can answer for, so it reaches an operator as a
-// health problem and a warn line rather than as a refusal.
+// safety: public health reports the alarm without exposing usage or budget totals.
 func (s *Server) egressHealth() (map[string]any, []string) {
 	if s.egress == nil {
 		return map[string]any{"enabled": false}, nil
 	}
 	state := s.egress.State()
-	summary := map[string]any{
-		"enabled":                     true,
-		"alarm":                       state.Alarm,
-		"global_day_bytes":            state.GlobalDayBytes,
-		"global_month_bytes":          state.GlobalMonthBytes,
-		"daily_alarm_bytes":           state.DailyAlarmBytes,
-		"monthly_bytes_per_principal": state.MonthlyBytesPerPrincipal,
-		"refused_total":               state.Refused,
-	}
+	summary := map[string]any{"enabled": true, "alarm": state.Alarm}
 	if !state.Alarm {
 		return summary, nil
 	}
-	return summary, []string{fmt.Sprintf(
-		"egress: this service has sent %s today, at or past the %s daily threshold",
-		egress.FormatBytes(state.GlobalDayBytes), egress.FormatBytes(state.DailyAlarmBytes))}
+	return summary, []string{"egress: daily alarm threshold reached"}
 }

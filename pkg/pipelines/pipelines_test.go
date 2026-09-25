@@ -231,3 +231,16 @@ pipelines:
 		t.Fatal("unexpected match")
 	}
 }
+
+// The repository's own config cannot name repositories its App token reads:
+// a team owner lists those in the controller, so a source block is refused
+// rather than silently ignored.
+func TestPipelineSourceExtraReposIsNotAConfigField(t *testing.T) {
+	_, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n    source:\n      extra_repos: [acme/secrets]\n"))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "source"`) {
+		t.Fatalf("a source block = %v, want an unknown-field refusal", err)
+	}
+	if _, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n")); err != nil {
+		t.Fatalf("control: the same entry without it = %v", err)
+	}
+}

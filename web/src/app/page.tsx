@@ -6,10 +6,8 @@ import Link from "next/link";
 import {
   type Approval,
   type Run,
-  type ServiceStatus,
   getPendingApprovals,
   getRuns,
-  getServiceHealth,
 } from "@/lib/api";
 import {
   type Metric,
@@ -27,6 +25,8 @@ import {
   fmtMsCompact,
 } from "@/lib/timeFormat";
 import Tooltip from "@/components/Tooltip";
+import { Sparkline } from "@/components/PipelineOverview";
+import { recentPipelineTriage } from "@/lib/homeTriage";
 
 const POLL_MS = 15000;
 const OVERVIEW_RUN_LIMIT = 1000;
@@ -34,21 +34,19 @@ const OVERVIEW_RUN_LIMIT = 1000;
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [services, setServices] = useState<ServiceStatus[]>([]);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
+  const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
-    const [rs, ap, svc] = await Promise.all([
+    const [rs, ap] = await Promise.all([
       getRuns({ since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT }),
       getPendingApprovals(),
-      getServiceHealth(),
     ]);
     setRuns(rs);
     setApprovals(ap);
-    setServices(svc);
     setNow(Date.now());
     setLoaded(true);
   }, [anchorMs]);
@@ -72,14 +70,14 @@ export default function Home() {
     [runs, now, anchorMs],
   );
 
-  const degraded = useMemo(
-    () => services.filter((s) => s.status !== "ok"),
-    [services],
-  );
-
   const running = useMemo(
     () => runs.filter((r) => r.status === "running"),
     [runs],
+  );
+
+  const { failed: failedPipelines, recovered: recoveredPipelines } = useMemo(
+    () => recentPipelineTriage(runs, includeFeatureBranches),
+    [runs, includeFeatureBranches],
   );
 
   const anchorLabel =
@@ -99,7 +97,15 @@ export default function Home() {
       </div>
 
       {!loaded ? (
-        <Panel>Loading...</Panel>
+        <div role="status" aria-label="Loading overview" className="animate-pulse motion-reduce:animate-none">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="h-24 bg-[var(--surface)] border border-[var(--border)] rounded-lg" />
+            ))}
+          </div>
+          <div className="h-14 bg-[var(--surface)] border border-[var(--border)] rounded-lg mb-5" />
+          <div className="h-20 bg-[var(--surface)] border border-[var(--border)] rounded-lg" />
+        </div>
       ) : (
         <>
           {runs.length >= OVERVIEW_RUN_LIMIT && (
@@ -117,13 +123,87 @@ export default function Home() {
             />
           </div>
 
-          <LastDeployCard run={overview.lastDeploy} />
+          {runs.length < 5 && <GettingStarted />}
 
           <NeedsAttention
             approvals={approvals}
-            degraded={degraded}
             running={running.length}
           />
+
+          <section className="mb-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--muted)]">
+                Recently Failed Pipelines <span className="font-normal normal-case tracking-normal">({includeFeatureBranches ? "all branches" : "default branch"})</span>
+              </h2>
+              <label className="flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeFeatureBranches}
+                  onChange={(event) => setIncludeFeatureBranches(event.target.checked)}
+                  className="accent-violet-500"
+                />
+                All branches
+              </label>
+            </div>
+            {failedPipelines.length === 0 ? (
+              <Panel><span className="text-sm text-[var(--muted)]">No recently failed pipelines.</span></Panel>
+            ) : (
+              <div className="space-y-2">
+                {failedPipelines.map(({ key, repo, pipeline, branch, latest, runs: history }) => (
+                  <Link
+                    key={key}
+                    href={`/runs?run=${encodeURIComponent(latest.id)}`}
+                    className="block rounded-lg border border-red-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
+                  >
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
+                        {repo.replace(/^github\.com\//, "")} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      </span>
+                      <Sparkline runs={history.slice(0, 30)} />
+                      <span className="text-[11px] font-mono text-[var(--muted)]">
+                        {fmtAgo(latest.started_at)}
+                        {now - Date.parse(latest.started_at) > WEEK_MS ? " · older than 7d" : ""}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[11px] text-red-300" title={latest.error || ""}>
+                      {latest.error || "Failed without a recorded error"}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <details className="mb-5 group">
+            <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-[var(--muted)] mb-2">
+              <h2 className="inline">Recently Recovered Pipelines <span className="font-normal normal-case tracking-normal">({includeFeatureBranches ? "all branches" : "default branch"})</span></h2>
+              <span className="ml-2 font-mono font-normal">{recoveredPipelines.length}</span>
+            </summary>
+            {recoveredPipelines.length === 0 ? (
+              <Panel><span className="text-sm text-[var(--muted)]">No recently recovered pipelines.</span></Panel>
+            ) : (
+              <div className="space-y-2">
+                {recoveredPipelines.map(({ key, repo, pipeline, branch, latest, runs: history }) => (
+                  <Link
+                    key={key}
+                    href={`/runs?run=${encodeURIComponent(latest.id)}`}
+                    className="block rounded-lg border border-green-500/30 bg-[var(--surface)] px-3 py-2 hover:bg-[var(--surface-raised)]"
+                  >
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm text-violet-300" title={`${repo}/${pipeline}`}>
+                        {repo.replace(/^github\.com\//, "")} / {pipeline}{branch ? ` · ${branch}` : ""}
+                      </span>
+                      <Sparkline runs={history.slice(0, 30)} />
+                      <span className="text-[11px] font-mono text-green-400">passed</span>
+                      <span className="text-[11px] font-mono text-[var(--muted)]">{fmtAgo(latest.started_at)}</span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </details>
+
+          <LastDeployCard run={overview.lastDeploy} />
         </>
       )}
     </div>
@@ -287,16 +367,34 @@ function LastDeployCard({ run }: { run: Run | null }) {
   );
 }
 
+function GettingStarted() {
+  return (
+    <section className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h2 className="text-sm font-semibold">Get started</h2>
+      <ol className="mt-2 list-decimal list-inside space-y-1 text-sm text-[var(--muted)]">
+        <li>Add a pipeline to your repository.</li>
+        <li><Link href="/team/machines" className="text-indigo-300 underline">Connect a runner</Link> on your machine or in GitHub Actions.</li>
+        <li>Trigger a run.</li>
+        <li>Follow its result in Runs.</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-indigo-300">
+        <a href="https://sparkwing.dev/docs/" target="_blank" rel="noopener noreferrer" className="hover:underline">
+          Setup docs ↗
+        </a>
+        <Link href="/runs" className="hover:underline">Browse runs →</Link>
+      </div>
+    </section>
+  );
+}
+
 function NeedsAttention({
   approvals,
-  degraded,
   running,
 }: {
   approvals: Approval[];
-  degraded: ServiceStatus[];
   running: number;
 }) {
-  const nothing = approvals.length === 0 && degraded.length === 0;
+  const nothing = approvals.length === 0;
   return (
     <div className="mb-6">
       <div className="flex items-baseline gap-2 mb-2">
@@ -314,11 +412,13 @@ function NeedsAttention({
       </div>
       {nothing ? (
         <Panel>
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-400" />
-            <span className="text-sm">
-              Nothing needs attention. Services healthy, no pending approvals.
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-sm">
+              No pending approvals.
             </span>
+            <Link href="/runs" className="text-sm text-indigo-300 hover:underline">
+              Browse runs →
+            </Link>
           </div>
         </Panel>
       ) : (
@@ -344,33 +444,6 @@ function NeedsAttention({
                     {fmtDateTime(a.requested_at)} · {fmtAgo(a.requested_at)}
                   </span>
                 </Tooltip>
-              </Link>
-            </li>
-          ))}
-          {degraded.map((s) => (
-            <li key={s.name}>
-              <Link
-                href="/cluster"
-                className="flex items-center gap-3 px-3 py-2 hover:bg-[var(--surface-raised)] transition-colors"
-              >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    s.status === "down" ? "bg-red-400" : "bg-amber-400"
-                  }`}
-                />
-                <span
-                  className={`text-[11px] font-mono shrink-0 ${
-                    s.status === "down" ? "text-red-400" : "text-amber-400"
-                  }`}
-                >
-                  {s.status}
-                </span>
-                <span className="font-mono text-xs truncate flex-1">
-                  {s.name}
-                </span>
-                <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 tabular-nums">
-                  {s.latency_ms}ms
-                </span>
               </Link>
             </li>
           ))}

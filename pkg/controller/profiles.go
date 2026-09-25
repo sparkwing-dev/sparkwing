@@ -15,7 +15,11 @@ import (
 func (s *Server) handleGetPipelineProfile(w http.ResponseWriter, r *http.Request) {
 	pipeline := r.PathValue("name")
 	nodeID := r.URL.Query().Get("node")
-	prof, err := s.store.GetPipelineProfile(r.Context(), pipeline, nodeID)
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	prof, err := tenant.GetPipelineProfile(r.Context(), pipeline, nodeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -53,11 +57,15 @@ func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
 	var err error
 	if body.Cores <= 0 && body.MemoryBytes <= 0 {
-		err = s.store.SetProfilePin(r.Context(), pipeline, nodeID, 0, 0)
+		err = tenant.SetProfilePin(r.Context(), pipeline, nodeID, 0, 0)
 	} else {
-		err = s.store.UpsertProfilePin(r.Context(), pipeline, nodeID, body.Cores, body.MemoryBytes)
+		err = tenant.UpsertProfilePin(r.Context(), pipeline, nodeID, body.Cores, body.MemoryBytes)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -68,7 +76,7 @@ func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
 
 // safety: omit sustained cores because these profiles become hard Kubernetes
 // CPU limits; charging a local-host plateau would throttle spiky pods.
-func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
+func (s *Server) foldRunProfiles(ctx context.Context, t *store.Tenant, run *store.Run) {
 	if run == nil || run.Pipeline == "" {
 		return
 	}
@@ -86,13 +94,15 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 		}
 		measured = true
 		peakCores, peakMem := samplePeaks(samples)
-		_ = s.store.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
+		if err := t.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeMetricSpan(samples),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     true,
-		})
-		s.emitNodeDrift(ctx, run, n.NodeID)
+		}); err != nil {
+			s.logger.Warn("fold node profile", "run_id", run.ID, "node_id", n.NodeID, "err", err)
+		}
+		s.emitNodeDrift(ctx, t, run, n.NodeID)
 		runPeakCores = maxF(runPeakCores, peakCores)
 		if peakMem > runPeakMem {
 			runPeakMem = peakMem
@@ -101,17 +111,19 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	if !measured {
 		return
 	}
-	_ = s.store.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
+	if err := t.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
 		Duration:        runDuration(run),
 		PeakCores:       runPeakCores,
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     true,
-	})
-	s.emitNodeDrift(ctx, run, "")
+	}); err != nil {
+		s.logger.Warn("fold run profile", "run_id", run.ID, "err", err)
+	}
+	s.emitNodeDrift(ctx, t, run, "")
 }
 
-func (s *Server) emitNodeDrift(ctx context.Context, run *store.Run, nodeID string) {
-	prof, err := s.store.GetPipelineProfile(ctx, run.Pipeline, nodeID)
+func (s *Server) emitNodeDrift(ctx context.Context, t *store.Tenant, run *store.Run, nodeID string) {
+	prof, err := t.GetPipelineProfile(ctx, run.Pipeline, nodeID)
 	if err != nil || prof == nil {
 		return
 	}
@@ -241,7 +253,11 @@ func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.RecordProfileObservation(r.Context(), r.PathValue("name"),
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.RecordProfileObservation(r.Context(), r.PathValue("name"),
 		r.URL.Query().Get("node"), body.observation()); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -250,7 +266,11 @@ func (s *Server) handleRecordProfileObservation(w http.ResponseWriter, r *http.R
 }
 
 func (s *Server) handleRecordContention(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.RecordContention(r.Context(), r.PathValue("name")); err != nil {
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.RecordContention(r.Context(), r.PathValue("name")); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -275,7 +295,11 @@ func (s *Server) handleRecordWaitObservation(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.RecordWaitObservation(r.Context(), r.PathValue("name"),
+	tenant, ok := s.requestTenant(w, r)
+	if !ok {
+		return
+	}
+	if err := tenant.RecordWaitObservation(r.Context(), r.PathValue("name"),
 		time.Duration(body.WaitNanos)); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

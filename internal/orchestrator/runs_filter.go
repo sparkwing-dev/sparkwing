@@ -205,8 +205,9 @@ func containsString(list []string, target string) bool {
 }
 
 func hasAnyPrefix(s string, prefixes []string) bool {
+	s = strings.ToLower(s)
 	for _, p := range prefixes {
-		if p != "" && strings.HasPrefix(s, p) {
+		if p != "" && strings.HasPrefix(s, strings.ToLower(p)) {
 			return true
 		}
 	}

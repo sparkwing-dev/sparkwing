@@ -97,10 +97,10 @@ func RunNodeOnce(
 					"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 					runID, nodeID)
 			}
-			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
-				runID, nodeID, token, logger)
+			return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+				runID, nodeID, token, cfg.repoAllowlist, logger)
 		}
-		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, logger)
+		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
 	if shouldRunRemote(trigger, cfg.brokeredChild) {
 		if controllerURL == "" {
@@ -108,8 +108,8 @@ func RunNodeOnce(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
 				runID, nodeID)
 		}
-		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheToken,
-			runID, nodeID, token, logger)
+		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, cfg.gitcacheURL, cfg.gitcacheGrant,
+			runID, nodeID, token, cfg.repoAllowlist, logger)
 	}
 
 	var art storage.ArtifactStore
@@ -188,6 +188,14 @@ func RunNodeOnce(
 		secrets.NewCached(source, masker).AsResolver())
 
 	ctx = secrets.WithMasker(ctx, masker)
+	ctx = sparkwingruntime.WithOIDCTokenSource(ctx, func(ctx context.Context, audience string) (string, error) {
+		tok, oerr := stateClient.OIDCToken(ctx, runID, audience)
+		if oerr != nil {
+			return "", fmt.Errorf("oidc token for run %s: %w", runID, oerr)
+		}
+		masker.Register(tok.Token)
+		return tok.Token, nil
+	})
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)

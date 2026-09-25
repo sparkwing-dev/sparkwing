@@ -37,34 +37,61 @@ func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
 func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
+const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
 	Cipher
 
-	SealBound(name, scope string, shared, masked bool, plain string) (string, error)
+	SealBound(team, name, scope string, shared, masked bool, plain string) (string, error)
 
-	OpenBound(name, scope string, shared, masked bool, envelope string) (string, error)
+	OpenBound(team, name, scope string, shared, masked bool, envelope string) (string, error)
 }
+type CacheGrantResponse struct {
+	Grant     string
+	Team      string
+	ExpiresAt time.Time
+}
+func CacheObjectMaxAge(team string) time.Duration
+const CheckoutAmountCode = "amount_out_of_range"
+const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
 	Seal(plain string) (string, error)
 
 	Open(envelope string) (string, error)
 }
 const ClaimPollInterval = 500 * time.Millisecond
+const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int
 const ComputeLimitRefusedCode = "compute_limit"
 const ComputeLimitRetryAfterSeconds = 5
+const CreditsFrozenCode = "credits_frozen"
 const CreditsRefusedCode = "insufficient_credits"
 func CronIdempotencyKey(scheduleID string, due time.Time) string
+type DataDownloadResponse struct {
+	URL     string
+	SHA256  string
+	Size    int64
+	Expires time.Time
+}
 const DefaultLiveLogIdleTimeout = 10 * time.Minute
 const DefaultLiveLogMaxNodes = 1024
 const DefaultLiveLogNodeBytes = 512 << 10
 const DefaultLiveLogTotalBytes = 64 << 20
 const DefaultMaxIdleClaimPoll = 5 * time.Second
-const DefaultSessionMaxLifetime = 7 * 24 * time.Hour
+const DefaultRunnersPerToken = 64
+const DefaultSessionMaxLifetime = 30 * 24 * time.Hour
+const DefaultTeamDailyDownloadFreeBytes int64 = 5 << 30
+const DefaultTeamDailyDownloadFundedBytes int64 = 50 << 30
+type DirectUploadResponse struct {
+	UploadID  string
+	URL       string
+	Headers   map[string]string
+	ExpiresAt time.Time
+}
 type Dispatcher interface {
 	Dispatch(ctx context.Context, req RunRequest) error
 }
+const DisputeConflictCode = "dispute_conflict"
 const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
@@ -76,6 +103,53 @@ type FloodPolicy struct {
 
 	DedupeWindow time.Duration
 }
+const FreeRunLimitRetryAfterSeconds = 3600
+const FreeTierClosed FreeTierState = "closed"
+type FreeTierFunc func(ctx context.Context) (FreeTierState, error)
+func (f FreeTierFunc) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+const FreeTierOpen FreeTierState = "open"
+type FreeTierSource interface {
+	SignUpFreeTier(ctx context.Context) (FreeTierState, error)
+}
+type FreeTierState string
+const FreeTierThrottled FreeTierState = "throttled"
+const FreeTierUnreadable FreeTierState = "unreadable"
+type GitCredentialJSON struct {
+	Host        string
+	Kind        string
+	Username    string
+	Fingerprint string
+	HostKey     string
+
+	PublicKey string
+	Confirmed bool
+	CreatedBy string
+	CreatedAt int64
+	UpdatedAt int64
+}
+type GitCredentialReleaseJSON struct {
+	Host        string
+	RunID       string
+	Runner      string
+	TokenPrefix string
+	ReleasedAt  int64
+}
+type GitCredentialResponse struct {
+	Kind string
+
+	Host      string
+	Token     string
+	ExpiresAt int64
+
+	Repository        string
+	ExtraRepositories []string
+
+	Username   string
+	Secret     string
+	KnownHosts string
+}
+const GitHubActionsLabel = "github-actions"
+func GitHubRunnerWorkflow(controllerURL, team string) string
 type GitHubWebhookBinding struct {
 	Repos  []string
 	Secret string
@@ -115,6 +189,9 @@ type GitHubWebhookDisconnectResponse struct {
 	HookID      int64
 }
 const IdleClaimPollJitterFactor = 1.25
+type LegacyCipher interface {
+	OpenLegacy(name, scope string, shared, masked bool, envelope string) (string, error)
+}
 func LimitsProfile(name string) (LimitsProfileValues, error)
 const LimitsProfileCloud = "cloud"
 const LimitsProfileCloudFree = "cloud-free"
@@ -131,6 +208,14 @@ type LimitsProfileValues struct {
 	MaxLogStreamsPerPrincipal int
 
 	MaxDownloadsPerPrincipal int
+
+	RunsPerPrincipalHour int
+
+	ShedQueueDepth int
+
+	EgressMonthlyBytesPerPrincipal int64
+
+	EgressDailyCapBytes int64
 
 	EnforceIdleClaimPoll bool
 }
@@ -162,6 +247,7 @@ type LoopbackState interface {
 	EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (runID string, err error)
 }
 const MaxHonoredIdleClaimPoll = 8 * time.Second
+const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback
@@ -169,6 +255,13 @@ type NoopDispatcher struct {
 	Logger *slog.Logger
 }
 func (n NoopDispatcher) Dispatch(_ context.Context, req RunRequest) error
+type OIDCTokenRequest struct {
+	Audience string
+}
+type OIDCTokenResponse struct {
+	Token     string
+	ExpiresAt time.Time
+}
 type ObjectStoreBreakerResponse struct {
 	Enabled bool
 
@@ -200,6 +293,14 @@ type Principal struct {
 	Scopes      []string
 	TokenPrefix string
 	Authed      time.Time
+
+	Team store.Team
+
+	Role string
+
+	AccountID string
+
+	Expires time.Time
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
@@ -207,6 +308,7 @@ const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int
+	RunnersPerToken     int
 }
 type RunRequest struct {
 	RunID       string
@@ -219,6 +321,8 @@ type RunRequest struct {
 }
 const ScopeAdmin = "admin"
 const ScopeApprovalsWrite = "approvals.write"
+const ScopeCreditsGrant = "credits.grant"
+const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = "logs.read"
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
@@ -227,8 +331,10 @@ const ScopeRunsRead = "runs.read"
 const ScopeRunsState = "runs.state"
 const ScopeRunsWrite = "runs.write"
 const ScopeSecretsRead = "secrets.read"
+const ScopeTeamAdmin = "team.admin"
 const ScopeTriggersClaim = "triggers.claim"
 const ScopeTriggersRead = "triggers.read"
+func ScopesForRole(role store.Role) []string
 func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
@@ -236,53 +342,103 @@ type Server struct {
 func (s *Server) AssistedRunHandler() http.Handler
 func (s *Server) AttachPool(cfg PoolConfig) *Server
 func (s *Server) AuthEnabled() bool
+func (s *Server) CheckFreeTierSource()
 func (s *Server) EgressMeter() *egress.Meter
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) MaintainStorage(ctx context.Context)
+func (s *Server) Metering() bool
+func (s *Server) MultiTeam() bool
+func (s *Server) ProcessTeamDeletions(ctx context.Context, now time.Time)
 func (s *Server) RegisteredRoute(r *http.Request) bool
+func (s *Server) ResealStoredSecrets(ctx context.Context) (store.SecretResealCounts, error)
+func (s *Server) RunStoragePass(ctx context.Context) (bool, error)
 func (s *Server) Shutdown(ctx context.Context) error
+func (s *Server) SignUpFreeTier(ctx context.Context) (FreeTierState, error)
 func (s *Server) StopAssistedClaims()
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAssistedRunScope(runID string) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
+func (s *Server) WithBillingCheckout(url, token string) *Server
 func (s *Server) WithBucketUsage(a storage.ArtifactStore) *Server
 func (s *Server) WithCacheCredentials(url, token string) *Server
 func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDashboardURL(url string) *Server
+func (s *Server) WithDirectUploads(client *s3.Client, bucket, prefix string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server
 func (s *Server) WithExternalURL(rawURL string) *Server
 func (s *Server) WithFloodPolicy(p FloodPolicy) *Server
+func (s *Server) WithFreeTier(src FreeTierSource) *Server
+func (s *Server) WithGitHubApp(cfg githubapp.Config) *Server
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
+func (s *Server) WithGitHubRunners(cfg githuboidc.Config) *Server
+func (s *Server) WithGitHubSignIn(client *githubauth.Client, redirectURIs []string) *Server
 func (s *Server) WithGitHubWebhookConfig(cfg GitHubWebhookConfig) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
+func (s *Server) WithGoogleSignIn(client *googleauth.Client, redirectURIs []string) *Server
 func (s *Server) WithIdleClaimPoll(max time.Duration) *Server
 func (s *Server) WithIdleClaimPollEnforced(on bool) *Server
+func (s *Server) WithLicense(lic *license.License) *Server
 func (s *Server) WithLiveLogLimits(perNodeBytes int, totalBytes int64, maxNodes int, idle time.Duration) *Server
 func (s *Server) WithLocalExecution() *Server
 func (s *Server) WithLocalFirstPlacement(defaultPrefers []string, hold, liveness time.Duration) *Server
 func (s *Server) WithLogsURL(url string) *Server
+func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
+func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server
+func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server
+func (s *Server) WithSignUpWaitlist(on bool) *Server
+func (s *Server) WithSignedDownloads(cache, logs *teamblob.Store, client *s3.Client, domain, keyPairID, privateKey string) error
+func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
+func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
+func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
+	DataDownloadURL string
+
 	CachePod string
 
 	Logs string
 
 	Dashboard string
+
+	MultiTeam bool
+
+	DirectData bool
+}
+type SourceTokenResponse struct {
+	Token      string
+	ExpiresAt  int64
+	Repository string
+
+	ExtraRepositories []string
 }
 const StorageMaintenanceInterval = time.Hour
+const StoragePassEvery = time.Hour
+type StorageTierResponse struct {
+	Team           string
+	Tier           storagequota.Tier
+	AllowanceBytes int64
+}
+const TeamDeletionInterval = time.Minute
+type TeamStorage struct {
+	LogsURL   string
+	LogsToken string
+
+	CacheURL   string
+	CacheToken string
+}
 type TokenRequestBudget struct {
 	PerTokenMinute int
 
@@ -306,9 +462,13 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
-func (l cronLauncher) Active(ctx context.Context, runID string, staleAfter time.Duration) (bool, error)
+func (l cronLauncher) Active(ctx context.Context, sched store.CronSchedule, runID string, staleAfter time.Duration) (bool, error)
 func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time.Time) (string, error)
 func (r *flushingStatusRecorder) Flush()
+func (g githubProvider) AuthorizeURL(state, verifier, redirectURI string) string
+func (g githubProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
+func (g googleProvider) AuthorizeURL(state, verifier, redirectURI string) string
+func (g googleProvider) SignIn(ctx context.Context, code, verifier, redirectURI string) (store.SignInProfile, error)
 func (hashingBudgetCollector) Collect(ch chan<- prometheus.Metric)
 func (hashingBudgetCollector) Describe(ch chan<- *prometheus.Desc)
 func (l *liveLogs) Append(runID, nodeID string, data []byte)

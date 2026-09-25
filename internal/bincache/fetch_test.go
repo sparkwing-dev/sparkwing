@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -325,7 +326,7 @@ func TestFetchPipelineSource_RegistersDistinctNamesForEqualBasenames(t *testing.
 	}
 }
 
-func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_AuthenticatesRegisterAndGit(t *testing.T) {
 	repoParent := t.TempDir()
 	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
@@ -350,10 +351,10 @@ func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) 
 	}))
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL+"/api/v1/gitcache", srv.URL, "runner-token",
+	sparkwingDir, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL+"/api/v1/gitcache", srv.URL, "runner-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir())
 	if err != nil {
-		t.Fatalf("FetchPipelineSourceWithToken: %v", err)
+		t.Fatalf("FetchPipelineSourceWithCredentials: %v", err)
 	}
 	got, err := exec.Command("git", "-C", filepath.Dir(sparkwingDir), "rev-parse", "HEAD").Output()
 	if err != nil {
@@ -364,7 +365,7 @@ func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) 
 	}
 }
 
-func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
 	repoParent := t.TempDir()
 	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
 	execPath := gitExecPath(t)
@@ -387,7 +388,7 @@ func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t 
 	}))
 	defer srv.Close()
 
-	if _, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "controller-admin-token",
+	if _, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "controller-admin-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +399,7 @@ func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t 
 	}
 }
 
-func TestFetchPipelineSourceWithToken_ControllerRedirectCannotCarryBearer(t *testing.T) {
+func TestFetchPipelineSourceWithCredentials_ControllerRedirectCannotCarryBearer(t *testing.T) {
 	var targetRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		targetRequests++
@@ -421,7 +422,7 @@ func TestFetchPipelineSourceWithToken_ControllerRedirectCannotCarryBearer(t *tes
 	}))
 	defer controller.Close()
 
-	_, err := FetchPipelineSourceWithToken(controller.URL+"/api/v1/gitcache", controller.URL, "runner-token",
+	_, err := FetchPipelineSourceWithCredentials(context.Background(), controller.URL+"/api/v1/gitcache", controller.URL, "runner-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
 	if err == nil {
 		t.Fatal("controller Git redirect unexpectedly succeeded")
@@ -448,7 +449,7 @@ func TestFetchPipelineSource_DirectCacheRedirectsStayAtConfiguredOrigin(t *testi
 				http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
 			}))
 			defer cache.Close()
-			_, err := FetchPipelineSourceWithToken(cache.URL, "https://controller.example", "agent-token",
+			_, err := FetchPipelineSourceWithCredentials(context.Background(), cache.URL, "https://controller.example", "agent-token", "",
 				"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
 			if err == nil {
 				t.Fatal("direct cache redirect unexpectedly succeeded")
@@ -485,7 +486,7 @@ func TestFetchPipelineWorkspaceSource_RestoresRawGitBlobs(t *testing.T) {
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "ignored-controller-token",
+	sparkwingDir, err := FetchPipelineSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored-controller-token", "",
 		"git@github.com:sparkwing-dev/sparkwing.git", "main", workspaceSHA, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -828,7 +829,7 @@ func TestAdoptWorkspaceBaseline_ResolvesTheBaselineAStepDiffsAgainst(t *testing.
 		{name: "without one"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+			sparkwingDir, err := FetchPipelineWorkspaceSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored", "",
 				testRepoSSH, "main", workspaceSHA, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
@@ -884,7 +885,7 @@ func TestAdoptWorkspaceBaseline_SkipsASourceThatServesOnlyTheSnapshot(t *testing
 	srv := startGitcacheTestServer(t, repoParent)
 	defer srv.Close()
 
-	sparkwingDir, err := FetchPipelineWorkspaceSourceWithToken(srv.URL, "https://controller.example", "ignored",
+	sparkwingDir, err := FetchPipelineWorkspaceSourceWithCredentials(context.Background(), srv.URL, "https://controller.example", "ignored", "",
 		testRepoSSH, "main", workspaceSHA, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -922,4 +923,41 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// The operator's own grants register the mirror a run needs, and the cache
+// refuses every other team's, so a grant holder asks and a refusal leaves the
+// already-registered mirror to serve the clone.
+func TestFetchPipelineSourceWithAGrantSurvivesARefusedRegistration(t *testing.T) {
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable (no git-http-backend on PATH)")
+	}
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, sourceurl.ClaimedRepoNameFromURL(testRepoSSH), "main")
+	registered := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, r *http.Request) {
+		registered = true
+		http.Error(w, "mirror registration takes the cache's operator token", http.StatusForbidden)
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	t.Setenv(authwire.CacheGrantEnv, authwire.CacheGrantPrefix+"payload.sig")
+
+	sparkwingDir, err := FetchPipelineSource(context.Background(), srv.URL, testRepoSSH, "main", tipSHA, t.TempDir())
+	if err != nil {
+		t.Fatalf("FetchPipelineSource with a grant: %v", err)
+	}
+	if !registered {
+		t.Error("a grant holder never asked the cache to register the mirror")
+	}
+	if _, err := os.Stat(filepath.Join(sparkwingDir, "marker")); err != nil {
+		t.Fatalf("fetched tree: %v", err)
+	}
 }

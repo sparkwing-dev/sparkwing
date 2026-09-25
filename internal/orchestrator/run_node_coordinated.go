@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -23,8 +24,9 @@ type runNodeConfig struct {
 	brokerArtifact bool
 	claimFence     store.NodeClaimFence
 	gitcacheURL    string
-	gitcacheToken  string
+	gitcacheGrant  string
 	apiSocket      string
+	repoAllowlist  *sourceurl.RepoAllowlist
 }
 
 func brokeredExecutionChild(artifact bool) RunNodeOption {
@@ -69,11 +71,20 @@ func OverAPISocket(sock string) RunNodeOption {
 	return func(c *runNodeConfig) { c.apiSocket = sock }
 }
 
-// WithGitcache avoids process-global cache credentials when one agent executes concurrent nodes.
-func WithGitcache(url, token string) RunNodeOption {
+// WithRepoAllowlist holds a claimed node to the repositories this machine's
+// owner allowed: a node whose run names any other is refused before its source
+// is fetched. An executor started without it -- a Job its run's trigger runner
+// created -- builds only the repository that runner already admitted.
+func WithRepoAllowlist(allow sourceurl.RepoAllowlist) RunNodeOption {
+	return func(c *runNodeConfig) { c.repoAllowlist = &allow }
+}
+
+// WithGitcache hands a claimed node the cache and the grant its run's cache
+// traffic carries, so concurrent nodes of different runs never share one.
+func WithGitcache(url, grant string) RunNodeOption {
 	return func(c *runNodeConfig) {
 		c.gitcacheURL = url
-		c.gitcacheToken = token
+		c.gitcacheGrant = grant
 	}
 }
 

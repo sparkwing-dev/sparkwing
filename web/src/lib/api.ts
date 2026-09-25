@@ -1,4 +1,6 @@
 import { readCSRFCookie } from "./csrfCookie";
+import type { LogCompleteness } from "./logCompleteness";
+import type { TriggerGit } from "./triggerSource";
 
 function getApiUrl(): string {
   if (typeof window !== "undefined") return "";
@@ -71,7 +73,18 @@ function endSession() {
   window.location.assign(loginUrlFor(pathname || "/", search || ""));
 }
 
-function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
+// A route whose refusal answers a question about the caller, such as /me for an
+// operator signed in with a password, passes speaksForSession: false so its 401
+// never reads as the dashboard session ending, which would reload in a loop.
+export interface AuthFetchOptions {
+  speaksForSession?: boolean;
+}
+
+export function authFetch(
+  url: string,
+  opts: RequestInit = {},
+  { speaksForSession = true }: AuthFetchOptions = {},
+): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
   }
@@ -92,6 +105,9 @@ function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
         setConnectionStatus("ok");
+        return res;
+      }
+      if (!speaksForSession && [401, 403, 404].includes(res.status)) {
         return res;
       }
       if (res.status === 401 && sessionMode()) {
@@ -179,6 +195,8 @@ export interface Node {
   executor_kind?: string;
   executor_name?: string;
   executor_location?: "local" | "cloud" | "unknown";
+  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
+  execution_site_name?: string;
   execution_started_at?: string;
   execution_attempts?: ExecutionAttempt[];
   status_detail?: string;
@@ -210,6 +228,8 @@ export interface ExecutionAttempt {
   executor_kind?: string;
   executor_name?: string;
   location?: "local" | "cloud" | "unknown";
+  execution_site?: "machine" | "cloud" | "github-actions" | "cluster";
+  execution_site_name?: string;
   platform?: string;
   started_at?: string;
   finished_at?: string;
@@ -315,6 +335,17 @@ export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
   return body.runs || [];
 }
 
+export interface ControllerQueueState {
+  resources?: Array<{ key: string; capacity: number; held: number }>;
+  holders?: Array<{ run_id: string }>;
+  waiters?: Array<{ run_id: string; position: number }>;
+}
+
+export async function getControllerQueueState(): Promise<ControllerQueueState | null> {
+  const res = await authFetch(`${API_URL}/api/v1/queue/state`, { cache: "no-store" }).catch(() => null);
+  return res?.ok ? res.json() : null;
+}
+
 export async function getRunAttempts(runID: string): Promise<Run[]> {
   const res = await authFetch(`${API_URL}/api/v1/runs/${runID}/attempts`, {
     cache: "no-store",
@@ -372,6 +403,18 @@ export async function getNodeLogs(
   return res.text();
 }
 
+export async function getNodeLogCompleteness(
+  runID: string,
+  nodeID: string,
+): Promise<LogCompleteness | null> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/completeness`,
+    { cache: "no-store" },
+  ).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
+
 export interface RunLogMatch {
   node_id: string;
   line: number;
@@ -417,9 +460,11 @@ export interface RunsGrepResponse {
   runs: Record<string, Run>;
   total: number;
   runs_scanned: number;
+  runs_matching: number;
 }
 
 export interface RunsGrepOpts {
+  runIDs?: string[];
   pipelines?: string[];
   excludePipelines?: string[];
   statuses?: string[];
@@ -438,6 +483,7 @@ export async function searchRunsGrep(
   opts: RunsGrepOpts = {},
 ): Promise<RunsGrepResponse> {
   const params = new URLSearchParams({ q: query });
+  for (const id of opts.runIDs ?? []) params.append("run_id", id);
   for (const p of opts.pipelines ?? []) params.append("pipeline", p);
   for (const p of opts.excludePipelines ?? []) params.append("npipeline", p);
   for (const s of opts.statuses ?? []) params.append("status", s);
@@ -452,10 +498,8 @@ export async function searchRunsGrep(
     params.set("max_matches", String(opts.maxMatches));
   const res = await authFetch(`${API_URL}/api/v1/runs/grep?${params}`, {
     cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) {
-    return { query, matches: [], runs: {}, total: 0, runs_scanned: 0 };
-  }
+  });
+  if (!res.ok) throw new Error(`Search failed (${res.status})`);
   return res.json();
 }
 
@@ -491,6 +535,7 @@ export interface RunEvent {
 export async function triggerRun(
   pipeline: string,
   args?: Record<string, string>,
+  git?: TriggerGit,
 ): Promise<{ run_id: string } | null> {
   const res = await authFetch(`${API_URL}/api/v1/triggers`, {
     method: "POST",
@@ -499,6 +544,7 @@ export async function triggerRun(
       pipeline,
       args: args || {},
       trigger: { source: "dashboard" },
+      ...(git ? { git } : {}),
     }),
   });
   if (!res.ok) {
@@ -571,6 +617,31 @@ export interface PipelineArg {
 export interface PipelineMeta {
   args: PipelineArg[];
   tags?: string[];
+  last_status?: string;
+  last_run_at?: string;
+}
+
+// A team's list comes from the controller, newest activity first; the local
+// dashboard answers with a name-keyed map of the working directory's pipelines.
+interface TeamPipeline {
+  name: string;
+  last_status?: string;
+  last_run_at?: string;
+}
+
+export function pipelinesByName(
+  raw: Record<string, PipelineMeta> | TeamPipeline[] | undefined,
+): Record<string, PipelineMeta> {
+  if (!Array.isArray(raw)) return raw || {};
+  const out: Record<string, PipelineMeta> = {};
+  for (const p of raw) {
+    out[p.name] = {
+      args: [],
+      last_status: p.last_status,
+      last_run_at: p.last_run_at,
+    };
+  }
+  return out;
 }
 
 let _pipelinesUnavailable = false;
@@ -586,7 +657,7 @@ export async function getPipelines(): Promise<Record<string, PipelineMeta>> {
   }
   if (!res.ok) return {};
   const data = await res.json();
-  return data.pipelines || {};
+  return pipelinesByName(data.pipelines);
 }
 
 export interface TrendPoint {
@@ -618,25 +689,6 @@ export async function getTrends(opts?: {
   return res.json();
 }
 
-export interface ServiceStatus {
-  name: string;
-  url: string;
-  status: string;
-  latency_ms: number;
-  checked_at: string;
-  error?: string;
-  problems?: string[];
-}
-
-export async function getServiceHealth(): Promise<ServiceStatus[]> {
-  const res = await authFetch(`${API_URL}/api/v1/health/services`, {
-    cache: "no-store",
-  }).catch(() => null);
-  if (!res || !res.ok) return [];
-  const data = await res.json();
-  return data.services || [];
-}
-
 export interface LogSearchResult {
   run_id: string;
   node_id: string;
@@ -649,6 +701,7 @@ export interface LogSearchResponse {
   results: LogSearchResult[];
   total: number;
   truncated?: boolean;
+  reason?: string;
 }
 
 export function getLogsUrl(): string {
@@ -816,9 +869,10 @@ export async function triggerJob(
     require?: string;
     env?: Record<string, string>;
     args?: Record<string, string>;
+    git?: TriggerGit;
   },
 ): Promise<Job> {
-  const res = await triggerRun(pipeline, opts?.args);
+  const res = await triggerRun(pipeline, opts?.args, opts?.git);
   return {
     id: res?.run_id || "",
     pipeline,
@@ -1201,18 +1255,15 @@ export interface CronHealth {
 
 export type CronState = "armed" | "paused" | "undeclared";
 
-export type CronOutcome = "" | "fired" | "skipped_overlap" | "missed" | "failed";
+export type CronOutcome =
+  "" | "fired" | "skipped_overlap" | "missed" | "failed";
 
 // Where a schedule is evaluated. This dashboard reads one host's store, so
 // every row it serves is local.
 export type CronWhere = "local" | "controller";
 
 export type CronLockState =
-  | "follows"
-  | "pinned"
-  | "ahead"
-  | "dirty"
-  | "missing";
+  "follows" | "pinned" | "ahead" | "dirty" | "missing";
 
 export interface CronLock {
   // Ref, binary and digest are empty while a schedule follows the checkout.

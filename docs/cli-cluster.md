@@ -25,7 +25,6 @@ local dashboard with 'sparkwing serve'.
 - `gc` -- Sweep stale warm-PVC state
 - `users` -- Manage dashboard login users
 - `tokens` -- Manage controller API tokens
-- `credits` -- Inspect and top up the prepaid credit balance
 - `limits` -- Read and set the compute guards
 - `image` -- Rollout helpers for images referenced by a gitops repo
 - `webhooks` -- Connect, inspect, and replay GitHub webhooks
@@ -47,7 +46,7 @@ sparkwing cluster agents list --profile prod
 Inspect the controller's fleet view
 
 Hits GET /api/v1/agents on the selected profile's controller.
-Prints persisted executor registrations, including idle and
+Prints the caller's team's executor registrations, including idle and
 offline agents and gateways, plus recent legacy claim-only runners.
 
 ### Subcommands
@@ -106,7 +105,7 @@ sparkwing cluster agents enroll --profile prod --name build-gateway --token-pref
 
 Print the controller's known agents
 
-Fetches /api/v1/agents and renders a table of fleet members.
+Fetches /api/v1/agents and renders the caller's team's fleet members.
 Registered executors report their operator-assigned identity,
 kind, trusted placement location, capabilities, concurrency limit, and
 measured resource headroom. A stale registration remains visible
@@ -164,230 +163,6 @@ command narrows to one namespace.
 ```sh
 # Who holds and who's queued
 sparkwing cluster concurrency --namespace deploy-prod --profile prod
-```
-
-## `sparkwing cluster credits`
-
-Inspect and top up the prepaid credit balance
-
-Cloud runner time is prepaid. One hundred credits is one dollar,
-so a ten dollar top-up is a thousand credits. The balance is
-grants minus charges: a claim reserves a minute of cloud runner
-time before it is granted, heartbeats charge the seconds they
-cover, and the finish refunds whatever of the reservation the
-node did not use. Runners the operator did not mark metered are
-never charged.
-
-### Subcommands
-
-- `show` -- Print the balance, the rate table, and the recent burn
-- `grant` -- Add free or paid credits to the ledger, or reverse a paid grant
-- `history` -- List grants and charges, newest first
-- `settings` -- Read or set the credit rate table, the grace period, and the charge cap
-- `allowance` -- Read or set how many retained bytes a team keeps
-
-### Examples
-
-```sh
-# Read the balance and the burn
-sparkwing cluster credits show --profile prod
-
-# Load ten dollars
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
-```
-
-## `sparkwing cluster credits allowance`
-
-Read or set how many retained bytes a team keeps
-
-Retained bytes are what a team still has stored after its
-runs end, and the storage pass bills them at the storage rate.
-The allowance is how many of them the team asked to keep: the
-pass expires its oldest finished runs above the allowance before
-it bills and never bills above it, so the allowance is both what
-the team keeps and the most it pays for. An allowance of zero
-keeps everything and caps nothing. This verb is the only writer;
-rewriting a team's quota leaves the allowance alone.
-
-Reading with no flag reports the calling token's own allowance
-and what it currently retains. An admin token reads another
-team by naming it. Setting one needs the admin scope and names
-the team. The free allowance every team keeps unbilled and the
-price of a gibibyte-day are controller-wide settings on
-`sparkwing cluster credits settings`.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--principal NAME` | Team whose allowance to read or set; required to set one |
-| `--gb N` | Gibibytes of retained storage to keep; 0 keeps everything |
-| `--bytes N` | Bytes of retained storage to keep; 0 keeps everything |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Read what this token's team keeps
-sparkwing cluster credits allowance --profile prod
-
-# Keep fifty gibibytes for a team
-sparkwing cluster credits allowance --principal acme --gb 50 --profile prod
-```
-
-## `sparkwing cluster credits grant`
-
-Add free or paid credits to the ledger, or reverse a paid grant
-
-Adds credits and records who added them, which kind they are, and
-the payment they came from. One hundred credits is one dollar.
-A grant that lifts the balance above zero lets metered runners
-claim again and stops the cancellation of nodes running on an
-empty balance. A reference is the payment id: granting it twice
-returns the first grant rather than adding the credits again. A
-reversal takes a refunded payment back out with a negative
-amount, its own reference (the refund id) and --reverses naming
-the paid grant's reference. Requires the admin scope.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--kind KIND` | Grant kind: free \| paid \| reversal (required) |
-| `--amount N` | Credits to add, negative on a reversal; 100 credits is one dollar (required) |
-| `--reference REF` | Payment id or operator note recorded with the grant; granting the same one twice returns the first grant |
-| `--reverses REF` | Reference of the paid grant a reversal takes back |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Load ten dollars against a payment
-sparkwing cluster credits grant --kind paid --amount 1000 --reference pay_12345 --profile prod
-
-# Hand out trial credits
-sparkwing cluster credits grant --kind free --amount 500 --profile prod
-
-# Take a refunded payment back out
-sparkwing cluster credits grant --kind reversal --amount -1000 --reference re_9 --reverses pay_12345 --profile prod
-```
-
-## `sparkwing cluster credits history`
-
-List grants and charges, newest first
-
-Lists every movement of the ledger newest first: grants with
-their kind and reference, and the reservation a claim took, the
-usage an interval billed, and the refund of a reservation a node
-did not use, each with the run, node, token prefix and seconds
-it covered, and the cpu class and rate it was billed at. Charges
-render negative because they take credits
-out and a refund renders positive. -o json emits one JSON record
-per line.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--limit N` | Maximum rows of each kind, up to 1000 (0 = the controller's default) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Read the ledger
-sparkwing cluster credits history --profile prod
-
-# Sum today's charges
-sparkwing cluster credits history --profile prod -o json | jq 'select(.type=="charge") | .amount_micro'
-```
-
-## `sparkwing cluster credits settings`
-
-Read or set the credit rate table, the grace period, and the charge cap
-
-Prints the runtime settings the ledger prices work with, and
-sets the ones named by a flag. The rate table prices one cloud
-runner second at every cpu class, and a node is billed at the
-smallest class covering the cpu and memory it pinned; a request
-above the largest class fails the node. The rate is what a
-four-core second costs, which is the four-core entry of the
-table under another name, so a body may name one or the other,
-never both. The warm cpu class is the largest class the warm
-runner pool serves: a node above it starts a Kubernetes node
-sized to its class instead, and zero starts a node of its own
-for every class. The grace period
-is how long a node keeps running after it has consumed the
-reservation its claim paid for with the balance at zero: a node
-inside that reservation is never cancelled, because the ledger
-already took payment for it. The charge cap is the most seconds
-any one charge may bill, which forgives a controller outage or a
-stalled heartbeat loop rather than billing the gap. A flag left
-off leaves that setting alone, and a refused value moves
-nothing. Grace zero cancels a metered node at the first
-heartbeat past its reservation, which bounds the unpaid overrun
-to one heartbeat interval per node. An installation that never
-set a table bills the default ladder. Reading needs the
-runs.read scope and setting needs admin.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--rate-table PAIRS` | Price every cpu class, as CORES=MICRO pairs: 2=10000,4=20000,8=36667 |
-| `--warm-cpu-class-cores N` | Largest cpu class the warm runner pool serves; a larger class starts a node of its own |
-| `--rate-micro N` | Micro-credits one four-core cloud runner second costs, 1 to 1000000000000; refused once a rate table exists |
-| `--grace-seconds N` | Seconds a node runs past its reservation on an empty balance; 0 cancels at the next heartbeat |
-| `--max-charge-seconds N` | The most seconds any one charge may bill, 6 to 86400 |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Read the settings
-sparkwing cluster credits settings --profile prod
-
-# Cut a node off at the first heartbeat past its reservation
-sparkwing cluster credits settings --grace-seconds 0 --profile prod
-
-# Reprice a cloud runner second at 0.03 credits
-sparkwing cluster credits settings --rate-micro 30000 --profile prod
-
-# Price the three sizes at the GitHub Actions rates
-sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667 --profile prod
-```
-
-## `sparkwing cluster credits show`
-
-Print the balance, the rate table, and the recent burn
-
-Prints the balance in credits, what was granted and charged, the
-price of a cloud runner second at every cpu class, the credits
-burned over the last day, the grace period a node gets past the
-reservation its claim paid for, and the cap on what any one
-charge may bill. A
-controller that was never granted anything reads a zero balance
-and charges nothing, because nothing is metered until an
-operator marks a token.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty on TTY, json when piped) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Read the balance
-sparkwing cluster credits show --profile prod
-
-# Read the balance as JSON
-sparkwing cluster credits show --profile prod -o json
 ```
 
 ## `sparkwing cluster gc`
@@ -513,7 +288,7 @@ existed.
 
 ### Subcommands
 
-- `show` -- Print every compute guard and the cloud runners in use
+- `show` -- Print every compute guard and visible runner usage
 - `set` -- Set one compute guard
 
 ### Examples
@@ -535,10 +310,11 @@ max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
 max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
 runner_scale_step_credits and runner_scale_ceiling. The per-principal
-guards bind a principal holding a metered token; the two max_global settings bind
-every run. The three runner_scale settings raise max_concurrent_runners by one
-runner_scale_base for every runner_scale_step_credits of paid credit granted in
-the last 30 days, held under runner_scale_ceiling. Work past a guard answers
+guards bind a principal holding a metered token in its team; the two max_global
+settings bind every run. The three runner_scale settings raise
+max_concurrent_runners by one runner_scale_base for every
+runner_scale_step_credits of paid credit granted to that team in the last 30
+days, held under runner_scale_ceiling. Work past a guard answers
 429 with a Retry-After and the run records a compute_limit_blocked event.
 Requires the admin scope.
 
@@ -568,12 +344,12 @@ sparkwing cluster limits set --name runner_scale_step_credits --value 5000 --pro
 
 ## `sparkwing cluster limits show`
 
-Print every compute guard and the cloud runners in use
+Print every compute guard and visible runner usage
 
 Prints each guard with its ceiling, or "unlimited" when nothing set
-one, then the cloud runners claimed now in total and per principal. A
-cloud runner is a claim a metered token holds, so a controller that
-marks no token metered reads zero.
+one. An operator also sees the cloud runners claimed now in total and per
+principal, and whether runner_alarm has been reached. Team readers see their
+own paid runner cap without another team's fleet activity.
 
 ### Flags
 
@@ -735,6 +511,11 @@ missing sparkwing-runner, an unreachable service manager, or an unusable
 setting fails first. If a step after the mint fails, the output names the live
 token and the command that revokes it.
 
+With --allow-repo the agent fetches each run's source itself, from the
+repositories the list names, with the credential the controller releases or
+else this machine's own git credentials. Without it the agent fetches through
+the controller's gitcache proxy.
+
 The command prints the token prefix and the revoke command. The raw token
 reaches only the config file.
 
@@ -743,6 +524,7 @@ reaches only the config file.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Runner name, shown in the dashboard (required) |
+| `--allow-repo PATTERN` | Repository this machine may build and fetch directly, as host/path with '*' within one segment (repeatable) |
 | `--labels CSV` | Comma-separated self-asserted placement labels |
 | `--max-concurrent N` | Concurrent jobs this machine accepts (default: 2) |
 | `--contribution SPEC` | CPU and memory this machine contributes (4,8gb or 50%,50%) (default: 50%,50%) |
@@ -763,6 +545,9 @@ sparkwing cluster runners add --profile prod --name build-box --max-concurrent 4
 
 # Write the config and supervise the agent yourself
 sparkwing cluster runners add --profile prod --name dev-laptop --no-service
+
+# Fetch source directly for the team's repositories
+sparkwing cluster runners add --profile prod --name dev-laptop --allow-repo 'github.com/acme/*'
 ```
 
 ## `sparkwing cluster runners remove`
@@ -849,7 +634,6 @@ save it before leaving this command.
 - `revoke` -- Mark a token revoked
 - `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
-- `set-metered` -- Mark an existing token as one credits pay for
 
 ## `sparkwing cluster tokens create`
 
@@ -868,7 +652,6 @@ this command exits it cannot be recovered.
 | `--principal NAME` | Name identifying the token holder (required) |
 | `--scope CSV` | Comma-separated scopes; use sparkwing docs read --topic auth for the supported set |
 | `--ttl DURATION` | Token lifetime (30d, 720h, and similar durations). 0 = never expires |
-| `--metered` | Mark the token as one whose node claims cost credits |
 | `--profile NAME` | Profile name (required) |
 
 ### Examples
@@ -879,9 +662,6 @@ sparkwing cluster tokens create --type service --principal deploy-bot --scope ru
 
 # Mint a user token that expires in 30 days
 sparkwing cluster tokens create --type user --principal fictional-user --scope admin --ttl 720h --profile prod
-
-# Mint a metered cloud runner token
-sparkwing cluster tokens create --type runner --principal agent:cloud-pool --scope nodes.claim --metered --profile prod
 ```
 
 ## `sparkwing cluster tokens list`
@@ -988,35 +768,6 @@ window short.
 ```sh
 # Rotate a token with a 48h grace window
 sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
-```
-
-## `sparkwing cluster tokens set-metered`
-
-Mark an existing token as one credits pay for
-
-Sets or clears the metering marker on a token that is already
-minted, which is how a warm pool already running starts costing
-credits without a new credential. Metering is an operator
-decision: a runner's own labels never make its work billable.
-A claim by a metered token reserves a minute of cloud runner
-time and is refused when the balance cannot cover it.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--prefix PREFIX` | Non-secret token prefix (from 'tokens list') (required) |
-| `--metered BOOL` | true to charge this token's claims, false to stop (required) |
-| `--profile NAME` | Profile name (required) |
-
-### Examples
-
-```sh
-# Start charging the warm pool
-sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered true --profile prod
-
-# Stop charging a token
-sparkwing cluster tokens set-metered --prefix swr_a1b2c3d4 --metered false --profile prod
 ```
 
 ## `sparkwing cluster users`

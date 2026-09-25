@@ -81,6 +81,72 @@ var additiveColumnSources = map[int][]map[string]string{
 	// and bytes a storage charge billed, all defaulted, so an older binary
 	// keeps writing the migrated database.
 	47: {storageQuotaAllowanceCols, creditChargeStorageCols},
+	// safety: v49 adds the tenant key to every tenant-owned table with a
+	// default naming the team the existing rows are backfilled into, so an
+	// older binary keeps writing the migrated database and its inserts land
+	// in that team.
+	49: {teamColumn},
+	// safety: v50 adds the per-team credit exhaustion marker with a default,
+	// and moves the deployment-wide stamp into it, so an older binary keeps
+	// writing the migrated database and simply never stamps the column.
+	50: {teamsCreditExhaustedCols},
+	// safety: v52 adds the identity tables and columns with defaults, so an
+	// older binary keeps writing sessions, tokens and teams it never tags
+	// with an account, and runs whose event counters it never bumps.
+	52: {teamIdentityCols, sessionAccountCols, tokenCreatorCols, runEventUsageCols},
+	// safety: v53 adds a trigger's open credit reservation with a default of
+	// none, so an older binary keeps claiming and finishing triggers; it opens
+	// no reservation and the next claim overwrites one it left open.
+	53: {triggersCreditCols},
+	// safety: v54 adds the GitHub App tables and no column, and nothing older
+	// reads them, so an older binary keeps writing the migrated database.
+	54: nil,
+	// safety: v55 adds a nullable emailed_at to invitations and a defaulted
+	// teams_created to accounts, which an older binary leaves at their
+	// defaults, and tables it never reads.
+	55: {invitationEmailCols, accountTeamsCreatedCols},
+	// safety: v56 adds the free_slots table and an index, and nothing older
+	// reads them, so an older binary keeps writing the migrated database.
+	56: nil,
+	// safety: v57 is reserved and intentionally empty.
+	57: nil,
+	// safety: v58 adds an account's waitlist stamp with a default of never
+	// waitlisted, so an older binary keeps creating and reading accounts; an
+	// account it creates is admitted, as it would have been before the gate.
+	58: {accountWaitlistCols},
+	// safety: v59 adds one defaulted node column an older binary never names
+	// and rewrites one setting's value in place, so an older binary keeps
+	// writing the migrated database; a node it claims bills from execution
+	// start, as it always did.
+	59: {nodesCreditBillingCols},
+	60: nil,
+	61: nil,
+	// safety: v62 adds the git credential and GitHub App extra repository
+	// tables and no column, and nothing older reads them, so an older binary
+	// keeps writing the migrated database.
+	62: nil,
+	// safety: v63 adds defaulted trigger columns an older binary never names
+	// and an index, so an older binary keeps writing the migrated database.
+	63: {triggerGitHubCheckRunCols},
+	// safety: v64 adds a defaulted identities column an older binary never
+	// names and two tables nothing older reads, so an older binary keeps
+	// writing the migrated database.
+	64: {identityLinkedCols},
+	// safety: v65 to v67 add defaulted github_app_triggers columns an older
+	// binary never names, so an older binary keeps writing the migrated
+	// database.
+	65: {githubAppTriggerTagsCols},
+	66: {githubAppTriggerPatternsCols},
+	67: {githubAppBranchFilterCols},
+	// safety: v68 adds a defaulted github_runner_credentials column an older
+	// binary never names, so an older binary keeps writing the migrated
+	// database.
+	68: {githubRunnerRunCols},
+	// safety: v69 adds defaulted, default-off github_app_triggers event
+	// columns an older binary never names, so an older binary keeps writing
+	// the migrated database.
+	69: {githubAppTriggerOptionCols},
+	70: nil,
 }
 
 func columnSpecMaps() []map[string]string {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -612,8 +613,80 @@ func TestLocalTriggerFailure_LiveContextRecordsTheFailedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trig.Status != "done" {
-		t.Fatalf("trigger status = %q, want done", trig.Status)
+	if trig.Status != "failed" {
+		t.Fatalf("trigger status = %q, want failed", trig.Status)
+	}
+}
+
+func TestLocalSetupFailureChild(t *testing.T) {
+	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
+		t.Skip("child process fixture")
+	}
+	if err := HandleClaimedTriggerLocal(context.Background(), os.Getenv("SPARKWING_LOCAL_SETUP_TEST_RUN"), ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLocalConsumerKeepsSafeSetupFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the child fixture is a shell script")
+	}
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "pending run", pending: true},
+		{name: "run absent", pending: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("SPARKWING_HOME", home)
+			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_CHILD", "1")
+			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_RUN", "local-setup-failure")
+			t.Setenv(StoreWedgeBudgetEnvVar, "secret-should-not-be-shown")
+			binary, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SPARKWING_LOCAL_SETUP_TEST_BINARY", binary)
+			st := consumerTestStore(t, home)
+			repoDir := t.TempDir()
+			if err := os.Mkdir(filepath.Join(repoDir, ".sparkwing"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			pinned := filepath.Join(t.TempDir(), "child")
+			if err := os.WriteFile(pinned, []byte("#!/bin/sh\nexec \"$SPARKWING_LOCAL_SETUP_TEST_BINARY\" -test.run=^TestLocalSetupFailureChild$\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			const id = "local-setup-failure"
+			if err := st.CreateTrigger(ctx, store.Trigger{
+				ID: id, Pipeline: "orch-ok", CreatedAt: time.Now(),
+				TriggerEnv: map[string]string{SubmitRepoDirKey: repoDir, crons.PinnedBinaryEnvKey: pinned},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if tc.pending {
+				if err := st.CreateRun(ctx, store.Run{ID: id, Pipeline: "orch-ok", Status: "pending", StartedAt: time.Now()}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			trigger, err := st.ClaimNextTrigger(ctx, time.Minute)
+			if err != nil || trigger == nil {
+				t.Fatalf("claim trigger: %v, %+v", err, trigger)
+			}
+			cache := &localCompileCache{}
+			defer cache.Close()
+			runClaimedTrigger(ctx, st, trigger, cache, quietLogger(), home, time.Minute)
+			run, err := st.GetRun(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Status != "failed" || !strings.Contains(run.Error, "pipeline setup failed before dispatch") ||
+				strings.Contains(run.Error, "secret-should-not-be-shown") {
+				t.Fatalf("local setup failure run = status %q, error %q", run.Status, run.Error)
+			}
+		})
 	}
 }
 

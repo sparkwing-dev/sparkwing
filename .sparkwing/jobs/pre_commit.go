@@ -21,8 +21,8 @@ func (PreCommit) Help() string {
 		"reads the staged change, or the change since origin/main when nothing is staged, and names the " +
 		"mode it ran in: " +
 		"gofmt and the configured formatters (gofumpt + goimports) over the Go files, " +
-		"no em dashes and no internal tracker IDs, no disallowed comments (only GoDoc on " +
-		"exported APIs and // hack:/safety:/bug:/perf: tags), which in range mode also reads " +
+		"no em dashes and no internal tracker IDs, no disallowed comments (GoDoc, " +
+		"tagged rationale, and code or checker directives are allowed), which in range mode also reads " +
 		"every untracked Go file, no test that sleeps or reads the wall clock as a wait, and repo-wide, no tracked " +
 		"ELF, Mach-O or PE executable, an embedded pkg/docs/ mirror that matches docs/ and CHANGELOG.md, " +
 		"live links in released changelog entries, and no product file that resolves the sparkwing home " +

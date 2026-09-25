@@ -175,6 +175,7 @@ type EnvVarDocer interface {
 }
 var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
+var ErrOIDCUnavailable = errors.New("sparkwing: no controller issues OIDC tokens for this run")
 var ErrRefAbsent = errors.New("sparkwing: referenced output is absent")
 var ErrSecretMissing = errors.New("sparkwing: secret not found")
 func Error(ctx context.Context, format string, args ...any)
@@ -443,6 +444,8 @@ type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
 func Not(p Predicate) Predicate
 func NpmCache() DirCache
+func OIDCToken(ctx context.Context, audience string) (string, error)
+type OIDCTokenSource func(ctx context.Context, audience string) (string, error)
 type OnLimit string
 func OneOf(values ...any) Constraint
 func Or(preds ...Predicate) Predicate
@@ -662,6 +665,7 @@ var RuntimePlumbing = struct {
 		ResolvedArgs:      keyResolvedArgs,
 		ProfileResolution: keyProfileResolution,
 		Admission:         keyAdmission,
+		OIDCTokenSource:   oidcTokenSourceKey{},
 	},
 	Fns: runtimePlumbingFns{
 		PlanInsertChild:        (*Plan).insertChild,

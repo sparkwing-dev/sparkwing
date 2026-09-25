@@ -96,3 +96,38 @@ func TestCancel_MissingRun(t *testing.T) {
 		t.Errorf("err=%v want ErrNotFound", err)
 	}
 }
+
+func TestCancel_UnclaimedRunIsCancelledAndUnclaimable(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ts := httptest.NewServer(controller.New(st, nil).Handler())
+	defer ts.Close()
+	c := client.New(ts.URL, nil)
+	ctx := context.Background()
+
+	now := time.Now()
+	if err := st.CreateTrigger(ctx, store.Trigger{ID: "run-queued", Pipeline: "demo", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(ctx, store.Run{ID: "run-queued", Pipeline: "demo", Status: "pending", CreatedAt: now, StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.CancelRun(ctx, "run-queued"); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+
+	run, err := st.GetRun(ctx, "run-queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "cancelled" {
+		t.Fatalf("run status = %q after cancel, want cancelled", run.Status)
+	}
+	if _, err := st.ClaimNextTrigger(ctx, 30*time.Second); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a runner claimed the cancelled run: err=%v", err)
+	}
+}

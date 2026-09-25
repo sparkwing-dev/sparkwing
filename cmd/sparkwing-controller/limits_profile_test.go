@@ -28,6 +28,10 @@ func TestApplyLimitsProfile_CloudTurnsEveryGuardOn(t *testing.T) {
 		RequestsPerMinuteAlarm:    5000,
 		MaxLogStreamsPerPrincipal: 50,
 		MaxDownloadsPerPrincipal:  20,
+		RunsPerPrincipalHour:      600,
+		ShedQueueDepth:            5000,
+		EgressMonthlyBytes:        100 << 30,
+		EgressDailyCapBytes:       200 << 30,
 		EnforceIdleClaimPoll:      true,
 	}
 	if got := applyLimitsProfile(cloud, guardValues{}, guardsNamed{}); got != want {
@@ -47,6 +51,10 @@ func TestApplyLimitsProfile_WhatTheOperatorNamedWins(t *testing.T) {
 		RequestsPerMinuteAlarm:    100,
 		MaxLogStreamsPerPrincipal: 2,
 		MaxDownloadsPerPrincipal:  1,
+		RunsPerPrincipalHour:      7,
+		ShedQueueDepth:            8,
+		EgressMonthlyBytes:        9,
+		EgressDailyCapBytes:       10,
 	}
 	got := applyLimitsProfile(cloud, set, guardsNamed{
 		ClaimsPerRunnerMinute:     true,
@@ -55,6 +63,10 @@ func TestApplyLimitsProfile_WhatTheOperatorNamedWins(t *testing.T) {
 		RequestsPerMinuteAlarm:    true,
 		MaxLogStreamsPerPrincipal: true,
 		MaxDownloadsPerPrincipal:  true,
+		RunsPerPrincipalHour:      true,
+		ShedQueueDepth:            true,
+		EgressMonthlyBytes:        true,
+		EgressDailyCapBytes:       true,
 	})
 	set.EnforceIdleClaimPoll = true
 	if got != set {

@@ -3,6 +3,7 @@ package logs_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -88,6 +89,39 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 				t.Errorf("filtered bytes = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLogs_GrepReportsOriginalLinesAndCapsMatches(t *testing.T) {
+	c, _, stop := newLogsServer(t)
+	defer stop()
+	ctx := context.Background()
+	if err := c.Append(ctx, "run-grep", "build", []byte("start\nfatal one\nFATAL other\nwaiting\nfatal two\nfatal three\n")); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := c.Grep(ctx, "run-grep", "build", "fatal", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || matches[0].LineNo != 2 || matches[0].Line != "fatal one" ||
+		matches[1].LineNo != 5 || matches[1].Line != "fatal two" {
+		t.Fatalf("numbered matches = %+v, want lines 2 and 5", matches)
+	}
+}
+
+func TestLogs_GrepReportsErrorReadingFailureResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if _, err := w.Write([]byte("short")); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := logs.NewClient(srv.URL, nil).Grep(context.Background(), "run", "node", "error", 0)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("Grep error = %v, want unexpected EOF from response body", err)
 	}
 }
 

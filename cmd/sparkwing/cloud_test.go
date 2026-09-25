@@ -321,8 +321,8 @@ func TestCloudStatusReportsThePrincipalAndProbes(t *testing.T) {
 	for _, p := range got.Probes {
 		names = append(names, p.Name)
 	}
-	if !slices.Equal(names, []string{"controller", "auth", "logs", "gitcache"}) {
-		t.Errorf("probes = %v, want the same four `configure profiles test` runs", names)
+	if !slices.Equal(names, []string{"controller", "auth", "logs"}) {
+		t.Errorf("probes = %v, want the configured service probes", names)
 	}
 }
 

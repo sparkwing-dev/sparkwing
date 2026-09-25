@@ -25,7 +25,7 @@ func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 		},
 		{
 			name:         "controller degraded",
-			body:         `{"status":"degraded","auth":"enabled","problems":["triggers: 3 claimed >30m without /done"]}`,
+			body:         `{"status":"degraded","auth":"enabled","problems":["db: unavailable"]}`,
 			wantStatus:   StatusDegraded,
 			wantProblems: 1,
 			wantAuth:     "enabled",

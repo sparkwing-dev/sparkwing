@@ -18,9 +18,16 @@ import (
 // Session is one row in the sessions table. ID holds the raw session id the
 // caller presented; the table keys rows by its digest.
 type Session struct {
-	ID         string
-	Principal  string
-	Scopes     []string
+	ID        string
+	Principal string
+	Scopes    []string
+	// Team is the team the session acts for. A password session keeps
+	// [DefaultTeam]; an account session moves when the account switches.
+	Team Team
+	// AccountID is set on a session opened by an identity-provider sign-in.
+	// Its scopes are not stored: they come from the account's membership in
+	// Team on every request.
+	AccountID  string
 	CSRFToken  string
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
@@ -170,11 +177,10 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 	if ttl <= 0 {
 		return "", "", nil, errors.New("sessions: ttl must be positive")
 	}
-	sessBytes := make([]byte, SessionIDLen)
-	if _, err := rand.Read(sessBytes); err != nil {
+	rawSession, err = newSessionID()
+	if err != nil {
 		return "", "", nil, err
 	}
-	rawSession = base64.RawURLEncoding.EncodeToString(sessBytes)
 
 	csrfToken, err = s.deriveCSRFToken(rawSession)
 	if err != nil {
@@ -201,8 +207,30 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 	return rawSession, csrfToken, sess, nil
 }
 
+func newSessionID() (string, error) {
+	b := make([]byte, SessionIDLen)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error) {
+	return s.lookupSession(rawSession, now, 0, 0)
+}
+
+// LookupSessionAndRenew resolves a live session and extends its expiry from
+// this use. A row past maxLifetime is returned without renewal for its caller
+// to revoke.
+func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+	if ttl <= 0 {
+		return nil, errors.New("sessions: ttl must be positive")
+	}
+	return s.lookupSession(rawSession, now, ttl, maxLifetime)
+}
+
+func (s *Store) lookupSession(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
@@ -213,18 +241,18 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
 	row := s.queryRowNoCtx(`
-        SELECT principal, scopes,
+        SELECT principal, scopes, team, account_id,
                created_at, expires_at, last_used_at
           FROM sessions
          WHERE hash = ?
     `, digest)
 
 	var sess Session
-	var scopes string
+	var scopes, team string
 	var lastUsed sql.NullInt64
 	var created, expires int64
 	if err := row.Scan(
-		&sess.Principal, &scopes,
+		&sess.Principal, &scopes, &team, &sess.AccountID,
 		&created, &expires, &lastUsed,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -234,6 +262,7 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 	}
 	sess.ID = rawSession
 	sess.Scopes = splitScopes(scopes)
+	sess.Team = Team(team)
 	sess.CreatedAt = time.Unix(created, 0).UTC()
 	sess.ExpiresAt = time.Unix(expires, 0).UTC()
 	if lastUsed.Valid {
@@ -244,12 +273,47 @@ func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error
 		return nil, errors.New("session expired")
 	}
 	sess.CSRFToken = csrfToken
-	_, _ = s.execNoCtx(
-		`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
-		now.UTC().Unix(), digest,
-	)
-	ts := now.UTC()
-	sess.LastUsedAt = &ts
+	if ttl > 0 {
+		if sess.CreatedAt.After(now) || maxLifetime > 0 && !now.Before(sess.CreatedAt.Add(maxLifetime)) {
+			return &sess, nil
+		}
+		renewed := now.Add(ttl)
+		if maxLifetime > 0 {
+			limit := sess.CreatedAt.Add(maxLifetime)
+			if renewed.After(limit) {
+				renewed = limit
+			}
+		}
+		result, err := s.execNoCtx(`UPDATE sessions
+			SET last_used_at = CASE WHEN last_used_at > ? THEN last_used_at ELSE ? END,
+				expires_at = CASE
+				WHEN expires_at > ? THEN expires_at
+				ELSE ? END
+			WHERE hash = ? AND expires_at > ?`,
+			now.UTC().Unix(), now.UTC().Unix(), renewed.Unix(), renewed.Unix(), digest, now.UTC().Unix())
+		if err != nil {
+			return nil, fmt.Errorf("%w: renew session: %w", ErrSessionBackend, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("%w: renew session rows: %w", ErrSessionBackend, err)
+		}
+		if rows == 0 {
+			return nil, errors.New("unknown session")
+		}
+		if sess.ExpiresAt.Before(renewed) {
+			sess.ExpiresAt = renewed
+		}
+	} else {
+		_, _ = s.execNoCtx(
+			`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
+			now.UTC().Unix(), digest,
+		)
+	}
+	if ttl == 0 || sess.LastUsedAt == nil || sess.LastUsedAt.Before(now) {
+		ts := now.UTC()
+		sess.LastUsedAt = &ts
+	}
 	return &sess, nil
 }
 
@@ -270,16 +334,6 @@ func (s *Store) ExpireSessions(now time.Time) (int64, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
-}
-
-// ExtendSession bumps expires_at to now+ttl (sliding TTL).
-func (s *Store) ExtendSession(rawSession string, ttl time.Duration, now time.Time) error {
-	expires := now.Add(ttl).UTC().Unix()
-	_, err := s.execNoCtx(
-		`UPDATE sessions SET expires_at = ? WHERE hash = ?`,
-		expires, sessionDigest(rawSession),
-	)
-	return err
 }
 
 // CreateUser inserts a user with an argon2id-hashed password. scopes is

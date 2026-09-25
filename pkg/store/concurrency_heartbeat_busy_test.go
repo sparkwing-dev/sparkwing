@@ -62,7 +62,7 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 		}
 	}
 	started := time.Now()
-	expires, _, err := hb.heartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second, releaseOnRetry)
+	expires, _, err := hb.defaultTenant().heartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second, releaseOnRetry)
 	if err != nil {
 		t.Fatalf("heartbeat under transient busy: %v", err)
 	}

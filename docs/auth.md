@@ -19,51 +19,108 @@ audit logs. The remaining ~35 characters carry the secret entropy.
 
 ## Metered runners
 
-A token carries a `metered` marker the operator sets, either at mint
-(`sparkwing cluster tokens create --metered`) or afterwards
-(`sparkwing cluster tokens set-metered --prefix P --metered true`). That marker
-is the only thing that decides whether the work a runner does costs credits.
+A token carries a `metered` marker that Sparkwing Cloud operators set with
+the private `sparkwing-ops` tool. That marker is the only thing that decides
+whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
-A claim by a metered token reserves its first minute inside the claim's own
-transaction. The reservation is what makes the check safe when several runners
-poll at once: each one's spend is visible to the next before either claim
-commits, so a balance that covers one minute hands out one node, not one per
-runner. When the balance cannot cover the reservation,
+A claim by a metered token reserves the minimum billable time, 20 seconds at
+the node's class, inside the claim's own transaction. The reservation is what
+makes the check safe when several runners poll at once: each one's spend is
+visible to the next before either claim commits, so a balance that covers one
+minimum hands out one node, not one per runner. When the balance cannot cover the reservation,
 `POST /api/v1/nodes/claim` answers `402` with `"code": "insufficient_credits"`,
 the node stays ready, the run records a `credits_blocked` event, and the runner
 keeps polling.
 
-The live claim's fenced execution acknowledgement starts billing immediately
-before the node body runs. Claiming, queueing, provisioning, image pulls and
-runner startup do not consume the reservation. A heartbeat after execution
-starts charges the seconds since the previous charge, and the finish charges
-the tail the last heartbeat missed and refunds whatever is left. A finish or
-expired claim before execution refunds the complete reservation, so a node
-that runs for four seconds pays for four seconds. Two bounds apply. No single
-charge bills more than the charge cap (30 seconds by default), so a controller
+A metered trigger claim starts a whole run, so it is gated too. The claim
+names how the runner executes the trigger's nodes (`node_runner`: `k8s`,
+`warm` or `inprocess`, which an empty value means). A metered token that names
+`inprocess` gets `403` with `"error": "metered_inprocess_nodes"`, because nodes
+a trigger holder runs in its own process hold no node claim and are never
+charged; `sparkwing-runner runner --trigger-runner=inprocess` on a metered
+token stops its trigger loop with that reason and keeps claiming nodes. A
+metered pool therefore sets `runner.triggerRunner.kind` to `k8s` or `warm`
+in the runner-bundle chart.
+
+The trigger step itself, the planning and orchestration the holder runs on
+the claiming pool, is billed too. A metered `k8s` or `warm` claim reserves
+the cheapest class's minimum inside the claim's transaction, the same way a
+node claim does, so claims racing for a balance that covers one minimum start
+one run; the rest answer `402` and their triggers stay pending. The
+claim does not say how large the pool is, so the step is billed at the
+cheapest class. Each heartbeat charges whole seconds beyond the reserved
+minimum and renews the lease in the same transaction. If the balance cannot
+cover the elapsed time, the charge is recorded and the trigger and run fail;
+the heartbeat answers `409` and the runner stops. A ledger error also answers
+`409` without renewing the lease. Finish and lease expiry bill only the unpaid
+tail, through the lease's end when it lapsed before the reap. A claim
+requeued before its run started is refunded whole, including heartbeat
+charges. If an earlier claim left an open reservation, a new claim waits for
+operator ledger review; a named claim answers `409` with that reason. These
+ledger rows carry the run id and an empty node id.
+
+Billing runs from the moment the machine that executes a node starts work on
+it to the node's finish, so fetching the source and compiling the pipeline are
+billed; queueing and provisioning are not. A runner that claims work from the
+queue or accepts an offer is that machine, so its node bills from the claim.
+A dispatcher that claims a node and then creates a Kubernetes Job for it
+claims before the pod exists, so that node bills from the pod's first claim
+renewal, which the pod sends as it starts, or from its execution start if that
+comes first. A heartbeat charges the seconds since the previous charge, and
+the finish charges the tail the last heartbeat missed. Every node that starts
+pays at least the minimum: the reservation is consumed rather than refunded,
+so a node that runs for four seconds pays for twenty, and one that runs for a
+minute pays for a minute.
+
+A node whose machine never started gets its reservation back: a pod that never
+came up, a claim reaped before its pod renewed it. A node the platform stops
+before its execution starts gets back everything its claim billed, setup
+included. That covers no machine of the class coming free (`queue_timeout`)
+and a log service that refused or dropped the node's writes (`logs_auth`,
+`logs_dropped`). A runner that stops renewing its claim, before or after
+execution starts, ran until its lease ran out: when the reaper or agent-loss
+recovery clears the claim, the seconds since its last charge are billed to the
+lease's end, under the per-charge cap. Any other end before
+execution is the pipeline's own and keeps its setup billed: a compile error, a
+source fetch the repository refused, a cancellation, an out-of-memory kill. A
+platform failure after execution starts is billed like any other finish.
+
+Two bounds apply. No single charge bills more than the charge cap (30 seconds by default), so a controller
 outage or a stalled heartbeat loop does not bill the gap it left behind. A
 node that is requeued -- its lease reaped, its runner lost, or its attempt
 reset for a retry -- releases its charge window, so the next attempt starts a
 fresh reservation and the idle time between attempts is never billed.
 
-Once the balance reaches zero the node keeps running for the grace period. The
-first heartbeat after that window fails the node with the failure reason
-`credits_exhausted`, releases its claim, and answers `409`, which is how the
-runner learns to stop. The run records a `credits_exhausted` event naming the
-balance and how long it had been spent.
+Once the team's balance reaches zero the node keeps running for the grace
+period. The first heartbeat after that window fails the node with the failure
+reason `credits_exhausted`, releases its claim, and answers `409`, which is how
+the runner learns to stop. The run records a `credits_exhausted` event naming
+the balance and how long it had been spent. Both the balance and the instant it
+ran out are the team's own, so one team spending its grants refuses and cancels
+that team's nodes and leaves every other team on the controller running.
 
-A token with no marker is neither checked nor charged, so a deployment that
-marks none bills nothing.
+A token with no marker is neither checked nor charged. A controller without a
+signed metering license ignores even a previously marked token when it claims
+work, and refuses requests to mint or mark a metered token.
 
 ## Credits
 
-Cloud runner time is prepaid. Amounts are stored in micro-credits: a million
-micro-credits is one credit, and a hundred credits is one dollar, so a ten
-dollar top-up is a thousand credits. At the default rate a cloud runner second
-costs 0.02 credits, which is 1.2 credits a minute and 72 credits ($0.72) an
-hour, so ten dollars buys just under fourteen hours.
+Credits are a Sparkwing Cloud and enterprise feature. The controller requires
+the `metering` feature in its signed license. A signed `multi-team` license
+includes metering, including licenses issued before `metering` was named.
+Without either feature, credit and team billing routes return `404`, claims
+never check a balance or write charges, and the dashboard omits Billing.
+Customers who need metering can contact Korey for help running sparkwing-ops.
+
+Cloud runner time is prepaid. One credit is one second of one vCPU, and
+20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
+Amounts are stored in micro-credits, 5,000 to the credit, so a dollar is
+100,000,000 micro-credits and a cent is 1,000,000. A class costs its core count
+in credits a second: a four-core second is 4 credits, a minute 240, an hour
+14,400 ($0.72), so ten dollars (200,000 credits) buys just under fourteen
+four-core hours.
 
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
@@ -74,28 +131,100 @@ when the class is chosen, failing the node with `unpriced_cpu_class` and a
 `credits_unpriced_class` event naming both sizes, rather than reserving credits
 for a node no claim can pay for.
 
-An installation that never set a table bills the default ladder, which carries
-GitHub Actions' Linux x64 rates to the second: 2-core 10,000 micro-credits,
-4-core 20,000, 8-core 36,667. `credit_rate_micro_per_second` is the four-core
+An installation that never set a table bills the default ladder, each class at
+its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
+8-core 40,000. `credit_rate_micro_per_second` is the four-core
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
-`sparkwing cluster credits settings --rate-table 2=10000,4=20000,8=36667` sets
-the ladder and needs `admin`. A stored table this build cannot read is an error
-on every credit read rather than a silent return to the flat rate.
+Sparkwing Cloud operators set the ladder through the private `sparkwing-ops`
+tool. A stored table this build cannot read is an error on every credit read
+rather than a silent return to the flat rate.
 
-The balance is the sum of grants less the sum of charges, computed in SQL over
-the `credit_grants` and `credit_charges` tables. A grant is `free` or `paid`
+A balance belongs to a team: it is the sum of that team's grants less the sum of
+that team's charges, computed in SQL over the `credit_grants` and
+`credit_charges` tables. A grant reference is a payment id, so it stays unique
+across the deployment and a second team replaying one is refused rather than
+granted the first team's credits. The price of a second, the grace period, the
+charge cap, the rate table, the warm cpu class and the storage rate are the
+deployment's and are the same for every team. A grant is `free` or `paid`
 and records who added it and the payment it came from. A charge is a
 `reservation` a claim took, the `usage` an interval billed, or the `refund` of
 a reservation a node did not use; each names the run, node, token prefix, and
 seconds it covered, and the class and rate it was billed at, so a later change
 to the table never reprices a charge already written.
 
-`sparkwing cluster credits show` prints the balance, the rate table, the charge
-cap and the last day's burn. `sparkwing cluster credits grant --kind free|paid
---amount N` adds credits and needs `admin`. `sparkwing cluster credits history`
-lists every movement newest first.
+Sparkwing Cloud operators read balances and history, change pricing, and grant
+credits through the private `sparkwing-ops` tool. The controller's credit API
+routes remain the authority.
+
+## Buying credits
+
+A team owner buys credits from the dashboard's Team -> Billing page, and any
+member reads the balance, the price table, usage by run and the team's
+purchases there, from `GET /api/v1/team/billing`. A purchase is between $5 and
+$500. Purchases are final and credits never expire.
+
+The Stripe Checkout Session is created on the server, never in the browser,
+so no caller chooses the team a payment funds. The dashboard posts only the
+amount to `POST /api/v1/team/billing/checkout`, which needs an owner of the
+active team. The controller takes the team from that session, refuses an
+amount outside the range, and asks the hosted checkout service at
+`--billing-url` (`SPARKWING_BILLING_URL`), authenticated with
+`SPARKWING_BILLING_TOKEN`, to open a session for that team. The browser is
+sent to the page it returns. When Stripe confirms the payment, the checkout
+service verifies the webhook and grants the credits to the team the session
+names through `POST /api/v1/credits/grants`, keyed on the payment id so a
+redelivered webhook grants once. The service holds a token carrying only
+`credits.grant`, which the operator mints with
+`sparkwing cluster tokens create --type service --principal checkout-service --scope credits.grant`; it records paid
+grants, holds by payment, and reads the ledger's units, and every
+other route refuses it. A controller with no `--billing-url` sells no credits
+and answers the checkout route with `503` and
+`"code": "checkout_unavailable"`.
+
+A team's balance holds at most $5,000, and the cap is held when a checkout
+opens. The controller adds the balance, every checkout of the team still
+open and the new purchase, and refuses the purchase before any session opens
+when they pass the cap, with `409` and `"code": "balance_cap"` naming the
+balance, the open checkouts (`open_micro`), the amount and the cap. A checkout
+counts from the moment it opens until its payment is granted or its session
+expires, about half an hour later, so two owners racing for the last room
+cannot both open one. The grant that follows a verified payment is never
+refused by the cap, because the money has already moved; the balance can pass
+the cap only by a payment settled after its session expired. A `paid` grant is
+at most one purchase, $500. The grant route still refuses an operator's `free`
+grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
+
+Purchases are final, so a refund is the operator's decision and is made by
+hand. The private `sparkwing-ops` refund command takes back what the
+purchase still has on the ledger, in the team it funded, through
+`POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
+the operator then issues the money back. The controller never moves money, and
+a refund issued in Stripe alone changes nothing on the ledger. The whole
+purchase is reversed even when its credits were spent, so the balance can go
+below zero and the team's metered claims stop until it is funded again. A
+reversal never takes back more than its payment paid, and running the refund
+twice reverses once.
+
+A chargeback holds the team. Holds are one per dispute, and a team is held
+while any of its holds stands: its metered claims are refused with `402` and
+`"code": "credits_frozen"` while work already running finishes, and
+Team -> Billing says so. When Stripe reports a dispute opened on a purchase,
+the checkout service logs an alert (`alert=chargeback_opened`) and holds the
+team the payment funded through `POST /api/v1/credits/freezes`. A dispute
+lost reverses the purchase the way a refund does and holds the team too, so a
+lost dispute holds it even when Stripe delivered the close before the open. A
+dispute won logs `alert=dispute_won` and changes nothing: the checkout service
+never releases a team, because one dispute's outcome says nothing about
+another's. The operator uses the private `sparkwing-ops` tool to release one
+dispute's hold or every hold on a team. Replaying any
+dispute event changes nothing, and a replayed hold never undoes a release. A
+dispute is bound to the one payment and team its first hold named: a hold or
+a lost-dispute reversal that names the same dispute for another payment is
+refused with `409` and `"code": "dispute_conflict"` and logged as
+`alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
+so no claim that read the team as not held commits after the hold.
 
 ## Retained storage
 
@@ -122,8 +251,10 @@ with the current instant and billed from the next pass, so pricing storage
 never bills for the past, and so a team's first bytes cost one pass before the
 meter reaches them. A team that drops to nothing keeps no watermark, and an
 interval is never billed for longer than the bytes in it have been held, so an
-idle stretch is not charged against whatever a team stores next. A team whose
-retained runs all carry no creation date bills nothing for that interval. Each
+idle stretch is not charged against whatever a team stores next. A pass bills
+one team's bytes under one token principal, so two teams that both label a
+token `ci` are metered apart. A team whose retained runs all carry no creation
+date bills nothing for that interval. Each
 team's watermark moves by compare-and-set, so two controllers on one database
 bill an interval once whatever either clock says, and a clock that steps
 backwards bills nothing rather than billing twice.
@@ -132,22 +263,21 @@ The amount is `bytes x rate x seconds` divided by a gibibyte-day, truncated
 toward zero, so a fraction of a micro-credit is never billed and truncation
 forgives at most one micro-credit per team per pass. Three gibibytes retained
 against a one-gibibyte free allowance for one day is two gibibyte-days, which
-at 833,333 micro-credits a gibibyte-day is 1,666,666 micro-credits, or 25
-credits a gibibyte-month, GitHub's $0.25.
+at 333,333 micro-credits a gibibyte-day is 666,666 micro-credits, and that rate
+is 2,000 credits a gibibyte-month, the published $0.10.
 
 The charge is a `storage` row naming the team, the bytes it billed and the
-interval it covered, so `sparkwing cluster credits show` and `credits history`
-separate retained bytes from runner time. It carries no cpu class and no
+interval it covered, so the private `sparkwing-ops` credit views separate
+retained bytes from runner time. It carries no cpu class and no
 per-second rate, because neither priced it.
 
 Each team's allowance is how many retained bytes it asked to keep. The pass
 expires its oldest finished runs above the allowance before it bills, and it
 never bills for more than the allowance, so the allowance is both what a team
 keeps and the most it pays for; an allowance of zero keeps everything and caps
-nothing. Read and write one with
-`sparkwing cluster credits allowance --principal NAME --gb N`, which needs
-`admin`. Only that verb writes it: rewriting a team's quota leaves the
-allowance where it stands.
+nothing. Sparkwing Cloud operators read and write one through the private
+`sparkwing-ops` tool. Rewriting a team's quota leaves the allowance where it
+stands.
 
 An empty balance is a hard cut, the same as it is for runner time: a write that
 would grow a team's retained bytes is refused with `402` and a reason naming
@@ -169,9 +299,9 @@ is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
 carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
 four, 32 GiB at eight. A node takes the smallest class that covers both halves
 of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
-because the 4-core class carries only 16 GiB. The pod is created with cpu and
-memory requests and limits equal to its class, so a node never outgrows the
-class it is billed at.
+because the 4-core class carries only 16 GiB. The class sets the price, while
+the Kubernetes pod requests the pinned CPU and memory. A node with a 0.25-core
+pin still pays for the 2-core class, including the 20-second minimum.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -193,27 +323,27 @@ message.
 Concurrency in the band is whatever the pool's own cpu limit fits. A Job that
 finds no room waits for a machine to free rather than failing, because a full
 fleet is a condition that clears. A Job whose shape no machine in the pool
-could hold still fails after the five-minute wait below, because waiting cures
-nothing.
+could hold fails before the Job is created, because waiting cures nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
-`credit_cpu_class_memory_bytes`, and the Job is created from those two figures,
-so the pod shape and the bill agree whichever ladder the operator priced. A
-claim that names a node carries `sizes_to_class` to say it creates the node's
-executor at that class; a metered claim without it is held to the warm class,
+`credit_cpu_class_memory_bytes`. The Job uses the pipeline's resource pin or
+measured profile for its requests, with 100m CPU and 128 MiB memory defaults
+when no usable measurement exists. Limits retain the runner's burst settings
+and operator ceilings. A claim that names a node carries `sizes_to_class` to
+select the class-routed Kubernetes path; a metered claim without it is held to
+the warm class,
 and an unmetered one may not set it at all, so a customer's local agent can
 never route a class node to itself. The metered token is the operator's own
 pool, and class routing trusts it: the warm loop and the Job dispatcher share
 one process and one token, so the controller takes the flag at its word until
 the Job builder moves server-side and the pod shape is the controller's own.
-A runner cpu or memory ceiling below the billed class fails the node naming
-both, because a customer must never be billed for a class the pod cannot get.
+An operator ceiling caps the pod request without changing the billed class.
 A pod no node accepts is one of two things, and the runner tells them apart by
 measuring the pod's requests against the `allocatable` of the pool machines its
-own node selector admits. No machine in the pool could hold the pod even when
-empty, which is what a class larger than the cluster provisions looks like: the
-node fails after five minutes with the scheduler's own message, as it always
-has. A machine of the right shape is running and simply busy: the node queues,
+own node selector admits. If no matching machine could hold the pod even when
+empty, the node fails before Job creation with a clear error.
+If none exists yet, the five-minute wait allows the pool to provision one.
+A machine of the right shape that is simply busy causes the node to queue,
 its `status_detail` reads `queued: the runner fleet is full` with the
 scheduler's message, a `capacity_queued` event opens the wait, and it runs the
 moment a machine frees. The queue is bounded at nine minutes, one minute short
@@ -248,7 +378,7 @@ none behaves as it did before the guards existed.
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
 | `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most a billion; zero turns scaling off | the controller's ledger |
+| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | one team's grants |
 | `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
@@ -262,10 +392,10 @@ already finished still occupies the budget until it ages out of the hour.
 
 ### Scaling the per-principal runner cap
 
-`max_concurrent_runners` scales with what the controller loaded recently, so a
+`max_concurrent_runners` scales with what the team loaded recently, so a
 customer that has paid for capacity gets it and one that has paid nothing
 cannot spawn a thousand pods. The cap is the base plus one more base for every
-`runner_scale_step_credits` of `paid` credit granted in the last 30 days, held
+`runner_scale_step_credits` of `paid` credit granted to that team in the last 30 days, held
 under `runner_scale_ceiling`. The base is `runner_scale_base`, or
 `max_concurrent_runners` when that is zero; the ceiling is
 `runner_scale_ceiling`, or `max_global_runners` when that is zero. With a base
@@ -276,16 +406,18 @@ Every scaling setting is zero by default, which holds each principal to the
 static `max_concurrent_runners`, and the rule applies only while that guard is
 set. Scaling only ever raises that guard: a ceiling below it is ignored.
 `runner_scale_base` and `runner_scale_ceiling` are capped at a million runners
-and `runner_scale_step_credits` at a billion credits, so a typo cannot mint a
-cap.
+and `runner_scale_step_credits` at 200 billion credits, ten million dollars, so
+a typo cannot mint a cap. The step is written in whole credits, so schema v59
+multiplied a step written when a credit was a cent by 200, keeping its dollar
+value.
 
 `free` credit earns nothing and a payment ages out after 30 days. A refund is a
 `reversal` grant naming the payment's reference, and it is matched to that
 payment rather than to its own date: a refund settled after the window still
 takes back the payment that bought the cap, and refunding a payment that has
-already aged out leaves this month's payments alone. The ledger belongs to the
-controller and a controller serves one team, so every metered principal on it
-derives the same cap.
+already aged out leaves this month's payments alone. Every metered principal
+within a team derives its cap from that team's grants. A grant or reversal in
+another team does not change it.
 
 The derivation is held for a minute so a claim costs no ledger query, and any
 grant or reversal retires it at once. A ledger the derivation
@@ -294,10 +426,12 @@ names the failure in the controller log. `max_global_runners` is checked first,
 so the controller's own ceiling still refuses a claim a scaled cap would have
 allowed.
 
-`GET /api/v1/compute-limits` reports the result as `usage.derived_runner_cap`
-with the `usage.recent_paid_micro` it was read from, which is the window's paid
-grants less the reversals of them, and `sparkwing cluster limits show` prints it
-as `DERIVED RUNNER CAP`.
+`GET /api/v1/compute-limits` reports the request team's result as
+`usage.derived_runner_cap` with that team's `usage.recent_paid_micro`, which is
+the window's paid grants less their reversals. `sparkwing cluster limits show`
+prints it as `DERIVED RUNNER CAP` for the team of its credential. Only an
+operator sees the controller-wide runner count, per-principal counts and
+`runner_alarm` state; team readers receive none of those fields.
 
 Work a guard refuses answers `429` with `"code": "compute_limit"` naming the
 guard, its ceiling and what was measured, and a `Retry-After` saying how soon
@@ -325,18 +459,21 @@ mapping is in the generated [api-reference.md](api-reference.md):
 
 | Scope             | Unlocks                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
-| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar deployment-wide reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
-| `runs.write`      | POST `/api/v1/triggers`, `/gitcache/refresh`: starting new work |
+| `runs.read`       | GET `/api/v1/runs`, `/runs/{id}`, `/runs/{id}/nodes`, `/runs/{id}/events`, `/trends`, `/agents`, `/queue/state`, `/credits`, `/credits/history`, `/compute-limits`, per-node metrics GETs, and similar team-scoped reads. `/runs/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
+| `runs.write`      | POST `/api/v1/triggers`: starting new work. `/gitcache/refresh` fetches any repository with the operator's cache credential, so it takes `admin`; the CLI warms the cache with it before a trigger and proceeds without it |
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
+| `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
-| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
-| `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the repository of the run the caller holds a claim in |
+| `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
+| `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and the two cross-run concurrency routes `force-release` and `cancel-waiter` -- see [api-reference.md](api-reference.md) for the per-route mapping |
+| `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
+| `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -445,11 +582,12 @@ The slot routes under `/api/v1/concurrency/{key}/` -- `acquire`, `heartbeat`,
 run the request names, so a pipeline that declares a concurrency group or a
 memoized node runs on the runner scope set. `acquire` and `resolve` name their
 run outright; `heartbeat`, `release` and `holder` name a holder, and the
-controller reads the run off that holder's row. A caller holding no live claim
-on that run gets `403 claim_required`, and so does a holder whose lease has
+controller reads the run off that holder's row. `cancel-waiter` names its run
+in the request body. A caller holding no live claim on that run gets
+`403 claim_required`, and so does a holder whose lease has
 already lapsed, because a lapsed row proves nothing about who is calling. The
-two routes that act on rows another run owns, `force-release` and
-`cancel-waiter`, stay `admin`. `admin` bypasses all of it.
+`force-release` can drop another run's superseded holder and stays `admin`.
+`admin` bypasses all of it.
 
 A `nodes.claim` token also reaches only the runs it is working on. The node
 read routes (`GET nodes/{id}`, `nodes/{id}/output`, `nodes/{id}/bounce`) and
@@ -521,6 +659,304 @@ it to resolve tokens against the controller. It shows as `public` in
 from `requireScope` wrappers -- there, `public` means no scope check,
 not no authentication.
 
+## Teams and sign-in
+
+A controller holds one team, `default`, unless it runs with a signed
+multi-team license. The license is one line,
+`base64url(payload).base64url(signature)`, where the payload is JSON naming
+`features` (`multi-team`, `metering`), `issued_to`, `issued_at` and `expires_at` (RFC
+3339), and the signature is Ed25519 over those payload bytes. The controller
+verifies it against a public key compiled into the binary and reads it from
+`--license-file` or from `SPARKWING_LICENSE`. A missing, malformed, expired or
+wrongly signed license is logged at startup and leaves the controller holding
+one team; it never stops the controller starting.
+
+A multi-team controller always requires authentication. A request with no
+credential would act as the operator of `default`, so the license turns token
+auth on even while the tokens table is empty, and such a request gets 401. With
+no token yet, only Google or GitHub sign-in sessions are accepted; supply the first admin
+token with `--bootstrap-admin-token-file` (`SPARKWING_BOOTSTRAP_ADMIN_TOKEN`).
+
+With the license and a Google OAuth client (`--google-client-id` or
+`SPARKWING_GOOGLE_CLIENT_ID`, `SPARKWING_GOOGLE_CLIENT_SECRET`, and the
+dashboard callbacks in `--oauth-redirect-uris` or
+`SPARKWING_OAUTH_REDIRECT_URIS`), the dashboard offers Google sign-in. The controller
+runs the server half of a PKCE flow: `POST /api/v1/auth/oauth/google/start`
+returns the authorize URL, state and verifier for a redirect URI on the
+allowlist, and `POST /api/v1/auth/oauth/google/exchange` redeems the code,
+verifies the ID token (signature against Google's published keys, issuer,
+audience, expiry, `email_verified`) and opens a session. The dashboard keeps
+the state and verifier in a `__Host-` cookie and checks the state at its
+callback, which is what proves the same browser finished the flow.
+
+GitHub sign-in works the same way through `POST /api/v1/auth/oauth/github/start`
+and `/exchange`, configured with `--github-client-id` (or
+`SPARKWING_GITHUB_CLIENT_ID`) and `SPARKWING_GITHUB_CLIENT_SECRET` under the same license and redirect allowlist.
+It asks for `read:user user:email` only, keys the identity on GitHub's numeric
+account id so a renamed login keeps its account, and trusts only the primary
+email GitHub has verified, never the profile's public email. When the client id
+and secret belong to a GitHub App, that App is also how a team connects its
+repositories; see [GitHub App](github-app.md).
+
+A Google identity joins an existing user only when Google and that user both
+hold the email verified, and never when that user already has a different
+identity from the same provider or unlinked this one; a GitHub identity joins a
+Google user the same way. A second account from one provider on one address is
+a recycled address or another person, so it gets its own user and the first
+user's claim on the address is withdrawn. A user's email follows what the
+provider asserts at each sign-in, except through a sign-in the user linked
+(see [Linked sign-ins](#linked-sign-ins)). A user with no team, other than one on the
+[sign-up waitlist](#sign-up-gate), gets a personal space: a team
+whose only member is its owner, slugged from the email's local part, with the
+smallest free integer appended on a collision. The user's active team is
+stored on the user, so the next sign-in returns to it. One user creates at
+most three teams over the account's life, the personal space included, and
+deleting a team does not give one back. A slug that ever named a team is
+never registered again, and slugs such as `default`,
+`app`, `api`, `auth`, `login`, `admin` and anything starting `demo-` are
+reserved. Without the license, sessions opened by a Google sign-in stop
+authenticating as well as new sign-ins.
+
+A membership carries one role, and the role decides the session's scopes on
+every request, so a demotion or removal bites on the user's next request:
+
+| Role     | Scopes                                                                 |
+|----------|------------------------------------------------------------------------|
+| `reader` | `runs.read`, `logs.read`, `triggers.read`                              |
+| `editor` | reader, plus `runs.write`, `runs.control`, `approvals.write`; mints runner tokens for the team |
+| `owner`  | editor, plus `team.admin`                                              |
+
+No role grants `admin`, which stays the deployment operator's scope. Nobody
+grants a role above their own, and a team keeps at least one owner. An
+invitation names an email and a role, expires after seven days, is used once,
+and is accepted only by a signed-in user whose verified email is that address.
+Every `/api/v1/team/...` route acts on the caller's active team, taken from the
+session and never from the request, and an id belonging to another team
+answers 404.
+
+A runner token minted from team settings carries the runner scope set and
+belongs to the team that minted it. It expires 90 days after it is minted, and
+the runner-token list shows when. Removing a member revokes every runner token
+they minted in that team, and demoting a member to `reader` revokes theirs,
+both in the same step as the role change. A team holds at most 10 live runner
+tokens, at most 50 open invitations, and creates at most 100 invitations a day;
+withdrawing an invitation still counts toward that day. No token minted into a
+team carries `admin`.
+
+Any member mints a personal CLI token with `POST /api/v1/team/cli-tokens`,
+from a signed-in session only; a bearer token cannot mint one. It is a user
+token bound to the member and the active team, carrying the member's role
+scopes without `team.admin`, so a reader's token only reads. It expires 90 days
+after it is minted. Removing the member, or demoting them to `reader`, revokes
+it with their runner tokens; an owner demoted to `editor` keeps it, since it
+already carried only the editor's scopes. The member lists and revokes their
+own CLI tokens and no one else's, and holds at most 10 live ones in a team.
+
+With `--email-sender` (env `SPARKWING_EMAIL_SENDER`) set, the controller
+emails each invitation through Amazon SES, taking credentials and region from
+the AWS default chain; `--email-configuration-set`
+(`SPARKWING_EMAIL_CONFIGURATION_SET`) names the SES configuration set every
+message carries. The email names the inviter by display name, the team, the
+role and the accept link, and says the invitation expires in seven days; it
+strips control and bidirectional-formatting characters from names and caps
+each at 80 characters. One address, compared without regard to case, receives
+at most 5 invitation emails in any 24 hours from every team together. The
+count lives in a log of address digests that deleting a team does not touch.
+Past the cap the invitation is still created and the response says
+`email_sent: false`. Without a sender the controller logs each invitation
+instead of mailing it. Either way the response carries `accept_url` for the
+owner to hand on.
+
+An owner deletes the active team with `DELETE /api/v1/team`, typing its slug
+back as `confirm_slug`. The request closes the team in one transaction: its
+members leave it and their sessions move to another team they belong to, every
+token the team holds is revoked, open invitations are withdrawn, queued runs are
+cancelled and running ones asked to stop, and the team no longer resolves for
+any request. Another replica may accept a revoked token from its cache for up to
+a minute, so a background pass, once a minute and at least two minutes after the
+request, then deletes the team's logs through the logs service, its artifacts
+and build cache through the cache service, and its rows in every team-owned
+table, secrets and storage watermarks included. A cache grant minted before
+the deletion stays valid for up to six hours, so seven hours after the purge a
+second pass deletes the cache tree and sweeps the team-owned tables once more.
+One replica works on a deletion at a time, under a five-minute lease it renews
+before each step. A pass that fails leaves the deletion where it was with the
+error recorded and the next pass starts that step again;
+`GET /api/v1/me/team-deletions` shows the requester its state. The slug is
+never registered again. The controller deletes logs with the token in
+`SPARKWING_LOGS_DELETE_TOKEN`, which must carry exactly the `logs.delete`
+scope; mint one as the operator with `sparkwing cluster tokens create --type service --principal controller-logs --scope logs.delete`. With a logs service
+configured and no such token, or one carrying any other scope, a deletion
+stays pending and records why. The purge deletes the team's logs with one
+`DELETE /api/v1/teams/{team}/logs`, which removes every run the logs service
+recorded for the team and its archived namespace; a logs service without an
+archive store answers that route 404, and the controller then deletes the
+team's runs one at a time. An owner cannot delete their only team;
+deleting their account does that. On a logs service without an archive store,
+logs of runs deleted before their team was, for instance by
+`DELETE /api/v1/runs/{id}`, are not tracked by any row the purge reads and
+stay until its retention removes them.
+
+A user deletes their account with `DELETE /api/v1/me`, typing their email back
+as `confirm_email`, from a session signed in within the last 10 minutes; an
+older session answers `403` with `reauth_required`. The account, its sign-in
+identities, memberships and sessions go, and every token it minted in any team
+is revoked. Teams the user is the only member of, their personal space
+included, are deleted as above. In teams the user shares, rows that recorded
+the user stay with the team and name `deleted user` instead: runs, triggers,
+approvals, cron schedules armed, node bounces, debug-pause releases, credit
+grants, node and trigger claims, secrets, egress usage (bytes kept, merged per
+month) and the text of event payloads. The match is on the account's email and
+every email its sign-in identities asserted, never a linked sign-in's, in every
+team, and on the principal of every token it minted, only in that token's team,
+because another team may
+use the same principal name for its own token; egress usage carries no team,
+so it is relabeled for the emails alone. Credit
+charges name the team, not a person, and are left as they are. A replica's
+in-memory egress counter for the address can write it back once until that
+month's rows are pruned. While the user is the last owner of a team that has
+other members the request answers `409` and lists those teams, so they hand
+ownership on or delete each first. The operator carries out a request that
+arrived by mail with `DELETE /api/v1/accounts/{account}`, naming the account by
+id or email, and deletes a team with `DELETE /api/v1/teams/{team}`; both need
+`admin`.
+
+Owning a secret means creating and deleting it, not keeping it from editors.
+Anyone who can run a team's pipelines -- an editor or above -- can use the
+secrets those pipelines read: they can change what a pipeline runs, and a
+runner token they mint reads the secrets of every run it claims. This is the
+same model as GitHub Actions, where anyone who can push a workflow can use the
+repository's secrets. Grant `editor` only to someone you would hand those
+secrets.
+
+### Linked sign-ins
+
+An account holds sign-in methods and team memberships. Runs, secrets, credits
+and machines belong to teams. A signed-in user adds a sign-in method to their
+own account from **Account -> Linked sign-ins** in the dashboard, whatever
+address the provider holds. Linking adds a way to sign in and moves nothing
+from another account: Sparkwing does not combine accounts.
+
+1. `POST /api/v1/me/identities/{provider}/link {redirect_uri}` returns the
+   provider's authorize URL, a state and a PKCE verifier. The state carries the
+   controller's signature and names the account, the session and the provider,
+   and expires after ten minutes.
+2. The provider returns the browser to the dashboard's sign-in callback,
+   `/auth/{provider}/callback`, so no new redirect URI needs registering. The
+   dashboard keeps the code in its flow cookie and moves on to a same-site page
+   whose request carries the session.
+3. `POST /api/v1/me/identities/{provider}/link/complete {state, verifier, code,
+   redirect_uri}` checks the state against the caller's account and session,
+   records it as used, redeems the code, and attaches the provider account by
+   its stable subject: Google's `sub`, GitHub's numeric id.
+
+The controller refuses, and changes nothing, when the provider account is
+already attached to any account (`409 identity_linked_elsewhere`, or
+`identity_already_linked` for this one), or when the account already has a
+sign-in from that provider (`409 provider_already_linked`). A user with a
+second Sparkwing account either keeps both, invites one into the other's team
+and switches teams with the team switcher, or deletes the other account and then
+links its sign-in.
+
+A linked sign-in never changes the account's email, at the link or at any later
+sign-in through it, and does not withdraw another account's claim on its
+address. The rule for joining by email is unchanged: a new identity still joins
+an account only when both sides hold the address verified.
+
+`DELETE /api/v1/me/identities/{provider}` unlinks a sign-in while the account
+keeps at least one other (`409 last_sign_in_method` otherwise). It ends every
+other session of the account, and the unlinked provider account then signs in
+as a new account, even when it asserts the account's own address. Unlinking
+GitHub leaves each GitHub App installation the user connected bound to its
+team; connecting another installation needs a linked GitHub sign-in again.
+
+Link start, link completion and unlinking need a session signed in within the
+last 10 minutes (`403 reauth_required`). An account makes at most ten link
+attempts a minute (`429 rate_limited`); the limit is per controller replica.
+The controller logs `identity.linked`,
+`identity.unlinked` and `identity.change_refused` with the account, the provider
+and, for a change, the provider's subject. `GET /api/v1/me/identities` lists
+the account's sign-in methods and the providers it can link.
+
+### Sign-up gate
+
+Every new user costs a personal space, and a personal space holds a free
+storage allowance, so the sign-up gate bounds how many a burst of new provider
+accounts can take before the operator looks. It never touches a user that
+already exists: a returning user, and a new identity that links to one, sign in
+as before in every state.
+
+A new user meets the gate at its first sign-in. The gate admits it, which
+creates its personal space, or places it on the waitlist. A waitlisted user
+still gets an account and a session, so it can be admitted later without
+signing up again, but it holds no personal space, cannot create a team
+(`POST /api/v1/teams` answers `403`), and reaches no team route. It can accept
+an invitation: a team that invites someone vouches for them, and they join that
+team with the invited role while staying on the waitlist for everything else.
+Because one admitted user could otherwise invite a farm of waitlisted accounts
+into team scopes, each such acceptance counts toward the hourly and daily
+limits as an admission, and a team that has bought no credits holds at most
+`free_team_members` members (default 10; accepting past it answers `403`).
+Members a team already holds are never removed, and a team with purchased
+credits has no member limit.
+`GET /api/v1/me` and the sign-in exchange report `"waitlisted": true`, and the
+dashboard shows a waitlist page in place of the team views.
+
+A new user is waitlisted, with the reason recorded on the account, when any of
+these holds:
+
+| Reason | Condition |
+|--------|-----------|
+| `deployment` | the controller runs with `--signup-gate=waitlist` |
+| `operator` | an operator set the stored mode to `waitlist` |
+| `hourly_signups` | the last hour already admitted `hourly_limit` new users (default 50); the gate closes itself |
+| `daily_signups` | the last 24 hours already admitted `daily_limit` new users (default 500); the gate closes itself |
+| `free_tier_closed` | the deployment's free storage reports `closed`; the gate reopens when it does |
+| `free_tier_unreadable` | the free-tier source failed; the gate fails closed and logs `signup.free_tier_unreadable` |
+| `github_account_age` | a GitHub account younger than `github_min_account_days` (default 7), or one whose creation date GitHub did not state |
+
+A velocity closure is stored with the source `hourly_signups` or
+`daily_signups` and stays closed until an operator reopens it, so a burst that
+pauses does not reopen the gate on its own. Reopening restarts both windows
+from that moment, so the burst already dealt with does not close it again.
+Only admissions count toward a limit: new users admitted, and waitlisted users
+who accepted an invitation. A burst of waitlisted sign-ups, such as young
+GitHub accounts, does not close the gate on everyone else. Every sign-up and
+acceptance locks the one gate row before counting, so concurrent sign-ups at a
+limit admit exactly the limit. A limit of `0` turns its check off.
+
+The free-tier state comes from a source the deployment wires in. A multi-team
+controller with none logs `signup.free_tier_unwired` once at startup and
+treats the free tier as open. Google states no account age, so the age
+check applies to GitHub alone.
+
+The operator routes need the `admin` scope:
+
+| Route | Does |
+|-------|------|
+| `GET /api/v1/signups` | the effective state (`open` or `waitlist`) and every reason holding it, the stored mode with its source, reason, setter and time, the free-tier state, the limits, and the counts of users created in the last hour and day and waiting on the list |
+| `PUT /api/v1/signups` | sets `mode` (`open` or `waitlist`, with an optional `reason`) and any of `hourly_limit`, `daily_limit`, `hourly_warn`, `github_min_account_days`, `free_team_members`; fields left out keep their values |
+| `GET /api/v1/signups/waitlist` | waitlisted users, oldest first, with the reason each was waitlisted; `?limit=` reads at most 1000 |
+| `POST /api/v1/signups/waitlist/approve` | admits `{"account_ids": [...]}` or `{"oldest": n}`, at most 1000 at a time; each admitted user without a team gets its personal space, and approving an admitted user again does nothing |
+
+An admitted user's open session moves into its new space on its next
+`GET /api/v1/me`. The controller logs `signup.approved` for each admission and
+runs the approval notifier the deployment installed, which is where a
+"you're in" email would be sent from. This build installs none and has no
+mailer, so it logs `signup.approval_not_sent` instead and the person finds
+their space at their next visit.
+
+The controller logs `signup.velocity_warning` and counts
+`sparkwing_signup_velocity_warnings_total` once each time the last hour's new
+users cross `hourly_warn` (default 20), which is below the hourly limit so an
+alert fires before anyone is waitlisted. It logs `signup.gate_closed` and counts
+`sparkwing_signup_gate_closed_total` when a limit closes the gate, and
+`sparkwing_signups_total` counts every new user by outcome and reason, with
+waitlisted users admitted by invitation under `admitted`/`invitation`. Alert on
+any increase in the closure counter, on the warning counter, on
+`signup.free_tier_unreadable`, and on `GET /api/v1/signups` answering
+`"state": "waitlist"`.
+
 ## Unauthenticated endpoints
 
 Routes registered on the controller's outer router are matched before
@@ -529,7 +965,9 @@ the health and metrics probes (k8s httpGet probes and Prometheus
 scrapes can't carry `Authorization`), the service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
 the dashboard uses to establish, validate, and end a session (login,
-logout, session), the bootstrap probe, and the GitHub webhook, which
+logout, session, and the Google sign-in start and exchange), the
+capabilities report a signed-out dashboard draws its sign-in page from,
+the bootstrap probe, and the GitHub webhook, which
 is HMAC-verified instead of bearer-authenticated. The logs service
 opens its health and metrics probes the same way. Every registered
 route is listed in
@@ -555,6 +993,10 @@ reaches the upstream, so a signed-in tab cannot mint a token, read a secret, or
 create a user through the proxy. Both lists live in
 `internal/web/proxy_routes.go`, and a test holds each entry to the scope
 `pkg/controller/server.go` and `pkg/logs/server.go` register for that route.
+A third list forwards the identity and team routes (`/api/v1/me`,
+`/api/v1/teams`, `/api/v1/team/...`, invitation accept) with no dashboard
+scope, because a membership role decides them and the controller resolves that
+role on every request.
 
 A browser session carries the scopes of the user who signed in. The proxy
 checks them against the target route before forwarding, so an account holding
@@ -565,18 +1007,55 @@ with `sparkwing cluster users add --scope runs.read,logs.read`; omitting
 `admin` is rejected with `400`, and `sparkwing cluster users list` prints the
 scope set of every account.
 
-The web pod's own service token needs `runs.read` plus `logs.read`. Add
+Under `--require-login` the web pod reaches the controller as the signed-in
+user: the proxy and the pod's own run, node and event reads send
+`Authorization: Session <id>` for that browser's session, and never the pod's
+service token. On a multi-team controller a service token reads every team,
+so the session, which belongs to one user and one active team, is the only
+credential that keeps a browser inside its own team. The service token still
+authenticates the logs service, which accepts bearers only, and the services
+health probe.
+
+Without `--require-login` there is no session, and the web pod's own service
+token carries every request. It needs `runs.read` plus `logs.read`. Add
 `runs.control` where the UI cancels, retries, or releases a debug pause,
 `runs.write` where it submits a trigger, and `approvals.write` where it
-resolves approval gates. That token bounds what the
-proxy can reach at all; the session's scopes bound what one signed-in user
-reaches through it.
+resolves approval gates.
 
-Deleting a run from the dashboard needs `admin` on both sides, because the
-controller registers `DELETE /api/v1/runs/{id}` at `admin`: the web pod's token
-must carry `admin` and so must the signed-in account. Leave `admin` off that
-token where operators should delete runs with the CLI instead; the dashboard
-button then reports `delete needs the admin scope` and nothing is removed.
+Deleting a run from the dashboard needs `admin`, because the controller
+registers `DELETE /api/v1/runs/{id}` at `admin`: the signed-in account must
+carry it, or, without `--require-login`, the web pod's token. Without it the
+dashboard button reports `delete needs the admin scope` and nothing is removed.
+
+### Google and GitHub sign-in
+
+Account sign-in needs a dashboard started with `--controller`, which forwards
+every read with the signed-in user's own session. A dashboard started with
+`--profile` or `--state` reads the operator's store directly, so it offers no
+provider, answers `/auth/<provider>/...` with `404`, and treats any account
+session, or any session acting for a team other than the operator's, as signed
+out.
+
+When the controller's `GET /api/v1/capabilities` reports `teams.enabled`, the
+sign-in page offers "Sign in with Google" when `auth.providers` lists `google`
+and "Sign in with GitHub" when it lists `github`, above the password form. Each
+flow runs through the dashboard host: `GET /auth/<provider>/start` asks the
+controller's `POST /api/v1/auth/oauth/<provider>/start` for an authorize URL, a
+state and a PKCE verifier, keeps the provider, state and verifier in a
+ten-minute `__Host-sw_oauth` cookie (`Secure`, `HttpOnly`, `SameSite=Lax`,
+`Path=/`), and redirects to the provider. The provider returns to
+`GET /auth/<provider>/callback`, which refuses a callback whose `state` does not
+match that cookie or whose provider is not the one the flow started with, then
+has the controller exchange the code and sets the dashboard session cookies.
+Any other provider name answers `404`.
+
+Register `https://<dashboard-host>/auth/<provider>/callback` as the OAuth
+client's redirect URI (the authorization callback URL on GitHub). The scheme
+follows the same TLS evidence as the CSRF origin check, so a dashboard behind a
+TLS-terminating proxy needs `--trusted-proxy-cidrs` or `--hsts`. The host is the
+one the browser used, so a local dashboard reached as `http://localhost:4343`
+uses `http://localhost:4343/auth/google/callback`, and reaching it as
+`127.0.0.1` sends a redirect URI the provider does not recognize.
 
 `sparkwing-web --require-login` needs a controller session backend. Pass
 `--controller URL`, or select a `--profile` whose `controller.url` is set. A
@@ -664,6 +1143,10 @@ along with `Secure`, because a browser discards a `__Host-` cookie that is not
 `Secure`; on those deployments the names are `sw_session` and `sw_csrf`. A
 custom browser client reads whichever name the deployment sets, preferring the
 prefixed one.
+
+Both sign-in cookies persist across browser restarts for 30 days. Their
+presence does not extend a controller session: the controller checks the
+session on every protected request and clears invalid cookies.
 
 Login cookies are `Secure` by default, so a login-required dashboard must be
 served over HTTPS. A plain `http://localhost` port-forward can reach health
@@ -856,10 +1339,9 @@ every request and the dashboard resolves the session on every protected
 request, so deleting a session or a user logs that browser out on its
 next request.
 
-A session expires 12 hours after its last use and the controller renews it when
-under an hour remains, but never past seven days from the moment it was
-created. Reaching that age deletes the row and answers `401`, so the browser
-signs in again. An embedder changes the cap with
+A session expires seven days after its last use. Each successful use renews
+that term, but never past 30 days from creation. Reaching that age deletes the
+row and answers `401`, so the browser signs in again. An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
 ## Extension points

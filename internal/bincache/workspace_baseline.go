@@ -24,6 +24,9 @@ type WorkspaceBaseline struct {
 	SHA string
 }
 
+// SourceBundleObjectEnvKey binds a working-tree trigger to its one-run source object.
+const SourceBundleObjectEnvKey = "SPARKWING_SOURCE_BUNDLE_OBJECT"
+
 const (
 	// WorkspaceBaseRefEnvKey carries WorkspaceBaseline.Ref in a trigger's environment.
 	WorkspaceBaseRefEnvKey = "SPARKWING_WORKTREE_BASE_REF"

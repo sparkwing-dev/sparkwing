@@ -862,12 +862,17 @@ func TestGitHubCommitStatusDispatchPanicReleasesReservation(t *testing.T) {
 		},
 		"repository":{"full_name":"acme/sample-app"}
 	}`)
+	tenant, err := st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatalf("ForTeam: %v", err)
+	}
 	panicked := false
 	func() {
 		defer func() { panicked = recover() != nil }()
 		srv.handleGitHubPullRequest(
 			httptest.NewRecorder(),
 			httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)),
+			tenant,
 			"pr-gate",
 			"delivery-1",
 			body,
@@ -1214,4 +1219,95 @@ func testGitHubSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+// A team chose its own binding secret and nothing proves it controls the
+// repository it names, so a delivery that team signed posts no status to that
+// repository with the controller's token. The operator's own binding still does.
+func TestGitHubCommitStatus_ATeamBindingPostsNoStatus(t *testing.T) {
+	received := make(chan recordedGitHubStatus, 4)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- recordedGitHubStatus{Path: r.URL.Path}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := st.AsOperator().CreateTeam(ctx, "attacker"); err != nil {
+		t.Fatal(err)
+	}
+	attacker, err := st.ForTeam(ctx, "attacker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := attacker.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
+		Pipeline: "pr-gate", Repo: "victim/app", Secret: "attacker-chosen",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutGitHubWebhookBinding(ctx, store.GitHubWebhookBinding{
+		Pipeline: "pr-gate", Repo: "acme/app", Secret: "operator-secret",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := New(st, nil)
+	reporter := newGitHubCommitStatusReporter("github-token", "", github.URL, github.Client())
+	srv.githubCommitStatuses = reporter
+	controller := httptest.NewServer(srv.Handler())
+	defer controller.Close()
+
+	deliver := func(repo, secret, delivery string) string {
+		t.Helper()
+		body := []byte(`{"action":"opened","number":1,` +
+			`"pull_request":{"head":{"ref":"f","sha":"1111111111111111111111111111111111111111"},` +
+			`"base":{"ref":"main","sha":"2222222222222222222222222222222222222222"},"user":{"login":"x"}},` +
+			`"repository":{"full_name":"` + repo + `"}}`)
+		req, err := http.NewRequest(http.MethodPost, controller.URL+"/webhooks/github/pr-gate", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-GitHub-Event", "pull_request")
+		req.Header.Set("X-GitHub-Delivery", delivery)
+		req.Header.Set("X-Hub-Signature-256", testGitHubSignature(secret, body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusAccepted {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("delivery for %s = %d: %s", repo, resp.StatusCode, raw)
+		}
+		var accepted triggerResp
+		if err := json.NewDecoder(resp.Body).Decode(&accepted); err != nil {
+			t.Fatal(err)
+		}
+		return accepted.RunID
+	}
+
+	teamRun := deliver("victim/app", "attacker-chosen", "delivery-team")
+	if _, _, ok := srv.githubCommitStatus(ctx, teamRun, "success"); ok {
+		t.Error("a team-bound run resolves a commit status for its repository")
+	}
+	shutdownCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := reporter.shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-received:
+		t.Fatalf("a team-bound delivery posted a commit status to %s", got.Path)
+	default:
+	}
+
+	operatorRun := deliver("acme/app", "operator-secret", "delivery-operator")
+	if _, _, ok := srv.githubCommitStatus(ctx, operatorRun, "success"); !ok {
+		t.Error("the operator's binding no longer resolves a commit status")
+	}
 }
