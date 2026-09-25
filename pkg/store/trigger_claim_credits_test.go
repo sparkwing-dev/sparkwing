@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -436,6 +437,88 @@ func TestMeteredTriggerRequeueCannotRefundAnEarlierGenerationAgain(t *testing.T)
 	}
 	if got := balance(t, st); got != 3*floor {
 		t.Fatalf("earlier generation minted credits on second refund: balance=%d, want %d", got, 3*floor)
+	}
+}
+
+func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
+	for _, mode := range []string{"paid release to unmetered token", "unstarted requeue with metering disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			st := storetest.Open(t)
+			ctx := context.Background()
+			metered := meteredClaimant(t, st, "agent:cloud")
+			floor := triggerFloor(t, st, metered)
+			if _, err := st.CancelPendingTrigger(ctx, "run-floor"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+				t.Fatal(err)
+			}
+			pendingTrigger(t, st, "run-transition")
+			prior, err := st.ClaimSpecificTriggerFor(ctx, "run-transition", metered, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			backdateTriggerClaim(t, st, prior.ID, time.Now().Add(-25*time.Second), time.Time{})
+			switch mode {
+			case "paid release to unmetered token":
+				if err := st.CreateRun(ctx, store.Run{ID: prior.ID, Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+					t.Fatal(err)
+				}
+				if ok, err := st.ReleaseClaimAtGeneration(store.WithoutCreditMetering(ctx), prior.ID, prior.ClaimSeq); err != nil || !ok {
+					t.Fatalf("release prior claim = %t, %v", ok, err)
+				}
+			case "unstarted requeue with metering disabled":
+				if ok, err := st.RequeueUnstartedClaim(store.WithoutCreditMetering(ctx), prior.ID); err != nil || !ok {
+					t.Fatalf("requeue prior claim = %t, %v", ok, err)
+				}
+			}
+			before := balance(t, st)
+			var markerBefore, secondsBefore, amountBefore int64
+			var reservationBefore string
+			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
+				`SELECT credit_reserved_at, credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
+				   FROM triggers WHERE id = ?`), prior.ID,
+			).Scan(&markerBefore, &secondsBefore, &amountBefore, &reservationBefore); err != nil {
+				t.Fatal(err)
+			}
+			claimCtx := ctx
+			claimant := metered
+			switch mode {
+			case "paid release to unmetered token":
+				claimant = unmeteredClaimant(t, st, "agent:laptop")
+			case "unstarted requeue with metering disabled":
+				claimCtx = store.WithoutCreditMetering(ctx)
+			}
+			if _, err := st.ClaimSpecificTriggerFor(claimCtx, prior.ID, claimant, time.Minute); err == nil ||
+				!strings.Contains(err.Error(), "unsettled prior metered claim") {
+				t.Fatalf("named claim of unsettled trigger = %v, want actionable refusal", err)
+			}
+			if got, err := st.GetTrigger(ctx, prior.ID); err != nil || got.Status != "pending" || got.ClaimSeq != prior.ClaimSeq {
+				t.Fatalf("refused claim changed trigger: %+v, %v", got, err)
+			}
+			var markerAfter, secondsAfter, amountAfter int64
+			var reservationAfter string
+			if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
+				`SELECT credit_reserved_at, credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id
+				   FROM triggers WHERE id = ?`), prior.ID,
+			).Scan(&markerAfter, &secondsAfter, &amountAfter, &reservationAfter); err != nil {
+				t.Fatal(err)
+			}
+			if markerAfter != markerBefore || secondsAfter != secondsBefore ||
+				amountAfter != amountBefore || reservationAfter != reservationBefore {
+				t.Fatalf("refused claim erased prior credit cursor: before=%d/%d/%d/%q after=%d/%d/%d/%q",
+					markerBefore, secondsBefore, amountBefore, reservationBefore,
+					markerAfter, secondsAfter, amountAfter, reservationAfter)
+			}
+			pendingTrigger(t, st, "run-ready")
+			claimed, err := st.ClaimNextTriggerFor(claimCtx, claimant, time.Minute, nil, nil)
+			if err != nil || claimed.ID != "run-ready" {
+				t.Fatalf("parked oldest trigger hid ready work: %+v, %v", claimed, err)
+			}
+			if got := balance(t, st); got != before {
+				t.Fatalf("refused claim moved prior credit balance: got=%d, want=%d", got, before)
+			}
+		})
 	}
 }
 

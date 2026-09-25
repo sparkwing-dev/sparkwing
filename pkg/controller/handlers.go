@@ -1325,6 +1325,10 @@ func (s *Server) handleClaimSpecificTrigger(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		s.writeInternalError(w, r, "claim trigger", err)
 		return
 	}
@@ -1414,6 +1418,10 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrNotFound) {
 			s.writeClaimPollAdvice(w)
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if errors.Is(err, store.ErrLockHeld) {
+			writeError(w, http.StatusConflict, err)
 			return
 		}
 		s.writeInternalError(w, r, "claim next trigger", err)

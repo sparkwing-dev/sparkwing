@@ -57,7 +57,9 @@ the heartbeat answers `409` and the runner stops. A ledger error also answers
 `409` without renewing the lease. Finish and lease expiry bill only the unpaid
 tail, through the lease's end when it lapsed before the reap. A claim
 requeued before its run started is refunded whole, including heartbeat
-charges. These ledger rows carry the run id and an empty node id.
+charges. If an earlier claim left an open reservation, a new claim waits for
+operator ledger review; a named claim answers `409` with that reason. These
+ledger rows carry the run id and an empty node id.
 
 Billing runs from the moment the machine that executes a node starts work on
 it to the node's finish, so fetching the source and compiling the pipeline are

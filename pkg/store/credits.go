@@ -1775,6 +1775,15 @@ const triggerCreditNodeID = ""
 func reserveTriggerCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, triggerID string, now time.Time,
 ) error {
+	var prior int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT credit_reserved_at FROM triggers WHERE team = ? AND id = ?`,
+		string(team), triggerID).Scan(&prior); err != nil {
+		return err
+	}
+	if prior != 0 {
+		return unsettledTriggerCredits(triggerID)
+	}
 	if creditMeteringDisabled(ctx) {
 		return nil
 	}
@@ -1821,6 +1830,10 @@ func reserveTriggerCreditsTx(
 		  WHERE team = ? AND id = ?`,
 		now.UnixNano(), MinBillableSeconds, required, charge.ID, string(team), triggerID)
 	return err
+}
+
+func unsettledTriggerCredits(triggerID string) error {
+	return fmt.Errorf("%w: trigger %s has an unsettled prior metered claim; review its credit ledger before retrying", ErrLockHeld, triggerID)
 }
 
 // safety: a frozen team is refused the way an empty balance is, so every

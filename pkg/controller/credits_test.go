@@ -313,6 +313,39 @@ func TestCredits_TriggerHeartbeatLedgerFailureRefusesRenewal(t *testing.T) {
 	}
 }
 
+func TestCredits_UnsettledTriggerClaimIsActionableWithoutBlockingQueue(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
+	if err := f.store.CreateTrigger(ctx, store.Trigger{
+		ID: "run-unsettled", Pipeline: "build", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := c.ClaimTrigger(ctx)
+	if err != nil || prior == nil {
+		t.Fatalf("prior claim = %+v, %v", prior, err)
+	}
+	if ok, err := f.store.ReleaseClaimAtGeneration(store.WithoutCreditMetering(ctx), prior.ID, prior.ClaimSeq); err != nil || !ok {
+		t.Fatalf("release without settlement = %t, %v", ok, err)
+	}
+	if _, err := c.ClaimSpecificTrigger(ctx, prior.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) ||
+		!strings.Contains(err.Error(), "unsettled prior metered claim") {
+		t.Fatalf("named claim = %v, want actionable conflict", err)
+	}
+	if err := f.store.CreateTrigger(ctx, store.Trigger{
+		ID: "run-ready", Pipeline: "build", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := c.ClaimTrigger(ctx); err != nil || next == nil || next.ID != "run-ready" {
+		t.Fatalf("next claim behind parked trigger = %+v, %v", next, err)
+	}
+}
+
 // A metered pool that ran a claimed trigger's nodes in its own process would
 // run them outside any node claim, and so outside any credit charge. A
 // metered trigger claim must name a node runner that claims each node.

@@ -7367,6 +7367,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
        idempotency_key, claim_seq, webhook_delivery, team, webhook_replay_key
   FROM triggers
  WHERE status = ? AND available_at <= ? AND cancel_requested_at IS NULL
+   AND credit_reserved_at = 0
    AND NOT EXISTS (
        SELECT 1 FROM agent_loss_retries alr
        JOIN runs source_run ON source_run.id = alr.source_run_id
@@ -8090,6 +8091,7 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1,
 		        claim_principal = ?, claim_token_prefix = ?
 		  WHERE id = ? AND status = ? AND available_at <= ? AND cancel_requested_at IS NULL
+		    AND credit_reserved_at = 0
 		    AND NOT EXISTS (
 		        SELECT 1 FROM agent_loss_retries alr
 		        JOIN runs source_run ON source_run.id = alr.source_run_id
@@ -8104,6 +8106,17 @@ func (s *Store) ClaimSpecificTriggerFor(ctx context.Context, id string, claimant
 		return nil, err
 	}
 	if n == 0 {
+		var prior int64
+		lookupArgs := append([]any{id, triggerStatusPending}, teamArgs...)
+		lookupErr := tx.QueryRowContext(ctx,
+			`SELECT credit_reserved_at FROM triggers WHERE id = ? AND status = ?`+teamClause,
+			lookupArgs...).Scan(&prior)
+		if lookupErr == nil && prior != 0 {
+			return nil, unsettledTriggerCredits(id)
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+			return nil, lookupErr
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
