@@ -73,3 +73,17 @@ func TestComputeLimitsPaidCapacityShowsOnlyTheReadersTeam(t *testing.T) {
 		}
 	}
 }
+
+func TestComputeLimitsTeamReadDoesNotDependOnGlobalUsage(t *testing.T) {
+	f := newIdentityFixture(t)
+	member := f.signIn(person("reader", "reader@example.test", "Reader"))
+	if _, err := f.store.DB().Exec(`DROP TABLE nodes`); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call(http.MethodGet, "/api/v1/compute-limits", sessionAuth(member.SessionID), nil, nil); code != http.StatusOK {
+		t.Fatalf("team compute limits with unavailable fleet usage = %d, want 200", code)
+	}
+	if code := f.call(http.MethodGet, "/api/v1/compute-limits", "Bearer "+f.admin, nil, nil); code != http.StatusInternalServerError {
+		t.Fatalf("operator compute limits with unavailable fleet usage = %d, want 500", code)
+	}
+}
