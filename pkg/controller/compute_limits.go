@@ -116,24 +116,20 @@ func (s *Server) computeLimitsView(r *http.Request) (computeLimitsJSON, error) {
 }
 
 func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimits) (computeLimitsJSON, error) {
-	usage, err := s.store.ComputeUsage(r.Context())
-	if err != nil {
-		return computeLimitsJSON{}, err
-	}
 	out := computeLimitsJSON{
-		Limits: make(map[string]int64, len(store.ComputeLimitNames())),
-		Usage: computeUsageJSON{
-			ByPrincipal: usage.ByPrincipal,
-		},
+		Limits:  make(map[string]int64, len(store.ComputeLimitNames())),
 		Budgets: s.requestBudgetsView(),
 	}
 	// safety: global runner activity and per-principal counts reveal other
 	// teams' work, so only the operator reads them.
 	if isAdmin(r) {
+		usage, err := s.store.ComputeUsage(r.Context())
+		if err != nil {
+			return computeLimitsJSON{}, err
+		}
 		out.Usage.Runners = &usage.Runners
+		out.Usage.ByPrincipal = usage.ByPrincipal
 		out.Usage.AlarmReached = &usage.AlarmReached
-	} else {
-		out.Usage.ByPrincipal = nil
 	}
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)
