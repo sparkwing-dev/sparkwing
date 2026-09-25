@@ -16,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
@@ -235,24 +236,23 @@ func dispatchRun(args []string) error {
 	}
 	var fleetSnapshot *worktreeSnapshot
 	if flags.fleet {
-		configPath := os.Getenv(fleet.PathEnv)
-		if configPath == "" {
-			configPath, err = fleet.DefaultPath()
-			if err != nil {
-				return fmt.Errorf("--sw-fleet config: %w", err)
-			}
+		configPath, err := userconfig.Path()
+		if err != nil {
+			return fmt.Errorf("--sw-fleet config: %w", err)
 		}
 		fleetConfig, err := fleet.Load(configPath, fleet.LocalTailscaleIPs)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("--sw-fleet config %s does not exist; create it with `sparkwing fleet init --tailnet` or explicit --listen and --public-url", configPath)
+				return fmt.Errorf("--sw-fleet: %s has no fleet section; create it with `sparkwing fleet init --tailnet` or explicit --listen and --public-url", configPath)
 			}
 			return fmt.Errorf("--sw-fleet config %s: %w", configPath, err)
 		}
 		if len(fleetConfig.Executors) == 0 {
-			return fmt.Errorf("--sw-fleet has no enrolled helpers; %s lists no executors", configPath)
+			return fmt.Errorf("--sw-fleet has no enrolled helpers; the fleet section of %s lists no executors", configPath)
 		}
-		env = setEnv(env, fleet.PathEnv, configPath)
+		// safety: the orchestrator takes its fleet config path from this variable
+		// alone, so it reads the file validated here.
+		env = setEnv(env, userconfig.PathEnv, configPath)
 		if err := resolveSparks(context.Background(), dir, compileOptions{NoUpdate: flags.noUpdate}); err != nil {
 			return err
 		}
@@ -580,7 +580,7 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -680,7 +680,7 @@ func runJobs(args []string) error {
 		outputFormat := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
@@ -726,7 +726,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
@@ -778,7 +778,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outputFormat := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/config.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}

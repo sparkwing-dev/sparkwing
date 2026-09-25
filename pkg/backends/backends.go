@@ -59,7 +59,7 @@ type Spec struct {
 	// needs the token (secrets resolver, controller storeurl).
 	TokenEnv string `yaml:"token_env,omitempty"`
 
-	// Controller names a profile from profiles.yaml for type=controller
+	// Controller names a profile from config.yaml for type=controller
 	// backends. The orchestrator resolves the name to a controller URL
 	// and bearer token via the same profile-lookup callback used by
 	// profile secret sources.

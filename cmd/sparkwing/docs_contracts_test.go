@@ -312,9 +312,9 @@ func TestEnvVarWalkResolvesSameNamedConstantsPerPackage(t *testing.T) {
 	}
 	write("go.mod", "module fake\n\ngo 1.26\n")
 	write("internal/fleet/fleet.go", "package fleet\n\nimport \"os\"\n\n"+
-		"const PathEnv = \"SPARKWING_FLEET_CONFIG\"\n\nvar a = os.Getenv(PathEnv)\n")
+		"const PathEnv = \"SPARKWING_ALPHA_PATH\"\n\nvar a = os.Getenv(PathEnv)\n")
 	write("internal/repos/repos.go", "package repos\n\nimport \"os\"\n\n"+
-		"const PathEnv = \"SPARKWING_REPOS\"\n\nvar b = os.Getenv(PathEnv)\n")
+		"const PathEnv = \"SPARKWING_BETA_PATH\"\n\nvar b = os.Getenv(PathEnv)\n")
 	write("main.go", "package main\n\nimport (\n\t\"os\"\n\n\tf \"fake/internal/fleet\"\n"+
 		"\t\"fake/internal/repos\"\n\t\"example.com/outside\"\n)\n\n"+
 		"var c = os.Getenv(f.PathEnv)\n"+
@@ -327,7 +327,7 @@ func TestEnvVarWalkResolvesSameNamedConstantsPerPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "SPARKWING_FLEET_CONFIG,SPARKWING_REPOS"
+	want := "SPARKWING_ALPHA_PATH,SPARKWING_BETA_PATH"
 	if got := strings.Join(names, ","); got != want {
 		t.Errorf("envVarsRead found %q, want %q", got, want)
 	}

@@ -92,7 +92,7 @@ export SPARKWING_PG_URL="$(aws secretsmanager get-secret-value \
 Then add a Mode 3 profile that reads the DSN from that variable:
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   shared:
     state:

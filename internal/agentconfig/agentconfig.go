@@ -1,26 +1,25 @@
-// Package agentconfig owns agent.yaml: the file a remote machine's
-// sparkwing-runner reads its controller, credential and capacity ceilings
-// from. It sits below both the runner that executes against the file and the
-// CLI that writes one, so neither has to import the other.
+// Package agentconfig owns the agent section of config.yaml: the settings a
+// remote machine's sparkwing-runner reads its controller, credential and
+// capacity ceilings from. It sits below both the runner that executes against
+// the section and the CLI that writes one, so neither has to import the other.
 //
-// The file describes claim mode, the mode that executes work: the runner polls
-// the controller's claim route and runs what it is awarded. A file that still
-// carries the removed enrolled-mode keys fails to load with
+// The section describes claim mode, the mode that executes work: the runner
+// polls the controller's claim route and runs what it is awarded. A section
+// that still carries the removed enrolled-mode keys fails to load with
 // [EnrolledModeRemoved].
 package agentconfig
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
+	"os"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -56,48 +55,31 @@ type Config struct {
 // EnrolledModeRemoved is the whole message a configuration carrying the
 // removed enrolled-mode keys fails to load with.
 const EnrolledModeRemoved = "enrolled mode has been removed; " +
-	"delete name and coordinators from agent.yaml to run in claim mode, which executes work"
+	"delete name and coordinators from the agent section of config.yaml to run in claim mode, which executes work"
 
-// Load reads one agent.yaml. The file carries a credential, so it must be an
-// owner-only regular file; an unknown field or a second YAML document is an
-// error rather than something silently ignored.
+// Load reads the agent section of the config.yaml at path. The file carries a
+// credential, so it must be an owner-only regular file; an unknown field is an
+// error rather than something silently ignored. A file without the section
+// fails with an error that wraps [os.ErrNotExist].
 func Load(path string) (*Config, error) {
-	f, err := fssecure.OpenPrivateConfig(path)
+	// safety: the unknown-field error names the key without naming the mode it
+	// used to select, so the removed keys are answered before the ordinary parse.
+	section, err := userconfig.Node(path, userconfig.Agent)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	if selectsEnrolledMode(data) {
+	if carriesEnrolledKey(section, 0) {
 		return nil, fmt.Errorf("parse %s: %s", path, EnrolledModeRemoved)
 	}
 	var cfg Config
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	found, err := userconfig.Read(path, userconfig.Agent, &cfg)
+	if err != nil {
+		return nil, err
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple YAML documents are not allowed")
-		}
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	if !found {
+		return nil, fmt.Errorf("%s has no agent section; `sparkwing cluster runners add` writes one: %w", path, os.ErrNotExist)
 	}
 	return &cfg, nil
-}
-
-// safety: the unknown-field error names the key without naming the mode it
-// used to select, so the removed keys are answered before the ordinary parse.
-func selectsEnrolledMode(data []byte) bool {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
-		return false
-	}
-	return carriesEnrolledKey(doc.Content[0], 0)
 }
 
 // safety: a merge key hides the removed keys behind an alias and YAML admits a
@@ -140,11 +122,11 @@ func carriesEnrolledKey(node *yaml.Node, depth int) bool {
 func Validate(in Config) (Config, error) {
 	out := in
 	if out.Controller == "" {
-		return out, errors.New("agent.yaml: controller is required")
+		return out, errors.New("agent: controller is required")
 	}
 	allow, err := sourceurl.ParseRepoAllowlist(out.AllowRepos)
 	if err != nil {
-		return out, fmt.Errorf("agent.yaml: allow_repos: %w", err)
+		return out, fmt.Errorf("agent: allow_repos: %w", err)
 	}
 	if !allow.Empty() {
 		out.AllowRepos = allow.Patterns()
@@ -160,15 +142,15 @@ func Validate(in Config) (Config, error) {
 	switch out.SpawnPolicy {
 	case "return-to-queue":
 	case "run-local", "auto":
-		return out, fmt.Errorf("agent.yaml: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
+		return out, fmt.Errorf("agent: spawn_policy %q is not implemented yet (only return-to-queue is supported in v0)", out.SpawnPolicy)
 	default:
-		return out, fmt.Errorf("agent.yaml: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
+		return out, fmt.Errorf("agent: spawn_policy %q: expected return-to-queue | run-local | auto", out.SpawnPolicy)
 	}
 	if _, err := wingd.ParseBudget(out.LocalReserve); err != nil {
-		return out, fmt.Errorf("agent.yaml: local_reserve: %w", err)
+		return out, fmt.Errorf("agent: local_reserve: %w", err)
 	}
 	if _, err := wingd.ParseBudget(out.Contribution); err != nil {
-		return out, fmt.Errorf("agent.yaml: contribution: %w", err)
+		return out, fmt.Errorf("agent: contribution: %w", err)
 	}
 	if out.LocalAdmission == nil {
 		disabled := false
@@ -196,7 +178,7 @@ func Validate(in Config) (Config, error) {
 	return out, nil
 }
 
-// DefaultPath is the agent.yaml a runner reads when it is given no --config.
+// DefaultPath is the config.yaml a runner reads when it is given no --config.
 func DefaultPath() (string, error) {
-	return fssecure.ConfigFile("agent.yaml")
+	return userconfig.Path()
 }

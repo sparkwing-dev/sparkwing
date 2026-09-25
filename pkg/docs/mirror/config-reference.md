@@ -9,7 +9,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `defaults` | `Defaults` | no | Defaults carries the per-pipeline fields each pipeline inherits unless it declares its own. See Defaults for the per-field merge semantics. |
-| `profiles` | `map[string]*profile.Profile` | no | Profiles maps profile name to its surface bundle. The same shape as ~/.config/sparkwing/profiles.yaml's profiles map; project profiles get referenced from inside the project (pipeline.profile, defaults.profile), user profiles from the CLI (--profile). |
+| `profiles` | `map[string]*profile.Profile` | no | Profiles maps profile name to its surface bundle. The same shape as the profiles section of ~/.config/sparkwing/config.yaml; project profiles get referenced from inside the project (pipeline.profile, defaults.profile), user profiles from the CLI (--profile). |
 | `pipelines` | `[]pipelines.Pipeline` | no |  |
 | `sparks` | `[]sparks.Library` | no |  |
 
@@ -17,7 +17,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `profile` | `string` | no | Profile names the profile that applies when neither --profile nor pipeline.profile is set. The name resolves against Config.Profiles first and the user's profiles.yaml second, so a repo can default to a connection whose token stays out of the checkout. Empty means "no default" -- a pipeline without its own profile: still runs (against the sqlite-only test/dev shape). Wholesale-replaced by pipeline.profile when set. |
+| `profile` | `string` | no | Profile names the profile that applies when neither --profile nor pipeline.profile is set. The name resolves against Config.Profiles first and the user's config.yaml second, so a repo can default to a connection whose token stays out of the checkout. Empty means "no default" -- a pipeline without its own profile: still runs (against the sqlite-only test/dev shape). Wholesale-replaced by pipeline.profile when set. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values for every pipeline. Each key is layered under pipeline.args (pipeline wins per-key), and the merged map sits in the priority chain between schema.Computed and the explicit operator CLI flag. |
 | `guards` | `pipelines.Guards` | no | Guards apply to every pipeline. Wholesale-replaced by a pipeline that declares its own non-empty guards block. |
 | `requires` | `[]string` | no | Requires are runner labels every pipeline's jobs must satisfy in addition to their own Job.Requires(). Wholesale- replaced by pipeline.requires when set. |
@@ -33,7 +33,7 @@ Reference tables for selected `.sparkwing/sparkwing.yaml` structs, generated fro
 | `hidden` | `bool` | no | Hidden omits the entry from default `pipeline list` output; it stays invocable by exact name and shows under `list --all`. |
 | `guards` | `Guards` | no | Guards gate dispatch on the resolved profile, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches the checked-out head. The default token matches only when the dispatch supplies default-branch metadata. `arg:` tokens read the merged argument set the run executes with, so a value supplied by defaults.args or this entry's own args: block is guarded exactly like one typed on the command line. See pkg/pipelines/guards.go. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than schema Default and Computed; lower than an explicit operator CLI flag. Keyed by CLI flag name (kebab-case, matching what the SDK's WithArgs[T] field tags resolve to). |
-| `profile` | `string` | no | Profile names the project profile (from sparkwing.yaml's profiles map) this pipeline uses. Empty means "fall back to the project's defaults.profile selector". The CLI's --profile flag (which targets ~/.config/sparkwing/profiles.yaml) overrides this when present. |
+| `profile` | `string` | no | Profile names the project profile (from sparkwing.yaml's profiles map) this pipeline uses. Empty means "fall back to the project's defaults.profile selector". The CLI's --profile flag (which targets ~/.config/sparkwing/config.yaml) overrides this when present. |
 | `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" keeps fleet helpers from claiming the node; --sw-local-only instead selects local storage backends. |
 
 ## `guards`

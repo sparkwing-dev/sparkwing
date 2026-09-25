@@ -41,9 +41,7 @@ func main(){ f,err:=os.OpenFile(os.Getenv("SPARKWING_TEST_DESCRIBES"),os.O_CREAT
 		}
 		fmt.Fprintf(&registry, "  - path: %s\n", root)
 	}
-	registryPath := filepath.Join(t.TempDir(), "repos.yaml")
-	writeRepoFile(t, registryPath, registry.String())
-	t.Setenv("SPARKWING_REPOS", registryPath)
+	writeRegistry(t, filepath.Join(t.TempDir(), "config.yaml"), registry.String())
 	repos.InvalidateCache()
 	t.Cleanup(repos.InvalidateCache)
 	out := captureStdout(t, func() {

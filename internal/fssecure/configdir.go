@@ -42,7 +42,7 @@ var foreignConfigDirWarned sync.Map
 
 // EnsureConfigDir prepares a directory that holds sparkwing config files.
 // Inside [ConfigDir] it behaves like [EnsureDir]. An operator who points
-// SPARKWING_PROFILES or SPARKWING_REPOS somewhere else owns that directory's
+// SPARKWING_CONFIG somewhere else owns that directory's
 // mode: a missing one is still created private, but an existing group- or
 // other-reachable one keeps the mode it has and the divergence is reported on
 // stderr once per path.

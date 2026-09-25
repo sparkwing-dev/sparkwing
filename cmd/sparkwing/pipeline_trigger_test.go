@@ -159,25 +159,25 @@ func (s *triggerSpy) seedStats() (int, []string, []string) {
 
 func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
 		"  prod: { controller: { url: " + controllerURL + ", token: swu_test } }\n" +
 		"  laptop: { state: { type: sqlite } }\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	body := "profiles:\n" +
 		"  prod: { controller: { url: " + controllerURL + " }, logs: { type: controller } }\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestPipelineTrigger_MissingProfile(t *testing.T) {

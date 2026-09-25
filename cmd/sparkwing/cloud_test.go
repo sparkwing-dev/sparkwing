@@ -106,7 +106,7 @@ func TestCloudConnectMintsAUserTokenAndWritesTheProfile(t *testing.T) {
 		t.Errorf("the profile does not carry the minted token")
 	}
 	if saved.ControllerToken() == f.admin {
-		t.Error("the admin credential reached profiles.yaml")
+		t.Error("the admin credential reached config.yaml")
 	}
 	for _, want := range []string{"minted user token " + minted.Prefix, "connected profile", cloudDashboardURL, "controller", "auth"} {
 		if !strings.Contains(out, want) {

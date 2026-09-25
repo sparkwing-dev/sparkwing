@@ -10,9 +10,9 @@ import (
 )
 
 func TestAggregatedPipelinesReportsUnreadableRegistry(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "repos.yaml")
-	t.Setenv("SPARKWING_REPOS", path)
-	if err := os.WriteFile(path, []byte("repos: ["), 0o644); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("SPARKWING_CONFIG", path)
+	if err := os.WriteFile(path, []byte("repos:\n  repos: ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

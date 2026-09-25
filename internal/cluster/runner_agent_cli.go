@@ -19,12 +19,12 @@ func RunAgentCLI(args []string) error {
 
 func runAgentCLI(args []string) error {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	configPath := fs.String("config", "", "path to agent.yaml (default: ~/.config/sparkwing/agent.yaml)")
+	configPath := fs.String("config", "", "config.yaml whose agent section to run (default: ~/.config/sparkwing/config.yaml)")
 	var allowRepos multiFlag
 	fs.Var(&allowRepos, "allow-repo",
 		"repository this machine may build, as host/path with '*' matching within one path segment "+
-			"(repeatable, e.g. --allow-repo 'github.com/acme/*'; replaces agent.yaml's allow_repos). "+
-			"Without a gitcache in agent.yaml the agent then fetches each run's source directly, with the "+
+			"(repeatable, e.g. --allow-repo 'github.com/acme/*'; replaces the agent section's allow_repos). "+
+			"Without a gitcache in the agent section the agent then fetches each run's source directly, with the "+
 			"credential the controller releases or else this machine's own git credentials, instead of "+
 			"through the controller's gitcache proxy")
 	if err := fs.Parse(args); err != nil {
@@ -72,7 +72,6 @@ func runAgentCLI(args []string) error {
 	return RunPoolLoop(ctx, pool, logger)
 }
 
-// agentPoolConfig is the claim loop a validated agent.yaml runs.
 func agentPoolConfig(cfg agentconfig.Config) (PoolLoopConfig, error) {
 	allow, err := sourceurl.ParseRepoAllowlist(cfg.AllowRepos)
 	if err != nil {

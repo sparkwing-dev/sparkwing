@@ -130,7 +130,7 @@ func (e *directSourceE2E) sh(home, dir, stdin, command string) string {
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"SPARKWING_HOME="+filepath.Join(home, ".sparkwing"),
-		"SPARKWING_PROFILES="+filepath.Join(home, "profiles.yaml"),
+		"SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"),
 		"GIT_TERMINAL_PROMPT=0",
 	)
 	cmd.Stdin = strings.NewReader(stdin)

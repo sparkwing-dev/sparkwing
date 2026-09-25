@@ -327,7 +327,7 @@ helm install sparkwing ./charts/sparkwing-full -n sparkwing --create-namespace
 Then add a profile pointing at the controller's URL:
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   prod:
     controller:

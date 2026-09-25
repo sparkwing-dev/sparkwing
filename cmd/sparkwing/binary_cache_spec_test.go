@@ -37,7 +37,7 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "binaries-store")
 	seedArtifactStore(t, storeDir, pipelineDir, 23)
 
-	profiles := filepath.Join(t.TempDir(), "profiles.yaml")
+	profiles := filepath.Join(t.TempDir(), "config.yaml")
 	body := fmt.Sprintf(`profiles:
   isolated-binaries:
     secrets: { type: env }
@@ -52,7 +52,7 @@ func TestCompileAndExec_FetchesTheBinaryFromTheBinariesSubSpec(t *testing.T) {
 `, filepath.Join(t.TempDir(), "state.db"), filepath.Join(t.TempDir(), "logs"),
 		filepath.Join(t.TempDir(), "plain-cache"), storeDir)
 	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
-		t.Fatalf("write profiles.yaml: %v", err)
+		t.Fatalf("write config.yaml: %v", err)
 	}
 
 	code := runCompileChild(t, pipelineDir, profiles, "isolated-binaries")
@@ -73,7 +73,7 @@ func TestCompileAndExec_TheSubSpecOverridesTheCacheSurface(t *testing.T) {
 	storeDir := filepath.Join(t.TempDir(), "binaries-store")
 	seedArtifactStore(t, storeDir, pipelineDir, 23)
 
-	profiles := filepath.Join(t.TempDir(), "profiles.yaml")
+	profiles := filepath.Join(t.TempDir(), "config.yaml")
 	body := fmt.Sprintf(`profiles:
   plain-cache:
     secrets: { type: env }
@@ -86,7 +86,7 @@ func TestCompileAndExec_TheSubSpecOverridesTheCacheSurface(t *testing.T) {
 `, filepath.Join(t.TempDir(), "state.db"), filepath.Join(t.TempDir(), "logs"),
 		storeDir, filepath.Join(t.TempDir(), "empty-binaries"))
 	if err := os.WriteFile(profiles, []byte(body), 0o600); err != nil {
-		t.Fatalf("write profiles.yaml: %v", err)
+		t.Fatalf("write config.yaml: %v", err)
 	}
 
 	code := runCompileChild(t, pipelineDir, profiles, "plain-cache")
@@ -144,7 +144,7 @@ func runCompileChild(t *testing.T, pipelineDir, profiles, profileName string) in
 		"SPARKWING_TEST_BINARIES_CHILD=1",
 		"SPARKWING_TEST_BINARIES_COMPILE_DIR="+pipelineDir,
 		"SPARKWING_HOME="+filepath.Join(t.TempDir(), "home"),
-		"SPARKWING_PROFILES="+profiles,
+		"SPARKWING_CONFIG="+profiles,
 		"SPARKWING_PROFILE="+profileName,
 		"GOWORK=off",
 	)

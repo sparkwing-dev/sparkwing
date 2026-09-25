@@ -11,11 +11,11 @@ import (
 func writeProfilesFixture(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "profiles.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestResolveProfileFlag_NotFound(t *testing.T) {

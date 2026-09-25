@@ -27,7 +27,7 @@ func TestRunLocal_TriggerLoopFinishesBeforeTheStoreCloses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 2.6s of real work; the fast class runs under -short")
 	}
-	t.Setenv("SPARKWING_PROFILES", filepath.Join(t.TempDir(), "profiles.yaml"))
+	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("GITHUB_ACTIONS", "")

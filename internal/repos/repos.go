@@ -8,11 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/configguard"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
-	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 type Entry struct {
@@ -25,77 +21,48 @@ type Config struct {
 	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
 }
 
-// PathEnv names the repo registry, the way SPARKWING_HOME names the state root.
-const PathEnv = "SPARKWING_REPOS"
-
-// DefaultPath reports the repo registry: $SPARKWING_REPOS when set, else
-// repos.yaml in [fssecure.ConfigDir]. SPARKWING_HOME does not move it, because
-// a registered repo is a machine-wide fact that outlives any one home;
-// [configguard.ErrOutsideSandboxHome] is how a write says so.
+// DefaultPath reports the config.yaml the repo registry is read from and
+// written to; see [userconfig.Path].
 func DefaultPath() (string, error) {
-	if v := os.Getenv(PathEnv); v != "" {
-		return v, nil
-	}
-	if os.Getenv("XDG_CONFIG_HOME") == "" && paths.UnderTest() {
-		return filepath.Join(paths.TestSandbox(), "config", "sparkwing", "repos.yaml"), nil
-	}
-	return fssecure.ConfigFile("repos.yaml")
+	return userconfig.Path()
 }
 
+// Load reads the repos section of the config.yaml at path. An absent file or
+// section is an empty registry.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Config{}, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	if _, err := userconfig.Read(path, userconfig.Repos, &cfg); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
 
-// Save writes cfg to path. It refuses a path outside the sparkwing home in
-// use; see [configguard.GuardWrite].
+// Save replaces the repos section of the config.yaml at path with cfg,
+// keeping every other section; see [userconfig.Write].
 func Save(path string, cfg *Config) error {
-	if err := configguard.GuardWrite("the repo registry", PathEnv, path); err != nil {
+	return userconfig.Write(path, userconfig.Repos, "the repo registry", cfg)
+}
+
+// safety: the registry changes under the settings file's lock, so two
+// registrations racing each keep their entry.
+func update(change func(cfg *Config) (bool, error)) error {
+	path, err := DefaultPath()
+	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
-	if err := fssecure.EnsureConfigDir(dir); err != nil {
-		return fmt.Errorf("prepare %s: %w", dir, err)
+	var cfg Config
+	errUnchanged := errors.New("unchanged")
+	err = userconfig.Update(path, userconfig.Repos, "the repo registry", &cfg, func(bool) error {
+		changed, err := change(&cfg)
+		if err == nil && !changed {
+			return errUnchanged
+		}
+		return err
+	})
+	if errors.Is(err, errUnchanged) {
+		return nil
 	}
-	buf, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshal repos: %w", err)
-	}
-	f, err := os.CreateTemp(dir, ".repos-*.yaml")
-	if err != nil {
-		return fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if _, err := f.Write(buf); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := f.Chmod(0o644); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("chmod %s: %w", tmp, err)
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return fmt.Errorf("sync %s: %w", tmp, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename %s: %w", tmp, err)
-	}
-	return nil
+	return err
 }
 
 func AutoRegister(absPath string) error {
@@ -120,21 +87,15 @@ func AutoRegister(absPath string) error {
 		return nil
 	}
 
-	cfgPath, err := DefaultPath()
-	if err != nil {
-		return err
-	}
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		return err
-	}
-	for _, e := range cfg.Repos {
-		if pathsEqual(e.Path, abs) {
-			return nil
+	return update(func(cfg *Config) (bool, error) {
+		for _, e := range cfg.Repos {
+			if pathsEqual(e.Path, abs) {
+				return false, nil
+			}
 		}
-	}
-	cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
-	return Save(cfgPath, cfg)
+		cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
+		return true, nil
+	})
 }
 
 func Add(absPath string) error {
@@ -145,72 +106,56 @@ func Add(absPath string) error {
 	if _, err := repoKind(abs); err != nil {
 		return err
 	}
-	cfgPath, err := DefaultPath()
-	if err != nil {
-		return err
-	}
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		return err
-	}
-	for _, e := range cfg.Repos {
-		if pathsEqual(e.Path, abs) {
-			return nil
+	return update(func(cfg *Config) (bool, error) {
+		for _, e := range cfg.Repos {
+			if pathsEqual(e.Path, abs) {
+				return false, nil
+			}
 		}
-	}
-	cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
-	return Save(cfgPath, cfg)
+		cfg.Repos = append(cfg.Repos, &Entry{Path: abs})
+		return true, nil
+	})
 }
 
 func Remove(match string) (int, error) {
-	cfgPath, err := DefaultPath()
-	if err != nil {
-		return 0, err
-	}
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		return 0, err
-	}
 	matchAbs, _ := filepath.Abs(match)
-	keep := cfg.Repos[:0]
 	removed := 0
-	for _, e := range cfg.Repos {
-		if pathsEqual(e.Path, matchAbs) || filepath.Base(e.Path) == match {
-			removed++
-			continue
+	err := update(func(cfg *Config) (bool, error) {
+		keep := cfg.Repos[:0]
+		for _, e := range cfg.Repos {
+			if pathsEqual(e.Path, matchAbs) || filepath.Base(e.Path) == match {
+				removed++
+				continue
+			}
+			keep = append(keep, e)
 		}
-		keep = append(keep, e)
+		cfg.Repos = keep
+		return removed > 0, nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	if removed == 0 {
-		return 0, nil
-	}
-	cfg.Repos = keep
-	return removed, Save(cfgPath, cfg)
+	return removed, nil
 }
 
 func Prune() ([]string, error) {
-	cfgPath, err := DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := Load(cfgPath)
-	if err != nil {
-		return nil, err
-	}
 	var dropped []string
-	keep := cfg.Repos[:0]
-	for _, e := range cfg.Repos {
-		if !hasSparkwingDir(e.Path) {
-			dropped = append(dropped, e.Path)
-			continue
+	err := update(func(cfg *Config) (bool, error) {
+		keep := cfg.Repos[:0]
+		for _, e := range cfg.Repos {
+			if !hasSparkwingDir(e.Path) {
+				dropped = append(dropped, e.Path)
+				continue
+			}
+			keep = append(keep, e)
 		}
-		keep = append(keep, e)
+		cfg.Repos = keep
+		return len(dropped) > 0, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if len(dropped) == 0 {
-		return nil, nil
-	}
-	cfg.Repos = keep
-	return dropped, Save(cfgPath, cfg)
+	return dropped, nil
 }
 
 type ListEntry struct {

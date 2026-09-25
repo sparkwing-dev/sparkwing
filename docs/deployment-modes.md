@@ -22,7 +22,7 @@ not-supported on a bucket whatever it supports, and need Postgres or a
 controller. See [shared object storage](#shared-object-storage).
 
 The selection lives in the profile you run under -- each profile in
-`~/.config/sparkwing/profiles.yaml` carries a `state` / `cache` / `logs`
+`~/.config/sparkwing/config.yaml` carries a `state` / `cache` / `logs`
 triple (see [Storage backends](backends.md)) -- and applies uniformly to
 `sparkwing run`, `sparkwing-web`, and any cluster-side binaries.
 
@@ -136,7 +136,7 @@ can't reach the bucket surfaces the error, and the step recomputes on
 a later run rather than reading a half-written result.
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   shared:
     state:
@@ -210,7 +210,7 @@ infrastructure; not suitable for untrusted CI against shared infra
 (use a controller for that).
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   shared:
     state:
@@ -318,7 +318,7 @@ controller's state backend is pluggable. See
 for the single-box shape.
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   prod:
     controller:

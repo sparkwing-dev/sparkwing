@@ -38,9 +38,9 @@ teardown() {
 }
 trap teardown EXIT
 
-log "Reading profile $PROFILE from ~/.config/sparkwing/profiles.yaml"
-PROFILES_FILE="$HOME/.config/sparkwing/profiles.yaml"
-[ -f "$PROFILES_FILE" ] || fail "profiles file not found at $PROFILES_FILE"
+PROFILES_FILE="${SPARKWING_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing/config.yaml}"
+log "Reading profile $PROFILE from $PROFILES_FILE"
+[ -f "$PROFILES_FILE" ] || fail "config file not found at $PROFILES_FILE"
 
 read_profile_field() {
   local field="$1"

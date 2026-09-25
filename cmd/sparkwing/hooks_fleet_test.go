@@ -48,9 +48,7 @@ func (f *chainFixture) registerRepos(t *testing.T, dirs ...string) {
 	for _, d := range dirs {
 		fmt.Fprintf(&b, "  - path: %s\n", d)
 	}
-	path := filepath.Join(f.root, "repos.yaml")
-	writeRepoFile(t, path, b.String())
-	t.Setenv("SPARKWING_REPOS", path)
+	writeRegistry(t, filepath.Join(f.root, "config.yaml"), b.String())
 }
 
 func proverFailingIn(dir string) Prover {

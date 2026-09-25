@@ -13,11 +13,11 @@ import (
 
 func writeInnerProfiles(t *testing.T, body string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestFleetProfileRejectsRemoteAuthorityButLocalOnlyCanOverride(t *testing.T) {

@@ -32,7 +32,10 @@ func checkProfileConfigs(contentDir string) bool {
 			continue
 		}
 		checked++
-		var cfg profile.Config
+		var cfg struct {
+			Profiles map[string]*profile.Profile `yaml:"profiles"`
+			Sections map[string]yaml.Node        `yaml:",inline"`
+		}
 		dec := yaml.NewDecoder(strings.NewReader(b.body))
 		dec.KnownFields(true)
 		if perr := dec.Decode(&cfg); perr != nil {
@@ -41,15 +44,15 @@ func checkProfileConfigs(contentDir string) bool {
 		}
 	}
 
-	fmt.Printf("doccheck/profiles-config: %d profiles.yaml block(s) -- %d valid, %d INVALID\n",
+	fmt.Printf("doccheck/profiles-config: %d profiles block(s) -- %d valid, %d INVALID\n",
 		checked, checked-failed, failed)
 	if failed > 0 {
-		fmt.Printf("\n%d profiles.yaml example(s) the loader's types reject (key the loader ignores or a type mismatch):\n\n", failed)
+		fmt.Printf("\n%d profiles example(s) the loader's types reject (key the loader ignores or a type mismatch):\n\n", failed)
 		for _, f := range failures {
 			fmt.Println(f)
 		}
 		return false
 	}
-	fmt.Println("\nALL profiles.yaml DOC EXAMPLES PARSE")
+	fmt.Printf("\nALL profiles DOC EXAMPLES PARSE\n")
 	return true
 }

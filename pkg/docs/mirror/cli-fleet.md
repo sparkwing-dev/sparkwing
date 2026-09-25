@@ -9,7 +9,8 @@ Every `sparkwing fleet` command, flag, and argument, generated from the CLI's ow
 Configure foreground assisted execution
 
 Local fleet configuration. Running a pipeline with assistance uses
-sparkwing run PIPELINE --sw-fleet, and fleet.yaml names the helpers it trusts.
+sparkwing run PIPELINE --sw-fleet, and the fleet section of config.yaml names
+the helpers it trusts.
 
 Fleet runs transmit an immutable snapshot containing every tracked file and
 every non-ignored untracked file to the executor that wins a node. Review
@@ -26,7 +27,8 @@ history.
 
 Create an owner-only foreground fleet policy
 
-Creates fleet.yaml without replacing an existing policy. The listener is
+Writes the fleet section of config.yaml without replacing an existing
+policy or any other section. The listener is
 fixed for the life of each foreground run. HTTPS public URLs assume a local
 Tailscale Serve or reverse proxy and therefore require a literal loopback
 listener. Plain HTTP is accepted only at a literal IP that the local Tailscale
@@ -34,10 +36,10 @@ client confirms belongs to this machine. Tailscale supplies transport, not
 Sparkwing authorization: only explicitly enrolled helpers receive credentials,
 and no peer discovery occurs.
 
-SPARKWING_HOME does not move fleet.yaml; it is the state, cache and
+SPARKWING_HOME does not move config.yaml; it is the state, cache and
 logs root, and the fleet policy is machine-wide. A write from a
 command running under a home of its own is refused rather than sent
-to the machine's policy: set SPARKWING_FLEET_CONFIG to a path inside
+to the machine's policy: set SPARKWING_CONFIG to a path inside
 that home to keep it there.
 
 ### Flags

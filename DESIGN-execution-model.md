@@ -29,14 +29,14 @@ Four choices are load-bearing and shouldn't drift later.
 
 1. **A target names the logical environment a run acts on**, selected per run rather than baked into the pipeline's identity. A pipeline that has no concept of target (e.g. `lint`, `scaffold`) simply ignores it.
 2. **Runners are matched by labels.** "Local" and "remote" disappear as enum values. Named runners (templates for cluster-backed types, bindings for static machines, plus the implicit local one) advertise labels and carry their backing spec; jobs declare label requirements and preferences via three verbs: `Requires`, `Prefers`, `WhenRunner`.
-3. **Defaults are explicit per controller.** Each profile in `profiles.yaml` names its `default_runner`. The scheduler uses that default only when a job hasn't picked a preference and the resolved allow-set has multiple valid choices. Ambiguity without a default fails at validation, not silently.
+3. **Defaults are explicit per controller.** Each profile in `config.yaml` names its `default_runner`. The scheduler uses that default only when a job hasn't picked a preference and the resolved allow-set has multiple valid choices. Ambiguity without a default fails at validation, not silently.
 4. **Single-controller per run for v1.** A run uses one orchestrating controller; every runner it touches must be reachable from that controller. Cross-controller and peered dispatch are deferred.
 
 ## The axes
 
 | Axis | Question it answers | Declared in | Picked by |
 |---|---|---|---|
-| Orchestration host | Where does the run record live and who drives dispatch? | `profiles.yaml` | `--profile <name>` (default: configured default profile) |
+| Orchestration host | Where does the run record live and who drives dispatch? | `config.yaml` | `--profile <name>` (default: configured default profile) |
 | Runner | Which runner pool actually executes each job? | runner declarations + per-job `Requires`/`WhenRunner`/`Prefers` | resolution rule, per job |
 | Target | What logical environment does this run act on? | the pipeline's own args | `--target <name>` (default: the pipeline's arg default) |
 | Source (config + secrets) | Where do dynamic values come from? | the resolved profile's `secrets:` surface | resolved at run start |
@@ -74,7 +74,7 @@ The runner's name is itself an implicit label, so `Requires("cloud-gpu")` matche
 
 ```yaml
 # Runner declarations. Project config lives in .sparkwing/sparkwing.yaml
-# and per-user config in ~/.config/sparkwing/profiles.yaml; neither
+# and per-user config in ~/.config/sparkwing/config.yaml; neither
 # loader models a standalone `runners:` map (see the status banner).
 
 runners:
@@ -153,7 +153,7 @@ The static runner's label set is the contract. No separate machine-pinning API.
 Profiles describe controllers -- the orchestration hosts a CLI can dispatch to.
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 default: laptop
 profiles:
   laptop:
@@ -365,7 +365,7 @@ The fail-fast typed surface that *is* declared alongside the pipeline is `Secret
 `sparkwing.Secret(ctx, name)` and `sparkwing.Config(ctx, name)` resolve through a `SecretResolver` installed on ctx. The source is the resolved profile's `secrets:` surface, so selecting a profile selects the vault.
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   laptop:
     secrets: { type: filesystem, path: .sparkwing/secrets.local.env }
@@ -422,7 +422,7 @@ At run start the orchestrator resolves every required entry against the chosen s
 Cache (content-addressed artifacts including compiled pipeline binaries), logs (per-job log streams), and state (the run-record store) each have a pluggable backend. Where they live is a property of the selected profile -- CI wants s3, cluster mode wants the controller's hosted services, laptop wants the local filesystem.
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml (per-user)
+# ~/.config/sparkwing/config.yaml (per-user)
 # .sparkwing/sparkwing.yaml         (project, under `profiles:`)
 
 profiles:

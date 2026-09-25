@@ -43,7 +43,7 @@ jobs:
 ```
 
 State, cache, and logs destinations come from the resolved profile in
-`~/.config/sparkwing/profiles.yaml`. Select one with `--profile NAME`
+`~/.config/sparkwing/config.yaml`. Select one with `--profile NAME`
 (or set `defaults.profile` in `.sparkwing/sparkwing.yaml`); there is no
 environment-based auto-selection. See
 [storage backends](backends.md) for the configuration shape.
@@ -73,7 +73,7 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
 | `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. A hosted runner has far fewer cores than a workstation, so a value picked for local use over-subscribes it -- pick deliberately. |
-| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/profiles.yaml` (override the path with `SPARKWING_PROFILES`). Absent, the pipeline's own `profile:` field applies, then the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
+| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/config.yaml` (override the path with `SPARKWING_CONFIG`). Absent, the pipeline's own `profile:` field applies, then the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
 
 State, cache, and logs come from the resolved profile; see
 [storage backends](backends.md) for the configuration shape.
@@ -104,7 +104,7 @@ Repos without a `sparks:` block ignore this var -- it's a no-op.
 
 ## Profile-based config (laptop)
 
-`~/.config/sparkwing/profiles.yaml`:
+`~/.config/sparkwing/config.yaml`:
 
 ```yaml
 profiles:
@@ -219,7 +219,7 @@ State, cache, and logs come from the resolved profile. Declare a
 profile for the run and pass it with `--profile`:
 
 ```yaml
-# ~/.config/sparkwing/profiles.yaml
+# ~/.config/sparkwing/config.yaml
 profiles:
   buildkite:
     state: { type: s3, bucket: my-team-sparkwing, prefix: state/ }
@@ -243,7 +243,7 @@ release:
     - sparkwing run release-prod --sw-mode=ci-embedded --sw-workers=4
 ```
 
-Declare a `gitlab` profile in `~/.config/sparkwing/profiles.yaml` and
+Declare a `gitlab` profile in `~/.config/sparkwing/config.yaml` and
 select it with `--profile gitlab` (same shape as the Buildkite example
 above).
 

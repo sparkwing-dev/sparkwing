@@ -254,7 +254,7 @@ func (e *submitTestEnv) env() []string {
 	base := append(os.Environ(),
 		"SPARKWING_HOME="+e.home,
 
-		"SPARKWING_REPOS="+filepath.Join(e.home, "repos.yaml"),
+		"SPARKWING_CONFIG="+filepath.Join(e.home, "config.yaml"),
 		"SPARKWING_NO_UPDATE=1",
 		"SPARKWING_SUBMIT_TEST_MARKER="+e.marker,
 		"SPARKWING_SUBMIT_TEST_ENV_MARKER="+e.envMarker,

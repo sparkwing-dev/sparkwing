@@ -3,6 +3,7 @@ package profile_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -13,7 +14,7 @@ import (
 // operator named the file, and a test binary's home is the test sandbox.
 func savedAt(t *testing.T, path string) string {
 	t.Helper()
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 	return path
 }
 
@@ -50,7 +51,7 @@ func TestInheritControllerDefaults(t *testing.T) {
 }
 
 func TestSaveKeepsInheritedLogsURLDiscoverable(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
+	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 	if err := os.WriteFile(path, []byte("profiles:\n  prod:\n    controller: {url: https://ctrl.example}\n    logs: {type: controller}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +83,7 @@ func TestLoad_MissingFile(t *testing.T) {
 }
 
 func TestLoadSaveRoundTrip(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
+	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 	mirror := false
 	cfg := &profile.Config{
 		Profiles: map[string]*profile.Profile{
@@ -116,7 +117,7 @@ func TestLoadSaveRoundTrip(t *testing.T) {
 }
 
 func TestSave_0600Mode(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "profiles.yaml"))
+	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 	if err := profile.Save(path, &profile.Config{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestNames_Sorted(t *testing.T) {
 }
 
 func TestDefaultPath_RespectsEnv(t *testing.T) {
-	t.Setenv("SPARKWING_PROFILES", "/tmp/custom.yaml")
+	t.Setenv("SPARKWING_CONFIG", "/tmp/custom.yaml")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	got, err := profile.DefaultPath()
 	if err != nil || got != "/tmp/custom.yaml" {
@@ -154,11 +155,11 @@ func TestDefaultPath_RespectsEnv(t *testing.T) {
 }
 
 func TestDefaultPath_XDG(t *testing.T) {
-	t.Setenv("SPARKWING_PROFILES", "")
+	t.Setenv("SPARKWING_CONFIG", "")
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	got, err := profile.DefaultPath()
-	if err != nil || got != "/tmp/xdg/sparkwing/profiles.yaml" {
-		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/profiles.yaml", got, err)
+	if err != nil || got != "/tmp/xdg/sparkwing/config.yaml" {
+		t.Errorf("got (%q, %v), want /tmp/xdg/sparkwing/config.yaml", got, err)
 	}
 }
 
@@ -181,5 +182,29 @@ func TestSurfaces_NilSafe(t *testing.T) {
 	got := (*profile.Profile)(nil).Surfaces()
 	if got.State != nil || got.Cache != nil || got.Logs != nil {
 		t.Errorf("nil profile should yield zero Surfaces; got %+v", got)
+	}
+}
+
+func TestSaveRewritesOnlyTheProfilesSection(t *testing.T) {
+	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
+	before := "# this machine\nadmission:\n  budget: 50%,8gb # leave the desktop room\nprofiles:\n  old: {}\n"
+	if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &profile.Config{Profiles: map[string]*profile.Profile{"prod": {Controller: &profile.ControllerSpec{URL: "https://ctrl.example"}}}}
+	if err := profile.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# this machine", "budget: 50%,8gb # leave the desktop room", "prod:", "url: https://ctrl.example"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("config.yaml after Save lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(string(body), "old:") {
+		t.Errorf("Save kept a profile the new set dropped:\n%s", body)
 	}
 }

@@ -198,7 +198,7 @@ function FleetEmpty() {
       <p>
         Start a laptop agent:{" "}
         <code className="bg-[var(--background)] px-1 py-0.5 rounded font-mono">
-          sparkwing-runner agent --config agent.yaml
+          sparkwing-runner agent --config config.yaml
         </code>
         , or confirm the cluster pool is running:{" "}
         <code className="bg-[var(--background)] px-1 py-0.5 rounded font-mono">

@@ -46,8 +46,8 @@ Set up ~/.config/sparkwing/ and report laptop-level config status
 
 Idempotent setup + status command for laptop-level
 sparkwing config. Creates ~/.config/sparkwing/ if it doesn't exist,
-then reports which config files are present (profiles.yaml,
-repos.yaml, secrets.env), the running CLI + Go toolchain version,
+then reports which config files are present (config.yaml,
+secrets.env), the running CLI + Go toolchain version,
 and a curated list of next-step commands.
 
 Pairs with the per-project flow: use this one on a fresh laptop
@@ -88,15 +88,16 @@ sparkwing configure init --dry-run
 
 Manage connection profiles for remote controllers
 
-Profile config lives at $SPARKWING_PROFILES (if set), else
-$XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
-~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
+Profiles are the profiles section of config.yaml:
+$SPARKWING_CONFIG (if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml,
+else ~/.config/sparkwing/config.yaml. Permissions on save are 0600, and a
+save rewrites only the profiles section.
 
 SPARKWING_HOME does not move this file. It is the state, cache and
 logs root; profiles are machine-wide connections that outlive any
 one home. A write from a command running under a home of its own is
 refused rather than sent to the machine's profiles: set
-SPARKWING_PROFILES to a path inside that home to keep it there.
+SPARKWING_CONFIG to a path inside that home to keep it there.
 
 Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
@@ -117,18 +118,18 @@ exist on other commands; profiles are the only config surface.
 
 Register a new connection profile
 
-Creates a new entry in profiles.yaml. --name and --controller
+Creates a new entry in the profiles section of config.yaml. --name and --controller
 are required; the token is optional. --token-stdin reads the
 token from stdin and prompts without echo when stdin is a
 terminal; prefer it over --token, which is visible to other
 processes in the process list and recorded in shell history.
-Configure storage and service backends by editing profiles.yaml.
+Configure storage and service backends by editing config.yaml.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Profile name (unique per profiles.yaml) (required) |
+| `--name NAME` | Profile name (unique in config.yaml) (required) |
 | `--controller URL` | Controller base URL (required) |
 | `--token TOKEN` | Bearer token, visible to other processes and shell history (omit for local/unauthed stacks) |
 | `--token-stdin` | Read the bearer token from stdin, prompting without echo on a terminal |
@@ -195,7 +196,7 @@ sparkwing configure profiles list -o json
 
 Delete a profile
 
-Removes the named entry from profiles.yaml.
+Removes the named entry from the profiles section of config.yaml.
 
 ### Flags
 
@@ -307,13 +308,13 @@ annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
 disable).
 
-The registry lives at $SPARKWING_REPOS (if set), else
-$XDG_CONFIG_HOME/sparkwing/repos.yaml, else
-~/.config/sparkwing/repos.yaml. SPARKWING_HOME does not move it; it
+The registry is the repos section of config.yaml: $SPARKWING_CONFIG
+(if set), else $XDG_CONFIG_HOME/sparkwing/config.yaml, else
+~/.config/sparkwing/config.yaml. SPARKWING_HOME does not move it; it
 is the state, cache and logs root, and a registered checkout is a
 machine-wide fact that outlives any one home. A write from a command
 running under a home of its own is refused rather than sent to the
-machine's registry: set SPARKWING_REPOS to a path inside that home
+machine's registry: set SPARKWING_CONFIG to a path inside that home
 to keep it there.
 
 ### Subcommands

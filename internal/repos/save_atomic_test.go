@@ -9,18 +9,20 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 // safety: Save refuses a registry outside the sparkwing home unless the
 // operator named the file, and a test binary's home is the test sandbox.
 func savedAt(t *testing.T, path string) string {
 	t.Helper()
-	t.Setenv(PathEnv, path)
+	t.Setenv(userconfig.PathEnv, path)
 	return path
 }
 
 func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
-	path := savedAt(t, filepath.Join(t.TempDir(), "repos.yaml"))
+	path := savedAt(t, filepath.Join(t.TempDir(), "config.yaml"))
 	const writers = 24
 
 	var wg sync.WaitGroup
@@ -66,7 +68,7 @@ func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
 
 func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 	dir := t.TempDir()
-	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
+	path := savedAt(t, filepath.Join(dir, "config.yaml"))
 	for i := range 5 {
 		if err := Save(path, &Config{Repos: []*Entry{{Path: fmt.Sprintf("/r%d", i)}}}); err != nil {
 			t.Fatal(err)
@@ -77,7 +79,7 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() != "repos.yaml" {
+		if e.Name() != "config.yaml" && e.Name() != "config.yaml.lock" {
 			t.Errorf("staging file %q survived the save", e.Name())
 		}
 	}
@@ -85,7 +87,7 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 
 func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	dir := t.TempDir()
-	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
+	path := savedAt(t, filepath.Join(dir, "config.yaml"))
 	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)
@@ -134,7 +136,7 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 	}
 
 	dir := t.TempDir()
-	path := savedAt(t, filepath.Join(dir, "repos.yaml"))
+	path := savedAt(t, filepath.Join(dir, "config.yaml"))
 	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
 	if err := Save(path, good); err != nil {
 		t.Fatal(err)
@@ -173,7 +175,7 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() != "repos.yaml" && !strings.HasPrefix(e.Name(), ".repos-") {
+		if e.Name() != "config.yaml" && e.Name() != "config.yaml.lock" && !strings.HasPrefix(e.Name(), ".config-") {
 			t.Errorf("unexpected leftover %q", e.Name())
 		}
 	}
@@ -212,7 +214,7 @@ func waitForStagingFile(t *testing.T, dir string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		matches, err := filepath.Glob(filepath.Join(dir, ".repos-*.yaml"))
+		matches, err := filepath.Glob(filepath.Join(dir, ".config-*.yaml"))
 		if err != nil {
 			t.Fatalf("match staging file: %v", err)
 		}

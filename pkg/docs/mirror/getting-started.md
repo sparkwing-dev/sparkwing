@@ -354,7 +354,7 @@ sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
 It reads the token you were given on stdin, writes the profile into
-`~/.config/sparkwing/profiles.yaml`, and prints the dashboard URL the
+`~/.config/sparkwing/config.yaml`, and prints the dashboard URL the
 controller announces along with the same probes `sparkwing configure profiles
 test` runs. Nothing here asks you to edit YAML.
 
@@ -372,7 +372,7 @@ until it is revoked.
 Add `--set-default` inside a repository to write `defaults.profile` into its
 `.sparkwing/sparkwing.yaml`, so runs in that checkout select the connection
 with no flag. The name resolves against the project's own `profiles:` block
-first and `profiles.yaml` second, so the token stays out of the checkout.
+first and `config.yaml` second, so the token stays out of the checkout.
 
 ```bash
 sparkwing cloud status --profile prod        # principal, scopes, and probes

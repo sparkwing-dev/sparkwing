@@ -3,13 +3,11 @@ package fleet
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"net"
 	"net/netip"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,17 +15,10 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/sparkwing-dev/sparkwing/internal/configguard"
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
-
-const Filename = "fleet.yaml"
-
-// PathEnv names the fleet config, the way SPARKWING_HOME names the state root.
-// SPARKWING_HOME does not move the file.
-const PathEnv = "SPARKWING_FLEET_CONFIG"
 
 var executorNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
@@ -71,168 +62,36 @@ func (e *Executor) UnmarshalYAML(node *yaml.Node) error {
 	return node.Decode((*plain)(e))
 }
 
-func DefaultPath() (string, error) { return fssecure.ConfigFile(Filename) }
-
+// Load reads the fleet section of the config.yaml at path. A file without the
+// section fails with an error that wraps [os.ErrNotExist].
 func Load(path string, tailscaleIPs TailscaleIPs) (Config, error) {
-	f, err := openPrivate(path)
-	if err != nil {
-		return Config{}, err
-	}
-	defer func() { _ = f.Close() }()
-	return decode(f, path, tailscaleIPs)
-}
-
-// Create writes the first owner-only fleet config without replacing an
-// existing operator policy.
-func Create(path string, cfg Config, tailscaleIPs TailscaleIPs) error {
-	if err := cfg.validate(tailscaleIPs); err != nil {
-		return err
-	}
-	if err := configguard.GuardWrite("the fleet config", PathEnv, path); err != nil {
-		return err
-	}
-	if err := fssecure.EnsureConfigDir(filepath.Dir(path)); err != nil {
-		return err
-	}
-	unlock, err := lockConfig(path)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if _, err := os.Lstat(path); err == nil {
-		return fmt.Errorf("fleet config already exists: %s", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	body, err := yaml.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return replacePrivate(path, body)
-}
-
-func decode(r io.Reader, path string, tailscaleIPs TailscaleIPs) (Config, error) {
 	cfg := Config{Local: Local{MaxConcurrent: 1, Contribution: "50%,50%"}}
-	dec := yaml.NewDecoder(r)
-	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
-		return Config{}, fmt.Errorf("parse %s: %w", path, err)
+	found, err := userconfig.Read(path, userconfig.Fleet, &cfg)
+	if err != nil {
+		return Config{}, fmt.Errorf("read fleet config: %w", err)
 	}
-	var trailing any
-	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple YAML documents are not allowed")
-		}
-		return Config{}, fmt.Errorf("parse %s: %w", path, err)
+	if !found {
+		return Config{}, fmt.Errorf("%s has no fleet section: %w", path, os.ErrNotExist)
 	}
 	if err := cfg.validate(tailscaleIPs); err != nil {
-		return Config{}, fmt.Errorf("%s: %w", path, err)
+		return Config{}, fmt.Errorf("%s: fleet: %w", path, err)
 	}
 	return cfg, nil
 }
 
-func lockConfig(path string) (func(), error) {
-	lockPath := path + ".lock"
-	for range 5 {
-		info, err := os.Lstat(lockPath)
-		if errors.Is(err, os.ErrNotExist) {
-			f, createErr := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
-			if errors.Is(createErr, os.ErrExist) {
-				continue
-			}
-			if createErr != nil {
-				return nil, createErr
-			}
-			if err := securePrivateFile(lockPath); err != nil {
-				_ = f.Close()
-				return nil, err
-			}
-			locked, lockErr := flockTry(f)
-			if lockErr != nil || !locked {
-				_ = f.Close()
-				if lockErr != nil {
-					return nil, lockErr
-				}
-				return nil, errors.New("fleet config is busy")
-			}
-			return func() { _ = flockUnlock(f); _ = f.Close() }, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, errors.New("fleet config lock must be a regular file")
-		}
-		if err := verifyPrivateFile(lockPath, info); err != nil {
-			return nil, fmt.Errorf("fleet config lock is not owner-only: %w", err)
-		}
-		f, err := os.OpenFile(lockPath, os.O_RDWR, 0)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		opened, statErr := f.Stat()
-		if statErr != nil || !os.SameFile(info, opened) {
-			_ = f.Close()
-			if statErr != nil {
-				return nil, statErr
-			}
-			continue
-		}
-		locked, lockErr := flockTry(f)
-		if lockErr != nil || !locked {
-			_ = f.Close()
-			if lockErr != nil {
-				return nil, lockErr
-			}
-			return nil, errors.New("fleet config is busy")
-		}
-		return func() { _ = flockUnlock(f); _ = f.Close() }, nil
-	}
-	return nil, errors.New("fleet config lock kept changing")
-}
-
-func replacePrivate(path string, body []byte) (retErr error) {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".fleet-*.yaml")
-	if err != nil {
+// Create writes the fleet section of the config.yaml at path without replacing
+// an existing operator policy or any other section.
+func Create(path string, cfg Config, tailscaleIPs TailscaleIPs) error {
+	if err := cfg.validate(tailscaleIPs); err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		if retErr != nil {
-			_ = os.Remove(tmpPath)
+	var existing yaml.Node
+	return userconfig.Update(path, userconfig.Fleet, "the fleet config", &existing, func(found bool) error {
+		if found {
+			return fmt.Errorf("%s already has a fleet section", path)
 		}
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		return err
-	}
-	if err := securePrivateFile(tmpPath); err != nil {
-		return err
-	}
-	if _, err := tmp.Write(body); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	return nil
-}
-
-func openPrivate(path string) (*os.File, error) {
-	f, err := fssecure.OpenPrivateConfig(path)
-	if err != nil {
-		return nil, fmt.Errorf("read fleet config: %w", err)
-	}
-	return f, nil
+		return existing.Encode(cfg)
+	})
 }
 
 func (c *Config) validate(tailscaleIPs TailscaleIPs) error {
@@ -414,11 +273,4 @@ func (e Executor) Registration(principal string) store.Executor {
 		PriorityCeiling: e.PriorityCeiling, MaxConcurrent: e.MaxConcurrent,
 		Budget: e.Budget, Principal: principal,
 	}
-}
-
-func ResolvePath(path string) (string, error) {
-	if path != "" {
-		return filepath.Abs(path)
-	}
-	return DefaultPath()
 }

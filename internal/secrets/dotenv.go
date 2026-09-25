@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	// SecretsPathEnv names the masked local store, the way SPARKWING_PROFILES
-	// names profiles.yaml. SPARKWING_HOME does not move the file.
+	// SecretsPathEnv names the masked local store, the way SPARKWING_CONFIG
+	// names config.yaml. SPARKWING_HOME does not move the file.
 	SecretsPathEnv = "SPARKWING_SECRETS"
 
 	// ConfigPathEnv names the plain local store, the one `secret set --plain`

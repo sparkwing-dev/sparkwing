@@ -110,7 +110,7 @@ func TestRun_PriorityReachesThePipelineProgramUnresolved(t *testing.T) {
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_HOME="+home,
-		"SPARKWING_REPOS="+filepath.Join(home, "repos.yaml"),
+		"SPARKWING_CONFIG="+filepath.Join(home, "config.yaml"),
 		"SPARKWING_NO_UPDATE=1",
 	)
 	out, err := cmd.CombinedOutput()

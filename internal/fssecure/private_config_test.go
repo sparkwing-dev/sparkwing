@@ -9,7 +9,7 @@ import (
 
 func TestOpenPrivateConfigDetectsReplacementBetweenInspectionAndOpen(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agent.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	other := filepath.Join(dir, "replacement.yaml")
 	for _, candidate := range []string{path, other} {
 		if err := os.WriteFile(candidate, []byte("token: private\n"), FileMode); err != nil {
@@ -31,7 +31,7 @@ func TestOpenPrivateConfigDetectsReplacementBetweenInspectionAndOpen(t *testing.
 func TestOpenPrivateConfigRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.yaml")
-	link := filepath.Join(dir, "agent.yaml")
+	link := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(target, []byte("token: private\n"), FileMode); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestOpenPrivateConfigRejectsSymlink(t *testing.T) {
 
 func TestOpenPrivateConfigDetectsSameFileSymlinkSwap(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "agent.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	realPath := filepath.Join(dir, "original.yaml")
 	if err := os.WriteFile(path, []byte("token: private\n"), FileMode); err != nil {
 		t.Fatal(err)

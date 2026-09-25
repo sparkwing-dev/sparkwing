@@ -1,12 +1,10 @@
 package wingd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -32,10 +30,6 @@ type ResolvedBudget struct {
 
 func (r ResolvedBudget) IsSet() bool { return r.Source != "" && r.Source != BudgetSourceUnset }
 
-func BudgetConfigPath() (string, error) {
-	return fssecure.ConfigFile("budget")
-}
-
 func ResolveBudget(flagValue string) (ResolvedBudget, error) {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return parseBudgetFrom(v, BudgetSourceFlag, "--budget")
@@ -43,16 +37,12 @@ func ResolveBudget(flagValue string) (ResolvedBudget, error) {
 	if v := strings.TrimSpace(os.Getenv(BudgetEnv)); v != "" {
 		return parseBudgetFrom(v, BudgetSourceEnv, BudgetEnv)
 	}
-	path, err := BudgetConfigPath()
+	raw, path, err := readAdmissionSection()
 	if err != nil {
-		return ResolvedBudget{Source: BudgetSourceUnset}, nil
+		return ResolvedBudget{}, fmt.Errorf("machine budget: %w", err)
 	}
-	v, err := readBudgetFile(path)
-	if err != nil {
-		return ResolvedBudget{}, err
-	}
-	if v != "" {
-		return parseBudgetFrom(v, BudgetSourceConfig, path)
+	if v := strings.TrimSpace(raw.Budget); v != "" {
+		return parseBudgetFrom(v, BudgetSourceConfig, path+" admission.budget")
 	}
 	return ResolvedBudget{Source: BudgetSourceUnset}, nil
 }
@@ -77,27 +67,4 @@ func (c Config) resolvedBudget() ResolvedBudget {
 		src, origin = BudgetSourceUnknown, ""
 	}
 	return ResolvedBudget{Budget: c.Budget, Source: src, Origin: origin}
-}
-
-func readBudgetFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", fmt.Errorf("read machine budget %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		return line, nil
-	}
-	if err := sc.Err(); err != nil {
-		return "", fmt.Errorf("read machine budget %s: %w", path, err)
-	}
-	return "", nil
 }

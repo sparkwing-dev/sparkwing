@@ -10,7 +10,7 @@ Sparkwing follows semantic versioning with explicit scope: only certain parts of
 | Top-level `sparkwing/` package | Author SDK. Same promise as `pkg/...`. |
 | CLI flags (`sparkwing` and subcommands) | Public surface. Renames or removals follow the removal procedure below. |
 | Wire protocols (HTTP API request/response shapes, persisted JSON record shapes) | Treated as public API. JSON field renames or type changes are breaking. |
-| YAML config formats (`.sparkwing/sparkwing.yaml`, `~/.config/sparkwing/profiles.yaml`) | Public surface. Field renames or removals are breaking. |
+| YAML config formats (`.sparkwing/sparkwing.yaml`, `~/.config/sparkwing/config.yaml`) | Public surface. Field renames or removals are breaking. |
 
 ## What's NOT covered
 

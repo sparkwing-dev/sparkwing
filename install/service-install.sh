@@ -53,7 +53,7 @@ detect_platform() {
 
 Run the native Windows agent manually under your service manager:
 
-  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\agent.yaml
+  sparkwing-runner.exe agent --config %USERPROFILE%\\.config\\sparkwing\\config.yaml
 
 Or run this installer inside WSL when systemd user services are enabled." ;;
     *) err "unsupported platform: $(uname -s). Supported: Darwin (macOS), Linux." ;;
@@ -158,22 +158,57 @@ LOG_PATH="${SPARKWING_HOME}/runner.log"
 mkdir -p "$SPARKWING_HOME"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
-CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
+CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 mkdir -p "$CONFIG_DIR"
-# safety: create the file at mode 600 first so the token is never readable, however permissive the umask
-install -m 600 /dev/null "$CONFIG_PATH"
-cat > "$CONFIG_PATH" <<YAML
-controller: "${CONTROLLER_URL}"
-logs: "${LOGS_URL}"
-gitcache: "${GITCACHE_URL}"
-token: "${API_TOKEN}"
-max_concurrent: ${MAX_CONCURRENT}
-holder_prefix: "${RUNNER_NAME}"
-contribution: "${CONTRIBUTION}"
-local_admission: true
-local_reserve: "${LOCAL_RESERVE}"
+chmod 700 "$CONFIG_DIR"
+
+AGENT_SECTION="$(cat <<YAML
+agent:
+  controller: "${CONTROLLER_URL}"
+  logs: "${LOGS_URL}"
+  gitcache: "${GITCACHE_URL}"
+  token: "${API_TOKEN}"
+  max_concurrent: ${MAX_CONCURRENT}
+  holder_prefix: "${RUNNER_NAME}"
+  contribution: "${CONTRIBUTION}"
+  local_admission: true
+  local_reserve: "${LOCAL_RESERVE}"
 YAML
-log "wrote $CONFIG_PATH (mode 600)"
+)"
+
+# safety: config.yaml holds the machine's other sparkwing settings, so the agent section is appended as one more top-level key
+# and the file is replaced by rename, never truncated; the shapes an append cannot extend safely are refused instead.
+write_agent_section() {
+  if [ -f "$CONFIG_PATH" ]; then
+    if grep -q '^agent:' "$CONFIG_PATH"; then
+      err "$CONFIG_PATH already has an agent section. Remove it first, or run 'sparkwing cluster runners add --force', which replaces only that section."
+    fi
+    if grep -qE '^(---|\.\.\.|[{\[])' "$CONFIG_PATH"; then
+      err "$CONFIG_PATH is not a plain block mapping this installer can extend. Add the agent section with 'sparkwing cluster runners add', or by hand."
+    fi
+  fi
+  local tmp
+  tmp="$(mktemp "${CONFIG_DIR}/.config-XXXXXX")"
+  chmod 600 "$tmp"
+  if [ -s "$CONFIG_PATH" ]; then
+    cat "$CONFIG_PATH" >"$tmp"
+    [ -z "$(tail -c 1 "$CONFIG_PATH")" ] || printf '\n' >>"$tmp"
+  fi
+  printf '%s\n' "$AGENT_SECTION" >>"$tmp"
+  mv -f "$tmp" "$CONFIG_PATH"
+}
+
+# safety: sparkwing takes this same lock before it rewrites config.yaml, so neither loses the other's change
+if command -v flock >/dev/null 2>&1; then
+  [ -e "${CONFIG_PATH}.lock" ] || install -m 600 /dev/null "${CONFIG_PATH}.lock"
+  exec 9<"${CONFIG_PATH}.lock"
+  flock 9
+  write_agent_section
+  exec 9<&-
+else
+  write_agent_section
+fi
+log "wrote the agent section of $CONFIG_PATH (mode 600)"
 
 if [ "$PLATFORM" = "macos" ]; then
   TEMPLATE="${SCRIPT_DIR}/macos/com.sparkwing.runner.plist.template"

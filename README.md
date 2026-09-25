@@ -72,7 +72,7 @@ controller:
 sparkwing cloud connect --controller https://api.sparkwing.example --token-stdin
 ```
 
-It stores the token on stdin in `~/.config/sparkwing/profiles.yaml` and
+It stores the token on stdin in `~/.config/sparkwing/config.yaml` and
 prints the dashboard URL. An administrator mints those tokens with
 `--admin-token-stdin`. See
 [getting-started.md](docs/getting-started.md#sparkwing-cloud).

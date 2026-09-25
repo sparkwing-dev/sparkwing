@@ -10,7 +10,7 @@ import (
 )
 
 func TestOpenPrivateConfigRejectsGroupReadableFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("token: private\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestOpenPrivateConfigRejectsGroupReadableFile(t *testing.T) {
 func TestPrivateConfigOpenerDoesNotFollowSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.yaml")
-	link := filepath.Join(dir, "agent.yaml")
+	link := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(target, []byte("token: private\n"), FileMode); err != nil {
 		t.Fatal(err)
 	}

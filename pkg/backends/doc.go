@@ -2,7 +2,7 @@
 // persistence surfaces live -- cache (content-addressed artifacts and
 // compiled pipeline binaries), logs (per-job log streams), and state
 // (run records, plan snapshots, status). They are declared per profile
-// in ~/.config/sparkwing/profiles.yaml; there is no standalone
+// in ~/.config/sparkwing/config.yaml; there is no standalone
 // backends.yaml.
 //
 // # Selection at process start
@@ -16,7 +16,7 @@
 //
 // # Shape (yaml)
 //
-//	# ~/.config/sparkwing/profiles.yaml
+//	# ~/.config/sparkwing/config.yaml
 //	profiles:
 //	  laptop:
 //	    state: { type: sqlite,     path: ~/.cache/sparkwing/state.db }

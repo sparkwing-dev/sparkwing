@@ -11,8 +11,7 @@ import (
 func TestConfigureInitTightensAndReportsAnExistingConfigDirectory(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	t.Setenv("SPARKWING_PROFILES", "")
-	t.Setenv("SPARKWING_REPOS", "")
+	t.Setenv("SPARKWING_CONFIG", "")
 	dir := filepath.Join(xdg, "sparkwing")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
@@ -20,7 +19,7 @@ func TestConfigureInitTightensAndReportsAnExistingConfigDirectory(t *testing.T) 
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatalf("chmod %s: %v", dir, err)
 	}
-	profiles := filepath.Join(dir, "profiles.yaml")
+	profiles := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(profiles, []byte("profiles: {}\n"), 0o644); err != nil {
 		t.Fatalf("write %s: %v", profiles, err)
 	}
@@ -43,27 +42,26 @@ func TestConfigureInitTightensAndReportsAnExistingConfigDirectory(t *testing.T) 
 	}
 	found := false
 	for _, f := range info.ConfigFiles {
-		if f.Name != "profiles.yaml" {
+		if f.Name != "config.yaml" {
 			continue
 		}
 		found = true
 		if f.Mode != "0644" {
-			t.Errorf("profiles.yaml mode = %q, want 0644", f.Mode)
+			t.Errorf("config.yaml mode = %q, want 0644", f.Mode)
 		}
 		if !f.Exposed {
-			t.Error("profiles.yaml at 0644 was not flagged as group- or other-readable")
+			t.Error("config.yaml at 0644 was not flagged as group- or other-readable")
 		}
 	}
 	if !found {
-		t.Fatal("profiles.yaml missing from the survey")
+		t.Fatal("config.yaml missing from the survey")
 	}
 }
 
 func TestConfigureInitDryRunLeavesTheDirectoryAlone(t *testing.T) {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
-	t.Setenv("SPARKWING_PROFILES", "")
-	t.Setenv("SPARKWING_REPOS", "")
+	t.Setenv("SPARKWING_CONFIG", "")
 	dir := filepath.Join(xdg, "sparkwing")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)

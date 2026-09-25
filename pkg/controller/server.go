@@ -329,7 +329,7 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 
 // WithCachePodURL announces the externally-reachable sparkwing-cache
 // pod URL via GET /api/v1/services so the operator CLI can discover
-// it without configuring `gitcache:` in profiles.yaml. Empty disables
+// it without configuring `gitcache:` in config.yaml. Empty disables
 // the announcement (clients fall back to "no cache pod").
 func (s *Server) WithCachePodURL(url string) *Server {
 	s.cachePodURL = url

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func TestParseRunFlags_Only(t *testing.T) {
@@ -84,7 +85,7 @@ func TestParseRunFlags_FleetAndLocalOnlyCoexist(t *testing.T) {
 
 func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	t.Setenv(fleet.PathEnv, filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv(userconfig.PathEnv, filepath.Join(t.TempDir(), "missing.yaml"))
 	repo := t.TempDir()
 	if err := os.Mkdir(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
@@ -100,8 +101,8 @@ func TestDispatchFleetMissingConfigNamesSetupCommand(t *testing.T) {
 
 func TestDispatchFleetEmptyConfigNamesEnrollmentCommand(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	configPath := filepath.Join(t.TempDir(), "fleet.yaml")
-	t.Setenv(fleet.PathEnv, configPath)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv(userconfig.PathEnv, configPath)
 	if err := fleet.Create(configPath, fleet.Config{
 		Listen: "127.0.0.1:7443", PublicURL: "http://127.0.0.1:7443",
 		Local: fleet.Local{MaxConcurrent: 1, Contribution: "50%,50%"},

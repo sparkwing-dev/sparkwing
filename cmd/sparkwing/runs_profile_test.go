@@ -10,11 +10,11 @@ import (
 func setProfilesFixture(t *testing.T, body string) {
 	t.Helper()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	t.Setenv("SPARKWING_PROFILES", path)
+	t.Setenv("SPARKWING_CONFIG", path)
 }
 
 func TestRunsList_OnFlagRetired(t *testing.T) {

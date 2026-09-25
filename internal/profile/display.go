@@ -58,7 +58,7 @@ func (p *Profile) SurfaceStrings() (state, logs, cache string) {
 func DisplayDefaultPath() string {
 	path, err := DefaultPath()
 	if err != nil || path == "" {
-		return "profiles.yaml"
+		return "config.yaml"
 	}
 	if home, herr := os.UserHomeDir(); herr == nil && home != "" {
 		if rest, ok := strings.CutPrefix(path, home+"/"); ok {

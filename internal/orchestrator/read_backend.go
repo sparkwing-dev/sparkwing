@@ -25,7 +25,7 @@ func defaultProfile() (*profile.Profile, error) {
 	}
 	cfg, err := profile.Load(path)
 	if err != nil {
-		return nil, fmt.Errorf("profiles.yaml: %w", err)
+		return nil, fmt.Errorf("profiles: %w", err)
 	}
 	p, _, err := profile.Resolve("", cfg)
 	if err != nil {

@@ -34,7 +34,7 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 	stopHomeDaemon(t, home)
 	probe := t.TempDir()
 
-	profiles := filepath.Join(t.TempDir(), "profiles.yaml")
+	profiles := filepath.Join(t.TempDir(), "config.yaml")
 	writeMod(t, profiles, fmt.Sprintf(""+
 		"profiles:\n"+
 		"  modetwo:\n"+
@@ -48,7 +48,7 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		"SPARKWING_LOG_FORMAT=json",
 		"SPARKWING_LOG_LEVEL=debug",
 		"PROC_PROBE_DIR="+probe,
-		"SPARKWING_PROFILES="+profiles,
+		"SPARKWING_CONFIG="+profiles,
 		"SPARKWING_PROFILE=modetwo",
 		"SPARKWING_LOCAL_ONLY=",
 		"SPARKWING_S3_ENDPOINT="+endpoint,

@@ -62,7 +62,7 @@ func TestSecurePrivateDirRestrictsInheritedWindowsAccess(t *testing.T) {
 }
 
 func TestOpenPrivateConfigEnforcesProtectedWindowsDACL(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agent.yaml")
+	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("token: private\n"), FileMode); err != nil {
 		t.Fatal(err)
 	}

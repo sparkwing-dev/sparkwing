@@ -5,7 +5,7 @@
 
   Substitution variables filled in by the installer:
     __BINARY_PATH__   -- absolute path to sparkwing-runner
-    __CONFIG_PATH__   -- absolute path to agent.yaml (controller, token, etc.)
+    __CONFIG_PATH__   -- absolute path to config.yaml (its agent section holds controller, token, etc.)
     __HOME__          -- the user's home directory
     __LOG_PATH__      -- local path for stdout/stderr of the runner itself
 -->
