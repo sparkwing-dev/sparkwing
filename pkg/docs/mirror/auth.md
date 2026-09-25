@@ -50,11 +50,14 @@ the cheapest class's minimum inside the claim's transaction, the same way a
 node claim does, so claims racing for a balance that covers one minimum start
 one run; the rest answer `402` and their triggers stay pending. The
 claim does not say how large the pool is, so the step is billed at the
-cheapest class. When the claim ends, the step is billed for the wall time
-since the claim: a finish inside the minimum pays the minimum, one past it
-bills the rest, and a lapsed lease is billed through the lease's end
-rather than through the reap. A claim requeued before its run started is
-refunded whole. These ledger rows carry the run id and an empty node id.
+cheapest class. Each heartbeat charges whole seconds beyond the reserved
+minimum and renews the lease in the same transaction. If the balance cannot
+cover the elapsed time, the charge is recorded and the trigger and run fail;
+the heartbeat answers `409` and the runner stops. A ledger error also answers
+`409` without renewing the lease. Finish and lease expiry bill only the unpaid
+tail, through the lease's end when it lapsed before the reap. A claim
+requeued before its run started is refunded whole, including heartbeat
+charges. These ledger rows carry the run id and an empty node id.
 
 Billing runs from the moment the machine that executes a node starts work on
 it to the node's finish, so fetching the source and compiling the pipeline are

@@ -86,6 +86,37 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	}
 }
 
+func TestTriggerClaimHeartbeat_ConflictStopsChild(t *testing.T) {
+	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
+	ts, handler, _ := newTriggerHeartbeatServer(t)
+	handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "claim stopped", http.StatusConflict)
+	}))
+	var killed atomic.Bool
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got := triggerClaimHeartbeat(ctx, client.New(ts.URL, nil), "trig-x", func() { killed.Store(true) }, discardSlog())
+	if got != triggerClaimReaped || !killed.Load() {
+		t.Fatalf("conflict left child running: outcome=%v killed=%v", got, killed.Load())
+	}
+}
+
+func TestTriggerClaimHeartbeat_CancelRequestStopsChild(t *testing.T) {
+	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
+	ts, handler, _ := newTriggerHeartbeatServer(t)
+	handler.Store(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cancel_requested":true}`))
+	}))
+	var killed atomic.Bool
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got := triggerClaimHeartbeat(ctx, client.New(ts.URL, nil), "trig-x", func() { killed.Store(true) }, discardSlog())
+	if got != triggerClaimReaped || !killed.Load() {
+		t.Fatalf("cancel request left child running: outcome=%v killed=%v", got, killed.Load())
+	}
+}
+
 func TestTriggerClaimHeartbeat_Silenced(t *testing.T) {
 	withFastTriggerHeartbeat(t, 10*time.Millisecond, 20*time.Millisecond, 100*time.Millisecond)
 

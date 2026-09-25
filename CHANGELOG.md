@@ -914,6 +914,11 @@ unlock.
 
 ### Fixed
 
+- **controller + runner:** Metered trigger heartbeats now charge elapsed
+  coordinator time beyond the 20-second reservation. Exhausted credits close
+  the claim and fail the run; a ledger error refuses renewal. Runners stop on
+  the refusal, and finish or expiry bills only the unpaid tail.
+
 - **controller + store (Breaking):** A team's recent paid grants now raise only
   that team's concurrent runner cap. Refunds lower only the original team's
   cap, and `GET /api/v1/compute-limits` no longer exposes another team's paid

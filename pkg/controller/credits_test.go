@@ -277,6 +277,42 @@ func TestCredits_MeteredTriggerClaimRefusedOnAnEmptyBalance(t *testing.T) {
 	}
 }
 
+func TestCredits_TriggerHeartbeatLedgerFailureRefusesRenewal(t *testing.T) {
+	f := newCreditsFixture(t, true)
+	ctx := context.Background()
+	if _, err := f.store.GrantCredits(ctx, store.CreditGrantFree, 100*store.MicroCreditsPerCent, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := f.store.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: "run-ledger-stop", Pipeline: "build", Status: "pending", CreatedAt: now,
+	}, store.Run{ID: "run-ledger-stop", Pipeline: "build", Status: "pending", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	c := client.NewWithToken(f.url, nil, f.runner).WithTriggerNodeRunner("k8s")
+	claimed, err := c.ClaimTrigger(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim = %+v, %v", claimed, err)
+	}
+	if _, err := f.store.DB().Exec(`UPDATE triggers SET credit_reserved_at = ? WHERE id = ?`,
+		time.Now().Add(-25*time.Second).UnixNano(), claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.DB().Exec(`CREATE TRIGGER reject_trigger_usage BEFORE INSERT ON credit_charges
+		WHEN NEW.kind = 'usage' AND NEW.run_id = 'run-ledger-stop'
+		BEGIN SELECT RAISE(FAIL, 'ledger write failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: claimed.ClaimSeq})
+	if _, err := c.HeartbeatTrigger(fenced, claimed.ID); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("failed ledger heartbeat = %v, want the terminal 409 claim refusal", err)
+	}
+	got, err := f.store.GetTrigger(ctx, claimed.ID)
+	if err != nil || got.LeaseExpiresAt == nil || !got.LeaseExpiresAt.Equal(*claimed.LeaseExpiresAt) {
+		t.Fatalf("ledger failure renewed lease from %v to %+v, %v", claimed.LeaseExpiresAt, got, err)
+	}
+}
+
 // A metered pool that ran a claimed trigger's nodes in its own process would
 // run them outside any node claim, and so outside any credit charge. A
 // metered trigger claim must name a node runner that claims each node.

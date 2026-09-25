@@ -7485,51 +7485,76 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	return &t, nil
 }
 
-// HeartbeatTrigger extends the claim lease and returns whether cancel
-// was requested. ErrNotFound when not claimed.
+// HeartbeatTrigger charges a metered claim through the heartbeat before
+// extending its lease. It returns whether cancel was requested.
+// ErrNotFound when not claimed.
 func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Duration) (cancelled bool, err error) {
 	if lease <= 0 {
 		lease = DefaultLeaseDuration
 	}
-	expires := time.Now().Add(lease).UnixNano()
-
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := `UPDATE triggers
-		    SET lease_expires_at = ?
-		  WHERE id = ? AND status = ?`
-	args := []any{expires, id, triggerStatusClaimed}
-	_, fenced := TriggerClaimFenceFromContext(ctx)
-	if fence, ok := TriggerClaimFenceFromContext(ctx); ok {
-		query += ` AND claim_principal = ? AND claim_token_prefix = ?
-		             AND claim_seq = ? AND lease_expires_at > ?`
-		args = append(args, fence.Claimant.Principal, fence.Claimant.TokenPrefix,
-			fence.ClaimGeneration, time.Now().UnixNano())
-	}
-	res, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return false, err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if n == 0 {
-		if fenced {
+	var team, principal, tokenPrefix string
+	var reservedAt, claimSeq int64
+	var oldLease, cancelNS sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		`SELECT team, credit_reserved_at, lease_expires_at, cancel_requested_at,
+		        claim_principal, claim_token_prefix, claim_seq
+		   FROM triggers WHERE id = ? AND status = ?`+tx.forUpdate(),
+		id, triggerStatusClaimed).Scan(&team, &reservedAt, &oldLease, &cancelNS,
+		&principal, &tokenPrefix, &claimSeq)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, fenced := TriggerClaimFenceFromContext(ctx); fenced {
 			return false, ErrLockHeld
 		}
 		return false, ErrNotFound
 	}
-
-	var cancelNS sql.NullInt64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT cancel_requested_at FROM triggers WHERE id = ?`, id,
-	).Scan(&cancelNS); err != nil {
+	if err != nil {
+		return false, err
+	}
+	if fence, ok := TriggerClaimFenceFromContext(ctx); ok &&
+		(fence.Claimant.Principal != principal || fence.Claimant.TokenPrefix != tokenPrefix ||
+			fence.ClaimGeneration != claimSeq) {
+		return false, ErrLockHeld
+	}
+	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		if err := lockCreditLedgerTx(ctx, tx); err != nil {
+			return false, err
+		}
+	}
+	now := time.Now()
+	_, fenced := TriggerClaimFenceFromContext(ctx)
+	if (fenced || reservedAt != 0) && (!oldLease.Valid || oldLease.Int64 <= now.UnixNano()) {
+		return false, ErrLockHeld
+	}
+	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		if err := settleTriggerWindowTx(ctx, tx, Team(team), id, reservedAt, now.UnixNano(), false, false); err != nil {
+			if errors.Is(err, ErrInsufficientCredits) {
+				if _, stopErr := tx.ExecContext(ctx,
+					`UPDATE triggers SET status = ?, lease_expires_at = NULL, credit_reserved_at = 0,
+					        cancel_requested_at = COALESCE(cancel_requested_at, ?)
+					  WHERE id = ? AND team = ? AND status = ?`,
+					triggerStatusFailed, now.UnixNano(), id, team, triggerStatusClaimed); stopErr != nil {
+					return false, stopErr
+				}
+				if _, stopErr := tx.ExecContext(ctx, finishRunStmt,
+					runStatusFailed, "trigger credits exhausted", now.UnixNano(), id, team); stopErr != nil {
+					return false, stopErr
+				}
+				if commitErr := tx.Commit(); commitErr != nil {
+					return false, commitErr
+				}
+			}
+			return false, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = ?`,
+		now.Add(lease).UnixNano(), id, triggerStatusClaimed); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

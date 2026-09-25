@@ -1188,11 +1188,10 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, err)
 			return
 		}
-		if errors.Is(err, store.ErrLockHeld) {
-			writeError(w, http.StatusConflict, err)
-			return
+		if !errors.Is(err, store.ErrLockHeld) && !errors.Is(err, store.ErrInsufficientCredits) {
+			s.logger.Error("heartbeat trigger failed", "trigger_id", id, "err", err)
 		}
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
 		return
 	}
 	writeJSON(w, http.StatusOK, heartbeatResp{CancelRequested: cancelled})

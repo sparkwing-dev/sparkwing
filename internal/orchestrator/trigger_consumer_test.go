@@ -650,16 +650,32 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 }
 
 type transientHeartbeatStore struct {
-	calls int
-	seq   int64
+	calls    int
+	seq      int64
+	terminal error
 }
 
 func (s *transientHeartbeatStore) HeartbeatTrigger(context.Context, string, time.Duration) (bool, error) {
 	s.calls++
+	if s.terminal != nil {
+		return false, s.terminal
+	}
 	if s.calls == 1 {
 		return false, errors.New("database is locked")
 	}
 	return false, nil
+}
+
+func TestHeartbeat_StopsDispatchOnClaimRefusal(t *testing.T) {
+	for _, refusal := range []error{store.ErrLockHeld, store.ErrInsufficientCredits} {
+		st := &transientHeartbeatStore{terminal: refusal}
+		cancelRequested, keepGoing := heartbeatOnce(context.Background(), st, "run-stopped", 1,
+			time.Minute, time.Second, quietLogger())
+		if !cancelRequested || keepGoing || st.calls != 1 {
+			t.Fatalf("%v left dispatch running: cancel=%v keepGoing=%v calls=%d",
+				refusal, cancelRequested, keepGoing, st.calls)
+		}
+	}
 }
 
 func (s *transientHeartbeatStore) TriggerClaimGeneration(context.Context, string) (int64, error) {
@@ -705,12 +721,17 @@ func TestHeartbeat_StopsWhenTheClaimIsSuperseded(t *testing.T) {
 	if _, err := st.RequeueUnstartedClaim(ctx, "run-super"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ClaimNextTrigger(ctx, time.Minute); err != nil {
+	current, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	if _, keepGoing := heartbeatOnce(ctx, st, "run-super", stale.ClaimSeq, time.Minute, 50*time.Millisecond, quietLogger()); keepGoing {
 		t.Fatal("a superseded dispatch kept renewing a claim it no longer holds")
+	}
+	got, err := st.GetTrigger(ctx, "run-super")
+	if err != nil || !got.LeaseExpiresAt.Equal(*current.LeaseExpiresAt) {
+		t.Fatalf("stale heartbeat changed successor's lease from %v to %+v, %v", current.LeaseExpiresAt, got, err)
 	}
 }
 

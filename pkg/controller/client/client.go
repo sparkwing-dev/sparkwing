@@ -544,9 +544,9 @@ type HeartbeatStatus struct {
 	CancelRequested bool `json:"cancel_requested"`
 }
 
-// HeartbeatTrigger extends the claim lease on a trigger and returns
-// whether cancellation has been requested. ErrNotFound means the
-// trigger was reaped or never existed; the worker should abort.
+// HeartbeatTrigger charges a metered claim and extends its lease, returning
+// whether cancellation was requested. ErrNotFound or ErrLockHeld means the
+// claim is no longer live and the worker should abort.
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error) {
 	path := fmt.Sprintf("/api/v1/triggers/%s/heartbeat", url.PathEscape(id))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)

@@ -631,18 +631,23 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 			return triggerClaimCtxDone
 		case <-t.C:
 			hbCtx, cancel := context.WithTimeout(ctx, triggerHeartbeatTimeout)
-			_, err := cli.HeartbeatTrigger(hbCtx, triggerID)
+			status, err := cli.HeartbeatTrigger(hbCtx, triggerID)
 			cancel()
 			if err == nil {
+				if status != nil && status.CancelRequested {
+					logger.Warn("trigger loop: cancellation requested; killing child", "trigger_id", triggerID)
+					killChild()
+					return triggerClaimReaped
+				}
 				lastOK = time.Now()
 				continue
 			}
 			if errors.Is(err, context.Canceled) {
 				return triggerClaimCtxDone
 			}
-			if errors.Is(err, store.ErrNotFound) {
-				logger.Error("trigger loop: trigger reaped by controller; killing child",
-					"trigger_id", triggerID)
+			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+				logger.Error("trigger loop: trigger claim ended; killing child",
+					"trigger_id", triggerID, "err", err)
 				killChild()
 				return triggerClaimReaped
 			}

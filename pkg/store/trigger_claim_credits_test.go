@@ -141,6 +141,226 @@ func TestMeteredTriggerClaimReservesItsMinute(t *testing.T) {
 	}
 }
 
+func TestMeteredTriggerHeartbeatChargesOnlyItsTeamsUnpaidSeconds(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, st, "acme")
+	globex := teamHandle(t, st, "globex")
+	acmePool := meteredTeamClaimant(t, acme, "agent:acme-cloud")
+	globexPool := meteredTeamClaimant(t, globex, "agent:globex-cloud")
+	floor := triggerFloor(t, st, meteredClaimant(t, st, "agent:default-cloud"))
+	rate := floor / store.MinBillableSeconds
+	for _, tenant := range []*store.Tenant{acme, globex} {
+		if _, err := tenant.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+			t.Fatal(err)
+		}
+		id := "run-" + string(tenant.Team())
+		if err := tenant.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "build", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, claim := range []struct {
+		id   string
+		pool store.ClaimIdentity
+	}{
+		{"run-acme", acmePool}, {"run-globex", globexPool},
+	} {
+		if _, err := st.ClaimSpecificTriggerFor(ctx, claim.id, claim.pool, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	beforeGlobex, err := globex.CreditBalanceMicro(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-acme", time.Now().Add(-25*time.Second), time.Time{})
+	for range 2 {
+		if _, err := st.HeartbeatTrigger(ctx, "run-acme", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, err := acme.CreditBalanceMicro(ctx); err != nil || got != 2*floor-5*rate {
+		t.Fatalf("acme balance after repeated heartbeat = %d, %v; want %d", got, err, 2*floor-5*rate)
+	}
+	if got, err := globex.CreditBalanceMicro(ctx); err != nil || got != beforeGlobex {
+		t.Fatalf("globex balance after acme heartbeat = %d, %v; want %d", got, err, beforeGlobex)
+	}
+	backdateTriggerClaim(t, st, "run-acme", time.Now().Add(-27*time.Second), time.Time{})
+	if err := st.FinishTrigger(ctx, "run-acme"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := acme.CreditBalanceMicro(ctx); err != nil || got != 2*floor-7*rate {
+		t.Fatalf("acme balance after finish = %d, %v; want %d", got, err, 2*floor-7*rate)
+	}
+}
+
+func TestMeteredTriggerHeartbeatStopsAnEmptyBalance(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-empty")
+	if err := st.CreateRun(ctx, store.Run{ID: "run-empty", Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := st.ClaimSpecificTriggerFor(ctx, "run-empty", pool, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
+	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrInsufficientCredits) {
+		t.Fatalf("empty-balance heartbeat = %v, want ErrInsufficientCredits", err)
+	}
+	got, err := st.GetTrigger(ctx, claimed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" || got.LeaseExpiresAt != nil {
+		t.Fatalf("refused heartbeat left a live claim: status=%q lease=%v", got.Status, got.LeaseExpiresAt)
+	}
+	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("stopped claim renewed again: %v", err)
+	}
+	if got := balance(t, st); got != -5*(floor/store.MinBillableSeconds) {
+		t.Fatalf("balance after the refusal = %d, want the five elapsed seconds charged", got)
+	}
+	if run, err := st.GetRun(ctx, claimed.ID); err != nil || run.Status != "failed" {
+		t.Fatalf("refused heartbeat left run active: %+v, %v", run, err)
+	}
+}
+
+func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-ledger")
+	claimed, err := st.ClaimSpecificTriggerFor(ctx, "run-ledger", pool, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_trigger_usage BEFORE INSERT ON credit_charges
+		WHEN NEW.kind = 'usage' AND NEW.run_id = 'run-ledger'
+		BEGIN SELECT RAISE(FAIL, 'ledger write failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.HeartbeatTrigger(ctx, claimed.ID, 2*time.Minute); err == nil {
+		t.Fatal("heartbeat renewed despite a failed ledger insert")
+	}
+	got, err := st.GetTrigger(ctx, claimed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LeaseExpiresAt == nil || !got.LeaseExpiresAt.Equal(*claimed.LeaseExpiresAt) {
+		t.Fatalf("ledger failure changed lease from %v to %v", claimed.LeaseExpiresAt, got.LeaseExpiresAt)
+	}
+	if got := balance(t, st); got != floor {
+		t.Fatalf("ledger failure charged %d, want balance %d", got, floor)
+	}
+}
+
+func TestMeteredTriggerHeartbeatRejectsSupersededGeneration(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-old")
+	claimed, err := st.ClaimSpecificTriggerFor(ctx, "run-old", pool, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	if _, err := st.DB().Exec(storetest.Rebind(st,
+		`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`), claimed.ID); err != nil {
+		t.Fatal(err)
+	}
+	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
+	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("old generation heartbeat = %v, want ErrLockHeld", err)
+	}
+	if got := balance(t, st); got != floor {
+		t.Fatalf("old generation changed balance to %d, want %d", got, floor)
+	}
+}
+
+func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	rate := floor / store.MinBillableSeconds
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 3*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-reap-tail")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-reap-tail", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-25*time.Second), time.Time{})
+	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-28*time.Second), time.Now().Add(-100*time.Millisecond))
+	if _, err := store.Maintenance.ReapExpiredTriggers(st, ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := balance(t, st); got != 2*floor-7*rate {
+		t.Fatalf("reap balance = %d, want only two more seconds charged: %d", got, 2*floor-7*rate)
+	}
+	before := balance(t, st)
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-reap-tail", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-23*time.Second), time.Time{})
+	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got := balance(t, st); got != before-floor-3*rate {
+		t.Fatalf("new claim inherited old usage: balance = %d, want %d", got, before-floor-3*rate)
+	}
+}
+
+func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, st, "agent:cloud")
+	floor := triggerFloor(t, st, pool)
+	if _, err := st.GrantCredits(ctx, store.CreditGrantFree, 2*floor, "", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	pendingTrigger(t, st, "run-unstarted-paid")
+	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-unstarted-paid", pool, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	backdateTriggerClaim(t, st, "run-unstarted-paid", time.Now().Add(-25*time.Second), time.Time{})
+	if _, err := st.HeartbeatTrigger(ctx, "run-unstarted-paid", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := st.RequeueUnstartedClaim(ctx, "run-unstarted-paid"); err != nil || !ok {
+		t.Fatalf("requeue = %t, %v", ok, err)
+	}
+	if got := balance(t, st); got != 2*floor {
+		t.Fatalf("requeue refunded %d, want original %d", got, 2*floor)
+	}
+	if ok, err := st.RequeueUnstartedClaim(ctx, "run-unstarted-paid"); err != nil || ok {
+		t.Fatalf("second requeue = %t, %v", ok, err)
+	}
+	if got := balance(t, st); got != 2*floor {
+		t.Fatalf("second requeue moved balance to %d", got)
+	}
+}
+
 func TestDisabledMeteringDoesNotSettleAnEarlierTriggerReservation(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()

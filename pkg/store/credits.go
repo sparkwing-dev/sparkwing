@@ -1824,29 +1824,41 @@ func settleTriggerCreditsTx(ctx context.Context, tx *storeTx, triggerID string, 
 		settleNS = lease.Int64
 	}
 	settleNS = max(settleNS, reservedAt)
-	return settleTriggerWindowTx(ctx, tx, Team(team), triggerID, reservedAt, settleNS, refundAll)
+	return settleTriggerWindowTx(ctx, tx, Team(team), triggerID, reservedAt, settleNS, refundAll, true)
 }
 
 func settleTriggerWindowTx(
-	ctx context.Context, tx *storeTx, team Team, triggerID string, reservedAt, settleNS int64, refundAll bool,
+	ctx context.Context, tx *storeTx, team Team, triggerID string, reservedAt, settleNS int64, refundAll, final bool,
 ) error {
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return err
 	}
 	var tokenPrefix, principal string
-	var seconds, amount, class, rate int64
+	var seconds, amount, class, rate, chargedAt int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second
+		`SELECT token_prefix, principal, seconds, amount_micro, cpu_class, rate_micro_per_second, charged_at
 		  FROM credit_charges
 		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
 		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
 		string(team), triggerID, triggerCreditNodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &seconds, &amount, &class, &rate)
+		&tokenPrefix, &principal, &seconds, &amount, &class, &rate, &chargedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		if !final {
+			return errors.New("credits: active trigger has no reservation")
+		}
 	case err != nil:
 		return err
 	default:
+		var paidSeconds, paidAmount int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COALESCE(SUM(seconds), 0), COALESCE(SUM(amount_micro), 0)
+			   FROM credit_charges
+			  WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ? AND charged_at >= ?`,
+			string(team), triggerID, triggerCreditNodeID, CreditChargeUsage, chargedAt,
+		).Scan(&paidSeconds, &paidAmount); err != nil {
+			return err
+		}
 		w := chargeWindow{
 			Team: team, RunID: triggerID, NodeID: triggerCreditNodeID,
 			TokenPrefix: tokenPrefix, Principal: principal,
@@ -1855,23 +1867,48 @@ func settleTriggerWindowTx(
 		elapsed := (settleNS - reservedAt) / int64(time.Second)
 		switch {
 		case refundAll:
-			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -seconds, -amount)
-		case elapsed > seconds:
+			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -seconds-paidSeconds, -amount-paidAmount)
+		case elapsed > seconds+paidSeconds:
 			table, tableErr := creditRateTableTx(ctx, tx)
 			if tableErr != nil {
 				return tableErr
 			}
 			w.Rate = chargeRate(table, class)
-			over := elapsed - seconds
+			over := elapsed - seconds - paidSeconds
+			if over > (1<<63-1)/w.Rate {
+				return errors.New("credits: trigger window charge exceeds int64")
+			}
+			var exhausted error
+			if !final {
+				balance, balanceErr := creditBalanceTx(ctx, tx, team)
+				if balanceErr != nil {
+					return balanceErr
+				}
+				required := w.Rate * over
+				if freezeErr := refuseFrozenTeamTx(ctx, tx, team, balance, required, triggerID, ""); freezeErr != nil {
+					if !errors.Is(freezeErr, ErrInsufficientCredits) {
+						return freezeErr
+					}
+					exhausted = freezeErr
+				}
+				if balance < required && exhausted == nil {
+					exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
+				}
+			}
 			_, err = insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, over, w.Rate*over)
+			if err == nil && exhausted != nil {
+				return exhausted
+			}
 		}
 		if err != nil {
 			return err
 		}
 	}
-	_, err = tx.ExecContext(ctx,
-		`UPDATE triggers SET credit_reserved_at = 0 WHERE team = ? AND id = ?`,
-		string(team), triggerID)
+	if final {
+		_, err = tx.ExecContext(ctx,
+			`UPDATE triggers SET credit_reserved_at = 0 WHERE team = ? AND id = ?`,
+			string(team), triggerID)
+	}
 	return err
 }
 
