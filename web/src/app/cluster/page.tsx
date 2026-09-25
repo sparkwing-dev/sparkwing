@@ -150,31 +150,6 @@ function SectionHeader({ title, hint }: { title: string; hint: string }) {
   );
 }
 
-function Stat({
-  label,
-  value,
-  warn,
-}: {
-  label: string;
-  value: number;
-  warn?: boolean;
-}) {
-  return (
-    <div className="bg-[var(--background)] border border-[var(--border)] rounded px-3 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]">
-        {label}
-      </div>
-      <div
-        className={`text-lg font-mono mt-0.5 ${
-          warn ? "text-red-400" : "text-[var(--foreground)]"
-        }`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function FleetCards({
   totals,
 }: {
