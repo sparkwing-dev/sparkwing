@@ -22,6 +22,10 @@ unlock.
 
 ### Added
 
+- **charts:** Add an unprivileged service account for customer Kubernetes jobs
+  The runner bundle creates it without cloud role annotations, Kubernetes RBAC,
+  or an automatically mounted API token.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite
