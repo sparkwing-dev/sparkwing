@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.61.0] - 2026-09-26
 ### Added
 
 - **cli:** `run --sw-detached --sw-pipeline-ref <ref>` compiles the pipeline from
@@ -76,7 +77,7 @@ unlock.
   `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
   `secrets.pipeline` and keeps every stored value, so a row scoped to a
   repository slug survives the upgrade, answers no run, and is re-keyed to a
-  pipeline by an admin. See [migration guide](docs/migrations/_unreleased.md#secrets-are-scoped-to-pipelines).
+  pipeline by an admin. See [migration guide](docs/migrations/v0.61.0.md#secrets-are-scoped-to-pipelines).
 
 - **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
   `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
@@ -95,7 +96,7 @@ unlock.
   session carries its own matching token and that layer does not catch the
   swap. `SPARKWING_WEB_INSECURE_COOKIES=1` drops the prefix along with
   `Secure`, because a browser discards a `__Host-` cookie that is not `Secure`.
-  See [migration guide](docs/migrations/_unreleased.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
+  See [migration guide](docs/migrations/v0.61.0.md#dashboard-session-and-csrf-cookies-carry-the-__host--prefix).
   Summary: every signed-in browser signs in once more, and a custom browser
   client reads `__Host-sw_csrf` before `sw_csrf`.
 
@@ -187,7 +188,7 @@ unlock.
   operator connected to the pipeline of a run a signed webhook delivery
   created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
   `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
-  about pipelines. See [migration guide](docs/migrations/_unreleased.md#repository-metadata-grants-no-access).
+  about pipelines. See [migration guide](docs/migrations/v0.61.0.md#repository-metadata-grants-no-access).
 
 - **controller (Breaking):** `runs.control` separates operator actions from runner reports
   `runs.write` covered both starting work and acting on a run somebody else
@@ -196,7 +197,7 @@ unlock.
   and the cron writes now require `runs.control`. `runs.write` keeps trigger
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
-  See [migration guide](docs/migrations/_unreleased.md#operator-tokens-require-runscontrol).
+  See [migration guide](docs/migrations/v0.61.0.md#operator-tokens-require-runscontrol).
 
 ## [v0.60.0] - 2026-09-21
 ### Added
