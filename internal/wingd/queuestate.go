@@ -203,6 +203,10 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 		c := d.byRun[w.RequestID]
 		rowID := queueRowIdentity(w.RequestID, c)
 		rationale := d.costRationale(c)
+		blocking := w
+		if w.SoftCores && admission.SoftCoresFit(w.MilliCores, usedMilli, snap.TotalMilliCores, snap.HeadroomMilliCores) {
+			blocking.MilliCores = 0
+		}
 		waiter := wingwire.Waiter{
 			RunID:           rowID.runID,
 			ParticipantID:   rowID.participantID,
@@ -218,8 +222,8 @@ func (d *Daemon) buildQueueStateLocked() (wingwire.QueueState, admission.Snapsho
 			},
 			Burst:          w.BurstCores,
 			Semaphores:     claimKeys(w.Claims),
-			WaitingOn:      waitingOn(w, remaining),
-			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
+			WaitingOn:      waitingOn(blocking, remaining),
+			BlockingReason: hostBlockingReason(float64(blocking.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
 			CostRationale:  rationale,
 		}
 		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
@@ -646,7 +650,8 @@ func effectiveCapacity(ss admission.SemaphoreState) int {
 	return eff
 }
 
-func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale string) string {
+func (d *Daemon) hostBlockingReasonLocked(c *conn) string {
+	res := c.resources
 	if res.Cores <= 0 && res.MemoryBytes <= 0 {
 		return ""
 	}
@@ -676,7 +681,11 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: coresExternalSource(d.cpuMeasured, d.externalAttributed)},
 		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
-	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
+	if softCoreCostSource(wingwire.CostSource(c.costSource)) &&
+		admission.SoftCoresFit(int64(math.Round(res.Cores*1000)), usedMilli, snap.TotalMilliCores, snap.HeadroomMilliCores) {
+		res.Cores = 0
+	}
+	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, d.costRationale(c))
 }
 
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {

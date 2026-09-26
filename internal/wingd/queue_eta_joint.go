@@ -212,19 +212,7 @@ func (s *etaSimulation) resourcesIdle() bool {
 }
 
 func (s *etaSimulation) softCoresFit(cost, used int64) bool {
-	if cost == 0 {
-		return true
-	}
-	if used == 0 {
-		return cost <= s.capCores
-	}
-	if used >= s.totalCores || used > s.capCores {
-		return false
-	}
-	if cost <= s.capCores-used {
-		return true
-	}
-	return used <= s.capCores
+	return admission.SoftCoresFit(cost, used, s.totalCores, s.capCores)
 }
 
 func (s *etaSimulation) semaphoreBudget(key string, incomingCapacity uint64) (uint64, uint64) {

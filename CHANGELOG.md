@@ -103,6 +103,9 @@ unlock.
 
 ### Fixed
 
+- **daemon:** queue explanations use soft CPU admission rules for estimated
+  demands, so a semaphore or memory wait no longer reports a false core shortage.
+
 - **store:** schema compatibility errors distinguish unsupported requirements
   from conflicting version labels instead of recommending an installed release.
 

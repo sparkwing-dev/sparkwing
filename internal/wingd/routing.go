@@ -75,7 +75,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 					Key:            blockingSemaphoreKeyForRun(snap, ev.RequestID),
 					Position:       ev.Position + 1,
 					QueueLength:    d.waiterCountLocked(),
-					BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
+					BlockingReason: d.hostBlockingReasonLocked(c),
 				}})
 			}
 		case admission.EventBackfilled:
@@ -119,7 +119,7 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 			Key:            blockingSemaphoreKey(snap, waiter),
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
-			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
+			BlockingReason: d.hostBlockingReasonLocked(c),
 		}})
 	}
 	return out
@@ -136,7 +136,7 @@ func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapsh
 			Key:            blockingSemaphoreKey(snap, waiter),
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
-			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
+			BlockingReason: d.hostBlockingReasonLocked(c),
 		}}
 	}
 	return nil

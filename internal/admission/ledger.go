@@ -1038,24 +1038,29 @@ func (l *Ledger) resourcesIdle() bool {
 }
 
 func (l *Ledger) coresFitSoft(s spec) bool {
-	if s.milliCores == 0 {
+	return SoftCoresFit(s.milliCores, l.usedMilliCores, l.totalMilliCores, l.headroomMilliCores)
+}
+
+// SoftCoresFit applies CPU backpressure to a request measured in millicores.
+func SoftCoresFit(cost, used, total, headroom int64) bool {
+	if cost == 0 {
 		return true
 	}
-	if l.usedMilliCores == 0 {
-		effCores := min(l.totalMilliCores, l.headroomMilliCores)
-		return fitsCost(0, s.milliCores, effCores)
+	if used == 0 {
+		effCores := min(total, headroom)
+		return fitsCost(0, cost, effCores)
 	}
-	if l.usedMilliCores >= l.totalMilliCores {
+	if used >= total {
 		return false
 	}
-	effCores := min(l.totalMilliCores, l.headroomMilliCores)
-	if l.usedMilliCores > effCores {
+	effCores := min(total, headroom)
+	if used > effCores {
 		return false
 	}
-	if fitsCost(l.usedMilliCores, s.milliCores, effCores) {
+	if fitsCost(used, cost, effCores) {
 		return true
 	}
-	return l.usedMilliCores <= effCores
+	return used <= effCores
 }
 
 func (l *Ledger) semUsed(key string) int {

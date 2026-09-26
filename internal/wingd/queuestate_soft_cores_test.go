@@ -43,7 +43,7 @@ func TestQueueReasonUsesAdmissionCorePolicy(t *testing.T) {
 			if got := slices.Contains(waiter.WaitingOn, "cores"); got != tc.wantCores {
 				t.Errorf("waiting on %v, core blocker = %v, want %v", waiter.WaitingOn, got, tc.wantCores)
 			}
-			for _, reason := range []string{waiter.BlockingReason, d.hostBlockingReasonLocked(c.resources, d.costRationale(c))} {
+			for _, reason := range []string{waiter.BlockingReason, d.hostBlockingReasonLocked(c)} {
 				if got := strings.Contains(reason, "cores"); got != tc.wantCores {
 					t.Errorf("reason %q, core blocker = %v, want %v", reason, got, tc.wantCores)
 				}
