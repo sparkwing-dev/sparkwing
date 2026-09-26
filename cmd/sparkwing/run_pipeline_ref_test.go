@@ -29,6 +29,9 @@ func pipelineRefRepo(t *testing.T) string {
 		if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "sparkwing.yaml"), []byte("pipelines: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "which"), []byte(word), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -48,6 +51,16 @@ func TestPipelineRefResolutionDoesNotBuildTheCallerPipeline(t *testing.T) {
 	got, _, err := resolveSubmitRepo(t.Context(), "build", repo, "main")
 	if err != nil || got != repo {
 		t.Fatalf("resolve checkout without a buildable pipeline = %q, %v; want %q", got, err, repo)
+	}
+}
+
+func TestPipelineRefRequiresExecutionProjectConfiguration(t *testing.T) {
+	repo := pipelineRefRepo(t)
+	if err := os.Remove(filepath.Join(repo, ".sparkwing", "sparkwing.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveSubmitRepo(t.Context(), "build", repo, "main"); err == nil {
+		t.Fatal("submission accepted an execution checkout without project configuration")
 	}
 }
 
