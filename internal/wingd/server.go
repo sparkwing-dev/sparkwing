@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultChargeCores = 1.0
@@ -45,6 +46,8 @@ type Daemon struct {
 	finalizers  sync.WaitGroup
 
 	events eventWindow
+
+	queueStateReads singleflight.Group
 
 	mu                  sync.Mutex
 	persistMu           sync.Mutex
@@ -1458,9 +1461,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 }
 
 func (d *Daemon) handleQueueState(c *conn) {
-	d.mu.Lock()
-	qs := d.buildQueueStateLocked()
-	d.mu.Unlock()
+	qs := d.readQueueState()
 	_ = c.send(&qs)
 }
 

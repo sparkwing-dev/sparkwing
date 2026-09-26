@@ -24,9 +24,7 @@ func queueRow(t *testing.T, qs wingwire.QueueState, key string) wingwire.Resourc
 
 func queueState(t *testing.T, d *Daemon) wingwire.QueueState {
 	t.Helper()
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.buildQueueStateLocked()
+	return d.readQueueState()
 }
 
 func TestQueueState_ExternalIsTheReadingNotTheResidual(t *testing.T) {

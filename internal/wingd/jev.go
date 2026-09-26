@@ -135,9 +135,7 @@ func (d *Daemon) jevReservationBypass(req *wingwire.AdmissionRequest, resources 
 		time.Duration(req.ExpectedP99MS)*time.Millisecond > policy.Jev.maxBackfill() {
 		return false
 	}
-	d.mu.Lock()
-	queue := d.buildQueueStateLocked()
-	d.mu.Unlock()
+	queue := d.readQueueState()
 	if len(queue.Waiters) == 0 {
 		return false
 	}
