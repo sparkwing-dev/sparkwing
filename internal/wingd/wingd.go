@@ -230,6 +230,7 @@ type layout struct {
 	home    string
 	dir     string
 	lock    string
+	start   string
 	sock    string
 	apiSock string
 	state   string
@@ -250,6 +251,7 @@ func resolveLayout(home string) (layout, error) {
 		home:    home,
 		dir:     dir,
 		lock:    filepath.Join(dir, "d.lock"),
+		start:   filepath.Join(dir, "d.start.lock"),
 		sock:    sock,
 		apiSock: APISocketBeside(sock),
 		state:   filepath.Join(dir, "state.json"),

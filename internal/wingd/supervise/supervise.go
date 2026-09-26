@@ -17,9 +17,12 @@ import (
 )
 
 const (
-	defaultProbeInterval = 2 * time.Second
-	defaultProbeTimeout  = time.Second
-	defaultFailureLimit  = 3
+	defaultProbeInterval     = 2 * time.Second
+	defaultProbeTimeout      = time.Second
+	defaultFailureLimit      = 3
+	defaultStartupTimeout    = 30 * time.Second
+	defaultRestartBackoff    = time.Second
+	defaultMaxRestartBackoff = 30 * time.Second
 )
 
 // DefaultTermGrace is how long the supervisor lets a daemon it stopped exit
@@ -39,6 +42,12 @@ type Config struct {
 	ProbeTimeout  time.Duration
 	FailureLimit  int
 	TermGrace     time.Duration
+	// StartupTimeout bounds how long a child may go without answering its first probe.
+	StartupTimeout time.Duration
+	// RestartBackoff doubles on each replacement up to MaxRestartBackoff, and resets once a child has stayed
+	// healthy for MaxRestartBackoff.
+	RestartBackoff    time.Duration
+	MaxRestartBackoff time.Duration
 }
 
 type Deps struct {
@@ -60,6 +69,13 @@ func (c Config) validate() error {
 	if c.TermGrace <= 0 {
 		return fmt.Errorf("wingd supervisor: termination grace must be positive, got %s", c.TermGrace)
 	}
+	if c.StartupTimeout <= 0 {
+		return fmt.Errorf("wingd supervisor: startup timeout must be positive, got %s", c.StartupTimeout)
+	}
+	if c.RestartBackoff <= 0 || c.MaxRestartBackoff < c.RestartBackoff {
+		return fmt.Errorf("wingd supervisor: restart backoff must be positive and at most its maximum, got %s and %s",
+			c.RestartBackoff, c.MaxRestartBackoff)
+	}
 	return nil
 }
 
@@ -70,44 +86,89 @@ func Loop(ctx context.Context, cfg Config, deps Deps) error {
 	if deps.Start == nil || deps.Probe == nil {
 		return errors.New("wingd supervisor: start and probe dependencies are required")
 	}
+	var backoff time.Duration
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
 		child, err := deps.Start()
 		if err != nil {
 			return fmt.Errorf("wingd supervisor: start child: %w", err)
 		}
-		recoverChild, err := watchChild(ctx, child, cfg, deps)
+		recoverChild, resetBackoff, err := watchChild(ctx, child, cfg, deps)
 		if err != nil {
 			return err
 		}
 		if !recoverChild {
 			return nil
 		}
+		if resetBackoff {
+			backoff = 0
+		}
+		backoff = min(max(2*backoff, cfg.RestartBackoff), cfg.MaxRestartBackoff)
+		if deps.Logf != nil {
+			deps.Logf("starting a replacement daemon in %s", backoff)
+		}
+		if err := sleepContext(ctx, backoff); err != nil {
+			return nil
+		}
 	}
 }
 
-func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, error) {
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replace, resetBackoff bool, err error) {
 	ticker := time.NewTicker(cfg.ProbeInterval)
 	defer ticker.Stop()
+	started := time.Now()
+	var ready bool
+	var healthySince time.Time
 	failures := 0
 	for {
 
 		select {
 		case err := <-child.Wait():
-			return false, err
+			return false, false, err
 		default:
 		}
 		select {
 		case <-ctx.Done():
-			return false, stopChild(child, cfg.TermGrace)
+			return false, false, stopChild(child, cfg.TermGrace)
 		case err := <-child.Wait():
-			return false, err
+			return false, false, err
 		case <-ticker.C:
 			probeCtx, cancel := context.WithTimeout(ctx, cfg.ProbeTimeout)
 			err := deps.Probe(probeCtx)
 			cancel()
 			if err == nil {
+				ready = true
+				if healthySince.IsZero() {
+					healthySince = time.Now()
+				}
+				if time.Since(healthySince) >= cfg.MaxRestartBackoff {
+					resetBackoff = true
+				}
 				failures = 0
 				continue
+			}
+			healthySince = time.Time{}
+			if !ready {
+				if time.Since(started) < cfg.StartupTimeout {
+					continue
+				}
+				if deps.Logf != nil {
+					deps.Logf("daemon did not answer a probe within %s of starting; replacing it", cfg.StartupTimeout)
+				}
+				return true, false, stopChild(child, cfg.TermGrace)
 			}
 			failures++
 			if deps.Logf != nil {
@@ -120,9 +181,9 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 				deps.Logf("health probe failed %d times; replacing unresponsive daemon", failures)
 			}
 			if err := stopChild(child, cfg.TermGrace); err != nil {
-				return false, err
+				return false, false, err
 			}
-			return true, nil
+			return true, resetBackoff, nil
 		}
 	}
 }
@@ -240,10 +301,13 @@ func Run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return Loop(ctx, Config{
-		ProbeInterval: defaultProbeInterval,
-		ProbeTimeout:  defaultProbeTimeout,
-		FailureLimit:  defaultFailureLimit,
-		TermGrace:     DefaultTermGrace,
+		ProbeInterval:     defaultProbeInterval,
+		ProbeTimeout:      defaultProbeTimeout,
+		FailureLimit:      defaultFailureLimit,
+		TermGrace:         DefaultTermGrace,
+		StartupTimeout:    defaultStartupTimeout,
+		RestartBackoff:    defaultRestartBackoff,
+		MaxRestartBackoff: defaultMaxRestartBackoff,
 	}, Deps{
 		Start: func() (Child, error) {
 			return startExecChild(self, childArgs)

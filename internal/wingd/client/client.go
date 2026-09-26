@@ -386,6 +386,8 @@ func (cl *Client) connect(ctx context.Context) error {
 	var lastDial error
 	var predecessorDeadline time.Time
 	var socketDeadline time.Time
+	releaseStart := func() {}
+	defer func() { releaseStart() }()
 	for {
 		if err := ctx.Err(); err != nil {
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
@@ -397,9 +399,22 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			lastDial = derr
 			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
+				releaseStart()
+				releaseStart = func() {}
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
+				release, claimed, cerr := wingd.ClaimDaemonStart(opts.Home)
+				if cerr != nil {
+					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("claim daemon start: %w", cerr), lastDial)
+				}
+				if !claimed {
+					if err := dialWait.wait(ctx, derr); err != nil {
+						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
+					}
+					continue
+				}
+				releaseStart = release
 				preparation, lerr := wingd.PrepareDaemonSocket(opts.Home)
 				if lerr != nil && preparation != wingd.SocketPreparationCleanupFailed {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("check predecessor election: %w", lerr), lastDial)
@@ -444,6 +459,8 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			continue
 		}
+		releaseStart()
+		releaseStart = func() {}
 		cl.setConn(nc)
 		ack, herr := cl.handshake(opts.Version)
 		if herr != nil {
