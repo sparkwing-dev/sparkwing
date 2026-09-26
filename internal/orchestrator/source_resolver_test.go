@@ -6,7 +6,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -79,12 +78,9 @@ func TestRun_NoSecretsBackend_FallsBackToOptionsSecretSource(t *testing.T) {
 	}
 }
 
-func TestRun_LocalOnlyReplacesOptionsSecretSourceWithDotenv(t *testing.T) {
+func TestRun_LocalOnlyReplacesOptionsSecretSourceWithTheLocalStore(t *testing.T) {
 	p := newPaths(t)
-	seedLocalSecret(t, "", "TOKEN", "from-local-dotenv")
-	if value, _, err := secrets.NewDotenvSource("").Read("TOKEN"); err != nil || value != "from-local-dotenv" {
-		t.Fatalf("local dotenv precondition = %q, %v", value, err)
-	}
+	seedLocalSecret(t, p, "TOKEN", "from-local-store")
 
 	capturedEnvSecret = ""
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
@@ -98,7 +94,7 @@ func TestRun_LocalOnlyReplacesOptionsSecretSourceWithDotenv(t *testing.T) {
 	if res.Status != "success" {
 		t.Fatalf("status = %q (err=%v); want success", res.Status, res.Error)
 	}
-	if capturedEnvSecret != "from-local-dotenv" {
+	if capturedEnvSecret != "from-local-store" {
 		t.Errorf("step body saw Token = %q, want local dotenv", capturedEnvSecret)
 	}
 }

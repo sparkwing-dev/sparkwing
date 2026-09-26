@@ -152,7 +152,7 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 	})
 
 	masker := maskerForInvokeArgs(reg, invokeArgs)
-	src := secrets.NewDotenvSource("")
+	src := localSecretsFor(ctx, paths, backends, runID, run.Pipeline)
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
 	ctx = secrets.WithMasker(ctx, masker)
 

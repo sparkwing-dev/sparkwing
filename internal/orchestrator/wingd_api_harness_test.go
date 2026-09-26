@@ -50,7 +50,7 @@ func startAPIDaemonOn(t *testing.T, home string, runs *HeldRunStore, tune func(*
 // can fault one without the other.
 func startAPIDaemonSplit(t *testing.T, home string, runs, apiRuns *HeldRunStore, tune func(*wingd.Config), tuneAPI func(*wingdAPI)) (string, *HeldRunStore) {
 	t.Helper()
-	api := newWingdAPI(apiRuns, nil, nil)
+	api := newWingdAPI(apiRuns, nil, nil, testKeyring(t))
 	if tuneAPI != nil {
 		tuneAPI(api)
 	}

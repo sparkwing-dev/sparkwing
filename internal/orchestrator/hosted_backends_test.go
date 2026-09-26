@@ -720,12 +720,12 @@ func TestWingdAPI_ArtifactRouteFollowsTheConfiguredStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("artifact store: %v", err)
 	}
-	withStore := newWingdAPI(runs, art, nil)
+	withStore := newWingdAPI(runs, art, nil, testKeyring(t))
 	if got := probe(withStore, "/api/v1/artifacts/some-key"); got == http.StatusNotFound {
 		t.Fatal("a daemon that configured an artifact store reported its artifact route unsupported")
 	}
 
-	without := newWingdAPI(runs, nil, nil)
+	without := newWingdAPI(runs, nil, nil, testKeyring(t))
 	if got := probe(without, "/api/v1/artifacts/some-key"); got != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 from a daemon with no artifact store", got)
 	}

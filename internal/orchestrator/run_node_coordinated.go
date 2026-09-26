@@ -6,14 +6,17 @@ import (
 	"os"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -130,7 +133,7 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 	return ctx, nil
 }
 
-func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
+func coordinatedChildSurfaces(ctx context.Context, runID, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
 	projectCfg := bindProjectPipelines()
 	prof, _, err := resolveActiveProfile(loadPipelineYAML(pipeline), projectCfg)
 	if err != nil {
@@ -157,9 +160,25 @@ func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Sou
 		return nil, art, logs, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
 	}
 	if source == nil {
-		source = secrets.NewDotenvSource("")
+		source = coordinatedLocalSecrets(ctx, runID, pipeline)
 	}
 	return source, art, logs, nil
+}
+
+// safety: the dispatcher hands a node the daemon's socket only when the daemon
+// hosts the run; without one the node reads this machine's runs store itself,
+// and a machine that keeps none, such as a fleet worker, has no local secrets.
+func coordinatedLocalSecrets(ctx context.Context, runID, pipeline string) secrets.Source {
+	if sock := os.Getenv(wingwire.APISocketEnv); sock != "" {
+		return localsecrets.SocketSource(ctx, client.New(HostedAPIBaseURL, NewAPISocketClient(sock)), runID)
+	}
+	paths, err := DefaultPaths()
+	if err != nil {
+		return secrets.SourceFunc(func(string) (string, bool, error) {
+			return "", false, fmt.Errorf("local secrets: %w", err)
+		})
+	}
+	return localsecrets.StoreSource(paths.StateDB(), pipeline)
 }
 
 func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBackend, error) {

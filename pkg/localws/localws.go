@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -153,8 +154,15 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	var ctrl *controller.Server
 	if !useS3OnlyReader {
+		// safety: the environment keeps the key variables, because this
+		// process can start the admission daemon and runs, which need them.
+		ring, err := localsecrets.LoadKeyring(false)
+		if err != nil {
+			return fmt.Errorf("local secrets key: %w", err)
+		}
 		ctrl = controller.New(st, nil).
 			WithArtifactStore(opts.ArtifactStore).
+			WithSecretsCipher(ring.For(st)).
 			WithLocalExecution().
 			WithReconcileHook(func(rctx context.Context) error {
 				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)

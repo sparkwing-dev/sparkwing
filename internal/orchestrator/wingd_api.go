@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -36,6 +37,7 @@ type peerUIDKey struct{}
 type wingdAPI struct {
 	runs           *HeldRunStore
 	artifact       storage.ArtifactStore
+	secrets        *localsecrets.Keyring
 	logger         *slog.Logger
 	requestTimeout time.Duration
 
@@ -44,9 +46,10 @@ type wingdAPI struct {
 	// so the probe is a server with the same configuration and no store.
 	probe *controller.Server
 
-	mu      sync.Mutex
-	builtOn *store.Store
-	handler http.Handler
+	mu             sync.Mutex
+	builtOn        *store.Store
+	handler        http.Handler
+	secretsProblem string
 }
 
 // perf: a WAL reader does not wait out a foreign writer and the single
@@ -108,7 +111,12 @@ var apiStreamRoutes = []string{
 // so it reports on a home whose runs store does not exist.
 const APIHealthRoute = "GET /api/v1/health"
 
-var apiLocalRoutes = []string{APIHealthRoute}
+// APISecretsSealed is the health member a daemon sets when every secret its
+// controller API stores is sealed. A daemon without it predates local
+// encryption and would store a value as plaintext.
+const APISecretsSealed = "sealed"
+
+var apiLocalRoutes = []string{APIHealthRoute, APISecretsImportRoute}
 
 var (
 	apiStreamMux = routeSet(apiStreamRoutes)
@@ -124,13 +132,14 @@ func routeSet(routes []string) *http.ServeMux {
 	return mux
 }
 
-func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slog.Logger) *wingdAPI {
+func newWingdAPI(runs *HeldRunStore, artifact storage.ArtifactStore, logger *slog.Logger, ring *localsecrets.Keyring) *wingdAPI {
 	if logger == nil {
 		logger = loopbackLogger()
 	}
 	return &wingdAPI{
 		runs:           runs,
 		artifact:       artifact,
+		secrets:        ring,
 		logger:         logger,
 		requestTimeout: APIRequestTimeout,
 		probe:          controller.New(nil, logger).WithArtifactStore(artifact),
@@ -187,7 +196,11 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel = context.WithTimeout(ctx, a.requestTimeout)
 		defer cancel()
 	}
-	if localRoute(r) {
+	if pattern := localRoute(r); pattern != "" {
+		if pattern == APISecretsImportRoute {
+			a.importLegacySecrets(w, r.WithContext(ctx))
+			return
+		}
 		a.health(w, r.WithContext(ctx))
 		return
 	}
@@ -204,7 +217,7 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		writeAPIUnavailable(w, err)
 		return
 	}
-	a.handlerFor(rw, ro).ServeHTTP(w, r.WithContext(ctx))
+	a.handlerFor(ctx, rw, ro).ServeHTTP(w, r.WithContext(ctx))
 }
 
 // safety: the daemon answers this itself because a controller needs a store
@@ -212,18 +225,21 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 // that state rather than create the file or read as broken.
 func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	_, ro, err := a.runs.Handles(ctx)
+	rw, ro, err := a.runs.Handles(ctx)
 	switch {
 	case errors.Is(err, errRunStoreAbsent):
-		writeAPIHealth(w, http.StatusOK, "ok", "absent", "")
+		writeAPIHealth(w, http.StatusOK, "ok", "absent", "", "")
 	case err != nil:
-		writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", storeHealthState(err), "store: "+err.Error())
+		writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", storeHealthState(err), "store: "+err.Error(), "")
 	default:
 		if _, listErr := ro.ListRuns(ctx, store.RunFilter{Limit: 1}); listErr != nil {
-			writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+listErr.Error(), "db: "+listErr.Error())
+			writeAPIHealth(w, http.StatusServiceUnavailable, "degraded", "error: "+listErr.Error(), "db: "+listErr.Error(), "")
 			return
 		}
-		writeAPIHealth(w, http.StatusOK, "ok", "ready", "")
+		// safety: a caller about to store a secret asks here first, so the
+		// store's secrets are brought under the key before it is answered.
+		a.handlerFor(ctx, rw, ro)
+		writeAPIHealth(w, http.StatusOK, "ok", "ready", "", a.secretsFault())
 	}
 }
 
@@ -238,10 +254,13 @@ func storeHealthState(err error) string {
 	return "error: " + err.Error()
 }
 
-func writeAPIHealth(w http.ResponseWriter, status int, state, storeState, problem string) {
+func writeAPIHealth(w http.ResponseWriter, status int, state, storeState, problem, secretsProblem string) {
 	// safety: this server always installs an authenticator, so the auth member
 	// a controller derives from its own configuration is constant here.
-	body := map[string]any{"status": state, "auth": "enabled", "store": storeState}
+	body := map[string]any{"status": state, "auth": "enabled", "store": storeState, "secrets": APISecretsSealed}
+	if secretsProblem != "" {
+		body["secrets_problem"] = secretsProblem
+	}
 	if problem != "" {
 		body["problems"] = []string{problem}
 	}
@@ -265,9 +284,9 @@ func streamingRoute(r *http.Request) bool {
 	return pattern != ""
 }
 
-func localRoute(r *http.Request) bool {
+func localRoute(r *http.Request) string {
 	_, pattern := apiLocalMux.Handler(r)
-	return pattern != ""
+	return pattern
 }
 
 func writeAPIUnavailable(w http.ResponseWriter, err error) {
@@ -286,30 +305,63 @@ func writeAPIUnavailable(w http.ResponseWriter, err error) {
 
 // safety: the held store opens lazily and is reopened when the file under it
 // is replaced, so the router is rebuilt whenever the handle changes rather
-// than pinned to the one the first request happened to find.
-func (a *wingdAPI) handlerFor(rw, ro *store.Store) http.Handler {
+// than pinned to the one the first request happened to find. Each build
+// brings that store's secrets under the key before any route reads one.
+func (a *wingdAPI) handlerFor(ctx context.Context, rw, ro *store.Store) http.Handler {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.builtOn == rw && a.handler != nil {
 		return a.handler
 	}
 	a.builtOn = rw
-	a.handler = a.split(rw, ro)
+	a.handler = a.split(rw, ro, a.prepareSecrets(ctx, rw))
 	return a.handler
 }
 
-func (a *wingdAPI) split(rw, ro *store.Store) http.Handler {
+// safety: a store whose sealed values this daemon cannot open must not gain
+// values sealed under a second key, so its secret routes answer with the
+// reason instead; every other route keeps serving, because runs do not wait
+// on a secrets key.
+func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controller.Cipher {
+	a.secretsProblem = ""
+	cipher := a.secrets.For(rw)
+	if err := a.secrets.MissingKey(ctx, rw); err != nil {
+		return a.refuseSecrets(err)
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIRequestTimeout)
+	defer cancel()
+	a.importLegacyOnOpen(ctx, rw, cipher)
+	srv := controller.New(rw, a.logger).WithSecretsCipher(cipher)
+	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
+		return a.refuseSecrets(err)
+	}
+	return cipher
+}
+
+func (a *wingdAPI) refuseSecrets(err error) controller.Cipher {
+	a.logger.Error("local secrets unavailable", "err", err)
+	a.secretsProblem = err.Error()
+	return refusingCipher{err: err}
+}
+
+func (a *wingdAPI) secretsFault() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.secretsProblem
+}
+
+func (a *wingdAPI) split(rw, ro *store.Store, cipher controller.Cipher) http.Handler {
 	// safety: one authenticator for both servers, because each holds its own
 	// token cache and revocation generation, so a second one would keep
 	// serving a token the first revoked. It keeps the writing handle because
 	// a bearer token's own bookkeeping is a write.
 	auth := controller.NewAuthenticator(rw, apiAuthCacheTTL).WithLogger(a.logger)
 	mux := http.NewServeMux()
-	mux.Handle("/", a.controllerOn(rw, auth))
+	mux.Handle("/", a.controllerOn(rw, auth, cipher))
 	if ro == nil {
 		return mux
 	}
-	read := a.controllerOn(ro, auth)
+	read := a.controllerOn(ro, auth, cipher)
 	for _, route := range apiReadRoutes {
 		mux.Handle(route, read)
 	}
@@ -319,9 +371,10 @@ func (a *wingdAPI) split(rw, ro *store.Store) http.Handler {
 // safety: never give this server a reconcile hook. The two busiest read
 // routes run one before answering, it writes, and the controller discards its
 // error, so on the read-only handle it would fail silently.
-func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator) http.Handler {
+func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator, cipher controller.Cipher) http.Handler {
 	return controller.New(st, a.logger).
 		WithArtifactStore(a.artifact).
+		WithSecretsCipher(cipher).
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).
 		WithLocalExecution().
@@ -343,4 +396,16 @@ func peerPrincipal(r *http.Request) *controller.Principal {
 		Scopes: []string{controller.ScopeAdmin},
 		Authed: time.Now().UTC(),
 	}
+}
+
+type refusingCipher struct{ err error }
+
+func (c refusingCipher) Seal(string) (string, error) { return "", c.err }
+func (c refusingCipher) Open(string) (string, error) { return "", c.err }
+func (c refusingCipher) SealBound(string, string, string, bool, bool, string) (string, error) {
+	return "", c.err
+}
+
+func (c refusingCipher) OpenBound(string, string, string, bool, bool, string) (string, error) {
+	return "", c.err
 }
