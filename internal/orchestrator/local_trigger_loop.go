@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
@@ -175,7 +176,19 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		return err
 	}
 	defer cleanup()
-	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
+	pipelineRepo := repoDir
+	if revision := strings.TrimSpace(trig.TriggerEnv[PipelineRevKey]); trig.RetryOf != "" && revision != "" {
+		var cleanupPipeline func()
+		pipelineRepo, cleanupPipeline, err = snapshotRetryRevision(ctx, repoDir, revision)
+		if err != nil {
+			return err
+		}
+		defer cleanupPipeline()
+	}
+	sparkwingDir, err := submittedPipelineDir(trig, filepath.Join(pipelineRepo, ".sparkwing"))
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
 	}
@@ -215,6 +228,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
+		wingdclient.HostBinEnv:      {},
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
@@ -238,6 +252,9 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		if _, denied := blocked[key]; !denied && key != "SPARKWING_HOME" {
 			out = append(out, entry)
 		}
+	}
+	if host, _, ok := wingdclient.ResolveHostBin(); ok {
+		out = append(out, wingdclient.HostBinEnv+"="+host)
 	}
 	return append(out, "SPARKWING_HOME="+home)
 }
@@ -315,6 +332,15 @@ func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir 
 	}
 
 	revision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	return snapshotRetryRevision(ctx, repoDir, revision)
+}
+
+func snapshotRetryRevision(ctx context.Context, repoDir, revision string) (string, func(), error) {
+	if !gitObjectRE.MatchString(revision) {
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir, Reason: fmt.Sprintf("recorded revision %q is not a git object id", revision),
+		}
+	}
 	tempRoot, err := os.MkdirTemp("", "sparkwing-retry-")
 	if err != nil {
 		return "", func() {}, &RetrySourceUnavailableError{
@@ -380,6 +406,24 @@ func triggerUsesParentRepo(trig *store.Trigger) bool {
 }
 
 const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
+
+const (
+	PipelineRevKey = retryprovenance.PipelineRevisionKey
+	PipelineDirKey = "_SPARKWING_SUBMIT_PIPELINE_DIR"
+)
+
+func submittedPipelineDir(trig *store.Trigger, runSparkwingDir string) (string, error) {
+	if trig.RetryOf != "" || strings.TrimSpace(trig.TriggerEnv[PipelineRevKey]) == "" {
+		return runSparkwingDir, nil
+	}
+	dir := filepath.Clean(strings.TrimSpace(trig.TriggerEnv[PipelineDirKey]))
+	sparkwingDir := filepath.Join(dir, ".sparkwing")
+	if info, err := os.Stat(sparkwingDir); !filepath.IsAbs(dir) || err != nil || !info.IsDir() {
+		return "", fmt.Errorf("submitted trigger %s: --sw-pipeline-ref %s source directory %q is unavailable; resubmit",
+			trig.ID, trig.TriggerEnv[PipelineRevKey], dir)
+	}
+	return sparkwingDir, nil
+}
 
 // SubmitPriorityKey carries `run --sw-detached --sw-priority` on the trigger row
 // rather than in the run's arguments: it shapes admission, not the pipeline,

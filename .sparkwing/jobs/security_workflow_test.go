@@ -365,6 +365,7 @@ func TestGitleaksExclusionsCannotHideRepositoryPaths(t *testing.T) {
 		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:513",
 		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:514",
 		"7c75d7dbedc7b46c71c149db7996f6c9beabfc23:cmd/sparkwing/worktree_snapshot_test.go:generic-api-key:522",
+		"50470b89358f30fde06fcaa53c6b5ebefb8c2232:internal/bincache/direct_credential_test.go:private-key:15",
 	}, "\n")
 	if ignore != want {
 		t.Fatalf("gitleaks history exceptions are not the exact fingerprint set: %q", ignore)

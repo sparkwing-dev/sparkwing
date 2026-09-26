@@ -98,6 +98,30 @@ const (
 	SocketPreparationCleanupFailed
 )
 
+// ClaimDaemonStart serializes startup until the socket answers. The daemon
+// acquires its own election lock after spawning, leaving a gap for duplicate starters.
+func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := l.ensureDir(); err != nil {
+		return nil, false, err
+	}
+	f, err := os.OpenFile(l.start, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false, err
+	}
+	ok, err := flockTry(f)
+	if err != nil || !ok {
+		_ = f.Close()
+		return nil, false, err
+	}
+	return func() {
+		_ = f.Close()
+	}, true, nil
+}
+
 func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	l, err := resolveLayout(home)
 	if err != nil {

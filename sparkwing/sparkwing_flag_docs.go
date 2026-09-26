@@ -42,6 +42,7 @@ type SparkwingFlagDoc struct {
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-cd", Short: "C", Argument: "PATH", Desc: "Run as if started in PATH", Group: "System"},
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},
+	{Name: "sw-pipeline-ref", Argument: "REF", Desc: "Detached only: compile the pipeline at REF and execute it in this checkout; cannot be combined with --sw-ref", Group: "System"},
 	{Name: "sw-detached", Desc: "Queue the run for this machine's resident consumer and print its handle instead of executing here; the run outlives the terminal", Group: "System", Hot: true},
 	{Name: "sw-idempotency-key", Argument: "KEY", Desc: "Detached only: deduplication token; a repeat carrying this key returns the original run instead of starting a second one", Group: "System"},
 	{Name: "sw-request-id", Argument: "ID", Desc: "Detached only: tracing identifier recorded on the run; never affects deduplication", Group: "System"},

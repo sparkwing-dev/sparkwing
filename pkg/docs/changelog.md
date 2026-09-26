@@ -22,6 +22,10 @@ unlock.
 
 ### Added
 
+- **cli:** `run --sw-detached --sw-pipeline-ref <ref>` compiles the pipeline from
+  the selected commit and executes it in the submitting checkout. Queued runs
+  and retries preserve that pipeline commit when the ref moves.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite
@@ -63,7 +67,7 @@ unlock.
   provisioned for the larger classes is unaffected.
 
 
-- **secrets:** a secret is scoped by `--pipeline`, not `--repo` (Breaking)
+- **api + secrets (Breaking):** a secret is scoped by `--pipeline`, not `--repo`
   `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
   and response fields are `pipeline`, and the `?repo=` query parameter on
   `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
@@ -72,7 +76,7 @@ unlock.
   `DeleteSecretForPipeline`. Schema v48 renames `secrets.repo` to
   `secrets.pipeline` and keeps every stored value, so a row scoped to a
   repository slug survives the upgrade, answers no run, and is re-keyed to a
-  pipeline by an admin.
+  pipeline by an admin. See [migration guide](docs/migrations/_unreleased.md#secrets-are-scoped-to-pipelines).
 
 - **api:** `store.Run.Repo` is `store.Run.DeclaredRepo` and
   `store.RunFilter.Repos` is `store.RunFilter.DeclaredRepos`, because a
@@ -98,6 +102,37 @@ unlock.
 - **scaffold:** `const FallbackSDKVersion` pins v0.60.0, so a fresh scaffold compiles against that release.
 
 ### Fixed
+
+- **ci:** pin the dashboard package manager version when setting up hosted
+  checks and release builds.
+
+- **ci:** accept waits inside `testing/synctest.Test` bodies while continuing
+  to reject wall-clock waits outside them.
+
+- **daemon:** preserve the latest diagnostic stack dump in `d.log.stacks`
+  so operational log rotation cannot erase it.
+
+- **daemon:** queue explanations use soft CPU admission rules for estimated
+  demands, so a semaphore or memory wait no longer reports a false core shortage.
+
+- **store:** schema compatibility errors distinguish unsupported requirements
+  from conflicting version labels instead of recommending an installed release.
+
+- **daemon:** concurrent clients share one starter while a missing socket comes
+  online. The supervisor allows 30 seconds for startup and backs off repeated
+  replacements, resetting its delay after sustained successful health probes.
+  Cancellation logs identify the requesting process on Linux and macOS and list
+  the affected run IDs.
+
+- **orchestrator:** Queued runs retain the consumer's local daemon executable
+  A detached run can restart admission even when its captured PATH omits the CLI.
+
+- **daemon:** Keep queue ETA calculations from blocking health probes
+  Concurrent queue readers share one calculation outside the daemon lock.
+  The simulation computes each resource reservation once per queue scan.
+
+- **store:** Restore the missing node claim column when upgrading existing databases
+  Settlement reads resume without losing recorded node durations.
 
 - **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
   not one holding a `.sparkwing` directory
@@ -141,7 +176,7 @@ unlock.
 
 ### Security
 
-- **controller:** a run's repository is metadata and grants nothing (Breaking)
+- **controller (Breaking):** a run's repository is metadata and grants nothing
   A run's repository was a free-text field its submitter typed, and three
   checks read it as proof of which repository the caller was working in: the
   secret read, the two store helpers behind it, and the Git cache proxy. A
@@ -152,15 +187,16 @@ unlock.
   operator connected to the pipeline of a run a signed webhook delivery
   created. `RepoForClaimedRun` and `ReposForClaimant` are removed;
   `PipelineForClaimedRun` and `PipelinesForClaimant` answer the same question
-  about pipelines.
+  about pipelines. See [migration guide](docs/migrations/_unreleased.md#repository-metadata-grants-no-access).
 
-- **controller:** `runs.control` separates operator actions from runner reports (Breaking)
+- **controller (Breaking):** `runs.control` separates operator actions from runner reports
   `runs.write` covered both starting work and acting on a run somebody else
   started, and a token that could submit a trigger could also retry an
   arbitrary run into existence. Retry, cancel, node bounce, debug-pause release
   and the cron writes now require `runs.control`. `runs.write` keeps trigger
   submission and the Git cache refresh. Add `runs.control` to operator and
   dashboard tokens; runner tokens neither had it nor need it.
+  See [migration guide](docs/migrations/_unreleased.md#operator-tokens-require-runscontrol).
 
 ## [v0.60.0] - 2026-09-21
 ### Added

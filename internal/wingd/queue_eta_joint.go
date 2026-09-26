@@ -140,10 +140,10 @@ func liveETAClaims(snap admission.Snapshot, lease admission.LeaseState) []etaCla
 
 func (s *etaSimulation) nextPromotable() int {
 	blocked := map[string]bool{}
-	var protected []*etaRun
+	reservations := map[string]uint64{}
 	for i, run := range s.waiting {
 		resources := etaFIFOResources(run)
-		if s.violatesReservation(run, protected) || etaAnyBlocked(blocked, resources) {
+		if etaViolatesReservation(run, reservations) || etaAnyBlocked(blocked, resources) {
 			etaMarkBlocked(blocked, resources)
 			continue
 		}
@@ -151,7 +151,7 @@ func (s *etaSimulation) nextPromotable() int {
 			return i
 		}
 		if run.backfill > 0 {
-			protected = append(protected, run)
+			s.reserve(run, reservations)
 			continue
 		}
 		for _, resource := range resources {
@@ -212,19 +212,7 @@ func (s *etaSimulation) resourcesIdle() bool {
 }
 
 func (s *etaSimulation) softCoresFit(cost, used int64) bool {
-	if cost == 0 {
-		return true
-	}
-	if used == 0 {
-		return cost <= s.capCores
-	}
-	if used >= s.totalCores || used > s.capCores {
-		return false
-	}
-	if cost <= s.capCores-used {
-		return true
-	}
-	return used <= s.capCores
+	return admission.SoftCoresFit(cost, used, s.totalCores, s.capCores)
 }
 
 func (s *etaSimulation) semaphoreBudget(key string, incomingCapacity uint64) (uint64, uint64) {
@@ -419,31 +407,35 @@ func etaClaimFor(run *etaRun, key string) (etaClaim, bool) {
 	return etaClaim{}, false
 }
 
-func (s *etaSimulation) violatesReservation(candidate *etaRun, protected []*etaRun) bool {
-	for _, waiter := range protected {
-		for _, resource := range etaFIFOResources(waiter) {
-			candidateCost, ok := etaResourceCost(candidate, resource)
-			if !ok || candidateCost == 0 {
+func (s *etaSimulation) reserve(waiter *etaRun, reservations map[string]uint64) {
+	for _, resource := range etaFIFOResources(waiter) {
+		demand, _ := etaResourceCost(waiter, resource)
+		limits, ok := s.resourceCapacity(waiter, resource)
+		if !ok {
+			continue
+		}
+		used := demand
+		for _, holder := range s.active {
+			if holder.admit <= waiter.admit || etaRunsConflict(holder, waiter) {
 				continue
 			}
-			demand, _ := etaResourceCost(waiter, resource)
-			limits, ok := s.resourceCapacity(waiter, resource)
-			if !ok {
-				continue
-			}
-			var surviving uint64
-			for _, holder := range s.active {
-				if holder.admit <= waiter.admit || etaRunsConflict(holder, waiter) {
-					continue
-				}
-				cost, _ := etaResourceCost(holder, resource)
-				surviving = saturatingAddUint64(surviving, cost)
-			}
-			// safety: this mirrors the ledger's own reservation rule, which judges a squeezed head
-			// against the capacity the host recovers to rather than what it offers now
-			if !etaFitsCost(saturatingAddUint64(surviving, demand), candidateCost, limits.recovered) {
-				return true
-			}
+			cost, _ := etaResourceCost(holder, resource)
+			used = saturatingAddUint64(used, cost)
+		}
+		var remaining uint64
+		if used < limits.recovered {
+			remaining = limits.recovered - used
+		}
+		if previous, exists := reservations[resource]; !exists || remaining < previous {
+			reservations[resource] = remaining
+		}
+	}
+}
+
+func etaViolatesReservation(candidate *etaRun, reservations map[string]uint64) bool {
+	for resource, remaining := range reservations {
+		if cost, ok := etaResourceCost(candidate, resource); ok && cost > remaining {
+			return true
 		}
 	}
 	return false

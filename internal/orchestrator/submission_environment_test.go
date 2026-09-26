@@ -9,8 +9,28 @@ import (
 	"testing"
 	"time"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestSubmissionUsesConsumerDaemonHost(t *testing.T) {
+	const host = "/opt/sparkwing/bin/sparkwing"
+	t.Setenv(wingdclient.HostBinEnv, host)
+	for _, captured := range [][]string{
+		{"PATH=/submit/bin"},
+		{wingdclient.HostBinEnv + "=/another/machine/sparkwing"},
+	} {
+		var hosts []string
+		for _, entry := range submissionExecutionEnvironment(captured, t.TempDir()) {
+			if value, ok := strings.CutPrefix(entry, wingdclient.HostBinEnv+"="); ok {
+				hosts = append(hosts, value)
+			}
+		}
+		if !slices.Equal(hosts, []string{host}) {
+			t.Errorf("daemon hosts = %v, want only the consumer's %s", hosts, host)
+		}
+	}
+}
 
 func TestSubmissionEnvironmentIsOwnerOnlyAndDiscarded(t *testing.T) {
 	home := t.TempDir()

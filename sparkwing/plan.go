@@ -749,7 +749,8 @@ func SkipBudget(d time.Duration) SkipOption {
 // SkipIf registers a predicate the orchestrator evaluates after this
 // node's dependencies complete. If the predicate returns true, the
 // node is marked Skipped with the reason and its work is never
-// dispatched.
+// dispatched. A skipped node satisfies dependencies, so its dependents can run.
+// Apply the predicate to those dependents or their JobGroup to skip them too.
 //
 // Typed upstream output is consumed via closure capture + Ref.Get:
 //

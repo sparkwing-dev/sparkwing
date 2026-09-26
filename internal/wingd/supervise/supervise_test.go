@@ -66,17 +66,20 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 	wedged := newSupervisorTestChild()
 	successor := newSupervisorTestChild()
 	children := []*supervisorTestChild{wedged, successor}
-	var starts atomic.Int32
+	var starts, probes atomic.Int32
 	startedSuccessor := make(chan struct{})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
 		done <- Loop(ctx, Config{
-			ProbeInterval: time.Millisecond,
-			ProbeTimeout:  time.Millisecond,
-			FailureLimit:  2,
-			TermGrace:     time.Millisecond,
+			ProbeInterval:     time.Millisecond,
+			ProbeTimeout:      time.Millisecond,
+			FailureLimit:      2,
+			TermGrace:         time.Millisecond,
+			StartupTimeout:    2 * time.Millisecond,
+			RestartBackoff:    time.Millisecond,
+			MaxRestartBackoff: time.Millisecond,
 		}, Deps{
 			Start: func() (Child, error) {
 				index := int(starts.Add(1) - 1)
@@ -91,7 +94,7 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 				return child, nil
 			},
 			Probe: func(context.Context) error {
-				if starts.Load() == 1 {
+				if starts.Load() == 1 && probes.Add(1) > 1 {
 					return errors.New("unresponsive")
 				}
 				return nil
@@ -129,10 +132,13 @@ func TestWingdSupervisorDoesNotRestartAChildThatExitsWithoutWatchdogRecovery(t *
 	child.done <- nil
 	starts := 0
 	err := Loop(context.Background(), Config{
-		ProbeInterval: time.Hour,
-		ProbeTimeout:  time.Millisecond,
-		FailureLimit:  2,
-		TermGrace:     time.Millisecond,
+		ProbeInterval:     time.Hour,
+		ProbeTimeout:      time.Millisecond,
+		FailureLimit:      2,
+		TermGrace:         time.Millisecond,
+		StartupTimeout:    time.Second,
+		RestartBackoff:    time.Millisecond,
+		MaxRestartBackoff: time.Millisecond,
 	}, Deps{
 		Start: func() (Child, error) {
 			starts++

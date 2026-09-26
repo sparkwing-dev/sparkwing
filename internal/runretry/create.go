@@ -30,6 +30,17 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 	if err != nil {
 		return Created{}, err
 	}
+	env := provenance(src)
+	trigger, err := st.GetTrigger(ctx, sourceID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Created{}, err
+	}
+	if trigger != nil && trigger.TriggerEnv[retryprovenance.PipelineRevisionKey] != "" {
+		if env == nil {
+			env = make(map[string]string)
+		}
+		env[retryprovenance.PipelineRevisionKey] = trigger.TriggerEnv[retryprovenance.PipelineRevisionKey]
+	}
 
 	retrySource := "retry"
 	if strings.HasPrefix(src.TriggerSource, "pipeline-working-tree@") {
@@ -42,7 +53,7 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		Pipeline:      src.Pipeline,
 		Args:          src.Args,
 		TriggerSource: retrySource,
-		TriggerEnv:    provenance(src),
+		TriggerEnv:    env,
 		GitBranch:     src.GitBranch,
 		GitSHA:        src.GitSHA,
 		Repo:          src.DeclaredRepo,

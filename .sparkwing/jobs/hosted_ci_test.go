@@ -1,9 +1,9 @@
 package jobs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -166,7 +166,7 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	}
 }
 
-func TestCanonicalWorkflowLeavesRoomAroundTheGateDeadline(t *testing.T) {
+func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
@@ -176,12 +176,11 @@ func TestCanonicalWorkflowLeavesRoomAroundTheGateDeadline(t *testing.T) {
 	if minutesNode == nil {
 		t.Fatal("canonical gate job declares no workflow timeout")
 	}
-	minutes, err := strconv.Atoi(minutesNode.Value)
-	if err != nil {
-		t.Fatalf("canonical gate timeout-minutes = %q: %v", minutesNode.Value, err)
-	}
-	if room := time.Duration(minutes)*time.Minute - gateRunTimeout; room < 5*time.Minute {
-		t.Fatalf("canonical workflow leaves %s around the %s gate deadline, want at least 5m for setup and cleanup", room, gateRunTimeout)
+	want := fmt.Sprintf("${{ matrix.gate == 'pre-release' && %d || %d }}",
+		int((preReleaseRunTimeout+10*time.Minute)/time.Minute),
+		int((gateRunTimeout+5*time.Minute)/time.Minute))
+	if minutesNode.Value != want {
+		t.Fatalf("canonical workflow timeout = %q, want %q to allow setup and cleanup", minutesNode.Value, want)
 	}
 }
 

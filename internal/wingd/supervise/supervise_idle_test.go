@@ -57,10 +57,13 @@ func TestLoopReapsDaemonThatIdlesOutUnderHealthProbes(t *testing.T) {
 		Logf: t.Logf,
 	}
 	cfg := Config{
-		ProbeInterval: 50 * time.Millisecond,
-		ProbeTimeout:  time.Second,
-		FailureLimit:  3,
-		TermGrace:     time.Second,
+		ProbeInterval:     50 * time.Millisecond,
+		ProbeTimeout:      time.Second,
+		FailureLimit:      3,
+		TermGrace:         time.Second,
+		StartupTimeout:    5 * time.Second,
+		RestartBackoff:    time.Millisecond,
+		MaxRestartBackoff: time.Millisecond,
 	}
 
 	loopDone := make(chan error, 1)

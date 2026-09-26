@@ -61,6 +61,24 @@ nothing. Copy them when they are there, because a controller that was
 killed leaves committed transactions in the log and a restore without
 it loses them.
 
+For a live database in WAL mode, prepare `$DEST` as above and replace the three
+file-copy commands with a backup inside a read transaction. Keep the transaction
+open until the backup finishes so concurrent writes cannot restart the copy:
+
+```bash
+sqlite3 "$SPARKWING_HOME/state.db" <<SQL
+.bail on
+.timeout 5000
+BEGIN;
+SELECT count(*) FROM sqlite_schema;
+.backup '$DEST/state.db'
+ROLLBACK;
+SQL
+```
+
+Then save the secrets key, restrict permissions and create the checksums as above.
+The backup contains the committed snapshot without separate WAL or SHM files.
+
 ### PostgreSQL
 
 `pg_dump` reads a consistent snapshot of a live database, so the

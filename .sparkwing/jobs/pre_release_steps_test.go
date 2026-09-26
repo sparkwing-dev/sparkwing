@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -19,6 +20,9 @@ func TestPreReleaseWorkKeepsEveryCheckInOrder(t *testing.T) {
 	nodes := plan.Nodes()
 	if len(nodes) != 1 || nodes[0].ID() != "pre-release" {
 		t.Fatalf("nodes = %v, want pre-release", nodes)
+	}
+	if got := nodes[0].TimeoutDuration(); got != 120*time.Minute {
+		t.Fatalf("pre-release node timeout = %s, want 2h", got)
 	}
 	work := nodes[0].Work()
 	if work == nil {

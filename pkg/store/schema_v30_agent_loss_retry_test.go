@@ -1261,6 +1261,12 @@ func TestSchemaV30WorkingTreeRetryKeepsImmutableProvenance(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "run-workspace", Pipeline: "p", CreatedAt: time.Now(),
+		TriggerEnv: map[string]string{retryprovenance.PipelineRevisionKey: strings.Repeat("c", 40)},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.CreateNode(ctx, store.Node{RunID: "run-workspace", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1280,6 +1286,9 @@ func TestSchemaV30WorkingTreeRetryKeepsImmutableProvenance(t *testing.T) {
 	trigger, err := s.GetTrigger(ctx, recovered[0].RetryRunID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if trigger.TriggerEnv[retryprovenance.PipelineRevisionKey] != strings.Repeat("c", 40) {
+		t.Fatalf("retry lost pipeline revision: %+v", trigger.TriggerEnv)
 	}
 	if trigger.TriggerSource != "pipeline-working-tree@laptop" ||
 		trigger.TriggerEnv[retryprovenance.RepoDirKey] != repoDir ||

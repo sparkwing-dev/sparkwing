@@ -850,26 +850,34 @@ func refWorktreeTrigger(id, dir string) *store.Trigger {
 }
 
 func TestCleanupRefWorktreeRemovesATerminalRunsWorktree(t *testing.T) {
-	repo := gitRepoWithProject(t, true)
-	p := paths.Paths{Root: t.TempDir()}
-	st := testStore(t)
-	ctx := context.Background()
-	dir := buildWorktree(t, p, repo, "run-done")
-	submitTrigger(t, st, "run-done")
-	if err := st.FinishTrigger(ctx, "run-done"); err != nil {
-		t.Fatalf("FinishTrigger: %v", err)
-	}
+	for _, key := range []string{SubmitRepoDirKey, PipelineDirKey} {
+		t.Run(key, func(t *testing.T) {
+			repo := gitRepoWithProject(t, true)
+			p := paths.Paths{Root: t.TempDir()}
+			st := testStore(t)
+			ctx := context.Background()
+			dir := buildWorktree(t, p, repo, "run-done")
+			submitTrigger(t, st, "run-done")
+			if err := st.FinishTrigger(ctx, "run-done"); err != nil {
+				t.Fatalf("FinishTrigger: %v", err)
+			}
 
-	cleanupRefWorktree(ctx, st, p, refWorktreeTrigger("run-done", dir), slog.New(slog.DiscardHandler))
+			trig := refWorktreeTrigger("run-done", dir)
+			if key == PipelineDirKey {
+				trig.TriggerEnv = map[string]string{SubmitRepoDirKey: repo, PipelineDirKey: dir, PipelineRevKey: "selected"}
+			}
+			cleanupRefWorktree(ctx, st, p, trig, slog.New(slog.DiscardHandler))
 
-	if _, err := os.Stat(dir); !os.IsNotExist(err) {
-		t.Error("a finished run's worktree was not removed")
-	}
-	if worktreeRegistered(t, repo, dir) {
-		t.Error("the registration survived, so the path cannot be reused")
-	}
-	if _, err := os.Stat(repo); err != nil {
-		t.Fatalf("the origin repository was deleted: %v", err)
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Error("a finished run's worktree was not removed")
+			}
+			if worktreeRegistered(t, repo, dir) {
+				t.Error("the registration survived, so the path cannot be reused")
+			}
+			if _, err := os.Stat(repo); err != nil {
+				t.Fatalf("the origin repository was deleted: %v", err)
+			}
+		})
 	}
 }
 

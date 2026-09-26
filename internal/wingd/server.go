@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -45,6 +47,8 @@ type Daemon struct {
 	finalizers  sync.WaitGroup
 
 	events eventWindow
+
+	queueStateReads singleflight.Group
 
 	mu                  sync.Mutex
 	persistMu           sync.Mutex
@@ -1379,6 +1383,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		d.cancelPending[runID] = struct{}{}
 	}
 	d.mu.Unlock()
+	pid, known := peerPID(c.nc)
+	d.cfg.logf("cancel: run=%s peer_pid=%d peer_pid_known=%t affected=%s",
+		req.RunID, pid, known, strings.Join(affected, ","))
 
 	if d.cfg.Runs != nil {
 		if err := d.cfg.Runs.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
@@ -1458,9 +1465,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 }
 
 func (d *Daemon) handleQueueState(c *conn) {
-	d.mu.Lock()
-	qs := d.buildQueueStateLocked()
-	d.mu.Unlock()
+	qs := d.readQueueState()
 	_ = c.send(&qs)
 }
 
