@@ -99,6 +99,9 @@ unlock.
 
 ### Fixed
 
+- **store:** Restore the missing node claim column when upgrading existing databases
+  Settlement reads resume without losing recorded node durations.
+
 - **sdk:** a project root is a directory holding `.sparkwing/sparkwing.yaml`,
   not one holding a `.sparkwing` directory
   The machine's own state lives in `~/.sparkwing`, so a pipeline running

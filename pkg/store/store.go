@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 48
+const expectedSchemaVersion = 49
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1986,6 +1986,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyStorageAllowanceMigrationSQLite(ctx, tx)
 	case 48:
 		return applyRepoGrantsNothingMigrationSQLite(ctx, tx)
+	case 49:
+		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2338,6 +2340,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyStorageAllowanceMigrationPostgres(ctx, tx)
 	case 48:
 		return applyRepoGrantsNothingMigrationPostgres(ctx, tx)
+	case 49:
+		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2774,6 +2778,11 @@ var triggerRepoInheritedCols = map[string]string{
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+}
+
+// #nosec G101 -- column names, not credentials
+var nodeClaimTokenPrefixCols = map[string]string{
+	"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
 }
 
 // #nosec G101 -- column names, not credentials
