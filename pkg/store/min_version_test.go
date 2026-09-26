@@ -3,11 +3,30 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
+
+func TestSkewConflictingVersionLabelsDoNotRecommendTheInstalledRelease(t *testing.T) {
+	for _, stamp := range []string{"v0.59.0", "v0.60.0"} {
+		skew := &store.SkewError{
+			Requirements: []string{"future-schema-feature"},
+			MinVersion:   stamp, InstalledVersion: "v0.60.0",
+		}
+		got := skew.Error()
+		if strings.Contains(got, "sparkwing >= "+stamp) {
+			t.Errorf("writer stamp %s recommends a release already installed: %s", stamp, got)
+		}
+		for _, want := range []string{"future-schema-feature", "v0.60.0", "does not support"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("writer stamp %s: diagnostic %q omits %q", stamp, got, want)
+			}
+		}
+	}
+}
 
 func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 	store.SetBinaryVersion("v0.16.0")
