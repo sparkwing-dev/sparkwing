@@ -189,16 +189,14 @@ func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
 		if command.Hidden {
 			continue
 		}
-		foundProfile, controllerOnly := false, false
+		foundProfile := false
 		for _, spec := range command.Flags {
 			if spec.Name != "profile" {
 				continue
 			}
 			foundProfile = true
-			// safety: a required --profile names a verb the local dotenv store cannot answer, so it has no local mode to document.
-			controllerOnly = spec.Required
-			if !controllerOnly && !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
-				t.Errorf("%s describes --profile as %q, want local-mode guidance", command.Path, spec.Desc)
+			if spec.Required || !strings.Contains(strings.ToLower(spec.Desc), "omit for the local store") {
+				t.Errorf("%s describes --profile as %q (required %v), want it optional with local-mode guidance", command.Path, spec.Desc, spec.Required)
 			}
 		}
 		if !foundProfile {
@@ -211,12 +209,6 @@ func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
 			} else {
 				local = true
 			}
-		}
-		if controllerOnly {
-			if local || !remote {
-				t.Errorf("%s is controller-only; every example should name --profile", command.Path)
-			}
-			continue
 		}
 		if !local || !remote {
 			t.Errorf("%s examples do not cover both local and remote modes", command.Path)

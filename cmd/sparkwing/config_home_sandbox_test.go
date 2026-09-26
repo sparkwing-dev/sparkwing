@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
@@ -19,7 +19,7 @@ func scratchUserConfigDir(t *testing.T) string {
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	for _, env := range []string{
-		userconfig.PathEnv, secrets.SecretsPathEnv, secrets.ConfigPathEnv, versionHoldEnv,
+		userconfig.PathEnv, localsecrets.KeyFileEnv, versionHoldEnv,
 	} {
 		t.Setenv(env, "")
 	}
@@ -89,48 +89,6 @@ func TestProfilesAddWritesInsideTheHomeItIsPointedAt(t *testing.T) {
 	userProfiles := filepath.Join(userConfig, userconfig.Filename)
 	if _, err := os.Stat(userProfiles); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("stat %s = %v, want the user config left absent", userProfiles, err)
-	}
-}
-
-func TestSecretSetUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
-	userConfig := scratchUserConfigDir(t)
-	underAScratchHome(t)
-
-	err := runSecretSet([]string{"--name", "DRILL_TOKEN", "--value", "drill"})
-	wantRefusedAndUnwritten(t, "secret set", err, filepath.Join(userConfig, "secrets.env"))
-
-	err = runSecretSet([]string{"--name", "DRILL_REGION", "--value", "us-east-1", "--plain"})
-	wantRefusedAndUnwritten(t, "secret set --plain", err, filepath.Join(userConfig, "config.env"))
-}
-
-func TestSecretDeleteUnderAScratchHomeLeavesTheUserConfigUntouched(t *testing.T) {
-	userConfig := scratchUserConfigDir(t)
-	underAScratchHome(t)
-
-	err := runSecretDelete([]string{"--name", "DRILL_TOKEN"})
-	wantRefusedAndUnwritten(t, "secret delete", err, filepath.Join(userConfig, "secrets.env"))
-}
-
-func TestSecretSetWritesInsideTheHomeItIsPointedAt(t *testing.T) {
-	userConfig := scratchUserConfigDir(t)
-	home := underAScratchHome(t)
-	inHome := filepath.Join(home, "secrets.env")
-	t.Setenv(secrets.SecretsPathEnv, inHome)
-
-	if err := runSecretSet([]string{"--name", "DRILL_TOKEN", "--value", "drill"}); err != nil {
-		t.Fatalf("secret set with %s=%s: %v", secrets.SecretsPathEnv, inHome, err)
-	}
-
-	entries, err := secrets.ListDotenvEntries(inHome)
-	if err != nil {
-		t.Fatalf("read %s: %v", inHome, err)
-	}
-	if entries["DRILL_TOKEN"] != "drill" {
-		t.Errorf("secret written to %s = %q, want the value it was given", inHome, entries["DRILL_TOKEN"])
-	}
-	userSecrets := filepath.Join(userConfig, "secrets.env")
-	if _, err := os.Stat(userSecrets); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("stat %s = %v, want the user config left absent", userSecrets, err)
 	}
 }
 

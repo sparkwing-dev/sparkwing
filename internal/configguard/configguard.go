@@ -16,9 +16,8 @@ import (
 func WatchedFiles(home string) []string {
 	dir := fssecure.ConfigDirIn(home)
 	return []string{
-		filepath.Join(dir, "config.env"),
 		filepath.Join(dir, "config.yaml"),
-		filepath.Join(dir, "secrets.env"),
+		filepath.Join(dir, "secrets.key"),
 		filepath.Join(dir, "version-hold"),
 	}
 }

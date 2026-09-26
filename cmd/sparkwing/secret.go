@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -42,6 +43,86 @@ func runSecret(args []string) error {
 	}
 }
 
+type secretsTarget struct {
+	c     *client.Client
+	label string
+	local bool
+	// safety: a store that does not exist yet holds no secret, so a read answers without asking.
+	empty bool
+	close func()
+}
+
+func openSecretsTarget(fs *flag.FlagSet, on, verb string, write bool) (*secretsTarget, error) {
+	if fs.Changed("profile") {
+		prof, err := resolveProfile(on)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireController(prof, verb); err != nil {
+			return nil, err
+		}
+		return &secretsTarget{
+			c:     client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()),
+			label: "on: " + prof.Name,
+			close: func() {},
+		}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ensureDaemonTimeout)
+	defer cancel()
+	return localSecretsTarget(ctx, verb, write)
+}
+
+// hack: a variable so a test can host the daemon in its own process.
+var secretsDaemonOptions = func() wingdclient.Options {
+	return wingdclient.Options{Version: installedVersion()}
+}
+
+func localSecretsTarget(ctx context.Context, verb string, write bool) (*secretsTarget, error) {
+	cl, err := wingdclient.EnsureDaemon(ctx, secretsDaemonOptions())
+	if err != nil {
+		return nil, fmt.Errorf("%s: this machine's sparkwing daemon serves the local secret store, and it did not start: %w", verb, err)
+	}
+	daemon := cl.DaemonVersion()
+	ready, apiErr, sock := cl.APIReady(), cl.APIError(), cl.APISocket()
+	if err := cl.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: closing the daemon connection: %v\n", verb, err)
+	}
+	if !ready {
+		if apiErr == "" {
+			apiErr = "it serves no controller API"
+		}
+		return nil, fmt.Errorf("%s: this machine's sparkwing daemon (%s) cannot serve the local secret store: %s; "+
+			"run `sparkwing daemon restart` to start this release's daemon", verb, daemon, apiErr)
+	}
+	httpClient := orchestrator.NewAPISocketClient(sock)
+	if err := orchestrator.ImportLegacySecretsOverSocket(ctx, httpClient); err != nil {
+		fmt.Fprintf(os.Stderr, "sparkwing: %v\n", err)
+	}
+	health, err := orchestrator.ReadLocalAPIHealth(ctx, sock)
+	if err != nil {
+		httpClient.CloseIdleConnections()
+		return nil, fmt.Errorf("%s: %w", verb, err)
+	}
+	// safety: a daemon that predates local encryption would store the value
+	// as plaintext in state.db, so a write is refused rather than sent to it.
+	if write && health.Secrets != orchestrator.APISecretsSealed {
+		httpClient.CloseIdleConnections()
+		return nil, fmt.Errorf("%s: this machine's sparkwing daemon (%s) predates encrypted local secrets and would store the value "+
+			"unencrypted; run `sparkwing daemon restart` to start this release's daemon, then run this again", verb, daemon)
+	}
+	if health.SecretsProblem != "" {
+		httpClient.CloseIdleConnections()
+		return nil, fmt.Errorf("%s: %s", verb, health.SecretsProblem)
+	}
+	return &secretsTarget{
+		c:     client.New(orchestrator.HostedAPIBaseURL, httpClient),
+		label: "local",
+		local: true,
+		empty: health.Store == "absent",
+		close: httpClient.CloseIdleConnections,
+	}, nil
+}
+
 func runSecretSet(args []string) error {
 	fs := flag.NewFlagSet(cmdSecretSet.Path, flag.ContinueOnError)
 	v := bindFlags(cmdSecretSet, fs)
@@ -57,7 +138,6 @@ func runSecretSet(args []string) error {
 	plain := v.Bool("plain")
 	pipeline := v.String("pipeline")
 	shared := v.Bool("shared")
-	on := v.String("profile")
 	if !fs.Changed("value") && !fs.Changed("file") {
 		return errors.New("secret set: either --value or --file is required")
 	}
@@ -66,6 +146,9 @@ func runSecretSet(args []string) error {
 	}
 	if err := secrets.ValidateName(name); err != nil {
 		return fmt.Errorf("secret set: %w", err)
+	}
+	if shared && pipeline != "" {
+		return errors.New("secret set: --shared and --pipeline are exclusive; a pipeline's secret is already scoped")
 	}
 
 	raw := value
@@ -76,46 +159,22 @@ func runSecretSet(args []string) error {
 		}
 		raw = string(data)
 	}
-
 	masked := !plain
 
-	if pipeline != "" && !fs.Changed("profile") {
-		return errors.New("secret set: --pipeline needs --profile; the local store has no pipeline dimension")
-	}
-	if shared && !fs.Changed("profile") {
-		return errors.New("secret set: --shared needs --profile; the local store has no pipeline dimension")
-	}
-	if shared && pipeline != "" {
-		return errors.New("secret set: --shared and --pipeline are exclusive; a pipeline's secret is already scoped")
-	}
-
-	if !fs.Changed("profile") {
-		path, perr := localPathFor(masked)
-		if perr != nil {
-			return fmt.Errorf("secret set: %w", perr)
-		}
-		if err := secrets.WriteDotenvEntry(path, name, raw); err != nil {
-			return fmt.Errorf("secret set: %w", err)
-		}
-		other, oerr := localPathFor(!masked)
-		if oerr == nil {
-			_ = secrets.DeleteDotenvEntry(other, name)
-		}
-		fmt.Fprintf(os.Stdout, "secret %q set (local: %s, masked=%v)\n", name, path, masked)
-		return nil
-	}
-
-	prof, err := resolveProfile(on)
+	target, err := openSecretsTarget(fs, v.String("profile"), "secret set", true)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "secret set"); err != nil {
-		return err
+	defer target.close()
+	// safety: the machine's own runs read every local row, so a local secret
+	// is stored the way the import and the dashboard store one, shared,
+	// rather than as an admin-only row a run would read only by that gap.
+	if target.local && pipeline == "" {
+		shared = true
 	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.CreateSecretForPipeline(ctx, name, raw, pipeline, masked, shared); err != nil {
+	if err := target.c.CreateSecretForPipeline(ctx, name, raw, pipeline, masked, shared); err != nil {
 		return fmt.Errorf("secret set: %w", err)
 	}
 	scope := "admin only"
@@ -125,15 +184,8 @@ func runSecretSet(args []string) error {
 	case shared:
 		scope = "every pipeline"
 	}
-	fmt.Fprintf(os.Stdout, "secret %q set (on: %s, pipeline: %s, masked=%v)\n", name, prof.Name, scope, masked)
+	fmt.Fprintf(os.Stdout, "secret %q set (%s, pipeline: %s, masked=%v)\n", name, target.label, scope, masked)
 	return nil
-}
-
-func localPathFor(masked bool) (string, error) {
-	if masked {
-		return secrets.DefaultDotenvPath()
-	}
-	return secrets.DefaultConfigPath()
 }
 
 func runSecretGet(args []string) error {
@@ -147,41 +199,23 @@ func runSecretGet(args []string) error {
 	}
 	name := v.String("name")
 	pipeline := v.String("pipeline")
-	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret get: --name is required")
 	}
-	if pipeline != "" && !fs.Changed("profile") {
-		return errors.New("secret get: --pipeline needs --profile; the local store has no pipeline dimension")
-	}
-
-	if !fs.Changed("profile") {
-		src := secrets.NewDotenvSource("")
-		val, _, err := src.Read(name)
-		if err != nil {
-			if errors.Is(err, secrets.ErrSecretMissing) {
-				return fmt.Errorf("secret get: %q not set in local store (%s)", name, src.SecretsPath())
-			}
-			return fmt.Errorf("secret get: %w", err)
-		}
-		fmt.Fprint(os.Stdout, val)
-		return nil
-	}
-
-	prof, err := resolveProfile(on)
+	target, err := openSecretsTarget(fs, v.String("profile"), "secret get", false)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "secret get"); err != nil {
-		return err
+	defer target.close()
+	if target.empty {
+		return fmt.Errorf("secret get: %q not found (%s)", name, target.label)
 	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	sec, err := c.GetSecretForPipeline(ctx, name, pipeline)
+	sec, err := target.c.GetSecretForPipeline(ctx, name, pipeline)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("secret get: %q not found", name)
+			return fmt.Errorf("secret get: %q not found (%s)", name, target.label)
 		}
 		return fmt.Errorf("secret get: %w", err)
 	}
@@ -198,69 +232,20 @@ func runSecretList(args []string) error {
 		}
 		return err
 	}
-	on := v.String("profile")
 	grep := v.String("grep")
-
-	if !fs.Changed("profile") {
-		secretsPath, _ := secrets.DefaultDotenvPath()
-		configPath, _ := secrets.DefaultConfigPath()
-		maskedEntries, err := secrets.ListDotenvEntries(secretsPath)
-		if err != nil {
-			return fmt.Errorf("secret list: %w", err)
-		}
-		plainEntries, err := secrets.ListDotenvEntries(configPath)
-		if err != nil {
-			return fmt.Errorf("secret list: %w", err)
-		}
-		type row struct {
-			name   string
-			masked bool
-			path   string
-		}
-		rowByName := map[string]row{}
-		for k := range maskedEntries {
-			if grep != "" && !strings.Contains(k, grep) {
-				continue
-			}
-			rowByName[k] = row{name: k, masked: true, path: secretsPath}
-		}
-		for k := range plainEntries {
-			if grep != "" && !strings.Contains(k, grep) {
-				continue
-			}
-			rowByName[k] = row{name: k, masked: false, path: configPath}
-		}
-		if len(rowByName) == 0 {
-			fmt.Fprintf(os.Stdout, "(no secrets in %s or %s)\n", secretsPath, configPath)
-			return nil
-		}
-		names := make([]string, 0, len(rowByName))
-		for k := range rowByName {
-			names = append(names, k)
-		}
-		sort.Strings(names)
-		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tMASKED\tSTORE")
-		for _, k := range names {
-			r := rowByName[k]
-			fmt.Fprintf(tw, "%s\t%v\tlocal: %s\n", r.name, r.masked, r.path)
-		}
-		return tw.Flush()
-	}
-
-	prof, err := resolveProfile(on)
+	target, err := openSecretsTarget(fs, v.String("profile"), "secret list", false)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "secret list"); err != nil {
-		return err
-	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	secs, err := c.ListSecrets(ctx)
-	if err != nil {
-		return fmt.Errorf("secret list: %w", err)
+	defer target.close()
+	var secs []client.Secret
+	if !target.empty {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		secs, err = target.c.ListSecrets(ctx)
+		if err != nil {
+			return fmt.Errorf("secret list: %w", err)
+		}
 	}
 	if grep != "" {
 		filtered := secs[:0]
@@ -272,11 +257,11 @@ func runSecretList(args []string) error {
 		secs = filtered
 	}
 	if len(secs) == 0 {
-		fmt.Fprintln(os.Stdout, "(no secrets)")
+		fmt.Fprintf(os.Stdout, "(no secrets, %s)\n", target.label)
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tREPO\tMASKED\tBOUND\tPRINCIPAL\tCREATED\tUPDATED")
+	fmt.Fprintln(tw, "NAME\tPIPELINE\tMASKED\tBOUND\tPRINCIPAL\tCREATED\tUPDATED")
 	for _, sec := range secs {
 		scope := sec.Pipeline
 		if scope == "" {
@@ -306,56 +291,26 @@ func runSecretDelete(args []string) error {
 	}
 	name := v.String("name")
 	pipeline := v.String("pipeline")
-	on := v.String("profile")
 	if name == "" {
 		return errors.New("secret delete: --name is required")
 	}
-	if pipeline != "" && !fs.Changed("profile") {
-		return errors.New("secret delete: --pipeline needs --profile; the local store has no pipeline dimension")
-	}
-
-	if !fs.Changed("profile") {
-		secretsPath, _ := secrets.DefaultDotenvPath()
-		configPath, _ := secrets.DefaultConfigPath()
-		removedFrom := ""
-		if err := secrets.DeleteDotenvEntry(secretsPath, name); err == nil {
-			removedFrom = secretsPath
-		} else if !errors.Is(err, secrets.ErrSecretMissing) {
-			return fmt.Errorf("secret delete: %w", err)
-		}
-		if err := secrets.DeleteDotenvEntry(configPath, name); err == nil {
-			if removedFrom != "" {
-				removedFrom += " + " + configPath
-			} else {
-				removedFrom = configPath
-			}
-		} else if !errors.Is(err, secrets.ErrSecretMissing) {
-			return fmt.Errorf("secret delete: %w", err)
-		}
-		if removedFrom == "" {
-			return fmt.Errorf("secret delete: %q not set in local store", name)
-		}
-		fmt.Fprintf(os.Stdout, "secret %q deleted (local: %s)\n", name, removedFrom)
-		return nil
-	}
-
-	prof, err := resolveProfile(on)
+	target, err := openSecretsTarget(fs, v.String("profile"), "secret delete", false)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "secret delete"); err != nil {
-		return err
+	defer target.close()
+	if target.empty {
+		return fmt.Errorf("secret delete: %q not found (%s)", name, target.label)
 	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := c.DeleteSecretForPipeline(ctx, name, pipeline); err != nil {
+	if err := target.c.DeleteSecretForPipeline(ctx, name, pipeline); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return fmt.Errorf("secret delete: %q not found", name)
+			return fmt.Errorf("secret delete: %q not found (%s)", name, target.label)
 		}
 		return fmt.Errorf("secret delete: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "secret %q deleted (on: %s)\n", name, prof.Name)
+	fmt.Fprintf(os.Stdout, "secret %q deleted (%s)\n", name, target.label)
 	return nil
 }
 
@@ -368,22 +323,23 @@ func runSecretRotate(args []string) error {
 		}
 		return err
 	}
-	prof, err := resolveProfile(v.String("profile"))
+	target, err := openSecretsTarget(fs, v.String("profile"), "secret rotate", true)
 	if err != nil {
 		return err
 	}
-	if err := requireController(prof, "secret rotate"); err != nil {
-		return err
+	defer target.close()
+	if target.empty {
+		fmt.Fprintf(os.Stdout, "0 secret(s) re-encrypted under the current key (%s)\n", target.label)
+		return nil
 	}
-	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	result, err := c.RotateSecrets(ctx)
+	result, err := target.c.RotateSecrets(ctx)
 	if err != nil {
 		return fmt.Errorf("secret rotate: %w", err)
 	}
 	fmt.Fprintf(os.Stdout,
-		"%d secret(s) re-encrypted under the current key (on: %s)\n", result.Rotated, prof.Name)
+		"%d secret(s) re-encrypted under the current key (%s)\n", result.Rotated, target.label)
 	if len(result.Skipped) == 0 {
 		fmt.Fprintln(os.Stdout, "the previous key can now be dropped")
 		return nil

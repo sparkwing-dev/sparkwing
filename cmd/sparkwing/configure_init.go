@@ -12,6 +12,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
@@ -128,11 +129,14 @@ func surveyProjectGates() *githooks.RepoGates {
 }
 
 func surveyConfigFiles(configDir, configPath string) []ConfigureInitFile {
-	secretsEnvPath := filepath.Join(configDir, "secrets.env")
+	keyPath, err := localsecrets.KeyPath()
+	if err != nil {
+		keyPath = filepath.Join(configDir, "secrets.key")
+	}
 
 	files := []ConfigureInitFile{
 		{Name: userconfig.Filename, Path: configPath, Summary: configSummary(configPath)},
-		{Name: "secrets.env", Path: secretsEnvPath, Summary: "laptop-local masked secrets"},
+		{Name: filepath.Base(keyPath), Path: keyPath, Summary: "the key local secrets are sealed under; the first stored secret creates it"},
 	}
 	for i := range files {
 		_, err := os.Stat(files[i].Path)

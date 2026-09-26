@@ -392,7 +392,7 @@ var cmdConfigureInit = Command{
 	Description: `Idempotent setup + status command for laptop-level
 sparkwing config. Creates ~/.config/sparkwing/ if it doesn't exist,
 then reports which config files are present (config.yaml,
-secrets.env), the running CLI + Go toolchain version,
+secrets.key), the running CLI + Go toolchain version,
 and a curated list of next-step commands.
 
 Pairs with the per-project flow: use this one on a fresh laptop
@@ -3207,43 +3207,46 @@ the command that repairs them.`,
 
 var cmdSecret = Command{
 	Path:     "sparkwing secrets",
-	Synopsis: "Manage secrets (local dotenv or controller-stored)",
-	Description: `Without --profile, reads/writes the laptop dotenv at
-~/.config/sparkwing/secrets.env (masked) or
-~/.config/sparkwing/config.env (--plain), under
-$XDG_CONFIG_HOME/sparkwing when that variable is set. Used by jobs
-invoked through 'sparkwing run <pipeline>' locally.
+	Synopsis: "Manage secrets in this machine's local store or on a controller",
+	Description: `Without --profile, reads and writes this machine's local secret store:
+the secrets table of state.db in SPARKWING_HOME, which the sparkwing
+daemon serves on its API socket and starts when needed. Local runs,
+'sparkwing web' and these commands share it. Every value is sealed
+under the key in ~/.config/sparkwing/secrets.key
+($XDG_CONFIG_HOME/sparkwing when that variable is set), which the first
+stored secret creates; SPARKWING_SECRETS_KEY (base64 of 32 bytes)
+overrides the file and SPARKWING_SECRETS_KEY_FILE moves it. Set either
+in the environment the daemon starts in.
 
 With --profile PROF, reads/writes the named profile's controller.
 Used for prod / staging secrets that the cluster needs at run
 time. Pipelines declare a typed Secrets provider to resolve their secrets.
 'secrets list' masks values; 'secrets get' prints them.
 
-SPARKWING_HOME does not move the local files; it is the state, cache
-and logs root, and the local store is machine-wide. A write from a
-command running under a home of its own is refused rather than sent
-to the machine's store: set SPARKWING_SECRETS (masked) or
-SPARKWING_CONFIG_ENV (--plain) to a path inside that home to keep it
-there.`,
+A local run reads every local secret, including an unscoped one that
+is not shared, because the daemon answers this machine's own account
+as its administrator. The local store no longer reads secrets.env or
+config.env: the daemon imports each file once and leaves it in place.`,
 	SubcommandOrder: []string{"set", "get", "list", "delete", "rotate"},
 }
 
 var cmdSecretSet = Command{
 	Path:     "sparkwing secrets set",
 	Synopsis: "Store (or replace) a secret value",
-	Description: `Stores --value (or the contents of --file) in the local secret
-files when --profile is omitted, or uploads it to the named profile's
+	Description: `Stores --value (or the contents of --file) in the local secret store
+when --profile is omitted, or uploads it to the named profile's
 controller. Replaces any existing secret with that name.
 Prefer --file for long or multi-line values so the raw text
-does not land in shell history.`,
+does not land in shell history. A local secret without --pipeline is
+shared with every pipeline.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name (unique per controller)", Required: true, Group: "Input"},
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store a configuration value visible in run logs. Values are masked by default.", Group: "Input"},
-		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Scope the secret to one pipeline (controller only)", ConflictsWith: []string{"shared"}, Group: "Input"},
-		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret (controller only). Without --pipeline or --shared the secret answers admin callers only.", ConflictsWith: []string{"pipeline"}, Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Scope the secret to one pipeline", ConflictsWith: []string{"shared"}, Group: "Input"},
+		{Name: "shared", Type: FlagBool, Desc: "Let every run read this unscoped secret. On a controller, without --pipeline or --shared the secret answers admin callers only; locally it is always shared.", ConflictsWith: []string{"pipeline"}, Group: "Input"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for the local store)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -3258,13 +3261,13 @@ does not land in shell history.`,
 var cmdSecretGet = Command{
 	Path:     "sparkwing secrets get",
 	Synopsis: "Print a secret's raw value to stdout",
-	Description: `Reads local secret files when --profile is omitted, or the
+	Description: `Reads the local secret store when --profile is omitted, or the
 named profile's controller. Prints only the raw value (no trailing newline)
 so it can be piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
-		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Read the row owned by one pipeline (controller only); omit for the unscoped row", Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Read the row owned by one pipeline, falling back to the unscoped row", Group: "Input"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for the local store)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -3276,12 +3279,12 @@ so it can be piped into another command. Use 'secrets list' for metadata.`,
 var cmdSecretList = Command{
 	Path:     "sparkwing secrets list",
 	Synopsis: "List secret names + metadata",
-	Description: `Lists secret names and metadata from local files when --profile is omitted, or
-from the named profile's controller. Raw values are never printed by this
+	Description: `Lists secret names and metadata from the local secret store when --profile is
+omitted, or from the named profile's controller. Raw values are never printed by this
 command.`,
 	Flags: []FlagSpec{
 		{Name: "grep", Type: FlagString, Argument: "PATTERN", Desc: "Filter by name substring (case-sensitive)", Group: "Filter"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for the local store)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "System", "Other"},
 	Examples: []Example{
@@ -3294,13 +3297,13 @@ command.`,
 var cmdSecretDelete = Command{
 	Path:     "sparkwing secrets delete",
 	Synopsis: "Remove a secret",
-	Description: `Deletes the secret from local files when --profile is omitted, or from the
-named profile's controller. Pipelines that reference the name will fail to
+	Description: `Deletes the secret from the local secret store when --profile is omitted, or
+from the named profile's controller. Pipelines that reference the name will fail to
 resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
-		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Remove the row owned by one pipeline (controller only); omit for the unscoped row", Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
+		{Name: "pipeline", Type: FlagString, Argument: "NAME", Desc: "Remove the row owned by one pipeline; omit for the unscoped row", Group: "Input"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for the local store)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -3311,26 +3314,29 @@ resolve until the secret is re-added.`,
 
 var cmdSecretRotate = Command{
 	Path:     "sparkwing secrets rotate",
-	Synopsis: "Re-encrypt every stored secret under the controller's current key",
-	Description: `Reads every secret the named profile's controller holds and writes it
-back sealed under the key that controller is running with now, in one
-transaction. Run it after moving a controller onto a new key with the old
-one still configured as --secrets-previous-key-file
-(SPARKWING_SECRETS_PREVIOUS_KEY); drop the old key once a rotation reports
+	Synopsis: "Re-encrypt every stored secret under the current key",
+	Description: `Reads every secret the named profile's controller holds, or the local
+store without --profile, and writes it back sealed under the key that
+controller or this machine's daemon is running with now, in one
+transaction. Run it after moving onto a new key with the old one still
+configured as --secrets-previous-key-file or SPARKWING_SECRETS_PREVIOUS_KEY
+(locally: set SPARKWING_SECRETS_KEY and SPARKWING_SECRETS_PREVIOUS_KEY and
+run 'sparkwing daemon restart'); drop the old key once a rotation reports
 nothing skipped. A value the controller was holding as plaintext comes out
 encrypted too, which is how an existing install turns encryption on
 without re-setting each secret by hand.
 
 A row that opens under no configured key keeps the bytes it had and is
-listed by name; the rest of the table still rotates. The controller
+listed by name; the rest of the table still rotates. A controller
 refuses when it has no key configured. Values never leave it: the
 rotation opens and reseals them in place.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile naming the controller to rotate", Required: true, Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile naming the controller to rotate (omit for the local store)", Group: "System"},
 	},
 	GroupOrder: []string{"System", "Other"},
 	Examples: []Example{
 		{"Re-encrypt prod secrets under the current key", "sparkwing secrets rotate --profile prod"},
+		{"Re-encrypt local secrets after a key change", "sparkwing secrets rotate"},
 	},
 }
 
