@@ -99,6 +99,9 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** Queued runs retain the consumer's local daemon executable
+  A detached run can restart admission even when its captured PATH omits the CLI.
+
 - **daemon:** Keep queue ETA calculations from blocking health probes
   Concurrent queue readers share one calculation outside the daemon lock.
   The simulation computes each resource reservation once per queue scan.

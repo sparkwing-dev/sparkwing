@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
@@ -215,6 +216,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
+		wingdclient.HostBinEnv:      {},
 		"SPARKWING_RUN_HANDLE_FILE": {},
 		"SPARKWING_START_AT":        {}, "SPARKWING_STOP_AT": {}, "SPARKWING_ONLY": {},
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
@@ -238,6 +240,9 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		if _, denied := blocked[key]; !denied && key != "SPARKWING_HOME" {
 			out = append(out, entry)
 		}
+	}
+	if host, _, ok := wingdclient.ResolveHostBin(); ok {
+		out = append(out, wingdclient.HostBinEnv+"="+host)
 	}
 	return append(out, "SPARKWING_HOME="+home)
 }

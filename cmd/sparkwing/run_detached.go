@@ -135,9 +135,6 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 		}
 	}
 
-	// safety: the consumer's child resolves a daemon host from PATH, which is a
-	// different build whenever the launcher is not the installed sparkwing, so
-	// this hosts one from the launching binary first the way a foreground run does.
 	if runNeedsDaemon(wf, passthrough) {
 		ensureRunDaemonFn()
 	}
