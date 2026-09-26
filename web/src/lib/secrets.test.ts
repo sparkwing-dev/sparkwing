@@ -197,6 +197,18 @@ describe("listing", () => {
     assert.match(secrets.scopeLabel({}), /No runs/);
   });
 
+  it("labels a shared unscoped row by what it answers in local mode", () => {
+    assert.equal(
+      secrets.scopeLabel({ shared: true }, "local"),
+      "Every pipeline",
+    );
+    assert.equal(
+      secrets.scopeLabel({ pipeline: "deploy" }, "local"),
+      "Pipeline: deploy",
+    );
+    assert.match(secrets.scopeLabel({}, "local"), /No runs/);
+  });
+
   it("finds the row a draft would replace", () => {
     const rows = [row({ name: "A" }), row({ name: "A", pipeline: "p" })];
     const draft = {

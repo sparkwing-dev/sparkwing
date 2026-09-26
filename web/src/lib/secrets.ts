@@ -32,14 +32,25 @@ export interface SecretWriteBody {
   shared?: boolean;
 }
 
-export const scopeHelp =
-  "Scope a secret to a pipeline to limit which runs can read it. Team-wide rows answer every pipeline in the team. There is no per-repository scope because a run's repository name is supplied by whoever starts it.";
+// "local" is the dashboard `sparkwing web` serves with no accounts, where
+// the one built-in team is this machine, so the page drops team wording.
+export type SecretsAudience = "team" | "local";
+
+export const scopeHelp: Record<SecretsAudience, string> = {
+  team: "Scope a secret to a pipeline to limit which runs can read it. Team-wide rows answer every pipeline in the team. There is no per-repository scope because a run's repository name is supplied by whoever starts it.",
+  local:
+    "Stored in this machine's local sparkwing database. Scope a secret to a pipeline to limit which runs can read it; unscoped rows answer every pipeline run here.",
+};
 
 // An unscoped row that is not shared answers no run; the CLI can still write
 // one, so the page names it rather than calling it team-wide.
-export function scopeLabel(row: Pick<StoredSecret, "pipeline" | "shared">) {
+export function scopeLabel(
+  row: Pick<StoredSecret, "pipeline" | "shared">,
+  audience: SecretsAudience = "team",
+) {
   if (row.pipeline) return `Pipeline: ${row.pipeline}`;
-  return row.shared ? "Team" : "No runs (operator reads only)";
+  if (!row.shared) return "No runs (operator reads only)";
+  return audience === "local" ? "Every pipeline" : "Team";
 }
 
 export function rowKey(row: Pick<StoredSecret, "name" | "pipeline">): string {
