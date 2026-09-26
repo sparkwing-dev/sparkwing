@@ -1382,6 +1382,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		d.cancelPending[runID] = struct{}{}
 	}
 	d.mu.Unlock()
+	pid, known := peerPID(c.nc)
+	d.cfg.logf("cancel: run=%s peer_pid=%d peer_pid_known=%t affected=%s",
+		req.RunID, pid, known, strings.Join(affected, ","))
 
 	if d.cfg.Runs != nil {
 		if err := d.cfg.Runs.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {

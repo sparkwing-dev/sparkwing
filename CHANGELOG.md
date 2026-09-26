@@ -106,6 +106,8 @@ unlock.
 - **daemon:** concurrent clients share one starter while a missing socket comes
   online. The supervisor allows 30 seconds for startup and backs off repeated
   replacements, resetting its delay after sustained successful health probes.
+  Cancellation logs identify the requesting process on Linux and macOS and list
+  the affected run IDs.
 
 - **orchestrator:** Queued runs retain the consumer's local daemon executable
   A detached run can restart admission even when its captured PATH omits the CLI.
