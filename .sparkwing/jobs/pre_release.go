@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/mod/modfile"
 
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
-	actionlintCommand   = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
+	preReleaseRunTimeout = 120 * time.Minute
+	markdownlintCommand  = "npx --yes markdownlint-cli2@0.23.2"
+	actionlintCommand    = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
 	// safety: no --target-seconds, so a loaded builder records a slow
 	// measurement instead of reddening the release lane.
 	installToGreenCommand = "bash bin/install-to-green.sh --build --output json"
@@ -106,7 +108,7 @@ func (PreRelease) Examples() []sparkwing.Example {
 }
 
 func (preRelease *PreRelease) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, runContext sparkwing.RunContext) error {
-	sparkwing.Job(plan, runContext.Pipeline, preRelease)
+	sparkwing.Job(plan, runContext.Pipeline, preRelease).Timeout(preReleaseRunTimeout)
 	return nil
 }
 

@@ -21,7 +21,7 @@ jobs:
   gate:
     name: Canonical / ${{ matrix.gate }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.gate == 'pre-release' && 130 || 45 }}
     strategy:
       fail-fast: false
       matrix:

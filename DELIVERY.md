@@ -117,8 +117,9 @@ file. Other syntax and workflow checks remain active.
   over 828 tests rather than a few, so there is nothing to trim that fits it:
   the 25 slowest account for 17.4 s of the 186 s the suite takes without race.
   Left in, the step always times out, which is a check that cannot pass.
-  `pre-release` runs it instead, as `race-store`, where nothing bounds it to
-  30 minutes and no release ships past it. A Go step's own parallelism depends on who else holds the
+  `pre-release` runs it instead, as `race-store`, under a 120-minute node
+  deadline and a 130-minute hosted job deadline. The hosted `gate` job keeps
+  its 45-minute deadline. A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
   saturate a machine another gate is running on. A host that sets `CI` carries
   one gate and is discarded after it, so it holds nothing back for a neighbor
