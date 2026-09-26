@@ -103,6 +103,9 @@ unlock.
 
 ### Fixed
 
+- **store:** schema compatibility errors distinguish unsupported requirements
+  from conflicting version labels instead of recommending an installed release.
+
 - **daemon:** concurrent clients share one starter while a missing socket comes
   online. The supervisor allows 30 seconds for startup and backs off repeated
   replacements, resetting its delay after sustained successful health probes.
