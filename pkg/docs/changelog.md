@@ -103,6 +103,9 @@ unlock.
 
 ### Fixed
 
+- **ci:** read the pinned dashboard package manager version when setting up
+  hosted checks and release builds.
+
 - **ci:** accept waits inside `testing/synctest.Test` bodies while continuing
   to reject wall-clock waits outside them.
 
