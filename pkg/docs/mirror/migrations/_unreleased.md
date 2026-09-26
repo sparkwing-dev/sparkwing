@@ -31,6 +31,8 @@ Replace `--repo` with `--pipeline` in secret commands and `repo` with
 `pipeline` in secret API bodies and query parameters. Replace client methods
 `CreateSecretForRepo`, `GetSecretForRepo`, and `DeleteSecretForRepo` with their
 `ForPipeline` counterparts.
+The `POST /api/v1/secrets` body and OpenAPI `components.schemas.Secret`
+replace the `repo` property with `pipeline`.
 
 An old repository scope keeps its string value; the migration cannot choose
 the intended pipeline. Re-create each affected secret under its pipeline

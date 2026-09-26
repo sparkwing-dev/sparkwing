@@ -67,7 +67,7 @@ unlock.
   provisioned for the larger classes is unaffected.
 
 
-- **secrets (Breaking):** a secret is scoped by `--pipeline`, not `--repo`
+- **api + secrets (Breaking):** a secret is scoped by `--pipeline`, not `--repo`
   `sparkwing secrets set|get|delete` take `--pipeline NAME`, the API request
   and response fields are `pipeline`, and the `?repo=` query parameter on
   `GET`/`DELETE /api/v1/secrets/{name}` is `?pipeline=`. Client methods
