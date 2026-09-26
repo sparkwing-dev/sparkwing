@@ -552,7 +552,14 @@ func resolveSubmitRepo(ctx context.Context, pipeline, changeDir, pipelineRef str
 	}
 	if pipelineRef != "" {
 		dir, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
-		return strings.TrimSpace(dir), nil, err
+		if err != nil {
+			return "", nil, err
+		}
+		dir = strings.TrimSpace(dir)
+		if info, err := os.Stat(filepath.Join(dir, ".sparkwing", "sparkwing.yaml")); err != nil || info.IsDir() {
+			return "", nil, fmt.Errorf("execution checkout %s requires .sparkwing/sparkwing.yaml", dir)
+		}
+		return dir, nil, nil
 	}
 	if dir, declared, ok := localRepoDeclaring(start, pipeline); ok {
 		return dir, declared, nil
@@ -726,7 +733,7 @@ func emitSubmitResult(r submitResult, format string) error {
 			fmt.Fprintf(os.Stdout, "  logs:   %s\n", r.LogPath)
 		}
 		if r.ConsumerPID != 0 {
-			fmt.Fprintf(os.Stdout, "  runner: consumer pid %d (started %s); the run uses ITS environment, not this shell's\n",
+			fmt.Fprintf(os.Stdout, "  runner: consumer pid %d (started %s)\n",
 				r.ConsumerPID, r.ConsumerStarted)
 		}
 		fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --follow\n", r.RunID)

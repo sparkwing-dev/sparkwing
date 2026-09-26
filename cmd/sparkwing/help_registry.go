@@ -1697,7 +1697,7 @@ in. Address the run by that id afterwards:
   sparkwing runs logs   --run RUN_ID --follow
   sparkwing runs cancel --run RUN_ID
 
-Six flags are read only by a detached launch and are refused
+The following flags are read only by a detached launch and are refused
 without --sw-detached: --sw-pipeline-ref, --sw-idempotency-key,
 --sw-request-id, --sw-consumer-idle, --sw-consumer-claim-lease,
 and --sw-output,
@@ -1721,6 +1721,8 @@ ahead of the queue the run actually joins.
 
 --sw-pipeline-ref compiles the pipeline from another commit while
 the run executes in the checkout it was launched from.
+The execution checkout must retain .sparkwing/sparkwing.yaml;
+its pipeline source may be missing or unbuildable.
 The ref resolves when you
 launch; its tree is checked out only to compile and is removed when
 the run ends. It cannot be combined with --sw-ref.

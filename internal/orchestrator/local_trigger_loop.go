@@ -407,7 +407,6 @@ func triggerUsesParentRepo(trig *store.Trigger) bool {
 
 const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
 
-// PipelineRevKey and PipelineDirKey select compile source; SubmitRepoDirKey selects execution.
 const (
 	PipelineRevKey = retryprovenance.PipelineRevisionKey
 	PipelineDirKey = "_SPARKWING_SUBMIT_PIPELINE_DIR"

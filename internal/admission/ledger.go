@@ -1054,12 +1054,6 @@ func SoftCoresFit(cost, used, total, headroom int64) bool {
 		return false
 	}
 	effCores := min(total, headroom)
-	if used > effCores {
-		return false
-	}
-	if fitsCost(used, cost, effCores) {
-		return true
-	}
 	return used <= effCores
 }
 

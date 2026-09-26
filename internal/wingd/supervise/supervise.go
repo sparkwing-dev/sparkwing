@@ -38,11 +38,10 @@ type Child interface {
 }
 
 type Config struct {
-	ProbeInterval time.Duration
-	ProbeTimeout  time.Duration
-	FailureLimit  int
-	TermGrace     time.Duration
-	// StartupTimeout bounds how long a child may go without answering its first probe.
+	ProbeInterval  time.Duration
+	ProbeTimeout   time.Duration
+	FailureLimit   int
+	TermGrace      time.Duration
 	StartupTimeout time.Duration
 	// RestartBackoff doubles on each replacement up to MaxRestartBackoff, and resets once a child has stayed
 	// healthy for MaxRestartBackoff.
