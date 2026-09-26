@@ -213,3 +213,62 @@ func TestPathHonorsTheOverrideAndStaysInTheSandboxUnderTest(t *testing.T) {
 		t.Fatalf("Path = %q, %v", got, err)
 	}
 }
+
+func TestWriteRefusesToDropAnAnchorAnAliasElsewhereUses(t *testing.T) {
+	body := "fleet: &shared\n  listen: a\nagent: *shared\n"
+	path := writeFile(t, body)
+	err := Write(path, Fleet, "the fleet config", map[string]string{"listen": "b"})
+	if err != nil {
+		t.Fatalf("an update that keeps the anchored node failed: %v", err)
+	}
+	var agent map[string]string
+	if _, err := Read(path, Agent, &agent); err != nil || agent["listen"] != "b" {
+		t.Fatalf("agent = %v, %v; want the alias still resolving", agent, err)
+	}
+
+	path = writeFile(t, "fleet:\n  inner: &shared\n    listen: a\nagent: *shared\n")
+	before := readBack(t, path)
+	err = Write(path, Fleet, "the fleet config", map[string]string{"listen": "b"})
+	if err == nil || !strings.Contains(err.Error(), "&shared") {
+		t.Fatalf("Write error = %v, want a refusal naming the anchor", err)
+	}
+	if after := readBack(t, path); after != before {
+		t.Fatalf("a refused write changed the file:\n%s", after)
+	}
+}
+
+func TestWriteKeepsCommentsInsideTheRewrittenSection(t *testing.T) {
+	path := writeFile(t, "profiles:\n  # production\n  prod:\n    controller:\n      url: http://a # the old one\n  # lab\n  lab: {}\n")
+	if err := Write(path, Profiles, "profiles", map[string]any{
+		"prod": map[string]any{"controller": map[string]any{"url": "http://b"}},
+		"lab":  map[string]any{},
+		"new":  map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := readBack(t, path)
+	for _, want := range []string{"# production", "url: http://b # the old one", "# lab", "new: {}"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rewritten section lacks %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestWriteToACommentOnlyFileKeepsTheComment(t *testing.T) {
+	path := writeFile(t, "# this machine's settings\n")
+	if err := Write(path, Fleet, "the fleet config", fleetish{Listen: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if body := readBack(t, path); !strings.Contains(body, "# this machine's settings") || !strings.Contains(body, "listen: x") {
+		t.Fatalf("file = %q", body)
+	}
+}
+
+func readBack(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}

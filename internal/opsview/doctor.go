@@ -123,11 +123,11 @@ type DoctorReport struct {
 	StandaloneStores []DoctorStandaloneStore `json:"standalone_stores,omitempty"`
 
 	// LegacySettings are settings files config.yaml replaced that are still in
-	// the config directory after doctor's migration attempt, and replaced path
-	// variables still set.
+	// the config directory after doctor's copy into config.yaml, each marked
+	// copied or not, and replaced path variables still set.
 	LegacySettings []userconfig.Leftover `json:"legacy_settings,omitempty"`
 
-	// LegacySettingsError is why the migration left them.
+	// LegacySettingsError is why a file was not copied.
 	LegacySettingsError string `json:"legacy_settings_error,omitempty"`
 }
 
@@ -306,7 +306,22 @@ func (r DoctorReport) Clean() bool {
 		len(r.PoisonedProfiles) == 0 &&
 		r.InstallConflict == nil &&
 		r.ShadowedHooks == nil &&
-		len(r.LegacySettings) == 0
+		!r.LegacySettingsPending()
+}
+
+// LegacySettingsPending reports a legacy file config.yaml has not taken, a
+// replaced path variable still set, or a failed copy. A copied file left in
+// place is not pending: older binaries may still read it.
+func (r DoctorReport) LegacySettingsPending() bool {
+	if r.LegacySettingsError != "" {
+		return true
+	}
+	for _, l := range r.LegacySettings {
+		if !l.Copied {
+			return true
+		}
+	}
+	return false
 }
 
 func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
@@ -1573,6 +1588,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if r.Clean() {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
+		renderLegacySettings(w, r)
 		renderDaemonSection(w, r)
 		renderMachineBudget(w, r)
 		renderToolchains(w, r)
@@ -1858,17 +1874,31 @@ func renderInstallConflict(w io.Writer, r DoctorReport) {
 }
 
 func renderLegacySettings(w io.Writer, r DoctorReport) {
-	if len(r.LegacySettings) == 0 {
-		return
-	}
-	fmt.Fprintf(w, "\nwarning: %d legacy setting(s) sparkwing no longer reads; each belongs in config.yaml\n", len(r.LegacySettings))
+	var pending, copied []userconfig.Leftover
 	for _, l := range r.LegacySettings {
-		fmt.Fprintf(w, "  %s -> %s\n", l.Name, l.MovesTo)
+		if l.Copied {
+			copied = append(copied, l)
+		} else {
+			pending = append(pending, l)
+		}
 	}
-	if r.LegacySettingsError != "" {
-		fmt.Fprintf(w, "  %s\n", strings.ReplaceAll(r.LegacySettingsError, "\n", "\n  "))
-	} else if r.DryRun {
-		fmt.Fprintln(w, "  doctor without --dry-run moves each file into config.yaml")
+	if len(pending) > 0 || r.LegacySettingsError != "" {
+		fmt.Fprintf(w, "\nwarning: %d legacy setting(s) not yet in config.yaml\n", len(pending))
+		for _, l := range pending {
+			fmt.Fprintf(w, "  %s -> %s\n", l.Name, l.MovesTo)
+		}
+		if r.LegacySettingsError != "" {
+			fmt.Fprintf(w, "  %s\n", strings.ReplaceAll(r.LegacySettingsError, "\n", "\n  "))
+		} else if r.DryRun {
+			fmt.Fprintln(w, "  doctor without --dry-run copies each file into config.yaml")
+		}
+	}
+	if len(copied) > 0 {
+		fmt.Fprintf(w, "\nnotice: %d legacy settings file(s) already copied into config.yaml and no longer read by this sparkwing\n", len(copied))
+		for _, l := range copied {
+			fmt.Fprintf(w, "  %s\n", l.Name)
+		}
+		fmt.Fprintln(w, "  delete each once no older sparkwing binary on this machine still reads it")
 	}
 }
 

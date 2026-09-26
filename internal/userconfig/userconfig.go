@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -67,7 +68,7 @@ func Path() (string, error) {
 // declare, an unknown section, or a second YAML document is an error.
 func Read(path, section string, out any) (bool, error) {
 	path = legacyRedirect(path)
-	if err := migrateLegacy(path); err != nil {
+	if err := migrateLegacy(path, section); err != nil {
 		return false, err
 	}
 	data, err := readFile(path)
@@ -82,7 +83,7 @@ func Read(path, section string, out any) (bool, error) {
 // the section's shape before decoding it.
 func Node(path, section string) (*yaml.Node, error) {
 	path = legacyRedirect(path)
-	if err := migrateLegacy(path); err != nil {
+	if err := migrateLegacy(path, section); err != nil {
 		return nil, err
 	}
 	data, err := readFile(path)
@@ -136,7 +137,7 @@ func update(path, section, what string, out, value any, change func(found bool) 
 		return err
 	}
 	defer unlock()
-	if err := migrateLegacyLocked(path); err != nil {
+	if err := migrateLegacyLocked(path, section); err != nil {
 		return err
 	}
 
@@ -165,6 +166,14 @@ func update(path, section, what string, out, value any, change func(found bool) 
 		return fmt.Errorf("encode the %s section: %w", section, err)
 	}
 	setSection(root, section, &encoded)
+	return writeDoc(path, section, doc)
+}
+
+func writeDoc(path, section string, doc *yaml.Node) error {
+	if anchor := danglingAlias(doc); anchor != "" {
+		return fmt.Errorf("%s: an alias elsewhere in the file refers to the anchor &%s, which the rewritten %s section no longer defines; "+
+			"replace that alias with its value, then run this again", path, anchor, section)
+	}
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
@@ -175,6 +184,34 @@ func update(path, section, what string, out, value any, change func(found bool) 
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	return replace(path, buf.Bytes())
+}
+
+// safety: a node's identity, not its anchor name, decides reachability, so an
+// alias whose anchor node was replaced counts as dangling even if the name recurs.
+func danglingAlias(doc *yaml.Node) string {
+	present := map[*yaml.Node]bool{}
+	var aliases []*yaml.Node
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n == nil || present[n] {
+			return
+		}
+		present[n] = true
+		if n.Kind == yaml.AliasNode {
+			aliases = append(aliases, n)
+			return
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(doc)
+	for _, a := range aliases {
+		if a.Alias != nil && !present[a.Alias] {
+			return a.Alias.Anchor
+		}
+	}
+	return ""
 }
 
 func knownSection(section string) error {
@@ -217,7 +254,9 @@ func parseDoc(path string, data []byte) (*yaml.Node, *yaml.Node, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(doc); err != nil {
 		if errors.Is(err, io.EOF) {
-			return &yaml.Node{Kind: yaml.DocumentNode}, nil, nil
+			// safety: yaml reports a comment-only file as empty, so its text is
+			// carried as the document's comment rather than dropped on write.
+			return &yaml.Node{Kind: yaml.DocumentNode, HeadComment: strings.TrimRight(string(data), "\n")}, nil, nil
 		}
 		return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -307,8 +346,8 @@ func lookup(root *yaml.Node, section string) (*yaml.Node, *yaml.Node) {
 	return nil, nil
 }
 
-// safety: an existing section keeps its key node, and with it the comment
-// above the section.
+// safety: an existing section keeps its key node and is merged rather than
+// replaced, so comments, styles and anchors on the keys that survive stay put.
 func setSection(root *yaml.Node, section string, value *yaml.Node) {
 	empty := value.Kind == 0 ||
 		(value.Kind == yaml.ScalarNode && value.Tag == "!!null") ||
@@ -321,7 +360,7 @@ func setSection(root *yaml.Node, section string, value *yaml.Node) {
 			root.Content = append(root.Content[:i], root.Content[i+2:]...)
 			return
 		}
-		root.Content[i+1] = value
+		root.Content[i+1] = mergeNode(root.Content[i+1], value)
 		return
 	}
 	if empty {
@@ -329,6 +368,63 @@ func setSection(root *yaml.Node, section string, value *yaml.Node) {
 	}
 	root.Content = append(root.Content,
 		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: section}, value)
+}
+
+// hack: keys prev and next share keep prev's nodes, updated in place, which is
+// what carries their comments, styles and anchors through a rewrite.
+func mergeNode(prev, next *yaml.Node) *yaml.Node {
+	if prev == nil || prev.Kind != next.Kind || prev.Kind == yaml.AliasNode {
+		return next
+	}
+	switch next.Kind {
+	case yaml.ScalarNode:
+		if prev.Value == next.Value && prev.Tag == next.Tag {
+			return prev
+		}
+		next.HeadComment, next.LineComment, next.FootComment = prev.HeadComment, prev.LineComment, prev.FootComment
+		return next
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(prev.Content); i += 2 {
+			if prev.Content[i].Value == "<<" {
+				return next
+			}
+		}
+		merged := make([]*yaml.Node, 0, len(next.Content))
+		for i := 0; i+1 < len(next.Content); i += 2 {
+			key, val := next.Content[i], next.Content[i+1]
+			if prevKey, prevVal := lookup(prev, key.Value); prevKey != nil {
+				key, val = prevKey, mergeNode(prevVal, val)
+			}
+			merged = append(merged, key, val)
+		}
+		prev.Content = merged
+		return prev
+	case yaml.SequenceNode:
+		// safety: items match by value, not position, so removing one entry
+		// does not shift the comments of the rest onto their neighbors.
+		used := make([]bool, len(prev.Content))
+		merged := make([]*yaml.Node, len(next.Content))
+		for i, item := range next.Content {
+			merged[i] = item
+			for j, old := range prev.Content {
+				if !used[j] && equalNode(old, item) {
+					used[j], merged[i] = true, old
+					break
+				}
+			}
+		}
+		prev.Content = merged
+		return prev
+	}
+	return next
+}
+
+func equalNode(a, b *yaml.Node) bool {
+	var av, bv any
+	if a.Decode(&av) != nil || b.Decode(&bv) != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // safety: a random name plus O_EXCL keeps a pre-created path from receiving a
@@ -365,7 +461,27 @@ func replace(path string, body []byte) (retErr error) {
 	if err := os.Rename(tmpPath, path); err != nil {
 		return fmt.Errorf("rename %s: %w", tmpPath, err)
 	}
-	return fssecure.SecurePrivateConfig(path)
+	if err := fssecure.SecurePrivateConfig(path); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// safety: the rename is durable only once the directory entry is, so a crash
+// after a write reports success cannot bring the old file back.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return fmt.Errorf("sync %s: %w", dir, err)
+	}
+	return d.Close()
 }
 
 // safety: the lock sits beside the file rather than on it, because the write

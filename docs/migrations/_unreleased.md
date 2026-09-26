@@ -19,17 +19,23 @@ instead of one file per setting. Each old file becomes a section:
 by the local secret store in `state.db`; see
 [Local secrets in state.db](#local-secrets-in-statedb).
 
-**Automatic move.** The first command that reads or writes settings moves
-each old file it finds into its section, writes `config.yaml` owner-only,
-then renames the old file to `<name>.migrated` and prints one line for it.
-Each file must pass its section's own validation first; one that fails stays
-in place and the command fails naming it. When `config.yaml` already holds a
-different value for that section, nothing moves and the command names both;
-keep the value you want in `config.yaml` and delete the old file. A
-`profiles.yaml` key other than `profiles:`, such as the `default:` older
-releases wrote, had no effect and is left out. `sparkwing doctor` moves the
-files too and lists any it could not. The automatic move will be removed in a
-later release; after that, an old file is ignored.
+**Automatic copy.** The first command that reads or writes settings copies
+each old file it finds into its section of `config.yaml`, written owner-only,
+and prints one line for it. The old file stays where it is, untouched, so an
+older sparkwing binary on the same machine (an installed release beside a new
+build, a runner service started with `--config .../agent.yaml`, a running
+daemon) keeps reading it, and rolling back loses nothing. Once `config.yaml`
+has a section, the matching old file is ignored whether or not the two agree;
+edit `config.yaml` from then on, and delete each old file once no older
+binary needs it. A file that fails its section's own validation is not
+copied, and only commands that read that section fail, naming the file and
+the key to remove. A `profiles.yaml` key other than `profiles:`, such as the
+`default:` older releases wrote, had no effect and is left out. The copy runs
+only into the machine's own `config.yaml`, never into a file
+`SPARKWING_CONFIG` names, and is skipped with a warning under a sandboxed
+`SPARKWING_HOME`. `sparkwing doctor` copies too, and lists old files already
+copied (safe to delete) apart from any it could not copy. The automatic copy
+will be removed in a later release; after that, an old file is ignored.
 
 Before:
 
@@ -78,11 +84,11 @@ keys; fix any the move reports.
 **Runners.** `sparkwing-runner agent --config PATH` and
 `sparkwing cluster runners add|remove --config PATH` now name a `config.yaml`
 and use its `agent` section. A service unit written by an older
-`runners add` still passes `--config .../agent.yaml`; until the automatic move
+`runners add` still passes `--config .../agent.yaml`; until the automatic copy
 is removed, sparkwing reads `config.yaml` in its place and says so. Edit the
 unit's `--config` to the `config.yaml` path before then. `install/service-install.sh`
-writes a new `config.yaml` and refuses when one exists; use
-`sparkwing cluster runners add` on a machine that already has settings.
+adds the `agent` section to `config.yaml`, keeping the file's other sections,
+and refuses when an `agent` section already exists.
 
 **Daemon flag.** The internal `sparkwing wingd run --admission-config` flag is
 gone; the daemon reads the `admission` section.

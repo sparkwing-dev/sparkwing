@@ -66,10 +66,11 @@ The file carries credentials, so sparkwing reads it only as an owner-only
 regular file (mode `0600` on Unix) and refuses a symlink. A command that writes
 settings rewrites only its own section: it takes a lock beside the file
 (`config.yaml.lock`), reads the file, replaces that section, and renames a
-complete owner-only copy over the original. Other sections and the comments
-outside the rewritten section survive, and two commands writing different
-sections at once both land. Comments inside the rewritten section do not
-survive the rewrite.
+complete owner-only copy over the original. Other sections and their comments
+survive, and two commands writing different sections at once both land. Within
+the rewritten section, a key that survives keeps its comments; a removed key
+takes its comments with it. A write that would remove an anchor an alias in
+another section uses is refused, naming the anchor.
 
 A command running under a `SPARKWING_HOME` of its own refuses to write the
 machine's `config.yaml`; point `SPARKWING_CONFIG` at a file inside that home to
@@ -141,11 +142,12 @@ machine's files. This automatic import will be removed in a later release.
 ## Moving from the per-file settings
 
 Before `config.yaml`, each section was its own file in the config directory.
-Sparkwing moves any it finds into `config.yaml` automatically, the first time a
-command reads or writes settings, and keeps each original as
-`<name>.migrated`. This automatic move will be removed in a later release; the
-migration guide (`sparkwing docs search --query config.yaml`) shows the manual
-move.
+Sparkwing copies any it finds into `config.yaml` automatically, the first time a
+command reads or writes settings, and leaves each original in place so older
+sparkwing binaries on the machine keep reading it. Once `config.yaml` has the
+section, the original is ignored; delete it when no older binary needs it. This
+automatic copy will be removed in a later release; the migration guide
+(`sparkwing docs search --query config.yaml`) shows the manual move.
 
 | Old file | Section of config.yaml |
 |---|---|
@@ -156,10 +158,11 @@ move.
 | `profiles.yaml` | `profiles` (the file's `profiles:` map) |
 | `repos.yaml` | `repos` (same keys) |
 
-The move checks each file with its section's own validation first and leaves a
-file that fails in place, naming the error. When `config.yaml` already has a
-different value in that section, the move changes nothing and names both, so
-you choose which one stays. `SPARKWING_PROFILES`, `SPARKWING_REPOS` and
-`SPARKWING_FLEET_CONFIG` no longer move anything; a command refuses to start
-while one is set. `sparkwing doctor` lists any old file or variable still in
-place.
+The copy checks each file with its section's own validation first. A file that
+fails is not copied, and only reads of that section fail, naming the file and
+the key to remove. The copy goes only into the machine's own `config.yaml`,
+never into a file `SPARKWING_CONFIG` names, and is skipped with a warning
+under a sandboxed `SPARKWING_HOME`. `SPARKWING_PROFILES`, `SPARKWING_REPOS`
+and `SPARKWING_FLEET_CONFIG` no longer move anything; a command refuses to
+start while one is set. `sparkwing doctor` lists old files already copied,
+which are safe to delete, apart from any it could not copy.

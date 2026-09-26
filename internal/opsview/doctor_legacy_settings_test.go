@@ -9,6 +9,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
+func TestRenderDoctor_ACopiedLegacyFileIsANoticeNotARepair(t *testing.T) {
+	report := opsview.DoctorReport{LegacySettings: []userconfig.Leftover{
+		{Name: "/home/op/.config/sparkwing/fleet.yaml", MovesTo: "the fleet section of config.yaml", Copied: true},
+	}}
+	if !report.Clean() {
+		t.Fatal("a copied legacy file left for older binaries made the report unclean")
+	}
+	var pretty bytes.Buffer
+	if err := opsview.RenderDoctor(&pretty, report, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"notice: 1 legacy settings file(s) already copied", "/home/op/.config/sparkwing/fleet.yaml", "delete each once"} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Errorf("pretty output lacks %q:\n%s", want, pretty.String())
+		}
+	}
+}
+
 func TestRenderDoctor_NamesLegacySettingsAndWhereTheyBelong(t *testing.T) {
 	report := opsview.DoctorReport{
 		LegacySettings: []userconfig.Leftover{

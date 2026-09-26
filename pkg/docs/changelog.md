@@ -709,8 +709,9 @@ unlock.
   `SPARKWING_REPOS` and `SPARKWING_FLEET_CONFIG`, which now refuse to start a
   command. Commands that write settings rewrite only their own section under
   a lock, keeping the others and their comments. The first command that reads
-  settings moves each old file into its section and keeps the original as
-  `<name>.migrated`; this automatic move will be removed in a later release.
+  settings copies each old file into its section and leaves the original in
+  place for older binaries; once the section exists the original is ignored
+  and can be deleted. This automatic copy will be removed in a later release.
   The internal `wingd run --admission-config` flag is gone. See
   [One config.yaml for machine settings](docs/migrations/_unreleased.md#one-configyaml-for-machine-settings).
 - **cli + orchestrator (Breaking):** Local secrets move from

@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func budgetEnvSandbox(t *testing.T) string {
@@ -163,7 +161,7 @@ func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	}
 }
 
-func TestResolveBudget_MovesALegacyBudgetFileIntoConfig(t *testing.T) {
+func TestResolveBudget_CopiesALegacyBudgetFileIntoConfig(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	t.Setenv("SPARKWING_HOME", filepath.Dir(filepath.Dir(filepath.Dir(path))))
 	legacy := filepath.Join(filepath.Dir(path), "budget")
@@ -176,8 +174,8 @@ func TestResolveBudget_MovesALegacyBudgetFileIntoConfig(t *testing.T) {
 	if got.Budget.Cores != 6 || !got.Budget.Enforce || got.Source != BudgetSourceConfig {
 		t.Fatalf("budget = %+v from %q, want the legacy file's 6,enforce from config.yaml", got.Budget, got.Source)
 	}
-	if _, err := os.Stat(legacy + userconfig.MigratedSuffix); err != nil {
-		t.Fatalf("the legacy file was not set aside: %v", err)
+	if body, err := os.ReadFile(legacy); err != nil || !strings.Contains(string(body), "6,enforce") {
+		t.Fatalf("the legacy file = %q, %v; want it left in place for older binaries", body, err)
 	}
 }
 

@@ -120,7 +120,7 @@ func runRunnersAdd(args []string) error {
 	fmt.Printf("minted runner token %s for %s on profile %s\n", minted.Prefix, principal, prof.Name)
 	cfg.Token = minted.Raw
 
-	if err := finishRunnerEnrollment(path, cfg, service); err != nil {
+	if err := finishRunnerEnrollment(path, cfg, *force, service); err != nil {
 		printRunnerRevokeHint(prof.Name, minted.Prefix)
 		return err
 	}
@@ -134,8 +134,8 @@ func runRunnersAdd(args []string) error {
 	return nil
 }
 
-func finishRunnerEnrollment(path string, cfg agentFileConfig, service runnerServicePlan) error {
-	if err := writeAgentConfig(path, cfg); err != nil {
+func finishRunnerEnrollment(path string, cfg agentFileConfig, force bool, service runnerServicePlan) error {
+	if err := writeAgentConfig(path, cfg, force); err != nil {
 		return err
 	}
 	fmt.Printf("wrote the agent section of %s (mode 0600)\n", path)
@@ -299,11 +299,24 @@ func checkAgentConfigAbsent(path string, force bool) error {
 	if err != nil || section == nil || force {
 		return err
 	}
+	return errAgentSectionExists(path)
+}
+
+func errAgentSectionExists(path string) error {
 	return fmt.Errorf("%s already has an agent section; pass --force to replace it (its token stays live until you revoke it)", path)
 }
 
-func writeAgentConfig(path string, cfg agentFileConfig) error {
-	return userconfig.Write(path, userconfig.Agent, "the agent config", cfg)
+// safety: the absence check repeats under the settings lock, so a second
+// enrollment racing this one cannot overwrite the section it wrote.
+func writeAgentConfig(path string, cfg agentFileConfig, force bool) error {
+	var section yaml.Node
+	return userconfig.Update(path, userconfig.Agent, "the agent config", &section, func(found bool) error {
+		if found && !force {
+			return errAgentSectionExists(path)
+		}
+		section = yaml.Node{}
+		return section.Encode(cfg)
+	})
 }
 
 func profileLogsURL(p *profile.Profile) string {
