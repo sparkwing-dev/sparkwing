@@ -219,6 +219,10 @@ func (p *Deploy) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwing.No
 }
 ```
 
+A skipped job satisfies `Needs`, so dependent jobs can still run. If skipping
+preparation must also skip its dependents, apply the predicate to those jobs
+or to a `JobGroup` containing them.
+
 To gate the whole pipeline instead of one job, use a `guards:` block (see
 below).
 
