@@ -33,6 +33,8 @@ Replace `--repo` with `--pipeline` in secret commands and `repo` with
 `ForPipeline` counterparts.
 The `POST /api/v1/secrets` body and OpenAPI `components.schemas.Secret`
 replace the `repo` property with `pipeline`.
+The `POST /api/v1/secrets/rotate` response makes the same replacement in
+each `skipped` item.
 
 An old repository scope keeps its string value; the migration cannot choose
 the intended pipeline. Re-create each affected secret under its pipeline
