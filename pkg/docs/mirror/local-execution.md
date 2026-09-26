@@ -1453,8 +1453,10 @@ bounded rather than growing one file forever. The rotation copies the
 log aside and empties it in place rather than renaming it, so the
 daemon, the supervisor watching it, and anything else already writing
 to `d.log` all keep writing to `d.log`. Only the previous stretch is
-kept, so copy a dump you care about out of `d.log` before asking for
-several more.
+kept. The latest dump is also saved to `d.log.stacks` with its timestamp
+and daemon summary. That file is replaced atomically by the next dump;
+operational log rotation leaves it intact. Copy it before requesting
+another dump if you need to keep both.
 
 ### Capping sparkwing's share of the machine
 

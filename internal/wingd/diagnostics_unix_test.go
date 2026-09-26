@@ -17,10 +17,12 @@ import (
 )
 
 func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
+	home := t.TempDir()
+	seedOversizedLog(t, home)
 	var mu sync.Mutex
 	var lines []string
 	d := &Daemon{
-		cfg: Config{Version: "v0.0.0-test", Logf: func(format string, args ...any) {
+		cfg: Config{Home: home, Version: "v0.0.0-test", Logf: func(format string, args ...any) {
 			mu.Lock()
 			defer mu.Unlock()
 			lines = append(lines, format)

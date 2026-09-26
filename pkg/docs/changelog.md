@@ -103,6 +103,9 @@ unlock.
 
 ### Fixed
 
+- **daemon:** preserve the latest diagnostic stack dump in `d.log.stacks`
+  so operational log rotation cannot erase it.
+
 - **daemon:** queue explanations use soft CPU admission rules for estimated
   demands, so a semaphore or memory wait no longer reports a false core shortage.
 

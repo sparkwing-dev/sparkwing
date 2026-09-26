@@ -34,29 +34,33 @@ func writeStateWithCancellations(path string, snap admission.Snapshot, events []
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}
+	return writeAtomicFile(path, data)
+}
+
+func writeAtomicFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".state-*.tmp")
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
 	if err != nil {
-		return fmt.Errorf("wingd: temp state: %w", err)
+		return fmt.Errorf("wingd: temp %s: %w", path, err)
 	}
 	tmpName := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("wingd: write state: %w", err)
+		return fmt.Errorf("wingd: write %s: %w", path, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("wingd: sync state: %w", err)
+		return fmt.Errorf("wingd: sync %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("wingd: close state: %w", err)
+		return fmt.Errorf("wingd: close %s: %w", path, err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		_ = os.Remove(tmpName)
-		return fmt.Errorf("wingd: rename state: %w", err)
+		return fmt.Errorf("wingd: rename %s: %w", path, err)
 	}
 	if err := syncStateDirectory(dir); err != nil {
 		return err
