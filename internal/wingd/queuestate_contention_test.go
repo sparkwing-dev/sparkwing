@@ -42,7 +42,7 @@ func TestDeepQueueEstimateLeavesDaemonLockAvailable(t *testing.T) {
 	start := time.Now()
 	go func() {
 		d.mu.Lock()
-		d.mu.Unlock()
+		d.mu.Unlock() //nolint:staticcheck // This empty critical section measures contention for the daemon lock.
 		acquired <- time.Since(start)
 	}()
 	if delay := <-acquired; delay > 100*time.Millisecond {

@@ -584,7 +584,7 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 		if revision := triggerEnv[retryprovenance.PipelineRevisionKey]; revision != "" {
 			env[retryprovenance.PipelineRevisionKey] = revision
 		}
-		raw, _ := json.Marshal(env)
+		raw, _ := json.Marshal(env) //nolint:errcheck // String maps contain no unsupported JSON values.
 		return raw, ""
 	}
 	if strings.HasPrefix(triggerSource, "pipeline-working-tree@") || (repoURL == "" && (githubOwner == "" || githubRepo == "")) {

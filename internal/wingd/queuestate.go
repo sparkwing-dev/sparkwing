@@ -18,6 +18,7 @@ func stallRecoveryCommand(runID string) string {
 // perf: ETA simulation can outlast a health probe on a deep queue. Only the snapshot
 // holds d.mu. Concurrent readers share the returned slices; callers must leave them unchanged.
 func (d *Daemon) readQueueState() wingwire.QueueState {
+	//nolint:errcheck // The callback always returns a nil error.
 	result, _, _ := d.queueStateReads.Do("", func() (any, error) {
 		d.mu.Lock()
 		qs, snap := d.buildQueueStateLocked()

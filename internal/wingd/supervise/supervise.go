@@ -88,8 +88,10 @@ func Loop(ctx context.Context, cfg Config, deps Deps) error {
 	}
 	var backoff time.Duration
 	for {
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
 		child, err := deps.Start()
 		if err != nil {
@@ -109,20 +111,20 @@ func Loop(ctx context.Context, cfg Config, deps Deps) error {
 		if deps.Logf != nil {
 			deps.Logf("starting a replacement daemon in %s", backoff)
 		}
-		if err := sleepContext(ctx, backoff); err != nil {
+		if !sleepContext(ctx, backoff) {
 			return nil
 		}
 	}
 }
 
-func sleepContext(ctx context.Context, d time.Duration) error {
+func sleepContext(ctx context.Context, d time.Duration) bool {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return false
 	case <-timer.C:
-		return nil
+		return true
 	}
 }
 

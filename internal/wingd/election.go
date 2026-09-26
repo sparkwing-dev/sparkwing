@@ -118,7 +118,6 @@ func ClaimDaemonStart(home string) (release func(), claimed bool, err error) {
 		return nil, false, err
 	}
 	return func() {
-		_ = flockUnlock(f)
 		_ = f.Close()
 	}, true, nil
 }
