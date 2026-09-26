@@ -26,7 +26,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing repos`](cli-repos.md) -- The machine's fleet of sparkwing repos and their SDK pins
 - [`sparkwing run`](cli-run.md) -- Invoke a pipeline
 - [`sparkwing runs`](cli-runs.md) -- Inspect and control pipeline runs
-- [`sparkwing secrets`](cli-secrets.md) -- Manage secrets (local dotenv or controller-stored)
+- [`sparkwing secrets`](cli-secrets.md) -- Manage secrets in this machine's local store or on a controller
 - [`sparkwing serve`](cli-serve.md) -- Manage the local dashboard + API server
 - [`sparkwing update`](cli-update.md) -- Update the CLI binary or this project's SDK pin
 - [`sparkwing version`](cli-version.md) -- Inspect versions (CLI, SDK, sparks)

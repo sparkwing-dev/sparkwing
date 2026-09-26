@@ -139,7 +139,7 @@ build surface a clear error at run start ("type X is recognized but
 not implemented in this build") instead of silently falling back.
 
 The fourth surface, `secrets`, names where `sparkwing.Secret` values
-resolve from (laptop dotenv or controller-stored); see
+resolve from (this machine's local secret store or controller-stored); see
 [security.md](security.md).
 
 ## Per-pipeline backend selection
