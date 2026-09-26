@@ -417,3 +417,32 @@ func TestDotted(t *testing.T) {
 		t.Fatalf("findings = %v, want the file refused; an unqualified Sleep is invisible to this walk", got)
 	}
 }
+
+func TestCheckFile_AllowsOnlySynctestBodies(t *testing.T) {
+	for _, alias := range []string{"synctest", "fake"} {
+		src := `package widget
+import (
+ "testing"
+ "time"
+ ` + alias + ` "testing/synctest"
+)
+func TestWait(t *testing.T) {
+ time.Sleep(time.Second)
+ ` + alias + `.Test(func() *testing.T { time.Sleep(time.Second); return t }(), func(t *testing.T) {
+  time.Sleep(time.Hour)
+  if time.Since(time.Now()) < time.Second { <-time.After(time.Second) }
+ })
+ time.Sleep(time.Second)
+}
+`
+		got := checkSource(t, src)
+		if len(got) != 3 {
+			t.Fatalf("alias %s: findings = %v, want the three waits outside the fake clock", alias, got)
+		}
+		for _, finding := range got {
+			if finding.line != 8 && finding.line != 9 && finding.line != 13 {
+				t.Errorf("unexpected finding: %v", finding)
+			}
+		}
+	}
+}
