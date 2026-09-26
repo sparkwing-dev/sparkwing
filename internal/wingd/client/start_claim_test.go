@@ -71,7 +71,7 @@ func TestClientRetriesWhenAnotherStarterReleasesItsClaim(t *testing.T) {
 	release()
 	select {
 	case <-spawned:
-	case <-time.After(time.Second):
+	case <-ctx.Done():
 		t.Fatal("client kept waiting after the startup claim was released")
 	}
 	cancel()

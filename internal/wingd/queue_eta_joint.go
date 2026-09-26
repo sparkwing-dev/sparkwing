@@ -422,7 +422,6 @@ func (s *etaSimulation) reserve(waiter *etaRun, reservations map[string]uint64) 
 			cost, _ := etaResourceCost(holder, resource)
 			used = saturatingAddUint64(used, cost)
 		}
-		// Reservations use recovered capacity, matching the admission ledger.
 		var remaining uint64
 		if used < limits.recovered {
 			remaining = limits.recovered - used

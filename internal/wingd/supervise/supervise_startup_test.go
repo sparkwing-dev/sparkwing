@@ -11,51 +11,53 @@ import (
 )
 
 func TestASlowStartingDaemonIsNotReplaced(t *testing.T) {
-	child := newSupervisorTestChild()
-	var starts, probes atomic.Int32
-	answering := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		done <- Loop(ctx, Config{
-			ProbeInterval:     time.Millisecond,
-			ProbeTimeout:      time.Millisecond,
-			FailureLimit:      2,
-			TermGrace:         time.Millisecond,
-			StartupTimeout:    time.Minute,
-			RestartBackoff:    time.Millisecond,
-			MaxRestartBackoff: time.Millisecond,
-		}, Deps{
-			Start: func() (Child, error) {
-				starts.Add(1)
-				return child, nil
-			},
-			Probe: func(context.Context) error {
-				switch n := probes.Add(1); {
-				case n <= 20:
-					return errors.New("still opening the store")
-				case n == 21:
-					close(answering)
-				}
-				return nil
-			},
-		})
-	}()
+	synctest.Test(t, func(t *testing.T) {
+		child := newSupervisorTestChild()
+		var starts, probes atomic.Int32
+		answering := make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- Loop(ctx, Config{
+				ProbeInterval:     time.Millisecond,
+				ProbeTimeout:      time.Millisecond,
+				FailureLimit:      2,
+				TermGrace:         time.Millisecond,
+				StartupTimeout:    time.Minute,
+				RestartBackoff:    time.Millisecond,
+				MaxRestartBackoff: time.Millisecond,
+			}, Deps{
+				Start: func() (Child, error) {
+					starts.Add(1)
+					return child, nil
+				},
+				Probe: func(context.Context) error {
+					switch n := probes.Add(1); {
+					case n <= 20:
+						return errors.New("still opening the store")
+					case n == 21:
+						close(answering)
+					}
+					return nil
+				},
+			})
+		}()
 
-	select {
-	case <-answering:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the starting daemon was never probed into readiness")
-	}
-	if terms, kills := child.actions(); terms != 0 || kills != 0 || starts.Load() != 1 {
-		t.Fatalf("a daemon failing 20 probes before its first answer was stopped (terms %d, kills %d, starts %d); "+
-			"it is starting, not unresponsive", terms, kills, starts.Load())
-	}
-	cancel()
-	child.done <- nil
-	if err := <-done; err != nil {
-		t.Fatalf("supervisor: %v", err)
-	}
+		select {
+		case <-answering:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the starting daemon was never probed into readiness")
+		}
+		if terms, kills := child.actions(); terms != 0 || kills != 0 || starts.Load() != 1 {
+			t.Fatalf("a daemon failing 20 probes before its first answer was stopped (terms %d, kills %d, starts %d); "+
+				"it is starting, not unresponsive", terms, kills, starts.Load())
+		}
+		cancel()
+		child.done <- nil
+		if err := <-done; err != nil {
+			t.Fatalf("supervisor: %v", err)
+		}
+	})
 }
 
 func TestReplacementsBackOffUntilADaemonStaysHealthy(t *testing.T) {

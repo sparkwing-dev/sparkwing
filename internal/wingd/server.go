@@ -13,9 +13,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
-	"golang.org/x/sync/singleflight"
 )
 
 const defaultChargeCores = 1.0

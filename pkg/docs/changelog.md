@@ -103,6 +103,9 @@ unlock.
 
 ### Fixed
 
+- **ci:** accept waits inside `testing/synctest.Test` bodies while continuing
+  to reject wall-clock waits outside them.
+
 - **daemon:** preserve the latest diagnostic stack dump in `d.log.stacks`
   so operational log rotation cannot erase it.
 

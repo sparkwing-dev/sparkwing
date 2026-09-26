@@ -15,7 +15,7 @@ func stallRecoveryCommand(runID string) string {
 	return fmt.Sprintf("sparkwing runs cancel --run %s", runID)
 }
 
-// ETA simulation can outlast a health probe on a deep queue. Only the snapshot
+// perf: ETA simulation can outlast a health probe on a deep queue. Only the snapshot
 // holds d.mu. Concurrent readers share the returned slices; callers must leave them unchanged.
 func (d *Daemon) readQueueState() wingwire.QueueState {
 	result, _, _ := d.queueStateReads.Do("", func() (any, error) {

@@ -203,7 +203,6 @@ type submission struct {
 
 	ScheduleID string
 
-	// PipelineRef selects compile source; execution stays in RepoDir.
 	PipelineRef string
 
 	// safety: a locked cron schedule pins its own binary, and the consumer

@@ -161,6 +161,19 @@ func checkFile(path, rel string) ([]finding, error) {
 	}
 	ctxPkg, _ := importAlias(file, "context")
 	elapsed := elapsedNames(file, timePkg)
+	synctestPkg, _ := importAlias(file, "testing/synctest")
+	fakeClockBodies := map[*ast.BlockStmt]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && len(call.Args) == 2 {
+			if name, ok := pkgCall(call.Fun, synctestPkg); ok && name == "Test" &&
+				call.Fun.(*ast.SelectorExpr).X.(*ast.Ident).Obj == nil {
+				if body, ok := call.Args[1].(*ast.FuncLit); ok {
+					fakeClockBodies[body.Body] = true
+				}
+			}
+		}
+		return true
+	})
 
 	var out []finding
 	seen := map[int]bool{}
@@ -174,6 +187,9 @@ func checkFile(path, rel string) ([]finding, error) {
 	}
 
 	ast.Inspect(file, func(n ast.Node) bool {
+		if body, ok := n.(*ast.BlockStmt); ok && fakeClockBodies[body] {
+			return false
+		}
 		switch node := n.(type) {
 		case *ast.ForStmt:
 			if node.Cond != nil && readsClock(node.Cond, timePkg, elapsed) {

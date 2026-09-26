@@ -446,3 +446,22 @@ func TestWait(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckFile_RejectsShadowedSynctest(t *testing.T) {
+	src := `package widget
+import (
+ "testing"
+ "time"
+ "testing/synctest"
+)
+func TestWait(t *testing.T) {
+ synctest.Test(t, func(t *testing.T) { time.Sleep(time.Hour) })
+ synctest := struct { Test func(*testing.T, func(*testing.T)) }{}
+ synctest.Test(t, func(t *testing.T) { time.Sleep(time.Second) })
+}
+`
+	got := checkSource(t, src)
+	if len(got) != 1 || got[0].line != 10 {
+		t.Fatalf("findings = %v, want the shadowed Test callback's wait", got)
+	}
+}
