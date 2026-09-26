@@ -101,6 +101,7 @@ unlock.
 
 - **daemon:** Keep queue ETA calculations from blocking health probes
   Concurrent queue readers share one calculation outside the daemon lock.
+  The simulation computes each resource reservation once per queue scan.
 
 - **store:** Restore the missing node claim column when upgrading existing databases
   Settlement reads resume without losing recorded node durations.
