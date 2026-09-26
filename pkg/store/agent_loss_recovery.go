@@ -324,14 +324,15 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceRunID string, items []expiredAgentNode, now time.Time) (string, []string, map[string]string, error) {
 	decisions := make(map[string]string, len(items))
 	var pipeline, status, triggerSource, retriedAs, repoURL, gitSHA, githubOwner, githubRepo string
-	var planJSON, invocationJSON []byte
+	var planJSON, invocationJSON, triggerEnvJSON []byte
 	var definitionPlanHash string
 	err := tx.QueryRowContext(ctx, `SELECT pipeline, status, trigger_source, retried_as, repo_url, git_sha,
 	   github_owner, github_repo, plan_json, invocation_json,
-	   COALESCE((SELECT plan_hash FROM run_definition_plans WHERE run_id = runs.id), '')
+	   COALESCE((SELECT plan_hash FROM run_definition_plans WHERE run_id = runs.id), ''),
+	   (SELECT trigger_env FROM triggers WHERE id = runs.id)
   FROM runs WHERE id = ?`+s.forUpdate(), sourceRunID).Scan(
 		&pipeline, &status, &triggerSource, &retriedAs, &repoURL, &gitSHA,
-		&githubOwner, &githubRepo, &planJSON, &invocationJSON, &definitionPlanHash)
+		&githubOwner, &githubRepo, &planJSON, &invocationJSON, &definitionPlanHash, &triggerEnvJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil, decisionsFor(items, "source_not_active"), nil
 	}
@@ -381,7 +382,7 @@ func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceR
 		return "", nil, decisions, nil
 	}
 	provenanceJSON, provenanceDecision := agentLossRetryProvenance(
-		planJSON, definitionPlanHash, invocationJSON, repoURL, gitSHA, githubOwner, githubRepo, triggerSource,
+		planJSON, definitionPlanHash, invocationJSON, triggerEnvJSON, repoURL, gitSHA, githubOwner, githubRepo, triggerSource,
 	)
 	if provenanceDecision != "" {
 		for _, nodeID := range causes {
@@ -541,7 +542,7 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invocationJSON []byte, repoURL, gitSHA, githubOwner, githubRepo, triggerSource string) ([]byte, string) {
+func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invocationJSON, triggerEnvJSON []byte, repoURL, gitSHA, githubOwner, githubRepo, triggerSource string) ([]byte, string) {
 	var invocation map[string]any
 	if len(invocationJSON) > 0 {
 		if err := json.Unmarshal(invocationJSON, &invocation); err != nil {
@@ -549,6 +550,12 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 		}
 	}
 	provenance := map[string]string{}
+	var triggerEnv map[string]string
+	if len(triggerEnvJSON) > 0 {
+		if err := json.Unmarshal(triggerEnvJSON, &triggerEnv); err != nil {
+			return nil, "invalid_provenance"
+		}
+	}
 	if inherited, ok := invocation["retry_provenance"].(map[string]any); ok {
 		for _, key := range []string{"repo_dir", "repo_identity", "revision", "content_policy"} {
 			provenance[key], _ = inherited[key].(string)
@@ -568,12 +575,16 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 		if !filepath.IsAbs(provenance["repo_dir"]) || !validAgentLossRevision(provenance["revision"]) {
 			return nil, "invalid_provenance"
 		}
-		raw, _ := json.Marshal(map[string]string{
+		env := map[string]string{
 			retryprovenance.RepoDirKey:      provenance["repo_dir"],
 			retryprovenance.RepoIdentityKey: provenance["repo_identity"],
 			retryprovenance.RevisionKey:     provenance["revision"],
 			retryprovenance.PlanHashKey:     provenance["plan_hash"],
-		})
+		}
+		if revision := triggerEnv[retryprovenance.PipelineRevisionKey]; revision != "" {
+			env[retryprovenance.PipelineRevisionKey] = revision
+		}
+		raw, _ := json.Marshal(env)
 		return raw, ""
 	}
 	if strings.HasPrefix(triggerSource, "pipeline-working-tree@") || (repoURL == "" && (githubOwner == "" || githubRepo == "")) {

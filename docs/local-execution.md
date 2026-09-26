@@ -148,11 +148,20 @@ never collide:
 sparkwing run deploy --sw-detached --sw-idempotency-key k --env staging
 ```
 
-Four flags are read only by a detached launch and are refused without
+Five flags are read only by a detached launch and are refused without
 `--sw-detached` rather than silently ignored: `--sw-idempotency-key`,
-`--sw-request-id`, `--sw-consumer-idle`, and `--sw-consumer-claim-lease`.
+`--sw-request-id`, `--sw-consumer-idle`, `--sw-consumer-claim-lease`, and
+`--sw-pipeline-ref`.
 `--sw-output` selects the acknowledgment's format and is likewise
 detached-only.
+
+`--sw-pipeline-ref <ref>` compiles the pipeline from a separate revision while
+executing it in the submitting checkout. The ref resolves to a commit at submission;
+a later branch update does not change the queued pipeline. It cannot be combined
+with `--sw-ref`, which changes the execution checkout too.
+Retries preserve the selected pipeline commit and recreate its compile worktree.
+They execute in a snapshot of the original execution revision, following the
+same checkout rules as other retries.
 
 #### Making a retry safe
 

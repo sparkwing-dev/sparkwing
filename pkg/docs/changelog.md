@@ -22,6 +22,10 @@ unlock.
 
 ### Added
 
+- **cli:** `run --sw-detached --sw-pipeline-ref <ref>` compiles the pipeline from
+  the selected commit and executes it in the submitting checkout. Queued runs
+  and retries preserve that pipeline commit when the ref moves.
+
 - **docs:** A backup, restore and upgrade runbook for self-hosted controllers
   Covers both database shapes, names what a restore needs beside the database,
   and says what rollback means at each stage of an upgrade. The store suite

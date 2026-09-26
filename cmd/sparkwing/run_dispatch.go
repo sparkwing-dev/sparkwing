@@ -77,6 +77,7 @@ type runFlags struct {
 	runHandleFile string
 
 	detached           bool
+	pipelineRef        string
 	idempotencyKey     string
 	requestID          string
 	consumerIdle       string
@@ -91,6 +92,7 @@ type detachedOnlyFlag struct {
 
 func (flags runFlags) detachedOnlyFlags() []detachedOnlyFlag {
 	return []detachedOnlyFlag{
+		{"--sw-pipeline-ref", flags.pipelineRef},
 		{"--sw-idempotency-key", flags.idempotencyKey},
 		{"--sw-request-id", flags.requestID},
 		{"--sw-consumer-idle", flags.consumerIdle},
@@ -345,6 +347,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			argumentIndex++
 		case argument == "--sw-detached":
 			flags.detached = true
+			argumentIndex++
+		case argument == "--sw-pipeline-ref":
+			if argumentIndex+1 < len(args) {
+				flags.pipelineRef = args[argumentIndex+1]
+				argumentIndex += 2
+				continue
+			}
+			passthroughArgs = append(passthroughArgs, argument)
+			argumentIndex++
+		case strings.HasPrefix(argument, "--sw-pipeline-ref="):
+			flags.pipelineRef = strings.TrimPrefix(argument, "--sw-pipeline-ref=")
 			argumentIndex++
 		case argument == "--sw-idempotency-key":
 			if argumentIndex+1 < len(args) {

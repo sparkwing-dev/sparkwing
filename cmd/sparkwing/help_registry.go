@@ -1697,9 +1697,10 @@ in. Address the run by that id afterwards:
   sparkwing runs logs   --run RUN_ID --follow
   sparkwing runs cancel --run RUN_ID
 
-Five flags are read only by a detached launch and are refused
-without --sw-detached: --sw-idempotency-key, --sw-request-id,
---sw-consumer-idle, --sw-consumer-claim-lease, and --sw-output,
+Six flags are read only by a detached launch and are refused
+without --sw-detached: --sw-pipeline-ref, --sw-idempotency-key,
+--sw-request-id, --sw-consumer-idle, --sw-consumer-claim-lease,
+and --sw-output,
 which picks the acknowledgment's format (pretty on a TTY, json
 when piped; plain prints the bare id for scripting).
 
@@ -1717,6 +1718,12 @@ even if the ref moves first; the consumer executes the worktree
 and removes it when the run ends. 'front' and 'back' stay
 unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
+
+--sw-pipeline-ref compiles the pipeline from another commit while
+the run executes in the checkout it was launched from.
+The ref resolves when you
+launch; its tree is checked out only to compile and is removed when
+the run ends. It cannot be combined with --sw-ref.
 
 A flag a detached run cannot carry (--sw-index, --sw-dry-run,
 --profile, --sw-fleet, and the other run-shaping --sw- flags)
@@ -1746,6 +1753,7 @@ is running and exits after five idle minutes; see
 		{"Run from a different git ref", "sparkwing run fictional-build --sw-ref feature/xyz"},
 		{"Queue a run that outlives the terminal", "sparkwing run nightly-report --sw-detached"},
 		{"Capture the id for scripting", "RUN=$(sparkwing run build --sw-detached --sw-output plain)"},
+		{"Compile the pipeline from another ref", "sparkwing run fictional-build --sw-detached --sw-pipeline-ref main"},
 		{"Deduplicate a detached retry", "sparkwing run deploy --sw-detached --sw-idempotency-key fictional-deploy-attempt --env staging"},
 		{"Detach a pipeline from another checkout", "sparkwing run lint --sw-detached --sw-cd ~/code/other-project"},
 		{"Retry a failed run", "sparkwing runs retry --run run-fictional --failed"},
