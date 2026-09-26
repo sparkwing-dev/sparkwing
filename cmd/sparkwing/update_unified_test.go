@@ -529,7 +529,7 @@ func buildUpdateArtifact(t *testing.T, version string) (string, string) {
 	if err := os.WriteFile(main, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("go", "build", "-ldflags", "-X main.Version="+version, "-o", path, main)
+	cmd := exec.Command("go", "build", "-trimpath=false", "-ldflags", "-X main.Version="+version, "-o", path, main)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := cmd.CombinedOutput(); err != nil {
