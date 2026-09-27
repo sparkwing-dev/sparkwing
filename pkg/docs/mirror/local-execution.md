@@ -198,11 +198,19 @@ pipeline as its own arguments.
 
 Because the trigger carries no allow, a launch of a pipeline whose step declares
 a risk is refused before the run is persisted, naming the step and its labels.
-The declarations are read from the checkout the run will execute, so a launch
+The declarations are read from the selected pipeline source, so a launch
 that names a ref is weighed at that ref rather than at your working tree, and a
-schedule is weighed the same way. `sparkwing runs retry` is not weighed yet: it
-re-queues the source run's own declarations, so a retry of a risk-declaring run
-is not refused. Run that pipeline in the foreground with `--sw-allow`.
+schedule is weighed the same way. Submission also refuses a pipeline name
+absent from that source before queuing work. Run a risk-declaring pipeline in
+the foreground with `--sw-allow`.
+
+`sparkwing runs retry` refuses local retries because the original execution
+environment is unavailable. Captured submission environments are deleted when
+execution starts. Submit a new run from the
+intended checkout and environment. A queued local retry also fails before
+dispatch if its execution environment is unavailable. Node retries within a
+live run keep that run's environment. Controller-backed retries use their
+configured execution context.
 
 `--sw-ref` and `--sw-priority` are the exceptions, because both ride on
 the trigger. A detached launch resolves the ref to a commit, builds the

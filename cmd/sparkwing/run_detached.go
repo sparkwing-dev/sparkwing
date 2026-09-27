@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -134,10 +135,6 @@ func runDetached(ctx context.Context, pipelineName string, wf runFlags, passthro
 			return fmt.Errorf("run %s is persisted but its handle could not be published to %s: %w",
 				result.RunID, wf.runHandleFile, perr)
 		}
-	}
-
-	if runNeedsDaemon(wf, passthrough) {
-		ensureRunDaemonFn()
 	}
 
 	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
@@ -668,6 +665,9 @@ func (g riskGate) check(execDir, pinnedBinary string) error {
 		if err != nil {
 			return fmt.Errorf("%s: read what %s declares: %w", g.Surface, g.Pipeline, err)
 		}
+	}
+	if !slices.ContainsFunc(declared, func(p sparkwing.DescribePipeline) bool { return p.Name == g.Pipeline }) {
+		return fmt.Errorf("%s: no selected source declares a pipeline named %q", g.Surface, g.Pipeline)
 	}
 	if err := enforceRiskGate(g.Pipeline, risksIn(declared, g.Pipeline), g.Flags); err != nil {
 		return fmt.Errorf("%s: %w\n"+

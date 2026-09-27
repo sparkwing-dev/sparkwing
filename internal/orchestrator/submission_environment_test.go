@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -349,5 +350,37 @@ func TestRequeuedRunDoesNotInheritTheConsumerShell(t *testing.T) {
 	}
 	if !strings.Contains(joined, "SPARKWING_HOME="+home) {
 		t.Fatalf("uncaptured dispatch environment does not force SPARKWING_HOME: %s", joined)
+	}
+}
+
+func TestRetryRequiresItsOwnSubmissionEnvironment(t *testing.T) {
+	for _, source := range []string{store.RetrySourceManual, store.RetrySourceAuto} {
+		for _, capture := range []string{"absent", "missing", "empty", "present"} {
+			t.Run(source+"/"+capture, func(t *testing.T) {
+				home := t.TempDir()
+				trig := &store.Trigger{ID: "retry", RetryOf: "source", RetrySource: source, TriggerEnv: map[string]string{}}
+				if capture != "absent" {
+					trig.TriggerEnv[SubmissionEnvironmentCapturedKey] = "1"
+				}
+				if capture == "empty" || capture == "present" {
+					env := []string{}
+					if capture == "present" {
+						env = append(env, "PATH=caller")
+					}
+					if err := CaptureSubmissionEnvironment(home, trig.ID, env, quietLogger()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				env, err := consumeSubmissionEnvironment(home, trig, quietLogger())
+				if capture == "absent" || capture == "missing" {
+					var unavailable *RetryEnvironmentUnavailableError
+					if !errors.As(err, &unavailable) {
+						t.Fatalf("environment = %v, %v; want typed refusal", env, err)
+					}
+				} else if err != nil || env == nil {
+					t.Fatalf("owned environment = %v, %v", env, err)
+				}
+			})
+		}
 	}
 }

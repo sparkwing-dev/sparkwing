@@ -3066,12 +3066,12 @@ var cmdJobsRetry = Command{
 	Description: `Issues a new trigger per source run with the same pipeline, args,
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
-For local runs, Sparkwing queues the retry in the same local store as
-'sparkwing run --sw-detached' and starts the resident consumer when no
-dashboard is running. The retry uses the source run's full origin identity,
-Git revision, and complete plan snapshot. Sparkwing compiles and runs an
-immutable detached snapshot of that revision. A missing source checkout or
-changed identity fails the retry before compilation.
+Local retries are refused because the original execution environment is
+unavailable. Captured submission environments are deleted when execution
+starts. Submit a new run from the intended environment.
+A queued local retry whose execution environment is unavailable also fails
+before execution. Controller-backed retries use their configured execution
+context; select one with --profile.
 
 A retry is not weighed against the pipeline's risk labels the way a launch is:
 it re-queues the source run's own declarations, so a retry of a run whose step
@@ -3098,8 +3098,8 @@ only when at least one id failed.`,
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-fictional"},
-		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-fictional"},
+		{"Rerun only the failed nodes", "sparkwing runs retry --failed --run run-fictional --profile prod"},
+		{"Rerun every node from scratch", "sparkwing runs retry --all --run run-fictional --profile prod"},
 		{"Rerun every recently failed run", "sparkwing runs list --status failed --since 1h -q | sparkwing runs retry --failed --run - --profile prod"},
 	},
 }

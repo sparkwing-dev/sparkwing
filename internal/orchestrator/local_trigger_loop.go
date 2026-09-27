@@ -224,7 +224,6 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 
 func submissionExecutionEnvironment(captured []string, home string) []string {
 	if captured == nil {
-		// safety: an uncaptured dispatch still passes the blocklist, so the consumer shell cannot shape the run.
 		captured = os.Environ()
 	}
 	blocked := map[string]struct{}{
@@ -234,9 +233,6 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 		"SPARKWING_NO_CACHE": {}, "SPARKWING_DRY_RUN": {}, "SPARKWING_LOCAL_ONLY": {},
 		"SPARKWING_ALLOW": {}, "SPARKWING_REF": {}, "SPARKWING_SECRETS_PROFILE": {},
 		"SPARKWING_MODE": {}, "SPARKWING_WORKERS": {}, "SPARKWING_DISPATCH_WAIT_TIMEOUT": {},
-		// safety: a submitted run's priority rides on the trigger row, so an
-		// ambient one from the submitting shell is the consumer's environment
-		// shaping the run rather than the submission.
 		PriorityEnv:                    {},
 		AdmissionClassEnv:              {},
 		"SPARKWING_DEBUG_PAUSE_BEFORE": {}, "SPARKWING_DEBUG_PAUSE_AFTER": {},
@@ -260,7 +256,7 @@ func submissionExecutionEnvironment(captured []string, home string) []string {
 }
 
 func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []string) error {
-	cmd := exec.CommandContext(ctx, binPath, args...)
+	cmd := exec.Command(binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	tail := &stderrTail{limit: childStderrTailBytes}
@@ -269,7 +265,8 @@ func execLocalChild(ctx context.Context, binPath, repoDir string, args, env []st
 	if cmd.Env == nil {
 		cmd.Env = os.Environ()
 	}
-	if err := cmd.Run(); err != nil {
+	outcome, startErr := runAssistedChildProcess(ctx, cmd, nil)
+	if err := errors.Join(startErr, outcome.waitErr, outcome.cancelCause); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
 				return fmt.Errorf(
