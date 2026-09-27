@@ -214,31 +214,33 @@ func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
 	}
 	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir}
 
-	swept := make(chan int, 1)
-	sweepErr := make(chan error, 1)
+	var swept int
+	var sweepErr error
+	dispatched := false
 	origin := dispatchLocalTriggerFn
 	dispatchLocalTriggerFn = func(
 		context.Context, *store.Trigger, string, string, *localCompileCache, *slog.Logger, []string,
 	) error {
+		dispatched = true
 		if ferr := st.FinishTrigger(ctx, "run-dispatching"); ferr != nil {
-			sweepErr <- ferr
-			swept <- 0
+			sweepErr = ferr
 			return ferr
 		}
-		n, serr := SweepRefWorktrees(ctx, p, st, nil)
-		swept <- n
-		sweepErr <- serr
-		return serr
+		swept, sweepErr = SweepRefWorktrees(ctx, p, st, nil)
+		return sweepErr
 	}
 	t.Cleanup(func() { dispatchLocalTriggerFn = origin })
 
 	runClaimedTrigger(ctx, st, claimed, nil, slog.New(slog.DiscardHandler), home, time.Minute)
 
-	if serr := <-sweepErr; serr != nil {
-		t.Fatalf("SweepRefWorktrees during dispatch: %v", serr)
+	if !dispatched {
+		t.Fatal("claimed trigger was refused before dispatch")
 	}
-	if n := <-swept; n != 0 {
+	if sweepErr != nil {
+		t.Fatalf("SweepRefWorktrees during dispatch: %v", sweepErr)
+	}
+	if swept != 0 {
 		t.Errorf("the sweep reclaimed %d worktrees while a dispatch was executing in one; "+
-			"its trigger reads finished, so the hold is the only thing left to spare it", n)
+			"its trigger reads finished, so the hold is the only thing left to spare it", swept)
 	}
 }
