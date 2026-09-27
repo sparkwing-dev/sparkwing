@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.62.0] - 2026-09-27
 ### Changed
 
 - **scaffold:** `const FallbackSDKVersion` pins v0.61.0, so a fresh scaffold compiles against that release.
@@ -28,7 +29,7 @@ unlock.
   `runs retry` refuses local retries because their original execution environment
   is unavailable. Submit a new run from the intended environment.
   Controller-backed retries keep their configured execution context.
-  See [local retry migration](docs/migrations/_unreleased.md#local-run-retries).
+  See [local retry migration](docs/migrations/v0.62.0.md#local-run-retries).
 
 ### Fixed
 
