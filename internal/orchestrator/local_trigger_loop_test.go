@@ -510,7 +510,7 @@ func writeRetryTestRepo(t *testing.T, dir, remoteURL, behavior string) (string, 
 	if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := "pipelines:\n  - name: pre-push\n    steps:\n      - shared-step\n"
+	manifest := "pipelines:\n  - name: pre-push\n    entrypoint: Fixture\n"
 	if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "sparkwing.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
