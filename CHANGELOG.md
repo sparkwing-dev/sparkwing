@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.62.0, so a fresh scaffold compiles against that release.
+
+
 ### Added
 
 - **cli:** Pipelines can declare `source: origin/main` to compile from a selected
@@ -29,6 +34,8 @@ unlock.
 
 ### Fixed
 
+- **cli:** On macOS, session identity checks query the requested process directly,
+  avoiding failures caused by unrelated changes to the full process table.
 - **cli:** Detached submissions create their trigger and run together. Idempotent
   resubmissions refuse a missing run record, and failed receipt writes return an
   error instead of reporting success without output.
