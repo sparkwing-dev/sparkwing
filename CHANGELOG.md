@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **scaffold:** `const FallbackSDKVersion` pins v0.61.0, so a fresh scaffold compiles against that release.
+
 - **cli (Breaking):** Local run retries require a new submission
   `runs retry` refuses local retries because their original execution environment
   is unavailable. Submit a new run from the intended environment.
