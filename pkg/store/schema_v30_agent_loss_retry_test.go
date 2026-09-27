@@ -1242,62 +1242,69 @@ func TestSchemaV30MissingRetryProvenanceIsExplicit(t *testing.T) {
 }
 
 func TestSchemaV30WorkingTreeRetryKeepsImmutableProvenance(t *testing.T) {
-	ctx := context.Background()
-	s := storetest.Open(t)
-	plan, _ := json.Marshal(map[string]any{
-		"pipeline": "p", "run_id": "run-workspace",
-		"nodes": []any{map[string]any{"id": "build", "modifiers": map[string]any{"retry": 1}}},
-	})
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	revision := strings.Repeat("b", 40)
-	if err := s.CreateRun(ctx, store.Run{
-		ID: "run-workspace", Pipeline: "p", Status: "running", StartedAt: time.Now(),
-		TriggerSource: "pipeline-working-tree@laptop", PlanSnapshot: plan,
-		RepoURL: "https://example.com/acme/repo.git", GitSHA: revision,
-		Invocation: map[string]any{"retry_provenance": map[string]any{
-			"repo_dir": repoDir, "repo_identity": "https://example.com/acme/repo.git",
-			"revision": revision, "content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateTrigger(ctx, store.Trigger{
-		ID: "run-workspace", Pipeline: "p", CreatedAt: time.Now(),
-		TriggerEnv: map[string]string{retryprovenance.PipelineRevisionKey: strings.Repeat("c", 40)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateNode(ctx, store.Node{RunID: "run-workspace", NodeID: "build", Status: "pending"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.MarkNodeReady(ctx, "run-workspace", "build"); err != nil {
-		t.Fatal(err)
-	}
-	identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
-	claimRetryNode(t, s, "run-workspace", identity, "agent:a:1")
-	forceExpireNodeClaim(t, s, "run-workspace", "build")
-	recovered, err := store.Maintenance.RecoverExpiredNodeClaims(s, ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(recovered) != 1 || recovered[0].RetryRunID == "" {
-		t.Fatalf("recovery = %+v", recovered)
-	}
-	trigger, err := s.GetTrigger(ctx, recovered[0].RetryRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trigger.TriggerEnv[retryprovenance.PipelineRevisionKey] != strings.Repeat("c", 40) {
-		t.Fatalf("retry lost pipeline revision: %+v", trigger.TriggerEnv)
-	}
-	if trigger.TriggerSource != "pipeline-working-tree@laptop" ||
-		trigger.TriggerEnv[retryprovenance.RepoDirKey] != repoDir ||
-		trigger.TriggerEnv[retryprovenance.RepoIdentityKey] != "https://example.com/acme/repo.git" ||
-		trigger.TriggerEnv[retryprovenance.RevisionKey] != revision {
-		t.Fatalf("retry provenance = source:%q env:%+v", trigger.TriggerSource, trigger.TriggerEnv)
-	}
-	if got, want := trigger.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sha256.Sum256(plan)); got != want {
-		t.Fatalf("retry plan hash = %q, want %q", got, want)
+	for _, fromTrigger := range []bool{true, false} {
+		t.Run(map[bool]string{true: "detached", false: "foreground"}[fromTrigger], func(t *testing.T) {
+			ctx := context.Background()
+			s := storetest.Open(t)
+			plan, _ := json.Marshal(map[string]any{
+				"pipeline": "p", "run_id": "run-workspace",
+				"nodes": []any{map[string]any{"id": "build", "modifiers": map[string]any{"retry": 1}}},
+			})
+			repoDir := filepath.Join(t.TempDir(), "repo")
+			revision := strings.Repeat("b", 40)
+			if err := s.CreateRun(ctx, store.Run{
+				ID: "run-workspace", Pipeline: "p", Status: "running", StartedAt: time.Now(),
+				TriggerSource: "pipeline-working-tree@laptop", PlanSnapshot: plan,
+				RepoURL: "https://example.com/acme/repo.git", GitSHA: revision,
+				Invocation: map[string]any{"pipeline_revision": strings.Repeat("c", 40), "retry_provenance": map[string]any{
+					"repo_dir": repoDir, "repo_identity": "https://example.com/acme/repo.git",
+					"revision": revision, "content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
+				}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if fromTrigger {
+				if err := s.CreateTrigger(ctx, store.Trigger{
+					ID: "run-workspace", Pipeline: "p", CreatedAt: time.Now(),
+					TriggerEnv: map[string]string{retryprovenance.PipelineRevisionKey: strings.Repeat("c", 40)},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			if err := s.CreateNode(ctx, store.Node{RunID: "run-workspace", NodeID: "build", Status: "pending"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.MarkNodeReady(ctx, "run-workspace", "build"); err != nil {
+				t.Fatal(err)
+			}
+			identity := store.ClaimIdentity{Principal: "runner", TokenPrefix: "swr_runner"}
+			claimRetryNode(t, s, "run-workspace", identity, "agent:a:1")
+			forceExpireNodeClaim(t, s, "run-workspace", "build")
+			recovered, err := store.Maintenance.RecoverExpiredNodeClaims(s, ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(recovered) != 1 || recovered[0].RetryRunID == "" {
+				t.Fatalf("recovery = %+v", recovered)
+			}
+			trigger, err := s.GetTrigger(ctx, recovered[0].RetryRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if trigger.TriggerEnv[retryprovenance.PipelineRevisionKey] != strings.Repeat("c", 40) {
+				t.Fatalf("retry lost pipeline revision: %+v", trigger.TriggerEnv)
+			}
+			if trigger.TriggerSource != "pipeline-working-tree@laptop" ||
+				trigger.TriggerEnv[retryprovenance.RepoDirKey] != repoDir ||
+				trigger.TriggerEnv[retryprovenance.RepoIdentityKey] != "https://example.com/acme/repo.git" ||
+				trigger.TriggerEnv[retryprovenance.RevisionKey] != revision {
+				t.Fatalf("retry provenance = source:%q env:%+v", trigger.TriggerSource, trigger.TriggerEnv)
+			}
+			if got, want := trigger.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sha256.Sum256(plan)); got != want {
+				t.Fatalf("retry plan hash = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
