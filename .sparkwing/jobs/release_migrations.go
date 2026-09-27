@@ -174,6 +174,7 @@ func insertMigrationIndexRow(indexBody, version, date, summary string) (string, 
 		return "", fmt.Errorf("%s/%s has no `|---|---|---|` table separator to add the %s row under",
 			migrationsDirRel, migrationIndexName, version)
 	}
+	summary = strings.ReplaceAll(strings.ReplaceAll(summary, `\|`, `|`), `|`, `\|`)
 	row := fmt.Sprintf("| [%s](%s.md) | %s | %s |", version, version, date, summary)
 	return indexBody[:loc[1]] + "\n" + row + indexBody[loc[1]:], nil
 }
