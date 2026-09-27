@@ -34,6 +34,8 @@ unlock.
 
 ### Fixed
 
+- **cli:** On macOS, session identity checks query the requested process directly,
+  avoiding failures caused by unrelated changes to the full process table.
 - **cli:** Detached submissions create their trigger and run together. Idempotent
   resubmissions refuse a missing run record, and failed receipt writes return an
   error instead of reporting success without output.

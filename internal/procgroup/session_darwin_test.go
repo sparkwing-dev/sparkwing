@@ -18,7 +18,7 @@ func TestSessionIdentityIgnoresUnrelatedProcessChurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	darwinSessionProcess = func(name string, args ...int) ([]byte, error) {
+	darwinSessionProcess = func(name string, args ...int) ([]unix.KinfoProc, error) {
 		if name == "kern.proc.all" {
 			return nil, unix.ENOMEM
 		}
@@ -43,7 +43,7 @@ func TestSessionIdentityIgnoresUnrelatedProcessChurn(t *testing.T) {
 func TestSessionIdentityRefusesMissingProcess(t *testing.T) {
 	original := darwinSessionProcess
 	t.Cleanup(func() { darwinSessionProcess = original })
-	darwinSessionProcess = func(string, ...int) ([]byte, error) { return nil, nil }
+	darwinSessionProcess = func(string, ...int) ([]unix.KinfoProc, error) { return nil, nil }
 	if _, _, err := sessionIdentity(os.Getpid()); !errors.Is(err, ErrProcessAbsent) {
 		t.Fatalf("absent process error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestSessionIdentityRefusesMissingProcess(t *testing.T) {
 func TestSessionIdentityReportsKernelFailure(t *testing.T) {
 	original := darwinSessionProcess
 	t.Cleanup(func() { darwinSessionProcess = original })
-	darwinSessionProcess = func(string, ...int) ([]byte, error) { return nil, unix.EPERM }
+	darwinSessionProcess = func(string, ...int) ([]unix.KinfoProc, error) { return nil, unix.EPERM }
 	if _, _, err := sessionIdentity(os.Getpid()); !errors.Is(err, unix.EPERM) {
 		t.Fatalf("kernel error = %v", err)
 	}
