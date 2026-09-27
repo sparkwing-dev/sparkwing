@@ -1698,7 +1698,7 @@ in. Address the run by that id afterwards:
   sparkwing runs cancel --run RUN_ID
 
 The following flags are read only by a detached launch and are refused
-without --sw-detached: --sw-pipeline-ref, --sw-idempotency-key,
+without --sw-detached: --sw-idempotency-key,
 --sw-request-id, --sw-consumer-idle, --sw-consumer-claim-lease,
 and --sw-output,
 which picks the acknowledgment's format (pretty on a TTY, json
@@ -1719,7 +1719,13 @@ and removes it when the run ends. 'front' and 'back' stay
 unresolved until the consumer launches the run, so 'front' means
 ahead of the queue the run actually joins.
 
---sw-pipeline-ref compiles the pipeline from another commit while
+A pipeline can declare source: origin/main in sparkwing.yaml. Every launch
+compiles that source while jobs execute in the submitting checkout.
+An explicit --sw-pipeline-ref must resolve to the declared source commit.
+Source-backed schedules use --follow rather than a pinned binary.
+
+--sw-pipeline-ref works in foreground and detached runs. It compiles
+the pipeline from another commit while
 the run executes in the checkout it was launched from.
 The execution checkout must retain .sparkwing/sparkwing.yaml;
 its pipeline source may be missing or unbuildable.

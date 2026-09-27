@@ -31,6 +31,14 @@ const (
 
 var submissionEnvironmentReconcileCursors sync.Map
 
+type SubmissionEnvironmentUnavailableError struct {
+	RunID string
+}
+
+func (e *SubmissionEnvironmentUnavailableError) Error() string {
+	return fmt.Sprintf("run %s: submission execution environment is unavailable; submit a new run from the intended environment", e.RunID)
+}
+
 type RetryEnvironmentUnavailableError struct {
 	RunID string
 }
@@ -207,6 +215,9 @@ func consumeSubmissionEnvironment(home string, trig *store.Trigger, logger *slog
 	env, err := submissionEnvironment(home, trig)
 	if err == nil && env == nil && trig.RetryOf != "" {
 		err = &RetryEnvironmentUnavailableError{RunID: trig.ID}
+	}
+	if err == nil && env == nil && (strings.HasPrefix(trig.TriggerSource, "runs-submit") || trig.TriggerEnv[SubmitRepoDirKey] != "") {
+		err = &SubmissionEnvironmentUnavailableError{RunID: trig.ID}
 	}
 	// safety: the snapshot's life ends when the run starts, not when it finishes.
 	if discardErr := DiscardSubmissionEnvironment(home, trig.ID); discardErr != nil {

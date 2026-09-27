@@ -196,7 +196,7 @@ func UploadBinary(ctx context.Context, gcURL, token, hash, src string) error {
 }
 
 func FetchPipelineSource(ctx context.Context, gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
-	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "")
+	return fetchPipelineSource(ctx, gcURL, "", repoSSH, branch, sha, parentDir, false, "", "")
 }
 
 // FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
@@ -215,7 +215,7 @@ func FetchPipelineSourceWithCredentials(
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
 	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
-		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+		repoSSH, branch, sha, parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), "")
 }
 
 // FetchPipelineWorkspaceSourceWithCredentials combines raw workspace restoration with the same origin credential fence.
@@ -224,7 +224,21 @@ func FetchPipelineWorkspaceSourceWithCredentials(
 	gcURL, controllerURL, controllerToken, cacheToken, repoSSH, branch, sha, parentDir string,
 ) (sparkwingDir string, err error) {
 	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, controllerToken, cacheToken),
-		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH))
+		repoSSH, branch, sha, parentDir, true, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), "")
+}
+
+func FetchPipelineRef(ctx context.Context, gcURL, controllerURL, token, repoSSH, ref, parentDir string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "refs/remotes/origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "refs/remotes/origin/")
+	}
+	if strings.HasPrefix(ref, "origin/") {
+		ref = "refs/heads/" + strings.TrimPrefix(ref, "origin/")
+	}
+	if ref == "" || strings.HasPrefix(ref, "-") || strings.ContainsAny(ref, ": \t\r\n") {
+		return "", fmt.Errorf("invalid pipeline source ref %q", ref)
+	}
+	return fetchPipelineSource(ctx, gcURL, GitcacheBearer(gcURL, controllerURL, token, ""), repoSSH, "", "", parentDir, false, controllerClaimedRepoName(gcURL, controllerURL, repoSSH), ref)
 }
 
 // GitcacheBearer resolves the credential a cache read may carry: the controller bearer only for
@@ -313,7 +327,7 @@ func controllerClaimedRepoName(gcURL, controllerURL, repoURL string) string {
 	return sourceurl.ClaimedRepoNameFromURL(repoURL)
 }
 
-func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName string) (sparkwingDir string, err error) {
+func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool, cacheName, sourceRef string) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -345,7 +359,11 @@ func fetchPipelineSource(ctx context.Context, gcURL, token, repoSSH, branch, sha
 		return "", fmt.Errorf("clear workTree: %w", err)
 	}
 
-	if sha != "" {
+	if sourceRef != "" {
+		if err := fetchGitRef(ctx, gcURL, cloneURL, token, sourceRef, workTree); err != nil {
+			return "", err
+		}
+	} else if sha != "" {
 		if err := fetchExactSHA(ctx, gcURL, cloneURL, token, sha, workTree); err != nil {
 			return "", err
 		}
@@ -377,6 +395,10 @@ func fetchExactSHA(ctx context.Context, gcURL, cloneURL, token, sha, dest string
 	if err != nil {
 		return err
 	}
+	return fetchGitRef(ctx, gcURL, cloneURL, token, sha, dest)
+}
+
+func fetchGitRef(ctx context.Context, gcURL, cloneURL, token, ref, dest string) error {
 	if err := mkdirCache(dest); err != nil {
 		return err
 	}
@@ -389,13 +411,13 @@ func fetchExactSHA(ctx context.Context, gcURL, cloneURL, token, sha, dest string
 	steps := [][]string{
 		{"init", "--quiet"},
 		{"remote", "add", "origin", cloneURL},
-		{"fetch", "--depth", "1", "--end-of-options", "origin", sha},
+		{"fetch", "--depth", "1", "--end-of-options", "origin", ref},
 		{"-c", "core.attributesFile=/dev/null", "checkout", "--quiet", "FETCH_HEAD"},
 	}
 	for _, step := range steps {
 		if out, err := runIn(step...); err != nil {
-			return fmt.Errorf("git %s (sha %s): %w: %s",
-				strings.Join(step, " "), sha, err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("git %s (ref %s): %w: %s",
+				strings.Join(step, " "), ref, err, strings.TrimSpace(string(out)))
 		}
 	}
 	return nil

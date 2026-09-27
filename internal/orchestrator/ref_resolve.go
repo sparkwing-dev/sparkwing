@@ -20,8 +20,9 @@ func ResolveRefCommit(ctx context.Context, originRepo, ref string, logger *slog.
 	if strings.HasPrefix(ref, "-") {
 		return "", fmt.Errorf("ref %q starts with a dash, which git reads as an option rather than a ref", ref)
 	}
+	fetchRef := strings.TrimPrefix(ref, "origin/")
 	out, fetchErr := exec.CommandContext(ctx, "git", "-C", originRepo,
-		"fetch", "--quiet", "origin", "--", ref).CombinedOutput()
+		"fetch", "--quiet", "origin", "--", fetchRef).CombinedOutput()
 	logBestEffortGit(ctx, logger, slog.LevelDebug, "fetch", out, fetchErr)
 
 	candidates := []string{ref + "^{commit}"}

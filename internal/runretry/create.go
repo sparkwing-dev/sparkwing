@@ -31,6 +31,12 @@ func Create(ctx context.Context, st *store.Store, sourceID, newID string, full b
 		return Created{}, err
 	}
 	env := provenance(src)
+	if revision, _ := src.Invocation["pipeline_revision"].(string); revision != "" {
+		if env == nil {
+			env = make(map[string]string)
+		}
+		env[retryprovenance.PipelineRevisionKey] = revision
+	}
 	trigger, err := st.GetTrigger(ctx, sourceID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return Created{}, err

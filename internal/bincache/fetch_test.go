@@ -923,3 +923,32 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+func TestFetchPipelineRefPreservesBranchAndTagIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("serves and fetches Git refs over HTTP")
+	}
+	parent := t.TempDir()
+	name := sourceurl.ClaimedRepoNameFromURL(testRepoSSH)
+	older, newer := makeBareRepoWithSparkwing(t, parent, name, "main")
+	bare := filepath.Join(parent, name+".git")
+	if out, err := exec.Command("git", "-C", bare, "tag", "main", older).CombinedOutput(); err != nil {
+		t.Fatalf("tag: %v: %s", err, out)
+	}
+	server := startGitcacheTestServer(t, parent)
+	defer server.Close()
+	for _, tc := range []struct{ ref, want string }{
+		{"refs/heads/main", newer}, {"origin/main", newer}, {"refs/remotes/origin/main", newer}, {"refs/tags/main", older}, {older, older},
+	} {
+		t.Run(tc.ref, func(t *testing.T) {
+			dir, err := FetchPipelineRef(t.Context(), server.URL, "", "", testRepoSSH, tc.ref, t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command("git", "-C", filepath.Dir(dir), "rev-parse", "HEAD").Output()
+			if err != nil || strings.TrimSpace(string(out)) != tc.want {
+				t.Fatalf("ref %s resolved to %q, %v; want %s", tc.ref, out, err, tc.want)
+			}
+		})
+	}
+}

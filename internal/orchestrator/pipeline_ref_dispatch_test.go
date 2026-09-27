@@ -18,11 +18,34 @@ func TestPipelineRefRetryRecreatesSourceAfterCleanup(t *testing.T) {
 	}
 	repo, cache, logger := cronPinnedFixture(t)
 	repo, pipelineRevision := writeRetryTestRepo(t, repo, "https://example.test/acme/build.git", "selected-pipeline")
+	selectedProgram := `package main
+import "os"
+func main() {
+ body,err:=os.ReadFile("subject.txt"); if err != nil {panic(err)}
+ if err:=os.WriteFile(os.Getenv("SPARKWING_RETRY_TEST_OUTPUT"),append([]byte("selected-pipeline:"),body...),0600);err!=nil{panic(err)}
+}`
+	for path, body := range map[string]string{
+		".sparkwing/main.go":        selectedProgram,
+		".sparkwing/sparkwing.yaml": "pipelines:\n  - name: pre-push\n    entrypoint: Fixture\n    source: selected\n",
+		"subject.txt":               "main-subject",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, path), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitForRetryTest(t, repo, "add", ".")
+	runGitForRetryTest(t, repo, "commit", "-m", "selected pipeline reads subject")
+	pipelineRevision = strings.TrimSpace(runGitForRetryTest(t, repo, "rev-parse", "HEAD"))
+	runGitForRetryTest(t, repo, "branch", "selected")
+	if err := os.WriteFile(filepath.Join(repo, "subject.txt"), []byte("branch-subject"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("unbuildable caller pipeline"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGitForRetryTest(t, repo, "commit", "-am", "change pipeline")
 	revision := strings.TrimSpace(runGitForRetryTest(t, repo, "rev-parse", "HEAD"))
+	runGitForRetryTest(t, repo, "branch", "-f", "selected", "HEAD")
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +82,8 @@ func TestPipelineRefRetryRecreatesSourceAfterCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(output)
-	if err != nil || string(got) != "selected-pipeline" {
-		t.Fatalf("retry output = %q, %v; want selected-pipeline", got, err)
+	if err != nil || string(got) != "selected-pipeline:branch-subject" {
+		t.Fatalf("retry output = %q, %v; want selected-pipeline:branch-subject", got, err)
 	}
 	if after := runGitForRetryTest(t, repo, "worktree", "list", "--porcelain"); after != before {
 		t.Fatalf("retry left worktrees behind:\n%s", after)
@@ -97,5 +120,34 @@ func TestPipelineRefDispatchRejectsMissingSource(t *testing.T) {
 	}, "", repoDir, cache, logger, nil)
 	if err == nil || !strings.Contains(err.Error(), "--sw-pipeline-ref") {
 		t.Fatalf("dispatch = %v, want a failure naming the missing pipeline tree", err)
+	}
+}
+
+func TestDeclaredSourceLocalTriggerIgnoresCallerPipeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles and executes selected trigger source")
+	}
+	repo, cache, logger := cronPinnedFixture(t)
+	repo, revision := writeRetryTestRepo(t, repo, "", "selected source")
+	runGitForRetryTest(t, repo, "branch", "selected")
+	config := "pipelines:\n  - name: pre-push\n    entrypoint: Fixture\n    source: selected\n"
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "sparkwing.yaml"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("caller cannot compile"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	trigger := &store.Trigger{ID: "source-trigger", Pipeline: "pre-push", TriggerEnv: map[string]string{SubmitRepoDirKey: repo}}
+	output := filepath.Join(t.TempDir(), "output")
+	t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", output)
+	if err := dispatchLocalTrigger(t.Context(), trigger, "", "", cache, logger, nil); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(output)
+	if err != nil || string(body) != "selected source" {
+		t.Fatalf("source execution: %q, %v", body, err)
+	}
+	if trigger.TriggerEnv[PipelineRevKey] != revision {
+		t.Fatalf("source revision: %v", trigger.TriggerEnv)
 	}
 }

@@ -56,6 +56,8 @@ type Pipeline struct {
 
 	Entrypoint string
 
+	Source string
+
 	Description string
 
 	On Triggers
