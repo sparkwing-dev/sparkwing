@@ -19,7 +19,7 @@ func TestPipelineRefRetryRecreatesSourceAfterCleanup(t *testing.T) {
 	for _, fromTrigger := range []bool{true, false} {
 		t.Run(map[bool]string{true: "detached", false: "foreground"}[fromTrigger], func(t *testing.T) {
 			repo, cache, logger := cronPinnedFixture(t)
-			repo, pipelineRevision := writeRetryTestRepo(t, repo, "https://example.test/acme/build.git", "selected-pipeline")
+			repo, _ = writeRetryTestRepo(t, repo, "https://example.test/acme/build.git", "selected-pipeline")
 			selectedProgram := `package main
 import "os"
 func main() {
@@ -37,7 +37,7 @@ func main() {
 			}
 			runGitForRetryTest(t, repo, "add", ".")
 			runGitForRetryTest(t, repo, "commit", "-m", "selected pipeline reads subject")
-			pipelineRevision = strings.TrimSpace(runGitForRetryTest(t, repo, "rev-parse", "HEAD"))
+			pipelineRevision := strings.TrimSpace(runGitForRetryTest(t, repo, "rev-parse", "HEAD"))
 			runGitForRetryTest(t, repo, "branch", "selected")
 			if err := os.WriteFile(filepath.Join(repo, "subject.txt"), []byte("branch-subject"), 0o600); err != nil {
 				t.Fatal(err)
