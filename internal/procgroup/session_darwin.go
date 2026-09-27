@@ -12,8 +12,10 @@ import (
 
 func guardedSessionSupport() error { return nil }
 
+var darwinSessionProcess = unix.SysctlRaw
+
 func sessionIdentity(pid int) (int, string, error) {
-	raw, err := unix.SysctlRaw("kern.proc.all")
+	raw, err := darwinSessionProcess("kern.proc.all")
 	if err != nil {
 		return 0, "", err
 	}
