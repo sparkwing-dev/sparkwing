@@ -92,7 +92,6 @@ type detachedOnlyFlag struct {
 
 func (flags runFlags) detachedOnlyFlags() []detachedOnlyFlag {
 	return []detachedOnlyFlag{
-		{"--sw-pipeline-ref", flags.pipelineRef},
 		{"--sw-idempotency-key", flags.idempotencyKey},
 		{"--sw-request-id", flags.requestID},
 		{"--sw-consumer-idle", flags.consumerIdle},

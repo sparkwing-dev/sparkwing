@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
@@ -185,6 +186,36 @@ func dispatchLocalTrigger(ctx context.Context, trig *store.Trigger,
 		}
 		defer cleanupPipeline()
 	}
+	if trig.TriggerEnv[PipelineRevKey] == "" {
+		revision, err := ResolvePipelineSource(ctx, repoDir, trig.Pipeline, "")
+		if err != nil {
+			return err
+		}
+		if revision != "" {
+			if trig.RetryOf != "" {
+				return fmt.Errorf("retry %s did not record its declared pipeline source revision", trig.ID)
+			}
+			if trig.TriggerEnv[crons.PinnedBinaryEnvKey] != "" {
+				return fmt.Errorf("pipeline %q declares source and has a pinned schedule binary; re-arm the schedule with --follow", trig.Pipeline)
+			}
+			var cleanupPipeline func()
+			pipelineRepo, cleanupPipeline, err = snapshotRetryRevision(ctx, repoDir, string(revision))
+			if err != nil {
+				return err
+			}
+			defer cleanupPipeline()
+			if trig.TriggerEnv == nil {
+				trig.TriggerEnv = make(map[string]string)
+			}
+			trig.TriggerEnv[PipelineRevKey] = string(revision)
+			trig.TriggerEnv[PipelineDirKey] = pipelineRepo
+		}
+	}
+	if env == nil {
+		env = os.Environ()
+	}
+	env = PipelineSourceEnvironment(env, trig.TriggerEnv[PipelineRevKey])
+
 	sparkwingDir, err := submittedPipelineDir(trig, filepath.Join(pipelineRepo, ".sparkwing"))
 	if err != nil {
 		return err
@@ -579,6 +610,9 @@ func unlocatableChildError(pipeline string) error {
 }
 
 func repoDeclaresPipeline(repoDir, pipeline string) bool {
+	if source, err := projectconfig.PipelineSource(repoDir, pipeline); err == nil && source != "" {
+		return true
+	}
 	names, err := repos.PipelineNamesForRepo(repoDir)
 	if err != nil {
 		return false

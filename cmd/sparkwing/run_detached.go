@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -230,13 +231,15 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		}
 		rev = resolved
 	}
-	var pipelineRev orchestrator.Commit
-	if sub.PipelineRef != "" {
-		resolved, rerr := orchestrator.ResolveRefCommit(ctx, sub.RepoDir, sub.PipelineRef, slog.Default())
-		if rerr != nil {
-			return submitResult{}, fmt.Errorf("--sw-pipeline-ref %s: %w", sub.PipelineRef, rerr)
-		}
-		pipelineRev = resolved
+	pipelineRev, err := orchestrator.ResolvePipelineSource(ctx, sub.RepoDir, sub.Pipeline, sub.PipelineRef)
+	if err != nil {
+		return submitResult{}, err
+	}
+	if pipelineRev != "" && sub.PinnedBinary != "" {
+		return submitResult{}, fmt.Errorf("pipeline %q declares source and has a pinned schedule binary; re-arm the schedule with --follow", sub.Pipeline)
+	}
+	if sub.Ref != "" && pipelineRev != "" {
+		return submitResult{}, errors.New("--sw-ref cannot replace a declared pipeline source; run from the intended execution checkout")
 	}
 	if existing, err := findExistingSubmission(ctx, st, sub.Pipeline, sub.IdempotencyKey); err != nil {
 		return submitResult{}, err
@@ -329,23 +332,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		trigger.GithubOwner, trigger.GithubRepo = owner, name
 	}
 
-	if err := st.CreateTrigger(ctx, trigger); err != nil {
-		if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, runID); derr != nil {
-			slog.Default().Warn("discard submission environment", "run_id", runID, "error", derr)
-		}
-		discardRefWorktree(ctx, paths, worktree)
-
-		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.Pipeline, sub.IdempotencyKey)
-			if ferr == nil {
-				return existingSubmissionResult(ctx, st, paths, existing, sub, rev, pipelineRev)
-			}
-			return submitResult{}, fmt.Errorf("persist trigger: %w", err)
-		}
-		return submitResult{}, fmt.Errorf("persist trigger: %w", err)
-	}
-
-	if err := st.CreateRun(ctx, store.Run{
+	if err := st.CreateTriggerWithRun(ctx, trigger, store.Run{
 		ID:            runID,
 		Pipeline:      sub.Pipeline,
 		Status:        "pending",
@@ -360,8 +347,19 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		CreatedAt:     now,
 		StartedAt:     now,
 	}); err != nil {
+		if derr := orchestrator.DiscardSubmissionEnvironment(paths.Root, runID); derr != nil {
+			slog.Default().Warn("discard submission environment", "run_id", runID, "error", derr)
+		}
 		discardRefWorktree(ctx, paths, worktree)
-		return submitResult{}, fmt.Errorf("persist run: %w", err)
+
+		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
+			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.Pipeline, sub.IdempotencyKey)
+			if ferr == nil {
+				return existingSubmissionResult(ctx, st, paths, existing, sub, rev, pipelineRev)
+			}
+			return submitResult{}, fmt.Errorf("persist trigger: %w", err)
+		}
+		return submitResult{}, fmt.Errorf("persist trigger: %w", err)
 	}
 
 	return submitResult{
@@ -469,10 +467,14 @@ func existingSubmissionResult(
 			sub.IdempotencyKey, existing.Pipeline, diff, existing.ID)
 	}
 
-	status := ""
-	if run, err := st.GetRun(ctx, existing.ID); err == nil && run != nil {
-		status = run.Status
+	run, err := st.GetRun(ctx, existing.ID)
+	if err != nil {
+		return submitResult{}, fmt.Errorf("submission %s has no readable run record: %w", existing.ID, err)
 	}
+	if run == nil {
+		return submitResult{}, fmt.Errorf("submission %s has no run record", existing.ID)
+	}
+	status := run.Status
 
 	logPath := existingRunLogDir(paths, existing.ID)
 	return submitResult{
@@ -546,6 +548,15 @@ func resolveSubmitRepo(ctx context.Context, pipeline, changeDir, pipelineRef str
 	start := changeDir
 	if start == "" {
 		start = mustGetwd()
+	}
+	if pipelineRef == "" {
+		if dir, err := findSparkwingDirFrom(start); err == nil {
+			source, err := projectconfig.PipelineSource(filepath.Dir(dir), pipeline)
+			if err != nil {
+				return "", nil, err
+			}
+			pipelineRef = source
+		}
 	}
 	if pipelineRef != "" {
 		dir, err := gitOutput(ctx, start, nil, "rev-parse", "--show-toplevel")
@@ -711,38 +722,43 @@ func sparkwingOwnerRepo(slug string) (owner, name string) {
 }
 
 func emitSubmitResult(r submitResult, format string) error {
+	if strings.TrimSpace(r.RunID) == "" {
+		return errors.New("detached submission produced no run ID")
+	}
 	switch format {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(r)
 	case "plain":
-		fmt.Fprintln(os.Stdout, r.RunID)
-		return nil
+		_, err := fmt.Fprintln(os.Stdout, r.RunID)
+		return err
 	default:
+		var out strings.Builder
 		if r.AlreadySubmitted {
 			status := r.Status
 			if status == "" {
 				status = "unknown"
 			}
-			fmt.Fprintf(os.Stdout, "run %s already submitted (%s), status %s\n",
+			fmt.Fprintf(&out, "run %s already submitted (%s), status %s\n",
 				r.RunID, r.Pipeline, status)
 		} else {
-			fmt.Fprintf(os.Stdout, "run %s submitted (%s)\n", r.RunID, r.Pipeline)
+			fmt.Fprintf(&out, "run %s submitted (%s)\n", r.RunID, r.Pipeline)
 		}
 		if r.LogPath != "" {
-			fmt.Fprintf(os.Stdout, "  logs:   %s\n", r.LogPath)
+			fmt.Fprintf(&out, "  logs:   %s\n", r.LogPath)
 		}
 		if r.ConsumerPID != 0 {
-			fmt.Fprintf(os.Stdout, "  runner: consumer pid %d (started %s)\n",
+			fmt.Fprintf(&out, "  runner: consumer pid %d (started %s)\n",
 				r.ConsumerPID, r.ConsumerStarted)
 		}
-		fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --follow\n", r.RunID)
-		fmt.Fprintf(os.Stdout, "  cancel: sparkwing runs cancel --run %s\n", r.RunID)
+		fmt.Fprintf(&out, "  follow: sparkwing runs logs --run %s --follow\n", r.RunID)
+		fmt.Fprintf(&out, "  cancel: sparkwing runs cancel --run %s\n", r.RunID)
 		if r.AlreadySubmitted && isTerminalRunStatus(r.Status) {
-			fmt.Fprintf(os.Stdout,
+			fmt.Fprintf(&out,
 				"  note:   this run already finished (%s); nothing new was queued. "+
 					"Use a different --sw-idempotency-key to run it again.\n", r.Status)
 		}
-		return nil
+		_, err := fmt.Fprint(os.Stdout, out.String())
+		return err
 	}
 }

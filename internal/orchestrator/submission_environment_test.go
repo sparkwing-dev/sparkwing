@@ -384,3 +384,16 @@ func TestRetryRequiresItsOwnSubmissionEnvironment(t *testing.T) {
 		}
 	}
 }
+
+func TestDetachedTriggerRefusesMissingSubmissionEnvironment(t *testing.T) {
+	for _, trigger := range []*store.Trigger{
+		{ID: "missing-marker", TriggerSource: "runs-submit@host"},
+		{ID: "missing-path", TriggerEnv: map[string]string{SubmitRepoDirKey: "/checkout"}},
+	} {
+		env, err := consumeSubmissionEnvironment(t.TempDir(), trigger, quietLogger())
+		var missing *SubmissionEnvironmentUnavailableError
+		if !errors.As(err, &missing) || env != nil {
+			t.Fatalf("missing submission environment = %v, %v", env, err)
+		}
+	}
+}

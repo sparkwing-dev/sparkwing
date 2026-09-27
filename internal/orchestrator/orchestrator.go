@@ -1146,6 +1146,9 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	if logDir != "" {
 		inv["log_path"] = logDir
 	}
+	if revision := os.Getenv("SPARKWING_PIPELINE_REV"); revision != "" {
+		inv["pipeline_revision"] = revision
+	}
 	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
 		inv["binary_source"] = src
 	}

@@ -176,6 +176,14 @@ func dispatchRun(args []string) error {
 	// safety: errors dropped intentionally; read-only home shouldn't break dispatch.
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
+	executionDir := dir
+	source, err := orchestrator.ResolvePipelineSource(context.Background(), filepath.Dir(dir), pipelineName, flags.pipelineRef)
+	if err != nil {
+		return err
+	}
+	if source != "" && (flags.ref != "" || flags.fleet) {
+		return errors.New("a declared pipeline source cannot be combined with --sw-ref or --sw-fleet")
+	}
 	var afterChild func()
 	if flags.ref != "" {
 		_, pipelineDirectory, cleanup, err := setupRefWorktree(dir, flags.ref)
@@ -187,7 +195,23 @@ func dispatchRun(args []string) error {
 		dir = pipelineDirectory
 	}
 
+	if source != "" {
+		_, selectedDir, cleanup, err := setupRefWorktree(dir, string(source))
+		if err != nil {
+			return err
+		}
+		afterChild = cleanup
+		defer cleanup()
+		dir = selectedDir
+	} else {
+		executionDir = ""
+	}
+
 	env := os.Environ()
+	env = removeEnv(env, "SPARKWING_PIPELINE_REV")
+	if source != "" {
+		env = setEnv(env, "SPARKWING_PIPELINE_REV", string(source))
+	}
 	env = removeEnv(env, "SPARKWING_RUN_HANDLE_FILE")
 	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
 	if logFormat == "" {
@@ -308,8 +332,9 @@ func dispatchRun(args []string) error {
 	}
 
 	run := newPipelineRun(dir, compileOptions{
-		NoUpdate:   flags.noUpdate || flags.fleet,
-		AfterChild: afterChild,
+		NoUpdate:     flags.noUpdate || flags.fleet,
+		ExecutionDir: executionDir,
+		AfterChild:   afterChild,
 	})
 	defer run.stop()
 	if err := run.materialize(env); err != nil {

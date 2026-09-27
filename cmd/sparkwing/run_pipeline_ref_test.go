@@ -182,14 +182,14 @@ func TestPipelineRefResubmissionRejectsChangedSource(t *testing.T) {
 	}
 }
 
-func TestPipelineRefFlagRequiresDetachedRun(t *testing.T) {
+func TestPipelineRefFlagAllowsForegroundRun(t *testing.T) {
 	for _, args := range [][]string{{"--sw-pipeline-ref", "main"}, {"--sw-pipeline-ref=main"}} {
 		flags, rest := parseRunFlags(args)
 		if flags.pipelineRef != "main" || len(rest) != 0 {
 			t.Errorf("parse %v = %q with %v left over, want main and nothing left", args, flags.pipelineRef, rest)
 		}
-		if err := refuseDetachedOnlyFlags(flags); err == nil || !strings.Contains(err.Error(), "--sw-pipeline-ref") {
-			t.Errorf("a foreground run with %v = %v, want the detached-only refusal", args, err)
+		if err := refuseDetachedOnlyFlags(flags); err != nil {
+			t.Errorf("a foreground run with %v = %v", args, err)
 		}
 	}
 }

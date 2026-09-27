@@ -20,6 +20,19 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cli:** Pipelines can declare `source: origin/main` to compile from a selected
+  Git ref while jobs execute in the submitting checkout. Foreground runs,
+  detached submissions, and triggers honor the declaration. Conflicting
+  `--sw-pipeline-ref` overrides are refused.
+
+### Fixed
+
+- **cli:** Detached submissions create their trigger and run together. Idempotent
+  resubmissions refuse a missing run record, and failed receipt writes return an
+  error instead of reporting success without output.
+
 ## [v0.62.0] - 2026-09-27
 ### Changed
 

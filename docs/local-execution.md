@@ -150,12 +150,17 @@ sparkwing run deploy --sw-detached --sw-idempotency-key k --env staging
 
 The following flags are read only by a detached launch and are refused without
 `--sw-detached` rather than silently ignored: `--sw-idempotency-key`,
-`--sw-request-id`, `--sw-consumer-idle`, `--sw-consumer-claim-lease`, and
-`--sw-pipeline-ref`.
+`--sw-request-id`, `--sw-consumer-idle`, and `--sw-consumer-claim-lease`.
 `--sw-output` selects the acknowledgment's format and is likewise
 detached-only.
 
-`--sw-pipeline-ref <ref>` compiles the pipeline from a separate revision while
+A pipeline may declare `source: origin/main` in its `sparkwing.yaml` entry.
+Foreground runs, detached submissions, and triggers compile that source and
+execute jobs in the submitting checkout. An explicit `--sw-pipeline-ref` must
+resolve to the same commit. Source declarations cannot be combined with
+`--sw-ref` or `--sw-fleet`; source-backed schedules must use `--follow`.
+
+`--sw-pipeline-ref <ref>` works in foreground and detached runs. It compiles the pipeline from a separate revision while
 executing it in the submitting checkout. The ref resolves to a commit at submission;
 a later branch update does not change the queued pipeline. It cannot be combined
 with `--sw-ref`, which changes the execution checkout too.

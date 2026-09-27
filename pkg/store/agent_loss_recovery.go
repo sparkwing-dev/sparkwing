@@ -581,7 +581,11 @@ func agentLossRetryProvenance(planJSON []byte, definitionPlanHash string, invoca
 			retryprovenance.RevisionKey:     provenance["revision"],
 			retryprovenance.PlanHashKey:     provenance["plan_hash"],
 		}
-		if revision := triggerEnv[retryprovenance.PipelineRevisionKey]; revision != "" {
+		revision, _ := invocation["pipeline_revision"].(string)
+		if recorded := triggerEnv[retryprovenance.PipelineRevisionKey]; recorded != "" {
+			revision = recorded
+		}
+		if revision != "" {
 			env[retryprovenance.PipelineRevisionKey] = revision
 		}
 		raw, _ := json.Marshal(env) //nolint:errcheck // String maps contain no unsupported JSON values.
