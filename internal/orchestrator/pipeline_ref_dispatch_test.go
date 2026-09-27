@@ -62,10 +62,14 @@ func main() {
 				}
 			}
 
+			invocationRevision := pipelineRevision
+			if fromTrigger {
+				invocationRevision = strings.Repeat("d", 40)
+			}
 			if err := st.CreateRun(t.Context(), store.Run{
 				ID: "source", Pipeline: "pre-push", Status: "failed", StartedAt: time.Now(),
 				RepoURL: "https://example.test/acme/build.git", GitSHA: revision,
-				PlanSnapshot: []byte("{}"), Invocation: map[string]any{"cwd": repo, "pipeline_revision": pipelineRevision},
+				PlanSnapshot: []byte("{}"), Invocation: map[string]any{"cwd": repo, "pipeline_revision": invocationRevision},
 			}); err != nil {
 				t.Fatal(err)
 			}

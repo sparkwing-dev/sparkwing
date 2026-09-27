@@ -1252,11 +1252,15 @@ func TestSchemaV30WorkingTreeRetryKeepsImmutableProvenance(t *testing.T) {
 			})
 			repoDir := filepath.Join(t.TempDir(), "repo")
 			revision := strings.Repeat("b", 40)
+			invocationRevision := strings.Repeat("c", 40)
+			if fromTrigger {
+				invocationRevision = strings.Repeat("d", 40)
+			}
 			if err := s.CreateRun(ctx, store.Run{
 				ID: "run-workspace", Pipeline: "p", Status: "running", StartedAt: time.Now(),
 				TriggerSource: "pipeline-working-tree@laptop", PlanSnapshot: plan,
 				RepoURL: "https://example.com/acme/repo.git", GitSHA: revision,
-				Invocation: map[string]any{"pipeline_revision": strings.Repeat("c", 40), "retry_provenance": map[string]any{
+				Invocation: map[string]any{"pipeline_revision": invocationRevision, "retry_provenance": map[string]any{
 					"repo_dir": repoDir, "repo_identity": "https://example.com/acme/repo.git",
 					"revision": revision, "content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
 				}},
