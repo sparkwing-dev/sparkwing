@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.62.0, so a fresh scaffold compiles against that release.
+
+
 ### Added
 
 - **cli:** Pipelines can declare `source: origin/main` to compile from a selected
