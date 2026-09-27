@@ -20,6 +20,24 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli (Breaking):** Local run retries require a new submission
+  `runs retry` refuses local retries because their original execution environment
+  is unavailable. Submit a new run from the intended environment.
+  Controller-backed retries keep their configured execution context.
+  See [local retry migration](docs/migrations/_unreleased.md#local-run-retries).
+
+### Fixed
+
+- **cli:** Detached submission rejects a pipeline absent from its selected source
+  The name and risk checks inspect the same compiled pipeline before queuing work.
+- **orchestrator:** Cancelling a local child also stops its owned descendants
+  Child completion waits for process cleanup, including setup commands and
+  local node process groups.
+- **orchestrator:** Queued local retries fail before dispatch when their execution
+  environment is unavailable, instead of inheriting the consumer's environment.
+
 ## [v0.61.0] - 2026-09-26
 ### Added
 

@@ -393,8 +393,6 @@ func (e *submitTestEnv) stopConsumer() {
 	}
 }
 
-// safety: the CLI pre-warms a daemon in this home and nothing else ends it,
-// so it outlives the test binary.
 func (e *submitTestEnv) stopDaemon() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -464,62 +462,33 @@ func TestRunDetached_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	})
 }
 
-func TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes(t *testing.T) {
+func TestRunsRetry_RefusesUnavailableLocalEnvironment(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
-		t.Skip("slow: 0.8s of real work; the fast class runs under -short")
+		t.Skip("executes the CLI")
 	}
 	e := newSubmitTestEnv(t)
-	e.extraEnv = []string{"SPARKWING_CONTROLLER_URL=http://127.0.0.1:1", "SPARKWING_LOGS_URL="}
-	runSnapshotGit(t, e.repoDir, "init")
-	runSnapshotGit(t, e.repoDir, "config", "user.email", "retry@example.test")
-	runSnapshotGit(t, e.repoDir, "config", "user.name", "Retry Test")
-	runSnapshotGit(t, e.repoDir, "remote", "add", "origin", "https://example.test/acme/retry-fixture.git")
-	runSnapshotGit(t, e.repoDir, "add", ".sparkwing")
-	runSnapshotGit(t, e.repoDir, "commit", "-m", "fixture")
-	revision := strings.TrimSpace(runSnapshotGit(t, e.repoDir, "rev-parse", "HEAD"))
-
-	const sourceID = "run-headless-retry-source"
+	const sourceID = "run-retry-source"
 	st := e.store()
-	if err := st.CreateRun(context.Background(), store.Run{
-		ID:           sourceID,
-		Pipeline:     "fixture",
-		Status:       "failed",
-		GitBranch:    "main",
-		GitSHA:       revision,
-		DeclaredRepo: "acme/retry-fixture",
-		RepoURL:      "https://example.test/acme/retry-fixture.git",
-		PlanSnapshot: []byte(`{"pipeline":"fixture","nodes":[]}`),
-		Invocation:   map[string]any{"cwd": e.repoDir},
-		StartedAt:    time.Now(),
-	}); err != nil {
+	if err := st.CreateRun(t.Context(), store.Run{ID: sourceID, Pipeline: "fixture", Status: "failed", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-
-	for _, tc := range []struct {
-		flag string
-		full bool
-	}{
-		{flag: "--failed"},
-		{flag: "--all", full: true},
-	} {
-		out := e.mustRun("runs", "retry", tc.flag, "--run", sourceID)
-		fields := strings.Fields(out)
-		if len(fields) < 2 || fields[0] != "run" {
-			t.Fatalf("retry output did not start with the new run id:\n%s", out)
+	for _, flag := range []string{"--failed", "--all"} {
+		out, err := e.run("runs", "retry", flag, "--run", sourceID)
+		if err == nil || !strings.Contains(out, "retry execution environment is unavailable") {
+			t.Fatalf("retry = %v: %s", err, out)
 		}
-		retryID := fields[1]
-		trigger, err := st.GetTrigger(context.Background(), retryID)
-		if err != nil {
-			t.Fatalf("retry %s has no trigger: %v", retryID, err)
-		}
-		if trigger.RetryOf != sourceID || trigger.Full != tc.full {
-			t.Fatalf("retry trigger = retry_of %q full %v, want %q/%v",
-				trigger.RetryOf, trigger.Full, sourceID, tc.full)
-		}
-		waitUntil(t, tc.flag+" retry to execute without a dashboard", 90*time.Second, func() bool {
-			return slices.Contains(e.markerLines(), retryID)
-		})
+	}
+	triggers, err := st.ListTriggers(t.Context(), store.TriggerFilter{})
+	if err != nil || len(triggers) != 0 {
+		t.Fatalf("refused retry left triggers: %d, %v", len(triggers), err)
+	}
+	runs, err := st.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || len(runs) != 1 || runs[0].RetriedAs != "" {
+		t.Fatalf("refused retry changed run history: %v, %v", runs, err)
+	}
+	if _, ok := orchestrator.ConsumerPID(e.home); ok {
+		t.Fatal("refused retry started a consumer")
 	}
 }
 

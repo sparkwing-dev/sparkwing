@@ -10,7 +10,7 @@ import (
 func TestLongDetachedProcessRegressionsRunInParallel(t *testing.T) {
 	targets := map[string]bool{
 		"TestRunDetached_ExecutionOutlivesTheSubmittingProcess":         false,
-		"TestRunsRetry_HeadlessLocalQueueExecutesFailedAndFullScopes":   false,
+		"TestRunsRetry_RefusesUnavailableLocalEnvironment":              false,
 		"TestRunDetached_DuplicateKeyReturnsTheOriginalRun":             false,
 		"TestRunDetached_DistinctKeysAreDistinctRuns":                   false,
 		"TestRunDetached_RequestIDDoesNotDeduplicate":                   false,

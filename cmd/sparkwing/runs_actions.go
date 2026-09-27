@@ -13,7 +13,6 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/runretry"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -165,30 +164,15 @@ func runRunsRetry(ctx context.Context, args []string) error {
 		if len(ids) == 0 {
 			return fmt.Errorf("retry: %d of %d failed", failures, requested)
 		}
-		results, consumerErr, localErr := retryLocalRuns(ctx, *home, ids, full)
+		results, localErr := retryLocalRuns(ctx, *home, ids)
 		if localErr != nil {
 			return localErr
 		}
-		localSuccesses := 0
 		for _, result := range results {
-			if result.Error != "" {
-				failures++
-				fmt.Fprintf(os.Stderr, "rerun of %s failed: %s\n", result.RunID, result.Error)
-				continue
-			}
-			localSuccesses++
-			fmt.Fprintf(os.Stdout, "run %s submitted successfully\n", result.NewRunID)
-			fmt.Fprintf(os.Stdout, "follow: sparkwing runs logs --run %s --follow\n", result.NewRunID)
+			failures++
+			fmt.Fprintf(os.Stderr, "rerun of %s failed: %s\n", result.RunID, result.Error)
 		}
-		if consumerErr != nil {
-			return fmt.Errorf("retry: %d run(s) persisted but no consumer could be started: %w\n"+
-				"Start one with `sparkwing runs consumer start`; the retries are queued and will execute when it comes up",
-				localSuccesses, consumerErr)
-		}
-		if failures > 0 {
-			return fmt.Errorf("retry: %d of %d failed", failures, requested)
-		}
-		return nil
+		return fmt.Errorf("retry: %d of %d failed", failures, requested)
 	}
 	c, _, err := resolveRunsClient(*on, cmdJobsRetry.Path)
 	if err != nil {
@@ -212,42 +196,30 @@ func runRunsRetry(ctx context.Context, args []string) error {
 	return nil
 }
 
-func retryLocalRuns(ctx context.Context, home string, ids []string, full bool) ([]runResult, error, error) {
+func retryLocalRuns(ctx context.Context, home string, ids []string) ([]runResult, error) {
 	paths, err := submitPaths(home)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if _, err := os.Stat(paths.StateDB()); err != nil {
-		return nil, nil, fmt.Errorf("no local runs store at %s (is this the home the run is using?)", paths.StateDB())
+		return nil, fmt.Errorf("no local runs store at %s (is this the home the run is using?)", paths.StateDB())
 	}
-	//nolint:contextcheck // Store.Open owns its bounded migration context and has no caller-context variant.
-	st, err := store.Open(paths.StateDB())
+	st, err := store.OpenReadOnly(paths.StateDB())
 	if err != nil {
-		return nil, nil, fmt.Errorf("open %s: %w", paths.StateDB(), err)
+		return nil, fmt.Errorf("open %s: %w", paths.StateDB(), err)
 	}
-
 	results := make([]runResult, 0, len(ids))
-	successes := 0
 	for _, sourceID := range ids {
-		created, createErr := runretry.Create(ctx, st, sourceID, orchestrator.NewLocalRunID(), full, time.Now())
-		if createErr != nil {
-			results = append(results, runResult{RunID: sourceID, Error: createErr.Error()})
-			continue
+		_, err := st.GetRun(ctx, sourceID)
+		if err == nil {
+			err = &orchestrator.RetryEnvironmentUnavailableError{RunID: sourceID}
 		}
-		successes++
-		results = append(results, runResult{RunID: sourceID, OK: true, NewRunID: created.ID})
+		results = append(results, runResult{RunID: sourceID, Error: err.Error()})
 	}
 	if err := st.Close(); err != nil {
-		return results, nil, fmt.Errorf("close %s: %w", paths.StateDB(), err)
+		return results, fmt.Errorf("close %s: %w", paths.StateDB(), err)
 	}
-	if successes == 0 {
-		return results, nil, nil
-	}
-	//nolint:contextcheck // The resident consumer lifecycle predates a context-aware process-table API.
-	if err := ensureTriggerConsumer(paths.Root, 0, 0); err != nil {
-		return results, err, nil
-	}
-	return results, nil, nil
+	return results, nil
 }
 
 func profileSuffix(on string) string {

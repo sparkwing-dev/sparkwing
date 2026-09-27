@@ -193,3 +193,63 @@ func TestPipelineRefFlagRequiresDetachedRun(t *testing.T) {
 		}
 	}
 }
+
+func TestPipelineRefSubmissionValidatesSelectedName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: compiles the selected pipeline source")
+	}
+	repo := pipelineRefRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.email=t@example.com", "-c", "user.name=t"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git: %v: %s", err, out)
+		}
+	}
+	files := map[string]string{
+		"go.mod": "module selectedfixture\n\ngo 1.22\n",
+		"main.go": `package main
+import "fmt"
+func main() { fmt.Print("[{\"name\":\"selected\"}]") }
+`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(repo, ".sparkwing", name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("add", ".")
+	git("commit", "-q", "-m", "declare pipeline")
+	git("branch", "declared")
+	if err := os.WriteFile(filepath.Join(repo, ".sparkwing", "main.go"), []byte("unbuildable caller"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths, st := pipelineRefStore(t)
+	submit := func(name string) (submitResult, error) {
+		gate := riskGate{Surface: detachedPath, Pipeline: name, SubmitDir: repo}
+		return persistSubmission(t.Context(), st, paths, submission{Pipeline: name, RepoDir: repo, PipelineRef: "declared", Gate: gate.check})
+	}
+	if _, err := submit("absent"); err == nil || !strings.Contains(err.Error(), "declares a pipeline") {
+		t.Fatalf("absent pipeline submission = %v, want a name refusal", err)
+	}
+	triggers, err := st.ListTriggers(t.Context(), store.TriggerFilter{})
+	if err != nil || len(triggers) != 0 {
+		t.Fatalf("rejected submission left triggers: %d, %v", len(triggers), err)
+	}
+	runs, err := st.ListRuns(t.Context(), store.RunFilter{})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("rejected submission left runs: %d, %v", len(runs), err)
+	}
+	for _, dir := range []string{paths.RefWorktreesDir(), filepath.Join(paths.Root, "submission-environments")} {
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("rejected submission left files in %s: %v", dir, entries)
+		}
+	}
+	if _, err := submit("selected"); err != nil {
+		t.Fatalf("selected source was not used: %v", err)
+	}
+}
