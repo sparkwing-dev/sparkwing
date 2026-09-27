@@ -208,11 +208,14 @@ func TestAClaimedTriggerHoldsItsTreeAgainstTheSweep(t *testing.T) {
 
 	dir := buildWorktree(t, p, repo, "run-dispatching")
 	submitTrigger(t, st, "run-dispatching")
+	if err := CaptureSubmissionEnvironment(home, "run-dispatching", []string{"PATH=" + os.Getenv("PATH")}, nil); err != nil {
+		t.Fatal(err)
+	}
 	claimed, err := st.ClaimNextTrigger(ctx, time.Minute)
 	if err != nil {
 		t.Fatalf("ClaimNextTrigger: %v", err)
 	}
-	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir}
+	claimed.TriggerEnv = map[string]string{SubmitRepoDirKey: dir, SubmissionEnvironmentCapturedKey: "1"}
 
 	var swept int
 	var sweepErr error
