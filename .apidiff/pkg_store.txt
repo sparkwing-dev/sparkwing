@@ -2103,7 +2103,7 @@ func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (Identity
 func (s *Store) PruneStorageCommitReceipts(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
 func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBinding) error
-func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error)
+func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error)
 func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
