@@ -20,6 +20,7 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.64.0] - 2026-09-28
 ### Added
 
 - **admission + cli:** `sparkwing daemon events` and `sparkwing daemon explain` show why runs queued, started or stopped
