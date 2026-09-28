@@ -86,8 +86,8 @@ unlock.
   `PATH` at startup (aws, buildx, crane, docker, git, go, golangci-lint, helm,
   kubectl, node, npm, shellcheck, terraform) and advertises each as a
   `tool:<name>` label with no configuration. `JobNode.NeedsTools` and
-  `JobGroup.NeedsTools` add those terms to a node's selector (a
-  `JobFanOutDynamic` group panics at plan time instead), and the matcher
+  `JobGroup.NeedsTools` add those terms to a node's selector, including the
+  members a `JobFanOutDynamic` group generates later, and the matcher
   never hands such a node to an agent without the tool. Sparkwing Cloud runners
   have exactly the tools `build/runner-tools` declares, and the runner image
   build fails when the image lacks one.

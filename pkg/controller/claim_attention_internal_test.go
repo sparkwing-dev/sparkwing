@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -76,7 +77,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	}
 	expect := func(step, want string) {
 		t.Helper()
-		srv.sweepClaimAttention(ctx)
+		srv.sweepClaimAttention(ctx, time.Now())
 		if single, listed := runAttention(t, ts.URL, "run-1"); single != want || listed != want {
 			t.Fatalf("%s: run says %q, run list says %q; want %q", step, single, listed, want)
 		}
@@ -195,5 +196,54 @@ func TestPresenceReportsAPlatformChange(t *testing.T) {
 	}
 	if !reg.record(key, []string{"tool:git"}, nil, match.Profile{OS: "linux", Arch: "arm64"}, nil, time.Now()) {
 		t.Fatal("a changed architecture is not reported")
+	}
+}
+
+// A pass ends once it has read every node that was waiting when it began, so a
+// node behind the cursor is judged again even while newer nodes keep every
+// page after the cursor full.
+func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	srv := New(st, nil)
+	batch := claimAttentionBatch
+	claimAttentionBatch = 2
+	t.Cleanup(func() { claimAttentionBatch = batch })
+	seed := func(runID string, readyAt time.Time) {
+		t.Helper()
+		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "work", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.MarkNodeReady(ctx, runID, "work"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`,
+			readyAt.UnixNano(), readyAt.UnixNano(), runID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	for _, run := range []string{"run-a", "run-b", "run-c"} {
+		seed(run, start.Add(-time.Minute))
+	}
+	srv.sweepClaimAttention(ctx, start)
+	if err := st.SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-a", NodeID: "work"}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 4; i++ {
+		tick := start.Add(time.Duration(i) * 100 * time.Second)
+		seed(fmt.Sprintf("run-d%dx", i), tick.Add(-time.Minute))
+		seed(fmt.Sprintf("run-d%dy", i), tick.Add(-time.Minute))
+		srv.sweepClaimAttention(ctx, tick)
+	}
+	if run, err := st.GetRun(ctx, "run-a"); err != nil || run.NeedsAttention == "" {
+		t.Fatalf("run-a = %+v, %v; the node behind the cursor was never judged again", run, err)
 	}
 }

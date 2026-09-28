@@ -232,23 +232,22 @@ type NodeAttention struct {
 	Reason        string
 }
 
-// SetNodeAttention records the reasons in one transaction. A node claimed
-// since the sweep read it keeps none.
+// SetNodeAttention records the reasons. A node claimed since the sweep read
+// it keeps none.
+//
+// safety: each reason is its own autocommitted single-row statement, so the
+// sweep never holds one node's lock while it waits for another's, and run
+// settlement, which locks a run's nodes in its own order, cannot deadlock
+// against it. A reason is advisory, so one lost to an error is rewritten on
+// the next pass.
 func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) error {
-	if len(updates) == 0 {
-		return nil
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackOrLog(tx)
+	var errs []error
 	for _, u := range updates {
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET attention_reason = ?
+		if _, err := s.exec(ctx, `UPDATE nodes SET attention_reason = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
 			u.Reason, string(u.Team), u.RunID, u.NodeID); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return tx.Commit()
+	return errors.Join(errs...)
 }

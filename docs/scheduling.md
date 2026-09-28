@@ -83,9 +83,8 @@ lacks one it declares.
 sw.Job(plan, "apply", &Apply{}).NeedsTools("terraform")
 ```
 
-`JobGroup.NeedsTools` applies to the members a group has at plan time, so it
-panics on a `JobFanOutDynamic` group; call `NeedsTools` on each node its
-callback returns. An enrolled executor has the tools its enrollment grants as
+`JobGroup.NeedsTools` applies to every member, including those a
+`JobFanOutDynamic` group generates after its source finishes. An enrolled executor has the tools its enrollment grants as
 `tool:<name>` capabilities.
 
 ## Waiting nodes and `needs_attention`
@@ -111,7 +110,9 @@ in the run list) says why:
   repository (`repo`) or cannot hold its request (`shape`).
 
 The sweep runs every 10 seconds and judges at most 1,000 waiting nodes per
-tick, resuming after the last one on the next tick. On Postgres with 5,000
+tick, resuming after the last one on the next tick. A pass covers the nodes
+that were waiting when it began, so every waiting node is judged within
+ceil(N/1,000) ticks however many arrive meanwhile. On Postgres with 5,000
 waiting nodes a tick that rewrites 1,000 reasons took about 350 ms and a tick
 that changes none about 10 ms.
 

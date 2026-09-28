@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -35,16 +36,22 @@ func TestClaimWaitIsThePlansOwn(t *testing.T) {
 	}
 }
 
-func TestNeedsToolsOnADynamicGroupFailsAtPlanTime(t *testing.T) {
+func TestNeedsToolsReachesADynamicGroupsGeneratedMembers(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	src := sparkwing.Job(plan, "discover", &discoverJob{items: []string{"a"}})
-	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
+	sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
 		return "build-" + s, func(ctx context.Context) error { return nil }
+	}).NeedsTools("terraform")
+	ctx := sparkwingruntime.WithJSONResolver(context.Background(), func(id string) ([]byte, bool) {
+		return []byte(`["a","b"]`), id == "discover"
 	})
-	defer func() {
-		if r := recover(); r == nil || !strings.Contains(r.(string), "dynamic group") {
-			t.Fatalf("NeedsTools on a dynamic group = %v, want a plan-time panic", r)
+	children := plan.Expansions()[0].Gen(ctx)
+	if len(children) != 2 {
+		t.Fatalf("generated %d members, want 2", len(children))
+	}
+	for _, c := range children {
+		if !slices.Equal(c.RequiresLabels(), []string{"tool:terraform"}) {
+			t.Fatalf("member %s selector = %v, want tool:terraform", c.ID(), c.RequiresLabels())
 		}
-	}()
-	group.NeedsTools("terraform")
+	}
 }

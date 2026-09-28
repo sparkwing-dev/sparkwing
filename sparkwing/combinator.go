@@ -16,6 +16,7 @@ type JobGroup struct {
 	name    string
 	members []*JobNode
 	dynamic bool
+	tools   []string
 	ready   chan struct{}
 	err     error
 }
@@ -124,7 +125,11 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 		for _, it := range items {
 			id, x := fn(it)
 			job := coerceJobArg("JobFanOutDynamic", id, x)
-			out = append(out, newNode("JobFanOutDynamic", id, job))
+			node := newNode("JobFanOutDynamic", id, job)
+			g.mu.Lock()
+			node.NeedsTools(g.tools...)
+			g.mu.Unlock()
+			out = append(out, node)
 		}
 		return out
 	}
@@ -205,14 +210,13 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
-// NeedsTools restricts every member to agents that have the named tools. See
-// [JobNode.NeedsTools]. A [JobFanOutDynamic] group has no members at plan
-// time, so it panics there; call NeedsTools on each node its callback returns.
+// NeedsTools restricts every member to agents that have the named tools,
+// including the members a [JobFanOutDynamic] group generates later. See
+// [JobNode.NeedsTools].
 func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
-	if g.dynamic {
-		panic("sparkwing: JobGroup.NeedsTools: a dynamic group's members are generated later; " +
-			"call NeedsTools on each node in the JobFanOutDynamic callback")
-	}
+	g.mu.Lock()
+	g.tools = append(g.tools, names...)
+	g.mu.Unlock()
 	for _, m := range g.Members() {
 		m.NeedsTools(names...)
 	}
