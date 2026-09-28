@@ -7442,6 +7442,10 @@ components:
           enum: [planning, admitted]
           description: >-
             A controller-dispatched run's admission state. Absent for every other run.
+        needs_attention:
+          type: string
+          description: >-
+            Why a ready node of the run waits with no agent able to claim it. It names the missing selector terms, or the eligible agent that is offline and when it was last seen. Absent when no node waits that way, and cleared when an agent claims the node.
     Node:
       x-sparkwing-go-partial: pkg/store.Node
       type: object

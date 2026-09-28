@@ -82,6 +82,21 @@ unlock.
   awarded a node whose run's repository its list refuses. Controllers older
   than schema 81 keep working against a migrated database.
 
+- **agent + sdk + controller:** An agent detects a fixed list of tools on its
+  `PATH` at startup (aws, buildx, crane, docker, git, go, golangci-lint, helm,
+  kubectl, node, npm, shellcheck, terraform) and advertises each as a
+  `tool:<name>` label with no configuration. `JobNode.NeedsTools` and
+  `JobGroup.NeedsTools` add those terms to a node's selector, and the matcher
+  never hands such a node to an agent without the tool. Sparkwing Cloud runners
+  have exactly the tools `build/runner-tools` declares, and the runner image
+  build fails when the image lacks one.
+- **controller + store:** A run's `needs_attention` field, on the run and in
+  the run list, says why a ready node waits with no online agent or Cloud
+  runner able to claim it: the selector terms no agent registered to the team
+  has, or the eligible agent that is offline and when it was last seen. It
+  clears when an agent claims the node. Schema 83 adds the columns it reads;
+  controllers older than schema 83 keep working against a migrated database.
+
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most
@@ -820,6 +835,13 @@ unlock.
   server, for PostgreSQL.
 
 ### Changed
+
+- **controller + sdk:** A ready node no agent claims now waits up to its claim
+  wait, 24 hours by default or what `Plan.ClaimWait` sets, instead of the
+  15-minute queue deadline, and then fails with `queue_timeout` and an error
+  starting `unclaimable:` that names why. The warm pool's own wait for an
+  unmatched node follows the same 24-hour default. The trigger queue deadline
+  stays at 15 minutes.
 
 - **controller + store (Breaking):** `name=` in a selector matches only the
   runner whose token was minted for that agent name; a runner asserting

@@ -205,6 +205,15 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
+// NeedsTools restricts every member to agents that have the named tools. See
+// [JobNode.NeedsTools].
+func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
+	for _, m := range g.Members() {
+		m.NeedsTools(names...)
+	}
+	return g
+}
+
 // Prefers boosts matching enrolled-executor offers within their priority
 // ceiling for every member. See [JobNode.Prefers].
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {

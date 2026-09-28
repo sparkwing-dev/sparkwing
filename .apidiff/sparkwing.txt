@@ -318,6 +318,7 @@ func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
+func (g *JobGroup) NeedsTools(names ...string) *JobGroup
 func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup
 func (g *JobGroup) Optional() *JobGroup
 func (g *JobGroup) Outputs(globs ...string) *JobGroup
@@ -360,6 +361,7 @@ func (n *JobNode) MemoizeConfig() *MemoizeConfig
 func (n *JobNode) Needs(deps ...Dep) *JobNode
 func (n *JobNode) NeedsGroups() []*JobGroup
 func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
+func (n *JobNode) NeedsTools(names ...string) *JobNode
 func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode
 func (n *JobNode) NoProgressTimeoutDuration() time.Duration
 func (n *JobNode) OnFailure(id string, x any) *JobNode
@@ -472,6 +474,8 @@ type Plan struct {
 }
 func (p *Plan) AdmissionClass(class AdmissionClass) *Plan
 func (p *Plan) AdmissionClassValue() AdmissionClass
+func (p *Plan) ClaimWait(d time.Duration) *Plan
+func (p *Plan) ClaimWaitValue() time.Duration
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan
 func (p *Plan) ConcurrencyCost() int
 func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup

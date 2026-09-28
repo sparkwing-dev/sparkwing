@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -55,6 +56,13 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "terraform"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("HOME", t.TempDir())
+
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
@@ -95,8 +103,9 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	if got.auth != "Bearer bearer-xyz" {
 		t.Fatalf("auth header: %q", got.auth)
 	}
-	if len(got.labels) != 2 || got.labels[0] != "laptop" || got.labels[1] != "arch=arm64" {
-		t.Fatalf("labels: %v", got.labels)
+	if len(got.labels) < 3 || got.labels[0] != "laptop" || got.labels[1] != "arch=arm64" ||
+		!slices.Contains(got.labels, "tool:terraform") || slices.Contains(got.labels, "tool:kubectl") {
+		t.Fatalf("labels: %v, want the configured labels then tool:terraform, the one known tool on PATH", got.labels)
 	}
 	if !strings.HasPrefix(got.holder, "agent:test:") {
 		t.Fatalf("holder prefix: %q", got.holder)

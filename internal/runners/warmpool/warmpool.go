@@ -263,10 +263,10 @@ func (r *Runner) pollRun(ctx context.Context, runID string, wait *runWait) {
 }
 
 // DefaultUnmatchableGrace is how long a node whose labels this dispatcher's
-// fallback cannot advertise waits for a runner that can before it fails. It
-// bounds the wait for a labeled runner that has yet to start, and is the only
-// end a node above the warm cpu class has when nothing on the fleet serves it.
-const DefaultUnmatchableGrace = 5 * time.Minute
+// fallback cannot advertise waits for a runner that can before it fails. It is
+// the controller's claim wait, so a node waits for an offline agent, with its
+// run marked as needing attention, rather than failing within minutes.
+const DefaultUnmatchableGrace = match.DefaultClaimWait
 
 // safety: the grace runs from the first sighting of an unmatchable node, and a
 // wait exactly as long as the grace is still inside it.

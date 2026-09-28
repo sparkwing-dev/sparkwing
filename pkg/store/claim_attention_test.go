@@ -1,0 +1,139 @@
+package store_test
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
+)
+
+func ageReadyNode(t *testing.T, s *store.Store, runID string, age time.Duration) {
+	t.Helper()
+	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s,
+		`UPDATE nodes SET ready_at = ? WHERE run_id = ?`), time.Now().Add(-age).UnixNano(), runID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A node that needs a tool is never taken by an agent without it, by queue or
+// by name, and the Cloud pool has exactly the tools its image declares.
+func TestToolNodeIsNeverClaimedByAnAgentWithoutTheTool(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
+	agent := store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: "swr_pi"}
+	if _, err := s.ClaimNextReadyNode(ctx, agent, "pi:1", time.Minute, []string{"tool:git", "tool:go"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a queue claim without terraform = %v, want not found", err)
+	}
+	if _, err := s.ClaimNamedNode(ctx, agent, "run-tf", "work", "pi:2", time.Minute,
+		store.NamedClaimOptions{Labels: []string{"tool:git"}}); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("a named claim without terraform = %v, want held", err)
+	}
+	pool := meteredClaimant(t, s, "agent:pool")
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNamedNode(ctx, pool, "run-tf", "work", "k8s-job:1", time.Minute,
+		store.NamedClaimOptions{Labels: []string{"tool:terraform"}}); err == nil {
+		t.Fatal("the Cloud pool claimed a terraform node its image does not declare")
+	}
+	seedMatchNode(t, s, "run-go", "", 1, "tool:go")
+	if n, err := s.ClaimNamedNode(ctx, pool, "run-go", "work", "k8s-job:2", time.Minute,
+		store.NamedClaimOptions{}); err != nil || n.ClaimedBy != "k8s-job:2" {
+		t.Fatalf("the Cloud pool's claim of a node needing a declared tool = %+v, %v", n, err)
+	}
+	if n, err := s.ClaimNextReadyNode(ctx, agent, "pi:3", time.Minute, []string{"tool:terraform"}); err != nil || n.RunID != "run-tf" {
+		t.Fatalf("a queue claim with terraform = %+v, %v; want run-tf", n, err)
+	}
+}
+
+// The attention reason shows on the run while the node waits and is gone the
+// moment an agent claims it.
+func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
+	ageReadyNode(t, s, "run-tf", time.Minute)
+	waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-30*time.Second))
+	if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"tool:terraform"}) {
+		t.Fatalf("waiting = %+v, %v", waiting, err)
+	}
+	const reason = "node work needs tool:terraform; no agent in team default has it"
+	if err := s.SetNodeAttention(ctx, store.DefaultTeam, "run-tf", "work", reason); err != nil {
+		t.Fatal(err)
+	}
+	run, err := s.GetRun(ctx, "run-tf")
+	if err != nil || run.NeedsAttention != reason {
+		t.Fatalf("run = %+v, %v; want the attention reason", run, err)
+	}
+	runs, err := s.ListRuns(ctx, store.RunFilter{Limit: 10})
+	if err != nil || len(runs) != 1 || runs[0].NeedsAttention != reason {
+		t.Fatalf("run list = %+v, %v; want the attention reason", runs, err)
+	}
+	agent := store.ClaimIdentity{Principal: "agent:box", TokenPrefix: "swr_box"}
+	if _, err := s.ClaimNextReadyNode(ctx, agent, "box:1", time.Minute, []string{"tool:terraform"}); err != nil {
+		t.Fatal(err)
+	}
+	if run, err = s.GetRun(ctx, "run-tf"); err != nil || run.NeedsAttention != "" {
+		t.Fatalf("run after a claim = %+v, %v; want no attention", run, err)
+	}
+}
+
+// A ready node fails as unclaimable, with its reason, only once its run's
+// claim wait has passed: 24 hours by default, or what the plan set.
+func TestUnclaimedNodesFailAtTheirClaimWait(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedMatchNode(t, s, "run-default", "", 1, "tool:terraform")
+	seedMatchNode(t, s, "run-short", "", 1, "tool:terraform")
+	if err := s.UpdatePlanSnapshot(ctx, "run-short", []byte(`{"claim_wait_ms":3600000,"nodes":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	ageReadyNode(t, s, "run-default", 2*time.Hour)
+	ageReadyNode(t, s, "run-short", 2*time.Hour)
+	if err := s.SetNodeAttention(ctx, store.DefaultTeam, "run-short", "work", "node work needs tool:terraform"); err != nil {
+		t.Fatal(err)
+	}
+	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait)
+	if err != nil || len(pairs) != 1 || pairs[0] != [2]string{"run-short", "work"} {
+		t.Fatalf("failed = %v, %v; want only the node past its one-hour wait", pairs, err)
+	}
+	n, err := s.GetNode(ctx, "run-short", "work")
+	if err != nil || n.Error != "unclaimable: node work needs tool:terraform" || n.FailureReason != store.FailureQueueTimeout {
+		t.Fatalf("node = %+v, %v; want unclaimable with its reason", n, err)
+	}
+	ageReadyNode(t, s, "run-default", 25*time.Hour)
+	if pairs, err = store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait); err != nil || len(pairs) != 1 {
+		t.Fatalf("failed after 25h = %v, %v; want the default-wait node", pairs, err)
+	}
+	if n, _ = s.GetNode(ctx, "run-default", "work"); !strings.HasPrefix(n.Error, "unclaimable: ") {
+		t.Fatalf("node error = %q", n.Error)
+	}
+}
+
+// A team's agents are listed with what they last advertised, offline or not.
+func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	_, pi, err := s.CreateToken("agent:pi", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateToken("someone", store.TokenKindUser, []string{"runs.read"}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordAgentLabels(ctx, pi.Prefix, []string{"tool:git", "name=forged", "arch=arm64"}); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
+	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
+		!slices.Equal(agents[0].Labels, []string{"tool:git", "arch=arm64"}) {
+		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
+	}
+}

@@ -2965,6 +2965,7 @@ type planSnapshot struct {
 	Pipeline       string                   `json:"pipeline"`
 	RunID          string                   `json:"run_id"`
 	Priority       int                      `json:"priority,omitempty"`
+	ClaimWaitMS    int64                    `json:"claim_wait_ms,omitempty"`
 	AdmissionClass sparkwing.AdmissionClass `json:"admission_class,omitempty"`
 	Requires       []string                 `json:"requires,omitempty"`
 	Nodes          []snapshotNode           `json:"nodes"`
@@ -3098,6 +3099,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		Pipeline:       rc.Pipeline,
 		RunID:          rc.RunID,
 		Priority:       p.PriorityValue(),
+		ClaimWaitMS:    p.ClaimWaitValue().Milliseconds(),
 		Requires:       slices.Clone(meta.PipelineRequires),
 		Secrets:        meta.Secrets,
 	}

@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 82
+const expectedSchemaVersion = 83
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2114,6 +2114,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 	// takes that step in place of this empty one.
 	case 82:
 		return nil
+	case 83:
+		return applyClaimAttentionMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2560,6 +2562,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 	// takes that step in place of this empty one.
 	case 82:
 		return nil
+	case 83:
+		return applyClaimAttentionMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3628,6 +3632,9 @@ type Run struct {
 	// column or come from backends that don't ping it (local + S3
 	// modes use per-node heartbeats for orphan detection instead).
 	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	// NeedsAttention says why a ready node of the run waits with no agent
+	// able to claim it; empty when none does.
+	NeedsAttention string `json:"needs_attention,omitempty"`
 }
 
 // CreateRun inserts a run row, or upgrades an existing 'pending' row
@@ -3951,7 +3958,8 @@ ON CONFLICT(run_id) DO UPDATE SET plan_hash = run_definition_plans.plan_hash
  WHERE run_definition_plans.team = excluded.team`, planHash, string(team), runID); err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ? WHERE team = ? AND id = ?`, snapshot, string(team), runID)
+	res, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, claim_wait_ns = ? WHERE team = ? AND id = ?`,
+		snapshot, planClaimWait(snapshot), string(team), runID)
 	if err != nil {
 		return err
 	}
@@ -3974,7 +3982,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission`
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission, ` + runAttentionColumn
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -4344,7 +4352,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.RetryAvoidExecutorID, &retryAvoidUntilNS,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
-		&heartbeatNS, &r.Admission)
+		&heartbeatNS, &r.Admission, &r.NeedsAttention)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
@@ -5648,6 +5656,9 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
+	if warm.metered {
+		profile = withCloudTools(profile)
+	}
 	scope, err := s.claimScope(ctx, claimant)
 	if err != nil {
 		return nil, err
@@ -6015,7 +6026,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	awardArgs = append(awardArgs, teamArgs...)
 	res, err := tx.ExecContext(
 		ctx,
-		`UPDATE nodes SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+		`UPDATE nodes SET attention_reason = '', claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
 		        lease_expires_at = ?, coordinator_id = ?, executor_kind = '', executor_id = '',
 		        executor_location = 'unknown', reservation_id = '', claim_membership_id = '',
 		        credit_charged_through = 0,
@@ -6449,60 +6460,6 @@ UPDATE nodes
 		return nil, err
 	}
 	return nodeIDs, nil
-}
-
-func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duration) ([][2]string, error) {
-	if olderThan <= 0 {
-		return nil, nil
-	}
-	threshold := time.Now().Add(-olderThan).UnixNano()
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id FROM nodes
-		  WHERE ready_at IS NOT NULL AND claimed_by IS NULL
-		    AND ready_at < ? AND `+nodeNotDone,
-		threshold)
-	if err != nil {
-		return nil, err
-	}
-	var pairs [][2]string
-	for rows.Next() {
-		var rid, nid string
-		if err := rows.Scan(&rid, &nid); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		pairs = append(pairs, [2]string{rid, nid})
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(pairs) == 0 {
-		return nil, nil
-	}
-	now := time.Now().UnixNano()
-	for _, p := range pairs {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE nodes
-   SET `+nodeFailSet+`,
-       error = 'no runner claimed this node before the queue deadline',
-       failure_reason = ?, finished_at = ?,
-       ready_at = NULL
- WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
-			FailureQueueTimeout, now, p[0], p[1]); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return pairs, nil
 }
 
 // Event is one audit/wire record for a run; Seq is per-run monotonic.

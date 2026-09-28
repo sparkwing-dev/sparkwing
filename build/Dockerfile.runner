@@ -30,6 +30,7 @@ ENV PATH=/usr/local/go/bin:$PATH \
     GOCACHE=/tmp/.gocache \
     GOPATH=/tmp/.gopath
 COPY bin/check-runner-image.sh /usr/local/bin/check-runner-image.sh
+COPY build/runner-tools /usr/local/share/sparkwing/runner-tools
 RUN /bin/sh /usr/local/bin/check-runner-image.sh
 COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/runner-entrypoint.sh

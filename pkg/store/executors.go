@@ -1312,7 +1312,7 @@ SELECT COUNT(*), COALESCE(SUM(claim_cores), 0), COALESCE(SUM(claim_memory_bytes)
 	membershipID := executorMembershipID(authorityID, e.id)
 	result, err := tx.ExecContext(ctx, `
 UPDATE nodes
-   SET claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
+   SET attention_reason = '', claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
        claim_executor = ?, claim_cores = ?, claim_memory_bytes = ?,
        claim_reservation = ?, claim_slot = ?, lease_expires_at = ?,
        coordinator_id = ?, claim_membership_id = ?, executor_kind = ?, executor_id = ?,

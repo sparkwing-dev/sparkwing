@@ -762,6 +762,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup` -- NeedsOptional declares optional upstream dependencies on every member; unknown IDs are silently dropped at finalize.
+- `func (g *JobGroup) NeedsTools(names ...string) *JobGroup` -- NeedsTools restricts every member to agents that have the named tools.
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
@@ -815,6 +816,7 @@ type JobNode struct {
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
 - `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from JobFanOutDynamic) this node is waiting on.
 - `func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode` -- NeedsOptional declares upstream dependencies that may or may not be present in the plan.
+- `func (n *JobNode) NeedsTools(names ...string) *JobNode` -- NeedsTools restricts the job to agents that have every named tool on their PATH.
 - `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
 - `func (n *JobNode) NoProgressTimeoutDuration() time.Duration` -- NoProgressTimeoutDuration returns the configured per-attempt inactivity timeout, or zero if disabled.
 - `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure registers a recovery node that runs only when this node terminates with outcome=failed; otherwise it's marked Skipped.
@@ -827,7 +829,7 @@ type JobNode struct {
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
 - `func (n *JobNode) PrefersLabels() []string`
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
-- `func (n *JobNode) RequiresLabels() []string`
+- `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels is the job's selector: its Requires terms, then a tool:<name> term for each tool NeedsTools named.
 - `func (n *JobNode) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the resource pin declared via JobNode.Resources, or nil when the node declared none.
 - `func (n *JobNode) Resources(hints ...ResourceHint) *JobNode` -- Resources pins this node's peak CPU and memory.
 - `func (n *JobNode) ResultStep() *WorkStep` -- ResultStep returns the *WorkStep the Job designated as its typed output via Work's return value, or nil for untyped Jobs.
@@ -1096,6 +1098,8 @@ type Plan struct {
 - `func NewPlan() *Plan`
 - `func (p *Plan) AdmissionClass(class AdmissionClass) *Plan` -- AdmissionClass sets the pipeline's local contention class.
 - `func (p *Plan) AdmissionClassValue() AdmissionClass` -- AdmissionClassValue returns the plan's explicit local contention class.
+- `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait bounds how long each of the run's ready nodes waits for an agent to claim it before the controller fails it as unclaimable.
+- `func (p *Plan) ClaimWaitValue() time.Duration` -- ClaimWaitValue returns the wait ClaimWait set, or zero for the default.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.
 - `func (p *Plan) ConcurrencyCost() int` -- ConcurrencyCost returns the first plan-level admission cost declared via Plan.Concurrency, or 0 when the plan declared no whole-run coordination.
 - `func (p *Plan) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the first group set via Plan.Concurrency, or nil when the plan declared no whole-run coordination.

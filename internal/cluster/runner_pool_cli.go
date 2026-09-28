@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"slices"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -81,6 +84,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 		logger = slog.Default()
 	}
 	cfg = normalizePoolLoopConfig(cfg)
+	cfg.Labels = withDetectedTools(cfg.Labels, exec.LookPath)
 	sweepLeftoverDeployKeys(logger)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -169,6 +173,18 @@ func (h *heldResources) report() *client.ClaimResources {
 		Cores:       free(h.capacity.Cores, h.held.Cores),
 		MemoryBytes: int64(free(float64(h.capacity.MemoryBytes), float64(h.held.MemoryBytes))),
 	}}
+}
+
+// safety: a node naming a tool is claimed only where the tool exists, and the
+// agent learns that from PATH, not config.
+func withDetectedTools(labels []string, lookPath func(string) (string, error)) []string {
+	out := slices.Clone(labels)
+	for _, tool := range match.DetectTools(lookPath) {
+		if !slices.Contains(out, tool) {
+			out = append(out, tool)
+		}
+	}
+	return out
 }
 
 func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {

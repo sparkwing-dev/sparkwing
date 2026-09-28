@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -75,12 +76,13 @@ func (r *runnerPresenceRegistry) complete(now time.Time, within time.Duration) b
 	return since != 0 && now.Sub(time.Unix(0, since)) >= within
 }
 
-func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, profile match.Profile, resources *claimResources, at time.Time) {
+func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, profile match.Profile, resources *claimResources, at time.Time) bool {
 	if r == nil || key.name == "" {
-		return
+		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	prev, seen := r.m[key]
 	p := runnerPresence{
 		Labels: append([]string(nil), labels...), UpdatedAt: at,
 		claimed: r.m[key].claimed, profile: profile,
@@ -94,6 +96,23 @@ func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capaci
 		p.capacityKnown = true
 	}
 	r.m[key] = p
+	return !seen || !slices.Equal(prev.Labels, p.Labels)
+}
+
+// safety: prunes nothing, so it cannot change what a placement read sees.
+func (r *runnerPresenceRegistry) byToken(now time.Time, within time.Duration) map[string]runnerPresence {
+	out := map[string]runnerPresence{}
+	if r == nil {
+		return out
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, p := range r.m {
+		if now.Sub(p.UpdatedAt) <= within && p.UpdatedAt.After(out[key.tokenPrefix].UpdatedAt) {
+			out[key.tokenPrefix] = p
+		}
+	}
+	return out
 }
 
 // safety: an award is both what proves a runner real and what spends one of the

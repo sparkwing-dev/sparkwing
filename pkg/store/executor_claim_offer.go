@@ -1017,7 +1017,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 		return nil, err
 	}
 	expires := now.Add(item.Lease)
-	res, err := tx.ExecContext(ctx, `UPDATE nodes SET
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET attention_reason = '',
        claimed_by = ?, claim_principal = ?, claim_token_prefix = ?,
        claim_executor = ?, claim_cores = ?, claim_memory_bytes = ?,
        claim_reservation = ?, claim_slot = ?, lease_expires_at = ?,
