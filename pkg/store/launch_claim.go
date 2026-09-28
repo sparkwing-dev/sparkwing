@@ -92,7 +92,7 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 	return nil, nil
 }
 
-// launchMaxPages bounds one poll's scan; a poll that spends it resumes the
+// safety: this bounds one poll's scan; a poll that spends it resumes the
 // next one where it stopped, so a queue of unpayable nodes costs each poll a
 // fixed amount and still lets every node behind it be reached in turn.
 const launchMaxPages = 4
