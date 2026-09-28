@@ -92,8 +92,7 @@ type settleNode struct {
 // safety: the caller holds the run row (lockDispatchRunTx) and calls this in the
 // transaction that made the change, so no transition is visible without the
 // releases, skips, cancels and run verdict it implies; with nothing due it
-// writes nothing. Once the run has a cancel request it releases nothing: every
-// node no claim holds is cancelled, and a claimed node's report only records.
+// writes nothing. On a cancel-requested run it cancels only unclaimed nodes.
 func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) error {
 	var status string
 	var cancelAt sql.NullInt64
@@ -290,10 +289,10 @@ func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string
 	return err
 }
 
-// safety: the store's lock order is executor eligibility, trigger, run, node
-// rows, then the credit ledger; a transaction that needs two of them takes them
-// in that order, so siblings serialize on the run and nothing deadlocks. A path
-// that locks a node and then touches its run takes this lock first.
+// safety: lock order is executor eligibility, trigger, run, node rows, free
+// tier, credit ledger, so siblings serialize on the run and nothing deadlocks.
+// A charged event locks its node before free-tier admission; a trigger insert
+// admitting first locks only rows it creates. Lock a node's run before the node.
 func lockTeamRunRowTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),

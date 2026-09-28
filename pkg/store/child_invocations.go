@@ -36,12 +36,6 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 		return "", err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	// safety: free-tier admission takes its global lock before any run lock,
-	// as every trigger insert does, so the claim checks below run under the
-	// run lock after it.
-	if err := admitFreeTeamRunTx(ctx, tx, tok.Team, now); err != nil {
-		return "", err
-	}
 	if err := lockDispatchRunTx(ctx, tx, tok.Team, tok.RunID); err != nil {
 		return "", err
 	}
@@ -90,6 +84,9 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 		if t.CreatedAt.IsZero() {
 			t.CreatedAt = now
 		}
+		// safety: only a new child is admitted, so a replay at the team's
+		// daily cap still answers; admission's free-tier lock follows the run
+		// and node locks above, in the order lockTeamRunRowTx names.
 		if err := createTriggerTx(ctx, tx, tok.Team, t); err != nil {
 			return "", err
 		}

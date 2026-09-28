@@ -145,16 +145,13 @@ type agentLossPlan struct {
 	} `json:"nodes"`
 }
 
-func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecovery, error) {
+func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRecovery, err error) {
 	now := time.Now()
-	dispatched, err := s.expireDispatchClaims(ctx, now)
-	if err != nil {
-		return nil, err
-	}
-	var recovered []AgentLossRecovery
-	for _, pair := range dispatched {
-		recovered = append(recovered, AgentLossRecovery{RunID: pair[0], NodeID: pair[1], Started: true})
-	}
+	defer func() {
+		for _, pair := range s.expireDispatchClaimsLogged(ctx, now) {
+			out = append(out, AgentLossRecovery{RunID: pair[0], NodeID: pair[1], Started: true})
+		}
+	}()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -169,7 +166,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	// past this pass's batch, is left to the next pass.
 	runIDs, err := expiredClaimRunsTx(ctx, tx, now)
 	if err != nil || len(runIDs) == 0 {
-		return recovered, err
+		return nil, err
 	}
 	for _, runID := range runIDs {
 		if err := lockRunRow(ctx, tx, runID); err != nil {
@@ -224,6 +221,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		}
 	}
 
+	var recovered []AgentLossRecovery
 	for _, runID := range runOrder {
 		items := byRun[runID]
 		for _, item := range items {
@@ -340,8 +338,8 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 			}
 		}
 	}
-	if len(recovered) == len(dispatched) {
-		return recovered, nil
+	if len(recovered) == 0 {
+		return nil, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

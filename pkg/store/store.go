@@ -6298,12 +6298,9 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
 // claims; ready_at is left intact. An expired claim on a controller-dispatched
 // run ends as a lost attempt instead, through [Store.ReportAttempt]'s retry
-// and settle. Returns reaped pairs.
-func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
-	dispatched, err := s.expireDispatchClaims(ctx, time.Now())
-	if err != nil {
-		return nil, err
-	}
+// and settle, in a pass of its own after this one. Returns reaped pairs.
+func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error) {
+	defer func() { out = append(out, s.expireDispatchClaimsLogged(ctx, time.Now())...) }()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -6341,7 +6338,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	if len(pairs) == 0 {
-		return dispatched, nil
+		return nil, nil
 	}
 	for _, claim := range lapsed {
 		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
@@ -6367,7 +6364,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return append(dispatched, pairs...), nil
+	return pairs, nil
 }
 
 func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {

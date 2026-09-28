@@ -32,6 +32,10 @@ type AttemptReport struct {
 	// Failure is the failure record an OnFailure recovery node receives.
 	Failure          json.RawMessage `json:"failure,omitempty"`
 	ArtifactManifest string          `json:"artifact_manifest,omitempty"`
+
+	// safety: set only by the expired-claim reaper, never decoded from a
+	// request, so a claimant cannot pass its own failure off as a lost claim.
+	leaseLost bool
 }
 
 func attemptRefused(format string, args ...any) error {
@@ -139,10 +143,10 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 	if err != nil {
 		return err
 	}
-	// safety: a planning claim's own failure is deterministic, so only a lost
-	// planning claim is planned again.
+	// safety: a planning claim's own failure is deterministic, so only a
+	// planning claim the reaper found lost is planned again.
 	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled &&
-		(n.kind != nodeKindPlan || report.FailureReason == FailureAgentLost)
+		(n.kind != nodeKindPlan || report.leaseLost)
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes

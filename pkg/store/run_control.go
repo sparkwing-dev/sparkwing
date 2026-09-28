@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -301,11 +302,23 @@ func (s *Store) expireDispatchClaims(ctx context.Context, now time.Time) ([][2]s
 			return err
 		})
 		if err != nil {
-			return out, err
+			slog.Error("expire controller-dispatched claims", "team", r.team, "run", r.runID, "error", err)
+			continue
 		}
 		out = append(out, expired...)
 	}
 	return out, nil
+}
+
+// safety: the orchestrator's expiry pass and this one are independent, so a
+// run this pass cannot settle is logged and retried next pass, and never keeps
+// the other pass from releasing its claims.
+func (s *Store) expireDispatchClaimsLogged(ctx context.Context, now time.Time) [][2]string {
+	out, err := s.expireDispatchClaims(ctx, now)
+	if err != nil {
+		slog.Error("expire controller-dispatched claims", "error", err)
+	}
+	return out
 }
 
 func (s *Store) expiredDispatchRuns(ctx context.Context, now time.Time) ([]teamNodeRef, error) {
@@ -359,7 +372,7 @@ func (s *Store) expireRunClaimsTx(ctx context.Context, tx *storeTx, team Team, r
 	if err != nil {
 		return nil, err
 	}
-	report := AttemptReport{Outcome: outcomeFailed, Error: "claim lease expired", FailureReason: FailureAgentLost}
+	report := AttemptReport{Outcome: outcomeFailed, Error: "claim lease expired", FailureReason: FailureAgentLost, leaseLost: true}
 	if cancelled {
 		report.Outcome = outcomeCancelled
 	}
