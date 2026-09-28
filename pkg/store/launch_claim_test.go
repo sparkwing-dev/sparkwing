@@ -175,3 +175,32 @@ func TestExecutorOffer_RefusesAControllerDispatchedNode(t *testing.T) {
 		t.Fatalf("an executor's named offer claimed a controller-dispatched node: %+v", res.Node)
 	}
 }
+
+// A manual retry of an opted-in repository's run takes the controller path
+// too, so a retry is never a way back onto the trigger path.
+func TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	alpha := tenantFor(t, st, "alpha")
+	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	intake(t, alpha, "run-src", "korey", "probe")
+	now := time.Now()
+	if err := st.CreateRetryWithRun(ctx, "run-src", store.Trigger{
+		ID: "run-retry", Pipeline: "demo", GithubOwner: "korey", GithubRepo: "probe", RetryOf: "run-src", CreatedAt: now,
+	}, store.Run{
+		ID: "run-retry", Pipeline: "demo", Status: "pending", GithubOwner: "korey", GithubRepo: "probe",
+		RetryOf: "run-src", CreatedAt: now, StartedAt: now,
+	}); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	runner := mintTeamClaimant(t, alpha, "agent:alpha-pool")
+	if claimed, err := st.ClaimNextTriggerFor(ctx, runner, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the retry's trigger was claimable: %+v %v", claimed, err)
+	}
+	nodes, err := st.ListNodes(ctx, "run-retry")
+	if err != nil || len(nodes) != 1 || nodes[0].NodeID != store.PlanNodeID {
+		t.Fatalf("retry nodes = %+v %v, want the plan node", nodes, err)
+	}
+}

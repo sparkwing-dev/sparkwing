@@ -95,6 +95,9 @@ func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig
 	if err := s.createRunTx(ctx, tx, team, r); err != nil {
 		return err
 	}
+	if err := routeRunDispatchTx(ctx, tx, team, trig, time.Now()); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
