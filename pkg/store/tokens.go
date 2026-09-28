@@ -291,7 +291,20 @@ func isAgentNameCollision(err error) bool {
 	return strings.Contains(msg, agentNameIndexName) || strings.Contains(msg, "tokens.team, tokens.principal")
 }
 
-func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, now time.Time) (err error) {
+func scanAgentNameDuplicates(rows *sql.Rows) (dupes []string, err error) {
+	defer closeRowsInto(rows, &err)
+	for rows.Next() {
+		var team, principal string
+		var n int
+		if err := rows.Scan(&team, &principal, &n); err != nil {
+			return nil, err
+		}
+		dupes = append(dupes, fmt.Sprintf("team %s %s (%d tokens)", team, principal, n))
+	}
+	return dupes, rows.Err()
+}
+
+func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, now time.Time) error {
 	if _, err := q.ExecContext(ctx, `UPDATE tokens SET revoked_at = expires_at
 		WHERE `+agentNameIndexedRow+` AND expires_at IS NOT NULL AND expires_at <= ?`, now.UTC().Unix()); err != nil {
 		return err
@@ -302,20 +315,8 @@ func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, n
 	if err != nil {
 		return err
 	}
-	var dupes []string
-	for rows.Next() {
-		var team, principal string
-		var n int
-		if err := rows.Scan(&team, &principal, &n); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		dupes = append(dupes, fmt.Sprintf("team %s %s (%d tokens)", team, principal, n))
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if err := rows.Err(); err != nil {
+	dupes, err := scanAgentNameDuplicates(rows)
+	if err != nil {
 		return err
 	}
 	if len(dupes) > 0 {

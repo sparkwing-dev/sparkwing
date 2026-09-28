@@ -39,7 +39,7 @@ func TestAgentNameMintRaceLeavesOneLiveTokenSQLiteAndPostgres(t *testing.T) {
 					defer wg.Done()
 					<-start
 					if i%2 == 0 {
-						_, _, errs[i] = s.CreateToken("agent:race", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
+						_, _, errs[i] = s.CreateTokenWith(ctx, "agent:race", store.TokenKindRunner, []string{"nodes.claim"}, 0, now, store.TokenOptions{})
 						return
 					}
 					_, _, errs[i] = tenant.CreateRunnerToken(ctx, "agent:race", []string{"nodes.claim"}, "owner", now)
