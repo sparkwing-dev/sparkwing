@@ -79,7 +79,7 @@ func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 		return "", false, fmt.Errorf("read secret %s: %w", name, err)
 	}
 	s.once.Do(func() {
-		ring, err := LoadKeyring(false)
+		ring, err := LoadKeyring(KeyringOptions{})
 		if err != nil {
 			s.ringErr = err
 			return

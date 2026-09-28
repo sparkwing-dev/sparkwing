@@ -4,7 +4,7 @@
 // state.db carries only ciphertext.
 //
 // Every local process that seals or opens a stored secret builds its cipher
-// here: the admission daemon's controller API, `sparkwing web`, a run's
+// here: the admission daemon's controller API, the dashboard (`sparkwing serve`), a run's
 // loopback controller, and a run that reads the store without a daemon.
 package localsecrets
 
@@ -13,15 +13,18 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -61,36 +64,50 @@ func KeyPath() (string, error) {
 	return fssecure.ConfigFile(keyFileName)
 }
 
+// ErrNoKeyToCreate reports a seal in a process that may not create the
+// machine's key; only the sparkwing daemon creates it.
+var ErrNoKeyToCreate = errors.New("no local secrets key")
+
+// KeyringOptions choose how [LoadKeyring] treats this process.
+type KeyringOptions struct {
+	// ClearEnv removes the key variables from this process's environment
+	// once read, which a long-lived server does so no child inherits them.
+	ClearEnv bool
+	// Create lets the first seal create the key file. Only the process that
+	// owns the machine's store may: the daemon, or a run on a machine with
+	// no daemon at all.
+	Create bool
+}
+
 // Keyring holds this process's view of the machine's secrets key. The key
-// comes from [KeyEnv] or the key file, and a keyring with neither creates
-// the file on its first seal.
+// comes from [KeyEnv] or the key file; a keyring with neither creates the
+// file on its first seal when [KeyringOptions.Create] allows it.
 type Keyring struct {
-	path     string
-	fromEnv  bool
-	previous []byte
+	path      string
+	fromEnv   bool
+	mayCreate bool
+	previous  []byte
 
 	mu     sync.Mutex
 	cipher *secrets.Cipher
 }
 
 // LoadKeyring reads the key from [KeyEnv], or from the key file when the
-// variable is unset; a missing file is not an error. clearEnv removes the key
-// variables from this process's environment once read, which a long-lived
-// server does so no child it starts inherits them.
-func LoadKeyring(clearEnv bool) (*Keyring, error) {
+// variable is unset; a missing file is not an error.
+func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	path, err := KeyPath()
 	if err != nil {
 		return nil, err
 	}
-	current, err := envKey(KeyEnv, clearEnv)
+	current, err := envKey(KeyEnv, opts.ClearEnv)
 	if err != nil {
 		return nil, err
 	}
-	previous, err := envKey(PreviousKeyEnv, clearEnv)
+	previous, err := envKey(PreviousKeyEnv, opts.ClearEnv)
 	if err != nil {
 		return nil, err
 	}
-	k := &Keyring{path: path, previous: previous, fromEnv: current != nil}
+	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
 	if current == nil {
 		current, err = readKeyFile(path)
 		if err != nil {
@@ -111,7 +128,7 @@ func LoadKeyring(clearEnv bool) (*Keyring, error) {
 }
 
 func envKey(name string, clear bool) ([]byte, error) {
-	v := os.Getenv(name)
+	v := secretkeyenv.Lookup(name)
 	if clear {
 		if err := os.Unsetenv(name); err != nil {
 			return nil, fmt.Errorf("clear %s from the environment: %w", name, err)
@@ -134,11 +151,23 @@ func newCipher(current, previous []byte) (*secrets.Cipher, error) {
 	return secrets.NewCipherWithPrevious(current, previous)
 }
 
+// safety: the key opens every local secret, so it is read only from an
+// owner-only regular file that is not a symlink and did not change while it
+// was opened.
 func readKeyFile(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	f, err := fssecure.OpenPrivateConfig(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, fmt.Errorf("read the local secrets key: %w", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "sparkwing: close %s: %v\n", path, cerr)
+		}
+	}()
+	data, err := io.ReadAll(io.LimitReader(f, secrets.KeySize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read the local secrets key: %w", err)
 	}
@@ -191,6 +220,11 @@ func (k *Keyring) ensure(ctx context.Context, st *store.Store) (*secrets.Cipher,
 	if err := k.missingLocked(ctx, st); err != nil {
 		return nil, err
 	}
+	if !k.mayCreate {
+		return nil, fmt.Errorf("%w: %s does not exist, and only the sparkwing daemon creates it. Store the first "+
+			"local secret with `sparkwing secrets set`, which starts the daemon; if the daemon runs with %s, "+
+			"set it for this process too", ErrNoKeyToCreate, k.path, KeyEnv)
+	}
 	if err := configguard.GuardWrite("the local secrets key", KeyFileEnv, k.path); err != nil {
 		return nil, err
 	}
@@ -237,7 +271,8 @@ func (k *Keyring) create() ([]byte, error) {
 	}
 	if err := os.Link(tmp.Name(), k.path); err != nil {
 		if !errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("install the local secrets key at %s: %w", k.path, err)
+			return nil, fmt.Errorf("install the local secrets key at %s: %w; creating it safely needs a filesystem "+
+				"with hard links, so set %s or point %s at a local disk", k.path, err, KeyEnv, KeyFileEnv)
 		}
 		winner, rerr := readKeyFile(k.path)
 		if rerr != nil {
@@ -248,7 +283,27 @@ func (k *Keyring) create() ([]byte, error) {
 		}
 		return winner, nil
 	}
+	if err := syncDir(dir); err != nil {
+		return nil, fmt.Errorf("persist the local secrets key at %s: %w", k.path, err)
+	}
 	return key, nil
+}
+
+// safety: a crash after the link but before the directory entry reaches disk
+// would lose the key while values sealed under it survive in state.db.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	serr := d.Sync()
+	if cerr := d.Close(); serr == nil {
+		serr = cerr
+	}
+	if serr != nil && runtime.GOOS == "windows" {
+		return nil
+	}
+	return serr
 }
 
 // MissingKey reports why this keyring must not create a key for st: st

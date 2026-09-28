@@ -37,8 +37,6 @@ const (
 	ImportPrincipal = "local-dotenv-import"
 )
 
-var legacyPathEnv = []string{"SPARKWING_SECRETS", "SPARKWING_CONFIG_ENV"}
-
 // LegacyFiles names the dotenv files an import reads. Secrets is the masked
 // file and Config the --plain one; an empty field is a file that does not
 // exist.
@@ -78,10 +76,11 @@ func (f ImportedFile) Notice() string {
 // and the files belong to the machine.
 func FindLegacyFiles() (LegacyFiles, string) {
 	var set []string
-	for _, name := range legacyPathEnv {
-		if os.Getenv(name) != "" {
-			set = append(set, name)
-		}
+	if os.Getenv("SPARKWING_SECRETS") != "" {
+		set = append(set, "SPARKWING_SECRETS")
+	}
+	if os.Getenv("SPARKWING_CONFIG_ENV") != "" {
+		set = append(set, "SPARKWING_CONFIG_ENV")
 	}
 	dir, err := userconfig.LegacyDir()
 	if err != nil {

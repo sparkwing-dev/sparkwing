@@ -38,7 +38,7 @@ func seedStoreSecret(t *testing.T, dbPath, name, value string) {
 	t.Helper()
 	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
 	t.Setenv(localsecrets.KeyEnv, "")
-	ring, err := localsecrets.LoadKeyring(false)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		t.Fatalf("load keyring: %v", err)
 	}

@@ -39,7 +39,7 @@ func openStore(t *testing.T) *store.Store {
 
 func loadRing(t *testing.T) *localsecrets.Keyring {
 	t.Helper()
-	ring, err := localsecrets.LoadKeyring(false)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		t.Fatalf("load keyring: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestKeyring_EnvKeyOverridesTheKeyFile(t *testing.T) {
 	t.Setenv(localsecrets.KeyEnv, base64.StdEncoding.EncodeToString(envKey))
 	st := openStore(t)
 
-	ring, err := localsecrets.LoadKeyring(true)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{ClearEnv: true, Create: true})
 	if err != nil {
 		t.Fatalf("load keyring: %v", err)
 	}
@@ -224,5 +224,54 @@ func TestKeyring_ReadsAKeyAnotherProcessCreatedLater(t *testing.T) {
 	sealRow(t, loadRing(t).For(st), st, "TOKEN", "abc")
 	if got, err := openRow(t, reader.For(st), st, "TOKEN"); err != nil || got != "abc" {
 		t.Errorf("a keyring loaded before the key existed opened %q, %v; want abc", got, err)
+	}
+}
+
+func TestKeyring_RefusesAKeyFileOthersCanRead(t *testing.T) {
+	path := keyFileIn(t, t.TempDir())
+	if err := os.WriteFile(path, bytes.Repeat([]byte{5}, secrets.KeySize), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "owner-only") {
+		t.Fatalf("load with a group-readable key file = %v, want an owner-only refusal", err)
+	}
+}
+
+func TestKeyring_RefusesAKeyFileSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "elsewhere.key")
+	if err := os.WriteFile(target, bytes.Repeat([]byte{6}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := keyFileIn(t, dir)
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{}); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("load through a symlinked key file = %v, want a symlink refusal", err)
+	}
+}
+
+func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
+	path := keyFileIn(t, t.TempDir())
+	st := openStore(t)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ring.For(st).Seal("value")
+	if !errors.Is(err, localsecrets.ErrNoKeyToCreate) || !strings.Contains(err.Error(), localsecrets.KeyEnv) {
+		t.Fatalf("seal in a non-creating process = %v, want ErrNoKeyToCreate naming %s", err, localsecrets.KeyEnv)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("a non-creating process created %s", path)
+	}
+
+	sealRow(t, loadRing(t).For(st), st, "TOKEN", "abc")
+	if got, err := openRow(t, ring.For(st), st, "TOKEN"); err != nil || got != "abc" {
+		t.Fatalf("the non-creating process opened %q, %v once the key existed; want abc", got, err)
 	}
 }

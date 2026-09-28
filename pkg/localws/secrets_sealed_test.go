@@ -1,7 +1,9 @@
 package localws
 
 import (
+	"bytes"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,8 +17,12 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: starts the local server; the fast class runs under -short")
 	}
-	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
+	keyPath := filepath.Join(t.TempDir(), "secrets.key")
+	t.Setenv(localsecrets.KeyFileEnv, keyPath)
 	t.Setenv(localsecrets.KeyEnv, "")
+	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{9}, secrets.KeySize), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	home := t.TempDir()
 	addr := startLocalws(t, Options{Home: home})
 
@@ -45,5 +51,28 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 	}
 	if !secrets.IsBound(sec.Value) || strings.Contains(sec.Value, "abc123") {
 		t.Fatalf("stored value %q is not a sealed envelope", sec.Value)
+	}
+}
+
+func TestLocalwsLeavesCreatingTheKeyToTheDaemon(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: starts the local server; the fast class runs under -short")
+	}
+	keyPath := filepath.Join(t.TempDir(), "secrets.key")
+	t.Setenv(localsecrets.KeyFileEnv, keyPath)
+	t.Setenv(localsecrets.KeyEnv, "")
+	addr := startLocalws(t, Options{Home: t.TempDir()})
+
+	resp, err := http.Post("http://"+addr+"/api/v1/secrets", "application/json",
+		strings.NewReader(`{"name":"TOKEN","value":"abc123","shared":true}`))
+	if err != nil {
+		t.Fatalf("create secret: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		t.Fatal("sparkwing web stored a secret with no key on the machine")
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("sparkwing web created %s: %v", keyPath, err)
 	}
 }

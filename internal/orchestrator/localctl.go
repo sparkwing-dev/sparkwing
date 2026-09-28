@@ -48,7 +48,7 @@ func startLoopbackController(
 	if logger == nil {
 		logger = loopbackLogger()
 	}
-	ring, err := localsecrets.LoadKeyring(false)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("loopback controller: local secrets key: %w", err)
 	}
