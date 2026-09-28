@@ -22,15 +22,16 @@ unlock.
 
 ### Fixed
 
-- **admission:** A daemon with an advancing heartbeat counter survives missed
-  health probes during overload. A machine pause restarts the stale window;
-  several stale samples or five minutes of continuous probe failure trigger
-  replacement. Unix heartbeats advance through a shared mapping.
-- **admission:** Lease holders and queued runs retry across longer replacement
-  gaps. Restored leases stay available for two minutes after daemon startup.
-  Releasing a lease during recovery can leave its capacity reserved until that
-  grace expires. Missing daemon hosts fail immediately; hosts that exit before
-  serving get at most three attempts.
+- **admission:** An overloaded or swapping machine no longer gets its
+  admission daemon replaced while it is still working. The supervisor replaces
+  the daemon only when health probes fail and its heartbeat has not moved for a
+  minute, or after five minutes with no answer; time the whole machine spent
+  frozen does not count against it.
+- **admission:** Runs survive a daemon replacement. A running or queued run
+  keeps reconnecting for up to 12 minutes, and the replacement holds each run's
+  lease for two minutes. A lease released during that recovery can stay
+  reserved until the two minutes pass. A missing daemon binary fails at once,
+  and a daemon that exits before serving gets three tries.
 
 ## [v0.63.0] - 2026-09-27
 ### Changed
