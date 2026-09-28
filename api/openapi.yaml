@@ -7437,6 +7437,11 @@ components:
           nullable: true
           description: >-
             Most recent run-level liveness ping from the dispatching orchestrator. Absent for rows that predate the column and for backends that ping per node instead (local and S3 modes).
+        admission:
+          type: string
+          enum: [planning, admitted]
+          description: >-
+            A controller-dispatched run's admission state. Absent for every other run.
     Node:
       x-sparkwing-go-partial: pkg/store.Node
       type: object
