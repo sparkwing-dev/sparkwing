@@ -15,6 +15,9 @@ const contentTypes = new Map([
   [".js", "text/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
   [".svg", "image/svg+xml"],
+  // The controller serves exported RSC payloads as text/plain; any other
+  // type makes the Next router fall back to a full page load.
+  [".txt", "text/plain; charset=utf-8"],
   [".woff2", "font/woff2"],
 ]);
 
