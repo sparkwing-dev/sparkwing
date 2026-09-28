@@ -112,7 +112,7 @@ func TestClaimLaunch_MintsATokenBoundToTheClaim(t *testing.T) {
 	if _, err := f.s.AuthorizeClaimToken(ctx, claim.Token, store.ClaimSensitive, now.Add(2*time.Minute)); !errors.Is(err, store.ErrClaimNotLive) {
 		t.Fatalf("after the lease lapsed: err = %v, want ErrClaimNotLive", err)
 	}
-	for _, bad := range []time.Duration{0, store.MaxClaimTokenLifetime + time.Second} {
+	for _, bad := range []time.Duration{0, time.Second, store.MinLaunchLifetime - time.Second, store.MaxClaimTokenLifetime + time.Second} {
 		req := launchRequest()
 		req.Deadline = bad
 		if _, err := f.s.ClaimLaunch(ctx, launcherIdentity, req, time.Now()); !errors.Is(err, store.ErrInvalidInput) {

@@ -114,6 +114,7 @@ func TestConfigValidate_RefusesAnUnpinnedOrUncappedLauncher(t *testing.T) {
 		"no cpu ceiling": func(c *Config) { c.CPUCeiling = 0 },
 		"no mem ceiling": func(c *Config) { c.MemoryCeiling = 0 },
 		"past 6h":        func(c *Config) { c.Deadline = 7 * time.Hour },
+		"under floor":    func(c *Config) { c.Deadline = time.Minute },
 		"bad scratch":    func(c *Config) { c.ScratchLimit = "lots" },
 	} {
 		cfg := testConfig()

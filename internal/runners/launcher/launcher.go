@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -56,6 +57,12 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	claim, err := l.Ctrl.ClaimLaunch(ctx, l.Holder, ClaimLease, l.Config.Deadline)
 	if err != nil || claim == nil {
 		return false, err
+	}
+	// safety: a token too short to outlast the margin would start a Job that
+	// dies before its pod runs, so the claim is left to lapse instead.
+	if time.Duration(claim.LifetimeSecs)*time.Second < store.MinLaunchLifetime {
+		return true, fmt.Errorf("claim %s/%s lives %ds, under the %s floor; no Job created",
+			claim.RunID, claim.NodeID, claim.LifetimeSecs, store.MinLaunchLifetime)
 	}
 	job := BuildJob(l.Config, *claim)
 	_, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Create(ctx, job, metav1.CreateOptions{})

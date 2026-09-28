@@ -171,3 +171,21 @@ func TestLaunchClaim_RefusesEveryCredentialButTheLauncher(t *testing.T) {
 		}
 	}
 }
+
+// A controller that answers a token too short to outlast the margin gets no
+// Job for it: the launcher leaves the claim to lapse.
+func TestLaunchOne_CreatesNoJobForATokenUnderTheFloor(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"team":"alpha","run_id":"run-1","node_id":"build","generation":1,"kind":"work","token":"swc_x","lifetime_secs":30}`)
+	}))
+	t.Cleanup(srv.Close)
+	f := launchFixture{kube: fake.NewSimpleClientset(), url: srv.URL}
+	launched, err := f.launcher("swr_launch").LaunchOne(context.Background())
+	if !launched || err == nil {
+		t.Fatalf("LaunchOne = %v, %v; want the short claim refused", launched, err)
+	}
+	if actions := f.kube.Actions(); len(actions) != 0 {
+		t.Fatalf("kubernetes actions = %v, want none for a claim under the floor", actions)
+	}
+}

@@ -1206,6 +1206,7 @@ const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 100_000
 const MinBillableSeconds = 60
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
+const MinLaunchLifetime = 90 * time.Second
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 type NamedClaimOptions struct {

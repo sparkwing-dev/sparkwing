@@ -72,8 +72,8 @@ func (c Config) Validate() error {
 	if c.CPUCeiling <= 0 || c.MemoryCeiling <= 0 {
 		errs = append(errs, errors.New("a cpu and a memory ceiling are required"))
 	}
-	if c.Deadline <= 0 || c.Deadline > MaxDeadline {
-		errs = append(errs, fmt.Errorf("the deadline must be positive and at most %s", MaxDeadline))
+	if c.Deadline < store.MinLaunchLifetime || c.Deadline > MaxDeadline {
+		errs = append(errs, fmt.Errorf("the deadline must be from %s to %s", store.MinLaunchLifetime, MaxDeadline))
 	}
 	if _, err := resource.ParseQuantity(c.scratchLimit()); err != nil {
 		errs = append(errs, fmt.Errorf("scratch limit: %w", err))

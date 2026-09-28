@@ -50,8 +50,9 @@ const launchScanBatch = 16
 // Only nodes that require no executor labels are the launcher's: a Job
 // advertises none.
 func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req LaunchClaimRequest, now time.Time) (*LaunchClaim, error) {
-	if req.HolderID == "" || req.Deadline <= 0 || req.Deadline > MaxClaimTokenLifetime {
-		return nil, fmt.Errorf("%w: a launch claim needs a holder and a deadline within %s", ErrInvalidInput, MaxClaimTokenLifetime)
+	if req.HolderID == "" || req.Deadline < MinLaunchLifetime || req.Deadline > MaxClaimTokenLifetime {
+		return nil, fmt.Errorf("%w: a launch claim needs a holder and a deadline from %s to %s",
+			ErrInvalidInput, MinLaunchLifetime, MaxClaimTokenLifetime)
 	}
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
@@ -220,6 +221,11 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 	c.Class = CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}
 	return &c, nil
 }
+
+// MinLaunchLifetime is the shortest claim token a launch claim mints: a minute
+// of work plus the launcher's margin for creating the Job. A shorter one would
+// start a Job that dies before its pod runs.
+const MinLaunchLifetime = 90 * time.Second
 
 // LaunchDeadlineSlack is how long past a node's own timeout its claim, and so
 // its Job, lives, so the pod records the timeout before the Job is killed.
