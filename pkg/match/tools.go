@@ -3,7 +3,10 @@ package match
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/build"
 )
 
 // KnownTools is every tool an agent detects on its PATH and advertises as a
@@ -13,10 +16,19 @@ var KnownTools = []string{
 	"helm", "kubectl", "node", "npm", "shellcheck", "terraform",
 }
 
-// CloudTools is the subset of [KnownTools] the Sparkwing Cloud runner image
-// provides. build/runner-tools declares the same list, and the image build
-// fails when the image lacks one of them.
-var CloudTools = []string{"git", "go"}
+// CloudTools is the toolset build/runner-tools declares for the Sparkwing
+// Cloud runner image, whose build fails when the image lacks one of them.
+var CloudTools = parseToolManifest(build.RunnerTools)
+
+func parseToolManifest(manifest string) []string {
+	var tools []string
+	for _, line := range strings.Split(manifest, "\n") {
+		if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "#") {
+			tools = append(tools, line)
+		}
+	}
+	return tools
+}
 
 // ToolPrefix starts every tool label.
 const ToolPrefix = "tool:"

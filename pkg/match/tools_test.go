@@ -39,6 +39,9 @@ func TestToolTermRefusesAnAgentWithoutTheTool(t *testing.T) {
 	if v := match.Evaluate(with, demand); !v.OK() {
 		t.Fatalf("an agent advertising terraform = %v", v)
 	}
+	if len(match.CloudTools) == 0 {
+		t.Fatal("build/runner-tools declares no tool")
+	}
 	for _, tool := range match.CloudTools {
 		if !match.IsKnownTool(tool) {
 			t.Errorf("Cloud tool %q is not a known tool", tool)
