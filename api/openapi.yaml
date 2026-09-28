@@ -3973,7 +3973,7 @@ paths:
                   closed: {type: boolean, description: Whether this report closed the checkout.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: The team is not registered or holds no checkout for the session.}
+        "404": {description: "The team is not registered, or holds no checkout for the session (`unknown_checkout`)."}
 
   /api/v1/credits/units:
     get:

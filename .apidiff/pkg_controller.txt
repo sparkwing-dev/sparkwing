@@ -457,6 +457,7 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
+const UnknownCheckoutCode = "unknown_checkout"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)

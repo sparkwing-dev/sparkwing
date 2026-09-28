@@ -252,16 +252,22 @@ func TestCheckoutClosedClosesOnlyTheTeamsOpenUnpaidSession(t *testing.T) {
 	}, nil); code != http.StatusCreated {
 		t.Fatalf("paid grant = %d", code)
 	}
+	var lastCode string
 	closeCheckout := func(auth, team, session, outcome string) (int, bool) {
 		var out struct {
-			Closed bool `json:"closed"`
+			Closed bool   `json:"closed"`
+			Code   string `json:"code"`
 		}
 		code := f.call("POST", "/api/v1/credits/checkouts/closed", auth,
 			map[string]any{"team": team, "session_id": session, "outcome": outcome}, &out)
+		lastCode = out.Code
 		return code, out.Closed
 	}
-	if code, _ := closeCheckout(grant, other.team, "cs_open", "expired"); code != http.StatusNotFound {
-		t.Errorf("closing another team's session = %d, want 404", code)
+	if code, _ := closeCheckout(grant, other.team, "cs_open", "expired"); code != http.StatusNotFound || lastCode != controller.UnknownCheckoutCode {
+		t.Errorf("closing another team's session = %d %q, want 404 %s", code, lastCode, controller.UnknownCheckoutCode)
+	}
+	if code, _ := closeCheckout(grant, "no-such-team", "cs_open", "expired"); code != http.StatusNotFound || lastCode == controller.UnknownCheckoutCode {
+		t.Errorf("closing for an unregistered team = %d %q, want a 404 without %s", code, lastCode, controller.UnknownCheckoutCode)
 	}
 	if code, _ := closeCheckout("Bearer "+f.admin, owner.team, "cs_open", "expired"); code != http.StatusForbidden {
 		t.Errorf("an operator token closing a checkout = %d, want 403", code)

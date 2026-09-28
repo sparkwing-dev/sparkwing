@@ -235,7 +235,7 @@ func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
 	}
 	closed, err := tenant.CloseCreditCheckout(r.Context(), req.SessionID, kind, principalName(r), time.Now())
 	if errors.Is(err, store.ErrCheckoutNotFound) {
-		writeError(w, http.StatusNotFound, err)
+		writeJSON(w, http.StatusNotFound, codedErrorJSON{Error: err.Error(), Code: UnknownCheckoutCode})
 		return
 	}
 	if err != nil {
@@ -247,6 +247,10 @@ func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
 		Team: req.Team, SessionID: req.SessionID, Outcome: req.Outcome, Closed: closed,
 	})
 }
+
+// UnknownCheckoutCode is the code on the 404 a checkout closure gets when
+// the team holds no checkout for the session, which no retry can change.
+const UnknownCheckoutCode = "unknown_checkout"
 
 type checkoutClosedJSON struct {
 	Team      string `json:"team"`
