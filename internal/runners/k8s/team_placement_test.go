@@ -12,9 +12,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// teamJob renders an off-band class, where the team term is the only
+// anti-affinity; a band Job also refuses every other Job's node.
 func teamJob(t *testing.T, team string) *batchv1.Job {
 	t.Helper()
-	return classJob(t, Config{Image: "img", Team: team}, 4)
+	return classJob(t, Config{Image: "img", Team: team}, 2)
 }
 
 // wantTeamAffinity is the whole affinity a Job of team acme renders. Any

@@ -1379,3 +1379,45 @@ func TestBuildJob_ToleratesThePoolItSelects(t *testing.T) {
 			"and tolerates another value never schedules", tol.Value)
 	}
 }
+
+func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cfg   Config
+		cores int64
+		cpu   string
+	}{
+		{name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, cores: 2, cpu: "1500m"},
+		{name: "4-core", cfg: Config{Image: "img"}, cores: 4, cpu: "3500m"},
+		{name: "8-core", cfg: Config{Image: "img"}, cores: 8, cpu: "7500m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := classJob(t, tc.cfg, tc.cores).Spec.Template.Spec
+			rr := pod.Containers[0].Resources
+			if got := rr.Requests.Cpu().String(); got != tc.cpu {
+				t.Fatalf("cpu request = %s, want %s", got, tc.cpu)
+			}
+			if _, ok := rr.Limits[corev1.ResourceCPU]; ok {
+				t.Fatalf("cpu limit = %s, want none: the machine is the class", rr.Limits.Cpu())
+			}
+			want := resource.NewQuantity(store.CPUClassMemoryBytes(tc.cores), resource.BinarySI)
+			if !rr.Requests.Memory().Equal(*want) || !rr.Limits.Memory().Equal(*want) {
+				t.Fatalf("memory = %s/%s, want %s request and limit", rr.Requests.Memory(), rr.Limits.Memory(), want)
+			}
+			terms := pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+			if len(terms) != 2 || terms[1].LabelSelector.MatchLabels["app.kubernetes.io/name"] != "sparkwing-runner" {
+				t.Fatalf("anti-affinity = %#v, want the team term and one Job per node", terms)
+			}
+		})
+	}
+}
+
+func TestBuildJob_KeepsTheRequestOffTheBand(t *testing.T) {
+	pod := classJob(t, Config{Image: "img"}, 2).Spec.Template.Spec
+	if got := pod.Containers[0].Resources.Requests.Cpu().String(); got != "100m" {
+		t.Fatalf("cpu request = %s, want the 100m default off the band", got)
+	}
+	if n := len(pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution); n != 1 {
+		t.Fatalf("anti-affinity terms = %d, want only the team term off the band", n)
+	}
+}

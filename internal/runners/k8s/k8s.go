@@ -860,6 +860,12 @@ func (r *Runner) buildJob(
 		// value leaves it selecting a pool whose taint it does not tolerate.
 		placed = selector[cpuBandKey]
 	}
+	affinity := teamAntiAffinity(team)
+	if selector[cpuBandKey] != "" && class.Cores > 0 {
+		container.Resources = bandClassResources(class)
+		affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
+			affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, oneJobPerNode())
+	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: r.cfg.ServiceAccountName,
@@ -867,7 +873,7 @@ func (r *Runner) buildJob(
 		AutomountServiceAccountToken: boolPtr(false),
 		NodeSelector:                 selector,
 		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
-		Affinity:                     teamAntiAffinity(team),
+		Affinity:                     affinity,
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -963,6 +969,38 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 		Value:    placed,
 		Effect:   corev1.TaintEffectNoSchedule,
 	})
+}
+
+// bandCPUHeadroom is what a band Job leaves of its class's vCPU for the
+// kubelet reservation and the node's daemonsets, so the pod fits a machine of
+// exactly its class and no smaller one.
+const bandCPUHeadroom = 0.5
+
+// safety: a band node is booted for one Job and billed at its class, so the pod
+// asks for that whole machine. CPU has no limit because the machine is the
+// promise; memory is capped at the class so a runaway Job is the process the
+// kernel kills, not a daemonset with a smaller request.
+func bandClassResources(class store.CPUClass) corev1.ResourceRequirements {
+	memory := *resource.NewQuantity(class.MemoryBytes, resource.BinarySI)
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    milliCores(float64(class.Cores) - bandCPUHeadroom),
+			corev1.ResourceMemory: memory,
+		},
+		Limits: corev1.ResourceList{corev1.ResourceMemory: memory},
+	}
+}
+
+// safety: requests alone let the scheduler pack two classes onto one larger
+// machine at the same price, which breaks the one-machine-per-Job promise.
+func oneJobPerNode() corev1.PodAffinityTerm {
+	return corev1.PodAffinityTerm{
+		LabelSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{"app.kubernetes.io/name": "sparkwing-runner"},
+		},
+		NamespaceSelector: &metav1.LabelSelector{},
+		TopologyKey:       corev1.LabelHostname,
+	}
 }
 
 func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {

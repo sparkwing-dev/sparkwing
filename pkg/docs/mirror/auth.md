@@ -299,9 +299,16 @@ is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
 carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
 four, 32 GiB at eight. A node takes the smallest class that covers both halves
 of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
-because the 4-core class carries only 16 GiB. The class sets the price, while
-the Kubernetes pod requests the pinned CPU and memory. A node with a 0.25-core
-pin still pays for the 2-core class, including the 20-second minimum.
+because the 4-core class carries only 16 GiB. The class sets the price. A node
+with a 0.25-core pin still pays for the 2-core class, including the 20-second
+minimum.
+
+On a band pool, a class is a machine: an N-core node runs alone on a node with
+N vCPU. Its pod requests N minus half a core, which leaves room for the
+kubelet and the node's daemonsets, and has no CPU limit, so the Job can use
+every cycle of the machine. Its memory request and limit are the class's
+memory. The class does not reserve N whole cores to the pod, the same way a
+hosted 2-core runner is a 2-vCPU virtual machine.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -326,9 +333,9 @@ fleet is a condition that clears. A Job whose shape no machine in the pool
 could hold fails before the Job is created, because waiting cures nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
-`credit_cpu_class_memory_bytes`. The Job uses the pipeline's resource pin or
-measured profile for its requests, with 100m CPU and 128 MiB memory defaults
-when no usable measurement exists. Limits retain the runner's burst settings
+`credit_cpu_class_memory_bytes`. A Job off the band uses the pipeline's
+resource pin or measured profile for its requests, with 100m CPU and 128 MiB
+memory defaults when no usable measurement exists. Limits retain the runner's burst settings
 and operator ceilings. A claim that names a node carries `sizes_to_class` to
 select the class-routed Kubernetes path; a metered claim without it is held to
 the warm class,

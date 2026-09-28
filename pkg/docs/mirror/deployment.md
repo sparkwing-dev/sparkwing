@@ -52,10 +52,14 @@ A Job for a cpu class above the warm one selects and tolerates the
 tolerations the runner was configured with. A cluster offering those classes
 needs a node pool labeled and tainted with that key and value; on a cluster
 without one the pod never schedules and the node fails with the scheduler's
-message. Requests use the pipeline's pinned or measured resources, independently
-of the billed class. On fixed node pools, a request exceeding every matching
-node's allocatable capacity fails before the Job is created; band pools can add
-larger nodes. See [Runner classes](auth.md#runner-classes).
+message. A Job placed on a band, by the class or by the operator's own
+selector, asks for one whole machine of its class: CPU of the class minus half
+a core with no limit, the class's memory as request and limit, and a node of
+its own. The pool therefore needs an N-vCPU machine that holds 4 GiB per vCPU
+after the kubelet's reservation. Elsewhere, requests use the pipeline's pinned
+or measured resources, and a request exceeding every matching node's
+allocatable capacity fails before the Job is created. See
+[Runner classes](auth.md#runner-classes).
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and

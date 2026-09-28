@@ -11,11 +11,10 @@ a team can consume that costs the operator money or grows with time, and what
 bounds each one. A team with no credits runs its work on its own machines, so
 what it costs the operator is storage, bandwidth and controller time.
 
-Cloud Jobs request the pipeline's pinned or measured CPU and memory from
-Kubernetes. The credit ledger still prices each claim at the smallest class
-that covers those resources, with a 20-second minimum. A 0.25-core request
-therefore fits a 0.25-core allocatable node but pays for the 2-core class.
-See [Runner classes](auth.md#runner-classes).
+The credit ledger prices each claim at the smallest class that covers the
+pipeline's pinned or measured resources, with a 20-second minimum. A Job on a
+band pool then runs alone on a machine of that class, so a 0.25-core pin pays
+for, and gets, a 2-vCPU node. See [Runner classes](auth.md#runner-classes).
 Each metered heartbeat charges elapsed work and renews the claim together. If
 the controller cannot check the token marker or charge the ledger, it refuses
 the renewal with `409` and the runner stops.
