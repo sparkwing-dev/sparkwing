@@ -232,3 +232,18 @@ func TestUpgradeWithAMalformedDotenvFileFailsSecretsUntilFixed(t *testing.T) {
 		t.Fatalf("list after the fix = %q, want both names", listed)
 	}
 }
+
+// Dotenv secrets on a machine that never ran a pipeline: no state.db yet.
+func TestSecretsListImportsIntoAFreshHome(t *testing.T) {
+	home, dir := secretsHome(t)
+	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=from-dotenv\n"})
+	hostSecretsDaemon(t, home)
+	listed := captureStdout(t, func() {
+		if err := runSecretList(nil); err != nil {
+			t.Fatalf("list: %v", err)
+		}
+	})
+	if !strings.Contains(listed, "TOKEN") {
+		t.Fatalf("list on a fresh home with secrets.env = %q, want TOKEN imported", listed)
+	}
+}

@@ -60,6 +60,9 @@ type storeSource struct {
 
 func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		if err := PendingImport(context.Background(), nil); err != nil {
+			return "", false, err
+		}
 		return "", false, secrets.ErrSecretMissing
 	}
 	st, err := store.OpenReadOnly(s.path)
