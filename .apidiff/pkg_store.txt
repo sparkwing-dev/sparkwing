@@ -663,7 +663,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete or credits.grant scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -1118,6 +1118,7 @@ type LaunchClaimRequest struct {
 
 	RunID, NodeID string
 }
+const LaunchScope = "claims.launch"
 type LegacyAgentClaim struct {
 	RunID       string
 	Status      string

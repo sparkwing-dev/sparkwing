@@ -109,7 +109,7 @@ const (
 	// the launcher builds, and it marks that claim as Cloud compute. It reads
 	// no secret or source. Only the operator mints it; no team's token may
 	// carry it.
-	ScopeClaimsLaunch = "claims.launch"
+	ScopeClaimsLaunch = store.LaunchScope
 )
 
 var allScopes = []string{

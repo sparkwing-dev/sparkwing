@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
+	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -117,5 +119,59 @@ func TestClaimLaunch_HonorsReadyAtAndLabels(t *testing.T) {
 	later, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now().Add(2*time.Minute))
 	if err != nil || later == nil || later.NodeID != "a" || later.Kind != store.ClaimTokenWork {
 		t.Fatalf("after the backoff: %+v %v", later, err)
+	}
+}
+
+// A sealed node of a controller-dispatched run is the launcher's even when an
+// enrolled executor's offer scan or its named offer reaches it.
+func TestExecutorOffer_RefusesAControllerDispatchedNode(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	if err := acme.CreateRun(ctx, store.Run{ID: "run-ctl", Pipeline: "release", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	seedSealedNode(t, st, "run-ctl", "candidate")
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE nodes SET kind = 'work' WHERE run_id = ?`), "run-ctl"); err != nil {
+		t.Fatal(err)
+	}
+	_, tok, err := acme.CreateToken(ctx, "agent:acme-helper", store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimant := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	if err := st.EnrollExecutor(ctx, tok.Prefix, store.Executor{
+		Name: "acme-helper", Kind: "agent", Location: "local", Principal: tok.Principal,
+		BasePriority: 100, PriorityCeiling: 100, MaxConcurrent: 1,
+		Budget: store.ExecutorResource{Cores: 4, MemoryBytes: 4 << 30},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reportCtx, err := executionpolicy.WithRuntimeReport(ctx, executionpolicy.CurrentRuntimeReport(buildinfo.Identity{
+		Binary: "sparkwing-runner", Version: "v0.41.0", GOOS: "linux", GOARCH: "amd64",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.HeartbeatExecutor(reportCtx, claimant, "acme-helper", store.ExecutorResource{Cores: 4, MemoryBytes: 4 << 30}, 0, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	sink := executionpolicy.NewPreparationSink()
+	if _, err := st.PrepareNextExecutorClaim(executionpolicy.WithPreparationSink(ctx, sink), claimant, "acme-helper"); err != nil &&
+		!errors.Is(err, executionpolicy.ErrBodyAttestationRequired) && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("PrepareNextExecutorClaim: %v", err)
+	}
+	if binding := sink.Load(); binding.RunID != "" {
+		t.Fatalf("the offer scan prepared %s/%s, a controller-dispatched node", binding.RunID, binding.NodeID)
+	}
+	summary, err := st.SchedulingSummary(ctx, "run-ctl", "candidate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := st.OfferExecutorClaim(ctx, claimant, store.ExecutorClaimOffer{
+		ExecutorName: "acme-helper", HolderID: "holder", RunID: "run-ctl", NodeID: "candidate",
+		ReservationID: "reservation", ResourceDigest: summary.ResourceDigest, Slot: 0,
+	}); err == nil && res.Node != nil {
+		t.Fatalf("an executor's named offer claimed a controller-dispatched node: %+v", res.Node)
 	}
 }
