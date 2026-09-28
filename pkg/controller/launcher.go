@@ -38,6 +38,11 @@ func (s *Server) handleLaunchClaim(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// safety: until run-node and plan --json report through claim tokens and pods
+// fetch claim-bound source, a controller-dispatched run cannot finish, so the
+// route refuses to opt a repository in; the store keeps the setting for tests.
+const controllerDispatchComplete = false
+
 type repoDispatchReq struct {
 	Dispatch store.RepoDispatch `json:"dispatch"`
 }
@@ -50,6 +55,11 @@ func (s *Server) handleSetRepoDispatch(w http.ResponseWriter, r *http.Request) {
 	var req repoDispatchReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Dispatch == store.RepoDispatchController && !controllerDispatchComplete {
+		writeError(w, http.StatusConflict, errors.New(
+			"controller dispatch cannot run a pipeline yet: pods do not fetch source or report through claim tokens"))
 		return
 	}
 	owner, name := r.PathValue("owner"), r.PathValue("name")

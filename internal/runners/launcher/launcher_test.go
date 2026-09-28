@@ -77,11 +77,17 @@ func (f launchFixture) launcher(bearer string) *launcher.Launcher {
 
 func (f launchFixture) request(t *testing.T, method, path, bearer string) int {
 	t.Helper()
-	req, err := http.NewRequest(method, f.url+path, strings.NewReader(`{}`))
+	return f.requestBody(t, method, path, bearer, `{}`)
+}
+
+func (f launchFixture) requestBody(t *testing.T, method, path, bearer, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(method, f.url+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -97,8 +103,13 @@ func TestLaunchOne_RunsAnOptedInRepoAsOneJobWithAClaimToken(t *testing.T) {
 	ctx := context.Background()
 	f := newLaunchFixture(t)
 	admin := f.token(t, controller.ScopeAdmin)
-	if code := f.request(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin); code != http.StatusBadRequest {
-		t.Fatalf("empty body: %d", code)
+	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
+		`{"dispatch":"shell"}`); code != http.StatusBadRequest {
+		t.Fatalf("unknown dispatch answered %d, want 400", code)
+	}
+	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
+		`{"dispatch":"controller"}`); code != http.StatusConflict {
+		t.Fatalf("opting in before the path is complete answered %d, want 409", code)
 	}
 	tenant, err := f.st.ForTeam(ctx, store.DefaultTeam)
 	if err != nil {

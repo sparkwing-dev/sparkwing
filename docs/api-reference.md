@@ -70,7 +70,7 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
-| `POST` | `/api/v1/launcher/claim` | `claims.launch` |
+| `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |

@@ -2171,7 +2171,7 @@ paths:
       tags: [teams]
       summary: Choose the path a repository's new runs take.
       description: >-
-        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds. Runs already started keep their path.
+        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds; it is refused with `409` until pods can fetch source and report through claim tokens. Runs already started keep their path.
       requestBody:
         required: true
         content:
@@ -2198,10 +2198,11 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: Controller dispatch cannot run a pipeline yet.}
 
   /api/v1/launcher/claim:
     post:
-      x-sparkwing-scope: claims.launch
+      x-sparkwing-scope: ScopeClaimsLaunch
       tags: [nodes]
       summary: Claim a ready node of a controller-dispatched run for a launcher Job.
       description: >-
