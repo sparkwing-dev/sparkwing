@@ -990,6 +990,8 @@ unlock.
   `team-credit-exhaustion-v1` requirement, so a v0.63.0 binary refuses a
   SQLite database whose upgrade stopped after moving the credit exhaustion
   clock. Schema 74 adds the node claim token column to databases that lack it.
+- **runner:** A local trigger whose dispatch fails records the dispatch error on
+  its failed run again, instead of a failed run with no error.
 
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close

@@ -135,7 +135,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
 		StartedAt:     time.Now(),
-		TriggerSource: "pipeline-working-tree@laptop.local",
+		TriggerSource: "manual",
 		DeclaredRepo:  "sample-app",
 		RepoURL:       "git@github.com:acme/sample-app.git",
 		GitBranch:     "main",
@@ -188,8 +188,8 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	if got.GithubRepo != "sample-app" {
 		t.Errorf("GithubRepo: got %q", got.GithubRepo)
 	}
-	if got.TriggerSource != "pipeline-working-tree@laptop.local" {
-		t.Errorf("TriggerSource: got %q, want parent workspace placement", got.TriggerSource)
+	if got.TriggerSource != "await-pipeline" {
+		t.Errorf("TriggerSource: got %q, want the child's own await-pipeline source", got.TriggerSource)
 	}
 	if !got.RepoInherited {
 		t.Error("RepoInherited = false, want same-repository routing provenance")

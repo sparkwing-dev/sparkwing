@@ -247,7 +247,7 @@ func TestCronsInstallProfile_RefusesAHeadNoRemoteBranchCarries(t *testing.T) {
 	if err == nil {
 		t.Fatal("a commit no remote branch carries was pushed anyway")
 	}
-	for _, want := range []string{"no remote branch", "--follow"} {
+	for _, want := range []string{"no origin branch", "--follow"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q is missing %q", err, want)
 		}

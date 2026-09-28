@@ -618,6 +618,21 @@ func TestLocalTriggerFailure_LiveContextRecordsTheFailedRun(t *testing.T) {
 	}
 }
 
+func TestClaimedTriggerFailure_RecordsTheDispatchError(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	claimed := claimedChildTrigger(t, st, "run-consumer-broken", "deploy")
+
+	finishClaimedTriggerFailure(context.Background(), st, claimed, quietLogger(), errors.New("compile failed"))
+
+	run, err := st.GetRun(context.Background(), "run-consumer-broken")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Status != "failed" || !strings.Contains(run.Error, "compile failed") {
+		t.Fatalf("run = %q %q, want failed with the dispatch error it carries", run.Status, run.Error)
+	}
+}
+
 func TestLocalSetupFailureChild(t *testing.T) {
 	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
 		t.Skip("child process fixture")

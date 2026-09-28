@@ -120,7 +120,7 @@ func recordLocalTriggerFailure(ctx context.Context, state StateBackend, trig *st
 	_ = state.CreateRun(book, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
-		Status:    "failed",
+		Status:    "pending",
 		StartedAt: time.Now(),
 	})
 	if err := state.FinishRun(book, trig.ID, "failed", "local dispatch: "+dispatchErr.Error()); err != nil {

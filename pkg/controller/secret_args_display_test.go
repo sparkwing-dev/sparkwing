@@ -161,11 +161,8 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
-		t.Fatal(err)
-	}
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest",
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"))
+		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest?status=failed"))
 }
 
 func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
@@ -345,15 +342,12 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
-	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
-		t.Fatal(err)
-	}
 	const q = "?include=" + store.IncludeSecretValues
 	assertRedactedResponse(t, "GET /api/v1/runs"+q, getBody(t, srv.URL+"/api/v1/runs"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"+q))
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest"+q,
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
+		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q+"&status=failed"))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
 }

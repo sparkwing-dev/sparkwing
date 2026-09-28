@@ -371,9 +371,9 @@ func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
 	st := storetest.Open(t)
 	key := "bin/01234567-89abcdef/" + strings.Repeat("a", 64)
 	digest := strings.Repeat("a", 64)
-	insert := `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
+	insert := storetest.Rebind(st, `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
 		VALUES ('team-a', ?, 'cache', 1, ?, 'runner', ?, ?)
-		ON CONFLICT DO NOTHING`
+		ON CONFLICT DO NOTHING`)
 	if _, err := st.DB().Exec(insert, key, digest, "local", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
 		defer wg.Done()
 		for range 2000 {
 			if _, err := st.DB().ExecContext(t.Context(),
-				`DELETE FROM data_objects WHERE team = 'team-a' AND key = ? AND provenance = 'cloud'`, key); err != nil {
+				storetest.Rebind(st, `DELETE FROM data_objects WHERE team = 'team-a' AND key = ? AND provenance = 'cloud'`), key); err != nil {
 				done <- err
 				return
 			}
