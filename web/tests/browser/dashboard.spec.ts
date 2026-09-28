@@ -109,7 +109,7 @@ const finishedDetail = {
 };
 
 test("keeps a long node name visible beside its location icon", async ({ page }) => {
-  const longName = "verify-release";
+  const longName = "verify-production-release-checks";
   const detail = {
     ...finishedDetail,
     nodes: [{
@@ -129,7 +129,18 @@ test("keeps a long node name visible beside its location icon", async ({ page })
   await expect(row).toBeVisible();
   await expect(row.getByText(longName, { exact: true })).toBeVisible();
   const label = row.getByText(longName, { exact: true });
-  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const fit = await label.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const labelBox = element.getBoundingClientRect();
+    const rowBox = element.closest("[data-node-id]")!.getBoundingClientRect();
+    return {
+      clipped: element.scrollWidth > element.clientWidth,
+      ellipsis: style.textOverflow === "ellipsis",
+      inside: labelBox.right <= rowBox.right,
+    };
+  });
+  expect(fit).toEqual({ clipped: true, ellipsis: true, inside: true });
+  await expect(label).toHaveAttribute("title", longName);
   await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
   const rowSite = row.getByLabel("Ran on moonborn (your machine)");
   await expect(rowSite).toBeVisible();
