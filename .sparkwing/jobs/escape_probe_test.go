@@ -184,3 +184,62 @@ func TestEscapeProbe_EnvProbeSkipsOnlyTheClaimToken(t *testing.T) {
 		}
 	}
 }
+
+func TestEscapeProbe_NetVerdictSeparatesFenceFromFailure(t *testing.T) {
+	dial := func(errno syscall.Errno) error { return &net.OpError{Op: "dial", Net: "tcp", Err: errno} }
+	for name, c := range map[string]struct {
+		err  error
+		want verdict
+	}{
+		"connected":        {nil, reached},
+		"refused":          {dial(syscall.ECONNREFUSED), blocked},
+		"host unreachable": {dial(syscall.EHOSTUNREACH), blocked},
+		"net unreachable":  {dial(syscall.ENETUNREACH), blocked},
+		"dropped":          {timeoutErr{}, blocked},
+		"dns miss":         {&net.DNSError{Err: "no such host", IsNotFound: true}, inconclusive},
+		"dns timeout":      {&net.DNSError{Err: "i/o timeout", IsTimeout: true}, inconclusive},
+		"tls failure":      {errTLSBroke, inconclusive},
+	} {
+		if got := netVerdict(c.err); got != c.want {
+			t.Errorf("%s: %s, want %s", name, got, c.want)
+		}
+	}
+}
+
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+func (failingBody) Close() error             { return errors.New("connection reset") }
+
+// Once a status arrived, the probe is judged by it, whatever happens to the
+// body after it.
+func TestEscapeProbe_AStatusSettlesTheProbeWhateverTheBodyDoes(t *testing.T) {
+	for status, want := range map[int]verdict{http.StatusOK: reached, http.StatusForbidden: denied, http.StatusNotFound: inconclusive} {
+		p := prober{httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Body: failingBody{}}, nil
+		})}}
+		code, err := p.status(http.MethodGet, "http://api/x", "", nil, nil)
+		if got := httpVerdict(code, err); got != want {
+			t.Errorf("status %d with a failing body: %s, want %s", status, got, want)
+		}
+	}
+}
+
+func TestEscapeProbe_RulesReviewVerdicts(t *testing.T) {
+	var bearers []string
+	for name, c := range map[string]struct {
+		rules string
+		want  verdict
+	}{
+		"grants secrets":       {`{"status":{"resourceRules":[{"resources":["secrets"]}]}}`, reached},
+		"grants nothing":       {`{"status":{"resourceRules":[{"resources":["selfsubjectreviews"]}]}}`, denied},
+		"incomplete, no grant": {`{"status":{"resourceRules":[],"incomplete":true}}`, inconclusive},
+		"incomplete, a grant":  {`{"status":{"resourceRules":[{"resources":["*"]}],"incomplete":true}}`, reached},
+		"unreadable":           {`{"status":`, inconclusive},
+	} {
+		p := prober{httpClient: cluster(http.StatusCreated, c.rules, nil, &bearers)}
+		if got := p.rulesVerdict("https://api", ""); got != c.want {
+			t.Errorf("%s: %s, want %s", name, got, c.want)
+		}
+	}
+}

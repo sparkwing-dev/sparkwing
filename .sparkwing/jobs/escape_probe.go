@@ -82,14 +82,19 @@ const (
 
 func (v verdict) failsGate() bool { return v != denied && v != blocked }
 
-// safety: a policy drop shows as a timeout and a closed port as a refusal;
-// any other failure, a DNS miss or a TLS error, says nothing about the fence.
+// safety: a policy drop shows as a timeout, a policy reject as an unreachable
+// host or network, and a closed port as a refusal; any DNS failure, even a
+// timed-out lookup, or a TLS error says nothing about the fence.
 func netVerdict(err error) verdict {
 	var ne net.Error
+	var dns *net.DNSError
 	switch {
 	case err == nil:
 		return reached
-	case errors.Is(err, syscall.ECONNREFUSED), errors.As(err, &ne) && ne.Timeout(), errors.Is(err, context.DeadlineExceeded):
+	case errors.As(err, &dns):
+		return inconclusive
+	case errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH),
+		errors.As(err, &ne) && ne.Timeout(), errors.Is(err, context.DeadlineExceeded):
 		return blocked
 	default:
 		return inconclusive
@@ -286,10 +291,11 @@ func (p prober) status(method, url, bearer string, body []byte, header map[strin
 	if err != nil {
 		return 0, err
 	}
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return 0, err
-	}
-	return resp.StatusCode, resp.Body.Close()
+	// safety: the status already answered the probe, so a body that fails to
+	// drain afterwards changes nothing about the verdict.
+	_, _ = io.Copy(io.Discard, resp.Body) //nolint:errcheck // see above
+	_ = resp.Body.Close()
+	return resp.StatusCode, nil
 }
 
 func (p prober) imdsProbe() probeResult {
@@ -364,6 +370,7 @@ func (p prober) rulesVerdict(base, bearer string) verdict {
 			ResourceRules []struct {
 				Resources []string `json:"resources"`
 			} `json:"resourceRules"`
+			Incomplete bool `json:"incomplete"`
 		} `json:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
@@ -375,6 +382,10 @@ func (p prober) rulesVerdict(base, bearer string) verdict {
 				return reached
 			}
 		}
+	}
+	// safety: an incomplete review may omit the very grant it is asked about.
+	if review.Status.Incomplete {
+		return inconclusive
 	}
 	return denied
 }
