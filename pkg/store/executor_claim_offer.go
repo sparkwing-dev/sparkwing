@@ -1433,6 +1433,9 @@ func meteredRunnerTokensTx(ctx context.Context, tx *storeTx, team Team, live []R
 	if team == DefaultTeam {
 		metered[""] = false
 	}
+	if len(live) == 0 {
+		return metered, nil
+	}
 	args := []any{string(team)}
 	for _, runner := range live {
 		args = append(args, runner.TokenPrefix)
