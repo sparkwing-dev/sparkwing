@@ -203,14 +203,21 @@ func assertGoModUntouched(path string, before []byte) error {
 }
 
 func ensureGitignore(sparkwingDir string) error {
-	target := locateGitignore(sparkwingDir)
-	entry := filepath.Join(filepath.Base(sparkwingDir), OverlayModfileName)
-	sumEntry := filepath.Join(filepath.Base(sparkwingDir), OverlaySumfileName)
-	var lines []string
-	if filepath.Base(sparkwingDir) == ".sparkwing" {
-		lines = []string{".sparkwing/.resolved.*"}
-	} else {
-		lines = []string{entry, sumEntry}
+	// Only the directory holding sparkwingDir counts as the project root: an
+	// ancestor's .git belongs to someone else, and an anchored pattern written
+	// there would not match this project's files anyway.
+	target := filepath.Join(sparkwingDir, ".gitignore")
+	lines := []string{OverlayModfileName, OverlaySumfileName}
+	if projectRoot := filepath.Dir(sparkwingDir); isGitCheckoutRoot(projectRoot) {
+		target = filepath.Join(projectRoot, ".gitignore")
+		if filepath.Base(sparkwingDir) == ".sparkwing" {
+			lines = []string{".sparkwing/.resolved.*"}
+		} else {
+			lines = []string{
+				filepath.Join(filepath.Base(sparkwingDir), OverlayModfileName),
+				filepath.Join(filepath.Base(sparkwingDir), OverlaySumfileName),
+			}
+		}
 	}
 
 	existing, err := os.ReadFile(target)
@@ -245,19 +252,9 @@ func ensureGitignore(sparkwingDir string) error {
 	return nil
 }
 
-func locateGitignore(sparkwingDir string) string {
-	dir := sparkwingDir
-	for range 10 {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return filepath.Join(dir, ".gitignore")
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return filepath.Join(sparkwingDir, ".gitignore")
+func isGitCheckoutRoot(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 func gitignoreContains(gitignore, line string) bool {

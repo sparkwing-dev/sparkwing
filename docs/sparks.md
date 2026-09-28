@@ -236,8 +236,11 @@ On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline spa
 
 The git-tracked `go.mod` and `go.sum` remain pristine. The one file
 resolution touches is `.gitignore`: when `.sparkwing/.resolved.*` is not
-already ignored, sparkwing appends it to the repo's `.gitignore`. Commit
-that line and later runs leave the tree clean. Consumers who never declare
+already ignored, sparkwing appends it to the `.gitignore` beside
+`.sparkwing/` if that directory holds `.git`, and otherwise ignores
+`.resolved.mod` and `.resolved.sum` in `.sparkwing/.gitignore`. It never
+writes above the directory that holds `.sparkwing/`. Commit that line and
+later runs leave the tree clean. Consumers who never declare
 a `sparks:` block see behavior identical to plain Go builds.
 
 ### Fast-path skip
@@ -570,8 +573,9 @@ Explicit scope limits, baked in to avoid drift:
 - **No modification of git-tracked files during resolution.** Version
   resolution, the overlay, and every `sparkwing` run leave `go.mod`,
   `go.sum`, and the rest of the repo pristine. The single write resolution
-  performs is a one-time append of `.sparkwing/.resolved.*` to `.gitignore`
-  when that entry is missing. Generated files live under
+  performs is a one-time append of the overlay's ignore entry to the
+  project's `.gitignore` (or `.sparkwing/.gitignore` outside a checkout
+  root) when that entry is missing. Generated files live under
   `.sparkwing/` with names starting `.resolved.` and are gitignored. The
   other deliberate exception is `sparkwing pipeline sparks inflate`, which you
   invoke explicitly to inflate a library's source and which does edit the

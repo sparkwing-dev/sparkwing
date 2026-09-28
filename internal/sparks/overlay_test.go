@@ -2,6 +2,7 @@ package sparks
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,6 +214,37 @@ func TestGitignoreAdds(t *testing.T) {
 	gi2, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if strings.Count(string(gi2), ".sparkwing/.resolved.*") != 1 {
 		t.Fatalf("gitignore entry duplicated:\n%s", gi2)
+	}
+}
+
+func TestGitignoreStaysInsideTheProjectWhenAnAncestorHoldsAGitDir(t *testing.T) {
+	fakeGoBin(t)
+	ancestor := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ancestor, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sparkwingDir := filepath.Join(ancestor, "project", ".sparkwing")
+	if err := os.MkdirAll(sparkwingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGoMod(t, sparkwingDir, nil)
+
+	if _, err := WriteOverlay(context.Background(), sparkwingDir, map[string]string{
+		"example.com/m": "v0.1.0",
+	}); err != nil {
+		t.Fatalf("overlay: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ancestor, ".gitignore")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("overlay wrote a .gitignore above the project: %v", err)
+	}
+	gi, err := os.ReadFile(filepath.Join(sparkwingDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("gitignore missing: %v", err)
+	}
+	for _, want := range []string{OverlayModfileName, OverlaySumfileName} {
+		if !gitignoreContains(string(gi), want) {
+			t.Fatalf("gitignore missing %s:\n%s", want, gi)
+		}
 	}
 }
 
