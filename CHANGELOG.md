@@ -22,6 +22,21 @@ unlock.
 
 ### Added
 
+- **controller + store + runner:** A repository can take the controller-dispatch
+  path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
+  `{"dispatch":"controller"}` (admin only) starts each new run of that
+  repository with a planning node instead of a claimable trigger. The new
+  `sparkwing-runner launch` claims those nodes through
+  `POST /api/v1/launcher/claim`, which needs the new operator-only
+  `claims.launch` scope, and runs each one as a Kubernetes Job it builds
+  itself: image by digest, service account `sparkwing-customer-job` with no
+  token, emptyDir scratch only, restricted security context, the band and
+  team-node placement on every class, one Job per machine, requests equal to
+  limits under mandatory ceilings, and the claim's own token as the pod's only
+  credential. Every other repository keeps the trigger path, and no other
+  claim path takes a controller-dispatched node. Schema v84 adds the `repos`
+  table and `runs.dispatch`.
+
 - **dashboard + controller:** An operator console at `/operator` finds a team
   by slug, name or owner email, shows its balance, 30-day purchases against
   its limit, trust, holds and recent business events, and grants, revokes or
