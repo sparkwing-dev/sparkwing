@@ -249,3 +249,43 @@ func TestFindLegacyFiles_SkipsTheMachinesFilesUnderAHomeOfItsOwn(t *testing.T) {
 		t.Fatalf("FindLegacyFiles under a scratch home = %+v, %v; want none", files, err)
 	}
 }
+
+func TestFindLegacyFiles_AnUnreadableDirectoryFailsTheImport(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads through permissions")
+	}
+	dir, _ := legacyDir(t, map[string]string{"config.env": "REGION=us-east-1\n"})
+	// Control: the directory as written is found without error.
+	if files, err := localsecrets.FindLegacyFiles(); err != nil || files.Config == "" {
+		t.Fatalf("FindLegacyFiles = %+v, %v; want config.env", files, err)
+	}
+	locked := filepath.Join(dir, "locked")
+	if err := os.MkdirAll(locked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "mine.env"), []byte("MINE=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	t.Setenv("SPARKWING_SECRETS", filepath.Join(locked, "mine.env"))
+	if files, err := localsecrets.FindLegacyFiles(); err == nil {
+		t.Fatalf("FindLegacyFiles past an unreadable directory = %+v, want an error", files)
+	}
+}
+
+func TestImportLegacy_AFileGoneBeforeTheReadImportsNothing(t *testing.T) {
+	dir, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n", "config.env": "REGION=x\n"})
+	st := openStore(t)
+	if err := os.Remove(filepath.Join(dir, "secrets.env")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := localsecrets.ImportLegacy(context.Background(), st, loadRing(t).For(st), files, time.Now()); err == nil {
+		t.Fatal("import with a discovered file gone succeeded")
+	}
+	if _, err := st.GetSecretRow("REGION", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("REGION was imported without secrets.env: %v", err)
+	}
+}

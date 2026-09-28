@@ -72,8 +72,10 @@ func FindLegacyFiles() (LegacyFiles, error) {
 		if p == "" {
 			p = filepath.Join(dir, f.name)
 		}
-		if _, err := os.Lstat(p); err != nil {
+		if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
 			continue
+		} else if err != nil {
+			return LegacyFiles{}, fmt.Errorf("import local secrets: %w", err)
 		}
 		if outsideSandbox(p) {
 			return LegacyFiles{}, nil
@@ -156,15 +158,17 @@ func ImportLegacy(ctx context.Context, st *store.Store, c *Cipher, files LegacyF
 }
 
 // PendingImport reports an error when a dotenv file exists that no import
-// has read into st yet, so a run reading st directly fails rather than run
+// has read into st yet, or that exists beside no store at all (nil st), so a run reading st directly fails rather than run
 // without those secrets.
 func PendingImport(ctx context.Context, st *store.Store) error {
 	files, err := FindLegacyFiles()
 	if err != nil || files.Empty() {
 		return err
 	}
-	if _, done, err := st.ImportMark(ctx, importMark); err != nil || done {
-		return err
+	if st != nil {
+		if _, done, err := st.ImportMark(ctx, importMark); err != nil || done {
+			return err
+		}
 	}
 	return fmt.Errorf("%s have not been imported into the local secret store yet; the sparkwing daemon imports them "+
 		"when it opens the store, so run `sparkwing secrets list` and fix any error it reports", describe(files))
@@ -191,9 +195,6 @@ type legacyEntry struct {
 
 func parseDotenv(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
