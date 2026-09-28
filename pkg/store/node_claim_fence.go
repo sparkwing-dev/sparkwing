@@ -271,6 +271,9 @@ func (s *Store) assertRunMutationFenceTx(ctx context.Context, tx *storeTx, team 
 
 func (s *Store) assertRunHeartbeatFenceTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if fence, ok := NodeClaimFenceFromContext(ctx); ok {
+		if _, err := lockTeamRunRowTx(ctx, tx, team, runID); err != nil {
+			return err
+		}
 		var held int
 		err := tx.QueryRowContext(ctx, `SELECT 1 FROM nodes
 	WHERE team = ? AND run_id = ? AND claimed_by = ? AND claim_principal = ? AND claim_token_prefix = ?

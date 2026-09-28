@@ -30,6 +30,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"lockCommittedTx":       "the storage pass reconciles every team's count of one store from one bucket listing",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
+	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
+		"to lock them before their nodes",
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
 		"the payment reverses it in that team; a payment id is unique across teams",

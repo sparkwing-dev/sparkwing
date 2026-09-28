@@ -156,12 +156,25 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		return nil, err
 	}
 
+	// safety: the runs are locked before their nodes, in the order
+	// lockTeamRunRowTx names; a claim that expires between the two reads is
+	// left to the next pass.
+	runIDs, err := expiredClaimRunsTx(ctx, tx, now)
+	if err != nil || len(runIDs) == 0 {
+		return nil, err
+	}
+	for _, runID := range runIDs {
+		if err := lockRunRow(ctx, tx, runID); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT run_id, node_id, coordinator_id, executor_kind, claim_worker_id, executor_id, executor_location,
 	       claim_membership_id, reservation_id, required_coordinator_id, required_executor_location,
 	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at, claim_token_prefix
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-   AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdate(), now.UnixNano())
+   AND lease_expires_at < ? AND `+nodeNotDone+` AND run_id IN (`+placeholders(len(runIDs))+`)`+s.forUpdate(),
+		append([]any{now.UnixNano()}, stringsToAny(runIDs)...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -327,6 +340,25 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 		return nil, err
 	}
 	return recovered, nil
+}
+
+func expiredClaimRunsTx(ctx context.Context, tx *storeTx, now time.Time) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT run_id FROM nodes
+ WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
+   AND lease_expires_at < ? AND `+nodeNotDone+` ORDER BY run_id`, now.UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsOrLog(rows)
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) createAgentLossRetryTx(ctx context.Context, tx *storeTx, sourceRunID string, items []expiredAgentNode, now time.Time) (string, []string, map[string]string, error) {

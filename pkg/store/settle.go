@@ -241,19 +241,27 @@ func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID str
 	return finishRunOnceTx(ctx, tx, runID, status, msg, team)
 }
 
-// safety: every dispatch transition locks the run row before any node row, so
-// siblings finishing at once serialize on the run instead of deadlocking; the
-// shared eligibility lock comes first because the credit ledger, taken last,
-// must follow it everywhere.
 func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string) error {
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return err
 	}
+	found, err := lockTeamRunRowTx(ctx, tx, team, runID)
+	if err == nil && !found {
+		return notFound("run", runID)
+	}
+	return err
+}
+
+// safety: the store's lock order is executor eligibility, trigger, run, node
+// rows, then the credit ledger; a transaction that needs two of them takes them
+// in that order, so siblings serialize on the run and nothing deadlocks. A path
+// that locks a node and then touches its run takes this lock first.
+func lockTeamRunRowTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),
 		string(team), runID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return notFound("run", runID)
+		return false, nil
 	}
-	return err
+	return err == nil, err
 }

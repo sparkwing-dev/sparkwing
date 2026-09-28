@@ -52,9 +52,9 @@ type claimResultHandler func(w http.ResponseWriter, r *http.Request, commit stor
 
 const maxClaimResultBytes = 16 << 20
 
-// safety: authorization precedes the handler, so a sensitive route writes only
-// through store functions that re-check the claim and its cancel in their own
-// transaction (assertClaimSensitiveTx).
+// safety: authorization precedes the handler, so a sensitive route that writes
+// must re-check the claim and its cancel inside the store transaction that
+// writes, taking locks in the store's order (lockTeamRunRowTx).
 func newClaimSensitiveRoute(kinds []store.ClaimTokenKind, bind func(*http.Request) (string, string),
 	next http.Handler,
 ) *claimTokenRoute {

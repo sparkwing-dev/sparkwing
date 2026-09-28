@@ -14,7 +14,7 @@ func TestClaimRunCancelled_AMissingRunReadsAsCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	cancelled, err := claimRunCancelled(context.Background(), s.queryRow, DefaultTeam, "no-such-run", "")
+	cancelled, err := claimRunCancelled(context.Background(), s.queryRow, DefaultTeam, "no-such-run")
 	if err != nil || !cancelled {
 		t.Fatalf("cancelled = %v, err = %v; want a missing run to refuse", cancelled, err)
 	}

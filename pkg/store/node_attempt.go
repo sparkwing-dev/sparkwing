@@ -127,23 +127,16 @@ func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken
 	ordinal := n.consumed + 1
 	// safety: a run with a cancel request retries nothing, so a node failing
 	// while its run is cancelled stays failed instead of being claimed again.
-	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID, "")
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
 	if err != nil {
 		return err
-	}
-	// safety: an unmetered attempt never opened a charge window, so it skips
-	// the global ledger lock; a metered one is billed before its claim clears.
-	if n.chargedThrough != 0 {
-		if _, err := s.chargeNodeTx(ctx, tx, tok.RunID, tok.NodeID, n.tokenPrefix, now, true); err != nil {
-			return err
-		}
 	}
 	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes
    SET status = ?, outcome = '', error = ?, failure_reason = ?, output_json = NULL, failure_json = NULL,
-       started_at = NULL, finished_at = NULL, execution_started_at = NULL, attempts_consumed = ?,
+       started_at = NULL, finished_at = NULL, attempts_consumed = ?,
        ready_at = ?, placement_hold_from = ?, offer_started_at = NULL,
        `+endClaimSet+`
  WHERE team = ? AND run_id = ? AND node_id = ?`,
@@ -162,7 +155,21 @@ func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken
 	if err != nil {
 		return err
 	}
-	return settleTx(ctx, tx, tok.Team, tok.RunID, now)
+	if err := settleTx(ctx, tx, tok.Team, tok.RunID, now); err != nil {
+		return err
+	}
+	// safety: the ledger lock is global and last in the store's lock order, so
+	// the charge follows settle's node writes, and an unmetered attempt, whose
+	// charge window never opened, skips it.
+	if n.chargedThrough != 0 {
+		if _, err := s.chargeNodeTx(ctx, tx, tok.RunID, tok.NodeID, n.tokenPrefix, now, true); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE nodes SET credit_charged_through = 0,
+       execution_started_at = CASE WHEN status = ? THEN NULL ELSE execution_started_at END
+ WHERE team = ? AND run_id = ? AND node_id = ?`, nodeStatusPending, string(tok.Team), tok.RunID, tok.NodeID)
+	return err
 }
 
 // safety: claim_generation is kept, so the next claim takes a later generation
@@ -170,8 +177,7 @@ func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken
 const endClaimSet = `claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_executor = '', claim_cores = 0, claim_memory_bytes = 0, claim_reservation = '',
        claim_slot = -1, lease_expires_at = NULL, reservation_id = '', claim_membership_id = '',
-       claim_worker_id = '', claim_executor_kind = '', claim_reservation_id = '', last_heartbeat = NULL,
-       credit_charged_through = 0`
+       claim_worker_id = '', claim_executor_kind = '', claim_reservation_id = '', last_heartbeat = NULL`
 
 func insertAttemptRowTx(ctx context.Context, tx *storeTx, tok ClaimToken, n attemptNode, report AttemptReport, now time.Time) error {
 	coordinatorID, err := coordinatorIDTx(ctx, tx)

@@ -7578,6 +7578,11 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		return false, ErrLockHeld
 	}
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		// safety: exhaustion finishes the run under the ledger, so the run
+		// row is locked first, in the order lockTeamRunRowTx names.
+		if err := lockRunRow(ctx, tx, id); err != nil {
+			return false, err
+		}
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
 			return false, err
 		}
