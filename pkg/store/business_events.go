@@ -2,15 +2,17 @@ package store
 
 import "time"
 
-// BusinessEvent is one durable fact about a team's account, such as a
+// BusinessEvent is one durable fact about an account or a team, such as a
 // billing trust change or a refused purchase.
 type BusinessEvent struct {
-	Kind   string
-	Team   Team
-	Actor  string
-	Reason string
-	Attrs  map[string]any
-	At     time.Time
+	ID        string
+	At        time.Time
+	Team      Team
+	Account   string
+	Kind      string
+	SubjectID string
+	Actor     string
+	Attrs     map[string]any
 }
 
 // RecordBusinessEvent writes ev inside tx, so the fact commits or rolls back
