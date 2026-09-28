@@ -84,6 +84,9 @@ type TokenOptions struct {
 	Metered bool
 	// CreatedBy names the account minting the token.
 	CreatedBy string
+	// safety: rotation is the one mint allowed to overlap a live token of the
+	// same agent name, and only the predecessor it revokes at grace end.
+	replaces string
 }
 
 // IsValid reports whether the token is usable at `now`.
@@ -150,6 +153,7 @@ func (s *Store) CreateTokenWith(
 
 type tokenExecer interface {
 	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
 }
 
 // MinSuppliedTokenLen is the shortest raw token [Store.CreateTokenIfNoneExist]
@@ -234,6 +238,9 @@ func createTokenRow(
 	if !ok {
 		return "", nil, fmt.Errorf("tokens: unknown kind %q", kind)
 	}
+	if err := refuseTakenAgentName(ctx, e, team, principal, kind, now, opts.replaces); err != nil {
+		return "", nil, err
+	}
 	raw, err := mintRaw(marker)
 	if err != nil {
 		return "", nil, err
@@ -243,6 +250,28 @@ func createTokenRow(
 		return "", nil, err
 	}
 	return raw, tok, nil
+}
+
+// safety: every mint path passes through here, so a second live runner token
+// for one agent name cannot be minted by any of them. A mint outside a locked
+// team row can still race another; the team settings mint locks it.
+func refuseTakenAgentName(ctx context.Context, q tokenExecer, team Team, principal, kind string, now time.Time, replaces string) (err error) {
+	if kind != TokenKindRunner || !strings.HasPrefix(principal, agentPrincipalPrefix) {
+		return nil
+	}
+	at := now.UTC().Unix()
+	rows, err := q.QueryContext(ctx, `SELECT prefix FROM tokens
+		WHERE team = ? AND kind = ? AND principal = ? AND prefix <> ?
+		  AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
+		string(team), TokenKindRunner, principal, replaces, at, at)
+	if err != nil {
+		return err
+	}
+	defer closeRowsInto(rows, &err)
+	if rows.Next() {
+		return fmt.Errorf("%w: %s", ErrAgentNameTaken, principal)
+	}
+	return rows.Err()
 }
 
 func insertTokenRow(
@@ -527,7 +556,7 @@ func (s *Store) rotateToken(
 	// re-minted into [DefaultTeam] would move the credential out of the team
 	// whose work it authorizes.
 	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Team, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
-		TokenOptions{Metered: oldTok.Metered})
+		TokenOptions{Metered: oldTok.Metered, replaces: oldTok.Prefix})
 	if err != nil {
 		return "", nil, nil, err
 	}

@@ -113,12 +113,13 @@ func (s *Store) ClaimNamedNode(
 	}
 	candidate := claimCandidate{runID: runID, nodeID: nodeID}
 	decodeCandidateLabels(runID, nodeID, needsJSON, &candidate.needs)
-	// safety: the operator's metered pool launches a Cloud executor for the
-	// node and carries no accept list of its own; it still answers to the
-	// node's selector as class cloud.
+	// safety: an administrator marks only the operator's own pool token
+	// metered, and that pool launches every node on a Cloud executor, so the
+	// mark grants the cloud class and location the pool had before selectors
+	// were checked here. It grants no exception to a repository list.
 	profile := claimProfileFrom(ctx, claimant, opts.Labels)
 	if warm.metered {
-		profile.Class, profile.Accept = match.ClassCloud, nil
+		profile.Class, profile.Location = match.ClassCloud, executorLocationCloud
 	}
 	demand := match.Demand{Selector: candidate.needs}
 	if profile.Accept != nil {
@@ -128,8 +129,15 @@ func (s *Store) ClaimNamedNode(
 		}
 		demand.Repo = &repo
 	}
+	// safety: a dispatcher older than the labels field sends none, so a node
+	// whose selector its labels would have to satisfy is refused, never
+	// admitted unchecked.
 	if verdict := match.Evaluate(profile, demand); !verdict.OK() {
-		return nil, fmt.Errorf("%w: the claimant's profile refuses the node: %s", ErrLockHeld, verdict)
+		hint := ""
+		if len(opts.Labels) == 0 {
+			hint = "; the claim sent no labels, so upgrade the dispatcher to one that sends its executor's labels"
+		}
+		return nil, fmt.Errorf("%w: the claimant's profile refuses the node: %s%s", ErrLockHeld, verdict, hint)
 	}
 	decodeCandidateLabels(runID, nodeID, prefersJSON, &candidate.prefers)
 	placement, _ := ClaimPlacementFromContext(ctx)

@@ -62,10 +62,6 @@ its cgroup ancestry, or the host's totals. A node whose resource request
 exceeds that capacity is never handed to it. What the runner has free right
 now only decides whether it holds a node back from the cloud.
 
-A node that reaches the queue deadline fails with an error naming the live
-runner of its team that came closest and what stopped it, for example
-`nearest runner moonborn: selector (gpu)`.
-
 ## Per-node modifiers (Go SDK)
 
 Three chainable modifiers on `*sparkwing.JobNode` (and the same names on

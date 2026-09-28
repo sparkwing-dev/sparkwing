@@ -1,9 +1,7 @@
 package store
 
 import (
-	"cmp"
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -230,59 +228,6 @@ func (p ClaimPlacement) needsRunRepository() bool {
 	return false
 }
 
-type staleNode struct {
-	runID, nodeID, team string
-	needsJSON           []byte
-	request             match.Resources
-}
-
-// safety: only a live runner of the node's team counts, and a sweep that
-// carries no presences cannot tell an absent runner from an unknown one.
-func nearestRunnerTx(ctx context.Context, tx *storeTx, n staleNode, live []RunnerPresence) (string, error) {
-	if live == nil {
-		return "", nil
-	}
-	demand := match.Demand{Request: n.request}
-	decodeCandidateLabels(n.runID, n.nodeID, n.needsJSON, &demand.Selector)
-	repo, err := scanRunRepository(tx.QueryRowContext(ctx, runRepositorySQL, n.runID, n.team))
-	if err != nil {
-		return "", err
-	}
-	demand.Repo = &repo
-	rank := map[match.Reason]int{
-		match.ReasonRepo: 1, match.ReasonTrustedPlacement: 2, match.ReasonSelector: 3,
-		match.ReasonShape: 4, match.ReasonAvailability: 5, "": 6,
-	}
-	best, bestRank := "", 0
-	for _, runner := range live {
-		sameTeam := runner.TokenPrefix == "" && NormalizeTeam(Team(n.team)) == DefaultTeam
-		if runner.TokenPrefix != "" {
-			var one int
-			err := tx.QueryRowContext(ctx, `SELECT 1 FROM tokens WHERE prefix = ? AND team = ?`,
-				runner.TokenPrefix, n.team).Scan(&one)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return "", err
-			}
-			sameTeam = err == nil
-		}
-		if !sameTeam {
-			continue
-		}
-		verdict := match.Evaluate(runner.profile(), demand)
-		if verdict.OK() {
-			verdict = match.Fits(runner.Profile.Capacity, runner.Available, demand.Request)
-		}
-		if rank[verdict.Reason] > bestRank {
-			name := cmp.Or(runner.Profile.Name, runner.Name)
-			best, bestRank = name+": "+cmp.Or(verdict.String(), "eligible"), rank[verdict.Reason]
-		}
-	}
-	if best == "" {
-		return "; no runner of the team was live", nil
-	}
-	return "; nearest runner " + best, nil
-}
-
 type nodeKey struct {
 	runID  string
 	nodeID string
@@ -298,8 +243,7 @@ type queueRunnersKey struct{}
 
 // WithQueueRunners carries every legacy claim-mode runner a controller has
 // heard from inside its liveness window into [Store.MarkNodeReady], which may
-// then open a round already due when none of them could claim the node, and
-// into the queue-deadline sweep, which names the runner that came closest. The
+// then open a round already due when none of them could claim the node. The
 // controller attaches it only once its registry has listened for a whole
 // window; a context without it leaves every offer round its window.
 func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context {

@@ -38,9 +38,6 @@ unlock.
   award read it from the stored row, so an executor is never offered or
   awarded a node whose run's repository its list refuses. Controllers older
   than schema 81 keep working against a migrated database.
-- **controller:** A node that reaches the queue deadline fails with an error
-  naming the live runner of its team that came closest and what stopped it,
-  for example `nearest runner moonborn: selector (gpu)`.
 
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
@@ -757,14 +754,17 @@ unlock.
 - **controller + store (Breaking):** `name=` in a selector matches only the
   runner whose token was minted for that agent name; a runner asserting
   `name=`, `class=`, `team=`, `local` or `location=` as a label no longer
-  satisfies anything with it. Minting a second live runner token for an agent
-  name the team already uses is refused with 409, so revoke the old token
-  first. A named claim (`POST /api/v1/runs/{id}/nodes/{nodeID}/claim`) now
-  checks the node's selector against the `labels` the claim sends and applies
-  the claimant's `allow_repos`; the operator's metered pool is checked as
-  class `cloud` without a repository list. A Kubernetes dispatcher sends its
-  configured labels, so a labeled node it could run before but whose labels
-  it does not advertise now waits for a runner that does. Executor exclusion
+  satisfies anything with it. Every mint path refuses a second live runner
+  token for an agent name the team already uses (409 from team settings, 400
+  from the admin token route), so revoke the old token first; rotation may
+  overlap its own predecessor until the grace ends. A named claim (`POST
+  /api/v1/runs/{id}/nodes/{nodeID}/claim`) now checks the node's selector
+  against the `labels` the claim sends and applies the claimant's
+  `allow_repos`. The operator's metered pool is granted class and location
+  `cloud`, so its `location=cloud` nodes still match, and a repository list it
+  sends still binds. A Kubernetes dispatcher sends its configured labels; one
+  older than this release sends none and is refused a labeled node, as is a
+  dispatcher whose labels do not satisfy it. Executor exclusion
   reasons rename `hard_capability` to `selector` and add `shape` for a node
   larger than the executor's budget. See the
   [migration guide](docs/migrations/_unreleased.md#one-agent-matcher).

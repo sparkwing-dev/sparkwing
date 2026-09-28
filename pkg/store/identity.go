@@ -1381,16 +1381,6 @@ func (t *Tenant) createRunnerTokenOnce(
 	if live >= MaxRunnerTokensPerTeam {
 		return "", nil, ErrRunnerTokenLimit
 	}
-	var named int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM tokens
-		WHERE team = ? AND kind = ? AND principal = ? AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
-		string(t.team), TokenKindRunner, principal, at, at).Scan(&named); err != nil {
-		return "", nil, err
-	}
-	if named > 0 {
-		return "", nil, fmt.Errorf("%w: %s", ErrAgentNameTaken, principal)
-	}
 	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, RunnerTokenLifetime, now,
 		TokenOptions{CreatedBy: createdBy})
 	if err != nil {

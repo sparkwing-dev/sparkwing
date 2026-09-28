@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,24 +205,88 @@ func TestRunnerTokenRefusesADuplicateAgentName(t *testing.T) {
 	}
 }
 
-// A queue deadline names the runner that came closest and what it lacked.
-func TestQueueTimeoutNamesTheNearestRunner(t *testing.T) {
+// Metering is billing, not placement trust: a metered agent's named claim
+// still answers to the repository list it sent.
+func TestNamedClaimOfAMeteredAgentObeysItsAcceptList(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	seedMatchNode(t, s, "run", "", 1, "gpu")
-	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE nodes SET ready_at = ? WHERE run_id = 'run'`),
-		time.Now().Add(-time.Hour).UnixNano()); err != nil {
+	claimant := meteredClaimant(t, s, "agent:pool")
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	live := []store.RunnerPresence{{Name: "moonborn", Labels: []string{"linux"}, FreeSlots: 1}}
-	if _, err := store.Maintenance.FailStaleQueuedNodes(s, store.WithQueueRunners(ctx, live), time.Minute); err != nil {
-		t.Fatal(err)
-	}
-	n, err := s.GetNode(ctx, "run", "work")
+	seedMatchNode(t, s, "run-b", "https://github.com/acme/b.git", 1)
+	allow, err := match.ParseAccept([]string{"github.com/acme/a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "no runner claimed this node before the queue deadline; nearest runner moonborn: selector (gpu)"; n.Error != want {
-		t.Fatalf("queue timeout error = %q, want %q", n.Error, want)
+	refusing := store.WithClaimProfile(ctx, match.Profile{Accept: allow})
+	if _, err := s.ClaimNamedNode(refusing, claimant, "run-b", "work", "k8s-job:1", time.Minute,
+		store.NamedClaimOptions{}); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("a metered named claim whose list refuses the repository = %v, want held", err)
+	}
+}
+
+// The operator's metered pool claims a location=cloud node by name without
+// sending labels, as it did before the named claim checked selectors, while
+// the queue claim still never grants a runner a location.
+func TestCloudPlacementMatchesThePreChangeBehavior(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	pool := meteredClaimant(t, s, "agent:pool")
+	if _, err := s.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_1", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	seedMatchNode(t, s, "run-cloud", "", 1, "location=cloud")
+	if _, err := s.ClaimNextReadyNode(ctx, pool, "pool:1", time.Minute, []string{"location=cloud"}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a queue claim asserting location=cloud = %v, want not found", err)
+	}
+	if n, err := s.ClaimNamedNode(ctx, pool, "run-cloud", "work", "k8s-job:1", time.Minute,
+		store.NamedClaimOptions{}); err != nil || n.ClaimedBy != "k8s-job:1" {
+		t.Fatalf("the pool's named claim of a location=cloud node = %+v, %v; want the node", n, err)
+	}
+	seedMatchNode(t, s, "run-other", "", 1, "location=cloud")
+	if _, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-other", "work", "k8s-job:2", time.Minute,
+		store.NamedClaimOptions{Labels: []string{"location=cloud"}}); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("an unmetered dispatcher asserting location=cloud = %v, want held", err)
+	}
+}
+
+// A dispatcher older than the labels field sends none: it still claims an
+// unlabeled node, and a labeled one is refused rather than admitted unchecked.
+func TestNamedClaimFromADispatcherThatSendsNoLabels(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedMatchNode(t, s, "run-plain", "", 1)
+	seedMatchNode(t, s, "run-gpu", "", 1, "gpu")
+	if _, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-plain", "work", "k8s-job:1", time.Minute,
+		store.NamedClaimOptions{}); err != nil {
+		t.Fatalf("an unlabeled node = %v", err)
+	}
+	_, err := s.ClaimNamedNode(ctx, store.ClaimIdentity{}, "run-gpu", "work", "k8s-job:2", time.Minute, store.NamedClaimOptions{})
+	if !errors.Is(err, store.ErrLockHeld) || !strings.Contains(err.Error(), "sent no labels") {
+		t.Fatalf("a gpu node from a claim that sent no labels = %v, want a refusal naming the missing labels", err)
+	}
+}
+
+// Every mint path refuses a second live token for an agent name; rotation is
+// the one overlap, with the predecessor it revokes at the end of its grace.
+func TestAgentNameIsUniqueOnEveryMintPath(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Now().UTC()
+	_, first, err := s.CreateToken("agent:moonborn", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateToken("agent:moonborn", store.TokenKindRunner, []string{"nodes.claim"}, 0, now); !errors.Is(err, store.ErrAgentNameTaken) {
+		t.Fatalf("a second moonborn token through CreateToken = %v, want ErrAgentNameTaken", err)
+	}
+	if _, _, err := s.CreateToken("agent:moonborn", store.TokenKindUser, []string{"runs.read"}, 0, now); err != nil {
+		t.Fatalf("a user token that shares the principal = %v", err)
+	}
+	if _, _, _, err := s.RotateToken(first.Prefix, time.Hour, 0, now); err != nil {
+		t.Fatalf("rotating moonborn = %v", err)
+	}
+	if _, _, err := s.CreateToken("agent:moonborn", store.TokenKindRunner, []string{"nodes.claim"}, 0, now); !errors.Is(err, store.ErrAgentNameTaken) {
+		t.Fatalf("a mint during the rotation grace = %v, want ErrAgentNameTaken", err)
 	}
 }

@@ -6439,7 +6439,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id, needs_labels, team, requested_cores, requested_memory_bytes FROM nodes
+		`SELECT run_id, node_id FROM nodes
 		  WHERE ready_at IS NOT NULL AND claimed_by IS NULL
 		    AND ready_at < ? AND `+nodeNotDone,
 		threshold)
@@ -6447,15 +6447,13 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 		return nil, err
 	}
 	var pairs [][2]string
-	var stale []staleNode
 	for rows.Next() {
-		var n staleNode
-		if err := rows.Scan(&n.runID, &n.nodeID, &n.needsJSON, &n.team, &n.request.Cores, &n.request.MemoryBytes); err != nil {
+		var rid, nid string
+		if err := rows.Scan(&rid, &nid); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		pairs = append(pairs, [2]string{n.runID, n.nodeID})
-		stale = append(stale, n)
+		pairs = append(pairs, [2]string{rid, nid})
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -6465,20 +6463,15 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 		return nil, nil
 	}
 	now := time.Now().UnixNano()
-	live, _ := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
-	for i, p := range pairs {
-		nearest, err := nearestRunnerTx(ctx, tx, stale[i], live)
-		if err != nil {
-			return nil, err
-		}
+	for _, p := range pairs {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET `+nodeFailSet+`,
-       error = ?,
+       error = 'no runner claimed this node before the queue deadline',
        failure_reason = ?, finished_at = ?,
        ready_at = NULL
  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
-			"no runner claimed this node before the queue deadline"+nearest, FailureQueueTimeout, now, p[0], p[1]); err != nil {
+			FailureQueueTimeout, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
 	}

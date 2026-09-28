@@ -1550,11 +1550,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"invocations", recovery.Invocations)
 				}
 			}
-			sweepCtx := ctx
-			if now := time.Now(); s.runnerPresence.complete(now, s.placement.liveness) {
-				sweepCtx = store.WithQueueRunners(ctx, s.runnerPresence.live(now, s.placement.liveness, presenceKey{}))
-			}
-			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, sweepCtx, s.queueTimeout); err != nil {
+			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, s.queueTimeout); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {
 				for _, p := range pairs {
