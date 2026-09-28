@@ -1354,15 +1354,14 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 	return ExecutorClaimRoundResult{Revoked: changed == 1}, nil
 }
 
-// offerRoundIdleTx reports whether nothing but the coordinator could take
-// the node: no queue runner of the run's team satisfies it and no GitHub
-// Actions job of the run's commit holds a live credential. The caller has
-// already found no eligible executor of the team.
+// safety: reports whether nothing but the coordinator could take the node, so
+// its round may open already due; the caller has found no eligible executor.
+// bug: a runner whose first poll lands after the controller's snapshot is missed.
 func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string, summary ExecutorSchedulingSummary,
 	class int64, now time.Time,
 ) (bool, error) {
-	live, _ := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
-	if len(live) == 0 || summary.RequiredCoordinatorID != "" || summary.RequiredLocation != "" {
+	live, known := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
+	if !known || summary.RequiredCoordinatorID != "" || summary.RequiredLocation != "" {
 		return false, nil
 	}
 	team, _, err := runOwnerTx(ctx, tx, runID)
@@ -1388,20 +1387,46 @@ func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string,
 		}
 		return false, nil
 	}
-	// safety: a GitHub Actions job claims only its own push's runs and may
-	// still be starting, so a live credential for the commit keeps the window.
-	busy, err := rowPresentTx(ctx, tx, `SELECT 1 FROM github_runner_credentials c
-  JOIN tokens t ON t.team = ? AND t.prefix = c.prefix
-  JOIN triggers tr ON tr.team = ? AND tr.id = ?
- WHERE c.team = ? AND c.sha = tr.git_sha AND c.expires_at > ?
-   AND (t.revoked_at IS NULL OR t.revoked_at > ?)
-   AND LOWER(t.principal) LIKE '%:' || LOWER(tr.github_owner) || '/' || LOWER(tr.github_repo) LIMIT 1`,
-		string(team), string(team), runID, string(team), now.Unix(), now.Unix())
+	busy, err := liveGitHubCredentialForRunTx(ctx, tx, team, runID, now)
 	return !busy, err
 }
 
-// meteredRunnerTokensTx maps each live runner credential of team to whether it
-// is metered. A credential of another team is absent.
+// safety: a GitHub Actions job claims only its own push's runs and may still be
+// starting, so a live credential for the run's repository and commit keeps the
+// window. The repository is compared exactly, outside SQL pattern matching.
+func liveGitHubCredentialForRunTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) (_ bool, err error) {
+	var owner, name string
+	if err := tx.QueryRowContext(ctx, `SELECT github_owner, github_repo FROM triggers WHERE team = ? AND id = ?`,
+		string(team), runID).Scan(&owner, &name); errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT t.principal FROM github_runner_credentials c
+  JOIN tokens t ON t.team = ? AND t.prefix = c.prefix
+  JOIN triggers tr ON tr.team = ? AND tr.id = ?
+ WHERE c.team = ? AND c.sha = tr.git_sha AND c.expires_at > ?
+   AND (t.revoked_at IS NULL OR t.revoked_at > ?)`,
+		string(team), string(team), runID, string(team), now.Unix(), now.Unix())
+	if err != nil {
+		return false, err
+	}
+	defer closeRowsInto(rows, &err)
+	for rows.Next() {
+		var principal string
+		if err := rows.Scan(&principal); err != nil {
+			return false, err
+		}
+		parts := strings.SplitN(principal, ":", 3)
+		if len(parts) == 3 && strings.EqualFold(parts[2], owner+"/"+name) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// safety: maps each live runner credential of team to whether it is metered;
+// another team's credential is absent, so its runner never holds the window.
 func meteredRunnerTokensTx(ctx context.Context, tx *storeTx, team Team, live []RunnerPresence) (_ map[string]bool, err error) {
 	metered := map[string]bool{}
 	// safety: an unauthenticated runner is the local path, which belongs to DefaultTeam.

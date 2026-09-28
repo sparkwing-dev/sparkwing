@@ -2171,8 +2171,8 @@ func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
 	ctx := r.Context()
-	if s.placement.liveness > 0 {
-		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(time.Now(), s.placement.liveness, presenceKey{}))
+	if now := time.Now(); s.runnerPresence.complete(now, s.placement.liveness) {
+		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(now, s.placement.liveness, presenceKey{}))
 	}
 	if err := s.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {

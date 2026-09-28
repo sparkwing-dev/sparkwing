@@ -45,10 +45,19 @@ func (p runnerPresence) freeSlots() int {
 type runnerPresenceRegistry struct {
 	mu sync.Mutex
 	m  map[presenceKey]runnerPresence
+	// safety: a registry younger than the liveness window may be missing a live
+	// runner that has not polled since the controller started.
+	since time.Time
 }
 
 func newRunnerPresenceRegistry() *runnerPresenceRegistry {
-	return &runnerPresenceRegistry{m: map[presenceKey]runnerPresence{}}
+	return &runnerPresenceRegistry{m: map[presenceKey]runnerPresence{}, since: time.Now()}
+}
+
+// safety: only a registry that has listened for a whole liveness window can
+// say no runner is live, whichever teams have polled it since.
+func (r *runnerPresenceRegistry) complete(now time.Time, within time.Duration) bool {
+	return r != nil && within > 0 && now.Sub(r.since) >= within
 }
 
 func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, allowRepos *sourceurl.RepoAllowlist, at time.Time) {

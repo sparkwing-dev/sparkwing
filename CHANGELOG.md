@@ -705,9 +705,11 @@ unlock.
   when nothing but its coordinator could claim it: no live eligible executor
   of the run's team, no live queue runner of that team whose labels and CPU
   class fit the node, and no live GitHub Actions credential for the run's
-  repository and commit. The warm pool then falls back on its first poll. A
-  controller that has heard from no runner, or runs without placement
-  liveness, keeps the window.
+  repository and commit. The warm pool then falls back on its first poll. The
+  controller skips only after its runner registry has listened for a whole
+  `--placement-liveness` window, so for that long after a restart every node
+  keeps the window. A runner whose first poll arrives just after the node
+  becomes ready can still miss that node.
 - **cli + runner (Breaking):** Machine settings move into one file,
   `~/.config/sparkwing/config.yaml`, with `admission`, `agent`, `fleet`,
   `profiles` and `repos` sections replacing `admission.yaml`, `budget`,

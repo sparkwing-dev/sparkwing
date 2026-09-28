@@ -22,15 +22,12 @@ func runnerToken(t *testing.T, tn *store.Tenant, name string) string {
 	return tok.Prefix
 }
 
-// reopenRound opens a fresh offer round for the node with live as the
-// controller's queue runners and reports whether the round is still open.
-func reopenRound(t *testing.T, st *store.Store, runID, nodeID string, live []store.RunnerPresence) bool {
+func reopenRound(ctx context.Context, t *testing.T, st *store.Store, runID, nodeID string) bool {
 	t.Helper()
-	ctx := context.Background()
 	if revoked, err := st.RevokeNodeReady(ctx, runID, nodeID); err != nil || !revoked {
 		t.Fatalf("reset offer round = %v, %v", revoked, err)
 	}
-	if err := st.MarkNodeReady(store.WithQueueRunners(ctx, live), runID, nodeID); err != nil {
+	if err := st.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		t.Fatalf("MarkNodeReady: %v", err)
 	}
 	result, err := st.FinalizeExecutorClaimRound(ctx, runID, nodeID)
@@ -55,52 +52,58 @@ func TestOfferRoundKeepsItsWindowOnlyWhileSomethingCouldClaim(t *testing.T) {
 	acmeRunner := runnerToken(t, acme, "acme")
 	seedExecutorNode(t, st, "run", 1, "linux")
 
+	known := func(live ...store.RunnerPresence) context.Context { return store.WithQueueRunners(ctx, live) }
 	for _, tc := range []struct {
-		name string
-		live []store.RunnerPresence
-		want bool
+		name  string
+		ready context.Context
+		want  bool
 	}{
-		{"no runners reported", nil, true},
-		{"a live runner of the team", []store.RunnerPresence{{Name: "home", TokenPrefix: homeRunner, Labels: []string{"linux"}}}, true},
-		{"a runner of the team without the label", []store.RunnerPresence{{Name: "home", TokenPrefix: homeRunner}}, false},
-		{"only another team's runner", []store.RunnerPresence{{Name: "acme", TokenPrefix: acmeRunner, Labels: []string{"linux"}}}, false},
+		{"a controller that cannot vouch for its registry", ctx, true},
+		{"a controller that knows no runner is live", known(), false},
+		{"a live runner of the team", known(store.RunnerPresence{Name: "home", TokenPrefix: homeRunner, Labels: []string{"linux"}}), true},
+		{"a runner of the team without the label", known(store.RunnerPresence{Name: "home", TokenPrefix: homeRunner}), false},
+		{"only another team's runner", known(store.RunnerPresence{Name: "acme", TokenPrefix: acmeRunner, Labels: []string{"linux"}}), false},
 	} {
-		if got := reopenRound(t, st, "run", "work", tc.live); got != tc.want {
+		if got := reopenRound(tc.ready, t, st, "run", "work"); got != tc.want {
 			t.Errorf("%s: round open = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 
 	enrollTeamOfferExecutor(t, st, home, "home-desk", 10)
-	if !reopenRound(t, st, "run", "work", []store.RunnerPresence{{Name: "acme", TokenPrefix: acmeRunner, Labels: []string{"linux"}}}) {
+	if !reopenRound(known(), t, st, "run", "work") {
 		t.Fatal("a live executor of the team: round closed at once, want the window")
 	}
 }
 
-func TestOfferRoundWaitsForALiveGitHubActionsCredential(t *testing.T) {
+func TestOfferRoundWaitsOnlyForALiveCredentialOfTheRunsRepository(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
-	home, err := st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
 	acme := tenantFor(t, st, "acme")
-	elsewhere := []store.RunnerPresence{{Name: "home", TokenPrefix: runnerToken(t, home, "home")}}
-	githubWork(t, st, acme, "run-gh", "acme/widgets", nil)
+	idle := store.WithQueueRunners(ctx, nil)
+	githubWork(t, st, acme, "run-gh", "acme/wid_gets", nil)
 
-	if reopenRound(t, st, "run-gh", "compile", elsewhere) {
+	if reopenRound(idle, t, st, "run-gh", "compile") {
 		t.Fatal("no credential for the push: round kept its window, want it closed")
 	}
 	binding, err := acme.AddGitHubRunnerBinding(ctx, store.GitHubRunnerBinding{
-		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/widgets",
+		RepositoryID: 42, RepositoryOwnerID: 7, Repository: "acme/wid_gets",
 	}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := acme.MintGitHubRunnerCredential(ctx, binding, "github:42:acme/widgets", mainPush,
-		[]string{"nodes.claim"}, time.Hour, time.Now()); err != nil {
-		t.Fatal(err)
+	mint := func(principal string) {
+		t.Helper()
+		if _, _, err := acme.MintGitHubRunnerCredential(ctx, binding, principal, mainPush,
+			[]string{"nodes.claim"}, time.Hour, time.Now()); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if !reopenRound(t, st, "run-gh", "compile", elsewhere) {
+	mint("github:42:acme/widXgets")
+	if reopenRound(idle, t, st, "run-gh", "compile") {
+		t.Fatal("a credential for another repository at the commit: round kept its window, want it closed")
+	}
+	mint("github:42:Acme/Wid_Gets")
+	if !reopenRound(idle, t, st, "run-gh", "compile") {
 		t.Fatal("a live credential for the push: round closed at once, want the window")
 	}
 }

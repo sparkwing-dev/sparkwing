@@ -23,3 +23,20 @@ func TestRunnerPresenceLiveCarriesTheClaimCredential(t *testing.T) {
 		t.Fatalf("live runner carries token prefix %q, want %q", live[0].TokenPrefix, laptop.tokenPrefix)
 	}
 }
+
+// A registry vouches that no runner is live only after listening for a whole
+// liveness window, however many runners of any team have polled it since.
+func TestRunnerPresenceCompleteOnlyAfterAWholeWindow(t *testing.T) {
+	reg := newRunnerPresenceRegistry()
+	start := reg.since
+	reg.record(presenceKey{tokenPrefix: "swr_other", name: "busy"}, nil, nil, nil, start)
+	if reg.complete(start.Add(time.Minute-time.Nanosecond), time.Minute) {
+		t.Fatal("a registry younger than the window vouched for its runners")
+	}
+	if !reg.complete(start.Add(time.Minute), time.Minute) {
+		t.Fatal("a registry that listened for the whole window did not vouch for its runners")
+	}
+	if reg.complete(start.Add(time.Hour), 0) {
+		t.Fatal("a controller without a liveness window vouched for its runners")
+	}
+}
