@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -47,9 +46,10 @@ func run(args []string) error {
 		"accept SPARKWING_WEB_INSECURE_COOKIES on a non-loopback address, for a dashboard published over plain HTTP through a proxy or ingress")
 	hsts := fs.Bool("hsts", false,
 		"assert that browsers reach this dashboard over TLS: send Strict-Transport-Security and require an https origin on unsafe requests. "+
-			"Unneeded when this process serves TLS itself or a proxy in --trusted-proxy-cidrs forwards X-Forwarded-Proto")
-	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
-		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For; empty ignores forwarded headers")
+			"Unneeded when this process serves TLS itself or a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
+	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
+		"second address serving the same dashboard, whose requests have X-Real-IP and X-Forwarded-Proto believed. "+
+			"Only a proxy that overwrites both may reach it. Empty serves only --addr, which ignores them")
 
 	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/config.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
@@ -62,10 +62,6 @@ func run(args []string) error {
 
 	_ = fs.Parse(args)
 	insecureCookies := insecureCookiesRequested(os.Getenv("SPARKWING_WEB_INSECURE_COOKIES"))
-	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
-	if err != nil {
-		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
-	}
 
 	paths, err := swpaths.DefaultPaths()
 	if err != nil {
@@ -103,7 +99,7 @@ func run(args []string) error {
 			AuthControllerURL: authControllerURL,
 			Token:             *token,
 			RequireLogin:      *requireLogin,
-			TrustedProxyCIDRs: trustedProxyCIDRs,
+			TrustedProxyAddr:  *trustedProxyAddr,
 			HSTS:              *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
@@ -128,18 +124,18 @@ func run(args []string) error {
 		// signed-in request reaches the controller as its own session, not the service token.
 		hc := &http.Client{
 			Timeout:   30 * time.Second,
-			Transport: web.SessionForwardingTransport(otelutil.WrapTransport(nil)),
+			Transport: web.SessionForwardingTransport(web.ControllerTransport(otelutil.WrapTransport(nil))),
 		}
 		c := client.NewWithToken(*controllerURL, hc, *token)
 		opts := web.HandlerOptions{
-			Backend:           backend.NewClientBackend(c, logStore),
-			Paths:             paths,
-			ControllerURL:     *controllerURL,
-			LogsURL:           *logsURL,
-			Token:             *token,
-			RequireLogin:      *requireLogin,
-			TrustedProxyCIDRs: trustedProxyCIDRs,
-			HSTS:              *hsts,
+			Backend:          backend.NewClientBackend(c, logStore),
+			Paths:            paths,
+			ControllerURL:    *controllerURL,
+			LogsURL:          *logsURL,
+			Token:            *token,
+			RequireLogin:     *requireLogin,
+			TrustedProxyAddr: *trustedProxyAddr,
+			HSTS:             *hsts,
 
 			AllowUnauthenticatedRemote: *allowUnauthenticatedRemote,
 			InsecureCookies:            insecureCookies,
@@ -155,8 +151,8 @@ func run(args []string) error {
 	}
 
 	return web.Serve(ctx, paths, *addr, web.HandlerOptions{
-		TrustedProxyCIDRs: trustedProxyCIDRs,
-		HSTS:              *hsts,
+		TrustedProxyAddr: *trustedProxyAddr,
+		HSTS:             *hsts,
 
 		InsecureCookies:            insecureCookies,
 		AllowInsecureCookiesRemote: *allowInsecureCookiesRemote,

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
-	"net/netip"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -43,16 +42,17 @@ func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Hand
 		}
 		ctx := context.WithValue(r.Context(), cspNonceCtxKey{}, nonce)
 		ctx = context.WithValue(ctx, requestTLSCtxKey{}, overTLS)
+		ctx = context.WithValue(ctx, clientIPCtxKey{}, ratelimit.ClientIP(r))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func requestOverTLS(r *http.Request, opts HandlerOptions) bool {
-	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r, opts.TrustedProxyCIDRs)
+	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r)
 }
 
-func forwardedHTTPS(r *http.Request, trustedProxyCIDRs []netip.Prefix) bool {
-	if !ratelimit.PeerIsTrustedProxy(r.RemoteAddr, trustedProxyCIDRs) {
+func forwardedHTTPS(r *http.Request) bool {
+	if !ratelimit.FromTrustedListener(r) {
 		return false
 	}
 	proto := r.Header.Get("X-Forwarded-Proto")
@@ -95,4 +95,29 @@ func newCSPNonce() string {
 func cspNonceFrom(ctx context.Context) string {
 	nonce, _ := ctx.Value(cspNonceCtxKey{}).(string)
 	return nonce
+}
+
+type clientIPCtxKey struct{}
+
+var controllerTransport = ControllerTransport(http.DefaultTransport)
+
+// ControllerTransport sends the address of the browser being served as
+// X-Real-IP, replacing any the caller set, so the controller's trusted
+// listener keys that browser's budgets and audit records on it. Wrap only
+// the transport of a controller client: no other service reads the header.
+func ControllerTransport(base http.RoundTripper) http.RoundTripper {
+	return relayTransport{base: base}
+}
+
+type relayTransport struct{ base http.RoundTripper }
+
+func (t relayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clientIP, _ := req.Context().Value(clientIPCtxKey{}).(string)
+	req = req.Clone(req.Context())
+	if clientIP == "" {
+		req.Header.Del("X-Real-IP")
+	} else {
+		req.Header.Set("X-Real-IP", clientIP)
+	}
+	return t.base.RoundTrip(req)
 }

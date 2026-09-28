@@ -15,8 +15,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 // safety: host-only scoping stops a sibling host under the registrable domain reading these cookies and does not
@@ -163,7 +161,7 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 		pass := r.PostForm.Get("password")
 		next := safeNext(r.PostForm.Get("next"))
 
-		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
 		if err != nil {
 			data := withSignInProviders(r.Context(), opts,
 				loginPageData{Error: "Invalid username or password.", Next: next})
@@ -198,7 +196,7 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 
-		sess, err := controllerLogin(r.Context(), controllerURL, user, pass, ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
 		if err != nil {
 			data := loginPageData{
 				Next:  next,
@@ -302,17 +300,13 @@ func resolveDashboardSession(ctx context.Context, opts HandlerOptions, sessionID
 	return sess, nil
 }
 
-func controllerLogin(ctx context.Context, controllerURL, user, pass, clientIP string) (*loginResp, error) {
+func controllerLogin(ctx context.Context, controllerURL, user, pass string) (*loginResp, error) {
 	body, _ := json.Marshal(map[string]string{"username": user, "password": pass})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/login",
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	// safety: without this every browser shares the web pod's controller budget, so one of them throttles all of them.
-	if clientIP != "" {
-		req.Header.Set("X-Forwarded-For", clientIP)
-	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -335,7 +329,7 @@ func controllerLogout(ctx context.Context, controllerURL, sessionID string) erro
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/logout",
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -438,7 +432,7 @@ func sessionBackendError(w http.ResponseWriter) {
 func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/bootstrap-needed", nil)
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false
@@ -462,7 +456,7 @@ func controllerCreateFirstUser(ctx context.Context, controllerURL, user, pass st
 		strings.TrimRight(controllerURL, "/")+"/api/v1/users",
 		bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -490,7 +484,7 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/session",
 		nil)
 	req.Header.Set("Authorization", "Session "+sessionID)
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

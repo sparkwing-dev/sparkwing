@@ -72,20 +72,6 @@ controller:
     name: ""
     key: token
 
-  # Proxy source CIDRs allowed to supply X-Forwarded-For, which names
-  # the client for login throttling and the audit log's client_ip. List
-  # the ingress controller's pod range. This must include the dashboard pod's address: the web
-  # deployment forwards each browser's address to the controller, and
-  # an untrusted source is ignored, which collapses every dashboard
-  # login into one budget. Set the web pod's address when you pin it;
-  # when the pod IP is unknown, set the cluster pod CIDR, for example
-  # 10.244.0.0/16 (kubeadm/kind), 10.42.0.0/16 (k3s), or the value of
-  # `kubectl cluster-info dump | grep cluster-cidr`. Every pod in the
-  # listed range can then supply X-Forwarded-For, so list the
-  # narrowest range that contains the web pod. Empty keys the limiter
-  # on the TCP peer. List proxy networks, not client networks.
-  trustedProxyCIDRs: []
-
   # Memory ceiling in MiB for concurrent argon2id password and token
   # hashing. Each hash holds 64 MiB while it runs, so the default
   # admits four at a time and keeps unauthenticated login traffic
@@ -337,9 +323,6 @@ web:
   # port can drive. Required when the token secret is set and
   # requireLogin is false; the dashboard refuses to start otherwise.
   allowUnauthenticatedRemote: false
-
-  # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
-  trustedProxyCIDRs: []
 
   resources:
     requests:

@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 // safety: the flow cookie is what proves the browser GitHub returns is the one
@@ -75,7 +73,7 @@ func githubAppConnectHandler(opts HandlerOptions, existing bool) http.HandlerFun
 		}
 		var start githubAppConnectResp
 		err := postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID,
+			principal.sessionID,
 			map[string]string{"redirect_uri": dashboardURL(r, githubAppCallbackPath)}, &start)
 		if err != nil {
 			renderGitHubAppRefusal(w, err)
@@ -235,7 +233,7 @@ func githubAppAvailableHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		var available githubAppAvailableResp
 		err := postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect/available",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]any{
+			principal.sessionID, map[string]any{
 				"state": flow.State, "verifier": flow.Verifier, "code": flow.Code,
 				"redirect_uri": dashboardURL(r, githubAppCallbackPath),
 			}, &available)
@@ -309,7 +307,7 @@ func githubAppSelectHandler(opts HandlerOptions) http.HandlerFunc {
 		setGitHubAppFlowCookie(w, "", -1, secure)
 		var bound githubAppInstallation
 		err = postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect/select",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]any{
+			principal.sessionID, map[string]any{
 				"state": flow.State, "verifier": flow.Verifier, "authorization": flow.Authorization, "installation_id": id,
 			}, &bound)
 		if err != nil {
@@ -337,7 +335,7 @@ func githubAppCompleteHandler(opts HandlerOptions) http.HandlerFunc {
 		setGitHubAppFlowCookie(w, "", -1, secure)
 		var bound githubAppInstallation
 		err := postControllerJSONAs(r.Context(), opts.ControllerURL, "/api/v1/team/github-app/connect/complete",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]any{
+			principal.sessionID, map[string]any{
 				"state":           flow.State,
 				"verifier":        flow.Verifier,
 				"code":            flow.Code,

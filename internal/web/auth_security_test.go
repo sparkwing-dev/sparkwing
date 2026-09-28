@@ -54,16 +54,12 @@ func TestSameOriginRequestUsesTLSEvidenceForOriginFormRequests(t *testing.T) {
 
 func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
 	t.Parallel()
-	trusted, err := ratelimit.ParseTrustedProxyCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("parse CIDRs: %v", err)
-	}
-	opts := HandlerOptions{TrustedProxyCIDRs: trusted}
+	opts := HandlerOptions{}
 
 	var decided bool
-	handler := securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := ratelimit.TrustedListener(securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		decided = sameOriginRequest(r)
-	}))
+	})))
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.RemoteAddr = "10.1.2.3:9999"
 	req.Host = "dashboard.example"

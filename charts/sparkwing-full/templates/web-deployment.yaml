@@ -84,9 +84,6 @@ spec:
             {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
             - "--allow-insecure-cookies-remote"
             {{- end }}
-            {{- with .Values.web.trustedProxyCIDRs }}
-            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
-            {{- end }}
           env:
             - name: SPARKWING_HOME
               value: /tmp/sparkwing

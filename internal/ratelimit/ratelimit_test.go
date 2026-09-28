@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"testing"
 	"time"
 )
@@ -123,68 +122,41 @@ func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
 	}
 }
 
-func TestClientIP_TrustedProxyChain(t *testing.T) {
-	trustedEdge := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	trustedIPv6Edge := []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/48")}
-	trustedChain := []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.0/8"),
-		netip.MustParsePrefix("192.168.0.0/16"),
-	}
+func TestClientIP_HonorsForwardedAddressOnlyOnTheTrustedListener(t *testing.T) {
 	cases := []struct {
 		name       string
-		xff        []string
+		trusted    bool
+		realIPs    []string
 		remoteAddr string
-		trusted    []netip.Prefix
 		want       string
 	}{
-		{name: "default ignores forwarded header", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "trusted edge accepts client", xff: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "198.51.100.7"},
-		{name: "trusted IPv6 edge accepts client", xff: []string{"2001:db8:ffff::7"}, remoteAddr: "[2001:db8:1::5]:5000", trusted: trustedIPv6Edge, want: "2001:db8:ffff::7"},
-		{name: "append chain stops at nearest untrusted hop", xff: []string{"198.51.100.99, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "malformed left prefix after client is ignored", xff: []string{"unknown, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "multiple trusted hops", xff: []string{"198.51.100.7, 192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
-		{name: "multiple header fields", xff: []string{"198.51.100.7", "192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
-		{name: "malformed chain falls back to peer", xff: []string{"198.51.100.7, unknown"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
-		{name: "untrusted peer ignores valid chain", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "missing forwarded header uses peer", remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
+		{name: "trusted listener uses forwarded address", trusted: true, realIPs: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", want: "198.51.100.7"},
+		{name: "IPv6 forwarded address", trusted: true, realIPs: []string{"2001:db8::7"}, remoteAddr: "10.0.0.1:5000", want: "2001:db8::7"},
+		{name: "plain listener ignores spoofed address", realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "second address copy is refused", trusted: true, realIPs: []string{"198.51.100.7", "198.51.100.8"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "malformed forwarded address uses peer", trusted: true, realIPs: []string{"unknown"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "trusted listener without the header uses peer", trusted: true, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
 		{name: "peer without port", remoteAddr: "127.0.0.1", want: "127.0.0.1"},
-		{name: "malformed peer stays opaque", remoteAddr: "local-peer", trusted: trustedEdge, want: "local-peer"},
+		{name: "malformed peer stays opaque", trusted: true, remoteAddr: "local-peer", want: "local-peer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/login", nil)
 			req.RemoteAddr = tc.remoteAddr
-			for _, value := range tc.xff {
-				req.Header.Add("X-Forwarded-For", value)
+			req.Header.Set("X-Forwarded-For", "192.0.2.66")
+			for _, v := range tc.realIPs {
+				req.Header.Add("X-Real-IP", v)
 			}
-			if got := ClientIP(req, tc.trusted); got != tc.want {
+			var got string
+			var h http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = ClientIP(r) })
+			if tc.trusted {
+				h = TrustedListener(h)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if got != tc.want {
 				t.Fatalf("ClientIP=%q want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestParseTrustedProxyCIDRs(t *testing.T) {
-	prefixes, err := ParseTrustedProxyCIDRs(" 10.0.0.5/8, 192.168.0.0/16, 2001:db8:1::1/48, ::ffff:10.0.0.5/104 ")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	want := []string{"10.0.0.0/8", "192.168.0.0/16", "2001:db8:1::/48", "10.0.0.0/8"}
-	if len(prefixes) != len(want) {
-		t.Fatalf("got %d prefixes, want %d", len(prefixes), len(want))
-	}
-	for i, w := range want {
-		if got := prefixes[i].String(); got != w {
-			t.Fatalf("prefix %d = %q, want %q", i, got, w)
-		}
-	}
-	if empty, err := ParseTrustedProxyCIDRs(""); err != nil || empty != nil {
-		t.Fatalf("empty input: %v %v", empty, err)
-	}
-	for _, raw := range []string{"10.0.0.1", "not-a-cidr", "::ffff:10.0.0.0/64"} {
-		if _, err := ParseTrustedProxyCIDRs(raw); err == nil {
-			t.Fatalf("ParseTrustedProxyCIDRs(%q) succeeded", raw)
-		}
 	}
 }
 

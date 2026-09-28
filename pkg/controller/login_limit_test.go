@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -18,6 +21,7 @@ func postLogin(t *testing.T, h http.Handler, remoteAddr, forwardedFor, body stri
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = remoteAddr
 	if forwardedFor != "" {
+		req.Header.Set("X-Real-IP", forwardedFor)
 		req.Header.Set("X-Forwarded-For", forwardedFor)
 	}
 	rec := httptest.NewRecorder()
@@ -76,9 +80,8 @@ func TestLoginLimiter_GlobalBucketExceedsAFleetsLogins(t *testing.T) {
 	}
 }
 
-func TestLoginLimiter_TrustedProxySeparatesForwardedClients(t *testing.T) {
-	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	h := New(newStoreForAuth(t), nil).WithTrustedProxyCIDRs(trusted).Handler()
+func TestLoginLimiter_TrustedListenerClientsKeepSeparateBudgets(t *testing.T) {
+	h := ratelimit.TrustedListener(New(newStoreForAuth(t), nil).Handler())
 
 	for range loginClientBurst {
 		postLogin(t, h, "10.0.0.1:5000", "198.51.100.7", loginBodyNoPassword)
@@ -93,9 +96,8 @@ func TestLoginLimiter_TrustedProxySeparatesForwardedClients(t *testing.T) {
 	}
 }
 
-func TestLoginLimiter_UntrustedPeerCannotRotateWithForwardedHeader(t *testing.T) {
+func TestLoginLimiter_PlainListenerCannotRotateWithForwardedHeaders(t *testing.T) {
 	h := New(newStoreForAuth(t), nil).Handler()
-
 	for i := range loginClientBurst {
 		forwarded := netip.AddrFrom4([4]byte{198, 51, 100, byte(i)}).String()
 		if rec := postLogin(t, h, "203.0.113.7:5000", forwarded, loginBodyNoPassword); rec.Code != http.StatusBadRequest {
@@ -105,6 +107,29 @@ func TestLoginLimiter_UntrustedPeerCannotRotateWithForwardedHeader(t *testing.T)
 	rec := postLogin(t, h, "203.0.113.7:5000", "198.51.100.250", loginBodyNoPassword)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want %d; forwarded headers must not mint new budgets", rec.Code, http.StatusTooManyRequests)
+	}
+}
+
+func TestRequestLogRecordsTheTrustedListenersClientAddress(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		trusted bool
+		want    string
+	}{
+		{name: "trusted listener", trusted: true, want: "198.51.100.7"},
+		{name: "plain listener", want: "203.0.113.7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			h := New(newStoreForAuth(t), slog.New(slog.NewJSONHandler(&logs, nil))).Handler()
+			if tc.trusted {
+				h = ratelimit.TrustedListener(h)
+			}
+			postLogin(t, h, "203.0.113.7:5000", "198.51.100.7", loginBodyNoPassword)
+			if want := `"client_ip":"` + tc.want + `"`; !strings.Contains(logs.String(), want) {
+				t.Fatalf("request log lacks %s:\n%s", want, logs.String())
+			}
+		})
 	}
 }
 

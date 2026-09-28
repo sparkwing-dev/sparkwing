@@ -242,7 +242,7 @@ func (l *Loopback) Handler() http.Handler {
 	// logger suppresses per-request Info lines from node state writes.
 	return otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, l.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
-			return ratelimit.ClientIP(r, nil)
+			return ratelimit.ClientIP(r)
 		}))
 }
 

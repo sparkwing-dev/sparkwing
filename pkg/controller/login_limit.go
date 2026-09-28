@@ -3,7 +3,6 @@ package controller
 import (
 	"errors"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"time"
 
@@ -27,18 +26,16 @@ type loginLimiter struct {
 	clients  *ratelimit.Limiter
 	global   *ratelimit.Limiter
 	failures *ratelimit.Limiter
-	trusted  []netip.Prefix
 
 	globalBurst int
 }
 
-func newLoginLimiter(trusted []netip.Prefix) *loginLimiter {
+func newLoginLimiter() *loginLimiter {
 	globalBurst := loginGlobalPerHashSlot * store.Argon2Slots()
 	return &loginLimiter{
 		clients:     ratelimit.New(loginClientBurst, loginClientWindow),
 		global:      ratelimit.New(globalBurst, loginGlobalWindow),
 		failures:    ratelimit.New(loginFailureBurst, loginFailureWindow),
-		trusted:     trusted,
 		globalBurst: globalBurst,
 	}
 }
@@ -59,7 +56,7 @@ func (l *loginLimiter) middleware(next http.Handler) http.Handler {
 }
 
 func (l *loginLimiter) client(r *http.Request) string {
-	return ratelimit.ClientIP(r, l.trusted)
+	return ratelimit.ClientIP(r)
 }
 
 // safety: keying the failure budget on the account alone would let any stranger lock a named user out of the dashboard.

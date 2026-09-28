@@ -46,13 +46,6 @@ func TestResolveAuthControllerURL(t *testing.T) {
 	}
 }
 
-func TestRunRejectsMalformedTrustedProxyCIDRs(t *testing.T) {
-	err := run([]string{"--trusted-proxy-cidrs", "10.0.0.1"})
-	if err == nil || !strings.Contains(err.Error(), "--trusted-proxy-cidrs") {
-		t.Fatalf("error = %v, want trusted proxy CIDR error", err)
-	}
-}
-
 func TestRunRejectsTokenWithoutABackend(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))

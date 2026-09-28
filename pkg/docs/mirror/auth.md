@@ -1112,7 +1112,7 @@ Any other provider name answers `404`.
 Register `https://<dashboard-host>/auth/<provider>/callback` as the OAuth
 client's redirect URI (the authorization callback URL on GitHub). The scheme
 follows the same TLS evidence as the CSRF origin check, so a dashboard behind a
-TLS-terminating proxy needs `--trusted-proxy-cidrs` or `--hsts`. The host is the
+TLS-terminating proxy needs `--trusted-proxy-addr` or `--hsts`. The host is the
 one the browser used, so a local dashboard reached as `http://localhost:4343`
 uses `http://localhost:4343/auth/google/callback`, and reaching it as
 `127.0.0.1` sends a redirect URI the provider does not recognize.
@@ -1128,8 +1128,8 @@ Every dashboard response carries `Content-Security-Policy`
 (`default-src 'self'` plus a per-response nonce for the bundle's inline
 scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
 `Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when the
-request carries evidence of TLS: the listener terminates TLS itself, a peer
-inside `--trusted-proxy-cidrs` forwarded `X-Forwarded-Proto: https`, or the
+request carries evidence of TLS: the listener terminates TLS itself, a request
+accepted on `--trusted-proxy-addr` forwarded `X-Forwarded-Proto: https`, or the
 operator passed `--hsts` because TLS terminates somewhere that forwards no
 trusted header. That same evidence decides the scheme the CSRF origin check
 expects, so a dashboard behind an HTTPS proxy keeps `Secure` cookies without
@@ -1149,23 +1149,24 @@ nothing would authenticate with it, so the dashboard would serve
 unauthenticated while the flag suggested otherwise.
 
 Login throttling uses the TCP peer address and ignores forwarded headers by
-default. When a reverse proxy fronts `sparkwing-web`, pass its egress networks
-as `--trusted-proxy-cidrs=<CIDR,...>` or set the chart's
-`web.trustedProxyCIDRs`. Sparkwing accepts `X-Forwarded-For` only from a trusted
-peer and walks append-style chains from right to left until it reaches the
-nearest untrusted address. Values to its left are ignored. A malformed entry in
-the trusted suffix or an untrusted immediate peer falls back to the TCP peer.
-IPv4-mapped CIDRs with prefix lengths `/96` through `/128` normalize to IPv4;
-broader mapped prefixes fail startup. List proxy networks, not client networks.
+default. `sparkwing-web` and `sparkwing-controller` each take
+`--trusted-proxy-addr=<host:port>`, a second listener that serves the same
+routes. On that listener alone, a request's single `X-Real-IP` is the client
+address; on `--addr` the header is ignored, and `X-Forwarded-For` is never
+taken as a client address on either. Point the fronting proxy at the trusted
+listener, make it overwrite `X-Real-IP` on every request (ingress-nginx does by
+default), and let nothing else reach that port, for example with a
+NetworkPolicy.
 
-The controller throttles `POST /api/v1/auth/login` the same way and takes the
-same `--trusted-proxy-cidrs` flag, because it is reachable without going
-through the dashboard. `sparkwing-web` forwards each browser's resolved
-address to the controller as `X-Forwarded-For`, so the controller's list must
-include the web pod's source; otherwise the controller ignores the header and
-keys every dashboard login on the web pod's own address. See
-[security.md](security.md#login-and-hashing-budgets) for its budgets, the
-per-prefix bearer budget, and the argon2 memory bound.
+`sparkwing-web` sends the address it settled on as `X-Real-IP` on every call it
+makes to the controller while serving a browser: login, OAuth, proxied
+`/api/v1/` requests, and backend reads alike. Point its `--controller` at the
+controller's trusted listener. The logs service never receives the header. The
+controller keys login throttling, the per-prefix bearer failure budget, and the
+`client_ip` of its audit records on that one address, and callers on `--addr`,
+such as runners, key on their TCP peer. See
+[security.md](security.md#login-and-hashing-budgets) for the budgets and the
+argon2 memory bound.
 
 The login, first-admin, and logout forms carry a CSRF token in both a
 `SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,

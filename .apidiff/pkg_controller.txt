@@ -36,7 +36,6 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error)
 func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
-func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
 const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
@@ -409,7 +408,7 @@ func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
-func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
+func (s *Server) WithTrustedProxyAddr(addr string) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
 

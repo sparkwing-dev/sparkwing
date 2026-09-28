@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -178,52 +176,4 @@ func TestAuditRecordCarriesAllowListedPathIDs(t *testing.T) {
 		}
 	}
 	t.Fatalf("no audit record for the node finish: %s", logs.String())
-}
-
-// The audit record names the caller an ingress forwarded for, and a caller
-// outside the trusted proxy networks cannot choose the address it is
-// recorded under by sending the header itself.
-func TestAuditClientIPTrustsForwardedForOnlyFromAProxy(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	for name, tc := range map[string]struct {
-		trusted string
-		want    string
-	}{
-		"through the ingress": {trusted: "127.0.0.0/8", want: "203.0.113.7"},
-		"direct caller":       {trusted: "10.0.48.0/20", want: "127.0.0.1"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			raw, pub := multiTeamLicense(t)
-			logs := &lockedBuffer{}
-			f := newIdentityFixtureWith(t, fixtureOpts{
-				license: raw, key: pub, logger: slog.New(slog.NewJSONHandler(logs, nil)),
-				configure: func(s *controller.Server) {
-					s.WithTrustedProxyCIDRs([]netip.Prefix{netip.MustParsePrefix(tc.trusted)})
-				},
-			})
-			owner := f.user("o", "olga@example.com")
-			req, err := http.NewRequest(http.MethodDelete, f.url+"/api/v1/secrets/ANY", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Header.Set("Authorization", owner.auth)
-			req.Header.Set("X-Forwarded-For", "203.0.113.7")
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_ = resp.Body.Close()
-			var got []any
-			for _, rec := range logs.records(t, "audit") {
-				if rec["route"] == "/api/v1/secrets/{name}" {
-					got = append(got, rec["client_ip"])
-				}
-			}
-			if len(got) != 1 || got[0] != tc.want {
-				t.Fatalf("audit client_ip = %v, want [%s]", got, tc.want)
-			}
-		})
-	}
 }

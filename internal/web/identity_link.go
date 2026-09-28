@@ -4,8 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 const oauthFlowLink = "link"
@@ -74,7 +72,7 @@ func identityLinkHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		var start oauthStartResp
 		err := postControllerJSONAs(r.Context(), controllerURL, "/api/v1/me/identities/"+provider.Name+"/link",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID,
+			principal.sessionID,
 			map[string]string{"redirect_uri": oauthRedirectURI(r, provider.Name)}, &start)
 		if err != nil {
 			refuseIdentityLink(w, r, provider.Name, identityLinkRefusal(err))
@@ -155,7 +153,7 @@ func identityLinkCompleteHandler(opts HandlerOptions) http.HandlerFunc {
 			Provider string `json:"provider"`
 		}
 		err := postControllerJSONAs(r.Context(), controllerURL, "/api/v1/me/identities/"+provider.Name+"/link/complete",
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs), principal.sessionID, map[string]string{
+			principal.sessionID, map[string]string{
 				"state":        flow.State,
 				"verifier":     flow.Verifier,
 				"code":         flow.Code,

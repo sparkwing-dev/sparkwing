@@ -1825,6 +1825,15 @@ unlock.
 
 ### Removed
 
+- **controller + web (Breaking):** `--trusted-proxy-cidrs` and the chart's
+  `controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs` are gone, and
+  neither process takes a client address from `X-Forwarded-For`. Each takes
+  `--trusted-proxy-addr`, a second listener on which a request's `X-Real-IP`
+  (and, for the dashboard, `X-Forwarded-Proto`) counts; `--addr` ignores both.
+  The dashboard sends each browser's address as `X-Real-IP` on every
+  controller call, not only logins, and never to the logs service. See the
+  [migration guide](docs/migrations/_unreleased.md#trusted-proxy-listener-replaces-trusted-proxy-cidrs).
+
 - **web (Breaking):** the dashboard no longer probes or displays controller,
   logs, and cache service health. It no longer serves
   `GET /api/v1/health/services` or accepts the probe-only `--cache` flag.

@@ -169,28 +169,6 @@ func TestWebIsPointedAtTheBundledLogs(t *testing.T) {
 	}
 }
 
-func TestWebTrustedProxyCIDRsRenderAsOneFlag(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
-	}
-	defaultArgs := webArgs(t, helmTemplate(t, "sparkwing"))
-	if got, ok := hasFlag(defaultArgs, "--trusted-proxy-cidrs="); ok {
-		t.Fatalf("default trusted proxy flag = %q", got)
-	}
-
-	configuredArgs := webArgs(t, helmTemplate(t, "sparkwing",
-		"web.trustedProxyCIDRs[0]=10.0.0.0/8",
-		"web.trustedProxyCIDRs[1]=192.168.0.0/16",
-	))
-	got, ok := hasFlag(configuredArgs, "--trusted-proxy-cidrs=")
-	if !ok {
-		t.Fatalf("no trusted proxy flag in %v", configuredArgs)
-	}
-	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
-		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
-	}
-}
-
 func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")
@@ -201,25 +179,11 @@ func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	}
 
 	defaultArgs := controllerArgs()
-	if got, ok := hasFlag(defaultArgs, "--trusted-proxy-cidrs="); ok {
-		t.Fatalf("default trusted proxy flag = %q", got)
-	}
 	if got, ok := hasFlag(defaultArgs, "--argon2-memory-budget-mb="); !ok || got != "--argon2-memory-budget-mb=256" {
 		t.Fatalf("argon2 budget flag = %q, want the 256 MiB default", got)
 	}
 
-	configured := controllerArgs(
-		"controller.trustedProxyCIDRs[0]=10.0.0.0/8",
-		"controller.trustedProxyCIDRs[1]=192.168.0.0/16",
-		"controller.argon2MemoryBudgetMB=128",
-	)
-	got, ok := hasFlag(configured, "--trusted-proxy-cidrs=")
-	if !ok {
-		t.Fatalf("no trusted proxy flag in %v", configured)
-	}
-	if want := "--trusted-proxy-cidrs=10.0.0.0/8,192.168.0.0/16"; got != want {
-		t.Fatalf("trusted proxy flag = %q, want %q", got, want)
-	}
+	configured := controllerArgs("controller.argon2MemoryBudgetMB=128")
 	if got, _ := hasFlag(configured, "--argon2-memory-budget-mb="); got != "--argon2-memory-budget-mb=128" {
 		t.Fatalf("argon2 budget flag = %q, want the override", got)
 	}

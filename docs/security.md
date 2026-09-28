@@ -134,19 +134,11 @@ An unauthenticated caller never sees a store error verbatim. Anything
 that is not an authentication rejection answers `503` with a generic
 message and the detail goes to the controller log.
 
-Login throttling, the bearer failure budget and the audit log's `client_ip`
-use the TCP peer and ignore forwarded headers until you name the proxy
-networks in `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`).
-Behind an ingress controller, list the ingress pods' source range, or every
-audit record names the ingress pod instead of the caller. A caller outside
-the list that sends `X-Forwarded-For` is recorded under its own address. The dashboard forwards each browser's
-address to the controller, so that list must include the web pod's source
-or every dashboard login shares one client budget. Set the web pod's
-address where you pin it; where the pod IP is unknown, set the cluster pod
-CIDR (`10.244.0.0/16` on kubeadm and kind, `10.42.0.0/16` on k3s) and
-accept that any pod in that range can then supply `X-Forwarded-For`. List
-the narrowest range that contains the web pod. Leaving it empty stays safe
-and turns coarse: every browser then shares the proxy's budget.
+Login throttling keys on the TCP peer. Only a request accepted on the
+controller's `--trusted-proxy-addr` listener counts against the budget of its
+`X-Real-IP`, so keep that port reachable by the ingress and the dashboard alone.
+Without it every browser shares the proxy's budget, which stays safe and turns
+coarse. [auth.md](auth.md) covers the setup.
 
 ## Trigger and list-query limits
 

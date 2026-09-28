@@ -61,7 +61,7 @@ func controllerIdentityCapabilities(ctx context.Context, controllerURL, sessionI
 	if sessionID != "" {
 		req.Header.Set("Authorization", sessionAuthorization(sessionID))
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return identityCapabilities{}, err

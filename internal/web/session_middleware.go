@@ -180,7 +180,7 @@ func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {
 
 func logsProxy(opts HandlerOptions) http.Handler {
 	return logsProxyAllowList(withLogsIdentityHeader(
-		controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), true)))
+		controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), true, false)))
 }
 
 // DurableLogStore reads a logs service on behalf of the signed-in browser
