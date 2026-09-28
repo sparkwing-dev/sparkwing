@@ -654,3 +654,55 @@ func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
 		t.Fatalf("result = %+v, want cancelled", result)
 	}
 }
+
+// A controller whose registry has listened for a whole liveness window and
+// holds no runner that could take the node opens the round already due, so
+// the fallback starts on the first poll; a younger registry keeps the window.
+func TestRunnerFallsBackAtOnceOnlyWhenTheControllerCanVouch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 5s of real work; the fast class runs under -short")
+	}
+	for _, tc := range []struct {
+		name      string
+		liveness  time.Duration
+		wantEarly bool
+	}{
+		{"registry older than its window", time.Nanosecond, true},
+		{"registry younger than its window", time.Minute, false},
+	} {
+		st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewServer(controller.New(st, quietTestLogger()).
+			WithLocalFirstPlacement(nil, 0, tc.liveness).Handler())
+		// safety: the registry's clock starts at the first request it hears.
+		if resp, err := http.Get(srv.URL + "/"); err != nil {
+			t.Fatal(err)
+		} else {
+			_ = resp.Body.Close()
+		}
+		fallback := &fallbackRunner{}
+		r := New(client.New(srv.URL, nil), fallback,
+			Config{PollInterval: 5 * time.Millisecond, ClaimWaitTimeout: 5 * time.Second}, quietTestLogger())
+
+		start := time.Now()
+		result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+		waited := time.Since(start)
+		srv.Close()
+		_ = st.Close()
+		if result.Outcome != sparkwing.Success || result.Err != nil || fallback.calls.Load() != 1 {
+			t.Fatalf("%s: result = %+v, fallback calls = %d", tc.name, result, fallback.calls.Load())
+		}
+		if early := waited < 5*time.Second; early != tc.wantEarly {
+			t.Errorf("%s: fallback after %s, want before the window = %v", tc.name, waited, tc.wantEarly)
+		}
+	}
+}

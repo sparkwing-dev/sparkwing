@@ -250,3 +250,14 @@ type nodePlacementEvent struct {
 	Reason   string   `json:"reason"`
 	Prefers  []string `json:"prefers,omitempty"`
 }
+
+type queueRunnersKey struct{}
+
+// WithQueueRunners carries every legacy claim-mode runner a controller has
+// heard from inside its liveness window into [Store.MarkNodeReady], which may
+// then open a round already due when none of them could claim the node. The
+// controller attaches it only once its registry has listened for a whole
+// window; a context without it leaves every offer round its window.
+func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context {
+	return context.WithValue(ctx, queueRunnersKey{}, live)
+}

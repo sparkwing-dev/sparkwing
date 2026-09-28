@@ -5357,6 +5357,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	var summary ExecutorSchedulingSummary
 	target := 0
+	executorEligible := false
 	var now time.Time
 	if !opened {
 		if err := lockExecutorRegistryTx(ctx, tx, false); err != nil {
@@ -5370,7 +5371,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		if err != nil {
 			return err
 		}
-		target, err = s.highestActiveExecutorPriorityTx(
+		target, executorEligible, err = s.highestActiveExecutorPriorityTx(
 			ctx, tx, summary, now.Add(-ExecutorRegistrationActiveWindow), now,
 		)
 		if err != nil {
@@ -5384,6 +5385,16 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	if err != nil {
 		return err
 	}
+	offerStart := now
+	if !opened && !executorEligible {
+		idle, err := s.offerRoundIdleTx(ctx, tx, runID, summary, class, now)
+		if err != nil {
+			return err
+		}
+		if idle {
+			offerStart = now.Add(-nodeClaimOfferWindow)
+		}
+	}
 	res, err := tx.ExecContext(
 		ctx,
 		`UPDATE nodes SET ready_at = COALESCE(ready_at, ?),
@@ -5392,7 +5403,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 		                  credit_cpu_class = ?,
 		                  offer_priority_target = CASE WHEN offer_started_at IS NULL THEN ? ELSE offer_priority_target END
 		  WHERE run_id = ? AND node_id = ?`,
-		now.UnixNano(), now.UnixNano(), now.UnixNano(), class, target, runID, nodeID,
+		now.UnixNano(), now.UnixNano(), offerStart.UnixNano(), class, target, runID, nodeID,
 	)
 	if err != nil {
 		return err
@@ -5406,7 +5417,7 @@ func (s *Store) markNodeReady(ctx context.Context, runID, nodeID string, policy 
 	}
 	if !opened {
 		if _, err := appendEventTx(ctx, tx, runID, nodeID, "executor_offer_round_opened", map[string]any{
-			"deadline":               now.Add(nodeClaimOfferWindow),
+			"deadline":               offerStart.Add(nodeClaimOfferWindow),
 			"priority_target":        target,
 			"hard_capabilities":      summary.HardCapabilities,
 			"preferred_capabilities": summary.PreferredCapabilities,

@@ -106,6 +106,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 
 	claimedSeen := false
 	waitDeadline := time.Now().Add(r.cfg.ClaimWaitTimeout)
+	// safety: the controller opens a round already due when nothing but this
+	// coordinator could take the node, so the first poll asks before waiting.
+	finalizeAt := time.Now()
 	const unmatchableLogEvery = time.Minute
 	var lastUnmatchableLog time.Time
 	var unmatchableSince time.Time
@@ -154,7 +157,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				}
 				continue
 			}
-			if !claimedSeen && time.Now().After(waitDeadline) {
+			if !claimedSeen && !time.Now().Before(finalizeAt) {
 				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
 				if rerr != nil {
 					r.logger.Warn("warmpool: offer finalization failed",
@@ -162,6 +165,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 					continue
 				}
 				if resolution.Pending {
+					finalizeAt = waitDeadline
 					continue
 				}
 				if !resolution.Revoked {

@@ -885,6 +885,7 @@ func (s *Server) Handler() http.Handler {
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.runnerPresence.listening(time.Now())
 		if !s.Metering() {
 			path := r.URL.Path
 			if strings.HasPrefix(path, "/api/v1/credits") ||

@@ -139,3 +139,53 @@ func TestExecutorReservationClaimRefusesAnotherTeamsNode(t *testing.T) {
 		t.Fatalf("an acme executor claiming its own team's node = %+v, %v", n, err)
 	}
 }
+
+func enrollTeamOfferExecutor(t *testing.T, st *store.Store, tn *store.Tenant, name string, priority int) store.ClaimIdentity {
+	t.Helper()
+	ctx := context.Background()
+	_, tok, err := tn.CreateToken(ctx, "agent:"+name, store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	if err := st.EnrollExecutor(ctx, tok.Prefix, store.Executor{
+		Name: name, Kind: "agent", Location: "local", Principal: tok.Principal, Capabilities: []string{"linux"},
+		BasePriority: priority, PriorityCeiling: priority, MaxConcurrent: 2,
+		Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30},
+	}); err != nil {
+		t.Fatalf("EnrollExecutor(%s): %v", name, err)
+	}
+	if err := st.HeartbeatExecutor(ctx, identity, name,
+		store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30}, 0, time.Now()); err != nil {
+		t.Fatalf("HeartbeatExecutor(%s): %v", name, err)
+	}
+	return identity
+}
+
+// Another team's executor can never offer for this node, so its higher
+// priority must not hold this team's only offer back until the deadline.
+func TestOfferPriorityTargetCountsOnlyTheNodesTeam(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	home, err := st.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acme := tenantFor(t, st, "acme")
+	identity := enrollTeamOfferExecutor(t, st, home, "home-desk", 10)
+	enrollTeamOfferExecutor(t, st, acme, "acme-desk", 90)
+	seedExecutorNode(t, st, "run-home", 1, "linux")
+
+	summary, err := st.SchedulingSummary(ctx, "run-home", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := st.HighestActiveExecutorPriority(ctx, summary, time.Now().Add(-store.ExecutorRegistrationActiveWindow))
+	if err != nil || target != 10 {
+		t.Fatalf("priority target = %d, %v; want 10 from the node's own team", target, err)
+	}
+	result := executorOffer(t, st, identity, "home-desk", "holder", "reservation", "run-home", "work", 0)
+	if result.Pending || result.Node == nil {
+		t.Fatalf("the team's only eligible offer = %+v, want an immediate award", result)
+	}
+}
