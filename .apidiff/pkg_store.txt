@@ -117,6 +117,9 @@ const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
 const ClaimReporting
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 const ClaimResult
+type ClaimResultCommit struct {
+}
+func (c ClaimResultCommit) Token() ClaimToken
 type ClaimRouteClass int
 const ClaimSensitive ClaimRouteClass = iota + 1
 type ClaimToken struct {
@@ -1114,6 +1117,7 @@ type NamedClaimOptions struct {
 }
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
+func NewClaimResultCommit(tok ClaimToken, digest string) ClaimResultCommit
 type Node struct {
 	RunID      string
 	NodeID     string
@@ -2026,6 +2030,7 @@ func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
+func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)

@@ -231,13 +231,13 @@ func TestClaimToken_ResultCommitsOnceAndReplaysOnlyTheSameResult(t *testing.T) {
 	raw := f.mint(t, now)
 	tok := wantClaimAuth(t, f.s, raw, store.ClaimResult, now, nil)
 
-	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, tok, "hash-a", now); err != nil || replayed {
+	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(tok, "hash-a"), now); err != nil || replayed {
 		t.Fatalf("first commit: replayed=%v err=%v", replayed, err)
 	}
-	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, tok, "hash-a", now); err != nil || !replayed {
+	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(tok, "hash-a"), now); err != nil || !replayed {
 		t.Fatalf("live replay: replayed=%v err=%v", replayed, err)
 	}
-	if _, err := store.CommitClaimResultForTest(ctx, f.s, tok, "hash-b", now); !errors.Is(err, store.ErrClaimResultConflict) {
+	if _, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(tok, "hash-b"), now); !errors.Is(err, store.ErrClaimResultConflict) {
 		t.Fatalf("differing result while live: err = %v", err)
 	}
 
@@ -248,13 +248,13 @@ func TestClaimToken_ResultCommitsOnceAndReplaysOnlyTheSameResult(t *testing.T) {
 	if !ended.Ended {
 		t.Fatal("claim not reported ended after finish")
 	}
-	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, ended, "hash-a", now); err != nil || !replayed {
+	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(ended, "hash-a"), now); err != nil || !replayed {
 		t.Fatalf("replay after the claim ended: replayed=%v err=%v", replayed, err)
 	}
-	if _, err := store.CommitClaimResultForTest(ctx, f.s, ended, "hash-b", now); !errors.Is(err, store.ErrClaimResultConflict) {
+	if _, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(ended, "hash-b"), now); !errors.Is(err, store.ErrClaimResultConflict) {
 		t.Fatalf("differing result after the claim ended: err = %v", err)
 	}
-	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, ended, "hash-a", now); err != nil || !replayed {
+	if replayed, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(ended, "hash-a"), now); err != nil || !replayed {
 		t.Fatalf("the refused result overwrote the committed one: replayed=%v err=%v", replayed, err)
 	}
 	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, store.ErrClaimNotLive)
@@ -267,12 +267,74 @@ func TestClaimToken_EndedClaimWithNoResultRefusesEveryResult(t *testing.T) {
 	raw := f.mint(t, now)
 	expireAndReap(t, f)
 	tok := wantClaimAuth(t, f.s, raw, store.ClaimResult, now, nil)
-	if _, err := store.CommitClaimResultForTest(ctx, f.s, tok, "hash-a", now); !errors.Is(err, store.ErrClaimResultConflict) {
+	if _, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(tok, "hash-a"), now); !errors.Is(err, store.ErrClaimResultConflict) {
 		t.Fatalf("result after the claim was lost: err = %v", err)
 	}
 	var digest string
 	if err := f.s.DB().QueryRowContext(ctx, storetest.Rebind(f.s,
 		`SELECT result_digest FROM claim_tokens WHERE run_id = ?`), "run-noresult").Scan(&digest); err != nil || digest != "" {
 		t.Fatalf("a refused result wrote %q (%v)", digest, err)
+	}
+}
+
+// A run no trigger names has no cancel request to read, so its own finished
+// state is what refuses the sensitive class.
+func TestClaimToken_TriggerlessRunRefusesSensitiveOnceItsRunEnds(t *testing.T) {
+	f := claimForToken(t, "run-bare")
+	ctx := context.Background()
+	now := time.Now()
+	raw := f.mint(t, now)
+	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, nil)
+	if err := f.s.FinishRun(ctx, "run-bare", "cancelled", "stopped"); err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
+	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, store.ErrClaimCancelRequested)
+	wantClaimAuth(t, f.s, raw, store.ClaimReporting, now, nil)
+}
+
+func TestClaimToken_SensitiveWriteFenceRechecksInsideTheTransaction(t *testing.T) {
+	f := claimForToken(t, "run-fenced")
+	ctx := context.Background()
+	now := time.Now()
+	raw := f.mint(t, now)
+	tok := wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, nil)
+	if err := store.AssertClaimSensitiveForTest(ctx, f.s, tok, now); err != nil {
+		t.Fatalf("live fence: %v", err)
+	}
+	if err := f.s.CreateTrigger(ctx, store.Trigger{ID: "run-fenced", Pipeline: "demo", Status: "claimed", CreatedAt: now}); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	if err := f.s.RequestCancel(ctx, "run-fenced"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := store.AssertClaimSensitiveForTest(ctx, f.s, tok, now); !errors.Is(err, store.ErrClaimCancelRequested) {
+		t.Fatalf("fence after cancel: err = %v", err)
+	}
+
+	lost := claimForToken(t, "run-fence-lost")
+	lostTok := wantClaimAuth(t, lost.s, lost.mint(t, now), store.ClaimSensitive, now, nil)
+	expireAndReap(t, lost)
+	if err := store.AssertClaimSensitiveForTest(ctx, lost.s, lostTok, now); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("fence after the lease lapsed: err = %v", err)
+	}
+}
+
+func TestClaimToken_ReplayAnswersOnlyTheCommittedDigest(t *testing.T) {
+	f := claimForToken(t, "run-replay")
+	ctx := context.Background()
+	now := time.Now()
+	raw := f.mint(t, now)
+	tok := wantClaimAuth(t, f.s, raw, store.ClaimResult, now, nil)
+	if err := f.s.ReplayClaimResult(ctx, tok, "hash-a"); !errors.Is(err, store.ErrClaimResultConflict) {
+		t.Fatalf("replay before any commit: err = %v", err)
+	}
+	if _, err := store.CommitClaimResultForTest(ctx, f.s, store.NewClaimResultCommit(tok, "hash-a"), now); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := f.s.ReplayClaimResult(ctx, tok, "hash-a"); err != nil {
+		t.Fatalf("identical replay: %v", err)
+	}
+	if err := f.s.ReplayClaimResult(ctx, tok, "hash-b"); !errors.Is(err, store.ErrClaimResultConflict) {
+		t.Fatalf("differing replay: err = %v", err)
 	}
 }

@@ -2,10 +2,13 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +20,9 @@ type claimRouteFixture struct {
 	srv     *Server
 	handler http.Handler
 	raw     string
+	plan    string
 	runner  string
+	results *int
 }
 
 // safety: these routes stand in for real ones; no production route admits a claim token.
@@ -47,18 +52,24 @@ func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 			t.Fatal(err)
 		}
 	}
-	if err := st.MarkNodeReady(ctx, "run-a", "build"); err != nil {
-		t.Fatal(err)
+	mint := func(nodeID string, kind store.ClaimTokenKind) string {
+		t.Helper()
+		if err := st.MarkNodeReady(ctx, "run-a", nodeID); err != nil {
+			t.Fatal(err)
+		}
+		node, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
+			"holder-"+nodeID, time.Minute, nil)
+		if err != nil || node == nil || node.NodeID != nodeID {
+			t.Fatalf("claim %s: %v %v", nodeID, node, err)
+		}
+		raw, err := st.MintClaimToken(ctx, store.DefaultTeam, "run-a", nodeID, node.ClaimGeneration, kind, now.Add(time.Hour), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
 	}
-	node, err := st.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"}, "holder", time.Minute, nil)
-	if err != nil || node == nil {
-		t.Fatalf("claim: %v %v", node, err)
-	}
-	raw, err := st.MintClaimToken(ctx, store.DefaultTeam, "run-a", "build", node.ClaimGeneration,
-		store.ClaimTokenWork, now.Add(time.Hour), now)
-	if err != nil {
-		t.Fatal(err)
-	}
+	raw := mint("build", store.ClaimTokenWork)
+	plan := mint("test", store.ClaimTokenPlan)
 
 	srv := New(st, nil).EnableAuthFromStore()
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,20 +77,36 @@ func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 		p, _ := PrincipalFromContext(r.Context())
 		writeJSON(w, http.StatusOK, map[string]any{"ended": tok.Ended, "kind": p.Kind, "scopes": len(p.Scopes)})
 	})
+	both := []store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}
+	work := []store.ClaimTokenKind{store.ClaimTokenWork}
+	results := new(int)
 	mux := http.NewServeMux()
-	mux.Handle("GET /api/v1/runs/{id}/probe", newClaimTokenRoute(store.ClaimSensitive, echo))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/report", newClaimTokenRoute(store.ClaimReporting, echo))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/result", newClaimTokenRoute(store.ClaimResult, echo))
+	mux.Handle("GET /api/v1/runs/{id}/probe", newClaimSensitiveRoute(work, nil, echo))
+	mux.Handle("GET /api/v1/runs/{id}/source", newClaimSensitiveRoute(both, nil, echo))
+	mux.Handle("GET /api/v1/secrets/{name}", newClaimSensitiveRoute(work, nil, echo))
+	mux.Handle("GET /api/v1/by-query", newClaimSensitiveRoute(work,
+		func(r *http.Request) (string, string) { return r.URL.Query().Get("run"), "" }, echo))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/report", newClaimReportingRoute(both, echo))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/result", srv.newClaimResultRoute(both, nil,
+		func(w http.ResponseWriter, r *http.Request, commit store.ClaimResultCommit) {
+			*results++
+			writeJSON(w, http.StatusOK, map[string]any{"node": commit.Token().NodeID})
+		}))
 	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, echo))
 	return claimRouteFixture{
-		st: st, srv: srv, raw: raw, runner: runner,
+		st: st, srv: srv, raw: raw, plan: plan, runner: runner, results: results,
 		handler: srv.authenticated(mux, srv.teamBoundary(mux, mux)),
 	}
 }
 
 func (f claimRouteFixture) call(t *testing.T, method, path, bearer string) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
+	return f.callBody(t, method, path, bearer, "")
+}
+
+func (f claimRouteFixture) callBody(t *testing.T, method, path, bearer, payload string) (int, map[string]any) {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
@@ -110,7 +137,9 @@ func TestClaimRoute_LiveTokenIsAClaimPrincipalWithNoScopes(t *testing.T) {
 		t.Fatalf("principal = %v", body)
 	}
 	wantStatus(t, f, http.MethodPost, reportA, f.raw, http.StatusOK, "")
-	wantStatus(t, f, http.MethodPost, resultA, f.raw, http.StatusOK, "")
+	if code, body := f.callBody(t, http.MethodPost, resultA, f.raw, "outcome"); code != http.StatusOK || body["node"] != "build" {
+		t.Fatalf("live result: %d %v", code, body)
+	}
 }
 
 func TestClaimRoute_TokenReachesOnlyClaimRoutesOfItsOwnClaim(t *testing.T) {
@@ -141,9 +170,6 @@ func TestClaimRoute_CancelAndFinishRefuseTheVeryNextRequest(t *testing.T) {
 	}
 	wantStatus(t, f, http.MethodGet, probeA, f.raw, http.StatusForbidden, "claim_ended")
 	wantStatus(t, f, http.MethodPost, reportA, f.raw, http.StatusForbidden, "claim_ended")
-	if body := wantStatus(t, f, http.MethodPost, resultA, f.raw, http.StatusOK, ""); body["ended"] != true {
-		t.Fatalf("result route after finish: %v", body)
-	}
 }
 
 // No production route is a claim route, so a claim token is refused on the
@@ -159,5 +185,53 @@ func TestClaimRoute_TheControllerRouterAdmitsNoClaimToken(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s: status %d, want 401", path, rec.Code)
 		}
+	}
+}
+
+func TestClaimRoute_KindMustBeOneTheRouteDeclares(t *testing.T) {
+	f := newClaimRouteFixture(t)
+	wantStatus(t, f, http.MethodGet, probeA, f.plan, http.StatusForbidden, "claim_kind")
+	wantStatus(t, f, http.MethodGet, "/api/v1/runs/run-a/source", f.plan, http.StatusOK, "")
+	wantStatus(t, f, http.MethodGet, probeA, f.raw, http.StatusOK, "")
+}
+
+// A route with no run in its path is closed unless it binds the run itself.
+func TestClaimRoute_AnUnboundRunIsRefused(t *testing.T) {
+	f := newClaimRouteFixture(t)
+	wantStatus(t, f, http.MethodGet, "/api/v1/secrets/token", f.raw, http.StatusForbidden, "claim_mismatch")
+	wantStatus(t, f, http.MethodGet, "/api/v1/by-query", f.raw, http.StatusForbidden, "claim_mismatch")
+	wantStatus(t, f, http.MethodGet, "/api/v1/by-query?run=run-b", f.raw, http.StatusForbidden, "claim_mismatch")
+	wantStatus(t, f, http.MethodGet, "/api/v1/by-query?run=run-a", f.raw, http.StatusOK, "")
+}
+
+// An ended claim is answered from the result it committed and never reaches
+// the handler, which is the only place a result could be written.
+func TestClaimRoute_EndedResultReplaysWithoutTheHandler(t *testing.T) {
+	f := newClaimRouteFixture(t)
+	ctx := context.Background()
+	if code, _ := f.callBody(t, http.MethodPost, resultA, f.raw, "outcome-a"); code != http.StatusOK || *f.results != 1 {
+		t.Fatalf("live result: %d, handler calls %d", code, *f.results)
+	}
+	sum := sha256.Sum256([]byte("outcome-a"))
+	if _, err := f.st.DB().ExecContext(ctx, `UPDATE claim_tokens SET result_digest = ? WHERE node_id = 'build'`,
+		hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range []string{"build", "test"} {
+		if err := f.st.FinishNode(ctx, "run-a", node, "success", "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, body := f.callBody(t, http.MethodPost, resultA, f.raw, "outcome-a"); code != http.StatusOK || body["status"] != "replayed" {
+		t.Fatalf("identical replay: %d %v", code, body)
+	}
+	if code, _ := f.callBody(t, http.MethodPost, resultA, f.raw, "outcome-b"); code != http.StatusConflict {
+		t.Fatalf("differing replay: %d", code)
+	}
+	if code, _ := f.callBody(t, http.MethodPost, "/api/v1/runs/run-a/nodes/test/result", f.plan, "outcome-a"); code != http.StatusConflict {
+		t.Fatalf("ended claim with no committed result: %d", code)
+	}
+	if *f.results != 1 {
+		t.Fatalf("the handler ran %d times; an ended claim must never reach it", *f.results)
 	}
 }

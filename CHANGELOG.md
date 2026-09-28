@@ -26,7 +26,10 @@ unlock.
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most
   6 hours, and is checked against the claim row on every request, so a lost,
-  finished, superseded or cancelled claim is refused on its next request. No
+  finished, superseded or cancelled claim is refused on its next request. A
+  route admits only the token kinds (`plan`, `work`) it declares and only the
+  run it binds; a claim that has ended gets its committed result replayed
+  (200 when identical, 409 otherwise) and writes nothing. No
   controller route accepts these tokens yet, and no path issues them; existing
   clients see no change. Controllers older than schema 76 keep working against
   a migrated database.

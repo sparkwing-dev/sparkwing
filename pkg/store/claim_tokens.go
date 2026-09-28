@@ -179,22 +179,21 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 		return ClaimToken{}, ErrClaimTokenInvalid
 	}
 	var (
-		tok                       ClaimToken
-		kind                      string
-		team                      string
-		expires                   int64
-		status                    sql.NullString
-		claimedBy                 sql.NullString
-		lease, nodeGen, cancelled sql.NullInt64
+		tok            ClaimToken
+		kind           string
+		team           string
+		expires        int64
+		status         sql.NullString
+		claimedBy      sql.NullString
+		lease, nodeGen sql.NullInt64
 	)
 	err := s.queryRow(ctx, `SELECT c.prefix, c.team, c.run_id, c.node_id, c.claim_generation, c.kind, c.expires_at,
-       n.status, n.claimed_by, n.lease_expires_at, n.claim_generation, t.cancel_requested_at
+       n.status, n.claimed_by, n.lease_expires_at, n.claim_generation
   FROM claim_tokens c
   LEFT JOIN nodes n ON n.team = c.team AND n.run_id = c.run_id AND n.node_id = c.node_id
-  LEFT JOIN triggers t ON t.team = c.team AND t.id = c.run_id
  WHERE c.digest = ?`, claimTokenDigest(raw)).Scan(
 		&tok.Prefix, &team, &tok.RunID, &tok.NodeID, &tok.Generation, &kind, &expires,
-		&status, &claimedBy, &lease, &nodeGen, &cancelled)
+		&status, &claimedBy, &lease, &nodeGen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimToken{}, ErrClaimTokenInvalid
 	}
@@ -215,8 +214,14 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 		if !live {
 			return ClaimToken{}, ErrClaimNotLive
 		}
-		if class == ClaimSensitive && cancelled.Valid {
-			return ClaimToken{}, ErrClaimCancelRequested
+		if class == ClaimSensitive {
+			cancelled, err := claimRunCancelled(ctx, s.queryRow, tok.Team, tok.RunID)
+			if err != nil {
+				return ClaimToken{}, err
+			}
+			if cancelled {
+				return ClaimToken{}, ErrClaimCancelRequested
+			}
 		}
 		return tok, nil
 	default:
@@ -224,10 +229,89 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 	}
 }
 
+// safety: the run's own row decides, and a run with no row reads as cancelled,
+// so a run no trigger names can never pass as "not cancelled" through a NULL.
+// Schema 77 moves the request onto runs and nodes; this is the one read to switch.
+func claimRunCancelled(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row,
+	team Team, runID string,
+) (bool, error) {
+	var status string
+	var requested sql.NullInt64
+	err := queryRow(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
+  LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
+ WHERE r.team = ? AND r.id = ?`, string(team), runID).Scan(&status, &requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return requested.Valid || (status != runStatusPending && status != runStatusRunning), nil
+}
+
+// safety: authorization reads the claim before the handler runs, so a store
+// function writing on a sensitive route's behalf calls this in its own
+// transaction; it locks the node row and refuses a claim lost or cancelled since.
+func assertClaimSensitiveTx(ctx context.Context, tx *storeTx, tok ClaimToken, now time.Time) error {
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return ErrClaimCancelRequested
+	}
+	live, err := claimLiveTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, tok.Generation, now)
+	if err != nil {
+		return err
+	}
+	if !live {
+		return ErrClaimNotLive
+	}
+	return nil
+}
+
+// ClaimResultCommit is the result a live claim is about to commit, identified
+// by the digest of the request that carries it. A store function that writes a
+// claim's result takes one and commits it in the same transaction as its
+// writes, so no result lands outside the claim's one-commit fence.
+type ClaimResultCommit struct {
+	token  ClaimToken
+	digest string
+}
+
+// NewClaimResultCommit binds digest to tok's claim.
+func NewClaimResultCommit(tok ClaimToken, digest string) ClaimResultCommit {
+	return ClaimResultCommit{token: tok, digest: digest}
+}
+
+// Token returns the claim the result belongs to.
+func (c ClaimResultCommit) Token() ClaimToken { return c.token }
+
+// ReplayClaimResult answers a result request whose claim has ended, and
+// writes nothing: nil when the claim committed exactly digest, and
+// [ErrClaimResultConflict] for any other digest or when it committed none.
+func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error {
+	var committed string
+	err := s.queryRow(ctx, `SELECT result_digest FROM claim_tokens
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ?`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&committed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrClaimTokenInvalid
+	}
+	if err != nil {
+		return err
+	}
+	if committed == "" || committed != digest {
+		return ErrClaimResultConflict
+	}
+	return nil
+}
+
 // safety: a claim commits one result. The caller writes it only on (false, nil);
 // the same digest again replays (true, nil) and writes nothing, and a differing
 // digest, or any after the claim ended uncommitted, is ErrClaimResultConflict.
-func commitClaimResultTx(ctx context.Context, tx *storeTx, tok ClaimToken, digest string, now time.Time) (bool, error) {
+func (c ClaimResultCommit) commitTx(ctx context.Context, tx *storeTx, now time.Time) (bool, error) {
+	tok, digest := c.token, c.digest
 	if digest == "" {
 		return false, errors.New("claim result digest is empty")
 	}

@@ -1,9 +1,14 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,19 +19,61 @@ import (
 // safety: a claim principal carries no scopes, so no scope-gated route admits it.
 const principalKindClaim = "claim"
 
+// safety: a token whose kind is not in kinds is refused, so an empty list admits none.
+type claimRouteSpec struct {
+	class store.ClaimRouteClass
+	kinds []store.ClaimTokenKind
+	// safety: nil reads the path's {id} and {nodeID}, and an empty run is refused,
+	// so a route with no run in its path is closed until it binds one itself.
+	bind func(*http.Request) (runID, nodeID string)
+}
+
 // safety: a claim token reaching a route not wrapped in this is refused as an
 // unknown bearer, so every route stays closed to claim tokens until it opts in.
 type claimTokenRoute struct {
-	class store.ClaimRouteClass
-	next  http.Handler
+	spec   claimRouteSpec
+	next   http.Handler
+	result claimResultHandler
+	store  *store.Store
 }
 
-func newClaimTokenRoute(class store.ClaimRouteClass, next http.Handler) *claimTokenRoute {
-	return &claimTokenRoute{class: class, next: next}
+// safety: the handler writes only through a store function that takes commit and
+// commits the result in the same transaction; an ended claim never reaches it.
+type claimResultHandler func(w http.ResponseWriter, r *http.Request, commit store.ClaimResultCommit)
+
+const maxClaimResultBytes = 16 << 20
+
+// safety: authorization precedes the handler, so a sensitive route writes only
+// through store functions that re-check the claim and its cancel in their own
+// transaction (assertClaimSensitiveTx).
+func newClaimSensitiveRoute(kinds []store.ClaimTokenKind, bind func(*http.Request) (string, string),
+	next http.Handler,
+) *claimTokenRoute {
+	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimSensitive, kinds: kinds, bind: bind}, next: next}
 }
 
-// A path's run, and for reporting and result routes its node, must be the
-// token's own; the mux fills the path only once it routes here.
+func newClaimReportingRoute(kinds []store.ClaimTokenKind, next http.Handler) *claimTokenRoute {
+	return &claimTokenRoute{spec: claimRouteSpec{class: store.ClaimReporting, kinds: kinds}, next: next}
+}
+
+// safety: the body's digest is the result's identity, so an ended claim is
+// answered from the digest it committed, 200 when identical and 409 otherwise,
+// without calling h.
+func (s *Server) newClaimResultRoute(kinds []store.ClaimTokenKind, bind func(*http.Request) (string, string),
+	h claimResultHandler,
+) *claimTokenRoute {
+	return &claimTokenRoute{
+		spec:   claimRouteSpec{class: store.ClaimResult, kinds: kinds, bind: bind},
+		result: h, store: s.store,
+	}
+}
+
+func pathClaimBinding(r *http.Request) (string, string) {
+	return r.PathValue("id"), r.PathValue("nodeID")
+}
+
+// safety: the mux fills the path only once it routes here, so the binding is
+// checked here rather than where the token is authenticated.
 func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tok, ok := claimTokenFromContext(r.Context())
 	if !ok {
@@ -36,16 +83,52 @@ func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-	ownNode := c.class == store.ClaimReporting || c.class == store.ClaimResult
-	if (runID != "" && runID != tok.RunID) || (ownNode && nodeID != tok.NodeID) {
+	if !slices.Contains(c.spec.kinds, tok.Kind) {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code:    "claim_kind",
+			Message: "this route does not answer a " + string(tok.Kind) + " claim token",
+		})
+		return
+	}
+	bind := c.spec.bind
+	if bind == nil {
+		bind = pathClaimBinding
+	}
+	runID, nodeID := bind(r)
+	ownNode := c.spec.class == store.ClaimReporting || c.spec.class == store.ClaimResult
+	if runID == "" || runID != tok.RunID || (ownNode && (nodeID == "" || nodeID != tok.NodeID)) {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:    "claim_mismatch",
 			Message: "this claim token is bound to another run or node",
 		})
 		return
 	}
-	c.next.ServeHTTP(w, r)
+	if c.spec.class != store.ClaimResult {
+		c.next.ServeHTTP(w, r)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxClaimResultBytes))
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, err)
+		return
+	}
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	if !tok.Ended {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		c.result(w, r, store.NewClaimResultCommit(tok, digest))
+		return
+	}
+	switch err := c.store.ReplayClaimResult(r.Context(), tok, digest); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "replayed"})
+	case errors.Is(err, store.ErrClaimResultConflict):
+		writeError(w, http.StatusConflict, err)
+	case errors.Is(err, store.ErrClaimTokenInvalid):
+		writeAuthError(w, http.StatusUnauthorized, authErrorBody{Code: "unauthenticated", Message: err.Error()})
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
 }
 
 type claimTokenCtxKey struct{}
@@ -71,7 +154,7 @@ func claimRouteFor(mux *http.ServeMux, r *http.Request) (string, *claimTokenRout
 // safety: this never consults the token cache; every request reads the claim
 // row, which is what refuses a lost or cancelled claim at once.
 func (s *Server) serveClaim(w http.ResponseWriter, r *http.Request, raw string, route *claimTokenRoute, next http.Handler) {
-	tok, err := s.store.AuthorizeClaimToken(r.Context(), raw, route.class, time.Now())
+	tok, err := s.store.AuthorizeClaimToken(r.Context(), raw, route.spec.class, time.Now())
 	if err != nil {
 		writeClaimRefusal(w, r, s, err)
 		return
