@@ -243,6 +243,7 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
+	enterGitCheckout(t, triggerTestOrigin)
 
 	out := captureStdout(t, func() {
 		if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach", "--version", "v1.2.3"}); err != nil {
@@ -445,6 +446,7 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
+	enterGitCheckout(t, triggerTestOrigin)
 
 	_ = captureStdout(t, func() {
 		if err := runPipelineTrigger([]string{"release", "--profile", "prod"}); err != nil {
@@ -486,6 +488,7 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 			srv := httptest.NewServer(spy.handler())
 			defer srv.Close()
 			writeTriggerProfiles(t, srv.URL)
+			enterGitCheckout(t, triggerTestOrigin)
 
 			var err error
 			stderr := captureStderr(t, func() {
@@ -524,6 +527,7 @@ func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfilesWithLogs(t, srv.URL)
+	enterGitCheckout(t, triggerTestOrigin)
 
 	var err error
 	stderr := captureStderr(t, func() {
@@ -547,6 +551,7 @@ func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
+	enterGitCheckout(t, triggerTestOrigin)
 
 	var err error
 	var stdout string
@@ -575,6 +580,7 @@ func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
+	enterGitCheckout(t, triggerTestOrigin)
 
 	var err error
 	_ = captureStderr(t, func() {
@@ -642,7 +648,15 @@ func captureStderr(t *testing.T, fn func()) string {
 	return string(<-done)
 }
 
+const triggerTestOrigin = "https://github.com/acme/sample-app.git"
+
 func withGitCheckout(t *testing.T, origin string, fn func()) {
+	t.Helper()
+	enterGitCheckout(t, origin)
+	fn()
+}
+
+func enterGitCheckout(t *testing.T, origin string) {
 	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -678,5 +692,4 @@ func withGitCheckout(t *testing.T, origin string, fn func()) {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
-	fn()
 }
