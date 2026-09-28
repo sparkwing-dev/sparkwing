@@ -345,7 +345,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		l.memberOf[m] = ls.ID
 	}
 	for child, parent := range ls.Parents {
-		if child == ls.RequestID || parent == child {
+		if child == ls.RequestID || parent == "" || parent == child {
 			return fmt.Errorf("%w: invalid parent for member %q", ErrInvalidSnapshot, child)
 		}
 		if _, ok := le.members[child]; !ok {

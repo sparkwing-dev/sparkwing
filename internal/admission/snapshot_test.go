@@ -204,6 +204,7 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 		{"lease without members", func(s *Snapshot) { s.Leases[0].Members = nil }},
 		{"member appears twice", func(s *Snapshot) { s.Leases[1].Members = append(s.Leases[1].Members, s.Leases[0].Members[0]) }},
 		{"parent outside lease", func(s *Snapshot) { s.Leases[0].Parents["child"] = "victim" }},
+		{"empty parent", func(s *Snapshot) { s.Leases[0].Parents["child"] = "" }},
 		{"parent cycle", func(s *Snapshot) { s.Leases[0].Parents["child"] = "child" }},
 		{"lease seq above counter", func(s *Snapshot) { s.Leases[0].Seq = s.LeaseSeq + 1 }},
 		{"lease seq reused", func(s *Snapshot) { s.Leases[1].Seq = s.Leases[0].Seq }},

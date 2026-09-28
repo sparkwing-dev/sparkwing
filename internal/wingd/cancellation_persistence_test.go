@@ -12,8 +12,16 @@ import (
 
 func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ledger.Submit(admission.Request{ID: "first", Cores: 1}); err != nil {
+		t.Fatal(err)
+	}
 	d := &Daemon{
 		layout:        layout{state: path},
+		ledger:        ledger,
 		cancelledRuns: map[string]struct{}{},
 	}
 	entered := make(chan struct{})
@@ -27,10 +35,13 @@ func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testin
 		return writeStateWithCancellations(path, snap, events, cancelled)
 	}
 	oldDone := make(chan error, 1)
-	go func() { oldDone <- d.persistState(admission.Snapshot{EventSeq: 1}) }()
+	go func() { oldDone <- d.persistState() }()
 	<-entered
+	if _, _, err := ledger.Submit(admission.Request{ID: "second", Cores: 1}); err != nil {
+		t.Fatal(err)
+	}
 	newDone := make(chan error, 1)
-	go func() { newDone <- d.persistState(admission.Snapshot{EventSeq: 2}) }()
+	go func() { newDone <- d.persistState() }()
 	close(release)
 	if err := <-oldDone; err != nil {
 		t.Fatal(err)
@@ -44,6 +55,45 @@ func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testin
 	}
 	if snap.EventSeq != 2 {
 		t.Fatalf("persisted event sequence = %d, want 2", snap.EventSeq)
+	}
+}
+
+func TestPersistStateKeepsNewerChildLineageAfterDelayedCall(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err := ledger.Submit(admission.Request{ID: "parent", Cores: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Attach(dec.Lease.ID, "first", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{layout: layout{state: path}, ledger: ledger}
+	resumeOlder := make(chan struct{})
+	olderDone := make(chan error, 1)
+	go func() {
+		<-resumeOlder
+		olderDone <- d.persistState()
+	}()
+	if err := ledger.Attach(dec.Lease.ID, "second", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.persistState(); err != nil {
+		t.Fatal(err)
+	}
+	close(resumeOlder)
+	if err := <-olderDone; err != nil {
+		t.Fatal(err)
+	}
+	snap, _, _, err := readStateWithCancellations(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Leases) != 1 || len(snap.Leases[0].Members) != 3 || snap.Leases[0].Parents["second"] != "parent" {
+		t.Fatalf("persisted lineage = %+v, want both children", snap.Leases)
 	}
 }
 

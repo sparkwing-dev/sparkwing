@@ -52,7 +52,6 @@ type Daemon struct {
 
 	mu                  sync.Mutex
 	persistMu           sync.Mutex
-	persistedEventSeq   uint64
 	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string) error
 	ledger              *admission.Ledger
 	conns               map[*conn]struct{}
@@ -274,12 +273,11 @@ func (d *Daemon) finalShutdown() {
 	for c := range d.conns {
 		toClose = append(toClose, c)
 	}
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	for _, c := range toClose {
 		c.close()
 	}
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
 	d.awaitAPI(APIDrainWindow)
@@ -460,13 +458,12 @@ func (d *Daemon) expireGrace() {
 		released++
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
 	if released > 0 {
 		d.cfg.logf("grace expired: released %d unreclaimed lease(s)", released)
 	}
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func (d *Daemon) now() time.Time { return d.cfg.now() }
@@ -843,7 +840,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			d.touchLocked()
 			d.mu.Unlock()
 			existing.close()
-			d.flush(deliveries, snap)
+			d.flush(deliveries)
 			return
 		case roleHolder:
 			if len(existing.members) != 1 {
@@ -930,10 +927,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			events = append(events, d.ledger.CancelWaiter(req.RunID)...)
 			delete(d.byRun, req.RunID)
 			deliveries := d.routeLocked(events)
-			snap := d.ledger.Snapshot()
 			d.touchLocked()
 			d.mu.Unlock()
-			d.flush(deliveries, snap)
+			d.flush(deliveries)
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
 			return
 		}
@@ -949,10 +945,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
@@ -1190,7 +1185,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	_ = c.send(&wingwire.Grant{
@@ -1282,10 +1277,9 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		d.byRun[m] = c
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
@@ -1337,19 +1331,17 @@ func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 	}
 	events := d.releaseConnLocked(c)
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.mu.Lock()
 	d.draining = true
 	remaining := len(d.leaseRun)
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.closeAPIListener()
@@ -1445,10 +1437,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		}
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	persistErr := d.persistState(snap)
+	persistErr := d.persistState()
 	if persistErr != nil {
 		d.cfg.logf("cancel: persist tombstone: %v", persistErr)
 	}
@@ -1492,10 +1483,7 @@ func (d *Daemon) handleQueueState(c *conn) {
 
 func (d *Daemon) handleStatsReset(c *conn) {
 	d.events.reset()
-	d.mu.Lock()
-	snap := d.ledger.Snapshot()
-	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("stats reset: admission-outcome window cleared")
@@ -1554,7 +1542,6 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			events = d.cancelWaiterLocked(c.runID)
 		}
 		deliveries := d.routeLocked(events)
-		snap := d.ledger.Snapshot()
 		d.touchConnLocked(c)
 		d.mu.Unlock()
 		d.logDisconnect(c, role, runID)
@@ -1562,7 +1549,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
 			d.finalizeAsync(orphan)
 		}
-		d.flush(deliveries, snap)
+		d.flush(deliveries)
 	})
 }
 
@@ -1597,8 +1584,8 @@ func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 	return events
 }
 
-func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
-	persistErr := d.persistState(snap)
+func (d *Daemon) flush(deliveries []delivery) {
+	persistErr := d.persistState()
 	if persistErr != nil {
 		d.cfg.logf("persist: %v", persistErr)
 	}
@@ -1623,13 +1610,11 @@ func (d *Daemon) recordCancelledRunLocked(runID string) {
 	delete(d.cancelledRuns, oldest)
 }
 
-func (d *Daemon) persistState(snap admission.Snapshot) error {
+func (d *Daemon) persistState() error {
 	d.persistMu.Lock()
 	defer d.persistMu.Unlock()
-	if snap.EventSeq < d.persistedEventSeq {
-		return nil
-	}
 	d.mu.Lock()
+	snap := d.ledger.Snapshot()
 	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
 	d.mu.Unlock()
 	write := d.persistWrite
@@ -1640,7 +1625,6 @@ func (d *Daemon) persistState(snap admission.Snapshot) error {
 	} else if err := writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
 		return err
 	}
-	d.persistedEventSeq = snap.EventSeq
 	return nil
 }
 
@@ -1715,7 +1699,7 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 	d.touchLocked()
 	d.mu.Unlock()
 
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 	d.cfg.logf("priority: run %s re-ranked %d -> %d across %d participant(s)", req.RunID, previous, priority, len(targets))
 	d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{
 		Found:        true,
