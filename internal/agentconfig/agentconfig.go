@@ -66,6 +66,9 @@ func Load(path string) (*Config, error) {
 	// used to select, so the removed keys are answered before the ordinary parse.
 	section, err := userconfig.Node(path, userconfig.Agent)
 	if err != nil {
+		if cfg, legacy, lerr := loadLegacyFile(path); legacy {
+			return cfg, lerr
+		}
 		return nil, err
 	}
 	if carriesEnrolledKey(section, 0) {

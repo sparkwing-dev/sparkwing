@@ -85,8 +85,9 @@ keys; fix any the move reports.
 `sparkwing cluster runners add|remove --config PATH` now name a `config.yaml`
 and use its `agent` section. A service unit written by an older
 `runners add` still passes `--config .../agent.yaml`; until the automatic copy
-is removed, sparkwing reads `config.yaml` in its place and says so. Edit the
-unit's `--config` to the `config.yaml` path before then. `install/service-install.sh`
+is removed, sparkwing reads `config.yaml` in its place and says so, and a
+`--config` naming an agent file anywhere else loads that file whole as the
+`agent` section. Edit the unit's `--config` to a `config.yaml` path before then. `install/service-install.sh`
 adds the `agent` section to `config.yaml`, keeping the file's other sections,
 and refuses when an `agent` section already exists.
 

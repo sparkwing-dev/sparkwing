@@ -263,12 +263,10 @@ func TestEveryControllerRouteIsClassified(t *testing.T) {
 		if got, want := streamingRoute(req), kind == "stream"; got != want {
 			t.Errorf("%s is classified %s and streamingRoute reports %v; the runtime classifier and the lists disagree", route, kind, got)
 		}
-		if got, want := localRoute(req) != "", kind == "local"; got != want {
+		if got, want := localRoute(req), kind == "local"; got != want {
 			t.Errorf("%s is classified %s and localRoute reports %v", route, kind, got)
 		}
 	}
-	// safety: the daemon answers the secrets import itself, so no controller registers it.
-	delete(classified, APISecretsImportRoute)
 	for route, kind := range classified {
 		t.Errorf("the daemon's API classifies %s as %s and the controller registers no such route", route, kind)
 	}

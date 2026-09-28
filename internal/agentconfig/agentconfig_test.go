@@ -222,3 +222,24 @@ func TestLoad_ReadsAllowRepos(t *testing.T) {
 		t.Fatalf("load = %+v, %v", cfg, err)
 	}
 }
+
+// A runner service installed before config.yaml passes its own agent.yaml to
+// --config, and it must keep loading after an upgrade restarts it.
+func TestConfig_LoadsAPreConfigYAMLAgentFileAtACustomPath(t *testing.T) {
+	path := writeRawConfig(t, "controller: http://localhost:4344\ntoken: tok-abc\nmax_concurrent: 2\n")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load legacy agent file: %v", err)
+	}
+	if cfg.Controller != "http://localhost:4344" || cfg.Token != "tok-abc" || cfg.MaxConcurrent != 2 {
+		t.Fatalf("legacy agent file loaded as %+v", cfg)
+	}
+	if _, err := Load(writeRawConfig(t, "controller: http://localhost:4344\nadmin: true\n")); err == nil ||
+		!strings.Contains(err.Error(), "field admin not found") {
+		t.Fatalf("legacy agent file with an unknown key = %v, want it refused", err)
+	}
+	if _, err := Load(writeRawConfig(t, "controller: http://localhost:4344\nname: old\n")); err == nil ||
+		!strings.Contains(err.Error(), EnrolledModeRemoved) {
+		t.Fatalf("legacy enrolled-mode agent file = %v, want the removal message", err)
+	}
+}
