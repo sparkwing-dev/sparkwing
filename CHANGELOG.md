@@ -26,7 +26,9 @@ unlock.
   its parent and siblings keep running. Cancelling the lease root still
   cancels every attached run, including after daemon restart. Nested inline
   runs attach to their immediate parent; children launched after a parent
-  exits attach under its nearest live ancestor.
+  exits attach under its nearest live ancestor while a live descendant retains
+  lineage. Otherwise they attach under the lease root, and the daemon logs the
+  requested and resolved parents.
 
 ## [v0.63.0] - 2026-09-27
 ### Changed

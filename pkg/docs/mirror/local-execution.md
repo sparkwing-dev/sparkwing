@@ -296,8 +296,10 @@ the lease's root run cancels every attached member. A resubmission is a
 different run with a different id.
 
 If a parent exits while another member keeps the lease alive, a later child
-attaches under the nearest live ancestor. This also works for clients that
-send only the inherited lease token.
+attaches under the nearest live ancestor while a live descendant retains its
+lineage. Otherwise it attaches under the lease root and the daemon logs the
+requested and resolved parents. Clients that send only the inherited lease
+token also attach under the root.
 
 #### The consumer process
 

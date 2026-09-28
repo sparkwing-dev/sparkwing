@@ -1076,6 +1076,59 @@ func TestChildAttachAfterParentExit(t *testing.T) {
 	}
 }
 
+func TestChildAttachLogsResolvedUnknownParent(t *testing.T) {
+	home := shortHome(t)
+	log := &logCapture{}
+	startDaemon(t, wingd.Config{Home: home, Logf: log.logf})
+	root := ensure(t, home, "")
+	rootLease := mustAcquire(t, root, coreReq("root", 1))
+	child := ensure(t, home, "")
+	mustAcquire(t, child, wingwire.AdmissionRequest{
+		RunID: "child", ParentRunID: "unknown-parent", ParentLeaseToken: rootLease.Token,
+	})
+	if !log.contains(`child attach: run=child requested_parent="unknown-parent" resolved_parent="root"`) {
+		t.Fatalf("missing parent resolution log:\n%s", log.joined())
+	}
+}
+
+func TestChildAttachRejectsDepartedLineageUnderCancelledAncestor(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
+	})
+	root := ensure(t, home, "")
+	rootLease := mustAcquire(t, root, coreReq("root", 1))
+	var departedLease *client.Lease
+	for _, member := range []struct{ id, parent string }{
+		{"parent", "root"}, {"departed", "parent"}, {"grandchild", "departed"},
+	} {
+		child := ensure(t, home, "")
+		lease := mustAcquire(t, child, wingwire.AdmissionRequest{
+			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
+		})
+		if member.id == "departed" {
+			departedLease = lease
+		}
+	}
+	if err := departedLease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	control := ensure(t, home, "")
+	if found, err := control.CancelLease(context.Background(), "parent"); err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	late := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := late.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "late", ParentRunID: "departed", ParentLeaseToken: rootLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("late child attached through a cancelled ancestor")
+	}
+}
+
 func TestChildAttachChecksOnlyItsAncestorsWhileSiblingCancellationIsPending(t *testing.T) {
 	home := shortHome(t)
 	entered := make(chan struct{})

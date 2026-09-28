@@ -3,6 +3,7 @@ package admission
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -67,7 +68,7 @@ func TestSnapshotRoundTrip_BusyLedger(t *testing.T) {
 	restoreRoundTrip(t, l)
 }
 
-func TestSnapshotPreservesChildLineageAndReleaseReparents(t *testing.T) {
+func TestSnapshotPreservesChildLineageUntilDescendantsExit(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	lease := mustGrant(t, l, Request{ID: "parent", Cores: 1})
 	for _, member := range []struct{ id, parent string }{
@@ -84,15 +85,44 @@ func TestSnapshotPreservesChildLineageAndReleaseReparents(t *testing.T) {
 	if _, err := restored.Release(lease.ID, "child"); err != nil {
 		t.Fatalf("Release child: %v", err)
 	}
-	if got := restoreRoundTrip(t, restored).Snapshot().Leases[0].Parents["grandchild"]; got != "parent" {
-		t.Fatalf("grandchild parent after release = %q, want parent", got)
+	if got := restoreRoundTrip(t, restored).Snapshot().Leases[0].Parents["grandchild"]; got != "child" {
+		t.Fatalf("grandchild lineage after release = %q, want child", got)
+	}
+	if got, err := restored.ResolveParent(lease.ID, "child"); err != nil || got != "parent" {
+		t.Fatalf("resolved parent after release = (%q, %v), want parent", got, err)
+	}
+	if _, err := restored.Release(lease.ID, "grandchild"); err != nil {
+		t.Fatalf("Release grandchild: %v", err)
+	}
+	if parents := restored.Snapshot().Leases[0].Parents; len(parents) != 1 || parents["sibling"] != "parent" {
+		t.Fatalf("lineage after last descendant exited = %v, want sibling only", parents)
+	}
+}
+
+func TestReleaseKeepsSequentialChildLineageBounded(t *testing.T) {
+	l := testLedger(t, 4, 0)
+	lease := mustGrant(t, l, Request{ID: "root", Cores: 1})
+	for i := range 2000 {
+		child := fmt.Sprintf("child-%d", i)
+		if err := l.Attach(lease.ID, child, "root"); err != nil {
+			t.Fatalf("Attach %s: %v", child, err)
+		}
+		if _, err := l.Release(lease.ID, child); err != nil {
+			t.Fatalf("Release %s: %v", child, err)
+		}
+		if parents := l.Snapshot().Leases[0].Parents; len(parents) != 0 {
+			t.Fatalf("lineage after %d children = %d entries, want none", i+1, len(parents))
+		}
 	}
 }
 
 func TestAttachAfterParentReleaseUsesLiveAncestor(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	lease := mustGrant(t, l, Request{ID: "root", Cores: 1})
-	if err := l.Attach(lease.ID, "parent", "root"); err != nil {
+	if err := l.Attach(lease.ID, "middle", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Attach(lease.ID, "parent", "middle"); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.Attach(lease.ID, "survivor", "parent"); err != nil {
@@ -102,16 +132,16 @@ func TestAttachAfterParentReleaseUsesLiveAncestor(t *testing.T) {
 		t.Fatal(err)
 	}
 	l = restoreRoundTrip(t, l)
-	for _, member := range []struct{ id, parent string }{
-		{"new-client", "parent"},
-		{"old-client", ""},
-		{"unknown-parent", "departed-before-lineage"},
+	for _, member := range []struct{ id, parent, want string }{
+		{"new-client", "parent", "middle"},
+		{"old-client", "", "root"},
+		{"unknown-parent", "departed-before-lineage", "root"},
 	} {
 		if err := l.Attach(lease.ID, member.id, member.parent); err != nil {
 			t.Fatalf("Attach %s: %v", member.id, err)
 		}
-		if got := l.Snapshot().Leases[0].Parents[member.id]; got != "root" {
-			t.Fatalf("%s parent = %q, want root", member.id, got)
+		if got := l.Snapshot().Leases[0].Parents[member.id]; got != member.want {
+			t.Fatalf("%s parent = %q, want %q", member.id, got, member.want)
 		}
 	}
 	other := mustGrant(t, l, Request{ID: "other", Cores: 1})
@@ -124,8 +154,11 @@ func TestAttachAfterParentReleaseUsesLiveAncestor(t *testing.T) {
 	if _, err := l.Release(other.ID, "other-child"); err != nil {
 		t.Fatal(err)
 	}
-	if err := l.Attach(lease.ID, "cross-departed", "other-child"); !errors.Is(err, ErrUnknownMember) {
-		t.Fatalf("cross-lease departed parent = %v, want unknown member", err)
+	if err := l.Attach(lease.ID, "cross-departed", "other-child"); err != nil {
+		t.Fatalf("attach with pruned parent: %v", err)
+	}
+	if got := l.Snapshot().Leases[0].Parents["cross-departed"]; got != "root" {
+		t.Fatalf("pruned parent resolved to %q, want root", got)
 	}
 }
 

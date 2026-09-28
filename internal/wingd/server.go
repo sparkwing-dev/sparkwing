@@ -1195,6 +1195,9 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
+	if resolvedParent != req.ParentRunID {
+		d.cfg.logf("child attach: run=%s requested_parent=%q resolved_parent=%q", req.RunID, req.ParentRunID, resolvedParent)
+	}
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
@@ -1376,9 +1379,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	}
 	waiter := target.role == roleWaiter
 	affected := []string{req.RunID}
+	var parents map[string]string
 	if !waiter {
 		snap := d.ledger.Snapshot()
-		parents := leaseParents(snap)
+		parents = leaseParents(snap)
 		affected = nil
 		for _, lease := range snap.Leases {
 			for _, member := range lease.Members {
@@ -1391,8 +1395,25 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			}
 		}
 	}
-	const reason = "cancelled via sparkwing runs cancel"
+	affectedSet := make(map[string]struct{}, len(affected))
 	for _, runID := range affected {
+		affectedSet[runID] = struct{}{}
+	}
+	var blockedIDs []string
+	for descendant := range parents {
+		if _, live := affectedSet[descendant]; live {
+			continue
+		}
+		for ancestor, hops := descendant, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
+			if ancestor == req.RunID {
+				blockedIDs = append(blockedIDs, descendant)
+				break
+			}
+		}
+	}
+	blockedIDs = append(blockedIDs, affected...)
+	const reason = "cancelled via sparkwing runs cancel"
+	for _, runID := range blockedIDs {
 		d.cancelPending[runID] = struct{}{}
 	}
 	d.mu.Unlock()
@@ -1405,8 +1426,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
 			var orphaned []string
 			d.mu.Lock()
-			for _, runID := range affected {
+			for _, runID := range blockedIDs {
 				delete(d.cancelPending, runID)
+			}
+			for _, runID := range affected {
 				if _, disconnected := d.disconnectedPending[runID]; disconnected {
 					delete(d.disconnectedPending, runID)
 					orphaned = append(orphaned, runID)
@@ -1423,10 +1446,12 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 
 	d.mu.Lock()
 	current := make(map[*conn]string)
-	for _, runID := range affected {
+	for _, runID := range blockedIDs {
 		delete(d.cancelPending, runID)
-		delete(d.disconnectedPending, runID)
 		d.recordCancelledRunLocked(runID)
+	}
+	for _, runID := range affected {
+		delete(d.disconnectedPending, runID)
 		if owner := d.byRun[runID]; owner != nil {
 			if _, seen := current[owner]; !seen {
 				current[owner] = runID

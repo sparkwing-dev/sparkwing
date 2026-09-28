@@ -405,17 +405,26 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	}
 	delete(le.members, memberID)
 	delete(l.memberOf, memberID)
-	parentID := le.parents[memberID]
-	if parentID == "" {
-		parentID = le.ownerID
-		if parentID == "" {
-			parentID = le.requestID
+	for departed := memberID; departed != ""; {
+		referenced := false
+		for _, parent := range le.parents {
+			if parent == departed {
+				referenced = true
+				break
+			}
 		}
-	}
-	for childID, parent := range le.parents {
-		if parent == memberID {
-			le.parents[childID] = parentID
+		if referenced {
+			break
 		}
+		parent, known := le.parents[departed]
+		if !known {
+			break
+		}
+		delete(le.parents, departed)
+		if _, live := le.members[parent]; live {
+			break
+		}
+		departed = parent
 	}
 	if len(le.members) > 0 {
 		l.mustHoldInvariants()
