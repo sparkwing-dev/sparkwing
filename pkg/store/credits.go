@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2502,14 +2503,15 @@ func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error) {
 		return false, nil
 	}
 	var metered int64
-	err := s.queryRow(ctx, `SELECT metered FROM tokens WHERE prefix = ?`, prefix).Scan(&metered)
+	var scopes string
+	err := s.queryRow(ctx, `SELECT metered, scopes FROM tokens WHERE prefix = ?`, prefix).Scan(&metered, &scopes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return metered != 0, nil
+	return tokenPaysCredits(metered, scopes), nil
 }
 
 func tokenMeteredTx(ctx context.Context, tx *storeTx, prefix string) (bool, error) {
@@ -2517,14 +2519,22 @@ func tokenMeteredTx(ctx context.Context, tx *storeTx, prefix string) (bool, erro
 		return false, nil
 	}
 	var metered int64
-	err := tx.QueryRowContext(ctx, `SELECT metered FROM tokens WHERE prefix = ?`, prefix).Scan(&metered)
+	var scopes string
+	err := tx.QueryRowContext(ctx, `SELECT metered, scopes FROM tokens WHERE prefix = ?`, prefix).Scan(&metered, &scopes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return metered != 0, nil
+	return tokenPaysCredits(metered, scopes), nil
+}
+
+// safety: every launcher claim is Cloud compute a team pays for, so a token
+// carrying claims.launch is metered whatever its flag says; forgetting the flag
+// at mint must never hand out free compute.
+func tokenPaysCredits(metered int64, scopes string) bool {
+	return metered != 0 || slices.Contains(strings.Split(scopes, ","), LaunchScope)
 }
 
 // SetTokenMetered marks or unmarks a minted token as one credits pay for,

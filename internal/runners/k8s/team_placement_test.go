@@ -165,7 +165,7 @@ func TestBandRepels_FailsWithoutTheOneJobTerm(t *testing.T) {
 }
 
 func teamNode(team string) labels.Set {
-	return labels.Set{cpuBandKey: cpuBandSmall, TeamNodeLabel: TeamLabelValue(team)}
+	return labels.Set{CPUBandKey: CPUBandSmall, TeamNodeLabel: TeamLabelValue(team)}
 }
 
 func selects(job *batchv1.Job, node labels.Set) bool {
@@ -181,7 +181,7 @@ func TestBuildJob_BandNodeServesOnlyTheTeamThatBootedIt(t *testing.T) {
 		if selects(job, teamNode("beta")) {
 			t.Fatalf("team %q: a band Job selects a node beta booted", team)
 		}
-		if selects(job, labels.Set{cpuBandKey: cpuBandSmall}) {
+		if selects(job, labels.Set{CPUBandKey: CPUBandSmall}) {
 			t.Fatalf("team %q: a band Job selects a node with no team, which the next team could reuse", team)
 		}
 		if errs := validation.IsValidLabelValue(job.Spec.Template.Spec.NodeSelector[TeamNodeLabel]); len(errs) > 0 {
@@ -218,7 +218,7 @@ func TestBandTeamNode_FailsWithoutTheKey(t *testing.T) {
 }
 
 func TestBuildJob_UnbilledBandJobStillSelectsItsTeamsNode(t *testing.T) {
-	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, 0)
+	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{CPUBandKey: CPUBandSmall}}, 0)
 	if !selects(job, teamNode("acme")) || selects(job, teamNode("beta")) {
 		t.Fatalf("an unbilled band Job selects %v, want only acme's node", job.Spec.Template.Spec.NodeSelector)
 	}
@@ -227,8 +227,8 @@ func TestBuildJob_UnbilledBandJobStillSelectsItsTeamsNode(t *testing.T) {
 // Off by default, so a self-hosted band of static nodes, which carry no team
 // label, keeps taking band Jobs.
 func TestBuildJob_TeamNodesIsOptIn(t *testing.T) {
-	cfg := Config{Image: "img", Team: "acme", NodeSelector: map[string]string{cpuBandKey: "house"}}
-	static := labels.Set{cpuBandKey: "house"}
+	cfg := Config{Image: "img", Team: "acme", NodeSelector: map[string]string{CPUBandKey: "house"}}
+	static := labels.Set{CPUBandKey: "house"}
 	if !selects(classJob(t, cfg, 4), static) {
 		t.Fatal("a band Job without team nodes refuses a static band node that carries no team label")
 	}

@@ -104,6 +104,12 @@ const (
 	// the team a payment funded, and reads the ledger's units, and reaches
 	// nothing else. Only the operator mints it; no team's token may carry it.
 	ScopeCreditsGrant = "credits.grant"
+	// ScopeClaimsLaunch is the launcher's scope. It claims any team's ready
+	// node of a controller-dispatched run, and the claim's token, for the Job
+	// the launcher builds, and it marks that claim as Cloud compute. It reads
+	// no secret or source. Only the operator mints it; no team's token may
+	// carry it.
+	ScopeClaimsLaunch = store.LaunchScope
 )
 
 var allScopes = []string{
@@ -122,6 +128,7 @@ var allScopes = []string{
 	ScopeAdmin,
 	ScopeLogsDelete,
 	ScopeCreditsGrant,
+	ScopeClaimsLaunch,
 }
 
 // safety: the table is the whole grant a membership carries, and ScopeAdmin

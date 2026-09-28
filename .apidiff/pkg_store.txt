@@ -663,7 +663,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete or credits.grant scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -680,6 +680,8 @@ var ErrClaimTokenInvalid = errors.New("store: invalid or expired claim token")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrControllerDispatchIncomplete = errors.New(
+	"store: controller dispatch cannot run a pipeline yet: pods do not fetch source or report through claim tokens")
 var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")
@@ -1099,6 +1101,28 @@ type LastOwnerError struct {
 }
 func (e *LastOwnerError) Error() string
 func (e *LastOwnerError) Unwrap() error
+type LaunchClaim struct {
+	Team       Team
+	RunID      string
+	NodeID     string
+	Generation int64
+	Kind       ClaimTokenKind
+	Dispatch   RepoDispatch
+	Class      CPUClass
+	Token      string
+
+	LifetimeSecs int64
+}
+type LaunchClaimRequest struct {
+	HolderID string
+	Lease    time.Duration
+
+	Deadline time.Duration
+
+	RunID, NodeID string
+}
+const LaunchDeadlineSlack = 10 * time.Minute
+const LaunchScope = "claims.launch"
 type LegacyAgentClaim struct {
 	RunID       string
 	Status      string
@@ -1182,6 +1206,7 @@ const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 100_000
 const MinBillableSeconds = 60
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
+const MinLaunchLifetime = 90 * time.Second
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 type NamedClaimOptions struct {
@@ -1497,9 +1522,13 @@ type RegisteredAgent struct {
 	Enrolled bool
 	LastSeen time.Time
 }
+type RepoDispatch string
+const RepoDispatchController RepoDispatch = "controller"
+const RepoDispatchTrigger RepoDispatch = ""
 type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
+func RepoKey(owner, name string) string
 type RetentionSweep struct {
 	Events           int64
 	NodeMetrics      int64
@@ -1898,6 +1927,7 @@ func (s *Store) ChargeNodeCredits(ctx context.Context, runID, nodeID, tokenPrefi
 func (s *Store) ChargeRetainedStorage(ctx context.Context, now time.Time) (StorageChargeSweep, error)
 func (s *Store) ClaimExpiredSourceBundles(ctx context.Context, now time.Time) (out []Upload, err error)
 func (s *Store) ClaimInvitationEmail(ctx context.Context, invitationID string, now time.Time) (bool, error)
+func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req LaunchClaimRequest, now time.Time) (*LaunchClaim, error)
 func (s *Store) ClaimNamedNode(
 	ctx context.Context, claimant ClaimIdentity, runID, nodeID, holderID string,
 	lease time.Duration, opts NamedClaimOptions,
@@ -2458,6 +2488,7 @@ func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, ena
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
+func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error

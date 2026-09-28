@@ -74,7 +74,7 @@ func TestRunnerVersionHelpAndTopLevelUsage(t *testing.T) {
 	var topLevel bytes.Buffer
 	usage(&topLevel)
 	for _, want := range []string{
-		"runner|worker|agent|run-node|version",
+		"runner|worker|agent|run-node|launch|version",
 		"run-node - execute one claimed node (the Kubernetes Job fallback entrypoint)",
 		"version  - print this executable's offline build identity",
 	} {

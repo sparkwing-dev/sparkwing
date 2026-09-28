@@ -96,7 +96,7 @@ type plannedNode struct {
 	deps, runsOn, prefers           []string
 	resource                        ExecutorResource
 	retryBudget                     int
-	retryBackoff                    time.Duration
+	retryBackoff, timeout           time.Duration
 	optional, continueOnError       bool
 }
 
@@ -120,6 +120,13 @@ func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now
 	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
+	if err := insertPlanNodeTx(ctx, tx, team, runID, RepoDispatchController, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertPlanNodeTx(ctx context.Context, tx *storeTx, team Team, runID string, dispatch RepoDispatch, now time.Time) error {
 	class, err := readyCPUClassTx(ctx, tx, ExecutorResource{})
 	if err != nil {
 		return err
@@ -131,11 +138,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		class, now.UnixNano(), now.UnixNano(), planNodeRetryBudget); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission = ? WHERE team = ? AND id = ?`,
-		RunAdmissionPlanning, string(team), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = tx.ExecContext(ctx, `UPDATE runs SET admission = ?, dispatch = ? WHERE team = ? AND id = ?`,
+		RunAdmissionPlanning, string(dispatch), string(team), runID)
+	return err
 }
 
 // AcceptPlan commits the plan body a planning claim submits, as the claim's
@@ -240,12 +245,12 @@ func insertPlannedNodeTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO nodes (team, run_id, node_id, status, kind, deps_json,
        needs_labels, prefers_labels, requested_cores, requested_memory_bytes, credit_cpu_class,
-       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq, approval_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq, approval_json, timeout_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(team), runID, n.id, nodeStatusPending, n.kind, deps,
 		needs, prefers, res.Cores, res.MemoryBytes, class,
 		n.specHash, n.onFailureOf, boolInt(n.continueOnError), boolInt(n.optional), n.retryBudget,
-		n.retryBackoff.Milliseconds(), seq, n.approval)
+		n.retryBackoff.Milliseconds(), seq, n.approval, n.timeout.Milliseconds())
 	return err
 }
 
@@ -407,6 +412,9 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 		p.resource.Cores = m.ResCores
 	}
 	p.resource.MemoryBytes = max(m.ResMemoryBytes, 0)
+	// safety: clamped in milliseconds first, so a huge timeout_ms cannot overflow
+	// the Duration multiply into a negative or short timeout.
+	p.timeout = time.Duration(min(m.TimeoutMS, MaxClaimTokenLifetime.Milliseconds())) * time.Millisecond
 	return p, nil
 }
 

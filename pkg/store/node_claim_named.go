@@ -76,14 +76,14 @@ func (s *Store) ClaimNamedNode(
 	if err != nil {
 		return nil, err
 	}
-	var status, runStatus string
+	var status, runStatus, kind string
 	var claimedBy sql.NullString
 	var needsJSON, prefersJSON []byte
 	args := append([]any{runID, nodeID}, teamArgs...)
-	err = s.queryRow(ctx, `SELECT n.status, n.claimed_by, n.needs_labels, n.prefers_labels, r.status
+	err = s.queryRow(ctx, `SELECT n.status, n.claimed_by, n.needs_labels, n.prefers_labels, r.status, n.kind
  FROM nodes n JOIN runs r ON r.id = n.run_id
 	WHERE n.run_id = ? AND n.node_id = ?`+teamClause, args...).Scan(
-		&status, &claimedBy, &needsJSON, &prefersJSON, &runStatus)
+		&status, &claimedBy, &needsJSON, &prefersJSON, &runStatus, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, notFound("node", runID+"/"+nodeID)
 	}
@@ -92,6 +92,9 @@ func (s *Store) ClaimNamedNode(
 	}
 	if status == nodeStatusDone || claimedBy.Valid || isTerminalRunStatus(runStatus) {
 		return nil, ErrLockHeld
+	}
+	if kind != "" {
+		return nil, fmt.Errorf("%w: the launcher claims every node of a controller-dispatched run", ErrLockHeld)
 	}
 	warm, err := s.warmClassFilter(ctx, claimant)
 	if err != nil {

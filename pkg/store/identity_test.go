@@ -389,6 +389,20 @@ func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 	if _, _, err := tn.CreateRunnerToken(ctx, "agent:x", []string{"admin"}, u.Account.ID, time.Now()); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
 		t.Fatalf("runner mint with admin = %v, want ErrAdminScopeOnTeamToken", err)
 	}
+	for _, mint := range []func() error{
+		func() error {
+			_, _, err := tn.CreateToken(ctx, "ops", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
+			return err
+		},
+		func() error {
+			_, _, err := tn.CreateRunnerToken(ctx, "agent:l", []string{"nodes.claim", store.LaunchScope}, u.Account.ID, time.Now())
+			return err
+		},
+	} {
+		if err := mint(); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
+			t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
+		}
+	}
 }
 
 func TestIdentityOpenInvitationsAreCapped(t *testing.T) {

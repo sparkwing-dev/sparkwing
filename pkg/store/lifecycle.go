@@ -2,6 +2,11 @@ package store
 
 const nodeNotDone = `status != 'done'`
 
+// safety: a controller-dispatched run's nodes carry a kind, and only the
+// launcher's claim hands their pods the claim token they report through, so
+// every other claim path passes over them.
+const nodeTriggerDispatched = `kind = ''`
+
 func nodeClaimLiveSQL(alias string) string {
 	return alias + "claimed_by IS NOT NULL AND " + alias +
 		"lease_expires_at IS NOT NULL AND " + alias + "lease_expires_at > ?"

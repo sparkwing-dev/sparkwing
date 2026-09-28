@@ -49,6 +49,9 @@ func (t *Tenant) createTriggerWithRun(ctx context.Context, trig Trigger, r Run, 
 	if err := t.s.createRunTx(ctx, tx, t.team, r); err != nil {
 		return err
 	}
+	if err := routeRunDispatchTx(ctx, tx, t.team, trig, time.Now()); err != nil {
+		return err
+	}
 	if sourceKey != "" {
 		// safety: a fresh clock at this update decides the one-day window;
 		// expires_at=0 is the storage pass's competing prune claim.
@@ -90,6 +93,9 @@ func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig
 		return err
 	}
 	if err := s.createRunTx(ctx, tx, team, r); err != nil {
+		return err
+	}
+	if err := routeRunDispatchTx(ctx, tx, team, trig, time.Now()); err != nil {
 		return err
 	}
 	return tx.Commit()

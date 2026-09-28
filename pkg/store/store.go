@@ -113,6 +113,8 @@ type Store struct {
 	runnerCapMu     sync.Mutex
 	runnerCapCache  map[Team]runnerCapEntry
 	runnerCapEpoch  uint64
+	launchResumeMu  sync.Mutex
+	launchResume    *launchCursor
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -1064,7 +1066,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 83
+const expectedSchemaVersion = 84
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2114,6 +2116,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyAgentNameIndexMigration(ctx, tx, time.Now())
 	case 83:
 		return applyClaimAttentionMigration(ctx, tx, false)
+	case 84:
+		return applyRepoDispatchMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2560,6 +2564,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyAgentNameIndexMigration(ctx, tx, time.Now())
 	case 83:
 		return applyClaimAttentionMigration(ctx, tx, true)
+	case 84:
+		return applyRepoDispatchMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3671,6 +3677,9 @@ func (s *Store) CreateTriggerWithRun(ctx context.Context, t Trigger, r Run) erro
 		return err
 	}
 	if err := s.createRunTx(ctx, tx, DefaultTeam, r); err != nil {
+		return err
+	}
+	if err := routeRunDispatchTx(ctx, tx, DefaultTeam, t, time.Now()); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5889,7 +5898,7 @@ func (s *Store) readClaimCandidates(
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
-	AND `+nodeExecutionUnsealed+`
+	AND `+nodeExecutionUnsealed+` AND `+nodeTriggerDispatched+`
    AND NOT (avoid_until IS NOT NULL AND avoid_until > ?
             AND avoid_coordinator_id = ? AND avoid_executor_kind = ? AND avoid_executor_id = ?)`+teamClause+classClause+scopeClause+keyset+`
  ORDER BY ready_at ASC, run_id ASC, node_id ASC
@@ -5998,6 +6007,25 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if queued {
 		readyClause = ` AND ready_at IS NOT NULL`
 	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackOrLog(tx)
+	n, err := s.awardScannedNodeTx(ctx, tx, candidate, claimant, holderID, coordinatorID, lease, placement, readyClause, scope, time.Now())
+	if err != nil || n == nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+func (s *Store) awardScannedNodeTx(ctx context.Context, tx *storeTx, candidate claimCandidate, claimant ClaimIdentity,
+	holderID, coordinatorID string, lease time.Duration, placement ClaimPlacement, readyClause string, scope teamScope,
+	now time.Time,
+) (*Node, error) {
 	// safety: the award repeats the scan's team predicate rather than trusting
 	// it, because [Store.ClaimNamedNode] reaches this with a node the caller
 	// named and no scan behind it.
@@ -6005,15 +6033,9 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer rollbackOrLog(tx)
 	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
 		return nil, err
 	}
-	now := time.Now()
 	expires := now.Add(lease)
 	awardArgs := []any{
 		holderID, claimant.Principal, claimant.TokenPrefix, expires.UnixNano(),
@@ -6043,7 +6065,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	if awarded == 0 {
 		return nil, nil
 	}
-	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, queued); err != nil {
+	if err := s.reserveNodeCreditsTx(ctx, tx, claimant, candidate.runID, candidate.nodeID, now, readyClause != ""); err != nil {
 		return nil, err
 	}
 	// safety: a preference the controller supplies for every node it never
@@ -6061,9 +6083,6 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 	n := &nodeRecord{}
 	if err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
  FROM nodes WHERE run_id = ? AND node_id = ?`, candidate.runID, candidate.nodeID), n); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &n.Node, nil
@@ -7812,6 +7831,7 @@ func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, r
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id FROM runs r
 		WHERE r.status = ?
+		  AND r.dispatch = ''
 		  AND r.started_at > 0
 		  AND r.started_at < ?
 		  AND EXISTS (
