@@ -690,19 +690,49 @@ func TestRunnerFallsBackAtOnceOnlyWhenTheControllerCanVouch(t *testing.T) {
 			_ = resp.Body.Close()
 		}
 		fallback := &fallbackRunner{}
-		r := New(client.New(srv.URL, nil), fallback,
+		ctrl := &finalizeRecorder{coordinator: client.New(srv.URL, nil)}
+		r := New(ctrl, fallback,
 			Config{PollInterval: 5 * time.Millisecond, ClaimWaitTimeout: 5 * time.Second}, quietTestLogger())
 
-		start := time.Now()
 		result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
-		waited := time.Since(start)
 		srv.Close()
 		_ = st.Close()
 		if result.Outcome != sparkwing.Success || result.Err != nil || fallback.calls.Load() != 1 {
 			t.Fatalf("%s: result = %+v, fallback calls = %d", tc.name, result, fallback.calls.Load())
 		}
-		if early := waited < 5*time.Second; early != tc.wantEarly {
-			t.Errorf("%s: fallback after %s, want before the window = %v", tc.name, waited, tc.wantEarly)
+		first, ok := ctrl.firstResolution()
+		if !ok {
+			t.Fatalf("%s: the runner never finalized the offer round", tc.name)
+		}
+		if early := !first.Pending; early != tc.wantEarly {
+			t.Errorf("%s: first finalization = %+v, want a round resolved before the window = %v", tc.name, first, tc.wantEarly)
 		}
 	}
+}
+
+type finalizeRecorder struct {
+	coordinator
+	mu    sync.Mutex
+	first *store.ExecutorClaimRoundResult
+}
+
+func (f *finalizeRecorder) FinalizeNodeReady(ctx context.Context, runID, nodeID string) (store.ExecutorClaimRoundResult, error) {
+	res, err := f.coordinator.FinalizeNodeReady(ctx, runID, nodeID)
+	if err == nil {
+		f.mu.Lock()
+		if f.first == nil {
+			f.first = &res
+		}
+		f.mu.Unlock()
+	}
+	return res, err
+}
+
+func (f *finalizeRecorder) firstResolution() (store.ExecutorClaimRoundResult, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.first == nil {
+		return store.ExecutorClaimRoundResult{}, false
+	}
+	return *f.first, true
 }
