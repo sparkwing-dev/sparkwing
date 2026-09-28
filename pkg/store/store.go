@@ -1847,6 +1847,7 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
+	50: {teamCreditExhaustionRequirement},
 	51: {teamScopedUserKeysRequirement},
 	71: {"github-app-cron-identity-v1"},
 	72: {"storage-commit-receipts-v1"},
@@ -1865,6 +1866,11 @@ const (
 // behind it and every upsert on those tables fails; the requirement is
 // what makes it refuse the store instead.
 const teamScopedUserKeysRequirement = "team-scoped-user-keys"
+
+// safety: v50 moves the credit exhaustion clock from sparkwing_meta onto the
+// team, and SQLite commits v50 before v51 stamps its own requirement, so a
+// binary predating it could reopen that database and run the old clock.
+const teamCreditExhaustionRequirement = "team-credit-exhaustion-v1"
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {

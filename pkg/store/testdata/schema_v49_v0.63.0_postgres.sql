@@ -37,15 +37,15 @@ CREATE TABLE runs (
     replay_of_run_id text NOT NULL DEFAULT ''::text,
     replay_of_node_id text NOT NULL DEFAULT ''::text,
     last_heartbeat_at bigint,
-    annotations_json bytea,
-    parent_run_id text,
-    annotation_count bigint NOT NULL DEFAULT 0,
-    receipt_sha text NOT NULL DEFAULT ''::text,
     cost_cents bigint NOT NULL DEFAULT 0,
     cost_currency text NOT NULL DEFAULT 'USD'::text,
-    invocation_json bytea,
+    annotation_count bigint NOT NULL DEFAULT 0,
+    parent_run_id text,
     cost_settled bigint NOT NULL DEFAULT 0,
+    annotations_json bytea,
+    receipt_sha text NOT NULL DEFAULT ''::text,
     top_annotation text NOT NULL DEFAULT ''::text,
+    invocation_json bytea,
     created_principal text NOT NULL DEFAULT ''::text,
     CONSTRAINT runs_pkey PRIMARY KEY (id)
 );
@@ -244,9 +244,9 @@ CREATE TABLE triggers (
     webhook_delivery text NOT NULL DEFAULT ''::text,
     webhook_replay_key text NOT NULL DEFAULT ''::text,
     available_at bigint NOT NULL DEFAULT 0,
+    retry_source text NOT NULL DEFAULT ''::text,
     "full" bigint NOT NULL DEFAULT 0,
     parent_run_id text,
-    retry_source text NOT NULL DEFAULT ''::text,
     CONSTRAINT triggers_pkey PRIMARY KEY (id)
 );
 CREATE TABLE concurrency_entries (
@@ -418,18 +418,18 @@ CREATE TABLE pipeline_profiles (
     pinned_cores real NOT NULL DEFAULT 0,
     pinned_memory_bytes bigint NOT NULL DEFAULT 0,
     cpu_measured bigint NOT NULL DEFAULT 0,
-    wait_sample_count bigint NOT NULL DEFAULT 0,
     wait_samples_json bytea,
     wait_p50_ms bigint NOT NULL DEFAULT 0,
     wait_p99_ms bigint NOT NULL DEFAULT 0,
+    wait_sample_count bigint NOT NULL DEFAULT 0,
     contended_count bigint NOT NULL DEFAULT 0,
     plan_hash text NOT NULL DEFAULT ''::text,
     floor_cores real NOT NULL DEFAULT 0,
     floor_memory_bytes bigint NOT NULL DEFAULT 0,
     prev_peak_cores real NOT NULL DEFAULT 0,
     prev_peak_memory_bytes bigint NOT NULL DEFAULT 0,
-    sustained_cores real NOT NULL DEFAULT 0,
     prev_sustained_cores real NOT NULL DEFAULT 0,
+    sustained_cores real NOT NULL DEFAULT 0,
     CONSTRAINT pipeline_profiles_pkey PRIMARY KEY (pipeline, node_id)
 );
 CREATE TABLE node_bounces (
@@ -664,65 +664,79 @@ CREATE UNIQUE INDEX idx_tokens_prefix ON tokens USING btree (prefix);
 CREATE UNIQUE INDEX idx_triggers_idempotency_key ON triggers USING btree (pipeline, idempotency_key) WHERE (idempotency_key <> ''::text);
 CREATE UNIQUE INDEX idx_triggers_webhook_delivery ON triggers USING btree (webhook_delivery) WHERE (webhook_delivery <> ''::text);
 CREATE UNIQUE INDEX idx_triggers_webhook_replay_key ON triggers USING btree (webhook_replay_key) WHERE (webhook_replay_key <> ''::text);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (1, 1790569474732128591);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (2, 1790569474752586765);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (3, 1790569474772761040);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (4, 1790569474774370030);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (5, 1790569474796431894);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (6, 1790569474819206553);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (7, 1790569474821057441);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (8, 1790569474822452233);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (9, 1790569474824361921);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (10, 1790569474825100616);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (11, 1790569474827629601);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (12, 1790569474828310496);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (13, 1790569474829634388);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (14, 1790569474831292278);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (15, 1790569474833593264);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (16, 1790569474835644851);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (17, 1790569474836526545);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (18, 1790569474837699738);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (19, 1790569474838470533);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (20, 1790569474839107429);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (21, 1790569474840076824);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (22, 1790569474845600289);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (23, 1790569474847685676);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (24, 1790569474848892369);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (25, 1790569474850016762);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (26, 1790569474852353348);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (27, 1790569474853054543);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (28, 1790569474857037819);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (29, 1790569474857767314);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (30, 1790569474882420362);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (31, 1790569474892506499);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (32, 1790569474896929672);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (33, 1790569474904672724);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (34, 1790569474912249777);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (35, 1790569474917982641);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (36, 1790569474919029935);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (37, 1790569474920741024);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (38, 1790569474926555188);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (39, 1790569474928260278);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (40, 1790569474931958855);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (41, 1790569474933722644);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (42, 1790569474935976130);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (43, 1790569474936768125);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (44, 1790569474937115123);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (45, 1790569474938104917);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (46, 1790569474939809806);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (47, 1790569474941074499);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (48, 1790569474944596877);
-INSERT INTO sparkwing_schema_version (version, applied_at) VALUES (49, 1790569474945798469);
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('session-token-digest', 1790569474840382322, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('repo-scoped-secrets', 1790569474846006587, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('unique-token-prefix', 1790569474852731145, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('inherited-holder-marker', 1790569474853363241, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('executor-enrollment-v1', 1790569474882764759, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('executor-offer-arbitration-v1', 1790569474882764759, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('agent-loss-attempt-fencing-v1', 1790569474882764759, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('assisted-execution-policy-v1', 1790569474892865697, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('cron-schedule-names-v1', 1790569474905095421, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('pipeline-scoped-secrets', 1790569474944936475, 'v0.63.0');
-INSERT INTO sparkwing_requirements (name, added_at, added_by_version) VALUES ('declared-run-repo', 1790569474944936475, 'v0.63.0');
-INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('min_binary_version', 'v0.63.0', 1790569474946087368);
-INSERT INTO sparkwing_meta (key, value, updated_at) VALUES ('controller_authority_id', 'swfa_e440c60379ae998f1f5daca04ea42f07', 1790569474959363885);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (1, 1790572235963054770);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (2, 1790572236026735149);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (3, 1790572236077823512);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (4, 1790572236080022697);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (5, 1790572236134837235);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (6, 1790572236173793877);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (7, 1790572236177365354);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (8, 1790572236178873244);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (9, 1790572236182128822);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (10, 1790572236193174349);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (11, 1790572236197844319);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (12, 1790572236198850512);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (13, 1790572236200659400);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (14, 1790572236207528655);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (15, 1790572236212116424);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (16, 1790572236215373803);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (17, 1790572236216560395);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (18, 1790572236217897486);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (19, 1790572236218648481);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (20, 1790572236219568775);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (21, 1790572236220784367);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (22, 1790572236229779208);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (23, 1790572236232146592);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (24, 1790572236233428583);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (25, 1790572236234765075);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (26, 1790572236239293145);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (27, 1790572236241111933);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (28, 1790572236247606690);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (29, 1790572236248359785);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (30, 1790572236311818566);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (31, 1790572236343682355);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (32, 1790572236350912007);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (33, 1790572236363000527);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (34, 1790572236378776723);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (35, 1790572236387605065);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (36, 1790572236388690458);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (37, 1790572236391321540);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (38, 1790572236399377187);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (39, 1790572236403479260);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (40, 1790572236411522707);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (41, 1790572236425549314);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (42, 1790572236439468022);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (43, 1790572236441599108);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (44, 1790572236442094305);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (45, 1790572236443646895);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (46, 1790572236445709781);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (47, 1790572236447466969);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (48, 1790572236453326931);
+INSERT INTO sparkwing_schema_version ("version", "applied_at") VALUES (49, 1790572236458794894);
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('session-token-digest', 1790572236221096965, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('repo-scoped-secrets', 1790572236230522503, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('unique-token-prefix', 1790572236240047140, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('inherited-holder-marker', 1790572236241658929, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('executor-enrollment-v1', 1790572236312316862, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('executor-offer-arbitration-v1', 1790572236312316862, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('agent-loss-attempt-fencing-v1', 1790572236312316862, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('assisted-execution-policy-v1', 1790572236344357151, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('cron-schedule-names-v1', 1790572236363449524, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('pipeline-scoped-secrets', 1790572236453939527, 'v0.63.0');
+INSERT INTO sparkwing_requirements ("name", "added_at", "added_by_version") VALUES ('declared-run-repo', 1790572236453939527, 'v0.63.0');
+INSERT INTO runs ("id", "pipeline", "status", "trigger_source", "git_branch", "git_sha", "args_json", "plan_json", "error", "created_at", "started_at", "finished_at", "declared_repo", "repo_url", "github_owner", "github_repo", "retry_of", "retried_as", "retry_source", "retry_cause_node_id", "retry_avoid_coordinator_id", "retry_avoid_executor_kind", "retry_avoid_executor_id", "retry_avoid_until", "replay_of_run_id", "replay_of_node_id", "last_heartbeat_at", "cost_cents", "cost_currency", "annotation_count", "parent_run_id", "cost_settled", "annotations_json", "receipt_sha", "top_annotation", "invocation_json", "created_principal") VALUES ('run-a', 'build', 'running', '', '', '', '\x6e756c6c'::bytea, NULL, '', 1790000000000000000, 1790000000000000000, NULL, '', '', '', '', '', '', '', '', '', '', '', NULL, '', '', 1790572236481896842, 0, 'USD', 0, NULL, 0, NULL, '', '', NULL, '');
+INSERT INTO runs ("id", "pipeline", "status", "trigger_source", "git_branch", "git_sha", "args_json", "plan_json", "error", "created_at", "started_at", "finished_at", "declared_repo", "repo_url", "github_owner", "github_repo", "retry_of", "retried_as", "retry_source", "retry_cause_node_id", "retry_avoid_coordinator_id", "retry_avoid_executor_kind", "retry_avoid_executor_id", "retry_avoid_until", "replay_of_run_id", "replay_of_node_id", "last_heartbeat_at", "cost_cents", "cost_currency", "annotation_count", "parent_run_id", "cost_settled", "annotations_json", "receipt_sha", "top_annotation", "invocation_json", "created_principal") VALUES ('run-b', 'build', 'running', '', '', '', '\x6e756c6c'::bytea, NULL, '', 1790000000000000000, 1790000000000000000, NULL, '', '', '', '', '', '', '', '', '', '', '', NULL, '', '', 1790572236487650904, 0, 'USD', 0, NULL, 0, NULL, '', '', NULL, '');
+INSERT INTO nodes ("run_id", "node_id", "status", "outcome", "deps_json", "started_at", "finished_at", "error", "output_json", "ready_at", "claimed_by", "claim_principal", "claim_token_prefix", "claim_executor", "claim_cores", "claim_memory_bytes", "claim_reservation", "claim_slot", "lease_expires_at", "coordinator_id", "executor_kind", "executor_id", "execution_started_at", "reservation_id", "claim_generation", "claim_membership_id", "attempts_consumed", "retry_root_run_id", "executor_location", "required_coordinator_id", "required_executor_location", "execution_policy_json", "execution_policy_hash", "execution_policy_version", "execution_body_protocol", "execution_supervisor_requirements_json", "execution_supervisor_requirements_hash", "execution_body_requirements_json", "execution_body_requirements_hash", "avoid_coordinator_id", "avoid_executor_kind", "avoid_executor_id", "avoid_until", "needs_labels", "prefers_labels", "requested_cores", "requested_memory_bytes", "requested_slots", "offer_started_at", "offer_priority_target", "claim_base_priority", "claim_priority", "claim_worker_id", "claim_executor_kind", "claim_reservation_id", "placement_reason", "placement_hold_from", "status_detail", "last_heartbeat", "failure_reason", "exit_code", "artifact_manifest", "seq", "annotations_json", "summary", "cpu_nanos", "max_rss_bytes", "process_wall_nanos", "credit_charged_through", "credit_exhausted_anchor", "credit_cpu_class") VALUES ('run-a', 'test', 'pending', '', '\x6e756c6c'::bytea, NULL, NULL, '', NULL, NULL, NULL, '', '', '', 0, 0, '', -1, NULL, '', '', '', NULL, '', 0, '', 0, 'run-a', 'unknown', '', '', NULL, '', 0, 0, NULL, '', NULL, '', '', '', '', NULL, NULL, NULL, 0, 0, 1, NULL, 100, 0, 0, '', '', '', '', NULL, '', NULL, '', NULL, '', 2, NULL, '', 0, 0, 0, 0, 0, 0);
+INSERT INTO nodes ("run_id", "node_id", "status", "outcome", "deps_json", "started_at", "finished_at", "error", "output_json", "ready_at", "claimed_by", "claim_principal", "claim_token_prefix", "claim_executor", "claim_cores", "claim_memory_bytes", "claim_reservation", "claim_slot", "lease_expires_at", "coordinator_id", "executor_kind", "executor_id", "execution_started_at", "reservation_id", "claim_generation", "claim_membership_id", "attempts_consumed", "retry_root_run_id", "executor_location", "required_coordinator_id", "required_executor_location", "execution_policy_json", "execution_policy_hash", "execution_policy_version", "execution_body_protocol", "execution_supervisor_requirements_json", "execution_supervisor_requirements_hash", "execution_body_requirements_json", "execution_body_requirements_hash", "avoid_coordinator_id", "avoid_executor_kind", "avoid_executor_id", "avoid_until", "needs_labels", "prefers_labels", "requested_cores", "requested_memory_bytes", "requested_slots", "offer_started_at", "offer_priority_target", "claim_base_priority", "claim_priority", "claim_worker_id", "claim_executor_kind", "claim_reservation_id", "placement_reason", "placement_hold_from", "status_detail", "last_heartbeat", "failure_reason", "exit_code", "artifact_manifest", "seq", "annotations_json", "summary", "cpu_nanos", "max_rss_bytes", "process_wall_nanos", "credit_charged_through", "credit_exhausted_anchor", "credit_cpu_class") VALUES ('run-a', 'compile', 'pending', '', '\x6e756c6c'::bytea, NULL, NULL, '', NULL, NULL, NULL, '', 'swt_seed', '', 0, 0, '', -1, NULL, '', '', '', NULL, '', 0, '', 0, 'run-a', 'unknown', '', '', NULL, '', 0, 0, NULL, '', NULL, '', '', '', '', NULL, NULL, NULL, 0, 0, 1, NULL, 100, 0, 0, '', '', '', '', NULL, '', NULL, '', NULL, '', 1, NULL, '', 0, 0, 0, 0, 0, 0);
+INSERT INTO events ("run_id", "seq", "node_id", "kind", "ts", "payload") VALUES ('run-a', 1, 'compile', 'log', 1790572236512619739, '\x6c696e65'::bytea);
+INSERT INTO events ("run_id", "seq", "node_id", "kind", "ts", "payload") VALUES ('run-a', 2, 'compile', 'log', 1790572236526656346, '\x6c696e65'::bytea);
+INSERT INTO events ("run_id", "seq", "node_id", "kind", "ts", "payload") VALUES ('run-a', 3, 'compile', 'log', 1790572236537610074, '\x6c696e65'::bytea);
+INSERT INTO triggers ("id", "pipeline", "args_json", "trigger_source", "trigger_user", "trigger_env", "git_branch", "git_sha", "status", "created_at", "claimed_at", "lease_expires_at", "cancel_requested_at", "repo", "repo_url", "github_owner", "github_repo", "repo_inherited", "retry_of", "parent_node_id", "idempotency_key", "claim_seq", "claim_principal", "claim_token_prefix", "webhook_delivery", "webhook_replay_key", "available_at", "retry_source", "full", "parent_run_id") VALUES ('trig-1', 'build', '\x6e756c6c'::bytea, '', '', '\x6e756c6c'::bytea, '', '', 'pending', 1790000000000000000, NULL, NULL, NULL, '', '', '', '', 0, '', '', '', 0, '', '', '', '', 0, '', 0, NULL);
+INSERT INTO concurrency_entries ("key", "capacity", "previous_capacity", "last_write_run_id", "last_write_node_id", "updated_at") VALUES ('deploy', 1, NULL, 'run-a', 'compile', 1790572236553889166);
+INSERT INTO concurrency_holders ("key", "holder_id", "run_id", "node_id", "claimed_at", "queue_arrived_at", "lease_expires_at", "superseded", "cost", "declared_capacity") VALUES ('deploy', 'h1', 'run-a', 'compile', 1790572236553889166, 0, 1790575836553889166, 0, 1, 1);
+INSERT INTO secrets ("name", "value", "principal", "created_at", "updated_at", "masked", "pipeline", "shared") VALUES ('TOKEN', 'v1', '', 1790000000, 1790000000, 0, '', 0);
+INSERT INTO secrets ("name", "value", "principal", "created_at", "updated_at", "masked", "pipeline", "shared") VALUES ('TOKEN', 'v2', '', 1790000000, 1790000000, 0, 'build', 0);
+INSERT INTO sparkwing_meta ("key", "value", "updated_at") VALUES ('min_binary_version', 'v0.63.0', 1790572236459724788);
+INSERT INTO sparkwing_meta ("key", "value", "updated_at") VALUES ('controller_authority_id', 'swfa_a89010c7cf2bd3c9f42a771427b4747c', 1790572236478085667);
+INSERT INTO sparkwing_meta ("key", "value", "updated_at") VALUES ('credit_exhausted_at', '1790000000000000000', 1790000000000000000);
+INSERT INTO pipeline_profiles ("pipeline", "node_id", "p50_duration_ms", "p99_duration_ms", "peak_cores", "peak_memory_bytes", "sample_count", "updated_at", "samples_json", "pinned_cores", "pinned_memory_bytes", "cpu_measured", "wait_samples_json", "wait_p50_ms", "wait_p99_ms", "wait_sample_count", "contended_count", "plan_hash", "floor_cores", "floor_memory_bytes", "prev_peak_cores", "prev_peak_memory_bytes", "prev_sustained_cores", "sustained_cores") VALUES ('build', 'compile', 60000, 60000, 2, 1073741824, 1, 1790572236593753003, '\x7b22736368656d61223a342c2273616d706c6573223a5b7b2264223a36303030303030303030302c2263223a322c226d223a313037333734313832342c2273223a317d5d7d'::bytea, 0, 0, 0, NULL, 0, 0, 0, 0, '', 0, 0, 0, 0, 0, 1);

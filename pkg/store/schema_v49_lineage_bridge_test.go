@@ -12,11 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// safety: the fixtures are the schema and bookkeeping rows v0.63.0 left after
-// migrating an empty database to its v49, which numbered the node claim token
-// column where this lineage numbers the tenant key.
+// safety: the fixtures are the whole database v0.63.0 left after migrating to
+// its v49, which numbered the node claim token column where this lineage
+// numbers the tenant key, and then writing a few rows through its own API.
 
-func loadV49MainFixture(t *testing.T, driver, dsn, fixture string) {
+func loadV49MainFixture(t *testing.T, driver, dsn, fixture string, extra ...string) {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("testdata", fixture))
 	if err != nil {
@@ -27,8 +27,54 @@ func loadV49MainFixture(t *testing.T, driver, dsn, fixture string) {
 		t.Fatalf("open fixture database: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := db.Exec(string(body)); err != nil {
-		t.Fatalf("load %s: %v", fixture, err)
+	for _, stmt := range append([]string{string(body)}, extra...) {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("load %s: %v", fixture, err)
+		}
+	}
+}
+
+func sqliteV49Main(t *testing.T, extra ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "state.db")
+	loadV49MainFixture(t, "sqlite", path, "schema_v49_v0.63.0_sqlite.sql", extra...)
+	return path
+}
+
+func v49Count(t *testing.T, db *sql.DB, query string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(query).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	return n
+}
+
+func assertV49MainRowsCarried(t *testing.T, st *store.Store) {
+	t.Helper()
+	db := st.DB()
+	for table, want := range map[string]int{
+		"runs": 2, "nodes": 2, "events": 3, "secrets": 2, "concurrency_entries": 1,
+		"concurrency_holders": 1, "pipeline_profiles": 1, "triggers": 1,
+	} {
+		if got := v49Count(t, db, `SELECT COUNT(*) FROM `+table); got != want {
+			t.Errorf("%s rows = %d, want %d", table, got, want)
+		}
+	}
+	for _, table := range store.TenantTablesForTest() {
+		if got := v49Count(t, db, `SELECT COUNT(*) FROM `+table+` WHERE team <> 'default'`); got != 0 {
+			t.Errorf("%s has %d rows outside the default team", table, got)
+		}
+	}
+	for query, want := range map[string]int{
+		`SELECT COUNT(*) FROM nodes WHERE node_id = 'compile' AND claim_token_prefix = 'swt_seed'`:        1,
+		`SELECT event_count FROM runs WHERE id = 'run-a'`:                                                 3,
+		`SELECT COUNT(*) FROM teams WHERE name = 'default' AND credit_exhausted_at = 1790000000000000000`: 1,
+		`SELECT COUNT(*) FROM sparkwing_meta WHERE key = 'credit_exhausted_at'`:                           0,
+	} {
+		if got := v49Count(t, db, query); got != want {
+			t.Errorf("%s = %d, want %d", query, got, want)
+		}
 	}
 }
 
@@ -94,14 +140,88 @@ func assertMatchesFreshSchema(t *testing.T, upgraded, fresh *store.Store) {
 }
 
 func TestSchemaV49MainLineageSQLiteGainsTenantKey(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.db")
-	loadV49MainFixture(t, "sqlite", path, "schema_v49_v0.63.0_sqlite.sql")
-	upgraded, err := store.Open(path)
-	if err != nil {
-		t.Fatalf("open v0.63.0 database: %v", err)
+	for name, extra := range map[string][]string{
+		"plain":             nil,
+		"stray teams table": {`CREATE TABLE teams (name TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			upgraded, err := store.Open(sqliteV49Main(t, extra...))
+			if err != nil {
+				t.Fatalf("open v0.63.0 database: %v", err)
+			}
+			defer func() { _ = upgraded.Close() }()
+			assertMatchesFreshSchema(t, upgraded, storetest.OpenSQLite(t))
+			assertV49MainRowsCarried(t, upgraded)
+		})
 	}
-	defer func() { _ = upgraded.Close() }()
-	assertMatchesFreshSchema(t, upgraded, storetest.OpenSQLite(t))
+}
+
+func TestSchemaV49MainLineageRefusesUnusableTeamsTable(t *testing.T) {
+	path := sqliteV49Main(t, `CREATE TABLE teams (id INTEGER)`)
+	if st, err := store.Open(path); err == nil {
+		_ = st.Close()
+		t.Fatal("open with an unusable teams table succeeded, want refusal")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if got := v49Count(t, db, `SELECT MAX(version) FROM sparkwing_schema_version`); got != 49 {
+		t.Fatalf("schema version after refusal = %d, want 49", got)
+	}
+}
+
+// A SQLite upgrade that stops after v50 must already carry a requirement the
+// v0.63.0 binary does not know, so that binary refuses the half-moved clock.
+func TestSchemaV49MainLineageInterruptedAtV50RefusesOlderBinary(t *testing.T) {
+	// safety: a key-less secrets table holding a duplicate lets v49 and v50
+	// commit and then fails v51's primary-key rebuild.
+	path := sqliteV49Main(t,
+		`CREATE TABLE secrets_unkeyed AS SELECT * FROM secrets`,
+		`INSERT INTO secrets_unkeyed SELECT * FROM secrets`,
+		`DROP TABLE secrets`,
+		`ALTER TABLE secrets_unkeyed RENAME TO secrets`)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.Query(`SELECT name FROM sparkwing_requirements`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		known[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if st, err := store.Open(path); err == nil {
+		_ = st.Close()
+		t.Fatal("open with duplicate secrets succeeded, want v51 to fail")
+	}
+	if got := v49Count(t, db, `SELECT MAX(version) FROM sparkwing_schema_version`); got != 50 {
+		t.Fatalf("schema version after interruption = %d, want 50", got)
+	}
+	st, err := store.OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	listed, err := st.Requirements(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(listed, func(name string) bool { return !known[name] }) {
+		t.Fatalf("requirements at v50 = %v; v0.63.0 knows every one, so it would reopen the database", listed)
+	}
 }
 
 func TestSchemaV49MainLineagePostgresGainsTenantKey(t *testing.T) {
@@ -113,6 +233,7 @@ func TestSchemaV49MainLineagePostgresGainsTenantKey(t *testing.T) {
 	}
 	defer func() { _ = upgraded.Close() }()
 	assertMatchesFreshSchema(t, upgraded, storetest.OpenPostgres(t))
+	assertV49MainRowsCarried(t, upgraded)
 }
 
 func TestSchemaV73UpgradesToV74(t *testing.T) {

@@ -86,10 +86,6 @@ var additiveColumnSources = map[int][]map[string]string{
 	// older binary keeps writing the migrated database and its inserts land
 	// in that team.
 	49: {teamColumn},
-	// safety: v50 adds the per-team credit exhaustion marker with a default,
-	// and moves the deployment-wide stamp into it, so an older binary keeps
-	// writing the migrated database and simply never stamps the column.
-	50: {teamsCreditExhaustedCols},
 	// safety: v52 adds the identity tables and columns with defaults, so an
 	// older binary keeps writing sessions, tokens and teams it never tags
 	// with an account, and runs whose event counters it never bumps.

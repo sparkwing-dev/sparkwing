@@ -323,24 +323,19 @@ const runsTeamIndex = `CREATE INDEX IF NOT EXISTS idx_runs_team_started ON runs(
 
 // safety: releases v0.61.0 through v0.63.0 numbered their node claim token
 // migration v49, so a database they migrated reads as v49 without the tenant
-// key, and v50 onward assume the teams table exists. v74 carries that claim
-// token column on this lineage.
+// key, and v50 onward assume it. The tenant-key migration is idempotent, so
+// re-running it at v49 completes whatever part is missing on either lineage,
+// and a stray teams table it cannot use fails the open before v50 commits.
+// v74 carries that claim token column on this lineage.
 func bridgeMainLineageTenantKey(ctx context.Context, tx *storeTx, version int, postgres bool) error {
-	if version != 49 {
+	switch {
+	case version != 49:
 		return nil
-	}
-	probe := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'teams'`
-	if postgres {
-		probe = `SELECT COUNT(to_regclass('teams'))`
-	}
-	var keyed int
-	if err := tx.QueryRowContext(ctx, probe).Scan(&keyed); err != nil || keyed > 0 {
-		return err
-	}
-	if postgres {
+	case postgres:
 		return applyTenantKeyMigrationPostgres(ctx, tx)
+	default:
+		return applyTenantKeyMigrationSQLite(ctx, tx)
 	}
-	return applyTenantKeyMigrationSQLite(ctx, tx)
 }
 
 func applyTenantKeyMigrationSQLite(ctx context.Context, tx *storeTx) error {
