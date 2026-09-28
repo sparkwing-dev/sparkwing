@@ -111,11 +111,10 @@ func TestLaunchOne_RunsAnOptedInRepoAsOneJobWithAClaimToken(t *testing.T) {
 		`{"dispatch":"controller"}`); code != http.StatusConflict {
 		t.Fatalf("opting in before the path is complete answered %d, want 409", code)
 	}
-	tenant, err := f.st.ForTeam(ctx, store.DefaultTeam)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tenant.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+	// safety: the setter refuses controller dispatch until the path can run, so
+	// the test writes the row it will write once it accepts it.
+	if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)`,
+		string(store.DefaultTeam), store.RepoKey("korey", "probe"), string(store.RepoDispatchController), time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	f.intake(t, "run-old", "korey/other")

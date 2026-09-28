@@ -56,11 +56,20 @@ func RepoKey(owner, name string) string {
 	return strings.ToLower(owner + "/" + name)
 }
 
+// ErrControllerDispatchIncomplete refuses opting a repository into
+// [RepoDispatchController] while its pods can neither fetch claim-bound source
+// nor report through claim tokens, so no run of it could finish.
+var ErrControllerDispatchIncomplete = errors.New(
+	"store: controller dispatch cannot run a pipeline yet: pods do not fetch source or report through claim tokens")
+
 // SetRepoDispatch sets the path new runs of the team's repository owner/name
-// take. Runs already started keep the path they started on.
+// take. Runs already started keep the path they started on. It refuses
+// [RepoDispatchController] with [ErrControllerDispatchIncomplete] for now.
 func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error {
 	switch dispatch {
-	case RepoDispatchTrigger, RepoDispatchController:
+	case RepoDispatchTrigger:
+	case RepoDispatchController:
+		return ErrControllerDispatchIncomplete
 	default:
 		return fmt.Errorf("%w: dispatch %q is neither %q nor empty", ErrInvalidInput, dispatch, RepoDispatchController)
 	}

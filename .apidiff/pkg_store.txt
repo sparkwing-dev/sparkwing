@@ -680,6 +680,8 @@ var ErrClaimTokenInvalid = errors.New("store: invalid or expired claim token")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
+var ErrControllerDispatchIncomplete = errors.New(
+	"store: controller dispatch cannot run a pipeline yet: pods do not fetch source or report through claim tokens")
 var ErrCreditBalanceCap = errors.New("credits: the team balance cap refuses this amount")
 var ErrCreditGrantConflict = errors.New("credits: a different grant already carries this reference")
 var ErrCronScheduleTaken = errors.New("store: another team holds this schedule id")

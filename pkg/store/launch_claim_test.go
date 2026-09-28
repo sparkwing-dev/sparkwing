@@ -15,6 +15,16 @@ import (
 
 var launcherIdentity = store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"}
 
+// safety: the setter refuses controller dispatch until the path can run, so
+// tests write the row the way that setter will once it accepts it.
+func optInForTest(t *testing.T, st *store.Store, team *store.Tenant, owner, name string) error {
+	t.Helper()
+	_, err := st.DB().ExecContext(context.Background(), storetest.Rebind(st,
+		`INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)`),
+		string(team.Team()), store.RepoKey(owner, name), string(store.RepoDispatchController), time.Now().UnixNano())
+	return err
+}
+
 func launchRequest() store.LaunchClaimRequest {
 	return store.LaunchClaimRequest{HolderID: "launcher:pod", Lease: time.Minute, Deadline: time.Hour}
 }
@@ -36,7 +46,7 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	alpha := tenantFor(t, st, "alpha")
-	if err := alpha.SetRepoDispatch(ctx, "Korey", "Probe", store.RepoDispatchController, time.Now()); err != nil {
+	if err := optInForTest(t, st, alpha, "Korey", "Probe"); err != nil {
 		t.Fatal(err)
 	}
 	intake(t, alpha, "run-new", "korey", "probe")
@@ -71,6 +81,9 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 	}
 	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", "shell", time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("unknown dispatch: err = %v", err)
+	}
+	if err := alpha.SetRepoDispatch(ctx, "korey", "other", store.RepoDispatchController, time.Now()); !errors.Is(err, store.ErrControllerDispatchIncomplete) {
+		t.Fatalf("opting in before the path can run: err = %v, want ErrControllerDispatchIncomplete", err)
 	}
 }
 
@@ -184,7 +197,7 @@ func TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.New(t).Open(t)
 	alpha := tenantFor(t, st, "alpha")
-	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+	if err := optInForTest(t, st, alpha, "korey", "probe"); err != nil {
 		t.Fatal(err)
 	}
 	intake(t, alpha, "run-src", "korey", "probe")
@@ -223,7 +236,7 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 	launcher := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
 	unpaid, paying := teamHandle(t, st, "unpaid"), teamHandle(t, st, "paying")
 	for _, team := range []*store.Tenant{unpaid, paying} {
-		if err := team.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		if err := optInForTest(t, st, team, "korey", "probe"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -312,7 +325,7 @@ func TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped(t *testing.T) {
 	launcher := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
 	unpaid, paying := teamHandle(t, st, "unpaid"), teamHandle(t, st, "paying")
 	for _, team := range []*store.Tenant{unpaid, paying} {
-		if err := team.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		if err := optInForTest(t, st, team, "korey", "probe"); err != nil {
 			t.Fatal(err)
 		}
 	}
