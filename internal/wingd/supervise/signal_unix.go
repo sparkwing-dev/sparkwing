@@ -14,3 +14,5 @@ func signalTerminate(p *os.Process) error {
 func signalKill(p *os.Process) error {
 	return p.Kill()
 }
+
+func signalDump(p *os.Process) error { return p.Signal(syscall.SIGUSR1) }

@@ -8,13 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
 
 const (
@@ -55,10 +58,12 @@ type Config struct {
 }
 
 type Deps struct {
-	Start     func() (Child, error)
-	Probe     func(context.Context) error
-	Heartbeat func() (uint64, error)
-	Logf      func(string, ...any)
+	Start       func() (Child, error)
+	Probe       func(context.Context) error
+	Heartbeat   func() (uint64, error)
+	Logf        func(string, ...any)
+	CaptureDump func(Child) (string, error)
+	Journal     func(string, map[string]any)
 }
 
 func (c Config) heartbeatStale() time.Duration {
@@ -155,8 +160,11 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 	var healthySince time.Time
 	var failureSince, lastProgress, lastWarning, lastTick time.Time
 	var lastHeartbeat uint64
+	var firstHeartbeat uint64
 	var haveHeartbeat bool
 	var staleSamples int
+	var episodeFailures int
+	var largestTickGap time.Duration
 	failures := 0
 	for {
 
@@ -172,6 +180,9 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 			return false, false, err
 		case <-ticker.C:
 			tick := time.Now()
+			if !lastTick.IsZero() {
+				largestTickGap = max(largestTickGap, tick.Sub(lastTick))
+			}
 			stallThreshold := 2 * (cfg.ProbeInterval + cfg.ProbeTimeout)
 			stalled := !lastTick.IsZero() && tick.Sub(lastTick) > stallThreshold
 			lastTick = tick
@@ -187,6 +198,9 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 				staleSamples = 0
 			}
 			if err == nil {
+				if !failureSince.IsZero() && deps.Journal != nil {
+					deps.Journal("probe_failure_end", map[string]any{"duration_ms": time.Since(failureSince).Milliseconds(), "failures": episodeFailures})
+				}
 				lastProgress = time.Now()
 				ready = true
 				if healthySince.IsZero() {
@@ -196,6 +210,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 					resetBackoff = true
 				}
 				failures = 0
+				episodeFailures = 0
 				failureSince = time.Time{}
 				staleSamples = 0
 				lastWarning = time.Time{}
@@ -204,7 +219,12 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 			healthySince = time.Time{}
 			if failureSince.IsZero() {
 				failureSince = time.Now()
+				firstHeartbeat = lastHeartbeat
+				if deps.Journal != nil {
+					deps.Journal("probe_failure_start", map[string]any{"error": err.Error()})
+				}
 			}
+			episodeFailures++
 			if deps.Heartbeat != nil {
 				if counter, herr := deps.Heartbeat(); herr == nil {
 					if haveHeartbeat && counter != lastHeartbeat {
@@ -241,6 +261,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 						deps.Logf("replacing daemon during startup: no successful probe for %s and heartbeat stale for %s (last probe: %v)", time.Since(started), time.Since(staleSince), err)
 					}
 				}
+				recordReplacement(child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 				return true, false, stopChild(child, cfg.TermGrace)
 			}
 			failures++
@@ -258,11 +279,27 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 					deps.Logf("replacing daemon: %d failed probes and heartbeat stale for %s (last probe: %v)", failures, time.Since(staleSince), err)
 				}
 			}
+			recordReplacement(child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 			if err := stopChild(child, cfg.TermGrace); err != nil {
 				return false, false, err
 			}
 			return true, resetBackoff, nil
 		}
+	}
+}
+
+func recordReplacement(child Child, deps Deps, failures int, probeErr error, firstHeartbeat, lastHeartbeat uint64, stale time.Duration, ceiling bool, tickGap time.Duration) {
+	data := map[string]any{"failed_probes": failures, "last_error": probeErr.Error(), "first_heartbeat_counter": firstHeartbeat, "last_heartbeat_counter": lastHeartbeat, "stale_ms": stale.Milliseconds(), "ceiling": ceiling, "largest_tick_gap_ms": tickGap.Milliseconds()}
+	if deps.CaptureDump != nil {
+		path, err := deps.CaptureDump(child)
+		if err != nil {
+			data["dump_error"] = err.Error()
+		} else {
+			data["dump_path"] = path
+		}
+	}
+	if deps.Journal != nil {
+		deps.Journal("replacement", data)
 	}
 }
 
@@ -340,6 +377,46 @@ func (c *execChild) Kill() error {
 	return signalExited(signalKill(c.cmd.Process))
 }
 
+func (c *execChild) dumpSignal() error { return signalExited(signalDump(c.cmd.Process)) }
+
+func captureDump(child Child, dir string) (string, error) {
+	signaler, ok := child.(interface{ dumpSignal() error })
+	if !ok {
+		return "", errors.New("child has no dump signal")
+	}
+	source := filepath.Join(dir, "d.log.stacks")
+	previous, err := os.Stat(source)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	start := time.Now()
+	if err := signaler.dumpSignal(); err != nil {
+		return "", err
+	}
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if fi, err := os.Stat(source); err == nil && (previous == nil || !os.SameFile(previous, fi)) {
+			body, err := os.ReadFile(source)
+			if err != nil {
+				return "", err
+			}
+			path := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", start.UnixNano()))
+			if err := fssecure.WriteFile(path, body); err != nil {
+				return "", err
+			}
+			return path, nil
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			return "", errors.New("goroutine dump timed out")
+		}
+	}
+}
+
 // safety: signalling the handle rather than the pid means a child the kernel
 // has already reaped answers ErrProcessDone instead of letting the signal reach
 // whichever process inherited its pid.
@@ -376,6 +453,11 @@ func Run(args []string) error {
 		childArgs = append(childArgs, "--admission-config", *admissionConfig)
 	}
 	logger := log.New(os.Stderr, "wingd supervisor: ", log.LstdFlags|log.LUTC)
+	dir, err := wingd.StateDir(*home)
+	if err != nil {
+		return err
+	}
+	var supervisorSeq uint64
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return Loop(ctx, Config{
@@ -401,6 +483,13 @@ func Run(args []string) error {
 			}
 			return wingd.ReadHeartbeat(path)
 		},
-		Logf: logger.Printf,
+		Logf:        logger.Printf,
+		CaptureDump: func(child Child) (string, error) { return captureDump(child, dir) },
+		Journal: func(kind string, data map[string]any) {
+			supervisorSeq++
+			if err := journal.AppendSupervisor(dir, journal.Record{Seq: supervisorSeq, Incarnation: journal.Incarnation(dir), Kind: kind, Data: data}); err != nil {
+				logger.Printf("journal: %v", err)
+			}
+		},
 	})
 }

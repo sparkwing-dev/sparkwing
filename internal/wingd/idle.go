@@ -22,7 +22,7 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 		case <-t.C:
 			if d.idleElapsed() >= idle {
 				d.cfg.logf("idle for %s, exiting", idle)
-				d.shutdown()
+				d.shutdownWithReason("idle")
 				return
 			}
 		}

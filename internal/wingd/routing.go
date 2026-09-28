@@ -1,6 +1,8 @@
 package wingd
 
 import (
+	"strings"
+
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -36,12 +38,22 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 			lease, _ := d.ledger.LeaseByID(ev.Lease)
 			now := d.now()
+			wait := int64(0)
+			if !c.startAt.IsZero() {
+				wait = now.Sub(c.startAt).Milliseconds()
+			}
+			usedCores, usedMem := d.usedLocked()
+			freeCores := max(0, d.appliedCores-usedCores)
+			freeMem := uint64(0)
+			if d.appliedMem > usedMem {
+				freeMem = d.appliedMem - usedMem
+			}
+			grantData := map[string]any{"backfill": ev.BackfillCount > 0, "headroom_before_cores": freeCores + c.resources.Cores, "headroom_after_cores": freeCores, "headroom_before_memory": freeMem + uint64(max(0, c.resources.MemoryBytes)), "headroom_after_memory": freeMem, "external_cores": d.externalCores, "external_memory": d.externalMem, "lease_id": ev.Lease}
 			if c.finalizable {
-				wait := int64(0)
-				if !c.startAt.IsZero() {
-					wait = now.Sub(c.startAt).Milliseconds()
-				}
-				d.events.record(now, admissionEvent{Kind: eventGrant, WaitMS: wait})
+				d.recordWindow(now, admissionEvent{Kind: eventGrant, WaitMS: wait}, c, grantData)
+			} else {
+				grantData["wait_ms"] = wait
+				d.recordJournal("grant", c, grantData)
 			}
 			c.role = roleHolder
 			c.leaseID = ev.Lease
@@ -70,18 +82,30 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		case admission.EventQueued:
 			if c := d.byRun[ev.RequestID]; c != nil {
 				snap := d.ledger.Snapshot()
-				out = append(out, delivery{c, &wingwire.Queued{
+				queued := &wingwire.Queued{
 					RunID:          ev.RequestID,
 					Key:            blockingSemaphoreKeyForRun(snap, ev.RequestID),
 					Position:       ev.Position + 1,
 					QueueLength:    d.waiterCountLocked(),
 					BlockingReason: d.hostBlockingReasonLocked(c),
-				}})
+				}
+				resource := queueBlockerResource(queued.Key, queued.BlockingReason)
+				d.recordJournal("queued", c, map[string]any{"position": queued.Position, "key": queued.Key, "resource": resource, "blocking_reason": queued.BlockingReason, "blocker": queueBlocker(snap, resource, ev.RequestID)})
+				out = append(out, delivery{c, queued})
 			}
 		case admission.EventBackfilled:
-			d.events.record(d.now(), admissionEvent{Kind: eventBackfill, BackfillCount: ev.BackfillCount})
+			owner := d.byRun[ev.RequestID]
+			if owner == nil {
+				owner = &conn{runID: ev.RequestID}
+			}
+			d.recordWindow(d.now(), admissionEvent{Kind: eventBackfill, BackfillCount: ev.BackfillCount}, owner, map[string]any{"bypassed_by": ev.BypassedBy})
 		case admission.EventEvicted:
-			d.events.record(d.now(), admissionEvent{Kind: eventEviction, Key: ev.Key})
+			owner := d.byRun[ev.RequestID]
+			if owner == nil {
+				owner = &conn{runID: ev.RequestID}
+			}
+			d.recordWindow(d.now(), admissionEvent{Kind: eventEviction, Key: ev.Key}, owner, map[string]any{"reason": ev.Key, "superseded_by": d.leaseRun[ev.SupersededBy]})
+			d.recordJournal("superseded", owner, map[string]any{"reason": ev.Key, "by_run": d.leaseRun[ev.SupersededBy]})
 			if c := d.byRun[ev.RequestID]; c != nil {
 				out = append(out, delivery{c, &wingwire.Evicted{
 					RunID:        ev.RequestID,
@@ -93,6 +117,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		case admission.EventReprioritized:
 			queueChanged = true
 		case admission.EventReleased:
+			d.recordJournal("release", &conn{runID: ev.RequestID}, map[string]any{"lease_id": ev.Lease})
 			queueChanged = true
 			delete(d.leaseRun, ev.Lease)
 			delete(d.leaseCharge, ev.Lease)
@@ -103,6 +128,64 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 		out = append(out, d.waiterDeliveriesLocked()...)
 	}
 	return out
+}
+
+func queueBlockerResource(key, reason string) string {
+	if key != "" {
+		return "semaphore:" + key
+	}
+	if strings.Contains(reason, "cores") {
+		return "cores"
+	}
+	if strings.Contains(reason, "memory") {
+		return "memory"
+	}
+	return ""
+}
+
+func queueBlocker(snap admission.Snapshot, resource, runID string) string {
+	for i, waiter := range snap.Waiters {
+		if waiter.RequestID == runID {
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := waiterResources(snap.Waiters[j])[resource]; ok {
+					return snap.Waiters[j].RequestID
+				}
+			}
+			break
+		}
+	}
+	if strings.HasPrefix(resource, "semaphore:") {
+		key := strings.TrimPrefix(resource, "semaphore:")
+		for _, sem := range snap.Semaphores {
+			if sem.Key != key {
+				continue
+			}
+			for _, hold := range sem.Holds {
+				if hold.Superseded {
+					continue
+				}
+				for _, lease := range snap.Leases {
+					if lease.ID == hold.Lease {
+						return lease.RequestID
+					}
+				}
+			}
+		}
+		return ""
+	}
+	for _, lease := range snap.Leases {
+		switch resource {
+		case "cores":
+			if lease.MilliCores > 0 {
+				return lease.RequestID
+			}
+		case "memory":
+			if lease.MemoryBytes > 0 {
+				return lease.RequestID
+			}
+		}
+	}
+	return ""
 }
 
 func (d *Daemon) waiterDeliveriesLocked() []delivery {

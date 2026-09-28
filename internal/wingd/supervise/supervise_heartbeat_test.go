@@ -3,6 +3,8 @@ package supervise
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -56,6 +58,9 @@ func TestStaleHeartbeatAndFailedProbesReplaceDaemon(t *testing.T) {
 		var mu sync.Mutex
 		mu.Lock()
 		starts, probes := 0, 0
+		var replacement map[string]any
+		var failureStarted bool
+		dumpPath := filepath.Join(t.TempDir(), "dump.txt")
 		err := Loop(t.Context(), Config{
 			ProbeInterval: time.Millisecond, ProbeTimeout: time.Millisecond,
 			FailureLimit: 2, TermGrace: time.Millisecond, StartupTimeout: time.Millisecond,
@@ -83,6 +88,20 @@ func TestStaleHeartbeatAndFailedProbesReplaceDaemon(t *testing.T) {
 				mu.Unlock()
 				return 1, nil
 			},
+			CaptureDump: func(child Child) (string, error) {
+				if child != first {
+					t.Errorf("captured a successor's dump")
+				}
+				return dumpPath, os.WriteFile(dumpPath, []byte("goroutine 1"), 0o600)
+			},
+			Journal: func(kind string, data map[string]any) {
+				if kind == "probe_failure_start" {
+					failureStarted = true
+				}
+				if kind == "replacement" {
+					replacement = data
+				}
+			},
 		})
 		mu.Unlock()
 		if err != nil {
@@ -90,6 +109,12 @@ func TestStaleHeartbeatAndFailedProbesReplaceDaemon(t *testing.T) {
 		}
 		if terms, _ := first.actions(); terms != 1 || starts != 2 {
 			t.Fatalf("stale heartbeat did not replace daemon: terms %d, starts %d", terms, starts)
+		}
+		if !failureStarted || replacement["failed_probes"] == nil || replacement["dump_path"] != dumpPath {
+			t.Fatalf("replacement evidence: start=%t record=%+v", failureStarted, replacement)
+		}
+		if body, err := os.ReadFile(dumpPath); err != nil || string(body) != "goroutine 1" {
+			t.Fatalf("dump: %q %v", body, err)
 		}
 	})
 }

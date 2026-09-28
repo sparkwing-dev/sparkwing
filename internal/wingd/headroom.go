@@ -171,6 +171,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 		d.cpuMeasured != stat.CPUMeasured ||
 		d.memMeasured != stat.MemoryMeasured ||
 		now.Sub(d.headroomAt) >= d.cfg.headroomMaxAge()
+	d.recordJournal("headroom_sample", nil, map[string]any{"total_cores": stat.TotalCores, "total_memory": stat.TotalMemoryBytes, "reserved_cores": reservedCores, "reserved_memory": reservedMem, "external_cores": externalCores, "external_memory": externalMem, "budget": journalBudget(d.cfg.Budget), "target_cores": targetCores, "target_memory": targetMem, "changed": changed})
 	if !changed {
 		d.mu.Unlock()
 		return

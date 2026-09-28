@@ -54,12 +54,14 @@ type conn struct {
 	handshaked bool
 
 	runID        string
+	journalRunID string
 	ownerRunID   string
 	displayRunID string
 	pipeline     string
 	priority     int
 	class        string
 	pid          int
+	peerPID      int
 	role         connRole
 	leaseID      admission.LeaseID
 	members      []string
@@ -112,6 +114,15 @@ func (c *conn) refuse(t wingwire.MessageType) (closeConn bool) {
 		name = name[:maxRefusedTypeName]
 	}
 	c.unsupported++
+	kind := "message_refused"
+	if !c.handshaked {
+		kind = "handshake_refused"
+	}
+	data := map[string]any{"message_type": name, "health_probe": c.healthProbe}
+	if !c.handshaked {
+		data["reason"] = "unsupported message " + name
+	}
+	c.d.recordJournal(kind, c, data)
 	where := ""
 	if c.healthProbe {
 		where = " on a health probe"
