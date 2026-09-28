@@ -80,6 +80,7 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/activity",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/annotations",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest",
+	"POST /api/v1/runs/{id}/nodes/{nodeID}/attempt",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset",
 	"GET /api/v1/runs/{id}/nodes/{nodeID}/bounce",
 	"POST /api/v1/runs/{id}/nodes/{nodeID}/bounce",
