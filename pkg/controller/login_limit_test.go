@@ -17,20 +17,12 @@ import (
 
 func postLogin(t *testing.T, h http.Handler, remoteAddr, forwardedFor, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	return postLoginVia(t, h, remoteAddr, "", forwardedFor, body)
-}
-
-func postLoginVia(t *testing.T, h http.Handler, remoteAddr, secret, forwardedFor, body string) *httptest.ResponseRecorder {
-	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.RemoteAddr = remoteAddr
 	if forwardedFor != "" {
 		req.Header.Set("X-Real-IP", forwardedFor)
 		req.Header.Set("X-Forwarded-For", forwardedFor)
-	}
-	if secret != "" {
-		req.Header.Set(ratelimit.ProxyAuthHeader, secret)
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -88,65 +80,52 @@ func TestLoginLimiter_GlobalBucketExceedsAFleetsLogins(t *testing.T) {
 	}
 }
 
-func TestLoginLimiter_RelayedClientsKeepSeparateBudgets(t *testing.T) {
-	h := New(newStoreForAuth(t), nil).WithProxyAuth(ratelimit.NewProxyAuth("s3cret")).Handler()
+func TestLoginLimiter_TrustedListenerClientsKeepSeparateBudgets(t *testing.T) {
+	h := ratelimit.TrustedListener(New(newStoreForAuth(t), nil).Handler())
 
 	for range loginClientBurst {
-		postLoginVia(t, h, "10.0.0.1:5000", "s3cret", "198.51.100.7", loginBodyNoPassword)
+		postLogin(t, h, "10.0.0.1:5000", "198.51.100.7", loginBodyNoPassword)
 	}
-	drained := postLoginVia(t, h, "10.0.0.1:5000", "s3cret", "198.51.100.7", loginBodyNoPassword)
+	drained := postLogin(t, h, "10.0.0.1:5000", "198.51.100.7", loginBodyNoPassword)
 	if drained.Code != http.StatusTooManyRequests {
-		t.Fatalf("relayed client status = %d, want %d", drained.Code, http.StatusTooManyRequests)
+		t.Fatalf("forwarded client status = %d, want %d", drained.Code, http.StatusTooManyRequests)
 	}
-	fresh := postLoginVia(t, h, "10.0.0.1:5000", "s3cret", "198.51.100.8", loginBodyNoPassword)
+	fresh := postLogin(t, h, "10.0.0.1:5000", "198.51.100.8", loginBodyNoPassword)
 	if fresh.Code != http.StatusBadRequest {
-		t.Fatalf("second relayed client status = %d, want %d", fresh.Code, http.StatusBadRequest)
+		t.Fatalf("second forwarded client status = %d, want %d", fresh.Code, http.StatusBadRequest)
 	}
 }
 
-func TestLoginLimiter_UnvouchedCallerCannotRotateWithForwardedHeaders(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		proxy  *ratelimit.ProxyAuth
-		secret string
-	}{
-		{name: "no configured secret"},
-		{name: "no secret presented", proxy: ratelimit.NewProxyAuth("s3cret")},
-		{name: "wrong secret presented", proxy: ratelimit.NewProxyAuth("s3cret"), secret: "guess"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := New(newStoreForAuth(t), nil).WithProxyAuth(tc.proxy).Handler()
-			for i := range loginClientBurst {
-				forwarded := netip.AddrFrom4([4]byte{198, 51, 100, byte(i)}).String()
-				if rec := postLoginVia(t, h, "203.0.113.7:5000", tc.secret, forwarded, loginBodyNoPassword); rec.Code != http.StatusBadRequest {
-					t.Fatalf("attempt %d: status = %d, want %d", i+1, rec.Code, http.StatusBadRequest)
-				}
-			}
-			rec := postLoginVia(t, h, "203.0.113.7:5000", tc.secret, "198.51.100.250", loginBodyNoPassword)
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("status = %d, want %d; forwarded headers must not mint new budgets", rec.Code, http.StatusTooManyRequests)
-			}
-		})
+func TestLoginLimiter_PlainListenerCannotRotateWithForwardedHeaders(t *testing.T) {
+	h := New(newStoreForAuth(t), nil).Handler()
+	for i := range loginClientBurst {
+		forwarded := netip.AddrFrom4([4]byte{198, 51, 100, byte(i)}).String()
+		if rec := postLogin(t, h, "203.0.113.7:5000", forwarded, loginBodyNoPassword); rec.Code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: status = %d, want %d", i+1, rec.Code, http.StatusBadRequest)
+		}
+	}
+	rec := postLogin(t, h, "203.0.113.7:5000", "198.51.100.250", loginBodyNoPassword)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d; forwarded headers must not mint new budgets", rec.Code, http.StatusTooManyRequests)
 	}
 }
 
-func TestRequestLogRecordsTheVouchedClientAddress(t *testing.T) {
+func TestRequestLogRecordsTheTrustedListenersClientAddress(t *testing.T) {
 	for _, tc := range []struct {
-		name, secret, want string
+		name    string
+		trusted bool
+		want    string
 	}{
-		{name: "relayed", secret: "s3cret", want: "198.51.100.7"},
-		{name: "spoofed", secret: "guess", want: "203.0.113.7"},
-		{name: "direct", want: "203.0.113.7"},
+		{name: "trusted listener", trusted: true, want: "198.51.100.7"},
+		{name: "plain listener", want: "203.0.113.7"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			srv := New(newStoreForAuth(t), slog.New(slog.NewJSONHandler(&logs, nil)))
-			h := srv.WithProxyAuth(ratelimit.NewProxyAuth("s3cret")).Handler()
-			realIP := ""
-			if tc.secret != "" {
-				realIP = "198.51.100.7"
+			h := New(newStoreForAuth(t), slog.New(slog.NewJSONHandler(&logs, nil))).Handler()
+			if tc.trusted {
+				h = ratelimit.TrustedListener(h)
 			}
-			postLoginVia(t, h, "203.0.113.7:5000", tc.secret, realIP, loginBodyNoPassword)
+			postLogin(t, h, "203.0.113.7:5000", "198.51.100.7", loginBodyNoPassword)
 			if want := `"client_ip":"` + tc.want + `"`; !strings.Contains(logs.String(), want) {
 				t.Fatalf("request log lacks %s:\n%s", want, logs.String())
 			}

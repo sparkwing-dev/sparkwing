@@ -14,11 +14,11 @@ const (
 	loginRateGCPeriod = 5 * time.Minute
 )
 
-func rateLimitMiddleware(l *ratelimit.Limiter, proxy *ratelimit.ProxyAuth, next http.Handler) http.Handler {
-	return rateLimitMiddlewareEvery(l, proxy, next, loginRateGCPeriod)
+func rateLimitMiddleware(l *ratelimit.Limiter, next http.Handler) http.Handler {
+	return rateLimitMiddlewareEvery(l, next, loginRateGCPeriod)
 }
 
-func rateLimitMiddlewareEvery(l *ratelimit.Limiter, proxy *ratelimit.ProxyAuth, next http.Handler, gcPeriod time.Duration) http.Handler {
+func rateLimitMiddlewareEvery(l *ratelimit.Limiter, next http.Handler, gcPeriod time.Duration) http.Handler {
 	var lastGC atomic.Int64
 	lastGC.Store(time.Now().UnixNano())
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +33,7 @@ func rateLimitMiddlewareEvery(l *ratelimit.Limiter, proxy *ratelimit.ProxyAuth, 
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !l.Allow(ratelimit.ClientIP(r, proxy), now) {
+		if !l.Allow(ratelimit.ClientIP(r), now) {
 			w.Header().Set("Retry-After", "60")
 			http.Error(w,
 				"too many login attempts; try again in a minute",

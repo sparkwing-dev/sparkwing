@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 // profileDashboard serves the operator's own store and asks the controller
@@ -71,13 +70,7 @@ func TestOAuthStartRelaysTheBrowsersAddress(t *testing.T) {
 	ctrl := newIdentityController(t, true)
 	req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/auth/google/start", nil)
 	req.RemoteAddr = "203.0.113.7:5555"
-	HandlerFromOptionsWithBundle(HandlerOptions{
-		Backend:       &fakeBackend{caps: backend.Capabilities{Mode: "cluster"}},
-		ControllerURL: ctrl.URL,
-		Token:         "service-token",
-		RequireLogin:  true,
-		ProxyAuth:     ratelimit.NewProxyAuth("s3cret"),
-	}, authTestBundle).ServeHTTP(httptest.NewRecorder(), req)
+	teamDashboard(t, ctrl.URL).ServeHTTP(httptest.NewRecorder(), req)
 	starts, _, _, _ := ctrl.snapshot()
 	if len(starts) != 1 || starts[0]["x-real-ip"] != "203.0.113.7" {
 		t.Fatalf("starts = %v, want one carrying the browser's address", starts)

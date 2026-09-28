@@ -4,12 +4,10 @@
 package ratelimit
 
 import (
-	"crypto/subtle"
-	"fmt"
+	"context"
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -164,74 +162,33 @@ func (l *Limiter) gcLocked(now time.Time) {
 	}
 }
 
-// ProxyAuthHeader carries the secret a fronting proxy presents to
-// vouch for the X-Real-IP and X-Forwarded-Proto it sets.
-const ProxyAuthHeader = "X-Sparkwing-Proxy-Auth"
+type trustedListenerKey struct{}
 
-// ProxyAuth recognizes requests relayed by a proxy that holds the
-// shared secret. A nil *ProxyAuth recognizes none, so every forwarded
-// header is ignored.
-type ProxyAuth struct{ secret []byte }
-
-// LoadProxyAuth reads the shared proxy secret from path. An empty path
-// returns nil; a file with no secret in it is an error.
-func LoadProxyAuth(path string) (*ProxyAuth, error) {
-	if path == "" {
-		return nil, nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	p := NewProxyAuth(string(raw))
-	if p == nil {
-		return nil, fmt.Errorf("%s holds no secret", path)
-	}
-	return p, nil
+// TrustedListener marks every request next serves as accepted on a
+// listener that only a trusted proxy can reach, which overwrites
+// X-Real-IP with the client address it saw. Wrap the handler of that
+// listener alone; ClientIP ignores X-Real-IP everywhere else.
+func TrustedListener(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), trustedListenerKey{}, true)))
+	})
 }
 
-// NewProxyAuth recognizes requests carrying secret, ignoring surrounding
-// whitespace. A blank secret returns nil.
-func NewProxyAuth(secret string) *ProxyAuth {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return nil
-	}
-	return &ProxyAuth{secret: []byte(secret)}
-}
-
-// Relayed reports whether r carries exactly one copy of the secret.
-func (p *ProxyAuth) Relayed(r *http.Request) bool {
-	if p == nil {
-		return false
-	}
-	got := r.Header.Values(ProxyAuthHeader)
-	return len(got) == 1 && subtle.ConstantTimeCompare([]byte(got[0]), p.secret) == 1
-}
-
-// Relay stamps an outbound request to the controller with the client
-// address this process verified, and the secret that vouches for it.
-// A nil *ProxyAuth or an empty address strips both headers instead, so
-// a caller's copy never travels onward.
-func (p *ProxyAuth) Relay(h http.Header, clientIP string) {
-	if p == nil || clientIP == "" {
-		h.Del(ProxyAuthHeader)
-		h.Del("X-Real-IP")
-		return
-	}
-	h.Set(ProxyAuthHeader, string(p.secret))
-	h.Set("X-Real-IP", clientIP)
+// FromTrustedListener reports whether r arrived through TrustedListener.
+func FromTrustedListener(r *http.Request) bool {
+	trusted, _ := r.Context().Value(trustedListenerKey{}).(bool)
+	return trusted
 }
 
 // ClientIP returns the address a limiter, an audit record or a relay
-// should attribute r to: the single X-Real-IP of a request p
-// recognizes as relayed, and the TCP peer otherwise.
-func ClientIP(r *http.Request, p *ProxyAuth) string {
+// should attribute r to: the single X-Real-IP of a request accepted on
+// a trusted listener, and the TCP peer otherwise.
+func ClientIP(r *http.Request) string {
 	peer, ok := remoteIP(r.RemoteAddr)
 	if !ok {
 		return r.RemoteAddr
 	}
-	if forwarded := r.Header.Values("X-Real-IP"); len(forwarded) == 1 && p.Relayed(r) {
+	if forwarded := r.Header.Values("X-Real-IP"); len(forwarded) == 1 && FromTrustedListener(r) {
 		if ip, err := netip.ParseAddr(strings.TrimSpace(forwarded[0])); err == nil && ip.Zone() == "" {
 			return ip.Unmap().String()
 		}

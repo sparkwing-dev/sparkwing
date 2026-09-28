@@ -1751,12 +1751,12 @@ unlock.
 
 - **controller + web (Breaking):** `--trusted-proxy-cidrs` and the chart's
   `controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs` are gone, and
-  neither process takes a client address from `X-Forwarded-For`. A request's `X-Real-IP` and
-  `X-Forwarded-Proto` count only when it carries the secret from
-  `--proxy-auth-secret-file` (chart: `proxyAuth.name`) in
-  `X-Sparkwing-Proxy-Auth`, and the dashboard relays each browser's address
-  with that secret on every controller call, not only logins. See the
-  [migration guide](docs/migrations/_unreleased.md#proxy-secret-replaces-trusted-proxy-cidrs).
+  neither process takes a client address from `X-Forwarded-For`. Each takes
+  `--trusted-proxy-addr`, a second listener on which a request's `X-Real-IP`
+  (and, for the dashboard, `X-Forwarded-Proto`) counts; `--addr` ignores both.
+  The dashboard sends each browser's address as `X-Real-IP` on every
+  controller call, not only logins, and never to the logs service. See the
+  [migration guide](docs/migrations/_unreleased.md#trusted-proxy-listener-replaces-trusted-proxy-cidrs).
 
 - **web (Breaking):** the dashboard no longer probes or displays controller,
   logs, and cache service health. It no longer serves

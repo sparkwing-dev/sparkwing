@@ -58,64 +58,36 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 }
 
 func TestHSTSNeedsTLSEvidence(t *testing.T) {
-	trusted := ratelimit.NewProxyAuth("s3cret")
 	for _, tc := range []struct {
 		name      string
 		opts      HandlerOptions
-		peer      string
+		trusted   bool
 		forwarded string
-		secret    string
 		tls       bool
 		want      string
 	}{
-		{name: "plain HTTP", peer: "10.1.2.3:9999"},
+		{name: "plain HTTP"},
 		{name: "TLS listener", tls: true, want: hstsValue},
-		{
-			name:      "trusted forwarded https",
-			opts:      HandlerOptions{ProxyAuth: trusted},
-			peer:      "10.1.2.3:9999",
-			forwarded: "https",
-			secret:    "s3cret",
-			want:      hstsValue,
-		},
-		{
-			name:      "wrong secret forwarded https",
-			opts:      HandlerOptions{ProxyAuth: trusted},
-			peer:      "203.0.113.9:9999",
-			forwarded: "https",
-			secret:    "guess",
-		},
-		{
-			name:      "trusted forwarded http",
-			opts:      HandlerOptions{ProxyAuth: trusted},
-			peer:      "10.1.2.3:9999",
-			forwarded: "http",
-			secret:    "s3cret",
-		},
-		{
-			name:      "forwarded https without a configured secret",
-			peer:      "10.1.2.3:9999",
-			forwarded: "https",
-			secret:    "s3cret",
-		},
+		{name: "trusted listener forwarded https", trusted: true, forwarded: "https", want: hstsValue},
+		{name: "plain listener forwarded https", forwarded: "https"},
+		{name: "trusted listener forwarded http", trusted: true, forwarded: "http"},
 		{name: "operator asserts TLS", opts: HandlerOptions{HSTS: true}, want: hstsValue},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			if tc.peer != "" {
-				req.RemoteAddr = tc.peer
-			}
+			req.RemoteAddr = "10.1.2.3:9999"
 			if tc.forwarded != "" {
 				req.Header.Set("X-Forwarded-Proto", tc.forwarded)
-			}
-			if tc.secret != "" {
-				req.Header.Set(ratelimit.ProxyAuthHeader, tc.secret)
 			}
 			if tc.tls {
 				req.TLS = &tls.ConnectionState{}
 			}
+			h := HandlerFromOptionsWithBundle(tc.opts, testBundle())
+			if tc.trusted {
+				h = ratelimit.TrustedListener(h)
+			}
 			rec := httptest.NewRecorder()
-			HandlerFromOptionsWithBundle(tc.opts, testBundle()).ServeHTTP(rec, req)
+			h.ServeHTTP(rec, req)
 			if got := rec.Header().Get("Strict-Transport-Security"); got != tc.want {
 				t.Errorf("Strict-Transport-Security = %q, want %q", got, tc.want)
 			}

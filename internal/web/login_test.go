@@ -112,52 +112,24 @@ func TestSafeNext(t *testing.T) {
 	}
 }
 
-type relayedHeaders struct{ secret, realIP string }
-
 var relayCases = []struct {
 	name       string
-	proxy      *ratelimit.ProxyAuth
+	trusted    bool
 	remoteAddr string
-	secret     string
 	realIP     string
-	want       relayedHeaders
+	want       string
 }{
-	{
-		name:       "no configured secret strips a spoofed address",
-		remoteAddr: "198.51.100.9:4444",
-		secret:     "s3cret",
-		realIP:     "203.0.113.11",
-	},
-	{
-		name:       "direct browser relays its peer address",
-		proxy:      ratelimit.NewProxyAuth("s3cret"),
-		remoteAddr: "198.51.100.9:4444",
-		want:       relayedHeaders{secret: "s3cret", realIP: "198.51.100.9"},
-	},
-	{
-		name:       "browser behind the ingress relays the forwarded address",
-		proxy:      ratelimit.NewProxyAuth("s3cret"),
-		remoteAddr: "10.1.2.3:4444",
-		secret:     "s3cret",
-		realIP:     "203.0.113.11",
-		want:       relayedHeaders{secret: "s3cret", realIP: "203.0.113.11"},
-	},
-	{
-		name:       "wrong secret cannot forge an address",
-		proxy:      ratelimit.NewProxyAuth("s3cret"),
-		remoteAddr: "198.51.100.9:4444",
-		secret:     "guess",
-		realIP:     "203.0.113.11",
-		want:       relayedHeaders{secret: "s3cret", realIP: "198.51.100.9"},
-	},
+	{name: "plain listener relays the peer over a spoofed address", remoteAddr: "198.51.100.9:4444", realIP: "203.0.113.11", want: "198.51.100.9"},
+	{name: "trusted listener relays the forwarded address", trusted: true, remoteAddr: "10.1.2.3:4444", realIP: "203.0.113.11", want: "203.0.113.11"},
+	{name: "trusted listener without the header relays the peer", trusted: true, remoteAddr: "10.1.2.3:4444", want: "10.1.2.3"},
 }
 
-func relayRecorder(t *testing.T, path string, reply func(http.ResponseWriter)) (*httptest.Server, chan relayedHeaders) {
+func relayRecorder(t *testing.T, path string, reply func(http.ResponseWriter)) (*httptest.Server, chan string) {
 	t.Helper()
-	seen := make(chan relayedHeaders, 4)
+	seen := make(chan string, 4)
 	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == path {
-			seen <- relayedHeaders{secret: r.Header.Get(ratelimit.ProxyAuthHeader), realIP: r.Header.Get("X-Real-IP")}
+			seen <- strings.Join(r.Header.Values("X-Real-IP"), ",")
 			reply(w)
 			return
 		}
@@ -167,15 +139,27 @@ func relayRecorder(t *testing.T, path string, reply func(http.ResponseWriter)) (
 	return controller, seen
 }
 
-func expectRelayed(t *testing.T, seen chan relayedHeaders, want relayedHeaders) {
+func serveRelayCase(t *testing.T, opts HandlerOptions, req *http.Request, trusted bool, realIP string) {
+	t.Helper()
+	handler := HandlerFromOptionsWithBundle(opts, authTestBundle)
+	if trusted {
+		handler = ratelimit.TrustedListener(handler)
+	}
+	if realIP != "" {
+		req.Header.Set("X-Real-IP", realIP)
+	}
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+}
+
+func expectRelayed(t *testing.T, seen chan string, want string) {
 	t.Helper()
 	select {
 	case got := <-seen:
 		if got != want {
-			t.Fatalf("controller saw %+v, want %+v", got, want)
+			t.Fatalf("upstream saw X-Real-IP %q, want %q", got, want)
 		}
 	default:
-		t.Fatalf("controller never saw the request")
+		t.Fatalf("upstream never saw the request")
 	}
 }
 
@@ -189,12 +173,6 @@ func TestLoginRelaysVerifiedBrowserAddressToController(t *testing.T) {
 	})
 	for _, tc := range relayCases {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := HandlerFromOptionsWithBundle(HandlerOptions{
-				ControllerURL: controller.URL,
-				RequireLogin:  true,
-				ProxyAuth:     tc.proxy,
-			}, authTestBundle)
-
 			form := url.Values{
 				"username":   {"admin"},
 				"password":   {"correct-horse"},
@@ -205,11 +183,7 @@ func TestLoginRelaysVerifiedBrowserAddressToController(t *testing.T) {
 			req.Header.Set("Origin", "https://dashboard.example")
 			req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "tok"})
 			req.RemoteAddr = tc.remoteAddr
-			if tc.secret != "" {
-				req.Header.Set(ratelimit.ProxyAuthHeader, tc.secret)
-			}
-			req.Header.Set("X-Real-IP", tc.realIP)
-			handler.ServeHTTP(httptest.NewRecorder(), req)
+			serveRelayCase(t, HandlerOptions{ControllerURL: controller.URL, RequireLogin: true}, req, tc.trusted, tc.realIP)
 			expectRelayed(t, seen, tc.want)
 		})
 	}
@@ -222,19 +196,25 @@ func TestProxiedAPICallRelaysVerifiedBrowserAddress(t *testing.T) {
 	})
 	for _, tc := range relayCases {
 		t.Run(tc.name, func(t *testing.T) {
-			handler := HandlerFromOptionsWithBundle(HandlerOptions{
-				ControllerURL: controller.URL,
-				Token:         "service-token",
-				ProxyAuth:     tc.proxy,
-			}, authTestBundle)
 			req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/api/v1/runs", nil)
 			req.RemoteAddr = tc.remoteAddr
-			if tc.secret != "" {
-				req.Header.Set(ratelimit.ProxyAuthHeader, tc.secret)
-			}
-			req.Header.Set("X-Real-IP", tc.realIP)
-			handler.ServeHTTP(httptest.NewRecorder(), req)
+			serveRelayCase(t, HandlerOptions{ControllerURL: controller.URL, Token: "service-token"}, req, tc.trusted, tc.realIP)
 			expectRelayed(t, seen, tc.want)
+		})
+	}
+}
+
+func TestLogsProxyNeverRelaysAnAddress(t *testing.T) {
+	t.Parallel()
+	logs, seen := relayRecorder(t, "/api/v1/logs/run-1/node-1", func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	for _, tc := range relayCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "https://dashboard.example/api/v1/logs/run-1/node-1", nil)
+			req.RemoteAddr = tc.remoteAddr
+			serveRelayCase(t, HandlerOptions{ControllerURL: logs.URL, LogsURL: logs.URL, Token: "service-token"}, req, tc.trusted, tc.realIP)
+			expectRelayed(t, seen, "")
 		})
 	}
 }

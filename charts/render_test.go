@@ -171,25 +171,6 @@ func TestWebIsPointedAtTheBundledLogs(t *testing.T) {
 	}
 }
 
-func TestProxyAuthSecretMountsIntoControllerAndWeb(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 1.4s of real work; the fast class runs under -short")
-	}
-	const flag = "--proxy-auth-secret-file="
-	for _, tmpl := range []string{"templates/controller-deployment.yaml", "templates/web-deployment.yaml"} {
-		if got, ok := hasFlag(webArgs(t, helmRender(t, "./sparkwing-full", tmpl, "sparkwing")), flag); ok {
-			t.Fatalf("%s default proxy secret flag = %q", tmpl, got)
-		}
-		rendered := helmRender(t, "./sparkwing-full", tmpl, "sparkwing", "proxyAuth.name=edge-proxy")
-		if got, _ := hasFlag(webArgs(t, rendered), flag); got != flag+"/etc/sparkwing/proxy-auth/secret" {
-			t.Fatalf("%s proxy secret flag = %q", tmpl, got)
-		}
-		if !strings.Contains(rendered, `secretName: "edge-proxy"`) || !strings.Contains(rendered, "mountPath: /etc/sparkwing/proxy-auth") {
-			t.Fatalf("%s does not mount the proxy secret:\n%s", tmpl, rendered)
-		}
-	}
-}
-
 func TestControllerLoginThrottleFlagsRender(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.6s of real work; the fast class runs under -short")

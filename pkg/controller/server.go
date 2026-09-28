@@ -113,8 +113,9 @@ type Server struct {
 	deletionHolderOnce sync.Once
 	deletionHolderID   string
 
-	metricsAddr string
-	metricsLn   net.Listener
+	metricsAddr      string
+	trustedProxyAddr string
+	metricsLn        net.Listener
 
 	reconcileHook func(context.Context) error
 
@@ -245,7 +246,7 @@ func New(st *store.Store, logger *slog.Logger) *Server {
 		store:               st,
 		dispatcher:          NoopDispatcher{Logger: logger},
 		logger:              logger,
-		loginLimit:          newLoginLimiter(nil),
+		loginLimit:          newLoginLimiter(),
 		queueTimeout:        15 * time.Minute,
 		sessionMaxLifetime:  DefaultSessionMaxLifetime,
 		concurrencyCacheCap: store.DefaultConcurrencyCacheCap,
@@ -768,15 +769,12 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 	})
 }
 
-// WithProxyAuth names the secret a fronting proxy or the dashboard
-// presents to vouch for a request's X-Real-IP. Login throttling, the
-// bearer failure budget and the request log then key on that address;
-// nil keys them on the TCP peer and ignores forwarded headers.
-func (s *Server) WithProxyAuth(p *ratelimit.ProxyAuth) *Server {
-	s.loginLimit = newLoginLimiter(p)
-	if s.auth != nil {
-		s.auth.WithProxyAuth(p)
-	}
+// WithTrustedProxyAddr serves the same API on a second address whose
+// requests key login throttling, the bearer failure budget and the
+// request log on their X-Real-IP. Only a proxy that overwrites that
+// header may reach addr.
+func (s *Server) WithTrustedProxyAddr(addr string) *Server {
+	s.trustedProxyAddr = addr
 	return s
 }
 
@@ -817,7 +815,6 @@ const tokenCacheTTL = 60 * time.Second
 
 func (s *Server) storeAuthenticator() *Authenticator {
 	return NewAuthenticator(s.store, tokenCacheTTL).
-		WithProxyAuth(s.loginLimit.proxy).
 		WithLogger(s.logger)
 }
 
@@ -885,7 +882,7 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
-			return ratelimit.ClientIP(r, s.loginLimit.proxy)
+			return ratelimit.ClientIP(r)
 		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.runnerPresence.listening(time.Now())
@@ -1364,13 +1361,20 @@ func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logge
 const controllerShutdownBudget = 5 * time.Second
 
 func ServeWith(ctx context.Context, s *Server, addr string) error {
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           s.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       2 * time.Minute,
+	listener := func(addr string, h http.Handler) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           h,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+	}
+	srv := listener(addr, s.Handler())
+	servers := []*http.Server{srv}
+	if s.trustedProxyAddr != "" {
+		servers = append(servers, listener(s.trustedProxyAddr, ratelimit.TrustedListener(srv.Handler)))
 	}
 
 	if n, err := store.Maintenance.ReconcileConcurrencyKeys(s.store, ctx, store.DefaultConcurrencyLease); err != nil {
@@ -1393,7 +1397,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		go s.pool.run(ctx, s.logger)
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1+len(servers))
 
 	metricsSrv := s.metricsServer()
 	if metricsSrv != nil {
@@ -1421,17 +1425,21 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 		}()
 	}
 
-	go func() {
-		s.logger.Info("controller listening", "addr", addr)
-		errCh <- srv.ListenAndServe()
-	}()
+	for _, l := range servers {
+		go func() {
+			s.logger.Info("controller listening", "addr", l.Addr, "trusted_proxy", l != srv)
+			errCh <- l.ListenAndServe()
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
+		for _, l := range servers {
+			if err := l.Shutdown(shutdownCtx); err != nil {
+				s.logger.Warn("controller HTTP shutdown incomplete", "addr", l.Addr, "err", err)
+			}
 		}
 		s.drainGitHubCommitStatuses()
 		return nil

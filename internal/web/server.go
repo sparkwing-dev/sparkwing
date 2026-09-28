@@ -96,12 +96,11 @@ type HandlerOptions struct {
 
 	RequireLogin bool
 
-	// ProxyAuth recognizes requests a fronting proxy relays with the
-	// shared secret, whose X-Real-IP and X-Forwarded-Proto then count.
-	// The dashboard relays the address it settles on, with the same
-	// secret, on every call it makes to the controller. Nil ignores
-	// forwarded headers and strips them from those calls.
-	ProxyAuth *ratelimit.ProxyAuth
+	// TrustedProxyAddr is a second address ServeWithOptions serves the
+	// dashboard on, for a proxy that overwrites X-Real-IP and
+	// X-Forwarded-Proto. Only requests accepted there have those headers
+	// believed. Empty serves the main address alone.
+	TrustedProxyAddr string
 
 	// HSTS asserts that browsers reach this dashboard over TLS even
 	// though the process serves plaintext, for operators who terminate
@@ -174,6 +173,14 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	if err := validateCookieExposure(opts, addr); err != nil {
 		return err
 	}
+	if opts.TrustedProxyAddr != "" {
+		if err := validateRemoteExposure(opts, opts.TrustedProxyAddr); err != nil {
+			return err
+		}
+		if err := validateCookieExposure(opts, opts.TrustedProxyAddr); err != nil {
+			return err
+		}
+	}
 	if opts.Bundle == nil {
 		if err := VerifyBundleEmbedded(); err != nil {
 			return err
@@ -184,9 +191,16 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	if err := opts.Paths.EnsureRoot(); err != nil {
 		return err
 	}
+	handler := HandlerFromOptions(opts)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      HandlerFromOptions(opts),
+		Handler:      handler,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+	trusted := &http.Server{
+		Addr:         opts.TrustedProxyAddr,
+		Handler:      ratelimit.TrustedListener(handler),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
@@ -195,7 +209,16 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
+		_ = trusted.Shutdown(shutdownCtx)
 	}()
+	trustedErr := make(chan error, 1)
+	if opts.TrustedProxyAddr != "" {
+		go func() {
+			fmt.Fprintf(os.Stderr, "sparkwing web: serving trusted proxy traffic on http://%s\n", opts.TrustedProxyAddr)
+			trustedErr <- trusted.ListenAndServe()
+			_ = srv.Close()
+		}()
+	}
 	lis := opts.Listener
 	if lis == nil {
 		l, err := net.Listen("tcp", addr)
@@ -207,6 +230,13 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	fmt.Fprintf(os.Stderr, "sparkwing web: serving http://%s\n", addr)
 	if err := srv.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	select {
+	case err := <-trustedErr:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("trusted proxy listener: %w", err)
+		}
+	default:
 	}
 	return nil
 }
@@ -254,7 +284,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 		authedMux.Handle("/api/v1/logs/", logsProxy(opts))
 	}
 	if opts.ControllerURL != "" {
-		controllerAPI := proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true))
+		controllerAPI := proxyAllowList(controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts), true, true))
 		authedMux.Handle("/api/v1/", controllerAPI)
 		authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler(controllerAPI))
 	} else {
@@ -293,16 +323,16 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.HandleFunc("GET /login", loginPageHandler(opts))
 	loginLimiter := ratelimit.New(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.ProxyAuth, loginSubmitHandler(opts))))
+		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.ProxyAuth, bootstrapSubmitHandler(opts))))
+		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
 	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
 	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
 	router.HandleFunc("GET /github/app/setup", githubAppSetupHandler(opts))
 	router.HandleFunc("GET "+githubAppCallbackPath, githubAppCallbackHandler(opts))
 	if opts.ControllerURL != "" {
-		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false))
+		gitcacheProxy := gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false, false, true))
 		router.Handle("/api/v1/gitcache/", gitcacheProxy)
 		router.Handle("/api/v1/runs/{id}/gitcache/", gitcacheProxy)
 	}
@@ -621,7 +651,7 @@ func jsStringLiteral(s string) string {
 // safety: on a multi-team controller one service bearer reads every team, so a
 // signed-in browser reaches the controller and the logs service only as its
 // own session; the logs service resolves that session through the controller.
-func controllerProxy(controllerURL, token string, loginRequired, forwardSession bool) http.Handler {
+func controllerProxy(controllerURL, token string, loginRequired, forwardSession, relayClientIP bool) http.Handler {
 	u, err := url.Parse(controllerURL)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -629,9 +659,9 @@ func controllerProxy(controllerURL, token string, loginRequired, forwardSession 
 		})
 	}
 	proxy := &httputil.ReverseProxy{
-		Transport: controllerTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(u)
+			pr.Out.Header.Del("X-Real-IP")
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del(csrfHeaderName)
 			pr.Out.Header.Del("Proxy-Authorization")
@@ -653,6 +683,9 @@ func controllerProxy(controllerURL, token string, loginRequired, forwardSession 
 			}
 			return nil
 		},
+	}
+	if relayClientIP {
+		proxy.Transport = controllerTransport
 	}
 	return proxy
 }

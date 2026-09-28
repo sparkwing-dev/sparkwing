@@ -42,17 +42,17 @@ func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Hand
 		}
 		ctx := context.WithValue(r.Context(), cspNonceCtxKey{}, nonce)
 		ctx = context.WithValue(ctx, requestTLSCtxKey{}, overTLS)
-		ctx = context.WithValue(ctx, relayCtxKey{}, relay{proxy: opts.ProxyAuth, clientIP: ratelimit.ClientIP(r, opts.ProxyAuth)})
+		ctx = context.WithValue(ctx, clientIPCtxKey{}, ratelimit.ClientIP(r))
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func requestOverTLS(r *http.Request, opts HandlerOptions) bool {
-	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r, opts.ProxyAuth)
+	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r)
 }
 
-func forwardedHTTPS(r *http.Request, proxy *ratelimit.ProxyAuth) bool {
-	if !proxy.Relayed(r) {
+func forwardedHTTPS(r *http.Request) bool {
+	if !ratelimit.FromTrustedListener(r) {
 		return false
 	}
 	proto := r.Header.Get("X-Forwarded-Proto")
@@ -97,22 +97,27 @@ func cspNonceFrom(ctx context.Context) string {
 	return nonce
 }
 
-type relayCtxKey struct{}
+type clientIPCtxKey struct{}
 
-type relay struct {
-	proxy    *ratelimit.ProxyAuth
-	clientIP string
+var controllerTransport = ControllerTransport(http.DefaultTransport)
+
+// ControllerTransport sends the address of the browser being served as
+// X-Real-IP, replacing any the caller set, so the controller's trusted
+// listener keys that browser's budgets and audit records on it. Wrap only
+// the transport of a controller client: no other service reads the header.
+func ControllerTransport(base http.RoundTripper) http.RoundTripper {
+	return relayTransport{base: base}
 }
-
-// safety: every controller call carries the served browser's address and its secret,
-// or all browsers share the dashboard pod's budgets on the controller.
-var controllerTransport http.RoundTripper = relayTransport{base: http.DefaultTransport}
 
 type relayTransport struct{ base http.RoundTripper }
 
 func (t relayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	rel, _ := req.Context().Value(relayCtxKey{}).(relay)
+	clientIP, _ := req.Context().Value(clientIPCtxKey{}).(string)
 	req = req.Clone(req.Context())
-	rel.proxy.Relay(req.Header, rel.clientIP)
+	if clientIP == "" {
+		req.Header.Del("X-Real-IP")
+	} else {
+		req.Header.Set("X-Real-IP", clientIP)
+	}
 	return t.base.RoundTrip(req)
 }

@@ -1112,7 +1112,7 @@ Any other provider name answers `404`.
 Register `https://<dashboard-host>/auth/<provider>/callback` as the OAuth
 client's redirect URI (the authorization callback URL on GitHub). The scheme
 follows the same TLS evidence as the CSRF origin check, so a dashboard behind a
-TLS-terminating proxy needs `--proxy-auth-secret-file` or `--hsts`. The host is the
+TLS-terminating proxy needs `--trusted-proxy-addr` or `--hsts`. The host is the
 one the browser used, so a local dashboard reached as `http://localhost:4343`
 uses `http://localhost:4343/auth/google/callback`, and reaching it as
 `127.0.0.1` sends a redirect URI the provider does not recognize.
@@ -1129,7 +1129,7 @@ Every dashboard response carries `Content-Security-Policy`
 scripts), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
 `Referrer-Policy: same-origin`, and adds `Strict-Transport-Security` when the
 request carries evidence of TLS: the listener terminates TLS itself, a request
-carrying the `--proxy-auth-secret-file` secret forwarded `X-Forwarded-Proto: https`, or the
+accepted on `--trusted-proxy-addr` forwarded `X-Forwarded-Proto: https`, or the
 operator passed `--hsts` because TLS terminates somewhere that forwards no
 trusted header. That same evidence decides the scheme the CSRF origin check
 expects, so a dashboard behind an HTTPS proxy keeps `Secure` cookies without
@@ -1149,25 +1149,22 @@ nothing would authenticate with it, so the dashboard would serve
 unauthenticated while the flag suggested otherwise.
 
 Login throttling uses the TCP peer address and ignores forwarded headers by
-default. A fronting proxy vouches for a client address by sending a shared
-secret in `X-Sparkwing-Proxy-Auth` beside `X-Real-IP`; pass the same secret to
-`sparkwing-web` and `sparkwing-controller` as `--proxy-auth-secret-file=<path>`
-(chart: `proxyAuth.name`). A request whose single `X-Sparkwing-Proxy-Auth`
-matches, compared in constant time, has its single `X-Real-IP` believed; any
-other request keys on its TCP peer. Neither process takes a client address
-from `X-Forwarded-For`. The
-proxy must overwrite both headers on every request so a client's copy never
-reaches Sparkwing. With ingress-nginx, add the secret through the controller's
-`proxy-set-headers` ConfigMap; the stock template already sets `X-Real-IP` to
-`$remote_addr`.
+default. `sparkwing-web` and `sparkwing-controller` each take
+`--trusted-proxy-addr=<host:port>`, a second listener that serves the same
+routes. On that listener alone, a request's single `X-Real-IP` is the client
+address; on `--addr` the header is ignored, and `X-Forwarded-For` is never
+taken as a client address on either. Point the fronting proxy at the trusted
+listener, make it overwrite `X-Real-IP` on every request (ingress-nginx does by
+default), and let nothing else reach that port, for example with a
+NetworkPolicy.
 
-`sparkwing-web` relays the address it settled on, with the same secret, on
-every call it makes to the controller while serving a browser: login, OAuth,
-proxied `/api/v1/` requests, and backend reads alike. Without a configured
-secret it strips both headers from those calls. The controller keys login
-throttling, the per-prefix bearer failure budget, and the `client_ip` of its
-audit records on that one address, and callers that reach it directly, such as
-runners, key on their TCP peer. See
+`sparkwing-web` sends the address it settled on as `X-Real-IP` on every call it
+makes to the controller while serving a browser: login, OAuth, proxied
+`/api/v1/` requests, and backend reads alike. Point its `--controller` at the
+controller's trusted listener. The logs service never receives the header. The
+controller keys login throttling, the per-prefix bearer failure budget, and the
+`client_ip` of its audit records on that one address, and callers on `--addr`,
+such as runners, key on their TCP peer. See
 [security.md](security.md#login-and-hashing-budgets) for the budgets and the
 argon2 memory bound.
 

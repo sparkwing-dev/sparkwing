@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -124,79 +122,41 @@ func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
 	}
 }
 
-func TestClientIP_HonorsForwardedAddressOnlyWithTheSecret(t *testing.T) {
-	auth := &ProxyAuth{secret: []byte("s3cret")}
+func TestClientIP_HonorsForwardedAddressOnlyOnTheTrustedListener(t *testing.T) {
 	cases := []struct {
 		name       string
-		auth       *ProxyAuth
-		secrets    []string
+		trusted    bool
 		realIPs    []string
 		remoteAddr string
 		want       string
 	}{
-		{name: "secret present uses forwarded address", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", want: "198.51.100.7"},
-		{name: "IPv6 forwarded address", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"2001:db8::7"}, remoteAddr: "10.0.0.1:5000", want: "2001:db8::7"},
-		{name: "missing secret ignores spoofed address", auth: auth, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "wrong secret ignores spoofed address", auth: auth, secrets: []string{"guess"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "second secret copy is refused", auth: auth, secrets: []string{"guess", "s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "second address copy is refused", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7", "198.51.100.8"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
-		{name: "no configured secret ignores a presented one", secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "malformed forwarded address uses peer", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"unknown"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
-		{name: "direct call uses peer", auth: auth, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "trusted listener uses forwarded address", trusted: true, realIPs: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", want: "198.51.100.7"},
+		{name: "IPv6 forwarded address", trusted: true, realIPs: []string{"2001:db8::7"}, remoteAddr: "10.0.0.1:5000", want: "2001:db8::7"},
+		{name: "plain listener ignores spoofed address", realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "second address copy is refused", trusted: true, realIPs: []string{"198.51.100.7", "198.51.100.8"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "malformed forwarded address uses peer", trusted: true, realIPs: []string{"unknown"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "trusted listener without the header uses peer", trusted: true, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
 		{name: "peer without port", remoteAddr: "127.0.0.1", want: "127.0.0.1"},
-		{name: "malformed peer stays opaque", auth: auth, remoteAddr: "local-peer", want: "local-peer"},
+		{name: "malformed peer stays opaque", trusted: true, remoteAddr: "local-peer", want: "local-peer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/login", nil)
 			req.RemoteAddr = tc.remoteAddr
 			req.Header.Set("X-Forwarded-For", "192.0.2.66")
-			for _, v := range tc.secrets {
-				req.Header.Add(ProxyAuthHeader, v)
-			}
 			for _, v := range tc.realIPs {
 				req.Header.Add("X-Real-IP", v)
 			}
-			if got := ClientIP(req, tc.auth); got != tc.want {
+			var got string
+			var h http.Handler = http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = ClientIP(r) })
+			if tc.trusted {
+				h = TrustedListener(h)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if got != tc.want {
 				t.Fatalf("ClientIP=%q want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestProxyAuthRelayStripsWithoutASecret(t *testing.T) {
-	h := http.Header{}
-	h.Set(ProxyAuthHeader, "client-supplied")
-	h.Set("X-Real-IP", "192.0.2.66")
-	(*ProxyAuth)(nil).Relay(h, "198.51.100.7")
-	if h.Get(ProxyAuthHeader) != "" || h.Get("X-Real-IP") != "" {
-		t.Fatalf("relay without a secret kept %v", h)
-	}
-	(&ProxyAuth{secret: []byte("s3cret")}).Relay(h, "198.51.100.7")
-	if h.Get(ProxyAuthHeader) != "s3cret" || h.Get("X-Real-IP") != "198.51.100.7" {
-		t.Fatalf("relay stamped %v", h)
-	}
-}
-
-func TestLoadProxyAuth(t *testing.T) {
-	if p, err := LoadProxyAuth(""); p != nil || err != nil {
-		t.Fatalf("empty path = %v, %v; want nil, nil", p, err)
-	}
-	dir := t.TempDir()
-	good := filepath.Join(dir, "secret")
-	if err := os.WriteFile(good, []byte("s3cret\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	p, err := LoadProxyAuth(good)
-	if err != nil || string(p.secret) != "s3cret" {
-		t.Fatalf("LoadProxyAuth = %v, %v; want the trimmed secret", p, err)
-	}
-	blank := filepath.Join(dir, "blank")
-	if err := os.WriteFile(blank, []byte(" \n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadProxyAuth(blank); err == nil {
-		t.Fatal("a blank secret file loaded")
 	}
 }
 

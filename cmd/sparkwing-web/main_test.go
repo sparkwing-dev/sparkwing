@@ -46,13 +46,6 @@ func TestResolveAuthControllerURL(t *testing.T) {
 	}
 }
 
-func TestRunRejectsUnreadableProxyAuthSecret(t *testing.T) {
-	err := run([]string{"--proxy-auth-secret-file", filepath.Join(t.TempDir(), "missing")})
-	if err == nil || !strings.Contains(err.Error(), "--proxy-auth-secret-file") {
-		t.Fatalf("error = %v, want the proxy secret file error", err)
-	}
-}
-
 func TestRunRejectsTokenWithoutABackend(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))

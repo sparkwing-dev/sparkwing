@@ -54,17 +54,16 @@ func TestSameOriginRequestUsesTLSEvidenceForOriginFormRequests(t *testing.T) {
 
 func TestSameOriginRequestBehindHTTPSProxyKeepsSecureCookies(t *testing.T) {
 	t.Parallel()
-	opts := HandlerOptions{ProxyAuth: ratelimit.NewProxyAuth("s3cret")}
+	opts := HandlerOptions{}
 
 	var decided bool
-	handler := securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	handler := ratelimit.TrustedListener(securityHeadersMiddleware(opts, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		decided = sameOriginRequest(r)
-	}))
+	})))
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.RemoteAddr = "10.1.2.3:9999"
 	req.Host = "dashboard.example"
 	req.Header.Set("X-Forwarded-Proto", "https")
-	req.Header.Set(ratelimit.ProxyAuthHeader, "s3cret")
 	req.Header.Set("Origin", "https://dashboard.example")
 	handler.ServeHTTP(httptest.NewRecorder(), req)
 

@@ -289,7 +289,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
 | `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. | `[]` |
 | `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
-| `proxyAuth.name` / `proxyAuth.key` | Secret the ingress sends in `X-Sparkwing-Proxy-Auth`, overwriting any client copy, alongside `X-Real-IP`. The controller and web believe a forwarded address only with it, and web relays each browser's address to the controller with it. Empty name keys throttling and audit on the TCP peer. | `""` / `secret` |
 
 ### Runner-bundle sub-chart
 

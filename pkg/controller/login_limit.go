@@ -26,18 +26,16 @@ type loginLimiter struct {
 	clients  *ratelimit.Limiter
 	global   *ratelimit.Limiter
 	failures *ratelimit.Limiter
-	proxy    *ratelimit.ProxyAuth
 
 	globalBurst int
 }
 
-func newLoginLimiter(proxy *ratelimit.ProxyAuth) *loginLimiter {
+func newLoginLimiter() *loginLimiter {
 	globalBurst := loginGlobalPerHashSlot * store.Argon2Slots()
 	return &loginLimiter{
 		clients:     ratelimit.New(loginClientBurst, loginClientWindow),
 		global:      ratelimit.New(globalBurst, loginGlobalWindow),
 		failures:    ratelimit.New(loginFailureBurst, loginFailureWindow),
-		proxy:       proxy,
 		globalBurst: globalBurst,
 	}
 }
@@ -58,7 +56,7 @@ func (l *loginLimiter) middleware(next http.Handler) http.Handler {
 }
 
 func (l *loginLimiter) client(r *http.Request) string {
-	return ratelimit.ClientIP(r, l.proxy)
+	return ratelimit.ClientIP(r)
 }
 
 // safety: keying the failure budget on the account alone would let any stranger lock a named user out of the dashboard.

@@ -134,13 +134,11 @@ An unauthenticated caller never sees a store error verbatim. Anything
 that is not an authentication rejection answers `503` with a generic
 message and the detail goes to the controller log.
 
-Login throttling keys on the TCP peer and ignores forwarded headers until
-the controller holds the proxy secret in `--proxy-auth-secret-file` (chart:
-`proxyAuth.name`). A request then counts against the budget of its
-`X-Real-IP` only when it carries that secret in `X-Sparkwing-Proxy-Auth`,
-which the ingress and the dashboard send and a client cannot forge. Without
-the secret every browser shares the proxy's budget, which stays safe and turns
-coarse. [auth.md](auth.md) covers the ingress setup.
+Login throttling keys on the TCP peer. Only a request accepted on the
+controller's `--trusted-proxy-addr` listener counts against the budget of its
+`X-Real-IP`, so keep that port reachable by the ingress and the dashboard alone.
+Without it every browser shares the proxy's budget, which stays safe and turns
+coarse. [auth.md](auth.md) covers the setup.
 
 ## Trigger and list-query limits
 

@@ -147,8 +147,7 @@ func sessionIDFromContext(ctx context.Context) string {
 // SessionForwardingTransport sends a request made on behalf of a signed-in
 // browser with that browser's own controller session, replacing whatever
 // Authorization an inner client set. A request whose context carries no
-// session goes out with its session unchanged. Either way the request carries
-// the browser's verified address, as every controller call does. Wrap the transport of any controller client the
+// session goes out unchanged. Wrap the transport of any controller client the
 // dashboard calls while serving a request, for example:
 //
 //	hc := &http.Client{Transport: web.SessionForwardingTransport(http.DefaultTransport)}
@@ -157,7 +156,7 @@ func SessionForwardingTransport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return sessionForwardingTransport{base: relayTransport{base: base}}
+	return sessionForwardingTransport{base: base}
 }
 
 type sessionForwardingTransport struct{ base http.RoundTripper }
@@ -183,7 +182,7 @@ func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {
 
 func logsProxy(opts HandlerOptions) http.Handler {
 	return logsProxyAllowList(withLogsIdentityHeader(
-		controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), true)))
+		controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts), true, false)))
 }
 
 // DurableLogStore reads a logs service on behalf of the signed-in browser

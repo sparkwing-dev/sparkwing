@@ -374,16 +374,6 @@ ingress:
   # over plain HTTP.
   allowInsecure: false
 
-# Secret shared by the ingress, the dashboard and the controller. The
-# ingress must send it in X-Sparkwing-Proxy-Auth with X-Real-IP on every
-# request, and overwrite any copy a client sent; only a request carrying
-# it has its X-Real-IP key login throttling and audit records, and the
-# dashboard relays each browser's address to the controller with it.
-# Empty name ignores forwarded headers and keys everything on the TCP peer.
-proxyAuth:
-  name: ""
-  key: secret
-
 # -----------------------------------------------------------------------
 # 4. ServiceAccount + RBAC for the controller. The controller needs
 #    K8s API access for its warm-PVC pool: namespaces/get, PVC CRUD,

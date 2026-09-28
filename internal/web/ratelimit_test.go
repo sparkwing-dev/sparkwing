@@ -16,7 +16,7 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	l := ratelimit.New(2, time.Minute)
-	h := rateLimitMiddleware(l, nil, inner)
+	h := rateLimitMiddleware(l, inner)
 
 	send := func(method string) int {
 		req := httptest.NewRequest(method, "/login", nil)
@@ -43,7 +43,7 @@ func TestRateLimitMiddleware_Returns429(t *testing.T) {
 
 func TestRateLimitMiddleware_DirectPeerCannotRotateWithForwardedHeader(t *testing.T) {
 	hits := 0
-	h := rateLimitMiddleware(ratelimit.New(2, time.Minute), nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := rateLimitMiddleware(ratelimit.New(2, time.Minute), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -66,30 +66,31 @@ func TestRateLimitMiddleware_DirectPeerCannotRotateWithForwardedHeader(t *testin
 	}
 }
 
-func TestRateLimitMiddleware_KeysOnRelayedAddressOnlyWithTheSecret(t *testing.T) {
-	h := rateLimitMiddleware(ratelimit.New(1, time.Minute), ratelimit.NewProxyAuth("s3cret"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestRateLimitMiddleware_KeysOnForwardedAddressOnlyOnTheTrustedListener(t *testing.T) {
+	limited := rateLimitMiddleware(ratelimit.New(1, time.Minute), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	send := func(secret, client string) int {
+	trusted := ratelimit.TrustedListener(limited)
+	send := func(h http.Handler, client string) int {
 		req := httptest.NewRequest(http.MethodPost, "/login", nil)
 		req.RemoteAddr = "10.0.0.5:5000"
-		req.Header.Set(ratelimit.ProxyAuthHeader, secret)
 		req.Header.Set("X-Real-IP", client)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
 	for attempt, tc := range []struct {
-		secret, client string
-		want           int
+		h      http.Handler
+		client string
+		want   int
 	}{
-		{secret: "s3cret", client: "203.0.113.9", want: http.StatusOK},
-		{secret: "s3cret", client: "203.0.113.10", want: http.StatusOK},
-		{secret: "s3cret", client: "203.0.113.9", want: http.StatusTooManyRequests},
-		{secret: "guess", client: "203.0.113.11", want: http.StatusOK},
-		{secret: "guess", client: "203.0.113.12", want: http.StatusTooManyRequests},
+		{h: trusted, client: "203.0.113.9", want: http.StatusOK},
+		{h: trusted, client: "203.0.113.10", want: http.StatusOK},
+		{h: trusted, client: "203.0.113.9", want: http.StatusTooManyRequests},
+		{h: limited, client: "203.0.113.11", want: http.StatusOK},
+		{h: limited, client: "203.0.113.12", want: http.StatusTooManyRequests},
 	} {
-		if got := send(tc.secret, tc.client); got != tc.want {
+		if got := send(tc.h, tc.client); got != tc.want {
 			t.Fatalf("attempt %d status = %d, want %d", attempt+1, got, tc.want)
 		}
 	}
@@ -104,7 +105,7 @@ func TestRateLimitMiddleware_SweepsIdleBucketsWithoutATicker(t *testing.T) {
 		t.Fatalf("seeded %d buckets, want 2", l.Len())
 	}
 
-	h := rateLimitMiddlewareEvery(l, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := rateLimitMiddlewareEvery(l, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}), 0)
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)

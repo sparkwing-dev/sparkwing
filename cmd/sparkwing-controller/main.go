@@ -26,7 +26,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -114,11 +113,10 @@ func run(args []string) error {
 			"relying parties' cached key sets verify tokens across the switch.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
-	proxyAuthSecretFile := fs.String("proxy-auth-secret-file", "",
-		"file holding the secret a fronting proxy or the dashboard sends in "+
-			ratelimit.ProxyAuthHeader+"; only a request carrying it has its X-Real-IP "+
-			"key login throttling, the bearer failure budget and the request log. "+
-			"Empty ignores forwarded headers and keys them on the TCP peer")
+	trustedProxyAddr := fs.String("trusted-proxy-addr", "",
+		"second address serving the same API, whose requests key login throttling, the bearer "+
+			"failure budget and the request log on X-Real-IP. Only a proxy that overwrites "+
+			"X-Real-IP may reach it. Empty serves only --addr, which ignores X-Real-IP")
 	argonBudgetMB := fs.Int("argon2-memory-budget-mb",
 		int(store.DefaultArgon2MemoryBudget>>20),
 		fmt.Sprintf("memory ceiling in MiB for concurrent argon2id password and "+
@@ -310,10 +308,6 @@ func run(args []string) error {
 			"controller) and for laptop-local use.")
 	_ = fs.Parse(args)
 
-	proxyAuth, err := ratelimit.LoadProxyAuth(*proxyAuthSecretFile)
-	if err != nil {
-		return fmt.Errorf("--proxy-auth-secret-file: %w", err)
-	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
 		return err
@@ -473,7 +467,7 @@ func run(args []string) error {
 	}
 
 	srv := controller.New(st, nil).
-		WithProxyAuth(proxyAuth).
+		WithTrustedProxyAddr(*trustedProxyAddr).
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).
