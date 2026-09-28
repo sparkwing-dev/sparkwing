@@ -706,8 +706,12 @@ unlock.
   2N-vCPU node. It requests the class's cores minus half a core with no CPU
   limit, and what the machine leaves after system overhead as its memory
   request and limit: about 5.4, 12.8 and 27.6 GiB for the 2, 4 and 8-core
-  classes. A class no longer guarantees 4 GiB per core to the Job itself; a
-  Job that needs all of it pins the next class. A band Job also selects
+  classes. That Job memory is now the class's memory everywhere: a memory pin
+  takes the smallest class whose Job memory covers it (a 6 GiB pin takes the
+  4-core class, not the 2-core), `credit_cpu_class_memory_bytes` reports it,
+  and a pin above the largest class's fails the node at claim. Runner CPU and
+  memory ceilings still cap a band Job, and its pod carries
+  `karpenter.sh/do-not-disrupt`. A band Job also selects
   `sparkwing.dev/team-node: <team>` in place of the cross-team anti-affinity,
   so a node serves only the team whose Job booted it, including back-to-back
   reuse. A band pool needs an `Exists` requirement on that key or its Jobs no

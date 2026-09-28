@@ -1425,3 +1425,26 @@ func TestBuildJob_KeepsTheRequestOffTheBand(t *testing.T) {
 		t.Fatalf("anti-affinity terms = %d, want only the team term off the band", n)
 	}
 }
+
+func TestBuildJob_BandJobKeepsTheOperatorsCeilings(t *testing.T) {
+	cfg := Config{Image: "img", CPUCeiling: 3, MemoryCeiling: 8 << 30}
+	rr := classJob(t, cfg, 8).Spec.Template.Spec.Containers[0].Resources
+	if got := rr.Requests.Cpu().String(); got != "3" {
+		t.Fatalf("cpu request = %s, want the 3-core ceiling", got)
+	}
+	if got := rr.Limits.Cpu().String(); got != "3" {
+		t.Fatalf("cpu limit = %s, want the 3-core ceiling", got)
+	}
+	if !rr.Requests.Memory().Equal(resource.MustParse("8Gi")) || !rr.Limits.Memory().Equal(resource.MustParse("8Gi")) {
+		t.Fatalf("memory = %s/%s, want the 8Gi ceiling", rr.Requests.Memory(), rr.Limits.Memory())
+	}
+}
+
+func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
+	if got := classJob(t, Config{Image: "img"}, 4).Spec.Template.Annotations[karpenterDoNotDisrupt]; got != "true" {
+		t.Fatalf("band pod do-not-disrupt = %q, want true", got)
+	}
+	if _, ok := classJob(t, Config{Image: "img"}, 2).Spec.Template.Annotations[karpenterDoNotDisrupt]; ok {
+		t.Fatal("an off-band pod carries do-not-disrupt, which would pin a shared node")
+	}
+}

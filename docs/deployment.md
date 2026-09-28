@@ -55,7 +55,9 @@ without one the pod never schedules and the node fails with the scheduler's
 message. A Job placed on a band, by the class or by the operator's own
 selector, asks for one machine of its class and a node of its own: CPU of the
 class minus half a core with no limit, and as memory request and limit the
-class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead. The
+class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead.
+The runner's CPU and memory ceilings still cap both, and the pod carries
+`karpenter.sh/do-not-disrupt` so Karpenter never evicts it mid-run. The
 pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
 general-purpose families, and a kubelet reservation no larger than 110 pods
 leaves. The Job also selects `sparkwing.dev/team-node` with its run's team, so

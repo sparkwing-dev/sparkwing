@@ -24,11 +24,13 @@ const (
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
-	// safety: the memory of the machine a cpu class names, per core, matching
-	// the hosted runners a customer compares against. The Job gets that
-	// machine less the node's own overhead, not this much. A node asking for
-	// more takes the class whose machine covers it.
-	cpuClassMemoryBytesPerCore = 4 << 30
+	// safety: an N-core class is a machine of N vCPU and 4N GiB, matching the
+	// hosted runners a customer compares against. The Job gets what that
+	// machine leaves after the hypervisor, which Karpenter counts as 7.5
+	// percent, and 2 GiB for the kubelet reservation at 110 pods (1465 MiB),
+	// the 100 MiB eviction threshold, the node's daemonsets and a margin.
+	cpuClassMachineBytesPerCore = 4 << 30
+	cpuClassSystemBytes         = 2 << 30
 
 	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
 	// operator set one. A node above it is executed on a node of its own.
@@ -36,16 +38,19 @@ const (
 )
 
 // CPUClass is one rung of the billing ladder: a whole number of cores and the
-// memory of the machine they name. It prices a node independently of the pod's
+// memory a Job gets on the machine they name. It prices a node independently of the pod's
 // resource request.
 type CPUClass struct {
 	Cores       int64 `json:"cores"`
 	MemoryBytes int64 `json:"memory_bytes"`
 }
 
-// CPUClassMemoryBytes returns the memory a class of this many cores carries.
+// CPUClassMemoryBytes returns the memory a Job of a class with this many cores
+// may use, which is both what selects the class for a memory pin and what the
+// Job is given, whole mebibytes.
 func CPUClassMemoryBytes(cores int64) int64 {
-	return cores * cpuClassMemoryBytesPerCore
+	usable := cores*cpuClassMachineBytesPerCore*37/40 - cpuClassSystemBytes
+	return max(usable&^(1<<20-1), 0)
 }
 
 // safety: a credit is one vCPU-second, so each class costs its core count in
@@ -95,8 +100,9 @@ func (e *UnpricedCPUClassError) Error() string {
 	if e.MemoryBytes > 0 {
 		return fmt.Sprintf(
 			"credits: this node asks for %d bytes of memory, which needs a %d-core class, "+
-				"and the largest priced class is %d; add a class for it to the credit rate table",
-			e.MemoryBytes, e.Cores, e.MaxCores)
+				"and the largest priced class is %d, whose Job gets %d bytes; "+
+				"lower the memory pin or add a class to the credit rate table",
+			e.MemoryBytes, e.Cores, e.MaxCores, CPUClassMemoryBytes(e.MaxCores))
 	}
 	return fmt.Sprintf(
 		"credits: this node asks for %d cpu cores and the largest priced class is %d; "+
@@ -109,8 +115,7 @@ func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
 // ClassForResource returns the class that covers both halves of a node's
 // request: the smallest class whose cores cover the cpu rounded up to a whole
-// core and whose machine memory, four gibibytes for each core, covers the
-// memory asked for. It returns an [UnpricedCPUClassError] when no class is
+// core and whose [CPUClassMemoryBytes] covers the memory asked for. It returns an [UnpricedCPUClassError] when no class is
 // large enough.
 func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {
 	if len(t) == 0 {
@@ -139,8 +144,10 @@ func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, err
 // that much memory would come with, so the operator adds a class that fits
 // rather than one that still refuses the node.
 func memoryClassCores(bytes int64) int64 {
-	cores := bytes / cpuClassMemoryBytesPerCore
-	if bytes%cpuClassMemoryBytesPerCore != 0 {
+	cores := int64((float64(bytes) + cpuClassSystemBytes) / (cpuClassMachineBytesPerCore * 0.925))
+	// safety: a pin is pipeline input, so a huge one stops the walk before
+	// CPUClassMemoryBytes overflows rather than after.
+	for cores < 1<<20 && CPUClassMemoryBytes(cores) < bytes {
 		cores++
 	}
 	return cores

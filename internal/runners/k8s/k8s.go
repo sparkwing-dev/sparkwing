@@ -861,10 +861,14 @@ func (r *Runner) buildJob(
 		placed = selector[cpuBandKey]
 	}
 	affinity := teamAntiAffinity(team)
+	var podAnnotations map[string]string
 	if selector[cpuBandKey] != "" && class.Cores > 0 {
-		container.Resources = bandClassResources(class)
+		container.Resources = bandClassResources(class, r.cfg)
 		selector = teamNodeSelector(selector, team)
 		affinity = oneJobPerNode()
+		// safety: Karpenter drift and consolidation evict a running pod
+		// otherwise, and a band Job is a pipeline node with no retry.
+		podAnnotations = map[string]string{karpenterDoNotDisrupt: "true"}
 	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
@@ -913,7 +917,7 @@ func (r *Runner) buildJob(
 			TTLSecondsAfterFinished: &ttl,
 			ActiveDeadlineSeconds:   r.jobActiveDeadline(req),
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
 				Spec:       podSpec,
 			},
 		},
@@ -971,32 +975,30 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 	})
 }
 
-// A band Job leaves part of its machine to the node: half a core, and 2 GiB
-// of memory after the 7.5 percent Karpenter discounts from an instance's
-// memory for the hypervisor. The 2 GiB covers the kubelet reservation at 110
-// pods (1465 MiB), the 100 MiB eviction threshold, the daemonsets' requests,
-// and about 360 MiB of margin. Both must fit the class's own size in a
-// general-purpose family, 4 GiB per vCPU, or Karpenter launches the next one.
-const (
-	bandCPUHeadroom            = 0.5
-	bandMemoryHypervisorFactor = 0.925
-	bandMemoryReserveBytes     = 2 << 30
-)
+// bandCPUHeadroom is the part of a band Job's vCPU left to the kubelet and the
+// node's daemonsets, so the pod fits a machine of its class's own size.
+const bandCPUHeadroom = 0.5
+
+const karpenterDoNotDisrupt = "karpenter.sh/do-not-disrupt"
 
 // safety: a band node is booted for one Job and billed at its class, so the pod
-// asks for what that machine leaves after the node's own overhead. CPU has no
-// limit because the machine is the promise; memory is capped at the request so
-// a runaway Job is the process the kernel kills, not a daemonset whose smaller
-// request gives it a higher OOM score.
-func bandClassResources(class store.CPUClass) corev1.ResourceRequirements {
-	usable := int64(float64(class.MemoryBytes)*bandMemoryHypervisorFactor) - bandMemoryReserveBytes
-	memory := *resource.NewQuantity(usable&^(1<<20-1), resource.BinarySI)
+// asks for what that machine leaves after the node's own overhead, which is
+// the class's memory. CPU has no limit because the machine is the promise;
+// memory is capped at the request so a runaway Job is the process the kernel
+// kills, not a daemonset whose smaller request gives it a higher OOM score. An
+// operator ceiling still caps both, as it caps every other pod.
+func bandClassResources(class store.CPUClass, cfg Config) corev1.ResourceRequirements {
+	memory := *resource.NewQuantity(cappedBytes(class.MemoryBytes, cfg.MemoryCeiling), resource.BinarySI)
+	limits := corev1.ResourceList{corev1.ResourceMemory: memory}
+	if cfg.CPUCeiling > 0 {
+		limits[corev1.ResourceCPU] = milliCores(cfg.CPUCeiling)
+	}
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    milliCores(float64(class.Cores) - bandCPUHeadroom),
+			corev1.ResourceCPU:    milliCores(cappedCores(float64(class.Cores)-bandCPUHeadroom, cfg.CPUCeiling)),
 			corev1.ResourceMemory: memory,
 		},
-		Limits: corev1.ResourceList{corev1.ResourceMemory: memory},
+		Limits: limits,
 	}
 }
 
