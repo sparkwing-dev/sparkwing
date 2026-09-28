@@ -229,6 +229,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 	want := []string{
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
+		"credit-value-v1",
 		"cron-schedule-names-v1",
 		"declared-run-repo",
 		"executor-enrollment-v1",
@@ -236,6 +237,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"github-app-cron-identity-v1",
 		"pipeline-scoped-secrets",
 		"storage-commit-receipts-v1",
+		"team-credit-exhaustion-v1",
 		"team-scoped-user-keys",
 		"trigger-credit-cursor-v1",
 	}
@@ -282,6 +284,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		t.Fatalf("read-only schema = %d, %v; want unchanged v29", got, err)
 	}
 	wantListed := []string{
+		"credit-value-v1",
 		"declared-run-repo",
 		"github-app-cron-identity-v1",
 		"inherited-holder-marker",
@@ -289,6 +292,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"repo-scoped-secrets",
 		"session-token-digest",
 		"storage-commit-receipts-v1",
+		"team-credit-exhaustion-v1",
 		"team-scoped-user-keys",
 		"trigger-credit-cursor-v1",
 		"unique-token-prefix",
