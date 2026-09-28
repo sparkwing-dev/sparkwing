@@ -1454,6 +1454,8 @@ type Run struct {
 
 	ParentRunID string
 
+	Admission string
+
 	DeclaredRepo string
 
 	RepoURL string
@@ -1488,6 +1490,8 @@ type Run struct {
 }
 func (r Run) RedactedForDisplay() Run
 func (r Run) SecretArgNames() []string
+const RunAdmissionAdmitted = "admitted"
+const RunAdmissionPlanning = "planning"
 type RunCreditUsage struct {
 	RunID         string
 	Seconds       int64
@@ -1894,6 +1898,7 @@ func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error
 func (s *Store) DeleteUser(name, keepPrefix string, now time.Time) (int, []string, error)
 func (s *Store) Dialect() Dialect
 func (s *Store) DisputeTeam(ctx context.Context, disputeID string) (Team, bool, error)
+func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int64, t Trigger, now time.Time) (childID string, err error)
 func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Executor) error
 func (s *Store) EventLimits(ctx context.Context) (_ EventLimits, err error)
 func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentity, name string) (Executor, error)

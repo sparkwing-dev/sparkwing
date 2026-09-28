@@ -91,12 +91,13 @@ type submittedModifiers struct {
 }
 
 type plannedNode struct {
-	id, specHash, onFailureOf string
-	deps, runsOn, prefers     []string
-	resource                  ExecutorResource
-	retryBudget               int
-	retryBackoff              time.Duration
-	optional, continueOnError bool
+	id, kind, specHash, onFailureOf string
+	approval                        []byte
+	deps, runsOn, prefers           []string
+	resource                        ExecutorResource
+	retryBudget                     int
+	retryBackoff                    time.Duration
+	optional, continueOnError       bool
 }
 
 func planRefused(format string, args ...any) error {
@@ -124,6 +125,10 @@ func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		string(team), runID, PlanNodeID, nodeStatusPending, nodeKindPlan, []byte("[]"),
 		class, now.UnixNano(), now.UnixNano()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission = ? WHERE team = ? AND id = ?`,
+		RunAdmissionPlanning, string(team), runID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -163,6 +168,13 @@ func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body [
 	if accepted != 0 {
 		return false, ErrClaimResultConflict
 	}
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
+	if err != nil {
+		return false, err
+	}
+	if cancelled {
+		return false, ErrClaimCancelRequested
+	}
 	planned, err := validatePlan(body)
 	if err != nil {
 		return false, err
@@ -176,9 +188,9 @@ func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body [
 			return false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, plan_accepted_generation = ?,
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, plan_accepted_generation = ?, admission = ?,
        status = CASE WHEN status = ? THEN ? ELSE status END
- WHERE team = ? AND id = ?`, body, tok.Generation, runStatusPending, runStatusRunning,
+ WHERE team = ? AND id = ?`, body, tok.Generation, RunAdmissionAdmitted, runStatusPending, runStatusRunning,
 		string(tok.Team), tok.RunID); err != nil {
 		return false, err
 	}
@@ -224,12 +236,12 @@ func insertPlannedNodeTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO nodes (team, run_id, node_id, status, kind, deps_json,
        needs_labels, prefers_labels, requested_cores, requested_memory_bytes, credit_cpu_class,
-       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(team), runID, n.id, nodeStatusPending, nodeKindWork, deps,
+       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq, approval_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(team), runID, n.id, nodeStatusPending, n.kind, deps,
 		needs, prefers, res.Cores, res.MemoryBytes, class,
 		n.specHash, n.onFailureOf, boolInt(n.continueOnError), boolInt(n.optional), n.retryBudget,
-		n.retryBackoff.Milliseconds(), seq)
+		n.retryBackoff.Milliseconds(), seq, n.approval)
 	return err
 }
 
@@ -313,12 +325,10 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 	switch {
 	case n.Dynamic:
 		return plannedNode{}, errors.New("dynamic fan-out is not supported")
-	case n.Approval != nil:
-		return plannedNode{}, errors.New("approval nodes are not supported yet")
 	case !specHashRe.MatchString(n.SpecHash):
 		return plannedNode{}, errors.New(`spec_hash must be "sha256:" and 64 lowercase hex digits`)
 	}
-	p := plannedNode{id: n.ID, specHash: n.SpecHash, onFailureOf: n.OnFailureOf}
+	p := plannedNode{id: n.ID, kind: nodeKindWork, specHash: n.SpecHash, onFailureOf: n.OnFailureOf}
 	seen := map[string]bool{}
 	for _, dep := range n.Deps {
 		if !known[dep] {
@@ -373,6 +383,16 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 			}
 		}
 	}
+	if n.Approval != nil {
+		if m.HasSkipIf {
+			return plannedNode{}, errors.New("an approval gate cannot carry SkipIf")
+		}
+		approval, err := approvalJSON(*n.Approval)
+		if err != nil {
+			return plannedNode{}, err
+		}
+		p.kind, p.approval, m.RetryAuto = nodeKindApproval, approval, false
+	}
 	p.runsOn, p.prefers = m.RunsOn, m.Prefers
 	p.optional, p.continueOnError = m.Optional, m.ContinueOnError || m.Optional
 	if m.RetryAuto {
@@ -384,6 +404,31 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 	}
 	p.resource.MemoryBytes = max(m.ResMemoryBytes, 0)
 	return p, nil
+}
+
+const maxApprovalMessageBytes = 4 << 10
+
+func approvalJSON(raw json.RawMessage) ([]byte, error) {
+	var spec approvalSpec
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&spec); err != nil {
+		return nil, fmt.Errorf("approval: %w", err)
+	}
+	switch spec.OnTimeout {
+	case "":
+		spec.OnTimeout = ApprovalOnTimeoutFail
+	case ApprovalOnTimeoutFail, ApprovalOnTimeoutDeny, ApprovalOnTimeoutApprove:
+	default:
+		return nil, fmt.Errorf("approval on_timeout %q is not fail, deny or approve", spec.OnTimeout)
+	}
+	if spec.TimeoutMS < 0 {
+		return nil, errors.New("approval timeout_ms is negative")
+	}
+	if len(spec.Message) > maxApprovalMessageBytes {
+		return nil, fmt.Errorf("approval message is longer than %d bytes", maxApprovalMessageBytes)
+	}
+	return json.Marshal(spec)
 }
 
 func checkModifiers(m *submittedModifiers) error {
