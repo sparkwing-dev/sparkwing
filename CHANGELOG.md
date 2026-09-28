@@ -412,7 +412,7 @@ unlock.
 - **controller:** team billing. `GET /api/v1/team/billing` gives any member of
   the active team its balance, the price table, recent usage grouped by run,
   and its purchases and grants. `POST /api/v1/team/billing/checkout` lets an
-  owner buy $5 to $500 of credits: the controller takes the team from the
+  owner buy $10 to $500 of credits: the controller takes the team from the
   owner's session and asks the hosted checkout service at `--billing-url`
   (`SPARKWING_BILLING_URL`, authenticated with `SPARKWING_BILLING_TOKEN`) to
   open a Stripe Checkout Session, and answers with the page to send the owner
@@ -799,16 +799,21 @@ unlock.
   to start without `--controller`, which counts what each team stores there.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 30 days.
-- **credits (Breaking):** one credit is one vCPU-second and a dollar buys
-  20,000 of them, $0.18 a vCPU-hour. The ledger still stores micro-credits and
-  a dollar is still 100,000,000 of them, so every balance, grant and charge
-  keeps its dollar value; `micro_per_credit` reads 5,000 and
-  `credits_per_dollar` 20,000, and a client that hardcoded 100 renders balances
-  200 times too small. The default ladder bills each class its core count in
-  credits a second, so the eight-core class moves from 36,667 to 40,000
-  micro-credits a second. Schema v59 multiplies a stored
-  `runner_scale_step_credits` by 200 so the step keeps its dollar value.
-  `sparkwing cluster credits grant --amount` counts the new credit.
+- **credits (Breaking):** one credit is $0.001, a value that never changes;
+  prices move by rate, never by redefining the credit. The ledger still stores
+  micro-credits and a dollar is still 100,000,000 of them, so every balance,
+  grant and charge keeps its dollar value; `micro_per_credit` reads 100,000
+  and `credits_per_dollar` 1,000, and a client that hardcoded 100 renders
+  balances ten times too small. The default ladder prices each class at 90%
+  of the GitHub Actions Linux runner of its size: 2-core 9,000, 4-core 18,000
+  and 8-core 33,000 micro-credits a second, $0.0054, $0.0108 and $0.0198 a
+  minute. An installation that stored a rate or a rate table keeps its prices
+  until an operator writes new ones. Schema v59 multiplies a stored
+  `runner_scale_step_credits` by 200 and schema v75 divides it by 20, so the
+  step keeps its dollar value; its `credit-value-v1` requirement makes an
+  older controller refuse the upgraded database. The dashboard shows charges to a hundredth of a
+  credit, because a runner second costs a fraction of one. See
+  [Schema 75: a credit is $0.001](docs/migrations/_unreleased.md#schema-75-a-credit-is-0001).
 
 - **credits (Breaking):** every metered node and trigger step bills at least
   20 seconds on every class. `MinBillableSeconds` replaces

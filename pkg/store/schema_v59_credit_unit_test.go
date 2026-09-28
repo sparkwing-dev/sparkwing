@@ -9,16 +9,16 @@ import (
 )
 
 // A runner scale step written when a credit was a cent keeps its dollar value
-// when the credit becomes a vCPU-second: 5,000 cent-credits, fifty dollars,
-// become 1,000,000 vCPU-second credits, which is still fifty dollars.
+// through v59 and v75: 5,000 cent-credits, fifty dollars, become 1,000,000
+// vCPU-second credits and then 50,000 credits of $0.001, still fifty dollars.
 func TestSchemaV59_RestatesTheRunnerScaleStepInTheNewCredit(t *testing.T) {
 	cases := []struct {
 		name string
 		old  string
 		want string
 	}{
-		{name: "a step", old: "5000", want: "1000000"},
-		{name: "the old ceiling", old: "1000000000", want: "200000000000"},
+		{name: "a step", old: "5000", want: "50000"},
+		{name: "the old ceiling", old: "1000000000", want: "10000000000"},
 		{name: "scaling off", old: "0", want: "0"},
 		{name: "unreadable", old: "fifty", want: "fifty"},
 	}

@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 74
+const expectedSchemaVersion = 75
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1852,6 +1852,7 @@ var migrationRequirements = map[int][]string{
 	71: {"github-app-cron-identity-v1"},
 	72: {"storage-commit-receipts-v1"},
 	73: {"trigger-credit-cursor-v1"},
+	75: {creditValueRequirement},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -1871,6 +1872,11 @@ const teamScopedUserKeysRequirement = "team-scoped-user-keys"
 // team, and SQLite commits v50 before v51 stamps its own requirement, so a
 // binary predating it could reopen that database and run the old clock.
 const teamCreditExhaustionRequirement = "team-credit-exhaustion-v1"
+
+// safety: v75 restates runner_scale_step_credits in the $0.001 credit, so a
+// binary predating it reads the step in its own credit and scales runner caps
+// 20 times sooner; the requirement makes that binary refuse the store instead.
+const creditValueRequirement = "credit-value-v1"
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
@@ -2088,6 +2094,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyTriggerCreditCursorMigration(ctx, tx)
 	case 74:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
+	case 75:
+		return applyCreditValueMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2516,6 +2524,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyTriggerCreditCursorMigration(ctx, tx)
 	case 74:
 		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
+	case 75:
+		return applyCreditValueMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

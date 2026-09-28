@@ -166,7 +166,7 @@ function BuyPanel({ billing }: { billing: Billing }) {
   return (
     <Panel
       title="Buy credits"
-      hint={`Pay with Stripe, from ${fmtCents(billing.purchase_min_cents)} to ${fmtCents(billing.purchase_max_cents)} at a time.`}
+      hint={`Minimum purchase ${fmtCents(billing.purchase_min_cents)}, up to ${fmtCents(billing.purchase_max_cents)} at a time. Paid with Stripe.`}
     >
       <form onSubmit={submit} className="p-4 space-y-2">
         {owner ? null : (

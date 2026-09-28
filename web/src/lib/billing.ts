@@ -55,6 +55,7 @@ export interface Billing {
 export type Units = Pick<Billing, "micro_per_credit" | "credits_per_dollar">;
 
 const intFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const creditFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 function microPerDollar(u: Units): number {
   return u.micro_per_credit * u.credits_per_dollar;
@@ -74,17 +75,21 @@ export function balanceUSD(micro: number, u: Units): number {
   return Math.trunc(micro / microPerCent(u)) / 100;
 }
 
-// A charge or grant rounds to the nearest whole credit and cent.
+// A charge or grant rounds to the nearest hundredth of a credit and the
+// nearest cent. A runner second costs a fraction of a credit, so a short
+// charge rounded to whole credits would read as free.
 export function amountCredits(micro: number, u: Units): number {
-  return Math.round(micro / u.micro_per_credit);
+  return Math.round((micro * 100) / u.micro_per_credit) / 100;
 }
 
 export function amountUSD(micro: number, u: Units): number {
   return Math.round(micro / microPerCent(u)) / 100;
 }
 
+// fmtCredits shows up to two decimals, which only a charge or grant carries;
+// a balance arrives already truncated to whole credits.
 export function fmtCredits(credits: number): string {
-  return intFmt.format(credits === 0 ? 0 : credits);
+  return creditFmt.format(credits === 0 ? 0 : credits);
 }
 
 // fmtUSD always shows cents, for balances and ledger rows.
@@ -140,7 +145,7 @@ export function priceRows(b: Units & Pick<Billing, "rate_table">): PriceRow[] {
     });
 }
 
-// A trimmed decimal for credit rates, which are whole today but need not be.
+// A trimmed decimal for credit rates, which are fractions of a credit a second.
 export function fmtRate(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 }
@@ -239,7 +244,10 @@ export function purchaseProblem(
 ): string | null {
   const range = `Enter an amount from ${fmtCents(b.purchase_min_cents)} to ${fmtCents(b.purchase_max_cents)}.`;
   if (cents === null) return range;
-  if (cents < b.purchase_min_cents || cents > b.purchase_max_cents) {
+  if (cents < b.purchase_min_cents) {
+    return `Minimum purchase ${fmtCents(b.purchase_min_cents)}.`;
+  }
+  if (cents > b.purchase_max_cents) {
     return range;
   }
   if (b.balance_micro + cents * microPerCent(b) > b.balance_cap_micro) {

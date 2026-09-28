@@ -138,8 +138,8 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 		if len(b.Grants) != 1 || b.Grants[0].Kind != store.CreditGrantPaid || b.Grants[0].Reference != "pi_1" {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
-		if b.MicroPerCredit != 5_000 || b.CreditsPerDollar != 20_000 || b.MinBillableSeconds != 60 ||
-			b.PurchaseMinCents != 500 || b.PurchaseMaxCents != 50_000 ||
+		if b.MicroPerCredit != 100_000 || b.CreditsPerDollar != 1_000 || b.MinBillableSeconds != 60 ||
+			b.PurchaseMinCents != 1_000 || b.PurchaseMaxCents != 50_000 ||
 			b.BalanceCapMicro != 5_000*100*store.MicroCreditsPerCent || len(b.RateTable) != 3 {
 			t.Errorf("%s reads prices %+v", tc.name, b)
 		}
@@ -186,7 +186,7 @@ func TestTeamBillingCheckout_OpensASessionForTheOwnersActiveTeam(t *testing.T) {
 		{"an editor", editor, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a reader", reader, map[string]any{"amount_cents": 2_500}, http.StatusForbidden},
 		{"a body naming a team", owner, map[string]any{"amount_cents": 2_500, "team": "someone-else"}, http.StatusBadRequest},
-		{"a purchase under $5", owner, map[string]any{"amount_cents": 499}, http.StatusBadRequest},
+		{"a purchase under $10", owner, map[string]any{"amount_cents": 999}, http.StatusBadRequest},
 		{"a purchase over $500", owner, map[string]any{"amount_cents": 50_001}, http.StatusBadRequest},
 		{"a negative purchase", owner, map[string]any{"amount_cents": -2_500}, http.StatusBadRequest},
 	}
@@ -227,7 +227,7 @@ func TestTeamBillingCheckout_RefusesAPurchaseAboveTheBalanceCap(t *testing.T) {
 	}
 	refusal = capRefusal{}
 	if code := f.call("POST", "/api/v1/team/billing/checkout", owner.auth,
-		map[string]any{"amount_cents": 500}, &refusal); code != http.StatusConflict ||
+		map[string]any{"amount_cents": 1_000}, &refusal); code != http.StatusConflict ||
 		refusal.OpenMicro != 1_000*store.MicroCreditsPerCent {
 		t.Errorf("a checkout past the cap with one open = %d %+v, want 409 naming the open checkout", code, refusal)
 	}
