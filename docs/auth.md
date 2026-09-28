@@ -87,7 +87,9 @@ execution is the pipeline's own and keeps its setup billed: a compile error, a
 source fetch the repository refused, a cancellation, an out-of-memory kill. A
 platform failure after execution starts is billed like any other finish.
 
-Two bounds apply. No single charge bills more than the charge cap (30 seconds by default), so a controller
+Two bounds apply. The up-front reservation is one charge of the whole
+60-second minimum; after it, no single charge bills more than the charge cap
+(30 seconds by default), so a controller
 outage or a stalled heartbeat loop does not bill the gap it left behind. A
 node that is requeued -- its lease reaped, its runner lost, or its attempt
 reset for a retry -- releases its charge window, so the next attempt starts a

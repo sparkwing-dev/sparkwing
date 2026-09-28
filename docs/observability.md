@@ -476,8 +476,9 @@ it, and a trigger's until its claim settles, so queueing and Kubernetes
 provisioning add no cloud seconds and a claim whose machine never started
 returns its whole reservation. Once billing starts the reservation is consumed
 rather than refunded: the series counts the whole minimum, and heartbeats add
-the seconds past it. A setup the platform fails before execution is the one
-refund of billed seconds, and it lowers the series. A node the
+the seconds past it. Two refunds return billed seconds and lower the series: a
+node setup the platform fails before execution, and a trigger claim requeued
+before its run started, which also returns what its heartbeats charged. A node the
 credit-exhaustion sweep cancels settles there.
 
 The `local` series counts what this controller process settled for an unmetered
