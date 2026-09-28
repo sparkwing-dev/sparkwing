@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"testing"
 	"time"
@@ -62,4 +63,39 @@ func TestLockOrder_PostgresReaperTakesTheRunBeforeTheNode(t *testing.T) {
 		t.Fatalf("reaper: %v", err)
 	}
 	f.wantOutcome(t, "a", "failed")
+}
+
+// A pass locks its runs through one bind parameter each, so it takes a bounded
+// batch; the runs past it recover on the next pass rather than failing all.
+func TestExpiredClaimReaper_RecoversABoundedBatchPerPass(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: seeds more expired runs than one pass takes")
+	}
+	s := storetest.Open(t)
+	ctx := context.Background()
+	total := store.MaxExpiredClaimRunsPerPass + 3
+	expired := time.Now().Add(-time.Minute).UnixNano()
+	for i := range total {
+		run := fmt.Sprintf("run-sweep-%04d", i)
+		if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+			`INSERT INTO runs (id, pipeline, status, started_at) VALUES (?, 'demo', 'pending', ?)`), run, expired); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
+			`INSERT INTO nodes (run_id, node_id, status, claimed_by, lease_expires_at) VALUES (?, 'n', 'running', 'holder', ?)`),
+			run, expired); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
+	if err != nil || len(first) != store.MaxExpiredClaimRunsPerPass {
+		t.Fatalf("first pass recovered %d (%v), want %d", len(first), err, store.MaxExpiredClaimRunsPerPass)
+	}
+	second, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
+	if err != nil || len(second) != total-store.MaxExpiredClaimRunsPerPass {
+		t.Fatalf("second pass recovered %d (%v), want the %d left", len(second), err, total-store.MaxExpiredClaimRunsPerPass)
+	}
+	if third, err := store.Maintenance.FailExpiredNodeClaims(s, ctx); err != nil || len(third) != 0 {
+		t.Fatalf("third pass recovered %d (%v)", len(third), err)
+	}
 }

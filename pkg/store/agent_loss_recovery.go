@@ -157,8 +157,8 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	}
 
 	// safety: the runs are locked before their nodes, in the order
-	// lockTeamRunRowTx names; a claim that expires between the two reads is
-	// left to the next pass.
+	// lockTeamRunRowTx names; a claim that expires between the two reads, or
+	// past this pass's batch, is left to the next pass.
 	runIDs, err := expiredClaimRunsTx(ctx, tx, now)
 	if err != nil || len(runIDs) == 0 {
 		return nil, err
@@ -342,10 +342,14 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	return recovered, nil
 }
 
+// safety: the runs a pass locks become one IN list of bind parameters, so a
+// pass takes a bounded batch and the next pass continues where it stopped.
+const maxExpiredClaimRunsPerPass = 500
+
 func expiredClaimRunsTx(ctx context.Context, tx *storeTx, now time.Time) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT run_id FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-   AND lease_expires_at < ? AND `+nodeNotDone+` ORDER BY run_id`, now.UnixNano())
+   AND lease_expires_at < ? AND `+nodeNotDone+` ORDER BY run_id LIMIT ?`, now.UnixNano(), maxExpiredClaimRunsPerPass)
 	if err != nil {
 		return nil, err
 	}

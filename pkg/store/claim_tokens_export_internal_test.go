@@ -35,3 +35,6 @@ func SettleForTest(ctx context.Context, s *Store, team Team, runID string, now t
 	}
 	return tx.Commit()
 }
+
+// MaxExpiredClaimRunsPerPass is how many runs one expired-claim pass recovers.
+const MaxExpiredClaimRunsPerPass = maxExpiredClaimRunsPerPass
