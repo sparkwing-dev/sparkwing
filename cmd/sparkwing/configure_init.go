@@ -104,7 +104,7 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	}
 	out.Mode, out.Exposed = pathExposure(configDir)
 
-	out.ConfigFiles = surveyConfigFiles(configDir, configPath)
+	out.ConfigFiles = surveyConfigFiles(configDir, configPath, dryRun)
 	out.Toolchain = probeToolchain()
 	out.Hooks = surveyProjectGates()
 	out.NextSteps = configureInitNextSteps()
@@ -128,14 +128,14 @@ func surveyProjectGates() *githooks.RepoGates {
 	return &row
 }
 
-func surveyConfigFiles(configDir, configPath string) []ConfigureInitFile {
+func surveyConfigFiles(configDir, configPath string, dryRun bool) []ConfigureInitFile {
 	keyPath, err := localsecrets.KeyPath()
 	if err != nil {
 		keyPath = filepath.Join(configDir, "secrets.key")
 	}
 
 	files := []ConfigureInitFile{
-		{Name: userconfig.Filename, Path: configPath, Summary: configSummary(configPath)},
+		{Name: userconfig.Filename, Path: configPath, Summary: configSummary(configPath, dryRun)},
 		{Name: filepath.Base(keyPath), Path: keyPath, Summary: "the key local secrets are sealed under; the first stored secret creates it"},
 	}
 	for i := range files {
@@ -157,7 +157,15 @@ func pathExposure(path string) (string, bool) {
 	return fmt.Sprintf("%04o", perm), perm&0o077 != 0
 }
 
-func configSummary(path string) string {
+func configSummary(path string, dryRun bool) string {
+	// safety: reading config.yaml first copies any legacy settings file into it.
+	if dryRun {
+		for _, l := range userconfig.Leftovers() {
+			if !l.Copied && !l.Variable {
+				return "not read under --dry-run, because reading it copies " + l.Name + " into it"
+			}
+		}
+	}
 	profiles, perr := profile.Load(path)
 	registry, rerr := repos.Load(path)
 	if perr != nil || rerr != nil {

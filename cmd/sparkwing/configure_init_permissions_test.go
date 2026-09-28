@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 func TestConfigureInitTightensAndReportsAnExistingConfigDirectory(t *testing.T) {
@@ -88,4 +90,39 @@ func statMode(t *testing.T, path string) os.FileMode {
 		t.Fatalf("stat %s: %v", path, err)
 	}
 	return fi.Mode().Perm()
+}
+
+func TestConfigureInitDryRunWritesNothing(t *testing.T) {
+	if err := os.MkdirAll(paths.TestSandbox(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	xdg, err := os.MkdirTemp(paths.TestSandbox(), "xdg-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(xdg) })
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("SPARKWING_CONFIG", "")
+	t.Setenv("SPARKWING_HOME", "")
+	dir := filepath.Join(xdg, "sparkwing")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "profiles.yaml"), []byte("profiles:\n  prod:\n    controller: {url: https://api.example}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := gatherConfigureInit(true); err != nil {
+		t.Fatalf("gatherConfigureInit --dry-run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("--dry-run wrote config.yaml: %v", err)
+	}
+	// Control: without --dry-run the same survey copies profiles.yaml in.
+	if _, err := gatherConfigureInit(false); err != nil {
+		t.Fatalf("gatherConfigureInit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatalf("config.yaml after a real run: %v", err)
+	}
 }
