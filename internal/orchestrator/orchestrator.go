@@ -188,6 +188,11 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	if opts.Admission != nil {
 		opts.Admission.AdmissionClass = inferredAdmissionClass(opts.AdmissionClass, trigger.Source)
+		if opts.ParentRunID != "" {
+			opts.Admission.ParentRunID = opts.ParentRunID
+		} else if opts.Admission.ParentLeaseToken != "" {
+			opts.Admission.ParentRunID = os.Getenv("SPARKWING_RUN_ID")
+		}
 	}
 
 	invokeArgs := mergeInvokeArgs(opts)

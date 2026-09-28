@@ -17,7 +17,7 @@ func restartedDaemonHoldingNestedLease(t *testing.T) (*Daemon, string) {
 	if err != nil || dec.Kind != admission.DecisionGranted {
 		t.Fatalf("grant parent lease: %s %v", dec.Kind, err)
 	}
-	if err := before.Attach(dec.Lease.ID, "child-run"); err != nil {
+	if err := before.Attach(dec.Lease.ID, "child-run", "parent-run"); err != nil {
 		t.Fatalf("attach child: %v", err)
 	}
 

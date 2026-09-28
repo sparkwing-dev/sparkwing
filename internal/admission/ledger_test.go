@@ -674,7 +674,7 @@ func TestWeighted_TiesPromoteInArrivalOrder(t *testing.T) {
 func TestAttach_MemberKeepsLeaseAliveAfterOwnerReleases(t *testing.T) {
 	l := testLedger(t, 2, 0)
 	lease := mustGrant(t, l, Request{ID: "parent", Cores: 2})
-	if err := l.Attach(lease.ID, "child"); err != nil {
+	if err := l.Attach(lease.ID, "child", "parent"); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	mustQueue(t, l, Request{ID: "other", Cores: 2})
@@ -698,12 +698,14 @@ func TestAttach_DrawsNoBudget(t *testing.T) {
 	l := testLedger(t, 1, 0)
 	lease := mustGrant(t, l, Request{ID: "parent", Cores: 1, Semaphores: []SemaphoreClaim{sem("k", 1, 1, PolicyQueue)}})
 	before := l.Snapshot()
-	if err := l.Attach(lease.ID, "child"); err != nil {
+	if err := l.Attach(lease.ID, "child", "parent"); err != nil {
 		t.Fatalf("Attach at full capacity: %v", err)
 	}
 	after := l.Snapshot()
 	before.Leases[0].Members = nil
 	after.Leases[0].Members = nil
+	before.Leases[0].Parents = nil
+	after.Leases[0].Parents = nil
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("attach changed ledger state beyond membership")
 	}
@@ -715,17 +717,20 @@ func TestAttach_Errors(t *testing.T) {
 	mustGrant(t, l, Request{ID: "filler", Cores: 1})
 	mustQueue(t, l, Request{ID: "waiting", Cores: 1})
 
-	if err := l.Attach("lease-999", "child"); !errors.Is(err, ErrUnknownLease) {
+	if err := l.Attach("lease-999", "child", "parent"); !errors.Is(err, ErrUnknownLease) {
 		t.Fatalf("unknown lease: %v", err)
 	}
-	if err := l.Attach(lease.ID, ""); !errors.Is(err, ErrInvalidRequest) {
+	if err := l.Attach(lease.ID, "", "parent"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("empty member: %v", err)
 	}
-	if err := l.Attach(lease.ID, "parent"); !errors.Is(err, ErrDuplicateID) {
+	if err := l.Attach(lease.ID, "parent", "parent"); !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("owner re-attach: %v", err)
 	}
-	if err := l.Attach(lease.ID, "waiting"); !errors.Is(err, ErrDuplicateID) {
+	if err := l.Attach(lease.ID, "waiting", "parent"); !errors.Is(err, ErrDuplicateID) {
 		t.Fatalf("waiter attach: %v", err)
+	}
+	if err := l.Attach(lease.ID, "child", "filler"); !errors.Is(err, ErrUnknownMember) {
+		t.Fatalf("parent on another lease: %v", err)
 	}
 }
 

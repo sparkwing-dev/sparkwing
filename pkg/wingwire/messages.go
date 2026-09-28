@@ -199,6 +199,9 @@ type AdmissionRequest struct {
 	// [LeaseTokenEnv]) so nested runs are not double-charged. Empty for
 	// top-level runs.
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
+	// ParentRunID identifies the member that spawned this run. The daemon
+	// checks it against ParentLeaseToken before attaching the child.
+	ParentRunID string `json:"parent_run_id,omitempty"`
 	// SemaphoresOnly marks a request that draws no host budget even when
 	// Resources is zero: the daemon must not substitute its conservative
 	// default charge. Used for run-level semaphore claims and short-lived

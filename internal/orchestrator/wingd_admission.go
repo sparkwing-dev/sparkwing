@@ -29,6 +29,7 @@ type LocalAdmission struct {
 	Version string
 
 	ParentLeaseToken string
+	ParentRunID      string
 
 	Origin wingwire.Origin
 
@@ -403,6 +404,7 @@ func (la *LocalAdmission) attachChildRun(
 		Repo:             currentRepoShortName(),
 		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
+		ParentRunID:      la.ParentRunID,
 		Origin:           la.Origin,
 	}, nil)
 	if err != nil {

@@ -290,8 +290,10 @@ consumer claims it, cancellation is a store transaction that marks the
 run cancelled and takes it off the queue -- no dashboard and no profile
 required. Once it is running, the admission daemon holding the run's
 process cancels it the same way it cancels any local run. Either way the
-cancellation names one run id and can only reach that run: a
-resubmission is a different run with a different id.
+cancellation names one run id. Cancelling a child also cancels runs
+attached through it, while its parent and siblings continue. Cancelling
+the lease's root run cancels every attached member. A resubmission is a
+different run with a different id.
 
 #### The consumer process
 

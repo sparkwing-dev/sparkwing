@@ -20,6 +20,12 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **local admission:** Cancelling a child run cancels its descendants while
+  its parent and siblings keep running. Cancelling the lease root still
+  cancels every attached run, including after daemon restart.
+
 ## [v0.63.0] - 2026-09-27
 ### Changed
 

@@ -83,6 +83,7 @@ type lease struct {
 	memory      uint64
 	claims      []claim
 	members     map[string]struct{}
+	parents     map[string]string
 }
 
 type semaphore struct {
@@ -321,7 +322,7 @@ func (l *Ledger) CancelWaiter(id string) []Event {
 	return nil
 }
 
-func (l *Ledger) Attach(id LeaseID, memberID string) error {
+func (l *Ledger) Attach(id LeaseID, memberID, parentID string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -335,7 +336,12 @@ func (l *Ledger) Attach(id LeaseID, memberID string) error {
 	if err := l.checkFreshID(memberID); err != nil {
 		return err
 	}
+	_, member := le.members[parentID]
+	if !member && (parentID == "" || parentID != le.ownerID) {
+		return fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, id)
+	}
 	le.members[memberID] = struct{}{}
+	le.parents[memberID] = parentID
 	l.memberOf[memberID] = id
 	l.mustHoldInvariants()
 	return nil
@@ -354,6 +360,19 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 	}
 	delete(le.members, memberID)
 	delete(l.memberOf, memberID)
+	parentID := le.parents[memberID]
+	if parentID == "" {
+		parentID = le.ownerID
+		if parentID == "" {
+			parentID = le.requestID
+		}
+	}
+	delete(le.parents, memberID)
+	for childID, parent := range le.parents {
+		if parent == memberID {
+			le.parents[childID] = parentID
+		}
+	}
 	if len(le.members) > 0 {
 		l.mustHoldInvariants()
 		return nil, nil
@@ -1156,6 +1175,7 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 		memory:      s.memory,
 		claims:      s.claims,
 		members:     map[string]struct{}{s.id: {}},
+		parents:     map[string]string{},
 	}
 	l.tokens[token] = id
 	l.memberOf[s.id] = id

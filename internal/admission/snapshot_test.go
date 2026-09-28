@@ -42,7 +42,7 @@ func busyLedger(t *testing.T) (*Ledger, Lease, Lease) {
 		MemoryBytes: 256,
 		Semaphores:  []SemaphoreClaim{sem("deploy", 2, 1, PolicyQueue)},
 	})
-	if err := l.Attach(parent.ID, "child"); err != nil {
+	if err := l.Attach(parent.ID, "child", "parent"); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	victim := mustGrant(t, l, Request{ID: "victim", Semaphores: []SemaphoreClaim{sem("db", 1, 1, PolicyQueue)}})
@@ -65,6 +65,28 @@ func TestSnapshotRoundTrip_EmptyLedger(t *testing.T) {
 func TestSnapshotRoundTrip_BusyLedger(t *testing.T) {
 	l, _, _ := busyLedger(t)
 	restoreRoundTrip(t, l)
+}
+
+func TestSnapshotPreservesChildLineageAndReleaseReparents(t *testing.T) {
+	l := testLedger(t, 4, 0)
+	lease := mustGrant(t, l, Request{ID: "parent", Cores: 1})
+	for _, member := range []struct{ id, parent string }{
+		{"child", "parent"}, {"sibling", "parent"}, {"grandchild", "child"},
+	} {
+		if err := l.Attach(lease.ID, member.id, member.parent); err != nil {
+			t.Fatalf("Attach %s: %v", member.id, err)
+		}
+	}
+	restored := restoreRoundTrip(t, l)
+	if got := restored.Snapshot().Leases[0].Parents["grandchild"]; got != "child" {
+		t.Fatalf("grandchild parent = %q, want child", got)
+	}
+	if _, err := restored.Release(lease.ID, "child"); err != nil {
+		t.Fatalf("Release child: %v", err)
+	}
+	if got := restoreRoundTrip(t, restored).Snapshot().Leases[0].Parents["grandchild"]; got != "parent" {
+		t.Fatalf("grandchild parent after release = %q, want parent", got)
+	}
 }
 
 func TestRestore_UpgradesPreAdmitSequenceSnapshotByDurableOrder(t *testing.T) {
@@ -181,6 +203,8 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 		{"duplicate token", func(s *Snapshot) { s.Leases[1].Token = s.Leases[0].Token }},
 		{"lease without members", func(s *Snapshot) { s.Leases[0].Members = nil }},
 		{"member appears twice", func(s *Snapshot) { s.Leases[1].Members = append(s.Leases[1].Members, s.Leases[0].Members[0]) }},
+		{"parent outside lease", func(s *Snapshot) { s.Leases[0].Parents["child"] = "victim" }},
+		{"parent cycle", func(s *Snapshot) { s.Leases[0].Parents["child"] = "child" }},
 		{"lease seq above counter", func(s *Snapshot) { s.Leases[0].Seq = s.LeaseSeq + 1 }},
 		{"lease seq reused", func(s *Snapshot) { s.Leases[1].Seq = s.Leases[0].Seq }},
 		{"hold on dead lease", func(s *Snapshot) { s.Semaphores[0].Holds[0].Lease = "lease-999" }},

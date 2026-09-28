@@ -67,8 +67,6 @@ type conn struct {
 	sems         []string
 	startAt      time.Time
 
-	parentRun string
-
 	queueTimeoutMS int64
 
 	costSource         string

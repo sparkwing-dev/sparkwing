@@ -280,7 +280,9 @@ acknowledges. Already-finished runs surface a per-id error but
 don't abort the batch.
 
 Pass --run once per id (repeatable). Use --run - to read ids
-from stdin, one per line.
+from stdin, one per line. For local runs sharing an admission lease,
+cancelling a child also cancels its descendants. Its parent and siblings
+continue. Cancelling the root cancels every member of that lease.
 
 ### Flags
 
