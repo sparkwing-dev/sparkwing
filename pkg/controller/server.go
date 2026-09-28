@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -66,7 +67,9 @@ type Server struct {
 	githubWebhook        GitHubWebhookConfig
 	githubCommitStatuses *githubCommitStatusReporter
 
-	queueTimeout time.Duration
+	queueTimeout    time.Duration
+	attentionCursor [2]string
+	attentionPassAt time.Time
 
 	sessionMaxLifetime time.Duration
 
@@ -292,8 +295,9 @@ func (s *Server) WithSessionMaxLifetime(d time.Duration) *Server {
 	return s
 }
 
-// WithQueueTimeout overrides the default queue-timeout window used by
-// the reaper sweep. Zero disables the sweep entirely.
+// WithQueueTimeout overrides how long a trigger waits unclaimed before the
+// reaper fails its run. Zero disables that sweep. A ready node waits for its
+// claim wait instead, [match.DefaultClaimWait] unless its plan sets one.
 func (s *Server) WithQueueTimeout(d time.Duration) *Server {
 	s.queueTimeout = d
 	return s
@@ -1564,11 +1568,12 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"invocations", recovery.Invocations)
 				}
 			}
-			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, s.queueTimeout); err != nil {
+			s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
+			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {
 				for _, p := range pairs {
-					s.logger.Warn("terminated node as queue_timeout",
+					s.logger.Warn("terminated node as unclaimable",
 						"run_id", p[0], "node_id", p[1])
 				}
 			}

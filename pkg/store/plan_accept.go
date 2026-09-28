@@ -192,9 +192,9 @@ func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body [
 			return false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, plan_accepted_generation = ?, admission = ?,
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET plan_json = ?, claim_wait_ns = ?, plan_accepted_generation = ?, admission = ?,
        status = CASE WHEN status = ? THEN ? ELSE status END
- WHERE team = ? AND id = ?`, body, tok.Generation, RunAdmissionAdmitted, runStatusPending, runStatusRunning,
+ WHERE team = ? AND id = ?`, body, planClaimWait(body), tok.Generation, RunAdmissionAdmitted, runStatusPending, runStatusRunning,
 		string(tok.Team), tok.RunID); err != nil {
 		return false, err
 	}

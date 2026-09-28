@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
@@ -43,6 +44,14 @@ func claimProfileFrom(ctx context.Context, claimant ClaimIdentity, labels []stri
 }
 
 const agentPrincipalPrefix = "agent:"
+
+// safety: the metered pool runs every node on the Cloud runner image, so it
+// has exactly the tools that image declares, whatever tools the claim sent.
+func withCloudTools(p match.Profile) match.Profile {
+	labels := slices.DeleteFunc(slices.Clone(p.Labels), func(l string) bool { return strings.HasPrefix(l, match.ToolPrefix) })
+	p.Labels = append(labels, match.ToolLabels(match.CloudTools)...)
+	return p
+}
 
 func triggerRunRepository(t *Trigger, envJSON []byte) match.Repository {
 	env, decoded := decodeTriggerEnv(envJSON)

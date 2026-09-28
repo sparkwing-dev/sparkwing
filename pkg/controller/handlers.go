@@ -1879,7 +1879,9 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		lowered.Availability.MemoryBytes = min(lowered.Availability.MemoryBytes, body.Headroom.MemoryBytes)
 		resources = &lowered
 	}
-	s.runnerPresence.record(claimer, body.Labels, body.Capacity, profile, resources, time.Now())
+	if s.runnerPresence.record(claimer, body.Labels, body.Capacity, profile, resources, time.Now()) && claimer.tokenPrefix != "" {
+		s.recordAgentLabels(r.Context(), claimer.tokenPrefix, body.Labels, profile)
+	}
 	n, err := s.store.ClaimNextReadyNode(s.placementContext(claimCtx, claimer),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if writeClaimTeamRefusal(w, err) {

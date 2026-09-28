@@ -11,10 +11,11 @@ Each job declares the labels it needs, per node through the Go SDK
 `sparkwing.yaml`. Legacy runners self-report labels when they poll. Enrolled
 executors use only administrator-owned capabilities; agent traffic cannot add
 them. The controller filters incompatible runners before claim ordering. A node
-with no eligible runner waits until the queue deadline, then fails with
-`queue_timeout` (default 15m).
+with no eligible runner waits, and its run reports why in `needs_attention`,
+until its claim wait runs out (24 hours unless the plan sets
+`ClaimWait`); it then fails as unclaimable with `queue_timeout`.
 
-The same deadline covers the step before any node exists, for a trigger a
+The trigger queue deadline (default 15m) covers the step before any node exists, for a trigger a
 claimant released. A claim whose runner dies puts the trigger back in the queue
 and leaves the run pending for the next claimant, which is what lets the first
 run submitted during a runner-pool rollout wait out the rollout. The controller
@@ -25,7 +26,7 @@ die while the work runs on.
 
 A trigger no runner has ever claimed is outside that sweep and nothing reaps it
 today: it stays queued until a runner with matching labels appears, and the node
-queue timeout above takes over once the run has nodes.
+claim wait above takes over once the run has nodes.
 
 ## Label-match semantics
 
@@ -62,6 +63,67 @@ its cgroup ancestry, or the host's totals. A node whose resource request
 exceeds that capacity is never handed to it. What the runner has free right
 now only decides whether it holds a node back from the cloud.
 
+## Tools
+
+An agent looks up a fixed list of tools on its `PATH` when it starts (aws,
+buildx, crane, docker, git, go, golangci-lint, helm, kubectl, node, npm,
+shellcheck, terraform) and advertises each one it finds as the label
+`tool:<name>`, with no configuration. Like other labels an agent sends, these
+steer scheduling and grant nothing. `buildx` also counts when installed as a
+docker CLI plugin.
+
+A node names the tools it needs with `NeedsTools`, or with a `tool:<name>`
+term in `Requires` or `requires:`. The matcher never hands such a node to an
+agent that lacks the tool, on any claim route. Sparkwing Cloud runners have
+the tools `build/runner-tools` declares for the runner image, currently git
+and go, whatever tools their claims send; the image build fails when the image
+lacks one it declares.
+
+```go
+sw.Job(plan, "apply", &Apply{}).NeedsTools("terraform")
+```
+
+`JobGroup.NeedsTools` applies to every member, including those a
+`JobFanOutDynamic` group generates after its source finishes. An enrolled executor has the tools its enrollment grants as
+`tool:<name>` capabilities.
+
+## Waiting nodes and `needs_attention`
+
+A node no agent can claim does not fail fast. Once it has waited 30 seconds
+since it first became ready, the controller checks every agent registered to
+the node's team, online or offline, plus Sparkwing Cloud on a metered
+controller. Agents are judged as their claims are, on the selector, the run's
+repository and the node's resource request: an enrolled executor on its
+enrolled profile and online while it heartbeats, any other agent on what its
+latest claim sent and online while it polls. When no online agent and no Cloud
+runner could run the node, the run's `needs_attention` field (on the run and
+in the run list) says why:
+
+- `node apply needs tool:terraform; no agent in team acme has it and Sparkwing
+  Cloud runners don't provide it` when nothing registered satisfies the
+  selector; it names only the terms nothing satisfies.
+- `node apply needs tool:terraform; eligible agent pi is offline (last seen
+  2026-09-28T10:00:00Z)` when an agent that could run it is offline, matched
+  on the labels and platform it advertised on its last claim.
+- `node apply needs tool:terraform; every agent in team acme that matches
+  refuses it: pi (shape)` when the matching agents refuse the node's
+  repository (`repo`) or cannot hold its request (`shape`).
+
+The sweep runs every 10 seconds and judges at most 1,000 waiting nodes per
+tick, resuming after the last one on the next tick. A pass covers the nodes
+that were waiting when it began, so every waiting node is judged within
+ceil(N/1,000) ticks however many arrive meanwhile. On Postgres with 5,000
+waiting nodes a tick that rewrites 1,000 reasons took about 350 ms and a tick
+that changes none about 10 ms.
+
+The field clears when an agent claims the node, and on the next sweep once an
+eligible agent is online. The node waits up to its claim wait, 24 hours by
+default or what `plan.ClaimWait(d)` sets for the pipeline, then fails as
+unclaimable with `queue_timeout` and the reason as its error. Both the
+30 seconds and the claim wait run from when the node first became ready, so an
+agent that polls and cannot take the node does not postpone either. A missing
+tool is never retried automatically.
+
 ## Per-node modifiers (Go SDK)
 
 Three chainable modifiers on `*sparkwing.JobNode` (and the same names on
@@ -70,7 +132,7 @@ term syntax above.
 
 ```go
 // Hard filter on the claim queue: no runner advertising these labels
-// means the node waits, then fails with queue_timeout.
+// means the node waits, then fails as unclaimable at its claim wait.
 sw.Job(plan, "train", &Train{}).Requires("gpu")
 sw.Job(plan, "package", &Package{}).Requires("arch=arm64", "trusted")
 sw.Job(plan, "build", &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
@@ -89,7 +151,7 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
 - **`Requires`** -- hard constraint. Only a runner advertising the
   labels can claim the job. While none does, the warm pool logs a hint
   naming the missing labels and the node waits; the controller's sweep
-  fails it with `queue_timeout` at the queue deadline (default 15m).
+  fails it with `queue_timeout` at its claim wait (default 24h).
 - **`Prefers`** -- runner-label preferences recorded in plan-snapshot
   metadata. They raise an eligible enrolled-executor offer's effective
   priority within its administrator-owned priority ceiling during one

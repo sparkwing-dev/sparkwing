@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -16,6 +17,7 @@ type JobGroup struct {
 	name    string
 	members []*JobNode
 	dynamic bool
+	tools   []string
 	ready   chan struct{}
 	err     error
 }
@@ -124,7 +126,12 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 		for _, it := range items {
 			id, x := fn(it)
 			job := coerceJobArg("JobFanOutDynamic", id, x)
-			out = append(out, newNode("JobFanOutDynamic", id, job))
+			node := newNode("JobFanOutDynamic", id, job)
+			g.mu.Lock()
+			tools := slices.Clone(g.tools)
+			g.mu.Unlock()
+			node.NeedsTools(tools...)
+			out = append(out, node)
 		}
 		return out
 	}
@@ -201,6 +208,20 @@ func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup 
 func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Requires(labels...)
+	}
+	return g
+}
+
+// NeedsTools restricts every member to agents that have the named tools,
+// including the members a [JobFanOutDynamic] group generates later. See
+// [JobNode.NeedsTools].
+func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
+	mustKnowTools("JobGroup.NeedsTools", names)
+	g.mu.Lock()
+	g.tools = append(g.tools, names...)
+	g.mu.Unlock()
+	for _, m := range g.Members() {
+		m.NeedsTools(names...)
 	}
 	return g
 }

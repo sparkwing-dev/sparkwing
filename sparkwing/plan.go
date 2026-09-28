@@ -29,6 +29,8 @@ type Plan struct {
 
 	priority int
 
+	claimWait time.Duration
+
 	admissionClass AdmissionClass
 
 	lintWarnings []LintWarning
@@ -351,6 +353,7 @@ type JobNode struct {
 	verify VerifyFn
 
 	requires []string
+	tools    []string
 
 	prefers []string
 
@@ -845,8 +848,10 @@ func (n *JobNode) Requires(labels ...string) *JobNode {
 	return n
 }
 
+// RequiresLabels is the job's selector: its Requires terms, then a
+// tool:<name> term for each tool NeedsTools named.
 func (n *JobNode) RequiresLabels() []string {
-	return copyLabels(n.requires)
+	return copyLabels(append(slices.Clone(n.requires), n.tools...))
 }
 
 // Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.

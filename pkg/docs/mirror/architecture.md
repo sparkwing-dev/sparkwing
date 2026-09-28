@@ -71,8 +71,9 @@ serves it to runners that poll and claim.
   controller does not push work to runners
 - **Heartbeat monitor**: reclaims a node whose runner stops renewing its
   lease (default 3-minute lease)
-- **Queue timeout**: fails pending nodes that exceed their `queue_timeout`
-  (default 15 minutes)
+- **Claim wait**: marks a run `needs_attention` while a ready node has no
+  agent able to claim it, and fails the node as unclaimable once its claim
+  wait passes (default 24 hours)
 - **Metrics collector**: stores the per-node CPU/memory samples runners
   push as they execute (no cluster metrics-server involved)
 

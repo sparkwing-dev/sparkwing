@@ -164,6 +164,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// reads and writes the store; its agent-token rotation, which inserts the
 	// successor before revoking the predecessor, fails on the index instead.
 	82: nil,
+	// safety: v83 adds defaulted or nullable run, node and token columns an
+	// older binary never names, so an older binary keeps writing the migrated
+	// database.
+	83: {claimAttentionRunCols, claimAttentionNodeCols, agentLabelTokenCols},
 }
 
 func columnSpecMaps() []map[string]string {

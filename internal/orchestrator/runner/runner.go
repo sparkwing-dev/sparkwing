@@ -24,6 +24,8 @@ type Request struct {
 	Trigger  sparkwing.TriggerInfo
 
 	Node *sparkwing.JobNode
+	// ClaimWait is how long the node may wait for a claim; zero is the default.
+	ClaimWait time.Duration
 
 	Delegate sparkwing.Logger
 

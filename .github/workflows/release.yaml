@@ -136,7 +136,7 @@ jobs:
         if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images) && github.event_name == 'workflow_dispatch'
         run: |
           cp .release-tools/.dockerignore .dockerignore
-          cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
+          cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner .release-tools/build/runner-tools build/
           cp .release-tools/bin/build-release-images.sh .release-tools/bin/check-runner-image.sh bin/
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         if: matrix.goos == 'linux' && (github.event_name != 'workflow_dispatch' || inputs.publish_images)

@@ -156,8 +156,8 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 	}
 	past := time.Now().Add(-1 * time.Hour).UnixNano()
 	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s,
-		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`),
-		past, "run-1", "node-a"); err != nil {
+		`UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ? AND node_id = ?`),
+		past, past, "run-1", "node-a"); err != nil {
 		t.Fatal(err)
 	}
 

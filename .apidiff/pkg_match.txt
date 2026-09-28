@@ -3,6 +3,8 @@
 const ClassAgent = "agent"
 const ClassCloud = "cloud"
 const ClassCoordinator = "coordinator"
+var CloudTools = parseToolManifest(build.RunnerTools)
+const DefaultClaimWait = 24 * time.Hour
 type Demand struct {
 	Selector []string
 
@@ -11,8 +13,14 @@ type Demand struct {
 	Trigger bool
 	Request Resources
 }
+func DetectTools(lookPath func(string) (string, error)) []string
 func Evaluate(p Profile, d Demand) Verdict
 func Fits(capacity, available, request Resources) Verdict
+func IsKnownTool(name string) bool
+var KnownTools = []string{
+	"aws", "buildx", "crane", "docker", "git", "go", "golangci-lint",
+	"helm", "kubectl", "node", "npm", "shellcheck", "terraform",
+}
 func ParseAccept(patterns []string) (RepoFilter, error)
 type Profile struct {
 	Name, Class, Location string
@@ -45,6 +53,8 @@ type Resources struct {
 }
 func SelfAsserted(labels []string) []string
 func TermSatisfied(p Profile, term string) bool
+func ToolLabels(names []string) []string
+const ToolPrefix = "tool:"
 type Verdict struct {
 	Reason Reason
 

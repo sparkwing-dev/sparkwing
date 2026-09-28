@@ -1,0 +1,6 @@
+# Tools from pkg/match KnownTools that the runner image provides. The
+# controller offers a node needing tool:<name> to Sparkwing Cloud only when
+# <name> is listed here; bin/check-runner-image.sh fails the image build when
+# the image lacks one.
+git
+go

@@ -58,6 +58,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"the rows the per-team reference key would refuse",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
+	"(*Store).RecordAgentLabels": "writes the one credential the claim authenticated with; a token " +
+		"prefix is unique across teams",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +

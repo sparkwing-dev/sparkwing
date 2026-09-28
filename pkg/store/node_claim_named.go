@@ -120,6 +120,7 @@ func (s *Store) ClaimNamedNode(
 	profile := claimProfileFrom(ctx, claimant, opts.Labels)
 	if warm.metered {
 		profile.Class, profile.Location = match.ClassCloud, executorLocationCloud
+		profile = withCloudTools(profile)
 	}
 	demand := match.Demand{Selector: candidate.needs}
 	if profile.Accept != nil {
