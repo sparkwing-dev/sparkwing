@@ -1013,6 +1013,11 @@ func TestGitHubAppForkPullRequestIsNotRun(t *testing.T) {
 	if _, out := f.deliver("pull_request", gone, ""); out["status"] != "ignored" {
 		t.Fatalf("PR from a deleted head repository = %v, want ignored", out)
 	}
+	unnamed := prPayload(7, 701, "acme/widgets", 0)
+	unnamed["pull_request"].(map[string]any)["base"].(map[string]any)["repo"] = map[string]any{"full_name": "acme/widgets"}
+	if _, out := f.deliver("pull_request", unnamed, ""); out["status"] != "ignored" {
+		t.Fatalf("PR whose head and base repositories carry no id = %v, want ignored", out)
+	}
 	if n := len(f.triggers(olga.team)); n != 0 {
 		t.Fatalf("fork PRs started %d runs", n)
 	}

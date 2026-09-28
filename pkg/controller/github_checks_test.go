@@ -527,6 +527,14 @@ func TestGitHubAppRerequestedForkOrForeignCommitStartsNothing(t *testing.T) {
 	if _, out := f.deliver("check_run", forkRun, ""); out["status"] != "ignored" {
 		t.Fatalf("check run rerequested for a fork head = %v, want ignored", out)
 	}
+	unnamed := []any{map[string]any{
+		"number": 3,
+		"head":   map[string]any{"ref": "feature", "sha": headSHA, "repo": map[string]any{}},
+		"base":   map[string]any{"ref": "main", "sha": strings.Repeat("1", 40), "repo": map[string]any{}},
+	}}
+	if _, out := f.deliver("check_suite", checkSuitePayload(7, "rerequested", headSHA, unnamed), ""); out["status"] != "ignored" {
+		t.Fatalf("suite rerequested for a PR whose repositories carry no id = %v, want ignored", out)
+	}
 	never := strings.Repeat("9", 40)
 	if _, out := f.deliver("check_suite", checkSuitePayload(7, "rerequested", never, nil), ""); out["status"] != "ignored" {
 		t.Fatalf("suite rerequested for a commit never run = %v, want ignored", out)

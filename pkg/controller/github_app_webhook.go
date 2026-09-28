@@ -377,7 +377,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 	}
 	// safety: a head repository that is gone or is not the base repository is
 	// someone else's code, whatever the branch is called, and nothing runs it.
-	if pr.Head.Repo == nil || pr.Base.Repo == nil || pr.Head.Repo.ID != pr.Base.Repo.ID {
+	if !sameRepoPullRequest(pr.Head.Repo, pr.Base.Repo) {
 		return githubAppIntake{}, githubAppForkReason, nil
 	}
 	if !githubCommit(pr.Head.SHA) {
@@ -404,6 +404,12 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 }
 
 const githubAppForkReason = "pull requests from forks are not run"
+
+// safety: a zero id names no repository, so two missing ids must not read as
+// the same repository and admit a fork.
+func sameRepoPullRequest(head, base *githubAppRepoRef) bool {
+	return head != nil && base != nil && head.ID > 0 && head.ID == base.ID
+}
 
 // safety: A delayed GitHub clock may not make a valid delivery look older than its binding.
 const githubAppClockSkew = time.Minute

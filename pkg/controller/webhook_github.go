@@ -496,8 +496,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	}
 	// safety: a head repository that is gone or is not the base repository is
 	// someone else's code, and running it would hand it the team's runner token.
-	head, base := payload.PullRequest.Head.Repo, payload.PullRequest.Base.Repo
-	if head == nil || base == nil || head.ID == 0 || head.ID != base.ID {
+	if !sameRepoPullRequest(payload.PullRequest.Head.Repo, payload.PullRequest.Base.Repo) {
 		s.logger.Info("github webhook fork pull request ignored", "pipeline", pipeline,
 			"repo", payload.Repository.FullName, "delivery", delivery)
 		writeJSON(w, http.StatusAccepted, map[string]string{

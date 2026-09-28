@@ -1514,6 +1514,12 @@ unlock.
   did. A fork's code no longer runs with the team's runner token, secrets or
   OIDC identity.
 
+- **controller:** The GitHub App treats a pull request as its own
+  repository's only when the head and base repositories carry the same
+  nonzero id. A `pull_request` delivery or a check re-run whose repositories
+  carry no id is ignored as a fork; before, two missing ids compared equal
+  and the pull request ran.
+
 - **controller + runner:** A metered node stops when its heartbeat cannot read
   the token marker or charge credits. The failed renewal preserves the prior
   lease and ledger state.

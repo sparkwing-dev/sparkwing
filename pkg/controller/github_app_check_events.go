@@ -87,7 +87,7 @@ func (s *Server) handleGitHubAppCheckEvent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	for _, pr := range prs {
-		if pr.Head.Repo == nil || pr.Base.Repo == nil || pr.Head.Repo.ID != pr.Base.Repo.ID {
+		if !sameRepoPullRequest(pr.Head.Repo, pr.Base.Repo) {
 			s.logger.Info("github app fork pull request re-run ignored", "team", string(in.Team), "repo", repo.Slug(),
 				"installation_id", env.Installation.ID, "delivery", delivery)
 			githubAppIgnored(w, githubAppForkReason)
