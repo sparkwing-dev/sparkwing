@@ -134,9 +134,8 @@ type httpNodeLog struct {
 	pendingBytes    int
 	flushTimer      *time.Timer
 
-	// stream names this writer's numbered appends; seq, sentBytes and
-	// digest cover every line it numbered, delivered or not, and go into
-	// the seal Close sends.
+	// safety: seq, sentBytes and digest count every numbered line, delivered or not,
+	// because the seal Close sends reports drops against them.
 	stream    string
 	seq       int64
 	sentBytes int64
@@ -162,10 +161,12 @@ var httpNodeLogDropCooldown = 5 * time.Second
 
 const httpNodeLogFinishTimeout = 10 * time.Second
 
-const httpNodeLogPendingLimit = 4 << 20
-const httpNodeLogBatchLines = 256
-const httpNodeLogBatchBytes = 64 << 10
-const httpNodeLogTailDelay = 100 * time.Millisecond
+const (
+	httpNodeLogPendingLimit = 4 << 20
+	httpNodeLogBatchLines   = 256
+	httpNodeLogBatchBytes   = 64 << 10
+	httpNodeLogTailDelay    = 100 * time.Millisecond
+)
 
 var logStoreWithoutSealsOnce sync.Once
 
@@ -174,8 +175,6 @@ type numberedLine struct {
 	payload []byte
 }
 
-// logSealer is the capability a log store has when it can record the end
-// of a numbered stream; only the logs service has it.
 type logSealer interface {
 	Seal(ctx context.Context, runID, nodeID string, seal logs.Seal) error
 }
@@ -253,8 +252,7 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 	l.appendLive(payload)
 }
 
-// number gives the next line its place in this writer's stream. The
-// caller holds writeMu.
+// safety: the caller holds writeMu.
 func (l *httpNodeLog) number(payload []byte) int64 {
 	l.seq++
 	l.sentBytes += int64(len(payload))
@@ -506,11 +504,6 @@ func (l *httpNodeLog) Close() error {
 	return err
 }
 
-// seal tells the logs service this writer is done, with what it numbered
-// and what it lost, so a reader can tell a whole log from one cut short.
-// It retries until ctx, the node's finish budget, runs out. A writer whose
-// claim was refused, or that never learned its attempt, sent nothing the
-// service could file and seals nothing.
 func (l *httpNodeLog) seal(ctx context.Context) {
 	skip := func(reason string) {
 		l.logger.Warn("node log not sealed; "+reason,

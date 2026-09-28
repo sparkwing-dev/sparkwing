@@ -23,8 +23,7 @@ func testInvitation() mailer.Invitation {
 		TeamName:    "Platform Ops",
 		Role:        "maintainer",
 		AcceptURL:   "https://sparkwing.example/invitations/accept?token=tok123",
-		// 23:30 in UTC-7 is already the next day in UTC.
-		ExpiresAt: time.Date(2026, 9, 28, 23, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
+		ExpiresAt:   time.Date(2026, 9, 28, 23, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
 	}
 }
 

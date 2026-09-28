@@ -12,7 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// deleteAndPurge deletes a team its owner created and finishes the purge.
 func deleteAndPurge(t *testing.T, st *store.Store, team store.Team, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -140,7 +139,7 @@ func TestTeamCreationIsCappedOverTheAccountsLifetime(t *testing.T) {
 	now := time.Now()
 	owner := signIn(t, st, "o", "owner@example.com")
 	var err error
-	created := 1 // the personal space the sign-in created
+	created := 1
 	for i := range 30 {
 		slug := store.Team(fmt.Sprintf("churn-%d", i))
 		if _, err = st.CreateTeam(ctx, owner.Account.ID, slug, "", now); err != nil {

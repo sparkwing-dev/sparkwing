@@ -1,6 +1,9 @@
 package objectguard
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // Coalescer runs one background job at a time without dropping the
 // requests it turns away.
@@ -15,6 +18,7 @@ import "sync/atomic"
 type Coalescer struct {
 	running atomic.Bool
 	dirty   atomic.Bool
+	jobs    sync.WaitGroup
 }
 
 // Go runs job in a goroutine when none is running, and otherwise marks
@@ -26,14 +30,20 @@ func (c *Coalescer) Go(job func()) bool {
 		c.dirty.Store(true)
 		return false
 	}
+	c.jobs.Add(1)
 	go c.run(job)
 	return true
 }
+
+// Wait blocks until no job started by [Coalescer.Go] is running, repeats
+// included. A caller must stop issuing Go calls before it waits.
+func (c *Coalescer) Wait() { c.jobs.Wait() }
 
 // safety: the flag is released before the repeat is considered, so a request
 // arriving in that window either finds the job free and starts it or sets the
 // flag this loop is about to read; neither path drops the work.
 func (c *Coalescer) run(job func()) {
+	defer c.jobs.Done()
 	for {
 		c.dirty.Store(false)
 		job()

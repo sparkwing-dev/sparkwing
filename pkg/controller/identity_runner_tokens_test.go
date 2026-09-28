@@ -21,9 +21,6 @@ func mintRunner(f *identityFixture, auth, name string) mintedRunner {
 	return m
 }
 
-// runnerAuthenticates reports whether the controller still accepts a runner
-// token: a live one reaches the team boundary and hears 404 for a missing run,
-// a revoked one is refused before it.
 func runnerAuthenticates(f *identityFixture, m mintedRunner) bool {
 	f.t.Helper()
 	code := f.call("GET", "/api/v1/triggers/no-such-run", "Bearer "+m.Token, nil, nil)

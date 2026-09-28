@@ -115,7 +115,7 @@ test("auth-disabled bootstrap authenticates the dashboard without exposing its s
     expect(session).toMatchObject({
       value: "session-1",
       httpOnly: true,
-      sameSite: "Strict",
+      sameSite: "Lax",
     });
     expect(csrf).toMatchObject({
       value: "csrf-token",

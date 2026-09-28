@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -87,6 +88,9 @@ func TestRemoteBackends_PrefersAnnouncedLogsURL(t *testing.T) {
 	}))
 	defer ctrlSrv.Close()
 
+	// safety: discovery caches by URL for the process, and a reused test port would return another test's services.
+	discovery.ResetCache()
+	t.Cleanup(discovery.ResetCache)
 	c := client.NewWithToken(ctrlSrv.URL, nil, "")
 	backends := orchestrator.RemoteBackends(c, nil, nil, nil, 0)
 

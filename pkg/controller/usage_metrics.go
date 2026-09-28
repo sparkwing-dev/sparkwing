@@ -21,9 +21,6 @@ type usageMetricsResponse struct {
 	FirstGreen    store.FirstGreenStats `json:"time_to_first_green"`
 }
 
-// handleUsageMetrics reports the deployment's weekly traction to its
-// operator. The default team is the operator's own and never counts;
-// exclude_team names more, such as a team the operator signed up to test.
 func (s *Server) handleUsageMetrics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	weeks := defaultUsageWeeks

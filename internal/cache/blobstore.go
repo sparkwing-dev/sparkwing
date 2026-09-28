@@ -24,12 +24,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
-// blobStore, when set, holds the binary, dependency-archive and artifact
-// stores in a bucket instead of on the cache volume. Each team's objects
-// sit under teams/<team>/ exactly as its trees do on disk, and the
-// operator's under the store root. Git mirrors, workspace uploads,
-// archives and the registry proxy stay on the volume, because git needs
-// a real filesystem and the others are short-lived working state.
+// safety: git mirrors, workspace uploads, archives and the registry proxy stay on the
+// volume, because git needs a real filesystem and the rest is short-lived state.
 var blobStore *teamblob.Store
 
 // hack: an indirection so a test hands New a store over an in-memory
@@ -42,8 +38,6 @@ var openBlobStore = func(ctx context.Context, raw string) (*teamblob.Store, erro
 	return teamblob.New(teamblob.Options{Bucket: bucket, Prefix: prefix, Client: client})
 }
 
-// blobScratchDir stages a binary upload whose digest must be known
-// before the object is written.
 func blobScratchDir() string { return filepath.Join(dataRoot, "tmp") }
 
 func blobError(w http.ResponseWriter, op string, err error) {
@@ -145,12 +139,8 @@ func writeBinHeaders(w http.ResponseWriter, o teamblob.Object) bool {
 	return true
 }
 
-// maxBinBytes caps one binary upload.
 const maxBinBytes = 100 << 20
 
-// putBinBlob stages the body on the volume to learn its digest, then
-// writes it with the digest as object metadata, so a reader gets both
-// from one request.
 func putBinBlob(w http.ResponseWriter, r *http.Request, team, rel, hash string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBinBytes)
 	counted, body, ok := reserveBlobWrite(w, r, team, r.ContentLength, maxBinBytes)
@@ -280,9 +270,6 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// putStreamBlob writes the request body to rel without staging it. A
-// body cut off by the size cap or a hung-up client aborts the upload, so
-// no partial object is ever readable.
 func putStreamBlob(w http.ResponseWriter, r *http.Request, team, rel string, size int64, contentType, what string, limit int64) (int64, bool) {
 	if err := blobStore.WritesPaused(); err != nil {
 		blobError(w, "put "+what, err)
@@ -479,8 +466,7 @@ func tarBlob(ctx context.Context, tw *tar.Writer, team, prefix string, m teamblo
 	return err
 }
 
-// globMatches treats a malformed pattern as matching nothing, which is
-// what the volume's walk does with it.
+// safety: a malformed pattern matches nothing, as the volume's walk treats it.
 func globMatches(glob, name string) bool {
 	ok, err := path.Match(glob, name)
 	return err == nil && ok
@@ -496,7 +482,6 @@ func countCacheLookup(r *http.Request, hit bool) {
 	}
 }
 
-// deleteTeamBlobs removes a team's whole namespace from the bucket.
 func deleteTeamBlobs(ctx context.Context, team string) error {
 	if blobStore == nil {
 		return nil

@@ -29,21 +29,19 @@ import (
 const dashRedirect = "http://localhost:4343/auth/google/callback"
 
 type identityFixture struct {
-	t      *testing.T
-	url    string
-	store  *store.Store
-	google *googletest.Issuer
-	github *githubtest.Server
-	admin  string
-	srv    *controller.Server
-	// logsToken is the log-deletion credential a deletion fixture minted.
+	t         *testing.T
+	url       string
+	store     *store.Store
+	google    *googletest.Issuer
+	github    *githubtest.Server
+	admin     string
+	srv       *controller.Server
 	logsToken string
 }
 
 type fixtureOpts struct {
-	license string
-	key     ed25519.PublicKey
-	// configure adds to the server before it starts serving.
+	license   string
+	key       ed25519.PublicKey
 	configure func(*controller.Server)
 	logger    *slog.Logger
 

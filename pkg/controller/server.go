@@ -37,14 +37,9 @@ type Server struct {
 	dispatcher Dispatcher
 	logger     *slog.Logger
 
-	// hostKeyScan reads a host's ssh key for a new git credential; nil
-	// dials the host.
-	hostKeyScan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
-	// gitCredentialLimit holds a claim to a few credential releases a
-	// minute, so a looping pipeline cannot flood the audit trail.
+	hostKeyScan        func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	gitCredentialLimit perMinuteLimiter
-	// identityLinkLimit holds an account to a few link attempts a minute.
-	identityLinkLimit perMinuteLimiter
+	identityLinkLimit  perMinuteLimiter
 
 	pool *poolBinding
 
@@ -816,8 +811,7 @@ func (s *Server) EnableAuthFromStore() *Server {
 	return s
 }
 
-// tokenCacheTTL is how long a replica keeps accepting a token it looked up,
-// so a revocation on another replica reaches it at most this late.
+// safety: a revocation on another replica reaches this one at most this late.
 const tokenCacheTTL = 60 * time.Second
 
 func (s *Server) storeAuthenticator() *Authenticator {
@@ -826,11 +820,9 @@ func (s *Server) storeAuthenticator() *Authenticator {
 		WithLogger(s.logger)
 }
 
-// safety: a request with no credential acts as the operator of the default
-// team, which on a multi-team controller is every other team's operator too,
-// so the multi-team license turns token auth on whatever the tokens table
-// holds. It runs again when the handler is built because the license may be
-// installed after EnableAuthFromStore.
+// safety: a request with no credential acts as the default team's operator, which on a multi-team
+// controller is every team's operator, so the multi-team license forces token auth. It runs
+// again when the handler is built because the license may be installed after EnableAuthFromStore.
 func (s *Server) requireAuthForTeams() {
 	if s.auth == nil && s.store != nil && s.MultiTeam() {
 		s.auth = s.storeAuthenticator()
@@ -1714,7 +1706,7 @@ func withRequestLog(
 					status = rw.status
 				}
 				finish(status)
-				panic(p)
+				panic(p) //nolint:forbidigo // re-raise so net/http still sees the handler's panic
 			}
 		}()
 		next.ServeHTTP(writer, r)

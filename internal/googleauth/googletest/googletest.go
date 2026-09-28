@@ -179,7 +179,6 @@ func (i *Issuer) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id_token": token})
 }
 
-// sign is jwkstest's SignWith with a JOSE header a test can override.
 func (i *Issuer) sign(key *rsa.PrivateKey, headOverride, claims map[string]any) (string, error) {
 	head, err := json.Marshal(overridden(map[string]any{"alg": "RS256", "kid": i.signer.Kid, "typ": "JWT"}, headOverride))
 	if err != nil {

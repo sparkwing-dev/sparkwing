@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-// githubCredential is what the controller hands a GitHub Actions job in
-// exchange for the job's ID token.
 type githubCredential struct {
 	Token      string   `json:"token"`
 	Team       string   `json:"team"`
@@ -26,9 +24,6 @@ type githubCredential struct {
 
 const githubExchangeTimeout = 30 * time.Second
 
-// githubActionsCredential requests this job's ID token with the controller
-// as its audience and exchanges it for a runner credential bound to team and
-// to the repository the job runs in.
 func githubActionsCredential(ctx context.Context, client *http.Client, controllerURL, team string) (githubCredential, error) {
 	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
 	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
@@ -112,8 +107,6 @@ func doJSON(client *http.Client, req *http.Request, want int, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-// githubClaimDeadline is when a job stops taking new nodes, leaving the
-// credential's last minutes for the node it already holds.
 func githubClaimDeadline(cred githubCredential) time.Time {
 	const reserve = 10 * time.Minute
 	return time.Unix(cred.ExpiresAt, 0).Add(-reserve)

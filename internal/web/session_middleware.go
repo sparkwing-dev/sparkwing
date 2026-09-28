@@ -117,10 +117,8 @@ type webPrincipal struct {
 	Scopes    []string
 	ExpiresAt time.Time
 
-	sessionID string
-	csrfToken string
-	// accountBound marks a signed-up account's session, which reads its
-	// team's view from the controller rather than this dashboard's own.
+	sessionID    string
+	csrfToken    string
 	accountBound bool
 }
 

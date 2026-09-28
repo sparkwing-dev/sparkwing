@@ -25,7 +25,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// countPaths wraps h and counts the requests whose path contains any of subs.
 func countPaths(h http.Handler, n *atomic.Int32, subs ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, sub := range subs {
@@ -38,8 +37,6 @@ func countPaths(h http.Handler, n *atomic.Int32, subs ...string) http.Handler {
 	})
 }
 
-// httpsOrigin serves the bare repositories under root as https://git.example.invalid/,
-// for every git this process starts, the cache's clone included.
 func httpsOrigin(t *testing.T, root string) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
@@ -51,8 +48,6 @@ func httpsOrigin(t *testing.T, root string) {
 	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
 }
 
-// gitOnlyPath leaves git on PATH and takes the go toolchain off it, so a
-// runner that must compile the pipeline fails instead.
 func gitOnlyPath(t *testing.T) {
 	t.Helper()
 	git, err := exec.LookPath("git")
@@ -169,7 +164,6 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 		WithCachePodURL(cacheSrv.URL).
 		EnableAuthFromStore().Handler(), &proxied, "/gitcache"))
 	t.Cleanup(ctrlSrv.Close)
-	// The counter sees the proxy routes, so a zero below is the agent's choice.
 	if code, _ := post(t, ctrlSrv.URL+"/api/v1/runs/run-a1/gitcache/git/register", laptopA); code == 0 || proxied.Load() != 1 {
 		t.Fatalf("the proxy counter saw %d requests, want the probe", proxied.Load())
 	}
@@ -258,7 +252,6 @@ func post(t *testing.T, url, bearer string) (int, string) {
 	return resp.StatusCode, b.String()
 }
 
-// pipelineKey is the binary cache key of the pipeline at the bare origin's HEAD.
 func pipelineKey(t *testing.T, bare string) string {
 	t.Helper()
 	work := filepath.Join(t.TempDir(), "checkout")

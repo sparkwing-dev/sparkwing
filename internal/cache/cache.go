@@ -136,12 +136,11 @@ const DefaultMultiTeamEgressDailyCapBytes int64 = 200 << 30
 const serverReadTimeout = 30 * time.Second
 
 type Server struct {
-	cfg     Config
-	tel     *otelutil.Telemetry
-	mux     *http.ServeMux
-	handler http.Handler
-	http    *http.Server
-	// metrics serves /metrics and /stats when Config.MetricsAddr is set.
+	cfg         Config
+	tel         *otelutil.Telemetry
+	mux         *http.ServeMux
+	handler     http.Handler
+	http        *http.Server
 	metrics     http.Handler
 	metricsHTTP *http.Server
 	wg          sync.WaitGroup

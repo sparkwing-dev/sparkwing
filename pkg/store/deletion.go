@@ -240,14 +240,8 @@ func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Te
 	return nil
 }
 
-// markForDeletionTx records the deletion and closes every way into the team
-// before any row is removed: members leave (their sessions move to a team
-// they still hold, or end), every token is revoked, open invitations are
-// withdrawn, queued runs are cancelled and running ones asked to stop.
-// [Store.ForTeam] refuses the team from here on. The rows and stored
-// objects go later, in [Operator.PurgeTeam], because they may not fit one
-// transaction. Repeating a pending request changes nothing it has not
-// already changed.
+// safety: every way into the team closes before any row is removed; the rows and stored objects go
+// later, in [Operator.PurgeTeam], because they may not fit one transaction.
 func (t *Tenant) markForDeletionTx(ctx context.Context, tx *storeTx, requestedBy string, now time.Time) ([]string, error) {
 	if t.team == DefaultTeam {
 		return nil, fmt.Errorf("%w: the default team holds every single-team install's rows", ErrInvalidInput)
@@ -692,9 +686,6 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	return res, tx.Commit()
 }
 
-// ownedTeamsTx sorts the teams an account is the only owner of into those it
-// is also the only member of, which go with the account, and those with other
-// members, which block the deletion.
 func ownedTeamsTx(ctx context.Context, tx *storeTx, accountID string) (sole []Team, blocked []TeamInfo, err error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT m.team, t.display_name,
@@ -746,19 +737,11 @@ func lockOwnedTeamsTx(ctx context.Context, tx *storeTx, s *Store, accountID stri
 	return nil
 }
 
-// principalName is a name a row may carry for a deleted account. An address
-// is the account's in every team; a token's principal is a label its team
-// chose, so it names the account only inside that team.
 type principalName struct {
 	name string
 	team string
 }
 
-// accountPrincipalNamesTx lists the names a row may carry for this account:
-// its address now and every address a sign-in identity asserted for it, in
-// every team, and the principal of every token it minted, in that token's team.
-// Principal columns hold a name rather than an account id, so these are what
-// the relabel matches.
 func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ []principalName, err error) {
 	names := []principalName{{name: acct.Email}}
 	add := func(n principalName) {
@@ -784,10 +767,6 @@ func accountPrincipalNamesTx(ctx context.Context, tx *storeTx, acct Account) (_ 
 	return names, rows.Err()
 }
 
-// relabelPrincipalTx replaces a name with [DeletedUserLabel] in every column
-// that records who acted, in every team for an address and in its own team
-// for a token principal. Amounts on usage and billing rows stay; egress usage
-// for an address merges into the label's row for the month.
 func relabelPrincipalTx(ctx context.Context, tx *storeTx, n principalName) error {
 	label := DeletedUserLabel
 	scope, args := "", []any{label, n.name}

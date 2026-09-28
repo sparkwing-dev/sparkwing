@@ -255,8 +255,6 @@ const creditGrantReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_
 const creditGrantTeamReferenceIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_grants_team_reference
     ON credit_grants(team, kind, reference) WHERE reference != ''`
 
-// applyTeamGrantReferenceMigration moves the grant reference key from
-// (kind, reference) to (team, kind, reference). It is a step of v52.
 func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
 	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_credit_grants_reference`); err != nil {
 		return err
@@ -285,9 +283,6 @@ const (
 	v75StepDivisor        = MicroCreditsPerCredit / vcpuSecondCreditMicro
 )
 
-// applyCreditUnitMigration restates runner_scale_step_credits, the one setting
-// written in whole credits, in the vCPU-second credit, so a step an operator set
-// keeps its dollar value. It is a step of v59.
 func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
 	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
 		return min(step*v59StepScale, v59StepCeiling)
@@ -413,14 +408,9 @@ var nodesCreditBillingCols = map[string]string{
 	"credit_billing_from": "INTEGER NOT NULL DEFAULT 0",
 }
 
-// platformSetupFailures are the failure reasons that mean the platform, not
-// the customer's pipeline, stopped a node before its execution started: no
-// machine of the class came free, or the log service refused or dropped the
-// node's writes. A node that fails this way before execution gets back
-// everything its claim billed; any other failure before execution, such as a
-// compile error, keeps its setup billed. A lost runner or lease is not here:
-// its machine ran until the lease ran out, and the recovery that clears the
-// claim bills it to there.
+// safety: only failures where the platform, not the pipeline, stopped a node before execution belong
+// here, because they refund everything the claim billed. A lost runner or lease is excluded: its
+// machine ran until the lease ran out, and the recovery that clears the claim bills it to there.
 var platformSetupFailures = map[string]bool{
 	FailureQueueTimeout: true,
 	FailureLogsAuth:     true,
@@ -936,8 +926,6 @@ func sameGrantTerms(stored CreditGrant, team Team, req CreditGrantRequest) error
 	return nil
 }
 
-// reversedMicroTx is how much of a payment the team's reversals already
-// took back, as a positive amount.
 func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string) (int64, error) {
 	var sum sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_grants
@@ -945,8 +933,6 @@ func reversedMicroTx(ctx context.Context, tx *storeTx, team Team, payment string
 	return -sum.Int64, err
 }
 
-// creditGrantByReferenceTx finds the grant of kind carrying reference in
-// team, or in any team when team is empty.
 func creditGrantByReferenceTx(
 	ctx context.Context, tx *storeTx, team Team, kind, reference string,
 ) (CreditGrant, bool, error) {
@@ -1807,17 +1793,12 @@ func creditMeteringDisabled(ctx context.Context) bool {
 	return ctx.Value(creditMeteringDisabledKey{}) == true
 }
 
-// triggerCreditNodeID is the node id on the ledger rows that bill a trigger's
-// own step, the planning and orchestration its holder runs on the claiming
-// pool, which is no node of the run.
 const triggerCreditNodeID = ""
 
-// safety: the trigger step runs on the paid pool, so a metered claim reserves
-// its minimum here, inside the claim's transaction and under the ledger lock,
-// the way a node claim does; a check alone let every poller admit a run
-// against the same minimum. The claim names no pool size, so the step is billed
-// at the cheapest class. A refusal leaves the trigger pending, because it rolls
-// the claim back.
+// safety: the trigger step runs on the paid pool, so a metered claim reserves its minimum inside the
+// claim's transaction under the ledger lock, as a node claim does; a check alone lets every poller
+// admit a run against the same minimum. The claim names no pool size, so it bills the cheapest class.
+// A refusal rolls the claim back and leaves the trigger pending.
 func reserveTriggerCreditsTx(
 	ctx context.Context, tx *storeTx, claimant ClaimIdentity, team Team, triggerID string, now time.Time,
 ) error {
@@ -1896,12 +1877,10 @@ func refuseFrozenTeamTx(
 	}
 }
 
-// safety: every path that ends a trigger claim settles here before its own
-// write, in the same transaction, so a fence that refuses the write rolls the
-// settlement back with it. The step is billed through the lease's end when the
-// lease lapsed first, because a holder that stopped heartbeating is not
-// running. A step shorter than the minimum pays the minimum, and a claim that
-// never started its run is refunded whole.
+// safety: every path that ends a trigger claim settles here before its own write, in the same
+// transaction, so a fence that refuses the write rolls the settlement back. A lapsed lease bills
+// through the lease's end, because a holder that stopped heartbeating is not running. A short step
+// pays the minimum, and a claim that never started its run is refunded whole.
 func settleTriggerCreditsTx(ctx context.Context, tx *storeTx, triggerID string, now time.Time, refundAll bool) error {
 	if creditMeteringDisabled(ctx) {
 		return nil
@@ -2295,19 +2274,15 @@ func (s *Store) chargeNodeTx(
 	return out, nil
 }
 
-// expiredClaim is a node whose claim lapsed with its charge window open, the
-// token that held it, and when the lease that stopped being renewed ran out.
 type expiredClaim struct {
 	runID, nodeID, tokenPrefix string
 	leaseNS                    int64
 }
 
-// safety: the holder stopped renewing, so the node ran until its lease ran
-// out and no later; the interval since the last charge is billed to there,
-// under the same per-charge cap a heartbeat is held to, before the claim that
-// anchors it is cleared. Billing starts when the machine starts work, so a
-// lease lost before execution began is billed the same way; a claim whose
-// machine never started is refunded whole by the settle itself.
+// safety: the holder stopped renewing, so the node ran until its lease ran out and no later; the
+// interval since the last charge bills to there, under a heartbeat's per-charge cap, before the
+// anchoring claim is cleared. A lease lost before execution bills the same way, since billing starts
+// when the machine starts work; a claim whose machine never started is refunded whole by the settle.
 func (s *Store) settleExpiredClaimTx(ctx context.Context, tx *storeTx, claim expiredClaim, nowNS int64) error {
 	_, err := s.chargeNodeTx(ctx, tx, claim.runID, claim.nodeID, claim.tokenPrefix,
 		time.Unix(0, min(claim.leaseNS, nowNS)), true)
@@ -2326,11 +2301,6 @@ type chargeWindow struct {
 	Final                                 bool
 }
 
-// refundClaimTx returns everything the node's current claim billed: its
-// reservation and any usage charged since. It serves a claim whose machine
-// never started and a setup the platform failed, which are the two ways a
-// customer pays nothing for a node.
-//
 // safety: the refund carries the reservation's terms, and the claim is
 // bounded by its reservation row, so an earlier attempt of the same node
 // keeps what it paid.

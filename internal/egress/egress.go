@@ -443,8 +443,6 @@ func (m *Meter) Record(principal string, class Class, n int64) {
 	m.charge(principal, class, n, false)
 }
 
-// charged is what one charge admitted, and the refusal that stopped it
-// short when a budget did.
 type charged struct {
 	allowed int64
 	refusal *BudgetError
@@ -1016,8 +1014,7 @@ type countingWriter struct {
 	bodyless bool
 	status   int
 	wrote    bool
-	// cut reports that a budget stopped a write short.
-	cut bool
+	cut      bool
 }
 
 func (w *countingWriter) WriteHeader(code int) {

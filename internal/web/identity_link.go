@@ -53,10 +53,6 @@ func linkPrincipal(w http.ResponseWriter, r *http.Request) (*webPrincipal, bool)
 	return principal, true
 }
 
-// identityLinkHandler starts adding a provider's sign-in to the signed-in
-// account. The controller signs a state bound to the account and this
-// session; the browser keeps it, with the verifier, in the same flow cookie
-// sign-in uses, marked as a link.
 func identityLinkHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		provider, controllerURL, ok := oauthProviderFrom(w, r, opts)

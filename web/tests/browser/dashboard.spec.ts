@@ -109,7 +109,7 @@ const finishedDetail = {
 };
 
 test("keeps a long node name visible beside its location icon", async ({ page }) => {
-  const longName = "verify-production-checks";
+  const longName = "verify-production-release-checks";
   const detail = {
     ...finishedDetail,
     nodes: [{
@@ -129,7 +129,18 @@ test("keeps a long node name visible beside its location icon", async ({ page })
   await expect(row).toBeVisible();
   await expect(row.getByText(longName, { exact: true })).toBeVisible();
   const label = row.getByText(longName, { exact: true });
-  expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const fit = await label.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const labelBox = element.getBoundingClientRect();
+    const rowBox = element.closest("[data-node-id]")!.getBoundingClientRect();
+    return {
+      clipped: element.scrollWidth > element.clientWidth,
+      ellipsis: style.textOverflow === "ellipsis",
+      inside: labelBox.right <= rowBox.right,
+    };
+  });
+  expect(fit).toEqual({ clipped: true, ellipsis: true, inside: true });
+  await expect(label).toHaveAttribute("title", longName);
   await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
   const rowSite = row.getByLabel("Ran on moonborn (your machine)");
   await expect(rowSite).toBeVisible();
@@ -1322,8 +1333,12 @@ test("starting a run from the middle pane state keeps Nodes expanded", async ({ 
   await expect(page.getByLabel("Runs rail")).toBeVisible();
   await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
   await page.getByRole("button", { name: "+ Start a run" }).click();
-  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "Start a run" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
   await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
   await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
 });
@@ -1939,7 +1954,7 @@ test("manages local secrets without an account", async ({ page }) => {
   ]);
 });
 
-test("Overview and Compute do not request or show service probes", async ({ page }) => {
+test("Overview and Fleet do not request or show service probes", async ({ page }) => {
   const probeRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("/api/v1/health/services")) {
@@ -1950,7 +1965,7 @@ test("Overview and Compute do not request or show service probes", async ({ page
   await page.goto("/");
   await expect(page.getByText("No pending approvals.")).toBeVisible();
   await page.goto("/cluster");
-  await expect(page.getByRole("heading", { name: "Fleet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fleet", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Services", exact: true })).toHaveCount(0);
   expect(probeRequests).toEqual([]);
 });

@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// remoteParts splits a validated clone URL into its lowercased hostname (no
-// port), its ssh port if it names one, and its path with the case kept and
-// no leading or trailing slash.
 func remoteParts(raw string) (host, port, path string, err error) {
 	validated, err := ValidateCloneURL(raw)
 	if err != nil {

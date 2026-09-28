@@ -151,11 +151,9 @@ func TestReaperLeavesAClaimItSkippedForTheNextPass(t *testing.T) {
 		_, err := s.ReapExpiredNodeClaims(ctx)
 		done <- err
 	}()
-	// safety: the holder keeps the row until the pass ends, so the pass must
-	// skip it. A pass that instead blocks on the row is the bug this guards,
-	// and only the holder's own blockees count: other packages' tests share
-	// the database, and a lock wait of theirs once released the row early and
-	// let the pass settle it legitimately.
+	// safety: the holder keeps the row until the pass ends, so the pass must skip it rather than block.
+	// Only the holder's own blockees count: other packages' tests share the database, and a lock wait
+	// of theirs can release the row early and let the pass settle it legitimately.
 	var reapErr error
 	finished := false
 	for !finished {

@@ -435,10 +435,13 @@ file. Other syntax and workflow checks remain active.
   which embedded-postgres only makes available once the server has stopped.
   A server that will not start is retried once on a fresh port and then
   fails the step. `pre-release` runs it after the race gate, under a
-  thirty-minute timeout. The Go package has a fixed 15-minute timeout because
-  1,076 passing tests took 656 seconds in an isolated measurement and 679
-  seconds in the pipeline, with seven workers. The pipeline took 693 seconds
-  end to end. The first run may also download the Postgres binaries.
+  thirty-minute timeout. The Go package has a fixed 25-minute timeout because
+  its 1,199 top-level tests run serially in one package binary and took 789
+  seconds in the pipeline with seven workers on an otherwise idle 16-core
+  host, 88 percent of the earlier 15-minute limit. The pipeline took 801
+  seconds end to end. The limit leaves room for the gate's concurrent race
+  suite and stays inside the step's thirty minutes, so a hung test still
+  reports its stack. The first run may also download the Postgres binaries.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

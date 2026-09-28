@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// hostSecretsDaemon hosts the daemon `sparkwing secrets` starts in this
-// process and returns a stop that waits for it, as a restart needs.
 func hostSecretsDaemon(t *testing.T, home string) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,8 +53,6 @@ func hostSecretsDaemon(t *testing.T, home string) func() {
 	return stop
 }
 
-// secretsHome points this test at a fresh sparkwing home and config
-// directory, and returns both.
 func secretsHome(t *testing.T) (home, configDir string) {
 	t.Helper()
 	if testing.Short() {

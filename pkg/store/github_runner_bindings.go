@@ -60,9 +60,6 @@ var githubRunnerCredentialsTablePostgres = strings.NewReplacer("INTEGER", "BIGIN
 
 var githubRunnerRunCols = map[string]string{"run_id": "TEXT NOT NULL DEFAULT ''"}
 
-// applyGitHubRunnerBindingsMigration creates the bindings and credentials
-// tables. It is a step of the identity migration rather than a schema version
-// of its own.
 func applyGitHubRunnerBindingsMigration(ctx context.Context, tx *storeTx, ddl ...string) error {
 	for _, stmt := range ddl {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
@@ -379,9 +376,6 @@ func (r GitHubRepo) CanonicalURL() string {
 	return "https://github.com/" + strings.ToLower(r.Slug())
 }
 
-// spellings lists, lowercased, every way a trigger's repo or repo_url field
-// can name r: the slug, and the https, ssh and scp-style clone URLs with and
-// without ".git".
 func (r GitHubRepo) spellings() []string {
 	slug := strings.ToLower(r.Slug())
 	out := []string{slug}
@@ -436,8 +430,7 @@ type GitHubRunnerScope struct {
 	Push GitHubRunnerPush
 }
 
-// admits reports whether tr is work of the scope's repository recorded for
-// the scope's push. tr's team is checked by the caller's query.
+// safety: tr's team is checked by the caller's query.
 func (g GitHubRunnerScope) admits(tr *Trigger) bool {
 	return g.Push.Branch != "" && g.Push.SHA != "" &&
 		tr.TriggerSource == "github" && tr.TriggerEnv["GITHUB_EVENT_NAME"] == "push" &&
@@ -460,9 +453,8 @@ func GitHubRunnerScopeFrom(ctx context.Context) (GitHubRunnerScope, bool) {
 	return scope, ok
 }
 
-// triggerClause narrows a triggers query to rows the scope admits by their
-// columns. trigger_env is a blob no dialect filters, so a caller checks it
-// with [TriggerNamesGitHubRepo] on the row it reads.
+// safety: trigger_env is a blob no dialect filters, so a caller checks it with
+// [TriggerNamesGitHubRepo] on the row it reads.
 func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 	col := func(name string) string {
 		if alias == "" {
@@ -489,8 +481,6 @@ func (g GitHubRunnerScope) triggerClause(alias string) (string, []any) {
 	return clause, append(args, g.Push.Branch, g.Push.SHA)
 }
 
-// nodeClause narrows a nodes query to nodes of runs whose trigger the scope
-// admits by its columns.
 func (g GitHubRunnerScope) nodeClause() (string, []any) {
 	inner, innerArgs := g.triggerClause("gt")
 	return ` AND team = ? AND run_id IN (SELECT gt.id FROM triggers gt WHERE 1 = 1` + inner + `)`,

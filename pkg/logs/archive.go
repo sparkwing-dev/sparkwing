@@ -62,11 +62,8 @@ const (
 	// DefaultPruneInterval is how often retention lists the day index,
 	// one LIST request when nothing has expired.
 	DefaultPruneInterval = time.Hour
-	// minArchiveBackoff and maxArchiveBackoff bound the wait after a
-	// failed pass: the floor keeps full jitter from retrying at once, and
-	// the jittered part doubles per failure up to the cap.
-	minArchiveBackoff = 30 * time.Second
-	maxArchiveBackoff = 10 * time.Minute
+	minArchiveBackoff    = 30 * time.Second
+	maxArchiveBackoff    = 10 * time.Minute
 )
 
 // ArchiveOptions configures the object-store tier.
@@ -82,7 +79,7 @@ type ArchiveOptions struct {
 type archive struct {
 	store *teamblob.Store
 	opts  ArchiveOptions
-	locks sync.Map // runID -> *runLock
+	locks sync.Map
 
 	mu        sync.Mutex
 	absent    map[string]time.Time
@@ -93,24 +90,16 @@ type archive struct {
 }
 
 type runLock struct {
-	// rw is held shared by every request on the run and exclusively by
-	// the archiver and a delete, so a run never leaves the volume under
-	// a reader or a writer.
-	rw sync.RWMutex
-	// hydrate serializes restores of one run.
+	// safety: held shared by every request on the run and exclusively by the archiver and a delete,
+	// so a run never leaves the volume under a reader or a writer.
+	rw      sync.RWMutex
 	hydrate sync.Mutex
 }
 
-// runMeta sits beside a run's logs on the volume.
 type runMeta struct {
-	Team string `json:"team,omitempty"`
-	// ArchivedAt is when the files last matched the store; a file
-	// modified after it has to be uploaded again.
-	ArchivedAt time.Time      `json:"archived_at,omitzero"`
-	Files      []archivedFile `json:"files,omitempty"`
-	// Uploaded and IndexDigest record an archive in progress: the objects
-	// that already landed, by size, and the index body already written,
-	// so a retry sends only what is missing.
+	Team        string           `json:"team,omitempty"`
+	ArchivedAt  time.Time        `json:"archived_at,omitzero"`
+	Files       []archivedFile   `json:"files,omitempty"`
 	Uploaded    map[string]int64 `json:"uploaded,omitempty"`
 	IndexDigest string           `json:"index_digest,omitempty"`
 }
@@ -234,12 +223,8 @@ func (s *Server) writeRunMeta(root *os.Root, runID string, m runMeta) error {
 	return errors.Join(werr, f.Close())
 }
 
-// withRun holds the run on the volume for the life of the request,
-// restoring it from the archive first when it is not there, and refuses a
-// caller of one team a run recorded as another's. The controller has
-// already answered whether the caller may read the run; the recorded team
-// is the second, independent check that keeps one team's objects out of
-// another's reach even if that answer were wrong.
+// safety: the recorded-team check is independent of the controller's read answer, so one team's
+// objects stay out of another's reach even if that answer were wrong.
 func (s *Server) withRun(runID func(*http.Request) string, next http.Handler) http.Handler {
 	if s.archive == nil {
 		return next
@@ -267,8 +252,6 @@ func (s *Server) withRun(runID func(*http.Request) string, next http.Handler) ht
 	})
 }
 
-// principalTeam is the team a non-admin caller acts for, or "" when the
-// caller is the operator, unauthenticated, or names no team.
 func principalTeam(r *http.Request) string {
 	p, ok := logsPrincipalFromContext(r.Context())
 	if !ok || p == nil || p.hasScope(scopeAdmin) {
@@ -282,8 +265,7 @@ func (s *Server) teamMayUse(r *http.Request, runTeam string) bool {
 	return caller == "" || runTeam == "" || caller == runTeam
 }
 
-// ensureLocal returns the run's recorded team, restoring the run from the
-// archive when the volume does not hold it. The caller holds l.rw shared.
+// safety: the caller holds l.rw shared.
 func (s *Server) ensureLocal(ctx context.Context, runID string, l *runLock) (string, error) {
 	root, err := s.openRunsRoot()
 	if err != nil {
@@ -328,8 +310,6 @@ func (s *Server) readRunIndex(ctx context.Context, runID string) (runIndex, erro
 	return idx, nil
 }
 
-// restoreRun downloads the run beside the runs tree and renames it into
-// place, so no reader ever sees half a run.
 func (s *Server) restoreRun(ctx context.Context, root *os.Root, runID string, idx runIndex) error {
 	stage := filepath.Join(s.root, rehydrateDir)
 	if err := s.ensureDir(stage); err != nil {
@@ -405,9 +385,6 @@ func safeArchivedRel(rel string) bool {
 	return strings.HasSuffix(rel, ".log")
 }
 
-// labelRun records the appending caller's team on a run the first time a
-// team's credential writes to it, after the controller has validated the
-// write's claim. It refuses a write into a run recorded for another team.
 func (s *Server) labelRun(r *http.Request, root *os.Root, runID string) error {
 	if s.archive == nil {
 		return nil
@@ -609,8 +586,6 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 	return err
 }
 
-// committedSizes is what the store holds for the run as of its last
-// finished archive.
 func (m runMeta) committedSizes() map[string]int64 {
 	sizes := map[string]int64{}
 	for _, f := range m.Files {
@@ -619,10 +594,8 @@ func (m runMeta) committedSizes() map[string]int64 {
 	return sizes
 }
 
-// writtenSinceArchive reports whether any local file differs from what
-// the last finished archive stored. A restore rewrites every file, so the
-// file clock cannot tell a restored copy from a written one; the sizes can,
-// because an append only ever grows a file.
+// safety: a restore rewrites every file, so the file clock cannot tell a restored copy from a
+// written one; sizes can, because an append only ever grows a file.
 func writtenSinceArchive(meta runMeta, files []localFile) bool {
 	committed := meta.committedSizes()
 	for _, f := range files {
@@ -640,8 +613,7 @@ func maxTime(a, b time.Time) time.Time {
 	return a
 }
 
-// deleteArchivedRun removes a run's objects and its index. The caller
-// holds the run exclusively. The day index entry is left for retention,
+// safety: the caller holds the run exclusively. The day index entry is left for retention,
 // which drops an entry whose run is gone.
 func (s *Server) deleteArchivedRun(ctx context.Context, runID string) error {
 	idx, err := s.readRunIndex(ctx, runID)
@@ -744,16 +716,13 @@ func (s *Server) pruneDay(ctx context.Context, day string, cutoff time.Time) (in
 			operator = append(operator, entry)
 			continue
 		}
-		// The run was written again after this day; its newer day entry
-		// carries it, and this one only goes.
+		// safety: a newer day entry carries this run, so only this entry goes.
 		if idx.LastWrite.After(cutoff) {
 			operator = append(operator, entry)
 			continue
 		}
-		// A run in use, or restored and written since its archive, is not
-		// expired: its latest write is on the volume, and the archiver
-		// uploads it with a new day entry. This entry stays so the run is
-		// judged again if that never happens.
+		// safety: a run in use, or restored and written since its archive, is not expired; its entry
+		// stays so the run is judged again if the archiver never re-uploads it.
 		l := s.archive.lock(runID)
 		if !l.rw.TryLock() {
 			continue
@@ -787,8 +756,6 @@ func (s *Server) pruneDay(ctx context.Context, day string, cutoff time.Time) (in
 	return len(expired), store.DeleteMany(ctx, "", operator)
 }
 
-// localWrittenSinceArchive reports whether the volume holds a copy of the
-// run that was written after its last archive.
 func (s *Server) localWrittenSinceArchive(root *os.Root, runID string) (bool, error) {
 	if _, err := root.Stat(runID); errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -835,9 +802,7 @@ func (s *Server) startArchive(ctx context.Context) {
 	}()
 }
 
-// handleDeleteTeamLogs removes every log a team holds, in the archive and
-// on the volume, for the controller deleting that team. It is idempotent,
-// so a deletion that stopped part-way is finished by sending it again.
+// safety: idempotent, so a team deletion that stopped part-way is finished by sending it again.
 func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	team := r.PathValue("team")
 	if !teamblob.ValidTeam(team) {
@@ -879,8 +844,8 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		s.runTotals.forget(e.Name())
 	}
-	// Indexes go first: once the team's objects are gone, nothing names the
-	// runs whose indexes a retried purge would still have to find.
+	// safety: indexes go first because once the team's objects are gone, nothing names the runs
+	// whose indexes a retried purge would still have to find.
 	if err := s.deleteTeamIndexes(r.Context(), team); err != nil {
 		s.logger.Error("logs archive", "op", "delete team indexes", "team", team, "err", err)
 		writeLogsErr(w, http.StatusBadGateway, "delete the team's archived logs: the object store refused; retry")
@@ -897,11 +862,6 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, deleted)
 }
 
-// deleteTeamIndexes removes the run and day index entries of every run
-// team has archived. It lists the team's runs, one delimited LIST per
-// thousand, and reads each run's index to confirm the team and find its
-// day entry; an older day entry of a run archived more than once is left
-// for retention, which drops an entry whose run is gone.
 func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 	store := s.archive.store
 	runs, err := store.ListDirs(ctx, team, "runs/")
@@ -934,9 +894,7 @@ func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 	return store.DeleteMany(ctx, "", operator)
 }
 
-// mayDeleteArchivedRun deletes the run's archived objects after checking
-// the caller's team against the run's recorded one, and answers the
-// request itself when it must stop. The caller holds the run exclusively.
+// safety: the caller holds the run exclusively.
 func (s *Server) mayDeleteArchivedRun(w http.ResponseWriter, r *http.Request, root *os.Root, runID string) bool {
 	team := readRunMeta(root, runID).Team
 	if _, err := root.Stat(runID); err != nil {

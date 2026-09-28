@@ -78,9 +78,6 @@ func assertV49MainRowsCarried(t *testing.T, st *store.Store) {
 	}
 }
 
-// v0.63.0 wrote runner_scale_step_credits in cent credits, so a $50 step is
-// 5,000 there; v59 restates it as 1,000,000 vCPU-second credits and v75 as
-// 50,000 credits of $0.001.
 const v49MainScaleStepSQL = `INSERT INTO sparkwing_meta (key, value, updated_at)
 	VALUES ('compute_limit_runner_scale_step_credits', '5000', 1790572236000000000)`
 

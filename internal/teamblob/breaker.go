@@ -28,14 +28,9 @@ func (e *SuspendedError) Error() string {
 
 func (e *SuspendedError) Unwrap() error { return ErrSuspended }
 
-// The bucket's kill switch answers PUT and LIST with 403 once a request
-// alarm trips, and a refused request still bills. A 403 on either class
-// pauses both at once and for minutes; any other failure pauses them
-// after a few in a row, for seconds growing to minutes. When a pause ends
-// one request goes through as a probe: success closes the breaker, and
-// failure pauses again for longer. GET, HEAD and DELETE never pause,
-// because the kill switch leaves them working and a delete is how the
-// bucket gets back under its alarms.
+// safety: the bucket's kill switch 403s PUT and LIST once a request alarm trips and refused requests
+// still bill, so a 403 pauses both for minutes. GET, HEAD and DELETE never pause: the kill switch
+// leaves them working, and deletes bring the bucket back under its alarms.
 const (
 	deniedPauseBase = time.Minute
 	deniedPauseMax  = 5 * time.Minute
@@ -75,8 +70,8 @@ func (b *breaker) allow(now time.Time) error {
 	return nil
 }
 
-// paused reports the pause without claiming the probe, so a caller can
-// refuse before spending anything, even the HEAD a write starts with.
+// safety: does not claim the probe, so a caller can refuse before spending anything, even the
+// HEAD a write starts with.
 func (b *breaker) paused(now time.Time) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -144,7 +139,6 @@ func denied(err error) bool {
 	return errors.As(err, &status) && status.HTTPStatusCode() == 403
 }
 
-// guarded sends one PUT-class or LIST request through the breaker.
 func (s *Store) guarded(ctx context.Context, send func() error) error {
 	if err := s.breaker.allow(s.now()); err != nil {
 		return err

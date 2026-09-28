@@ -7055,10 +7055,8 @@ func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq in
 		  WHERE id = ? AND claim_seq = ?`, id, seq)
 }
 
-// endTriggerClaim settles the claim's credit reservation and applies the
-// guarded write that ends it, in one transaction, reporting whether the guard
-// admitted the write. A refused write rolls the settlement back with it, so a
-// superseded caller cannot settle a claim it no longer holds.
+// safety: a refused write rolls the settlement back with it, so a superseded caller cannot settle a
+// claim it no longer holds.
 func (s *Store) endTriggerClaim(ctx context.Context, id string, refundAll bool, query string, args ...any) (_ bool, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7279,12 +7277,8 @@ func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, erro
 	return true, nil
 }
 
-// cancelRequeuedCancelledTriggersTx finalizes every pending trigger that
-// carries a cancel request, inside a claim's own transaction. A trigger
-// gets there when its run was cancelled while claimed and the claim was
-// then released or lapsed back to the queue: the claim filter already
-// refuses it, and finalizing it here keeps it from sitting in the queue
-// forever.
+// safety: a trigger cancelled while claimed, then released or lapsed back to the queue, is refused by
+// the claim filter, so without finalizing it here it would sit in the queue forever.
 func cancelRequeuedCancelledTriggersTx(ctx context.Context, tx *storeTx, now time.Time) error {
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE runs

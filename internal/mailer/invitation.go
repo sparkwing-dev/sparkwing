@@ -61,13 +61,10 @@ If you did not expect this invitation, you can ignore this email.
 	return Message{To: to, Subject: subject, Text: text, HTML: html.String()}, nil
 }
 
-// maxNameRunes bounds a name an email repeats, so a long one cannot push the
-// rest of the subject out of view.
 const maxNameRunes = 80
 
-// displayName strips the control and bidirectional-formatting characters that
-// could reorder or hide what a recipient reads, line breaks included so a
-// crafted name cannot inject a mail header, and caps the length.
+// safety: control and bidi-formatting characters could reorder or hide what a
+// recipient reads, and a line break could inject a mail header.
 func displayName(s string) string {
 	var b strings.Builder
 	n := 0

@@ -20,9 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// oldAgentRegister sends the register request of a runner built before cache
-// grants: a POST to the controller's claim-bound proxy carrying only its
-// runner token.
 func oldAgentRegister(t *testing.T, ctrlURL, runID, token, repoURL string) (int, string) {
 	t.Helper()
 	q := neturl.Values{}
@@ -74,8 +71,6 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	now := time.Now().UTC()
 	newRun := func(tenant *store.Tenant, runID string) {
 		t.Helper()
-		// A CLI submission: no webhook delivery, the source named by the
-		// submitter's checkout.
 		if err := tenant.CreateTriggerWithRun(ctx,
 			store.Trigger{
 				ID: runID, Pipeline: "hello", Status: "running", CreatedAt: now,
@@ -92,7 +87,6 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The scopes prod's agent:moonborn token carries.
 	scopes := []string{
 		controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
 		controller.ScopeRunsState, controller.ScopeSecretsRead, controller.ScopeLogsWrite,
@@ -163,8 +157,6 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	if got, body := oldAgentRegister(t, ctrlSrv.URL, runID, agent, repoURL); got != http.StatusOK {
 		t.Fatalf("the old agent's register = %d %s, want 200", got, body)
 	}
-	// The old agent then fetches the run's commit through the same proxy,
-	// its runner token set as the proxy origin's extraHeader.
 	gcURL := ctrlSrv.URL + "/api/v1/runs/" + runID + "/gitcache"
 	dest := t.TempDir()
 	git := func(args ...string) {

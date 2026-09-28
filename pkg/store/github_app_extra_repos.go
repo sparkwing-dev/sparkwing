@@ -8,10 +8,8 @@ import (
 	"time"
 )
 
-// A team owner lists, per source repository, the further repositories of
-// the same owner that a run's GitHub App token for that repository also
-// reads, such as private submodules. The list lives here rather than in the
-// repository, because code in the repository must not widen its own token.
+// safety: a run token's extra repositories live here rather than in the repository, because code in
+// the repository must not widen its own token.
 const githubAppExtraReposTableSQLite = `CREATE TABLE IF NOT EXISTS github_app_extra_repos (
     team        TEXT NOT NULL,
     repository  TEXT NOT NULL,

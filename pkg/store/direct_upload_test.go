@@ -98,7 +98,6 @@ func TestSourceBundleOneRunAndRetention(t *testing.T) {
 		orphan.Key, "owner", "swu_owner"); !errors.Is(err, store.ErrSourceAlreadyBound) {
 		t.Fatalf("expired orphan source bound to a run: %v", err)
 	}
-	// A row written before terminal-status validation can carry this invalid pair.
 	if _, err := st.DB().ExecContext(t.Context(), storetest.Rebind(st,
 		`UPDATE runs SET finished_at = ? WHERE id = ? AND team = ?`),
 		time.Now().UnixNano(), "run-source", "team-source"); err != nil {

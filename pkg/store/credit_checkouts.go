@@ -155,7 +155,6 @@ func (t *Tenant) commitPurchaseRefusal(tx *storeTx, checkoutID string, refusal e
 	return refusal
 }
 
-// openCheckoutMicroTx is what the team's checkouts still open may add.
 func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int64) (int64, error) {
 	var open sql.NullInt64
 	err := q.QueryRowContext(ctx,
@@ -170,11 +169,9 @@ func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int
 // be granted that late.
 const CheckoutSettleWindow = 72 * time.Hour
 
-// safety: a session paid just before expiry is granted when its webhook
-// arrives, which can be days later, so its amount stays counted against the
-// purchase limit until then; otherwise a second checkout could spend the same
-// room and both payments land. A session the processor reported closed can
-// no longer be paid, so it stops counting.
+// safety: a session paid just before expiry is granted when its webhook lands, possibly days later,
+// so it keeps counting against the purchase limit until then, or a second checkout could spend the
+// same room and both payments land. A session the processor reported closed can no longer be paid.
 func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (int64, error) {
 	var open sql.NullInt64
 	err := q.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_checkouts

@@ -140,7 +140,6 @@ func TestAccountSessionsStopWithoutALicense(t *testing.T) {
 func TestTeamCreationIsCappedPerUser(t *testing.T) {
 	f := newIdentityFixture(t)
 	s := sessionAuth(f.signIn(person("g-c", "cap@example.com", "Cap")).SessionID)
-	// The personal team is the first of three.
 	for i := 2; i <= 3; i++ {
 		if code := f.call("POST", "/api/v1/teams", s, map[string]string{"slug": fmt.Sprintf("cap-team-%d", i)}, nil); code != http.StatusCreated {
 			t.Fatalf("team %d = %d", i, code)

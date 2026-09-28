@@ -53,7 +53,7 @@ func TestSchemaV21_DropsPlaintextSessions(t *testing.T) {
 	if remaining != 0 {
 		t.Errorf("sessions rows after migration = %d, want 0", remaining)
 	}
-	if _, err := up.LookupSession("legacy-raw-session", time.Now()); err == nil {
+	if _, err := up.LookupSession(t.Context(), "legacy-raw-session", time.Now()); err == nil {
 		t.Error("legacy raw session still resolves after migration")
 	}
 	if _, err := up.DB().Exec(`SELECT csrf_token FROM sessions`); err == nil {
@@ -68,7 +68,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, sess, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	raw, csrf, sess, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 		t.Errorf("returned session csrf = %q, want %q", sess.CSRFToken, csrf)
 	}
 
-	got, err := st.LookupSession(raw, now)
+	got, err := st.LookupSession(t.Context(), raw, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 	if got.Principal != "root" {
 		t.Errorf("principal = %q, want root", got.Principal)
 	}
-	if _, err := st.LookupSession(stored, now); err == nil {
+	if _, err := st.LookupSession(t.Context(), stored, now); err == nil {
 		t.Error("the stored digest authenticates as a session id")
 	}
 	if err := st.Close(); err != nil {
@@ -113,7 +113,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	survived, err := reopened.LookupSession(raw, now)
+	survived, err := reopened.LookupSession(t.Context(), raw, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestSessions_StoreDigestsAndDeriveCSRFTokens(t *testing.T) {
 	if err := reopened.DeleteSession(raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reopened.LookupSession(raw, now); err == nil {
+	if _, err := reopened.LookupSession(t.Context(), raw, now); err == nil {
 		t.Error("session resolves after DeleteSession")
 	}
 }
@@ -135,7 +135,7 @@ func TestCSRFKey_ReadOnlyStoreResolvesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	raw, csrf, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestCSRFKey_ReadOnlyStoreResolvesSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ro.Close()
-	sess, err := ro.LookupSession(raw, now)
+	sess, err := ro.LookupSession(t.Context(), raw, now)
 	if err != nil {
 		t.Fatalf("read-only LookupSession: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestCSRFKey_MintingRotatesLiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, _, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	raw, _, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestCSRFKey_MintingRotatesLiveSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if _, err := reopened.LookupSession(raw, now); err == nil {
+	if _, err := reopened.LookupSession(t.Context(), raw, now); err == nil {
 		t.Error("session survives a new signing key, so its csrf token no longer verifies")
 	}
 	var remaining int
@@ -201,7 +201,7 @@ func TestCSRFKey_ExistingKeyKeepsSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	raw, csrf, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+	raw, csrf, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestCSRFKey_ExistingKeyKeepsSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	sess, err := reopened.LookupSession(raw, now)
+	sess, err := reopened.LookupSession(t.Context(), raw, now)
 	if err != nil {
 		t.Fatalf("LookupSession after reopen: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestLookupSession_BackendFaultsAreDistinguishable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			raw, _, _, err := st.CreateSession("root", []string{"admin"}, time.Hour, now)
+			raw, _, _, err := st.CreateSession(t.Context(), "root", []string{"admin"}, time.Hour, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,7 +277,7 @@ func TestLookupSession_BackendFaultsAreDistinguishable(t *testing.T) {
 			if tc.name == "unknown session" {
 				raw = "not-a-session"
 			}
-			_, err = reopened.LookupSession(raw, now)
+			_, err = reopened.LookupSession(t.Context(), raw, now)
 			if err == nil {
 				t.Fatal("LookupSession succeeded, want an error")
 			}

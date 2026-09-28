@@ -971,6 +971,8 @@ func newTestServerConfig(t *testing.T, cfg Config) *httptest.Server {
 	cfg.DataDir = root
 	cfg.ProxyDir = filepath.Join(root, "proxy")
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
+	// safety: New replaces globals that a store measurement still running from an earlier test reads.
+	measureOnce.Wait()
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)

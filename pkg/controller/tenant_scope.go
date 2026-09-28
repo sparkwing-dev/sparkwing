@@ -48,11 +48,9 @@ func (c *tenantCache) put(team store.Team, t *store.Tenant, now time.Time) {
 	c.entries[team] = tenantCacheEntry{tenant: t, expires: now.Add(tenantCacheTTL)}
 }
 
-// requestTeam is the team a request acts for. A request with no principal is
-// the unauthenticated local path, and a principal with no team is the host's
-// own peer or a credential minted before tokens carried one; both act for the
-// team every such row was migrated into. A signed-in account never falls back,
-// because an account that lost its team must reach no team's rows.
+// safety: no principal, or a teamless peer or pre-team token, acts for the default team every such
+// row was migrated into; a signed-in account never falls back, so one that lost its team
+// reaches no team's rows.
 func requestTeam(r *http.Request) (store.Team, error) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
@@ -67,9 +65,8 @@ func requestTeam(r *http.Request) (store.Team, error) {
 	return store.DefaultTeam, nil
 }
 
-// tenantFor returns the store handle for the team the caller acts for. Every
-// tenant-owned read and write a handler makes goes through it, and the team is
-// never taken from the request body, path or query.
+// safety: every tenant-owned read and write goes through here, and the team never comes from the
+// request body, path or query.
 func (s *Server) tenantFor(r *http.Request) (*store.Tenant, error) {
 	team, err := requestTeam(r)
 	if err != nil {
@@ -92,9 +89,6 @@ func (s *Server) tenantForTeam(ctx context.Context, team store.Team) (*store.Ten
 	return t, nil
 }
 
-// requestTenant resolves the caller's tenant or answers the request. A caller
-// whose team is missing or unregistered is refused rather than served another
-// team's view.
 func (s *Server) requestTenant(w http.ResponseWriter, r *http.Request) (*store.Tenant, bool) {
 	t, err := s.tenantFor(r)
 	if err == nil {
@@ -119,8 +113,6 @@ var teamBoundaryExempt = map[string]string{
 		"log-write claim is live; the claim it validates is bound to the claimant's own team",
 }
 
-// teamBoundaryRunID reports the run id a request addresses when its route is
-// scoped to one run or trigger, and whether the boundary applies.
 func teamBoundaryRunID(pattern string, r *http.Request) (string, bool) {
 	if _, exempt := teamBoundaryExempt[pattern]; exempt {
 		return "", false
@@ -144,12 +136,8 @@ func teamBoundaryRunID(pattern string, r *http.Request) (string, bool) {
 	return id, true
 }
 
-// teamBoundary answers 404 for any route scoped to one run or trigger whose
-// row belongs to another team than the caller's, before the route's own
-// handler runs. It sits in front of the mux rather than on each route so a
-// route added under /api/v1/runs/{id} is inside the boundary without anyone
-// remembering to put it there. The answer is the one a missing run gets, so a
-// caller cannot tell another team's run from no run.
+// safety: it wraps the mux rather than each route, so a route added under /api/v1/runs/{id} is inside
+// the boundary; it answers as for a missing run, so another team's run looks like no run.
 func (s *Server) teamBoundary(mux *http.ServeMux, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := mux.Handler(r)
@@ -179,9 +167,6 @@ func runNotFound(runID string) error {
 	return fmt.Errorf("run %q: %w", runID, store.ErrNotFound)
 }
 
-// writeClaimTeamRefusal answers a claim whose credential names no team. The
-// claim is the caller's to fix, by using a token minted for a team, so it is
-// a 403 rather than a server fault.
 func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
 	if !errors.Is(err, store.ErrClaimantHasNoTeam) {
 		return false
@@ -193,18 +178,14 @@ func writeClaimTeamRefusal(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// handleRunLogAccess answers the logs service, which stores every team's logs
-// under bare run ids, whether the caller may read one run's logs. The team
-// boundary in front of the mux has already answered 404 for another team's
-// run, so reaching here is the yes.
+// safety: the team boundary in front of the mux already answered 404 for another team's run, so
+// reaching here is the yes.
 func handleRunLogAccess(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// runTeam answers the team of the run a request names, and refuses unless it
-// is the caller's own. The team boundary has already answered another team's
-// run 404; this repeats the check because a grant it feeds opens that team's
-// namespace in the shared cache.
+// safety: repeats the team boundary's check because a grant it feeds opens that team's namespace
+// in the shared cache.
 func (s *Server) runTeam(r *http.Request) (store.Team, error) {
 	t, err := s.tenantFor(r)
 	if err != nil {

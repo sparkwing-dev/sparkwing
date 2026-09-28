@@ -29,9 +29,8 @@ const TeamNodeLabel = "sparkwing.dev/team-node"
 
 var teamLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-// hashedTeamPrefix marks a label value derived by hashing. A team that is
-// already a slug keeps its name unless it starts with this prefix, so a
-// verbatim value never equals a hashed one.
+// safety: a slug team keeps its name unless it starts with this prefix, so a verbatim
+// value never equals a hashed one.
 const hashedTeamPrefix = "sha256-"
 
 // TeamLabelValue returns the label value for team. A DNS-label slug (lowercase
@@ -52,8 +51,6 @@ func TeamLabelValue(team string) string {
 	return hashedTeamPrefix + hex.EncodeToString(sum[:])[:40]
 }
 
-// teamAntiAffinity keeps a pod labeled with team value off any node that runs
-// a pod of another team. Same-team pods still share nodes.
 func teamAntiAffinity(value string) *corev1.Affinity {
 	return &corev1.Affinity{
 		PodAntiAffinity: &corev1.PodAntiAffinity{

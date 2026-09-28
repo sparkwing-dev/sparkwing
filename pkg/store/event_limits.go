@@ -61,7 +61,6 @@ func ValidateEventKind(kind string) error {
 	return nil
 }
 
-// eventBytes is what an event occupies against the byte caps.
 func eventBytes(kind string, payload []byte) int64 {
 	return int64(len(kind) + len(payload))
 }
@@ -161,8 +160,6 @@ func refuseEventOverLimitsTx(ctx context.Context, tx *storeTx, principal, runID 
 	return nil
 }
 
-// runEventUsageCols count what each run has appended as events, so the
-// per-run caps read one row instead of summing the run's events.
 var runEventUsageCols = map[string]string{
 	"event_bytes": "BIGINT NOT NULL DEFAULT 0",
 	"event_count": "BIGINT NOT NULL DEFAULT 0",

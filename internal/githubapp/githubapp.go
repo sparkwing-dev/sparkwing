@@ -571,9 +571,8 @@ func (c *Client) RepositoryIDThroughAlias(ctx context.Context, installation int6
 	return repo.ID, nil
 }
 
-// permissionsNotGranted reports whether a refused token request names
-// permissions the installation has not granted, which GitHub answers with 422
-// like a repository the installation does not cover.
+// hack: GitHub answers a request for ungranted permissions with the same 422 as a
+// repository the installation does not cover, so only the body tells them apart.
 func permissionsNotGranted(body []byte) bool {
 	var answer struct {
 		Message string `json:"message"`
@@ -635,9 +634,6 @@ func (c *Client) UpdateCheckRun(ctx context.Context, token, owner, repo string, 
 	return err
 }
 
-// repoWrite sends body to a repository route with an installation token and
-// returns GitHub's answer. GitHub answers 403 to a token that lacks the
-// route's permission.
 func (c *Client) repoWrite(ctx context.Context, method, token, owner, repo, path, op string, body any) ([]byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {

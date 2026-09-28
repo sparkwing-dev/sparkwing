@@ -43,9 +43,6 @@ func cliTrigger(f *identityFixture, token string) (int, string) {
 	return code, out.RunID
 }
 
-// cliAuthenticates reports whether the controller still accepts a CLI token:
-// a live one reaches the team boundary and hears 404 for a missing run, a
-// revoked one is refused before it.
 func cliAuthenticates(f *identityFixture, m mintedCLI) bool {
 	f.t.Helper()
 	switch code := f.call("GET", "/api/v1/runs/no-such-run", "Bearer "+m.Token, nil, nil); code {

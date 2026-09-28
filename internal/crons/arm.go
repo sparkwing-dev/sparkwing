@@ -632,8 +632,6 @@ func (s *Service) refreshOne(
 	report.Updated++
 }
 
-// declaredSchedules is [DeclaredSchedules] with each entry placed in the team s
-// arms in, so its id matches the row that team's store holds.
 func (s *Service) declaredSchedules(root string) ([]Declared, error) {
 	declared, err := DeclaredSchedules(root)
 	for i := range declared {

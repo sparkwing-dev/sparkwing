@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// emptyTokenTableServer is a controller whose tokens table holds no row, the
-// state of a fresh install before anyone mints a token.
 func emptyTokenTableServer(t *testing.T, multiTeam bool) (*controller.Server, *store.Store, string) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))

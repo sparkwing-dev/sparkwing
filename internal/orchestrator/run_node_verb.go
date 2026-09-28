@@ -163,8 +163,6 @@ func dispatchedNodeClaim() (store.NodeClaimFence, time.Duration, error) {
 	}, lease, nil
 }
 
-// errClaimAbandoned ends a dispatched node whose claim the controller will
-// no longer renew.
 var errClaimAbandoned = errors.New("run-node: the controller no longer renews this node's claim, so the node stopped")
 
 // safety: the controller refuses a renewal when the team's credits run out,

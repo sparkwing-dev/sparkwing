@@ -1257,8 +1257,6 @@ func nodeLogsHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-// nodeLogCompletenessHandler answers whether a node's log is whole, so the
-// dashboard can draw the synthetic line that says so after the log.
 func nodeLogCompletenessHandler(b backend.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID, nodeID := r.PathValue("id"), r.PathValue("node")

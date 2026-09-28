@@ -126,8 +126,6 @@ type SealReport struct {
 	LatestUnconfirmed bool   `json:"latest_unconfirmed,omitempty"`
 }
 
-// latest narrows the report to the node's newest execution attempt, so a
-// clean retry is not held to an attempt it replaced.
 func (r SealReport) latest() SealReport {
 	if r.LatestFile == "" {
 		return r
@@ -381,9 +379,7 @@ func appendSequenceFromRequest(r *http.Request) (appendSequence, bool, error) {
 	return appendSequence{stream: stream, seq: seq, end: end}, true, nil
 }
 
-// sealRecord is one line of a node's seal file. The file is append-only,
-// so the archive, which re-uploads a file only when it grows, never
-// misses a change.
+// safety: the seal file is append-only because the archive re-uploads a file only when it grows.
 type sealRecord struct {
 	Kind     string    `json:"kind"`
 	File     string    `json:"file"`
@@ -447,8 +443,6 @@ func (s *Server) appendSealRecord(root *os.Root, runID, nodeID string, rec sealR
 	return errors.Join(werr, f.Close())
 }
 
-// hasRecord reports whether stream has a record of kind; an empty kind
-// matches any.
 func hasRecord(recs []sealRecord, kind, stream string) bool {
 	for _, r := range recs {
 		if r.Stream == stream && (kind == "" || r.Kind == kind) {
@@ -458,10 +452,6 @@ func hasRecord(recs []sealRecord, kind, stream string) bool {
 	return false
 }
 
-// streamTracker counts what arrived of one stream since this process
-// first saw it. One stream can span several log files, because a writer
-// keeps numbering across the node's execution attempts; files names the
-// ones it has an open record in.
 type streamTracker struct {
 	highest  int64
 	missing  int64
@@ -490,8 +480,6 @@ func (t *streamTracker) addGap(from, to int64) {
 	}
 }
 
-// fill counts a late arrival inside a recorded gap; anything else below
-// the highest number is a retried duplicate.
 func (t *streamTracker) fill(seq int64) {
 	for i, g := range t.gaps {
 		if seq < g.From || seq > g.To {
@@ -514,7 +502,6 @@ func (t *streamTracker) fill(seq int64) {
 	}
 }
 
-// upTo reports the tracker's counts over sequence numbers 1..final.
 func (t *streamTracker) upTo(final int64) (received, missing int64, gaps []Gap) {
 	missing = t.missing
 	gaps = append([]Gap(nil), t.gaps...)
@@ -527,9 +514,8 @@ func (t *streamTracker) upTo(final int64) (received, missing int64, gaps []Gap) 
 	return max(final, t.highest) - missing, missing, gaps
 }
 
-// sealTrackers holds the live streams' trackers. It lives in memory: a
-// restart loses what arrived before it, and a stream seen again after one
-// is trusted for the numbers it sent before.
+// hack: trackers live in memory, so a restart loses what arrived before it and a stream seen
+// again afterwards is trusted for the numbers it sent before.
 type sealTrackers struct {
 	mu sync.Mutex
 	m  map[string]*streamTracker
@@ -661,8 +647,7 @@ func (s *Server) ensureSequenceOpenRecord(root *os.Root, runID, nodeID, file, st
 	return nil
 }
 
-// observeSequence records one numbered append. The caller holds the
-// node's append lock, so the seal file and the tracker change together.
+// safety: the caller holds the node's append lock, so the seal file and the tracker change together.
 func (s *Server) observeSequence(root *os.Root, runID, nodeID, file string, seq appendSequence) error {
 	now := time.Now()
 	key := trackerKey(runID, nodeID, seq.stream)

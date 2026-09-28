@@ -357,10 +357,9 @@ func (s *Server) handleRotateSecrets(w http.ResponseWriter, r *http.Request) {
 }
 
 type secretsRotateResponse struct {
-	Rotated int                 `json:"rotated"`
-	Skipped []secretsRotateSkip `json:"skipped"`
-	// GitCredentials is how many team git credentials were resealed.
-	GitCredentials int `json:"git_credentials"`
+	Rotated        int                 `json:"rotated"`
+	Skipped        []secretsRotateSkip `json:"skipped"`
+	GitCredentials int                 `json:"git_credentials"`
 }
 
 type secretsRotateSkip struct {

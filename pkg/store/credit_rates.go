@@ -24,11 +24,10 @@ const (
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
-	// safety: an N-core class is a machine of N vCPU and 4N GiB, matching the
-	// hosted runners a customer compares against. The Job gets what that
-	// machine leaves after the hypervisor, which Karpenter counts as 7.5
-	// percent, and 2 GiB for the kubelet reservation at 110 pods (1465 MiB),
-	// the 100 MiB eviction threshold, the node's daemonsets and a margin.
+	// safety: an N-core class is a machine of N vCPU and 4N GiB, matching the hosted runners customers
+	// compare against. The Job gets what remains after the hypervisor (Karpenter counts 7.5 percent) and
+	// 2 GiB for the kubelet reservation at 110 pods (1465 MiB), the 100 MiB eviction threshold, the
+	// node's daemonsets and a margin.
 	cpuClassMachineBytesPerCore = 4 << 30
 	cpuClassSystemBytes         = 2 << 30
 

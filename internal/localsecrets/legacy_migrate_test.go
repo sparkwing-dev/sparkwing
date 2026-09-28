@@ -145,7 +145,6 @@ func TestImportLegacy_RunsOnceSoADeletedNameStaysDeleted(t *testing.T) {
 			t.Errorf("%s after a second import = %v, want absent", name, err)
 		}
 	}
-	// Control: the same file does bring both names into a store never imported into.
 	if fresh := importNow(t, openStore(t), files); strings.Join(fresh.Imported, ",") != "LATER,TOKEN" {
 		t.Fatalf("import into a fresh store = %+v, want both names", fresh)
 	}
@@ -255,7 +254,6 @@ func TestFindLegacyFiles_AnUnreadableDirectoryFailsTheImport(t *testing.T) {
 		t.Skip("root reads through permissions")
 	}
 	dir, _ := legacyDir(t, map[string]string{"config.env": "REGION=us-east-1\n"})
-	// Control: the directory as written is found without error.
 	if files, err := localsecrets.FindLegacyFiles(); err != nil || files.Config == "" {
 		t.Fatalf("FindLegacyFiles = %+v, %v; want config.env", files, err)
 	}

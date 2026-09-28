@@ -117,9 +117,8 @@ type GitHub struct {
 	minted           []MintedToken
 	stats            []Status
 	checks           []CheckRunCall
-	// checkRuns maps a check run id to the call that created it.
-	checkRuns  map[int64]CheckRunCall
-	failChecks int
+	checkRuns        map[int64]CheckRunCall
+	failChecks       int
 }
 
 // New starts the fake and stops it when t ends.
@@ -678,7 +677,6 @@ func (g *GitHub) handleCheckRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Output != nil {
 		call.Title, call.Summary = req.Output.Title, req.Output.Summary
-		// GitHub refuses a summary longer than this many characters.
 		if utf8.RuneCountInString(call.Summary) > 65535 {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "output.summary is too long"})
 			return

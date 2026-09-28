@@ -226,7 +226,7 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	if err := st.SwitchSessionTeam(ctx, raw, a.Account.ID, a.PersonalTeam, "second"); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := st.LookupSession(raw, time.Now())
+	sess, err := st.LookupSession(t.Context(), raw, time.Now())
 	if err != nil || sess.Team != "second" || sess.AccountID != a.Account.ID {
 		t.Fatalf("session = %+v, %v", sess, err)
 	}
@@ -311,7 +311,6 @@ func TestIdentityTeamCreationIsCapped(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	u := signIn(t, st, "s", "busy@example.com")
-	// The personal team is the first of three.
 	for i := 2; i <= 3; i++ {
 		if _, err := st.CreateTeam(ctx, u.Account.ID, store.Team(fmt.Sprintf("busy-team-%d", i)), "", time.Now()); err != nil {
 			t.Fatalf("team %d: %v", i, err)

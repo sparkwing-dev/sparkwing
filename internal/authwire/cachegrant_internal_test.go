@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// signCacheGrant MACs an arbitrary payload the way MintCacheGrant does, so a
-// test can hand VerifyCacheGrant a grant Mint would refuse to produce.
 func signCacheGrant(signingKey, prefix, payload string) string {
 	body := prefix + base64.RawURLEncoding.EncodeToString([]byte(payload))
 	mac := hmac.New(sha256.New, cacheGrantKey(signingKey))
@@ -24,8 +22,6 @@ func TestVerifyCacheGrantRefusesSignedButInvalidGrants(t *testing.T) {
 		t.Fatalf("control grant refused: %v", err)
 	}
 	cases := map[string]string{
-		// A cache started without a key must not accept grants MACed with
-		// the key derived from the empty string.
 		"empty key":     signCacheGrant("", CacheGrantPrefix, valid),
 		"no prefix":     signCacheGrant("k", "", valid),
 		"escaping team": signCacheGrant("k", CacheGrantPrefix, `{"t":"../team-b","r":"run-1","e":1800003600}`),

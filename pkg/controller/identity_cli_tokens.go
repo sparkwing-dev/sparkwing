@@ -14,11 +14,9 @@ type cliTokenResp struct {
 	Prefix    string   `json:"prefix"`
 	Scopes    []string `json:"scopes"`
 	ExpiresAt int64    `json:"expires_at"`
-	// Profile is the profile name Setup writes; Setup and Run are the
-	// commands a member pastes into a terminal inside a pushed checkout.
-	Profile string `json:"profile"`
-	Setup   string `json:"setup"`
-	Run     string `json:"run"`
+	Profile   string   `json:"profile"`
+	Setup     string   `json:"setup"`
+	Run       string   `json:"run"`
 }
 
 type cliTokenJSON struct {
@@ -29,9 +27,6 @@ type cliTokenJSON struct {
 	LastUsedAt *int64   `json:"last_used_at"`
 }
 
-// cliTokenScopes is what a member's CLI token carries: the member's role
-// without team.admin, so a terminal can start and follow runs but never
-// administer the team, and a reader's token only reads.
 func cliTokenScopes(role store.Role) []string {
 	return slices.DeleteFunc(ScopesForRole(role), func(s string) bool { return s == ScopeTeamAdmin })
 }

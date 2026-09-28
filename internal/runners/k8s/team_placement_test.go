@@ -12,15 +12,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// teamJob renders an off-band class, where the team term is the only
-// anti-affinity; a band Job also refuses every other Job's node.
 func teamJob(t *testing.T, team string) *batchv1.Job {
 	t.Helper()
 	return classJob(t, Config{Image: "img", Team: team}, 2)
 }
 
-// wantTeamAffinity is the whole affinity a Job of team acme renders. Any
-// change to the term, including dropping it, fails here first.
 const wantTeamAffinity = `podAntiAffinity:
   requiredDuringSchedulingIgnoredDuringExecution:
   - labelSelector:
@@ -56,8 +52,6 @@ func TestBuildJob_LabelsJobAndPodWithTeam(t *testing.T) {
 	}
 }
 
-// teamRepels reports whether a pod of job's template refuses a node that runs
-// a pod labeled other.
 func teamRepels(t *testing.T, job *batchv1.Job, other map[string]string) bool {
 	t.Helper()
 	aff := job.Spec.Template.Spec.Affinity
@@ -92,7 +86,6 @@ func TestBuildJob_TwoTeamsRepelEachOtherButNotThemselves(t *testing.T) {
 	if teamRepels(t, acme, teamJob(t, "acme").Spec.Template.Labels) {
 		t.Fatal("an acme Job refuses a node running another acme Job, so a team's Jobs never pack")
 	}
-	// A node's daemonset and system pods carry no team label.
 	if teamRepels(t, acme, map[string]string{"app": "kube-proxy"}) {
 		t.Fatal("an acme Job refuses a node running an unlabeled pod, so it can schedule nowhere")
 	}
@@ -171,8 +164,6 @@ func TestBandRepels_FailsWithoutTheOneJobTerm(t *testing.T) {
 	}
 }
 
-// teamNode is the label set a band pool node carries after Karpenter boots it
-// for a Job of team.
 func teamNode(team string) labels.Set {
 	return labels.Set{cpuBandKey: cpuBandSmall, TeamNodeLabel: TeamLabelValue(team)}
 }

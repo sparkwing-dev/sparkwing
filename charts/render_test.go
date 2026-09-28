@@ -30,8 +30,6 @@ func TestFullChartVersion(t *testing.T) {
 	}
 }
 
-// tokenSecretDefaults names the runner's token, the cache's operator token
-// and the grant key as three Secrets, the shape the charts require.
 func tokenSecretDefaults(chart string) []string {
 	prefix := ""
 	if strings.Contains(chart, "sparkwing-full") {

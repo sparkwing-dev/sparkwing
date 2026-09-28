@@ -98,7 +98,7 @@ export default function ClusterPage() {
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-6xl mx-auto w-full">
       <div className="flex items-baseline justify-between mb-4">
-        <h1 className="text-xl font-bold">Compute</h1>
+        <h1 className="text-xl font-bold">Fleet</h1>
         <span className="text-[10px] font-mono text-[var(--muted)]">
           refresh every {POLL_MS / 1000}s
         </span>
@@ -110,7 +110,7 @@ export default function ClusterPage() {
         <Link href="/runs" className="text-[var(--accent)] hover:underline">View runs</Link>
       </div>
 
-      <SectionHeader title="Fleet" hint="/api/v1/agents" />
+      <SectionHeader title="Machines" hint="/api/v1/agents" />
       <FleetCards totals={fleetTotals} />
       <div className="space-y-2 mb-6">
         {!loaded ? (

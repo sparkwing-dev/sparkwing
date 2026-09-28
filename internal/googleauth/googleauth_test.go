@@ -131,7 +131,6 @@ func TestVerifyRefusesAHeaderNamingAnotherAlgorithmEvenWhenRSASigned(t *testing.
 	}
 }
 
-// clock lets a test move the client's notion of now without sleeping.
 type clock struct{ now time.Time }
 
 func (c *clock) Now() time.Time { return c.now }

@@ -51,12 +51,6 @@ func teamExhaustedAt(t *testing.T, s *store.Store, team store.Team) int64 {
 	return at
 }
 
-// A team that has spent its grants must stop only its own work. The fleet
-// balance and one team's balance were the same number under a controller per
-// team; on a shared controller summing them lets one customer's billing event
-// refuse every other customer's claims.
-// safety: each team's cloud runner holds a credential of that team, because
-// a metered token is one team's like any other and claims nothing outside it.
 func meteredTeamClaimant(t *testing.T, tenant *store.Tenant, principal string) store.ClaimIdentity {
 	t.Helper()
 	_, tok, err := tenant.CreateTokenWith(context.Background(), principal, store.TokenKindRunner,

@@ -154,15 +154,12 @@ func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error) {
 // Team reports which team t is scoped to.
 func (t *Tenant) Team() Team { return t.team }
 
-// safety: the un-ported *Store surface reads and writes through this
-// handle, because a caller predating the tenant key has no team to offer
-// and the migration put every existing row in this one. It skips the
-// registry read, which the migration's own registration makes redundant.
-// safety: a row that belongs to a run takes the run's team in the statement
-// that writes it, so no caller can hand it another; a row whose run is gone
-// lands where every pre-tenant row did.
+// safety: a row that belongs to a run takes the run's team in the statement that writes it, so no
+// caller can hand it another; a row whose run is gone lands where every pre-tenant row did.
 const runTeamSQL = `COALESCE((SELECT team FROM runs WHERE id = ?), '` + string(DefaultTeam) + `')`
 
+// safety: the un-ported *Store surface goes through this handle, because a caller predating the tenant
+// key has no team to offer and the migration put every existing row in this team.
 func (s *Store) defaultTenant() *Tenant { return &Tenant{s: s, team: DefaultTeam} }
 
 // Operator is the unscoped view of the store. It does not embed *Store,
@@ -294,14 +291,9 @@ var keyedAtCreation = []string{
 	"business_events",
 }
 
-// safety: executors is here because an executor enrolls with the deployment
-// and is offered work from every team on it, and sparkwing_meta because the
-// bag is the deployment's; the per-team keys inside that bag need a table of
-// their own rather than a column on it. accounts and identities are here
-// because a human belongs to the deployment and reaches teams through
-// memberships, which are tenant-owned. signup_gate is the deployment's one
-// gate for new accounts, and signup_admissions the deployment-wide admissions
-// its velocity limits count.
+// safety: executors enroll with the deployment and take work from every team; sparkwing_meta is the
+// deployment's bag, so per-team keys need their own table. A human belongs to the deployment and reaches
+// teams through tenant-owned memberships. signup_gate and signup_admissions gate new accounts deployment-wide.
 var operatorTables = []string{
 	"accounts",
 	"egress_day",
@@ -326,12 +318,10 @@ var operatorTables = []string{
 // team, so without this one team's listing scans the fleet's runs.
 const runsTeamIndex = `CREATE INDEX IF NOT EXISTS idx_runs_team_started ON runs(team, started_at DESC);`
 
-// safety: releases v0.61.0 through v0.63.0 numbered their node claim token
-// migration v49, so a database they migrated reads as v49 without the tenant
-// key, and v50 onward assume it. The tenant-key migration is idempotent, so
-// re-running it at v49 completes whatever part is missing on either lineage,
-// and a stray teams table it cannot use fails the open before v50 commits.
-// v74 carries that claim token column on this lineage.
+// safety: releases v0.61.0 through v0.63.0 numbered their claim token migration v49, so their databases
+// read as v49 without the tenant key that v50 onward assume. The idempotent tenant-key migration rerun
+// at v49 completes either lineage, and a stray teams table fails the open before v50 commits. v74
+// carries that claim token column on this lineage.
 func bridgeMainLineageTenantKey(ctx context.Context, tx *storeTx, version int, postgres bool) error {
 	switch {
 	case version != 49:

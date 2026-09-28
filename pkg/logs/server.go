@@ -209,25 +209,19 @@ func (s *Server) Handler() http.Handler {
 }
 
 const (
-	scopeLogsRead  = "logs.read"
-	scopeLogsWrite = "logs.write"
-	scopeAdmin     = "admin"
-	// scopeLogsDelete deletes any run's logs and reads none; the controller
-	// holds it to delete a team's logs.
+	scopeLogsRead   = "logs.read"
+	scopeLogsWrite  = "logs.write"
+	scopeAdmin      = "admin"
 	scopeLogsDelete = "logs.delete"
 )
 
 type logsPrincipal struct {
-	Name string
-	Kind string
-	// Team is the team a non-admin credential acts for, as whoami names
-	// it; the archive keys a run's objects by it.
+	Name        string
+	Kind        string
 	Team        string
 	Scopes      []string
 	TokenPrefix string
-	// credential is the Authorization header the caller sent, forwarded to
-	// the controller when a request needs it to decide for this caller.
-	credential string
+	credential  string
 }
 
 func (p *logsPrincipal) hasScope(s string) bool {
@@ -323,9 +317,6 @@ func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// extractCredential returns the caller's Authorization header: a bearer token,
-// or the session a signed-in account's dashboard forwards. The controller is
-// what resolves either, so the header travels to it unchanged.
 func extractCredential(r *http.Request) (string, error) {
 	h := strings.TrimSpace(r.Header.Get("Authorization"))
 	for _, scheme := range []string{"Bearer ", "Session "} {
@@ -822,9 +813,6 @@ func (s *Server) appendNodeLock(runID, nodeID string) *sync.Mutex {
 	return s.appendLock(nodePath(runID, nodeID))
 }
 
-// validateAppendClaim asks the controller whether the caller holds the
-// node's claim, and returns the headers it answered with, which name the
-// run's team's storage tier.
 func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (http.Header, int, error) {
 	if s.authDisabled() {
 		return nil, 0, nil

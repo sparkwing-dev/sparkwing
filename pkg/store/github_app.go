@@ -560,8 +560,6 @@ func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery st
 	return err
 }
 
-// triggerGitHubCheckRunCols holds the App's check run and repository identity;
-// 0 means the value was not recorded.
 var triggerGitHubCheckRunCols = map[string]string{
 	"github_check_run_id": "INTEGER NOT NULL DEFAULT 0",
 	"github_repo_id":      "BIGINT NOT NULL DEFAULT 0",
@@ -595,8 +593,6 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 	return t.GitHubCheckRun(ctx, runID)
 }
 
-// maxGitHubCommitTriggers bounds how many of a commit's triggers
-// [Tenant.GitHubCommitTriggers] reads.
 const maxGitHubCommitTriggers = 100
 
 // GitHubCommitTriggers returns t's triggers for commit sha of the GitHub

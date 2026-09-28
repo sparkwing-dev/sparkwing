@@ -195,6 +195,7 @@ func TestWebhookGitHub_RunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 	body := []byte(`{"ref":"refs/heads/main","after":"abc123def456abc123def456abc123def456abcd","repository":{"full_name":"acme/sample-app"},"pusher":{"name":"alice"}}`)
 	url := ts.URL + "/webhooks/github/sample-app-build"
 	first := postWebhook(t, url, "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = first.Body.Close() }()
 	if first.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("limited webhook = %d, want 429", first.StatusCode)
 	}
@@ -203,6 +204,7 @@ func TestWebhookGitHub_RunLimitRefusesWithoutConsumingDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry := postWebhook(t, url, "push", body, signWebhook(testWebhookSecret, body))
+	defer func() { _ = retry.Body.Close() }()
 	if retry.StatusCode != http.StatusAccepted {
 		t.Fatalf("retry after quota clears = %d, want 202", retry.StatusCode)
 	}

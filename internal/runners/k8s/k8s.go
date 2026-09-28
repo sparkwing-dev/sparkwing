@@ -987,18 +987,13 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 	})
 }
 
-// bandCPUHeadroom is the part of a band Job's vCPU left to the kubelet and the
-// node's daemonsets, so the pod fits a machine of its class's own size.
 const bandCPUHeadroom = 0.5
 
 const karpenterDoNotDisrupt = "karpenter.sh/do-not-disrupt"
 
-// safety: a band node is booted for one Job and billed at its class, so the pod
-// asks for what that machine leaves after the node's own overhead, which is
-// the class's memory. CPU has no limit because the machine is the promise;
-// memory is capped at the request so a runaway Job is the process the kernel
-// kills, not a daemonset whose smaller request gives it a higher OOM score. An
-// operator ceiling still caps both, as it caps every other pod.
+// safety: a band node is booted for one Job and billed at its class, so CPU has no
+// limit; memory is capped at the request so a runaway Job, not a daemonset with a
+// higher OOM score, is what the kernel kills. An operator ceiling still caps both.
 func bandClassResources(class store.CPUClass, cfg Config) corev1.ResourceRequirements {
 	memory := *resource.NewQuantity(cappedBytes(class.MemoryBytes, cfg.MemoryCeiling), resource.BinarySI)
 	limits := corev1.ResourceList{corev1.ResourceMemory: memory}

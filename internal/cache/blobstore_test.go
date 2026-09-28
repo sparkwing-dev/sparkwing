@@ -23,17 +23,12 @@ import (
 
 const blobTestBucket = "cache-blobs"
 
-// newBlobServer is newBudgetedServer with the blob stores in an in-memory
-// bucket. It returns the raw client so a test can look at the bucket
-// itself rather than trusting the service's own answers.
 func newBlobServer(t *testing.T, token string) (*httptest.Server, *s3.Client) {
 	t.Helper()
 	srv, raw, _ := newBlobServerWith(t, token, nil)
 	return srv, raw
 }
 
-// newBlobServerWith lets configure change the config before New, and also
-// returns the handler so a test can serve a request it built itself.
 func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.Client)) (*httptest.Server, *s3.Client, http.Handler) {
 	t.Helper()
 	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
@@ -85,6 +80,8 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	if configure != nil {
 		configure(&c, raw)
 	}
+	// safety: New replaces globals that a store measurement still running from an earlier test reads.
+	measureOnce.Wait()
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -211,7 +208,6 @@ func TestBlobStoreRefusesAnOversizedArtifactWithoutLeavingParts(t *testing.T) {
 	body := strings.Repeat("z", 7<<20)
 	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/artifacts/run-1?path=big.bin", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+grant)
-	// A chunked body hides its length, so the cap stops it mid-stream.
 	req.ContentLength = -1
 	resp, err := srv.Client().Do(req)
 	if err != nil {

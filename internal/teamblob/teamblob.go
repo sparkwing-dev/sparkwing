@@ -185,9 +185,6 @@ func ValidTeam(team string) bool {
 	return true
 }
 
-// validRel holds a relative key to segments an object store and every
-// reader treat the same way: no empty, "." or ".." segment, no
-// backslash and no control character.
 func validRel(rel string, allowTrailingSlash bool) bool {
 	if rel == "" || len(rel) > 900 || strings.HasPrefix(rel, "/") {
 		return false
@@ -219,8 +216,6 @@ func (s *Store) root() string {
 	return s.prefix + "/"
 }
 
-// namespace returns the key prefix every object of team sits under. The
-// operator's namespace, team "", is the store root.
 func (s *Store) namespace(team string) (string, error) {
 	if team == "" {
 		return s.root(), nil
@@ -348,8 +343,6 @@ func (s *Store) putBytes(ctx context.Context, key string, data []byte, opts PutO
 	return int64(len(data)), nil
 }
 
-// putStreaming reads the first part; a body that ends inside it is one
-// PUT, and anything longer is a multipart upload.
 func (s *Store) putStreaming(ctx context.Context, key string, body io.Reader, opts PutOptions) (int64, error) {
 	first := make([]byte, s.partSize)
 	n, err := io.ReadFull(body, first)
@@ -537,9 +530,6 @@ type sizedKey struct {
 	size int64
 }
 
-// deleteKeys reports what the store confirmed deleted: every key of a
-// batch it answered, less the keys it listed as failed. A batch that
-// failed outright deleted nothing the caller can count.
 func (s *Store) deleteKeys(ctx context.Context, keys []sizedKey) (Deleted, error) {
 	var d Deleted
 	var errs []error

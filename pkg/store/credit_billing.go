@@ -52,7 +52,6 @@ func (e *CreditBalanceCapError) Error() string {
 // Unwrap reports [ErrCreditBalanceCap].
 func (e *CreditBalanceCapError) Unwrap() error { return ErrCreditBalanceCap }
 
-// microDollars renders micro-credits as dollars to the cent, rounding down.
 func microDollars(micro int64) string {
 	cents := micro / MicroCreditsPerCent
 	sign := ""

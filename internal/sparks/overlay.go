@@ -203,9 +203,8 @@ func assertGoModUntouched(path string, before []byte) error {
 }
 
 func ensureGitignore(sparkwingDir string) error {
-	// Only the directory holding sparkwingDir counts as the project root: an
-	// ancestor's .git belongs to someone else, and an anchored pattern written
-	// there would not match this project's files anyway.
+	// safety: an ancestor's .git belongs to someone else, and an anchored pattern
+	// written there would not match this project's files anyway.
 	target := filepath.Join(sparkwingDir, ".gitignore")
 	lines := []string{OverlayModfileName, OverlaySumfileName}
 	if projectRoot := filepath.Dir(sparkwingDir); isGitCheckoutRoot(projectRoot) {

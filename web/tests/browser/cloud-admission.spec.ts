@@ -45,11 +45,10 @@ test("Cloud routes explain local admission without polling unsupported APIs", as
   expect(unsupported).toEqual([]);
 
   await page.goto("/cluster");
-  await expect(page.getByRole("heading", { name: "Compute", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fleet", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByText("Queued nodes 0")).toBeVisible();
   await expect(page.getByText("Running nodes 0")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Compute", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Fleet", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Fleet", exact: true })).toBeVisible();
   expect(unsupported).toEqual([]);
 });
 
@@ -57,6 +56,6 @@ test("Cloud navigation fits a mobile viewport", async ({ page }) => {
   await mockCloud(page, []);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Compute", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Fleet", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
 });

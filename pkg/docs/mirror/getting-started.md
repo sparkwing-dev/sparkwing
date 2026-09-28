@@ -393,7 +393,7 @@ To run work on this machine for that controller, enroll it as a runner with
 On a controller with teams, a team's runners fetch each run's source from
 GitHub themselves, so every run names a repository. A runner claims only
 runs whose repository matches one of its `--allow-repo` patterns, and a run
-nothing may build stays pending. There are two ways to start one.
+nothing may build stays pending. Start one from the dashboard or a terminal.
 
 **From the dashboard.** On the Runs page, **+ Start a run** opens a form that
 takes a pipeline name, a repository such as `https://github.com/acme/app`,

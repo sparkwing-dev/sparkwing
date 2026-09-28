@@ -181,8 +181,6 @@ func (s *Server) settleLogBlocks(ctx context.Context, final bool) {
 	}
 }
 
-// settleRunLogBlocks commits runID's blocks and gives the rest back, for a
-// node that sealed its log; a later append of the run reserves a new block.
 func (s *Server) settleRunLogBlocks(ctx context.Context, runID string) {
 	if s.archive == nil || s.counter == nil {
 		return

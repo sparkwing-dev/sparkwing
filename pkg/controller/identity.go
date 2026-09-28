@@ -105,10 +105,7 @@ type capabilitiesGitHubApp struct {
 	SourceTokens bool   `json:"source_tokens"`
 }
 
-// capabilitiesClaims tells a runner which claim fields this controller reads,
-// so a newer runner sends only what an older controller accepts.
 type capabilitiesClaims struct {
-	// AllowRepos reports that trigger and node claims take allow_repos.
 	AllowRepos bool `json:"allow_repos"`
 	Profile    bool `json:"profile"`
 }
@@ -151,8 +148,7 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, raw string
 // safety: an account's scopes come from its membership as it stands now, so a demotion or removal
 // takes effect on the next request rather than at session expiry.
 func (s *Server) sessionPrincipal(ctx context.Context, raw string, now time.Time) (*Principal, error) {
-	//nolint:contextcheck // session lookup predates contexts on this surface; handleSession uses it the same way
-	sess, err := s.store.LookupSessionAndRenew(raw, now, sessionTTL, s.sessionMaxLifetime)
+	sess, err := s.store.LookupSessionAndRenew(ctx, raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		return nil, err
 	}

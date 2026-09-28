@@ -248,7 +248,6 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The pod's environment as the Job spec sets it, less the grant.
 	t.Setenv("SPARKWING_AGENT_TOKEN", token)
 	t.Setenv("SPARKWING_GITCACHE_URL", cacheSrv.URL)
 	t.Setenv("SPARKWING_NODE_CLAIM_HOLDER", claimed.ClaimedBy)

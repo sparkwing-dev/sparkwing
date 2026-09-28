@@ -305,7 +305,6 @@ func (s *Service) schedules() ScheduleStore {
 	return s.Store
 }
 
-// team is the team s arms in: the one its Schedules names, or the operator's.
 func (s *Service) team() store.Team {
 	if t, ok := s.Schedules.(interface{ Team() store.Team }); ok {
 		return t.Team()

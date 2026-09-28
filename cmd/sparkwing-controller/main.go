@@ -557,8 +557,8 @@ func run(args []string) error {
 	if err := st.SetFreeTeamSlots(ctx, *freeTeamSlots); err != nil {
 		return fmt.Errorf("--free-team-slots: %w", err)
 	}
-	// The license decides whether an empty tokens table may serve
-	// unauthenticated, so auth is resolved after it is installed.
+	// safety: auth resolves after the license is installed, because the license decides
+	// whether an empty tokens table may serve unauthenticated.
 	srv.EnableAuthFromStore()
 	if err := configureSecrets(ctx, srv, cipher); err != nil {
 		return err
@@ -792,10 +792,8 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// checkRequireAuth refuses a --require-auth start with no live token. It asks
-// the tokens table rather than whether auth is on, because a multi-team
-// license turns auth on with an empty table and --require-auth promises a
-// token an operator can use.
+// safety: asks the tokens table rather than whether auth is on, because a multi-team
+// license turns auth on with an empty table and --require-auth promises a usable token.
 func checkRequireAuth(st *store.Store, requireAuth bool) error {
 	if !requireAuth {
 		return nil
@@ -823,11 +821,8 @@ func envTruthy(name string) bool {
 	}
 }
 
-// checkCacheGrantKey refuses to start a multi-team controller that has a cache
-// but no grant key of its own. The grant is the only boundary between teams
-// inside the cache, and without a usable key every run's grant request fails
-// at request time instead of when the operator deploys. A single-team install
-// keeps its request-time answer.
+// safety: the grant is the only boundary between teams inside the cache; without a key
+// every run's grant request would fail at request time instead of at deploy.
 func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey, cacheToken string) error {
 	if !srv.MultiTeam() || (cacheURL == "" && cachePodURL == "") {
 		return nil
@@ -845,10 +840,8 @@ func checkCacheGrantKey(srv *controller.Server, cacheURL, cachePodURL, grantKey,
 	return nil
 }
 
-// checkMultiTeamObjectStore refuses to start a multi-team controller with no
-// object store. A free team is held to its allowance only by the counters the
-// cache and logs services keep over the object store; the disk-backed cache
-// and log volume enforce no allowance at all.
+// safety: a free team is held to its allowance only by counters kept over the object
+// store; the disk-backed cache and log volume enforce no allowance at all.
 func checkMultiTeamObjectStore(srv *controller.Server, bucketStoreURL string) error {
 	if !srv.MultiTeam() || strings.TrimSpace(bucketStoreURL) != "" {
 		return nil

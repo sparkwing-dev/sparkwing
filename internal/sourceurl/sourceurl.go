@@ -203,10 +203,8 @@ func routableIP(ip net.IP) bool {
 	return true
 }
 
-// specialPurposeBlocks are the ranges the net.IP predicates miss that still
-// never name a public forge: this-network, CGNAT, IETF protocol assignments,
-// benchmarking, limited broadcast, and NAT64, whose translator reaches any
-// IPv4 address including the private ones.
+// safety: NAT64 is blocked because its translator reaches any IPv4 address,
+// including private ones.
 var specialPurposeBlocks = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),

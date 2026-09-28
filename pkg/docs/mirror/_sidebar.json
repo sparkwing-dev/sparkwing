@@ -57,11 +57,13 @@
         "self-hosting",
         "backup-restore",
         "backends",
+        "data-uploads",
         "scheduling",
         "github-actions-runners",
         "github-app",
         "warm-pool",
-        "gitcache"
+        "gitcache",
+        "git-credentials"
       ]
     },
     {

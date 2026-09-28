@@ -17,8 +17,6 @@ func sshCredential(fingerprint string) store.GitCredential {
 	}
 }
 
-// release is a release to a runner holding a live claim on runID's trigger,
-// which it creates in tn's team, for a minute from now.
 func release(t *testing.T, st *store.Store, tn *store.Tenant, runID string) store.GitCredentialRelease {
 	t.Helper()
 	ctx := context.Background()

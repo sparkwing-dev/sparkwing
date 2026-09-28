@@ -52,7 +52,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 			s.writeInternalError(w, r, "read retry source trigger", triggerErr)
 			return
 		}
-		// A local working-tree run can have no trigger row; its source remains retryable.
+		// safety: a local working-tree run can have no trigger row; its source remains retryable.
 		if triggerErr == nil && trigger.Team == tenant.Team() && trigger.TriggerEnv[bincache.SourceBundleObjectEnvKey] != "" {
 			writeError(w, http.StatusUnprocessableEntity, errors.New("cloud working-tree retry needs a new source upload; rerun sparkwing run <pipeline> --profile <cloud-profile> from the checkout"))
 			return

@@ -23,29 +23,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// childLogSeal numbers the log lines a pipeline child writes without
-// numbers of its own, and seals them once the child exits. The child is the
-// team's pipeline binary, built against whatever SDK the team pins, so a
-// release that predates seals would otherwise leave every brokered node's
-// log unconfirmed; the broker carrying the lines is this agent's code.
+// hack: the child is the team's pipeline binary on whatever SDK it pins, which may predate seals,
+// so the broker numbers and seals its lines rather than leaving every brokered log unconfirmed.
 type childLogSeal struct {
 	mu     sync.Mutex
 	stream string
-	// seq counts lines the logs service accepted, so a failed append that
-	// the child retries keeps its number.
+	// safety: counts only accepted lines, so a refused append the child retries keeps its number.
 	seq    int64
 	bytes  int64
 	digest hash.Hash
-	// failed holds the last append the service refused. The child retries
-	// the same bytes; different bytes mean it gave that line up.
-	failed  []byte
-	failing bool
-	dropped int64
-	// ordinal is the execution attempt the child's appends named, which a
-	// seal must name too.
-	ordinal int
-	// childNumbers records that the child numbers its own lines, and so
-	// seals them itself.
+	// safety: the child retries a refused append with the same bytes; different bytes mean it
+	// gave that line up.
+	failed       []byte
+	failing      bool
+	dropped      int64
+	ordinal      int
 	childNumbers bool
 }
 
@@ -59,9 +51,8 @@ func (b *remoteExecutionBroker) isChildLogAppend(r *http.Request) bool {
 		r.URL.EscapedPath() == "/api/v1/logs/"+url.PathEscape(b.runID)+"/"+url.PathEscape(b.nodeID)
 }
 
-// forwardChildLogAppend numbers one unnumbered append and forwards it. It
-// holds the stream for the whole round trip, so numbers follow the order
-// the service stored the lines in.
+// safety: holds the stream for the whole round trip, so numbers follow the order the service
+// stored the lines in.
 func (b *remoteExecutionBroker) forwardChildLogAppend(w http.ResponseWriter, r *http.Request) {
 	s := &b.logSeal
 	if r.Header.Get(logs.LogStreamHeader) != "" {
@@ -106,7 +97,7 @@ func (b *remoteExecutionBroker) forwardChildLogAppend(w http.ResponseWriter, r *
 	s.failing = false
 }
 
-// maxBrokeredLogAppend matches the largest append the logs service takes.
+// safety: must match the largest append the logs service accepts.
 const maxBrokeredLogAppend = 4 << 20
 
 type statusRecorder struct {
@@ -121,13 +112,9 @@ func (r *statusRecorder) WriteHeader(code int) {
 
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
-// childLogSealBudget bounds how long the supervisor spends sealing after
-// its child exits, the same budget a node's own log gets to finish.
 const childLogSealBudget = httpNodeLogFinishTimeout
 
-// sealChildLogs seals the lines the broker numbered once the child is gone.
-// A child that ended on its own, whatever its exit code, said everything it
-// was going to; one killed by a signal or cancelled may not have, so its log
+// safety: a child killed by a signal or cancelled may not have written everything, so its log
 // is left unsealed and reads as cut off.
 func (b *remoteExecutionBroker) sealChildLogs(ctx context.Context, outcome assistedChildOutcome, startErr error, logger *slog.Logger) {
 	if b.logs == nil {

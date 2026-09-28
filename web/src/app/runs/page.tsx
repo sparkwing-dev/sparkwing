@@ -699,7 +699,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const col = focusedColumnRef.current;
       const tabs = visibleTabsRef.current;
       if (e.key === "Tab") {
-        if (!selectedRunRef.current || tabs.length === 0) return;
+        if (scrollPane || !selectedRunRef.current || tabs.length === 0) return;
         e.preventDefault();
         const cur = tabRef.current;
         const idx = tabs.findIndex((t) => t.key === cur);

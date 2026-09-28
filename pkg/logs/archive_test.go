@@ -27,13 +27,11 @@ import (
 
 const archiveBucket = "logs-archive"
 
-// billed counts object-store requests by operation and can refuse one.
 type billed struct {
 	teamblob.Client
-	mu     sync.Mutex
-	calls  map[string]int
-	refuse map[string]bool
-	// refuseKey fails a PUT of a matching key; keys counts every PUT by key.
+	mu        sync.Mutex
+	calls     map[string]int
+	refuse    map[string]bool
 	refuseKey func(key string) bool
 	keys      map[string]int
 }
@@ -120,9 +118,6 @@ func (b *billed) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, o
 	return b.Client.ListObjectsV2(ctx, in, o...)
 }
 
-// archiveFixture is a logs service with an archive in an in-memory
-// bucket, in front of a fake controller that answers yes to every run
-// question, so the tests see what the logs service enforces on its own.
 type archiveFixture struct {
 	srv    *Server
 	http   *httptest.Server
@@ -257,8 +252,6 @@ func (f *archiveFixture) onVolume(runID string) bool {
 	return err == nil
 }
 
-// age backdates every file of a run so the archiver and retention see it
-// as last written at when.
 func (f *archiveFixture) age(t *testing.T, runID string, when time.Time) {
 	t.Helper()
 	err := filepath.Walk(filepath.Join(f.root, "runs", runID), func(p string, _ os.FileInfo, err error) error {
@@ -293,7 +286,6 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 	if err != nil || n != 1 {
 		t.Fatalf("archive = %d, %v", n, err)
 	}
-	// Two log files, the run index and the day entry: four PUTs, no LIST.
 	if got := f.client.count("PutObject"); got != 4 {
 		t.Errorf("archiving a two-file run cost %d PUTs, want 4", got)
 	}
@@ -321,7 +313,6 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 	if code != http.StatusOK || body != "line one\n" {
 		t.Fatalf("read of an archived run = %d %q", code, body)
 	}
-	// One index read and one read per file; no listing.
 	if got, lists := f.client.count("GetObject"), f.client.count("ListObjectsV2"); got != 3 || lists != 0 {
 		t.Errorf("restoring cost %d GETs and %d LISTs, want 3 and 0", got, lists)
 	}
@@ -333,7 +324,6 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 		t.Errorf("a second read of a restored run cost %d requests", f.client.total())
 	}
 
-	// Written again after archiving, the run keeps both appends.
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", "line two\n"); code != http.StatusNoContent {
 		t.Fatalf("append after archive = %d %s", code, body)
 	}
@@ -347,7 +337,6 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 		t.Fatalf("read after a second archive = %d %q", code, body)
 	}
 
-	// A run nobody ever wrote costs one index read, then none.
 	f.client.reset()
 	for range 3 {
 		if code, body := f.do(t, http.MethodGet, "/api/v1/logs/run-new/build", "Bearer a", ""); code != http.StatusOK || body != "" {
@@ -438,8 +427,6 @@ func TestTeamPurgeDeletesOnlyThatTeamsLogs(t *testing.T) {
 	if keys := f.keys(t); !keys["logs/index/runs/run-b1.json"] {
 		t.Error("the purge took team B's run index")
 	}
-	// The controller purges with its log-deletion credential, which may delete
-	// a team's logs and read nothing.
 	if code, _ := f.do(t, http.MethodDelete, "/api/v1/teams/team-a/logs", "Bearer deleter", ""); code != http.StatusOK {
 		t.Errorf("a repeated purge with the log-deletion credential = %d, want it to succeed", code)
 	}
@@ -493,7 +480,6 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 	if got := f.client.count("GetObject"); got != expired {
 		t.Errorf("prune read %d indexes, want %d", got, expired)
 	}
-	// One batch per team namespace and one for the operator's index keys.
 	if got := f.client.count("DeleteObjects"); got != 3 {
 		t.Errorf("prune sent %d delete batches, want 3", got)
 	}
@@ -511,7 +497,6 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 		t.Error("a run inside the retention was pruned")
 	}
 
-	// With nothing expired, a pass is one listing.
 	f.client.reset()
 	if _, err := f.srv.PruneArchive(context.Background(), now); err != nil {
 		t.Fatal(err)
@@ -571,8 +556,6 @@ func TestAChattyNodeCostsNoObjectStoreWritesWhileItRuns(t *testing.T) {
 			t.Fatalf("append = %d %s", code, body)
 		}
 	}
-	// The run's first request asks the index whether the run was archived
-	// before; nothing else reaches the store.
 	if puts, gets := f.client.count("PutObject"), f.client.count("GetObject"); puts != 0 || gets != 1 || f.client.total() != 1 {
 		t.Fatalf("a minute of appends cost %d PUTs, %d GETs, %d requests in all; want 0, 1, 1", puts, gets, f.client.total())
 	}
@@ -659,7 +642,6 @@ func TestFollowStreamsLiveLinesWithoutTouchingTheObjectStore(t *testing.T) {
 		want(text)
 		t.Logf("%q reached the follower in %s", text, time.Since(start).Round(time.Millisecond))
 	}
-	// The run is held by its follower, so the archiver leaves it alone.
 	if n, err := f.srv.ArchiveOnce(context.Background(), time.Now().Add(time.Hour)); err != nil || n != 0 {
 		t.Fatalf("the archiver took a followed run: %d, %v", n, err)
 	}
@@ -683,7 +665,6 @@ func TestRetentionKeepsAnExpiredRunThatWasWrittenAgain(t *testing.T) {
 	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 2 {
 		t.Fatalf("archive = %d, %v", n, err)
 	}
-	// Both are restored by a read; only one is written again.
 	for _, run := range []string{"revived", "stale"} {
 		if _, body := f.do(t, http.MethodGet, "/api/v1/logs/"+run+"/build", "Bearer a", ""); body != "old\n" {
 			t.Fatalf("restore of %s = %q", run, body)
@@ -705,7 +686,6 @@ func TestRetentionKeepsAnExpiredRunThatWasWrittenAgain(t *testing.T) {
 	if !f.keys(t)["logs/index/runs/revived.json"] {
 		t.Error("retention deleted the rewritten run's index")
 	}
-	// Archived again, the run carries its new write date and survives.
 	if _, err := f.srv.ArchiveOnce(context.Background(), now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}

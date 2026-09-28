@@ -57,8 +57,6 @@ func TestTenantListPipelines_OneTeamsPipelinesNewestFirst(t *testing.T) {
 		t.Errorf("build latest = %+v, want run-build-2 failed at %s", build, base.Add(10*time.Minute))
 	}
 
-	// Negative control: the other team's pipeline is in the store and visible
-	// to its own team, so its absence above is the scope and not an empty read.
 	theirs, err := bravo.ListPipelines(ctx, 200)
 	if err != nil {
 		t.Fatalf("ListPipelines bravo: %v", err)
