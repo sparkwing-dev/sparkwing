@@ -169,6 +169,8 @@ source may be missing or unbuildable.
 Retries preserve the selected pipeline commit and recreate its compile worktree.
 They execute in a snapshot of the original execution revision, following the
 same checkout rules as other retries.
+The pipeline process receives the selected commit as `SPARKWING_PIPELINE_REV`;
+Sparkwing also records it as `pipeline_revision` in the run invocation.
 
 #### Making a retry safe
 

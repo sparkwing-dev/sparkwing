@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Docs
+
+- **cli:** Document the selected pipeline commit exposed as `SPARKWING_PIPELINE_REV`
+
 ## [v0.63.0] - 2026-09-27
 ### Changed
 
