@@ -1379,3 +1379,72 @@ func TestBuildJob_ToleratesThePoolItSelects(t *testing.T) {
 			"and tolerates another value never schedules", tol.Value)
 	}
 }
+
+func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		cfg    Config
+		cores  int64
+		cpu    string
+		memory string
+	}{
+		{
+			name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}},
+			cores: 2, cpu: "1500m", memory: "5529Mi",
+		},
+		{name: "4-core", cfg: Config{Image: "img"}, cores: 4, cpu: "3500m", memory: "13107Mi"},
+		{name: "8-core", cfg: Config{Image: "img"}, cores: 8, cpu: "7500m", memory: "28262Mi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := classJob(t, tc.cfg, tc.cores).Spec.Template.Spec
+			rr := pod.Containers[0].Resources
+			if got := rr.Requests.Cpu().String(); got != tc.cpu {
+				t.Fatalf("cpu request = %s, want %s", got, tc.cpu)
+			}
+			if _, ok := rr.Limits[corev1.ResourceCPU]; ok {
+				t.Fatalf("cpu limit = %s, want none: the machine is the class", rr.Limits.Cpu())
+			}
+			want := resource.MustParse(tc.memory)
+			if !rr.Requests.Memory().Equal(want) || !rr.Limits.Memory().Equal(want) {
+				t.Fatalf("memory = %s/%s, want %s request and limit", rr.Requests.Memory(), rr.Limits.Memory(), &want)
+			}
+			terms := pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+			if len(terms) != 1 || terms[0].LabelSelector.MatchLabels["app.kubernetes.io/name"] != "sparkwing-runner" {
+				t.Fatalf("anti-affinity = %#v, want only one Job per node: the team node label separates teams", terms)
+			}
+		})
+	}
+}
+
+func TestBuildJob_KeepsTheRequestOffTheBand(t *testing.T) {
+	pod := classJob(t, Config{Image: "img"}, 2).Spec.Template.Spec
+	if got := pod.Containers[0].Resources.Requests.Cpu().String(); got != "100m" {
+		t.Fatalf("cpu request = %s, want the 100m default off the band", got)
+	}
+	if n := len(pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution); n != 1 {
+		t.Fatalf("anti-affinity terms = %d, want only the team term off the band", n)
+	}
+}
+
+func TestBuildJob_BandJobKeepsTheOperatorsCeilings(t *testing.T) {
+	cfg := Config{Image: "img", CPUCeiling: 3, MemoryCeiling: 8 << 30}
+	rr := classJob(t, cfg, 8).Spec.Template.Spec.Containers[0].Resources
+	if got := rr.Requests.Cpu().String(); got != "3" {
+		t.Fatalf("cpu request = %s, want the 3-core ceiling", got)
+	}
+	if got := rr.Limits.Cpu().String(); got != "3" {
+		t.Fatalf("cpu limit = %s, want the 3-core ceiling", got)
+	}
+	if !rr.Requests.Memory().Equal(resource.MustParse("8Gi")) || !rr.Limits.Memory().Equal(resource.MustParse("8Gi")) {
+		t.Fatalf("memory = %s/%s, want the 8Gi ceiling", rr.Requests.Memory(), rr.Limits.Memory())
+	}
+}
+
+func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
+	if got := classJob(t, Config{Image: "img"}, 4).Spec.Template.Annotations[karpenterDoNotDisrupt]; got != "true" {
+		t.Fatalf("band pod do-not-disrupt = %q, want true", got)
+	}
+	if _, ok := classJob(t, Config{Image: "img"}, 2).Spec.Template.Annotations[karpenterDoNotDisrupt]; ok {
+		t.Fatal("an off-band pod carries do-not-disrupt, which would pin a shared node")
+	}
+}

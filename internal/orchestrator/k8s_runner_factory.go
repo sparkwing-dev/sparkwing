@@ -33,6 +33,7 @@ type K8sRunnerFactoryConfig struct {
 	Labels       []string
 	NodeSelector map[string]string
 	Tolerations  []corev1.Toleration
+	TeamNodes    bool
 
 	DependencyProxyURL string
 
@@ -107,6 +108,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		AgentToken:         cfg.AgentToken,
 		Labels:             cfg.Labels,
 		NodeSelector:       cfg.NodeSelector,
+		TeamNodes:          cfg.TeamNodes,
 		Tolerations:        cfg.Tolerations,
 		CPURequest:         "100m",
 		MemoryRequest:      "128Mi",

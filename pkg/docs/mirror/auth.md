@@ -299,22 +299,31 @@ two passes to engage.
 
 ## Runner classes
 
-A class is a whole number of cores with the memory that comes with it, and it
-is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
-carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
-four, 32 GiB at eight. A node takes the smallest class that covers both halves
-of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
-because the 4-core class carries only 16 GiB. The class sets the price, while
-the Kubernetes pod requests the pinned CPU and memory. A node with a 0.25-core
-pin still pays for the 2-core class, including the 60-second minimum.
+A class is the unit a pipeline buys: a whole number of cores and the memory a
+Job gets with them. The ladder is 2, 4, and 8 cores. A class names a machine of
+N vCPU and 4N GiB, and a Job gets that machine less the system's own overhead,
+the same way a hosted 2-core runner is a 2-vCPU virtual machine rather than two
+reserved cores: about 5.4 GiB at two cores, 12.8 GiB at four and 27.6 GiB at
+eight. A node takes the smallest class whose cores cover its cpu pin and whose
+Job memory covers its memory pin, so a pin of three cores and 14 GiB takes the
+8-core class because the 4-core class gives a Job 12.8 GiB. A memory pin above
+the largest class's Job memory fails the node when it is claimed, naming both
+sizes. The class sets the price. A node with a 0.25-core pin still pays for the
+2-core class, including the 60-second minimum.
 
-The 2-core class runs on the warm pool and starts in seconds. A larger class
-starts a Kubernetes node of its own, which takes one to two minutes during the
-preview, and the controller refuses every warm claim and offer for it so it
-cannot land on a machine it shares. `warm_cpu_class_cores` is the largest class
-the warm pool serves, 2 by default; zero starts a node of its own for every
-class. Local claim-mode agents are unmetered and claim by their labels as they
-always have.
+Where a node runs decides whether it gets the machine to itself. Before any
+runner takes a node, a warm dispatcher offers it to claim-mode agents for up to
+five seconds; a local agent is unmetered and claims by its labels as it always
+has. A metered warm runner, one claiming nodes with the operator's pool token,
+takes only classes up to `warm_cpu_class_cores` (2 by default; zero sends every
+class elsewhere) and runs them on a machine it shares with its other nodes, so
+those nodes do not get a machine of their own. Everything else becomes a
+Kubernetes Job. A Job on a band pool, below, runs alone on a machine of its
+class: its pod requests N minus half a core with no CPU limit, so it can use
+every cycle the machine has spare, and the class's Job memory as request and
+limit. That machine takes one to two minutes to start during the preview,
+unless one its team just freed is still up. A Job off the band keeps the
+runner's configured shape and shares nodes with its own team's Jobs.
 
 Each class above the warm one names the band of machines it runs on. The 4-core
 and 8-core classes select nodes labeled `sparkwing.dev/cpu-band: small` and
@@ -331,9 +340,9 @@ fleet is a condition that clears. A Job whose shape no machine in the pool
 could hold fails before the Job is created, because waiting cures nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
-`credit_cpu_class_memory_bytes`. The Job uses the pipeline's resource pin or
-measured profile for its requests, with 100m CPU and 128 MiB memory defaults
-when no usable measurement exists. Limits retain the runner's burst settings
+`credit_cpu_class_memory_bytes`, the latter the class's Job memory. A Job off
+the band uses the pipeline's resource pin or measured profile for its requests, with 100m CPU and 128 MiB
+memory defaults when no usable measurement exists. Limits retain the runner's burst settings
 and operator ceilings. A claim that names a node carries `sizes_to_class` to
 select the class-routed Kubernetes path; a metered claim without it is held to
 the warm class,

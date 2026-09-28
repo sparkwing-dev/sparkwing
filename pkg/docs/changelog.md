@@ -741,6 +741,22 @@ unlock.
   `min_billable_seconds: 60`. Drain metered claims before deploying, because
   a claim reserved at 20 seconds would be covered for 60. See
   [60-second minimum billable duration](docs/migrations/_unreleased.md#60-second-minimum-billable-duration).
+- **runner:** A Kubernetes Job on a `sparkwing.dev/cpu-band` pool now runs
+  alone on a machine of its billed class, N vCPU and 4N GiB, instead of on a
+  2N-vCPU node. It requests the class's cores minus half a core with no CPU
+  limit, and what the machine leaves after system overhead as its memory
+  request and limit: about 5.4, 12.8 and 27.6 GiB for the 2, 4 and 8-core
+  classes. That Job memory is now the class's memory everywhere: a memory pin
+  takes the smallest class whose Job memory covers it (a 6 GiB pin takes the
+  4-core class, not the 2-core), `credit_cpu_class_memory_bytes` reports it,
+  and a pin above the largest class's fails the node at claim. Runner CPU and
+  memory ceilings still cap a band Job, and its pod carries
+  `karpenter.sh/do-not-disrupt`. It refuses a node holding any other Job in
+  place of the cross-team anti-affinity. `SPARKWING_RUNNER_TEAM_NODES=true`
+  (or `handle-trigger --runner-team-nodes`, off by default) also makes it
+  select `sparkwing.dev/team-node: <team>`, so a node serves only the team
+  whose Job booted it, including back-to-back reuse; the band pool then
+  needs an `Exists` requirement on that key.
 
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.

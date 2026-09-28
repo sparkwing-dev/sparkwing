@@ -63,6 +63,12 @@ type Config struct {
 	// [TeamLabel] and never share a node with another team's Jobs.
 	Team string
 
+	// TeamNodes makes a band Job select [TeamNodeLabel] with its team, so a
+	// band node serves one team from boot to release. Its pool must stamp
+	// that label on the nodes it boots, as an autoscaler that copies a pod's
+	// selector does; a pool of static nodes without it takes no band Job.
+	TeamNodes bool
+
 	CPURequest    string
 	CPULimit      string
 	MemoryRequest string
@@ -860,6 +866,22 @@ func (r *Runner) buildJob(
 		// value leaves it selecting a pool whose taint it does not tolerate.
 		placed = selector[cpuBandKey]
 	}
+	affinity := teamAntiAffinity(team)
+	var podAnnotations map[string]string
+	if selector[cpuBandKey] != "" {
+		// safety: a band node holds one team from boot to release whatever the
+		// claim billed, so an unmetered claim's pod is kept to its team too.
+		if class.Cores > 0 {
+			container.Resources = bandClassResources(class, r.cfg)
+		}
+		if r.cfg.TeamNodes {
+			selector = teamNodeSelector(selector, team)
+		}
+		affinity = oneJobPerNode()
+		// safety: Karpenter drift and consolidation evict a running pod
+		// otherwise, and a band Job is a pipeline node with no retry.
+		podAnnotations = map[string]string{karpenterDoNotDisrupt: "true"}
+	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: r.cfg.ServiceAccountName,
@@ -867,7 +889,7 @@ func (r *Runner) buildJob(
 		AutomountServiceAccountToken: boolPtr(false),
 		NodeSelector:                 selector,
 		Tolerations:                  bandTolerations(r.cfg.Tolerations, placed),
-		Affinity:                     teamAntiAffinity(team),
+		Affinity:                     affinity,
 		Containers:                   []corev1.Container{container},
 		Volumes: []corev1.Volume{{
 			Name:         scratchVolumeName,
@@ -907,7 +929,7 @@ func (r *Runner) buildJob(
 			TTLSecondsAfterFinished: &ttl,
 			ActiveDeadlineSeconds:   r.jobActiveDeadline(req),
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
 				Spec:       podSpec,
 			},
 		},
@@ -963,6 +985,47 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 		Value:    placed,
 		Effect:   corev1.TaintEffectNoSchedule,
 	})
+}
+
+// bandCPUHeadroom is the part of a band Job's vCPU left to the kubelet and the
+// node's daemonsets, so the pod fits a machine of its class's own size.
+const bandCPUHeadroom = 0.5
+
+const karpenterDoNotDisrupt = "karpenter.sh/do-not-disrupt"
+
+// safety: a band node is booted for one Job and billed at its class, so the pod
+// asks for what that machine leaves after the node's own overhead, which is
+// the class's memory. CPU has no limit because the machine is the promise;
+// memory is capped at the request so a runaway Job is the process the kernel
+// kills, not a daemonset whose smaller request gives it a higher OOM score. An
+// operator ceiling still caps both, as it caps every other pod.
+func bandClassResources(class store.CPUClass, cfg Config) corev1.ResourceRequirements {
+	memory := *resource.NewQuantity(cappedBytes(class.MemoryBytes, cfg.MemoryCeiling), resource.BinarySI)
+	limits := corev1.ResourceList{corev1.ResourceMemory: memory}
+	if cfg.CPUCeiling > 0 {
+		limits[corev1.ResourceCPU] = milliCores(cfg.CPUCeiling)
+	}
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    milliCores(cappedCores(float64(class.Cores)-bandCPUHeadroom, cfg.CPUCeiling)),
+			corev1.ResourceMemory: memory,
+		},
+		Limits: limits,
+	}
+}
+
+// safety: requests alone let the scheduler pack two classes onto one larger
+// machine at the same price, which breaks the one-machine-per-Job promise.
+func oneJobPerNode() *corev1.Affinity {
+	return &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app.kubernetes.io/name": "sparkwing-runner"},
+			},
+			NamespaceSelector: &metav1.LabelSelector{},
+			TopologyKey:       corev1.LabelHostname,
+		}},
+	}}
 }
 
 func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {

@@ -738,3 +738,46 @@ func TestAWarmClaimReachesASmallNodeBehindManyLargeOnes(t *testing.T) {
 		t.Fatalf("claimed %s, want the two-core node", n.RunID)
 	}
 }
+
+func TestClassForResource_NeverGivesAMemoryPinLessThanItAsked(t *testing.T) {
+	table := store.CreditRateTable{
+		{Cores: 2, MicroPerSecond: 10_000},
+		{Cores: 4, MicroPerSecond: 20_000},
+		{Cores: 8, MicroPerSecond: 36_667},
+	}
+	for _, tc := range []struct {
+		gib  float64
+		want int64
+	}{
+		{gib: 5, want: 2},
+		{gib: 6, want: 4},
+		{gib: 15, want: 8},
+	} {
+		pin := int64(tc.gib * (1 << 30))
+		class, err := table.ClassForResource(store.ExecutorResource{Cores: 1, MemoryBytes: pin})
+		if err != nil {
+			t.Fatalf("%g GiB: %v", tc.gib, err)
+		}
+		if class.Cores != tc.want || store.CPUClassMemoryBytes(class.Cores) < pin {
+			t.Fatalf("%g GiB took the %d-core class, whose Job gets %d bytes; want the %d-core class",
+				tc.gib, class.Cores, store.CPUClassMemoryBytes(class.Cores), tc.want)
+		}
+	}
+
+	_, err := table.ClassForResource(store.ExecutorResource{Cores: 1, MemoryBytes: 30 << 30})
+	var unpriced *store.UnpricedCPUClassError
+	if !errors.As(err, &unpriced) || unpriced.Cores != 9 ||
+		!strings.Contains(err.Error(), fmt.Sprint(store.CPUClassMemoryBytes(8))) {
+		t.Fatalf("30 GiB against an 8-core ladder = %v, want a refusal naming a 9-core class "+
+			"and the 8-core class's usable memory", err)
+	}
+}
+
+func TestCPUClassMemoryBytes_LeavesTheMachinesOverhead(t *testing.T) {
+	for cores, mib := range map[int64]int64{2: 5529, 4: 13107, 8: 28262} {
+		if got := store.CPUClassMemoryBytes(cores); got != mib<<20 {
+			t.Fatalf("%d-core class = %d MiB, want %d: an N-vCPU general-purpose node leaves no more",
+				cores, got>>20, mib)
+		}
+	}
+}

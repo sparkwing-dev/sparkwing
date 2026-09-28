@@ -12,9 +12,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// teamJob renders an off-band class, where the team term is the only
+// anti-affinity; a band Job also refuses every other Job's node.
 func teamJob(t *testing.T, team string) *batchv1.Job {
 	t.Helper()
-	return classJob(t, Config{Image: "img", Team: team}, 4)
+	return classJob(t, Config{Image: "img", Team: team}, 2)
 }
 
 // wantTeamAffinity is the whole affinity a Job of team acme renders. Any
@@ -146,5 +148,101 @@ func TestTeamLabelValue(t *testing.T) {
 	}
 	if TeamLabelValue("Acme") == TeamLabelValue("acme") {
 		t.Error("two different teams share a label value")
+	}
+}
+
+func TestBuildJob_BandJobRefusesEveryOtherJobsNode(t *testing.T) {
+	band := classJob(t, Config{Image: "img", Team: "acme"}, 4)
+	if !teamRepels(t, band, classJob(t, Config{Image: "img", Team: "acme"}, 4).Spec.Template.Labels) {
+		t.Fatal("a band Job accepts a node running another Job of its own team, so two classes share a machine")
+	}
+	if teamRepels(t, band, map[string]string{"app": "kube-proxy"}) {
+		t.Fatal("a band Job refuses a node running a daemonset pod, so it can schedule nowhere")
+	}
+}
+
+// The negative control: with only the team term, a band Job packs beside its
+// own team's Jobs, which the test above must catch.
+func TestBandRepels_FailsWithoutTheOneJobTerm(t *testing.T) {
+	band := classJob(t, Config{Image: "img", Team: "acme"}, 4)
+	band.Spec.Template.Spec.Affinity = teamAntiAffinity("acme")
+	if teamRepels(t, band, classJob(t, Config{Image: "img", Team: "acme"}, 4).Spec.Template.Labels) {
+		t.Fatal("a band Job with only the team term still reads as refusing its own team's node")
+	}
+}
+
+// teamNode is the label set a band pool node carries after Karpenter boots it
+// for a Job of team.
+func teamNode(team string) labels.Set {
+	return labels.Set{cpuBandKey: cpuBandSmall, TeamNodeLabel: TeamLabelValue(team)}
+}
+
+func selects(job *batchv1.Job, node labels.Set) bool {
+	return labels.SelectorFromSet(job.Spec.Template.Spec.NodeSelector).Matches(node)
+}
+
+func TestBuildJob_BandNodeServesOnlyTheTeamThatBootedIt(t *testing.T) {
+	for _, team := range []string{"acme", "Acme Corp", ""} {
+		job := classJob(t, Config{Image: "img", TeamNodes: true, Team: team}, 4)
+		if !selects(job, teamNode(team)) {
+			t.Fatalf("team %q: a band Job refuses a node its own team booted, so a DAG never reuses one", team)
+		}
+		if selects(job, teamNode("beta")) {
+			t.Fatalf("team %q: a band Job selects a node beta booted", team)
+		}
+		if selects(job, labels.Set{cpuBandKey: cpuBandSmall}) {
+			t.Fatalf("team %q: a band Job selects a node with no team, which the next team could reuse", team)
+		}
+		if errs := validation.IsValidLabelValue(job.Spec.Template.Spec.NodeSelector[TeamNodeLabel]); len(errs) > 0 {
+			t.Fatalf("team %q: node label value is invalid: %v", team, errs)
+		}
+	}
+}
+
+func TestBuildJob_TeamOutranksTheOperatorOnTheTeamNodeKey(t *testing.T) {
+	cfg := Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{TeamNodeLabel: "beta"}}
+	job := classJob(t, cfg, 4)
+	if got := job.Spec.Template.Spec.NodeSelector[TeamNodeLabel]; got != "acme" {
+		t.Fatalf("team node = %q, want acme over the operator's value", got)
+	}
+	if cfg.NodeSelector[TeamNodeLabel] != "beta" {
+		t.Fatalf("buildJob wrote back into the operator's selector: %v", cfg.NodeSelector)
+	}
+}
+
+func TestBuildJob_OffBandJobNamesNoTeamNode(t *testing.T) {
+	if got, ok := teamJob(t, "acme").Spec.Template.Spec.NodeSelector[TeamNodeLabel]; ok {
+		t.Fatalf("an off-band Job selects team node %q, which no fixed node carries", got)
+	}
+}
+
+// The negative control: without the team key a band Job selects another
+// team's node, which the test above must catch.
+func TestBandTeamNode_FailsWithoutTheKey(t *testing.T) {
+	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme"}, 4)
+	delete(job.Spec.Template.Spec.NodeSelector, TeamNodeLabel)
+	if !selects(job, teamNode("beta")) {
+		t.Fatal("a band Job without the team key still refuses beta's node")
+	}
+}
+
+func TestBuildJob_UnbilledBandJobStillSelectsItsTeamsNode(t *testing.T) {
+	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, 0)
+	if !selects(job, teamNode("acme")) || selects(job, teamNode("beta")) {
+		t.Fatalf("an unbilled band Job selects %v, want only acme's node", job.Spec.Template.Spec.NodeSelector)
+	}
+}
+
+// Off by default, so a self-hosted band of static nodes, which carry no team
+// label, keeps taking band Jobs.
+func TestBuildJob_TeamNodesIsOptIn(t *testing.T) {
+	cfg := Config{Image: "img", Team: "acme", NodeSelector: map[string]string{cpuBandKey: "house"}}
+	static := labels.Set{cpuBandKey: "house"}
+	if !selects(classJob(t, cfg, 4), static) {
+		t.Fatal("a band Job without team nodes refuses a static band node that carries no team label")
+	}
+	cfg.TeamNodes = true
+	if selects(classJob(t, cfg, 4), static) {
+		t.Fatal("a band Job with team nodes accepts a node carrying no team label")
 	}
 }

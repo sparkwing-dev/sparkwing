@@ -52,10 +52,24 @@ A Job for a cpu class above the warm one selects and tolerates the
 tolerations the runner was configured with. A cluster offering those classes
 needs a node pool labeled and tainted with that key and value; on a cluster
 without one the pod never schedules and the node fails with the scheduler's
-message. Requests use the pipeline's pinned or measured resources, independently
-of the billed class. On fixed node pools, a request exceeding every matching
-node's allocatable capacity fails before the Job is created; band pools can add
-larger nodes. See [Runner classes](auth.md#runner-classes).
+message. A Job placed on a band, by the class or by the operator's own
+selector, asks for one machine of its class and a node of its own: CPU of the
+class minus half a core with no limit, and as memory request and limit the
+class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead.
+The runner's CPU and memory ceilings still cap both, and the pod carries
+`karpenter.sh/do-not-disrupt` so Karpenter never evicts it mid-run. The
+pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
+general-purpose families, and a kubelet reservation no larger than 110 pods
+leaves. A band Job refuses a node that holds another Job, and with
+`--runner-team-nodes` on `handle-trigger` (env: `SPARKWING_RUNNER_TEAM_NODES`,
+off by default) it also selects `sparkwing.dev/team-node` with its run's
+team. Turn it on only for a pool with an `Exists` requirement on that key:
+Karpenter then labels each node it boots with the team that asked, and only
+that team's Jobs reuse it. A band of static nodes without the label takes no
+band Job while it is on. Elsewhere, requests use the pipeline's pinned
+or measured resources, and a request exceeding every matching node's
+allocatable capacity fails before the Job is created. See
+[Runner classes](auth.md#runner-classes).
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and
