@@ -15,19 +15,18 @@ import (
 	"time"
 )
 
-// Credit ledger arithmetic. One credit is one second of one vCPU, and a
-// dollar buys 20,000 of them, which prices compute at 0.18 dollars a
-// vCPU-hour. Grants and charges are stored in micro-credits, 5,000 to the
-// credit, so a dollar is 100,000,000 micro-credits and a cent is 1,000,000.
+// Credit ledger arithmetic. A credit is a tenth of a cent, $0.001, and that
+// value is fixed: a price change moves a rate, never the credit. The ledger
+// stores amounts in a fixed money unit of 10^-8 dollars, which the code and
+// the API call a micro-credit: 100,000 to the credit, 1,000,000 to the cent.
 //
-// A class costs its core count in credits a second: the default four-core
-// rate is 4 credits a second, 240 a minute, 0.72 dollars an hour. Ten dollars
-// is 200,000 credits, which buys 50,000 four-core seconds, just under
-// fourteen hours.
+// The default four-core rate is 18,000 micro-credits a second, which is 0.18
+// credits a second, 10.8 credits a minute and $0.648 an hour. Ten dollars is
+// 10,000 credits, a little over fifteen four-core hours.
 const (
-	CreditsPerDollar       = 20_000
-	MicroCreditsPerCredit  = 5_000
-	DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
+	CreditsPerDollar       = 1_000
+	MicroCreditsPerCredit  = 100_000
+	DefaultCreditRateMicro = 18_000
 
 	// MicroCreditsPerCent is what one cent of a payment buys, which a
 	// checkout converts by. It is the figure that must not move when the
@@ -276,16 +275,35 @@ func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// creditUnitScale is how many of today's credits one credit bought before a
-// credit became a vCPU-second, when it was a hundredth of a dollar. Micro-credit
-// amounts kept their dollar value across the change, so only a setting written
-// in whole credits needs it.
-const creditUnitScale = 1_000_000 / MicroCreditsPerCredit
+// safety: these figures belong to v59, which restated the step from the cent credit in the
+// $0.00005 vCPU-second credit and clamped it at ten million dollars of that credit, and to
+// v75, which restated it in the $0.001 credit. Today's credit constants must not move them.
+const (
+	v59StepScale          = 200
+	v59StepCeiling        = 200_000_000_000
+	vcpuSecondCreditMicro = 5_000
+	v75StepDivisor        = MicroCreditsPerCredit / vcpuSecondCreditMicro
+)
 
 // applyCreditUnitMigration restates runner_scale_step_credits, the one setting
 // written in whole credits, in the vCPU-second credit, so a step an operator set
 // keeps its dollar value. It is a step of v59.
 func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
+	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
+		return min(step*v59StepScale, v59StepCeiling)
+	})
+}
+
+// safety: v75 restates runner_scale_step_credits from the vCPU-second credit in the $0.001
+// credit, twenty to one, so the step keeps its dollar value. It rounds to the nearest credit
+// and never below one, because a step of zero turns scaling off.
+func applyCreditValueMigration(ctx context.Context, tx *storeTx) error {
+	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
+		return min(max((step+v75StepDivisor/2)/v75StepDivisor, 1), RunnerScaleMaxStepCredits)
+	})
+}
+
+func rescaleRunnerScaleStep(ctx context.Context, tx *storeTx, rescale func(int64) int64) error {
 	key := computeLimitKey(ComputeLimitRunnerScaleStepCredits)
 	var raw string
 	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
@@ -301,8 +319,7 @@ func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
 	if !parsed || step <= 0 {
 		return nil
 	}
-	return setCreditSettingTx(ctx, tx, key,
-		formatCreditSetting(min(step*creditUnitScale, RunnerScaleMaxStepCredits)))
+	return setCreditSettingTx(ctx, tx, key, formatCreditSetting(rescale(step)))
 }
 
 func wholeCreditSetting(raw string) (int64, bool) {
@@ -2668,9 +2685,9 @@ func newCreditID(prefix string) (string, error) {
 	return prefix + "-" + hex.EncodeToString(suffix[:]), nil
 }
 
-// FormatCredits renders micro-credits as credits with two decimal places.
-// Every class bills whole credits a second, so the decimals show only on a
-// storage charge or a rate an operator set off the ladder.
+// FormatCredits renders micro-credits as credits with two decimal places,
+// truncated toward zero so a balance never reads larger than it holds. A
+// runner second costs a fraction of a credit, so a charge needs the decimals.
 func FormatCredits(micro int64) string {
 	neg := ""
 	if micro < 0 {

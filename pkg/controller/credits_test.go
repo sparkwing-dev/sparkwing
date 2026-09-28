@@ -1001,7 +1001,7 @@ func TestCreditSettings_RefusesTableWithBadSiblingWithoutChangingPrices(t *testi
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
+	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }
@@ -1017,7 +1017,7 @@ func TestCreditSettings_RefusesExplicitNullWithoutChangingPrices(t *testing.T) {
 		t.Fatalf("mixed write = %d, want 400", status)
 	}
 	_, view := creditSettings(t, f, http.MethodGet, nil)
-	if view.RateTableSet || view.rateFor(2) != 10_000 || len(view.RateTable) != 3 {
+	if view.RateTableSet || view.rateFor(2) != 9_000 || len(view.RateTable) != 3 {
 		t.Fatalf("the good half of a refused write changed prices: %+v", view)
 	}
 }
@@ -1480,9 +1480,9 @@ func TestCredits_QuarterCorePinReservesTwoCoreMinimum(t *testing.T) {
 		t.Fatalf("list charges: %v", err)
 	}
 	if len(charges) != 1 || charges[0].CPUClassCores != 2 ||
-		charges[0].RateMicroPerSecond != 2*store.MicroCreditsPerCredit ||
-		charges[0].AmountMicro != 2*store.MicroCreditsPerCredit*store.MinBillableSeconds {
-		t.Fatalf("reservation = %+v, want 20 seconds at the two-core class", charges)
+		charges[0].RateMicroPerSecond != 9_000 ||
+		charges[0].AmountMicro != 9_000*store.MinBillableSeconds {
+		t.Fatalf("reservation = %+v, want the minimum billable seconds at the two-core class", charges)
 	}
 }
 

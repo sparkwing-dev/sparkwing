@@ -321,7 +321,7 @@ type CreditLedgerTotals struct {
 	SettledSeconds int64
 }
 const CreditPurchaseMaxCents = 50_000
-const CreditPurchaseMinCents = 500
+const CreditPurchaseMinCents = 1_000
 type CreditRate struct {
 	Cores          int64
 	MicroPerSecond int64
@@ -392,7 +392,7 @@ type CreditState struct {
 	ExhaustedAt               *time.Time
 }
 const CreditsGrantScope = "credits.grant"
-const CreditsPerDollar = 20_000
+const CreditsPerDollar = 1_000
 type CronDeclaration struct {
 	Cron         string
 	TZ           string
@@ -513,7 +513,7 @@ const DefaultConcurrencyHeartbeatTimeout = 2 * time.Second
 const DefaultConcurrencyLease = DefaultLeaseDuration
 const DefaultCreditGraceSeconds = 60
 const DefaultCreditMaxChargeSeconds = 30
-const DefaultCreditRateMicro = 4 * MicroCreditsPerCredit
+const DefaultCreditRateMicro = 18_000
 func DefaultCreditRateTable(rate int64) CreditRateTable
 var DefaultEventLimits = EventLimits{MaxBytesPerEvent: 256 << 10, MaxBytesPerRun: 64 << 20, MaxEventsPerRun: 50_000}
 const DefaultFreeAllowanceBytes int64 = 1 << 30
@@ -1081,8 +1081,8 @@ type MetricSample struct {
 }
 func (m MetricSample) OneShot() bool
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
-const MicroCreditsPerCredit = 5_000
-const MinBillableSeconds = 20
+const MicroCreditsPerCredit = 100_000
+const MinBillableSeconds = 60
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string

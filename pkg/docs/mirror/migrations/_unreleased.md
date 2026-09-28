@@ -16,6 +16,31 @@ requirement makes older controllers refuse the upgraded database.
 To roll back, stop the upgraded controller, restore the backup, and start the
 older build. Do not delete the requirement from a live database.
 
+## Schema 75: a credit is $0.001
+
+A credit is $0.001 and keeps that value. `micro_per_credit` reads 100,000 and
+`credits_per_dollar` 1,000; `micro_per_cent` stays 1,000,000, so stored
+balances, grants and charges keep their dollar value and the checkout service
+needs no change to grant. Schema 75 divides a stored
+`runner_scale_step_credits` by 20, rounding to the nearest credit and never
+below one, so the step keeps its dollar value. Upgrade every controller
+together: a controller older than schema 75 reads the restated step in its
+own credit and scales runner caps 20 times sooner.
+
+The default rate ladder moves to 2-core 9,000, 4-core 18,000 and 8-core 33,000
+micro-credits a second. An installation that stored
+`credit_rate_micro_per_second` or `rate_table` keeps its stored prices. To bill
+the new ladder, write it after the upgrade:
+
+```
+PUT /api/v1/credits/settings
+{"rate_table": {"2": 9000, "4": 18000, "8": 33000}}
+```
+
+Writing the table also sets `credit_rate_micro_per_second` to the four-core
+price. The minimum purchase rises from $5 to $10, and
+`purchase_min_cents` reads 1,000.
+
 ## 60-second minimum billable duration
 
 Drain metered node and trigger claims before deploying the controller that

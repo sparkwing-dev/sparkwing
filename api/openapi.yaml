@@ -3749,9 +3749,9 @@ paths:
       tags: [credits]
       summary: Read the prepaid credit balance, the rate, and the recent burn.
       description: |
-        Cloud runner time is prepaid. One credit is one vCPU-second and
-        20,000 credits is one dollar; amounts are micro-credits, 5,000 to the
-        credit, so a ten dollar top-up is 200,000 credits. The balance is the sum of
+        Cloud runner time is prepaid. One credit is $0.001, a value that never
+        changes; amounts are micro-credits, a fixed unit of 10^-8 dollars and
+        100,000 to the credit, so a ten dollar top-up is 10,000 credits. The balance is the sum of
         grants less the sum of charges, computed in SQL. `rate_micro_per_second`
         prices one cloud runner second, `grace_seconds` is how long a node runs
         past its claim reservation on an empty balance, and `burn_micro` is what the last
@@ -3995,8 +3995,8 @@ paths:
         Sets each setting the body names, in one transaction, and answers the
         full set as `GET` does. An omitted field leaves that setting as it was,
         so changing one value is a one-field body. A body that names nothing is
-        refused with `400`, as is a rate outside one micro-credit to a million
-        credits per second, a negative grace period, and a charge cap outside
+        refused with `400`, as is a rate outside one micro-credit to ten million
+        credits ($10,000) per second, a negative grace period, and a charge cap outside
         the band whose floor is one second past the longest node heartbeat
         cadence and whose ceiling is one day. The bounds keep the reservation a
         claim takes and a capped charge inside a signed 64-bit integer, and the
@@ -6479,7 +6479,7 @@ paths:
       tags: [teams]
       summary: Read the active team's balance, prices, recent usage and grants.
       description: >-
-        Any member of the active team reads it. One credit is one vCPU-second and `credits_per_dollar` of them make a dollar; amounts are micro-credits, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them.
+        Any member of the active team reads it. One credit is $0.001 and `credits_per_dollar` of them make a dollar; amounts are micro-credits, a fixed unit of 10^-8 dollars, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them.
       responses:
         "200":
           description: Team billing.
@@ -6545,7 +6545,7 @@ paths:
       tags: [teams]
       summary: Open a Stripe Checkout page to buy credits for the active team.
       description: >-
-        An owner of the active team buys between `purchase_min_cents` and `purchase_max_cents`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
+        An owner of the active team buys between `purchase_min_cents`, the $10 minimum purchase, and `purchase_max_cents`; any other amount answers `400`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
       requestBody:
         required: true
         content:
@@ -7614,8 +7614,8 @@ components:
         storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 bills no storage."}
         storage_free_allowance_bytes: {type: integer, format: int64, description: Retained bytes every team keeps without being billed for them.}
         exhausted_at: {type: integer, format: int64, nullable: true, description: Unix seconds the balance first reached zero.}
-        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
-        credits_per_dollar: {type: integer, format: int64}
+        micro_per_credit: {type: integer, format: int64, description: "Micro-credits in one credit, 100,000; a micro-credit is 10^-8 dollars."}
+        credits_per_dollar: {type: integer, format: int64, description: "Credits in one dollar, 1,000."}
     CreditSettings:
       x-sparkwing-go-type: pkg/controller.creditSettingsJSON
       type: object
@@ -7634,8 +7634,8 @@ components:
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill.}
         storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 bills no storage."}
         storage_free_allowance_bytes: {type: integer, format: int64, description: Retained bytes every team keeps without being billed for them.}
-        micro_per_credit: {type: integer, format: int64, description: Micro-credits in one credit.}
-        credits_per_dollar: {type: integer, format: int64}
+        micro_per_credit: {type: integer, format: int64, description: "Micro-credits in one credit, 100,000; a micro-credit is 10^-8 dollars."}
+        credits_per_dollar: {type: integer, format: int64, description: "Credits in one dollar, 1,000."}
     SetCreditSettings:
       x-sparkwing-go-type: pkg/controller.setCreditSettingsReq
       type: object
@@ -7736,7 +7736,7 @@ components:
       required: [kind, amount_micro]
       properties:
         kind: {type: string, description: "free, paid or reversal."}
-        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; a million is one credit, and one grant may not exceed 10^15."}
+        amount_micro: {type: integer, format: int64, description: "Micro-credits to add, negative on a reversal; 100,000 is one credit and 1,000,000 one cent, and one grant may not exceed 10^15."}
         reference: {type: string, description: "Payment id, refund id, or operator note. A non-empty one is idempotent."}
         reverses: {type: string, description: Reference of the paid grant a reversal takes back.}
         team: {type: string, description: "Slug of the team whose balance the grant funds. Required on a multi-team controller except on a reversal, which lands in the team its payment was granted to; defaults to the default team otherwise."}

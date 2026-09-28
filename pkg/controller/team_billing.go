@@ -167,7 +167,7 @@ func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Reques
 	}
 	if req.AmountCents < store.CreditPurchaseMinCents || req.AmountCents > store.CreditPurchaseMaxCents {
 		writeJSON(w, http.StatusBadRequest, codedErrorJSON{
-			Error: fmt.Sprintf("a purchase is between $%d and $%d",
+			Error: fmt.Sprintf("the minimum purchase is $%d and the maximum $%d",
 				store.CreditPurchaseMinCents/100, store.CreditPurchaseMaxCents/100),
 			Code: CheckoutAmountCode,
 		})

@@ -116,13 +116,14 @@ Without either feature, credit and team billing routes return `404`, claims
 never check a balance or write charges, and the dashboard omits Billing.
 Customers who need metering can contact Korey for help running sparkwing-ops.
 
-Cloud runner time is prepaid. One credit is one second of one vCPU, and
-20,000 credits is one dollar, which prices compute at $0.18 a vCPU-hour.
-Amounts are stored in micro-credits, 5,000 to the credit, so a dollar is
-100,000,000 micro-credits and a cent is 1,000,000. A class costs its core count
-in credits a second: a four-core second is 4 credits, a minute 240, an hour
-14,400 ($0.72), so ten dollars (200,000 credits) buys just under fourteen
-four-core hours.
+Cloud runner time is prepaid. One credit is $0.001, and that value is fixed:
+prices change by moving rates, never by changing the credit. Amounts are
+stored in micro-credits, a fixed money unit of 10^-8 dollars: 100,000 to the
+credit, 1,000,000 to the cent and 100,000,000 to the dollar. A four-core
+second costs 0.18 credits, a minute 10.8 and an hour 648 ($0.648), so ten
+dollars (10,000 credits) buys a little over fifteen four-core hours. A charge
+is a fraction of a credit, so the dashboard shows charges to a hundredth of a
+credit and balances in whole credits, rounded down.
 
 A second is priced by the node's cpu class. The rate table prices one class per
 whole-core size, and a node is billed at the class it pinned, which is the class
@@ -134,8 +135,9 @@ when the class is chosen, failing the node with `unpriced_cpu_class` and a
 for a node no claim can pay for.
 
 An installation that never set a table bills the default ladder, each class at
-its core count in credits a second: 2-core 10,000 micro-credits, 4-core 20,000,
-8-core 40,000. `credit_rate_micro_per_second` is the four-core
+90% of the GitHub Actions Linux runner of its size: 2-core 9,000 micro-credits
+a second ($0.0054 a minute), 4-core 18,000 ($0.0108), 8-core 33,000 ($0.0198).
+`credit_rate_micro_per_second` is the four-core
 entry of that ladder under another name. Once a table exists that setting is
 derived: a `PUT` that names it, alone or beside `rate_table`, answers `400` and
 says to write the table.
@@ -164,8 +166,9 @@ routes remain the authority.
 
 A team owner buys credits from the dashboard's Team -> Billing page, and any
 member reads the balance, the price table, usage by run and the team's
-purchases there, from `GET /api/v1/team/billing`. A purchase is between $5 and
-$500. Purchases are final and credits never expire.
+purchases there, from `GET /api/v1/team/billing`. The minimum purchase is $10
+and the maximum $500; the controller refuses any other amount with `400`.
+Purchases are final and credits never expire.
 
 The Stripe Checkout Session is created on the server, never in the browser,
 so no caller chooses the team a payment funds. The dashboard posts only the
@@ -380,7 +383,7 @@ none behaves as it did before the guards existed.
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
 | `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most 200 billion; zero turns scaling off | one team's grants |
+| `runner_scale_step_credits` | paid credit that earns one more base, at most 10 billion; zero turns scaling off | one team's grants |
 | `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
@@ -401,17 +404,18 @@ cannot spawn a thousand pods. The cap is the base plus one more base for every
 under `runner_scale_ceiling`. The base is `runner_scale_base`, or
 `max_concurrent_runners` when that is zero; the ceiling is
 `runner_scale_ceiling`, or `max_global_runners` when that is zero. With a base
-of 100, a step of 5000 credits and 15000 credits loaded, a principal is held to
-400 runners.
+of 100, a step of 50,000 credits ($50) and 150,000 credits loaded, a principal
+is held to 400 runners.
 
 Every scaling setting is zero by default, which holds each principal to the
 static `max_concurrent_runners`, and the rule applies only while that guard is
 set. Scaling only ever raises that guard: a ceiling below it is ignored.
 `runner_scale_base` and `runner_scale_ceiling` are capped at a million runners
-and `runner_scale_step_credits` at 200 billion credits, ten million dollars, so
-a typo cannot mint a cap. The step is written in whole credits, so schema v59
-multiplied a step written when a credit was a cent by 200, keeping its dollar
-value.
+and `runner_scale_step_credits` at 10 billion credits, ten million dollars, so
+a typo cannot mint a cap. The step is written in whole credits, so each change
+of credit restated it at the same dollar value: schema v59 multiplied a step
+written when a credit was a cent by 200, and schema v75 divides it by 20,
+rounding to the nearest credit and never below one.
 
 `free` credit earns nothing and a payment ages out after 30 days. A refund is a
 `reversal` grant naming the payment's reference, and it is matched to that

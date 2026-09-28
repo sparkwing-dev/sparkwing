@@ -125,9 +125,9 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 		t.Fatalf("rate table: %v", err)
 	}
 	want := store.CreditRateTable{
-		{Cores: 2, MicroPerSecond: 10_000},
-		{Cores: 4, MicroPerSecond: 20_000},
-		{Cores: 8, MicroPerSecond: 40_000},
+		{Cores: 2, MicroPerSecond: 9_000},
+		{Cores: 4, MicroPerSecond: 18_000},
+		{Cores: 8, MicroPerSecond: 33_000},
 	}
 	if len(table) != len(want) {
 		t.Fatalf("the default table prices %d classes, want %d", len(table), len(want))
@@ -149,8 +149,8 @@ func TestUnsetRateTablePricesTheDefaultLadder(t *testing.T) {
 	if got := table.RateFor(store.CreditRateBaseClassCores); got != 50_000 {
 		t.Fatalf("four-core class = %d, want the single rate 50000", got)
 	}
-	if got := table.RateFor(8); got != 40_000 {
-		t.Fatalf("eight-core class = %d, want the ladder's 40000", got)
+	if got := table.RateFor(8); got != 33_000 {
+		t.Fatalf("eight-core class = %d, want the ladder's 33000", got)
 	}
 	set, err := s.CreditRateTableSet(ctx)
 	if err != nil || set {

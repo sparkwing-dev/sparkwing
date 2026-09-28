@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// What a team may buy and hold. A purchase is between five and five hundred
+// What a team may buy and hold. A purchase is between ten and five hundred
 // dollars, and a balance holds at most five thousand: a per-purchase limit
 // alone is defeated by buying twice, so the bound that matters is on the
 // balance. It caps both the harm of a conversion mistake and the prepaid
@@ -16,7 +16,7 @@ import (
 // checkouts still open, because a payment that went through is granted
 // whatever the balance reads by then.
 const (
-	CreditPurchaseMinCents = 500
+	CreditPurchaseMinCents = 1_000
 	CreditPurchaseMaxCents = 50_000
 
 	// MaxTeamBalanceMicro is the most a team's balance may hold, five
