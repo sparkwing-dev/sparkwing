@@ -33,6 +33,10 @@ unlock.
   down. Before replacing a daemon, the supervisor records why and saves a
   goroutine dump. See [diagnosing admission](docs/diagnosing-admission.md).
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.63.0, so a fresh scaffold compiles against that release
+
 ### Fixed
 
 - **admission:** A busy or swapping machine no longer gets its admission daemon replaced while it is still working
