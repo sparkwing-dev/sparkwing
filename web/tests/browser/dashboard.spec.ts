@@ -1852,7 +1852,7 @@ test("separates fleet policy, observations, and current activity", async ({
 
   await page.goto("/cluster");
   await expect(
-    page.getByRole("heading", { name: "Compute", exact: true, level: 1 }),
+    page.getByRole("heading", { name: "Fleet", exact: true, level: 1 }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: /design-mac/ }).click();
@@ -1890,7 +1890,7 @@ test("keeps every public dashboard navigation target routable", async ({
     ["Queue", "Admission queue"],
     ["Crons", "Crons"],
     ["Capacity", "Capacity"],
-    ["Fleet", "Compute"],
+    ["Fleet", "Fleet"],
     ["Secrets", "Secrets and variables"],
     ["Analytics (preview)", "Analytics"],
   ] as const;
@@ -1954,7 +1954,7 @@ test("manages local secrets without an account", async ({ page }) => {
   ]);
 });
 
-test("Overview and Compute do not request or show service probes", async ({ page }) => {
+test("Overview and Fleet do not request or show service probes", async ({ page }) => {
   const probeRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().includes("/api/v1/health/services")) {
@@ -1965,7 +1965,7 @@ test("Overview and Compute do not request or show service probes", async ({ page
   await page.goto("/");
   await expect(page.getByText("No pending approvals.")).toBeVisible();
   await page.goto("/cluster");
-  await expect(page.getByRole("heading", { name: "Fleet", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Fleet", exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Services", exact: true })).toHaveCount(0);
   expect(probeRequests).toEqual([]);
 });

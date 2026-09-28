@@ -18,7 +18,7 @@ const teamTab: NavTab = { href: "/team", label: "Team" };
 const cloudTabs: NavTab[] = [
   { href: "/", label: "Home" },
   { href: "/runs", label: "Runs" },
-  { href: "/cluster", label: "Compute" },
+  { href: "/cluster", label: "Fleet" },
   { href: "/crons", label: "Crons" },
 ];
 

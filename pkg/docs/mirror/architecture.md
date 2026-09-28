@@ -118,7 +118,7 @@ See [Cache](gitcache.md) for endpoints and configuration.
 Next.js web app showing pipeline runs, logs, node status, and
 documentation.
 
-The Compute page shows team-scoped executors and queue activity. Operators can
+The Fleet page shows team-scoped executors and queue activity. Operators can
 check controller and logs health through their own service endpoints.
 
 ### DinD (Docker-in-Docker)
