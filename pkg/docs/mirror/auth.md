@@ -206,7 +206,10 @@ cannot spend more than it bought and a stolen card should buy little. A new
 team buys up to $50 over 30 days and at most $50 at once; a trusted team buys
 up to $500. The controller counts the team's payments of the last 30 days,
 less refunds of them, plus its open checkouts, and refuses a purchase past the
-limit with `409` and `"code": "purchase_limit"`. A team earns trust when its
+limit with `409` and `"code": "purchase_limit"`. An unpaid checkout keeps
+counting for three days after its session expires, because a session paid
+just before expiry is granted when its webhook arrives, and Stripe retries a
+webhook for up to three days. A team earns trust when its
 oldest unrefunded payment is at least 30 days old, it has spent at least $50,
 and it has never been held over a dispute. The operator grants or revokes
 trust, with a reason, through `POST /api/v1/teams/{team}/trust`; a grant may

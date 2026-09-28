@@ -6570,7 +6570,7 @@ paths:
                   storage_charged_micro: {type: integer, format: int64}
                   trusted: {type: boolean, description: "True once the team earned billing trust or an operator granted it; a trusted team buys up to $500 at once."}
                   purchase_limit_cents: {type: integer, format: int64, description: "What the team may buy over 30 days: $50 until trusted, $500 once trusted, or an operator's override."}
-                  purchased_30d_cents: {type: integer, format: int64, description: "What the team paid over the last 30 days, less refunds of those payments, plus its checkouts still open."}
+                  purchased_30d_cents: {type: integer, format: int64, description: "What the team paid over the last 30 days, less refunds of those payments, plus its checkouts still open or, for three days after their session expired, still awaiting a late payment."}
                   checkout_enabled: {type: boolean}
                   can_purchase: {type: boolean}
                   usage:

@@ -26,7 +26,9 @@ unlock.
   at most $50 at once, until it is trusted; a trusted team buys up to $500.
   A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
   `GET /api/v1/team/billing` gains `trusted`, `purchase_limit_cents` and
-  `purchased_30d_cents`. A team earns trust when its oldest unrefunded payment
+  `purchased_30d_cents`. An unpaid checkout counts against the limit for
+  three days after its session expires, the longest a paid session's
+  webhook can arrive late. A team earns trust when its oldest unrefunded payment
   is 30 days old, it has spent $50 and it has never been held over a dispute.
   The operator grants or revokes trust through `GET` and `POST
   /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`

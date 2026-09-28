@@ -68,7 +68,7 @@ func applyCreditCheckoutMigrationPostgres(ctx context.Context, tx *storeTx) erro
 // verified payment never meets a cap it cannot pass, and with a
 // [PurchaseLimitError] when what the team bought over [PurchaseLimitWindow],
 // plus its open checkouts, plus this one would pass its purchase limit.
-// Checkouts already expired are removed.
+// Checkouts that can no longer be paid or granted are removed.
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error) {
 	if amountMicro <= 0 {
 		return "", errors.New("credits: a checkout amount must be positive")
@@ -100,8 +100,9 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", err
 	}
 	nowNS := now.UnixNano()
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM credit_checkouts WHERE team = ? AND expires_at <= ?`, string(t.team), nowNS); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM credit_checkouts WHERE team = ?
+	    AND (expires_at <= ? OR (expires_at <= ? AND (paid_at IS NOT NULL OR session_id = '')))`,
+		string(t.team), now.Add(-CheckoutSettleWindow).UnixNano(), nowNS); err != nil {
 		return "", err
 	}
 	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
@@ -147,6 +148,24 @@ func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int
 	err := q.QueryRowContext(ctx,
 		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
 		string(team), nowNS).Scan(&open)
+	return open.Int64, err
+}
+
+// CheckoutSettleWindow is how long after its session expires an unpaid
+// checkout keeps counting against the purchase limit. Stripe retries a
+// webhook for up to three days, so a session paid just before it expired can
+// be granted that late.
+const CheckoutSettleWindow = 72 * time.Hour
+
+// safety: a session paid just before expiry is granted when its webhook
+// arrives, which can be days later, so its amount stays counted against the
+// purchase limit until then; otherwise a second checkout could spend the same
+// room and both payments land.
+func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (int64, error) {
+	var open sql.NullInt64
+	err := q.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_checkouts
+	  WHERE team = ? AND paid_at IS NULL AND (expires_at > ? OR (session_id != '' AND expires_at > ?))`,
+		string(team), now.UnixNano(), now.Add(-CheckoutSettleWindow).UnixNano()).Scan(&open)
 	return open.Int64, err
 }
 

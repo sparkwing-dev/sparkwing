@@ -143,6 +143,7 @@ type CPUClass struct {
 	MemoryBytes int64
 }
 func CPUClassMemoryBytes(cores int64) int64
+const CheckoutSettleWindow = 72 * time.Hour
 const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
 const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {

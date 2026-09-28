@@ -192,3 +192,48 @@ func TestOperatorTrustGrantAndRevoke(t *testing.T) {
 		}
 	}
 }
+
+// A session paid just before it expired is granted when its webhook arrives,
+// which can be days later, so its amount keeps counting against the limit
+// after expiry: a second checkout cannot spend the same room.
+func TestAnExpiredSessionKeepsCountingUntilItsPaymentCanNoLongerArrive(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	now := time.Now()
+	hold := 31 * time.Minute
+
+	id, err := acme.OpenCreditCheckout(ctx, dollarsMicro(50), now, hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.AttachCreditCheckout(ctx, id, "cs_late", now.Add(hold)); err != nil {
+		t.Fatal(err)
+	}
+	afterExpiry := now.Add(hold + time.Hour)
+	if _, err := acme.OpenCreditCheckout(ctx, dollarsMicro(10), afterExpiry, hold); !errors.Is(err, store.ErrPurchaseLimit) {
+		t.Fatalf("a checkout beside an expired, unsettled $50 session = %v, want the purchase limit", err)
+	}
+	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
+		Kind: store.CreditGrantPaid, AmountMicro: dollarsMicro(50), Reference: "pi_late", Checkout: "cs_late",
+		CreatedBy: "billing",
+	}); err != nil {
+		t.Fatalf("the late paid grant: %v", err)
+	}
+	if b := billingStanding(t, acme, afterExpiry); b.PurchasedMicro != dollarsMicro(50) {
+		t.Fatalf("after the late grant, purchased = %d, want the payment counted once", b.PurchasedMicro)
+	}
+
+	globex := teamHandle(t, s, "globex")
+	id, err = globex.OpenCreditCheckout(ctx, dollarsMicro(50), now, hold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := globex.AttachCreditCheckout(ctx, id, "cs_abandoned", now.Add(hold)); err != nil {
+		t.Fatal(err)
+	}
+	settled := now.Add(hold + store.CheckoutSettleWindow + time.Second)
+	if _, err := globex.OpenCreditCheckout(ctx, dollarsMicro(50), settled, hold); err != nil {
+		t.Fatalf("a checkout once the abandoned session could no longer be paid: %v", err)
+	}
+}

@@ -49,7 +49,8 @@ type BillingStanding struct {
 	Trusted    bool
 	LimitMicro int64
 	// PurchasedMicro is what the team paid over [PurchaseLimitWindow], less
-	// reversals of those payments, plus its checkouts still open.
+	// reversals of those payments, plus its checkouts still open or awaiting
+	// a late payment for [CheckoutSettleWindow] after their session expired.
 	PurchasedMicro int64
 }
 
@@ -145,7 +146,7 @@ func billingStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Ti
 	if err != nil {
 		return b, err
 	}
-	open, err := openCheckoutMicroTx(ctx, q, team, now.UnixNano())
+	open, err := settlingCheckoutMicroTx(ctx, q, team, now)
 	if err != nil {
 		return b, err
 	}
