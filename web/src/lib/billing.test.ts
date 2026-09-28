@@ -63,7 +63,7 @@ const billing = {
   balance_cap_micro: 500_000_000_000,
   micro_per_credit: 5_000,
   credits_per_dollar: 20_000,
-  min_billable_seconds: 20,
+  min_billable_seconds: 60,
   purchase_min_cents: 500,
   purchase_max_cents: 50_000,
   rate_table: [

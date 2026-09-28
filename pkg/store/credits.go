@@ -39,10 +39,9 @@ const (
 	DefaultCreditGraceSeconds = 60
 
 	// MinBillableSeconds is the least one metered node or trigger step pays
-	// for, on every class. A cold start takes about half a minute of
-	// provisioning nobody is billed for, and a run earns what it costs to
-	// serve once it bills at least half of that, so the minimum is 20 seconds
-	// with margin over the measured 31-second start.
+	// for, on every class. Billing stays per second, but every node instance
+	// costs the platform a startup it is not billed for, so each metered
+	// claim pays at least one minute.
 	//
 	// A claim reserves this many seconds at its class's rate inside the claim
 	// transaction and refuses a balance that cannot cover them. Once billing
@@ -55,7 +54,7 @@ const (
 	// safety: the reservation also bounds how far concurrent claims can drive
 	// one balance below zero, and a smaller one admits more of them at once;
 	// the per-principal runner caps bound that depth, not this constant.
-	MinBillableSeconds = 20
+	MinBillableSeconds = 60
 
 	// MaxCreditGrantMicro caps the size of one grant at ten billion dollars.
 	// A ledger sums grants in SQL, so an amount near the integer limit turns a
@@ -114,9 +113,9 @@ const (
 )
 
 // Credit charge kinds. A reservation is taken at claim time, usage rows bill
-// the intervals a node actually ran, a refund returns the unused tail of a
-// reservation when the node finishes early, and a storage row bills the bytes
-// a team kept for the interval it kept them.
+// the intervals a node actually ran past it, a refund returns what a claim
+// billed when its machine never started or the platform failed its setup, and
+// a storage row bills the bytes a team kept for the interval it kept them.
 const (
 	CreditChargeReservation = "reservation"
 	CreditChargeUsage       = "usage"

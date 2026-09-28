@@ -25,7 +25,7 @@ whether the work a runner does costs credits.
 A claim-mode runner chooses its own labels, so a label saying "cloud" proves
 nothing and metering never reads one.
 
-A claim by a metered token reserves the minimum billable time, 20 seconds at
+A claim by a metered token reserves the minimum billable time, 60 seconds at
 the node's class, inside the claim's own transaction. The reservation is what
 makes the check safe when several runners poll at once: each one's spend is
 visible to the next before either claim commits, so a balance that covers one
@@ -71,8 +71,8 @@ renewal, which the pod sends as it starts, or from its execution start if that
 comes first. A heartbeat charges the seconds since the previous charge, and
 the finish charges the tail the last heartbeat missed. Every node that starts
 pays at least the minimum: the reservation is consumed rather than refunded,
-so a node that runs for four seconds pays for twenty, and one that runs for a
-minute pays for a minute.
+so a node that runs for four seconds pays for sixty. Past the minimum, billing
+is per second with no rounding, so a node that runs for 61 seconds pays for 61.
 
 A node whose machine never started gets its reservation back: a pod that never
 came up, a claim reaped before its pod renewed it. A node the platform stops
@@ -301,7 +301,7 @@ four, 32 GiB at eight. A node takes the smallest class that covers both halves
 of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
 because the 4-core class carries only 16 GiB. The class sets the price, while
 the Kubernetes pod requests the pinned CPU and memory. A node with a 0.25-core
-pin still pays for the 2-core class, including the 20-second minimum.
+pin still pays for the 2-core class, including the 60-second minimum.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the

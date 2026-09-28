@@ -95,6 +95,12 @@ func balance(t *testing.T, st *store.Store) int64 {
 
 // backdateTriggerClaim moves a claim's reservation, and its lease when lease
 // is non-zero, into the past, standing in for a step that ran that long.
+// pastTriggerMinimum is a reservation instant that leaves a claim extra past
+// the minimum its reservation paid for.
+func pastTriggerMinimum(extra time.Duration) time.Time {
+	return time.Now().Add(-store.MinBillableSeconds*time.Second - extra)
+}
+
 func backdateTriggerClaim(t *testing.T, st *store.Store, id string, reservedAt, lease time.Time) {
 	t.Helper()
 	query, args := `UPDATE triggers SET credit_reserved_at = ? WHERE id = ?`, []any{reservedAt.UnixNano(), id}
@@ -174,7 +180,7 @@ func TestMeteredTriggerHeartbeatChargesOnlyItsTeamsUnpaidSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-acme", time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-acme", pastTriggerMinimum(5*time.Second), time.Time{})
 	for range 2 {
 		if _, err := st.HeartbeatTrigger(ctx, "run-acme", time.Minute); err != nil {
 			t.Fatal(err)
@@ -186,7 +192,7 @@ func TestMeteredTriggerHeartbeatChargesOnlyItsTeamsUnpaidSeconds(t *testing.T) {
 	if got, err := globex.CreditBalanceMicro(ctx); err != nil || got != beforeGlobex {
 		t.Fatalf("globex balance after acme heartbeat = %d, %v; want %d", got, err, beforeGlobex)
 	}
-	backdateTriggerClaim(t, st, "run-acme", time.Now().Add(-27*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-acme", pastTriggerMinimum(7*time.Second), time.Time{})
 	if err := st.FinishTrigger(ctx, "run-acme"); err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +217,7 @@ func TestMeteredTriggerHeartbeatStopsAnEmptyBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
 	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); !errors.Is(err, store.ErrInsufficientCredits) {
 		t.Fatalf("empty-balance heartbeat = %v, want ErrInsufficientCredits", err)
@@ -251,7 +257,7 @@ func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) 
 	if _, err := st.HoldTeamForDispute(ctx, store.DefaultTeam, "dispute-trigger", "", "operator hold", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	fenced := store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{Claimant: pool, ClaimGeneration: claimed.ClaimSeq})
 	if _, err := st.HeartbeatTrigger(fenced, claimed.ID, time.Minute); err != nil {
 		t.Fatalf("admitted claim stopped on a later dispute hold: %v", err)
@@ -280,7 +286,7 @@ func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	if _, err := st.DB().Exec(`CREATE TRIGGER reject_trigger_usage BEFORE INSERT ON credit_charges
 		WHEN NEW.kind = 'usage' AND NEW.run_id = 'run-ledger'
 		BEGIN SELECT RAISE(FAIL, 'ledger write failed'); END`); err != nil {
@@ -314,7 +320,7 @@ func TestMeteredTriggerHeartbeatRejectsSupersededGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, claimed.ID, time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, claimed.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 	if _, err := st.DB().Exec(storetest.Rebind(st,
 		`UPDATE triggers SET claim_seq = claim_seq + 1 WHERE id = ?`), claimed.ID); err != nil {
 		t.Fatal(err)
@@ -341,11 +347,11 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-reap-tail", pool, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(5*time.Second), time.Time{})
 	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-28*time.Second), time.Now().Add(-100*time.Millisecond))
+	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(8*time.Second), time.Now().Add(-100*time.Millisecond))
 	if _, err := store.Maintenance.ReapExpiredTriggers(st, ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +362,7 @@ func TestMeteredTriggerReapSettlesOnlyTheTailAfterHeartbeat(t *testing.T) {
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-reap-tail", pool, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-reap-tail", time.Now().Add(-23*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-reap-tail", pastTriggerMinimum(3*time.Second), time.Time{})
 	if _, err := st.HeartbeatTrigger(ctx, "run-reap-tail", time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +393,7 @@ func TestMeteredTriggerRequeueRefundsHeartbeatUsage(t *testing.T) {
 	if err := st.SetCreditRateTable(ctx, table); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-unstarted-paid", time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-unstarted-paid", pastTriggerMinimum(5*time.Second), time.Time{})
 	if _, err := st.HeartbeatTrigger(ctx, "run-unstarted-paid", time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +423,7 @@ func TestMeteredTriggerRequeueCannotRefundAnEarlierGenerationAgain(t *testing.T)
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-skew", pool, time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	backdateTriggerClaim(t, st, "run-skew", time.Now().Add(-25*time.Second), time.Time{})
+	backdateTriggerClaim(t, st, "run-skew", pastTriggerMinimum(5*time.Second), time.Time{})
 	if _, err := st.HeartbeatTrigger(ctx, "run-skew", time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +464,7 @@ func TestTriggerNewClaimRefusesAnUnsettledPriorCreditWindow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			backdateTriggerClaim(t, st, prior.ID, time.Now().Add(-25*time.Second), time.Time{})
+			backdateTriggerClaim(t, st, prior.ID, pastTriggerMinimum(5*time.Second), time.Time{})
 			switch mode {
 			case "paid release to unmetered token":
 				if err := st.CreateRun(ctx, store.Run{ID: prior.ID, Pipeline: "build", Status: "running", StartedAt: time.Now()}); err != nil {

@@ -701,6 +701,12 @@ unlock.
 
 ### Changed
 
+- **controller:** A metered node or trigger claim now pays at least 60 seconds
+  at its class's rate, up from 20. Billing stays per second past the minimum.
+  A claim reserves the 60 seconds up front, so a balance below one minute at
+  the class is refused with `402`. `GET /api/v1/team/billing` reports
+  `min_billable_seconds: 60`.
+
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
   Idle-tail appends start after 100 ms. A sequence

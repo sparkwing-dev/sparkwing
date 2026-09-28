@@ -138,7 +138,7 @@ func TestTeamBilling_EveryMemberReadsTheActiveTeamsBilling(t *testing.T) {
 		if len(b.Grants) != 1 || b.Grants[0].Kind != store.CreditGrantPaid || b.Grants[0].Reference != "pi_1" {
 			t.Errorf("%s grants = %+v", tc.name, b.Grants)
 		}
-		if b.MicroPerCredit != 5_000 || b.CreditsPerDollar != 20_000 || b.MinBillableSeconds != 20 ||
+		if b.MicroPerCredit != 5_000 || b.CreditsPerDollar != 20_000 || b.MinBillableSeconds != 60 ||
 			b.PurchaseMinCents != 500 || b.PurchaseMaxCents != 50_000 ||
 			b.BalanceCapMicro != 5_000*100*store.MicroCreditsPerCent || len(b.RateTable) != 3 {
 			t.Errorf("%s reads prices %+v", tc.name, b)

@@ -710,7 +710,7 @@ var (
 
 	creditsRefundedDesc = prometheus.NewDesc(
 		"sparkwing_credits_refunded_micro_total",
-		"Micro-credits returned from the unused tail of a claim reservation.",
+		"Micro-credits returned to claims whose machine never started, or whose setup the platform failed.",
 		nil, nil,
 	)
 
