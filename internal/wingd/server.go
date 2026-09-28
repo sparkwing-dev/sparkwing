@@ -601,7 +601,7 @@ func (d *Daemon) serveConn(c *conn) {
 	}
 	d.mu.Unlock()
 	if !c.healthProbe {
-		d.recordJournal("connection_opened", c, map[string]any{"connection_id": c.id, "role": "pending"})
+		d.recordJournal("connection_opened", c, map[string]any{"role": "pending"})
 	}
 	d.recordJournal("connection_handshake", c, map[string]any{"health_probe": c.healthProbe, "holder_liveness": c.holderLiveness, "protocol_major": served})
 	ack := &wingwire.HelloAck{

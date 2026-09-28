@@ -107,6 +107,9 @@ func TestJournalCaptureDumpPrunesOldFiles(t *testing.T) {
 		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.Chtimes(path, time.Unix(int64(i), 0), time.Unix(int64(i), 0)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	path, err := captureDump(context.Background(), dumpTestChild{source: source}, dir)
 	if err != nil {
@@ -189,6 +192,9 @@ func TestJournalCaptureDumpPrunesOnFailure(t *testing.T) {
 	for i := 1; i <= maxDumps+1; i++ {
 		path := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", i))
 		if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, time.Unix(int64(i), 0), time.Unix(int64(i), 0)); err != nil {
 			t.Fatal(err)
 		}
 	}

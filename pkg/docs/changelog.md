@@ -34,9 +34,9 @@ unlock.
 
 - **admission:** Journal counter and record corruption no longer prevent daemon
   startup or event inspection. Journal shutdown has a short drain bound, and
-  supervisor dumps retain only the newest ten. `daemon events` and `daemon
-  explain` report skipped records on stderr; explanations include descendant
-  runs. Policy endpoint records omit URL credentials and query parameters.
+  supervisor dumps retain the ten most recently modified files. `daemon events`
+  and `daemon explain` report skipped records on stderr; explanations include
+  descendant runs. Policy endpoint records omit URL credentials and query parameters.
 - **admission:** An overloaded or swapping machine no longer gets its
   admission daemon replaced while it is still working. The supervisor replaces
   the daemon only when health probes fail and its heartbeat has not moved for a

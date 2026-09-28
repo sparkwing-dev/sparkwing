@@ -52,7 +52,7 @@ error, heartbeat counter, stale duration, whether the continuous failure
 ceiling fired, largest supervisor tick gap, and the `dump_path`. On Unix, before
 stopping the daemon, the supervisor signals its SIGUSR1 diagnostic handler and
 saves up to 2 MiB as `dump-<timestamp>.txt` in the same directory. It keeps the
-newest ten dumps; the next stack capture replaces `d.log.stacks`. A
+ten most recently modified dumps; the next stack capture replaces `d.log.stacks`. A
 failed capture, including on Windows where SIGUSR1 is unavailable, appears in
 `dump_error`; replacement proceeds after a wait of at most one second. Journal
 writes do not hold admission or replacement. Policy endpoint URLs in records

@@ -408,12 +408,12 @@ func captureDump(ctx context.Context, child Child, dir string) (string, error) {
 }
 
 func captureDumpWithWrite(ctx context.Context, child Child, dir string, write func(string, []byte) error) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	source := filepath.Join(dir, "d.log.stacks")
 	previous, err := os.Stat(source)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := pruneDumps(ctx, dir, maxDumps-1); err != nil {
@@ -430,9 +430,6 @@ func captureDumpWithWrite(ctx context.Context, child Child, dir string, write fu
 	if err := signaler.dumpSignal(); err != nil {
 		return "", err
 	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -441,16 +438,8 @@ func captureDumpWithWrite(ctx context.Context, child Child, dir string, write fu
 		}
 		f, err := os.Open(source)
 		if err == nil {
-			if err := ctx.Err(); err != nil {
-				_ = f.Close()
-				return "", err
-			}
 			fi, err := f.Stat()
 			if err != nil {
-				_ = f.Close()
-				return "", err
-			}
-			if err := ctx.Err(); err != nil {
 				_ = f.Close()
 				return "", err
 			}
@@ -458,9 +447,6 @@ func captureDumpWithWrite(ctx context.Context, child Child, dir string, write fu
 				body, err := io.ReadAll(io.LimitReader(f, maxDumpBytes))
 				_ = f.Close()
 				if err != nil {
-					return "", err
-				}
-				if err := ctx.Err(); err != nil {
 					return "", err
 				}
 				path := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", start.UnixNano()))
@@ -492,45 +478,39 @@ func pruneDumps(ctx context.Context, dir string, limit int) error {
 	if err != nil {
 		return err
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	var pruneErr error
 	type dump struct {
 		name string
-		ts   int64
+		mod  time.Time
 	}
 	var dumps []dump
 	for _, entry := range entries {
-		value, ok := strings.CutPrefix(entry.Name(), "dump-")
-		if !ok {
+		if !strings.HasPrefix(entry.Name(), "dump-") || !strings.HasSuffix(entry.Name(), ".txt") {
 			continue
 		}
-		value, ok = strings.CutSuffix(value, ".txt")
-		if !ok {
+		if _, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(entry.Name(), "dump-"), ".txt"), 10, 64); err != nil {
 			continue
 		}
-		ts, err := strconv.ParseInt(value, 10, 64)
-		if err == nil {
+		info, err := entry.Info()
+		if err != nil {
+			pruneErr = errors.Join(pruneErr, err)
+			continue
+		}
+		if info.Size() > maxDumpBytes {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			info, err := entry.Info()
-			if err != nil {
-				pruneErr = errors.Join(pruneErr, err)
-				continue
-			}
-			if info.Size() > maxDumpBytes {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				pruneErr = errors.Join(pruneErr, os.Remove(filepath.Join(dir, entry.Name())))
-				continue
-			}
-			dumps = append(dumps, dump{entry.Name(), ts})
+			pruneErr = errors.Join(pruneErr, os.Remove(filepath.Join(dir, entry.Name())))
+			continue
 		}
+		dumps = append(dumps, dump{entry.Name(), info.ModTime()})
 	}
-	sort.Slice(dumps, func(i, j int) bool { return dumps[i].ts > dumps[j].ts })
+	sort.Slice(dumps, func(i, j int) bool {
+		if dumps[i].mod.Equal(dumps[j].mod) {
+			return dumps[i].name > dumps[j].name
+		}
+		return dumps[i].mod.After(dumps[j].mod)
+	})
 	for _, stale := range dumps[min(len(dumps), limit):] {
 		if err := ctx.Err(); err != nil {
 			return err

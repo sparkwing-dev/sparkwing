@@ -11,23 +11,23 @@ func (d *Daemon) recordJournal(kind string, c *conn, data map[string]any) {
 	if d.journal == nil || (c != nil && c.healthProbe) {
 		return
 	}
-	r := journal.Record{TS: d.now().UTC(), Kind: kind, Data: data}
+	r := journal.Record{Kind: kind, Data: data}
 	if c != nil {
 		r.RunID, r.DisplayRunID, r.Pipeline, r.Repo, r.PID = c.runID, c.displayRunID, c.pipeline, c.repo, c.pid
 		if r.RunID == "" {
 			r.RunID = c.journalRunID
 		}
-		if c.ownerRunID != "" {
+		connection := kind == "connection_opened" || kind == "connection_handshake" || kind == "connection_closed" || kind == "handshake_refused" || kind == "message_refused"
+		if c.ownerRunID != "" || connection {
 			if r.Data == nil {
 				r.Data = make(map[string]any)
 			}
+		}
+		if c.ownerRunID != "" {
 			r.Data["owner_run_id"] = c.ownerRunID
 		}
-		if kind == "connection_opened" || kind == "connection_handshake" || kind == "connection_closed" || kind == "handshake_refused" || kind == "message_refused" {
+		if connection {
 			r.PID = c.peerPID
-			if r.Data == nil {
-				r.Data = make(map[string]any)
-			}
 			r.Data["connection_id"] = c.id
 		}
 	}

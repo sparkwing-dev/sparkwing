@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -152,7 +153,7 @@ func runDaemonEvents(args []string) error {
 		if *incarnation != 0 && r.Incarnation != uint64(*incarnation) {
 			continue
 		}
-		if len(*kinds) > 0 && !containsString(*kinds, r.Kind) {
+		if len(*kinds) > 0 && !slices.Contains(*kinds, r.Kind) {
 			continue
 		}
 		selected = append(selected, r)
@@ -164,11 +165,9 @@ func runDaemonEvents(args []string) error {
 	}
 	for _, r := range selected[start:end] {
 		if format == "json" {
-			body, err := json.Marshal(r)
-			if err != nil {
+			if err := printJournalJSON(r); err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stdout, string(body))
 		} else {
 			fmt.Fprintf(os.Stdout, "%s  #%d.%d  %-22s %s %s\n", r.TS.Format(time.RFC3339Nano), r.Incarnation, r.Seq, r.Kind, r.RunID, compactData(r.Data))
 		}
@@ -177,15 +176,6 @@ func runDaemonEvents(args []string) error {
 		fmt.Fprintf(os.Stderr, "Older events retained; rerun with the same filters and --offset %d (or --limit 0 for all).\n", *offset+end-start)
 	}
 	return nil
-}
-
-func containsString(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
-			return true
-		}
-	}
-	return false
 }
 
 func runDaemonExplain(args []string) error {
@@ -254,11 +244,9 @@ func runDaemonExplain(args []string) error {
 		}
 		found = true
 		if format == "json" {
-			body, err := json.Marshal(r)
-			if err != nil {
+			if err := printJournalJSON(r); err != nil {
 				return err
 			}
-			fmt.Fprintln(os.Stdout, string(body))
 			continue
 		}
 		label := ""
@@ -274,6 +262,15 @@ func runDaemonExplain(args []string) error {
 	if !found && format != "json" {
 		fmt.Fprintf(os.Stdout, "No retained admission events for %s.\n", *run)
 	}
+	return nil
+}
+
+func printJournalJSON(r journal.Record) error {
+	body, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, string(body))
 	return nil
 }
 
