@@ -11,6 +11,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
+func trustTeam(t *testing.T, tenant *store.Tenant) *store.Tenant {
+	t.Helper()
+	if _, _, err := tenant.SetBillingTrust(context.Background(), store.BillingTrustChange{
+		Trust: store.BillingTrustGranted, Actor: "ops", Reason: "cap test", LimitCents: store.MaxPurchaseLimitCents,
+	}, time.Now()); err != nil {
+		t.Fatalf("trust: %v", err)
+	}
+	return tenant
+}
+
 // The cap bounds the balance an operator's free grant may reach: a grant that
 // fits alone is refused when the team already holds enough that the two
 // together pass it.
@@ -97,7 +107,7 @@ func TestPaidGrantsForVerifiedPaymentsAreNeverRefusedByTheCap(t *testing.T) {
 func TestOpenCheckoutsCountAgainstTheCap(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
+	acme := trustTeam(t, teamHandle(t, s, "acme"))
 	dollars := func(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
 	now := time.Now()
 	hold := 31 * time.Minute
@@ -128,7 +138,7 @@ func TestOpenCheckoutsCountAgainstTheCap(t *testing.T) {
 		t.Fatalf("a checkout once the others expired: %v", err)
 	}
 
-	globex := teamHandle(t, s, "globex")
+	globex := trustTeam(t, teamHandle(t, s, "globex"))
 	if _, err := globex.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantFree, AmountMicro: dollars(4000), Reference: "gift", CreatedBy: "ops",
 	}); err != nil {
@@ -160,7 +170,7 @@ func TestOpenCheckoutsCountAgainstTheCap(t *testing.T) {
 func TestFreeGrantCountsOpenCheckoutsAgainstTheCap(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
+	acme := trustTeam(t, teamHandle(t, s, "acme"))
 	dollars := func(n int64) int64 { return n * 100 * store.MicroCreditsPerCent }
 	if _, err := acme.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantFree, AmountMicro: dollars(4000), Reference: "gift", CreatedBy: "ops",
@@ -189,7 +199,7 @@ func TestFreeGrantCountsOpenCheckoutsAgainstTheCap(t *testing.T) {
 func TestConcurrentCheckoutsCannotBothPassTheCap(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
-	acme := teamHandle(t, s, "acme")
+	acme := trustTeam(t, teamHandle(t, s, "acme"))
 	half := int64(store.MaxTeamBalanceMicro/2 + store.MicroCreditsPerCent)
 	var wg sync.WaitGroup
 	errs := make([]error, 2)

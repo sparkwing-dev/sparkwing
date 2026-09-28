@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,7 +78,9 @@ func (s *Server) tokenBudgeted(next http.Handler) http.Handler {
 
 func (s *Server) allowDataRequest(w http.ResponseWriter, r *http.Request, team store.Team, prefix string) bool {
 	principal := &Principal{Team: team, TokenPrefix: prefix}
-	key := s.floodKey(r.WithContext(contextWithPrincipal(r.Context(), principal)), "")
+	// safety: this partial principal only keys the budget, so it stays out of
+	// the audit record that names the credential the caller authenticated.
+	key := s.floodKey(r.WithContext(context.WithValue(r.Context(), principalCtxKey{}, principal)), "")
 	return s.allowTokenRequest(w, r, key)
 }
 

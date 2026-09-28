@@ -40,6 +40,11 @@ export interface Billing {
   min_billable_seconds: number;
   purchase_min_cents: number;
   purchase_max_cents: number;
+  // A team may buy purchase_limit_cents over 30 days; purchased_30d_cents
+  // counts its payments and open checkouts against it.
+  trusted: boolean;
+  purchase_limit_cents: number;
+  purchased_30d_cents: number;
   rate_table: RateRow[];
   storage_rate_micro_per_gb_day: number;
   storage_free_allowance_bytes: number;
@@ -240,6 +245,8 @@ export function purchaseProblem(
       | "purchase_max_cents"
       | "balance_micro"
       | "balance_cap_micro"
+      | "purchase_limit_cents"
+      | "purchased_30d_cents"
     >,
 ): string | null {
   const range = `Enter an amount from ${fmtCents(b.purchase_min_cents)} to ${fmtCents(b.purchase_max_cents)}.`;
@@ -253,7 +260,25 @@ export function purchaseProblem(
   if (b.balance_micro + cents * microPerCent(b) > b.balance_cap_micro) {
     return capMessage(b.balance_micro, b.balance_cap_micro, b);
   }
+  if (b.purchased_30d_cents + cents > b.purchase_limit_cents) {
+    return limitMessage(b.purchase_limit_cents, b.purchased_30d_cents);
+  }
   return null;
+}
+
+// purchaseRemainingCents is what the team may still buy in the 30-day window.
+export function purchaseRemainingCents(
+  b: Pick<Billing, "purchase_limit_cents" | "purchased_30d_cents">,
+): number {
+  return Math.max(0, b.purchase_limit_cents - b.purchased_30d_cents);
+}
+
+function limitMessage(limitCents: number, purchasedCents: number): string {
+  const room = Math.max(0, limitCents - purchasedCents);
+  return (
+    `This team can buy ${fmtCents(limitCents)} of credit every 30 days. ` +
+    `It has bought ${fmtUSD(purchasedCents / 100)}, so it can buy up to ${fmtUSD(room / 100)} more now.`
+  );
 }
 
 function capMessage(
@@ -294,6 +319,8 @@ interface ErrorBody {
   open_micro?: number;
   cap_micro?: number;
   amount_micro?: number;
+  limit_cents?: number;
+  purchased_cents?: number;
 }
 
 async function readErrorBody(res: Response): Promise<ErrorBody> {
@@ -333,6 +360,15 @@ export function checkoutErrorMessage(
     }
     return detail || "This purchase would take the balance over its cap.";
   }
+  if (status === 409 && body.code === "purchase_limit") {
+    if (
+      typeof body.limit_cents === "number" &&
+      typeof body.purchased_cents === "number"
+    ) {
+      return limitMessage(body.limit_cents, body.purchased_cents);
+    }
+    return detail || "This purchase would pass the team's 30-day limit.";
+  }
   if (status === 400) {
     return detail
       ? `The controller refused this amount: ${detail}`
@@ -359,6 +395,9 @@ function normalize(body: Partial<Billing>): Billing {
     storage_rate_micro_per_gb_day: body.storage_rate_micro_per_gb_day ?? 0,
     storage_free_allowance_bytes: body.storage_free_allowance_bytes ?? 0,
     frozen: body.frozen === true,
+    trusted: body.trusted === true,
+    purchase_limit_cents: body.purchase_limit_cents ?? 0,
+    purchased_30d_cents: body.purchased_30d_cents ?? 0,
     checkout_enabled: body.checkout_enabled === true,
     can_purchase: body.can_purchase === true,
   };

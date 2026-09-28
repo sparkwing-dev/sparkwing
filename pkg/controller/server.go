@@ -153,6 +153,7 @@ type Server struct {
 
 	githubApp *githubAppState
 	checkout  *billingCheckout
+	operators atomic.Pointer[map[string]bool]
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -883,7 +884,9 @@ func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
-		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
+		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
+			return ratelimit.ClientIP(r, s.loginLimit.trusted)
+		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.runnerPresence.listening(time.Now())
 		if !s.Metering() {
@@ -1160,6 +1163,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
 	mux.Handle("POST /api/v1/credits/reversals", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
+	mux.Handle("POST /api/v1/credits/checkouts/closed", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
 	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
@@ -1169,6 +1173,15 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("DELETE /api/v1/accounts/{account}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteAccount)))
 	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
+	mux.Handle("GET /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustShow)))
+	mux.Handle("POST /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustSet)))
+	mux.Handle("GET /api/v1/operator/session", s.requireOperator(s.handleOperatorSession))
+	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
+	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))
+	mux.Handle("POST /api/v1/operator/teams/{team}/trust", s.requireOperator(s.handleBillingTrustSet))
+	mux.Handle("POST /api/v1/operator/teams/{team}/grants", s.requireOperator(s.handleOperatorGrant))
+	mux.Handle("POST /api/v1/operator/teams/{team}/freeze", s.requireOperator(s.handleOperatorFreeze))
+	mux.Handle("POST /api/v1/operator/teams/{team}/unfreeze", s.requireOperator(s.handleOperatorUnfreeze))
 	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
 	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
 	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))
@@ -1667,26 +1680,39 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 	ledgerSnapshot.set(totals)
 }
 
-func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {
+func withRequestLog(
+	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := requestID(r)
+		w.Header().Set(RequestIDHeader, id)
+		ctx, rec := withAuditRecord(r.Context(), id, routeLabel(r))
+		r = r.WithContext(ctx)
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
 		}
-		route := routeLabel(r)
 		start := time.Now()
+		finish := func(status int) {
+			elapsed := time.Since(start)
+			observeHTTPRequest(rec.route, r.Method, status, elapsed)
+			logRequest(ctx, logger, r, rec, w.Header(), status, elapsed, clientIP(r))
+		}
+		// safety: a handler that panics still made its write attempt, so it is
+		// logged as a 500 before the panic continues to the server.
+		defer func() {
+			if p := recover(); p != nil {
+				status := http.StatusInternalServerError
+				if p == http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
+					status = rw.status
+				}
+				finish(status)
+				panic(p)
+			}
+		}()
 		next.ServeHTTP(writer, r)
-		elapsed := time.Since(start)
-		observeHTTPRequest(route, r.Method, rw.status, elapsed)
-		logger.Info(
-			"http",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"route", route,
-			"status", rw.status,
-			"dur_ms", elapsed.Milliseconds(),
-		)
+		finish(rw.status)
 	})
 }
 

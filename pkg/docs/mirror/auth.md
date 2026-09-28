@@ -201,6 +201,22 @@ the cap only by a payment settled after its session expired. A `paid` grant is
 at most one purchase, $500. The grant route still refuses an operator's `free`
 grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
 
+A team also buys at most a set amount over 30 days, because a prepaid team
+cannot spend more than it bought and a stolen card should buy little. A new
+team buys up to $50 over 30 days and at most $50 at once; a trusted team buys
+up to $500. The controller counts the team's payments of the last 30 days,
+less refunds of them, plus its open checkouts, and refuses a purchase past the
+limit with `409` and `"code": "purchase_limit"`. An unpaid checkout keeps
+counting for three days after its session expires, because a session paid
+just before expiry is granted when its webhook arrives, and Stripe retries a
+webhook for up to three days. A team earns trust when its
+oldest unrefunded payment is at least 30 days old, it has spent at least $50,
+and it has never been held over a dispute. The operator grants or revokes
+trust, with a reason, through `POST /api/v1/teams/{team}/trust`; a grant may
+raise the limit to $5,000, and a revocation holds the team to the new-team
+limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
+remains of it.
+
 Purchases are final, so a refund is the operator's decision and is made by
 hand. The private `sparkwing-ops` refund command takes back what the
 purchase still has on the ledger, in the team it funded, through
@@ -230,6 +246,35 @@ a lost-dispute reversal that names the same dispute for another payment is
 refused with `409` and `"code": "dispute_conflict"` and logged as
 `alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
 so no claim that read the team as not held commits after the hold.
+
+## Operator console
+
+The dashboard's `/operator` page lets the operator look up a team and act on
+its billing from a browser: grant, revoke or reset trust, set or clear the
+purchase-limit override, grant free credits up to $5,000, and hold or release
+the team. Each action takes a reason and a confirmation step naming the team
+and the effect.
+
+Only the operator's own signed-in account reaches it. The controller lists
+operator accounts by account id with `--operator-accounts`
+(`SPARKWING_OPERATOR_ACCOUNTS`, comma-separated), and every route under
+`/api/v1/operator/` answers `403` to any other caller: a team owner, a
+password session and every bearer token, an admin token included. A console
+action therefore needs the operator's sign-in, not a credential that
+automation can hold. The dashboard serves the page only after the controller
+confirms the session through `GET /api/v1/operator/session`, and it forwards
+the console's writes under the same CSRF check as every other browser write.
+With no account listed, the console is off.
+
+Every action commits together with its business event, which names the
+operator and the reason: `billing.trust_changed` for trust and the limit,
+`credit.granted` for a grant, `team.frozen` and `team.unfrozen` for holds. A
+grant carries a key, and a retried grant with the same key grants once. A limit
+on a revoked team is refused until trust is granted again without one, so
+raising a limit never undoes a revocation. The console places holds of its own
+and releases only those; a payment dispute's hold stays until it is released
+outside the console. A console hold is a hold like a dispute's, so it also ends
+the team's automatic trust.
 
 ## Retained storage
 
@@ -487,7 +532,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `secrets.read`    | GET `/api/v1/secrets/{name}`, resolved against the pipeline of the run the caller holds a claim in |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
 | `team.admin`      | Administering the caller's own team: rename it, change roles, remove members, invitations, and revoking any of its runner tokens. A team owner holds it; it reaches no other team |
-| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
+| `credits.grant`   | The hosted checkout service's scope: POST `/api/v1/credits/grants` for `paid` grants only, POST `/api/v1/credits/reversals`, POST `/api/v1/credits/freezes` naming a payment, POST `/api/v1/credits/checkouts/closed`, and GET `/api/v1/credits/units`. It reaches no other route, and only the operator mints it; no team's token may carry it |
 | `admin`           | tokens / users / secrets CRUD, the token metering marker, credit grants, the compute guards, run delete, gitcache seed, warm-pool checkout / return / heartbeat, and concurrency `force-release` -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's

@@ -225,6 +225,7 @@ var tenantTables = []string{
 	"agent_loss_retry_legacy_deny_all",
 	"agent_loss_retry_node_sources",
 	"approvals",
+	"business_events",
 	"child_invocations",
 	"claim_tokens",
 	"concurrency_cache",
@@ -290,6 +291,7 @@ var keyedAtCreation = []string{
 	"uploads", "data_objects",
 	"team_build_trust",
 	"claim_tokens", "child_invocations",
+	"business_events",
 }
 
 // safety: executors is here because an executor enrolls with the deployment

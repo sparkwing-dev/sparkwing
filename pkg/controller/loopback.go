@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -240,7 +241,9 @@ func (l *Loopback) Handler() http.Handler {
 	// safety: preserve the server wrapper order while the Warn-level loopback
 	// logger suppresses per-request Info lines from node state writes.
 	return otelutil.WrapHandler("sparkwing-controller",
-		withRequestLog(router, l.logger, muxRouteLabeler(router, mux)))
+		withRequestLog(router, l.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
+			return ratelimit.ClientIP(r, nil)
+		}))
 }
 
 func (l *Loopback) authenticate(next http.Handler) http.Handler {

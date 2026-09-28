@@ -10,6 +10,9 @@ const billing = {
   min_billable_seconds: 60,
   purchase_min_cents: 1_000,
   purchase_max_cents: 50_000,
+  trusted: true,
+  purchase_limit_cents: 500_000,
+  purchased_30d_cents: 0,
   rate_table: [
     { cores: 2, micro_per_second: 9_000 },
     { cores: 4, micro_per_second: 18_000 },
@@ -53,7 +56,11 @@ async function mockController(page: Page, mock: Mock = {}) {
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/capabilities") {
       await route.fulfill({
-        json: { mode: "cluster", teams: { enabled: true }, billing: { enabled: true } },
+        json: {
+          mode: "cluster",
+          teams: { enabled: true },
+          billing: { enabled: true },
+        },
       });
     } else if (path === "/api/v1/me") {
       const team = { slug: "acme", display_name: "Acme", role };
@@ -97,10 +104,16 @@ test("an owner sees prices from the controller and starts a checkout", async ({
     page.getByText(/\$1\.23 · a team balance holds up to \$5,000/),
   ).toBeVisible();
   const twoCore = page.getByRole("row", { name: /2 vCPU/ });
-  await expect(twoCore.getByRole("cell", { name: "0.09", exact: true })).toBeVisible();
+  await expect(
+    twoCore.getByRole("cell", { name: "0.09", exact: true }),
+  ).toBeVisible();
   await expect(twoCore).toContainText("$0.32");
-  await expect(page.getByRole("columnheader", { name: "Credits / minute" })).toHaveCount(0);
-  await expect(page.getByRole("row", { name: /run-abc/ })).toContainText("0.27");
+  await expect(
+    page.getByRole("columnheader", { name: "Credits / minute" }),
+  ).toHaveCount(0);
+  await expect(page.getByRole("row", { name: /run-abc/ })).toContainText(
+    "0.27",
+  );
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
   await expect(page.getByRole("link", { name: "run-abc" })).toHaveAttribute(
     "href",
@@ -113,6 +126,11 @@ test("an owner sees prices from the controller and starts a checkout", async ({
     page.getByText("Purchases are final. Credits never expire.", {
       exact: true,
     }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "This team can buy $5,000 every 30 days; $5,000.00 remains.",
+    ),
   ).toBeVisible();
 
   const amount = page.getByLabel("Amount in US dollars");

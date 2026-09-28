@@ -22,6 +22,50 @@ unlock.
 
 ### Added
 
+- **dashboard + controller:** An operator console at `/operator` finds a team
+  by slug, name or owner email, shows its balance, 30-day purchases against
+  its limit, trust, holds and recent business events, and grants, revokes or
+  resets trust, sets or clears the limit override, grants free credits and
+  holds or releases its own holds, never a dispute's. Each action needs a
+  reason and a confirmation, and commits with a business event naming the
+  operator and reason. Only accounts listed with `--operator-accounts` reach
+  it, through their own signed-in session; no token does, an admin token
+  included. A limit override on a revoked team is refused until trust is
+  restored.
+- **controller + store:** A team buys at most $50 of credit over 30 days, and
+  at most $50 at once, until it is trusted; a trusted team buys up to $500.
+  A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
+  `GET /api/v1/team/billing` gains `trusted`, `purchase_limit_cents` and
+  `purchased_30d_cents`. An unpaid checkout counts against the limit for
+  three days after its session expires, the longest a paid session's
+  webhook can arrive late. A team earns trust when its oldest unrefunded payment
+  is 30 days old, it has spent $50 and it has never been held over a dispute.
+  The operator grants, revokes or resets trust to the automatic rule
+  through `GET` and `POST /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`
+  and a requirement, so a controller older than schema 80 refuses the
+  migrated database.
+- **controller:** Audit record for every write request
+  Each non-read request logs one `audit` record with its request id, route
+  pattern, status, duration, client address, a client class read from the
+  user agent (`sparkwing-<component>/<version>`, `browser`,
+  `go-http-client` or `other`, never the raw string), principal kind, the account id or token prefix, team,
+  and the run, node and team ids its path names. It never logs an email,
+  the raw path, query, headers, body or credential. A write whose handler
+  panics is audited as a 500. Empty node and trigger claim polls answering
+  204 are not audited; a pending executor offer is. Read requests and
+  internal-error and egress-refusal logs name the route pattern instead of
+  the path. Every response carries `X-Request-Id`: the caller's
+  value when it is a token of at most 64 characters, otherwise a new one.
+- **controller + store:** Schema 79 adds `business_events`
+  One row per admission, team creation, checkout opened, paid, failed or
+  expired, credit grant or reversal, dispute hold or release, and a team's
+  first successful run, written in the transaction that makes it true. A
+  repeat of the same team, kind and subject writes nothing. Purging a team
+  deletes its events, and deleting an account deletes its admission and
+  removes its id from the rest. `POST /api/v1/credits/checkouts/closed` lets
+  the checkout service (`credits.grant`) close an open, unpaid checkout its
+  team holds for a session that failed or expired.
+
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most

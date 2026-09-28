@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node.
+Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead); `authenticated` routes take any valid bearer and check no further scope. `claim` routes answer the claim token of one node claim, and only for that claim's own run and node. `operator` routes answer only the signed-in session of an account the controller lists with --operator-accounts; no token reaches them.
 
 ## Controller
 
@@ -38,6 +38,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
+| `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |
@@ -82,6 +83,13 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/nodes/claim/prepare` | `nodes.claim` |
 | `GET` | `/api/v1/object-store/breaker` | `admin` |
 | `POST` | `/api/v1/object-store/reset-breaker` | `admin` |
+| `GET` | `/api/v1/operator/session` | `operator` |
+| `GET` | `/api/v1/operator/teams` | `operator` |
+| `GET` | `/api/v1/operator/teams/{team}` | `operator` |
+| `POST` | `/api/v1/operator/teams/{team}/freeze` | `operator` |
+| `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
+| `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
+| `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
@@ -223,6 +231,8 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/team/runner-tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
+| `GET` | `/api/v1/teams/{team}/trust` | `admin` |
+| `POST` | `/api/v1/teams/{team}/trust` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

@@ -31,6 +31,7 @@ import {
   parseDollars,
   priceRows,
   purchaseProblem,
+  purchaseRemainingCents,
   startCheckout,
   storagePrice,
 } from "@/lib/billing";
@@ -219,6 +220,13 @@ function BuyPanel({ billing }: { billing: Billing }) {
             {submitError}
           </p>
         ) : null}
+        <p className="text-xs text-[var(--muted)]">
+          This team can buy {fmtCents(billing.purchase_limit_cents)} every 30
+          days; {fmtUSD(purchaseRemainingCents(billing) / 100)} remains.
+          {billing.trusted
+            ? null
+            : " The limit rises once a purchase is 30 days old and the team has spent $50."}
+        </p>
         <p className="text-xs text-[var(--muted)]">
           Purchases are final. Credits never expire.
         </p>

@@ -47,11 +47,14 @@ type teamBillingJSON struct {
 	StorageChargedMicro       int64            `json:"storage_charged_micro"`
 	// Frozen is set while the team's cloud usage is held over an open
 	// payment dispute; its metered claims are refused until it is released.
-	Frozen          bool                   `json:"frozen"`
-	CheckoutEnabled bool                   `json:"checkout_enabled"`
-	CanPurchase     bool                   `json:"can_purchase"`
-	Usage           []teamBillingUsageJSON `json:"usage"`
-	Grants          []teamBillingGrantJSON `json:"grants"`
+	Frozen             bool                   `json:"frozen"`
+	Trusted            bool                   `json:"trusted"`
+	PurchaseLimitCents int64                  `json:"purchase_limit_cents"`
+	Purchased30dCents  int64                  `json:"purchased_30d_cents"`
+	CheckoutEnabled    bool                   `json:"checkout_enabled"`
+	CanPurchase        bool                   `json:"can_purchase"`
+	Usage              []teamBillingUsageJSON `json:"usage"`
+	Grants             []teamBillingGrantJSON `json:"grants"`
 }
 
 // handleTeamBilling is the active team's billing page: its balance, the
@@ -83,6 +86,11 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "team billing freeze", err)
 		return
 	}
+	standing, err := t.BillingStanding(ctx, time.Now())
+	if err != nil {
+		s.writeInternalError(w, r, "team billing standing", err)
+		return
+	}
 	out := teamBillingJSON{
 		Team:                      string(t.Team()),
 		BalanceMicro:              state.BalanceMicro,
@@ -91,12 +99,15 @@ func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 		CreditsPerDollar:          store.CreditsPerDollar,
 		MinBillableSeconds:        store.MinBillableSeconds,
 		PurchaseMinCents:          store.CreditPurchaseMinCents,
-		PurchaseMaxCents:          store.CreditPurchaseMaxCents,
+		PurchaseMaxCents:          standing.PurchaseMaxCents(),
 		RateTable:                 creditRateTableToJSON(state.RateTable),
 		StorageRateMicroPerGBDay:  state.StorageRateMicroPerGBDay,
 		StorageFreeAllowanceBytes: state.StorageFreeAllowanceBytes,
 		StorageChargedMicro:       state.StorageChargedMicro,
 		Frozen:                    freeze.Frozen,
+		Trusted:                   standing.Trusted,
+		PurchaseLimitCents:        standing.LimitMicro / store.MicroCreditsPerCent,
+		Purchased30dCents:         standing.PurchasedMicro / store.MicroCreditsPerCent,
 		CheckoutEnabled:           s.checkout != nil,
 		CanPurchase:               s.checkout != nil && store.Role(p.Role).AtLeast(store.RoleOwner),
 		Usage:                     make([]teamBillingUsageJSON, 0, len(usage)),
@@ -130,7 +141,17 @@ const (
 	CheckoutAmountCode      = "amount_out_of_range"
 	CheckoutUnavailableCode = "checkout_unavailable"
 	BalanceCapCode          = "balance_cap"
+	PurchaseLimitCode       = "purchase_limit"
 )
+
+type purchaseLimitRefusalJSON struct {
+	Error          string `json:"error"`
+	Code           string `json:"code"`
+	Trusted        bool   `json:"trusted"`
+	LimitCents     int64  `json:"limit_cents"`
+	PurchasedCents int64  `json:"purchased_cents"`
+	AmountCents    int64  `json:"amount_cents"`
+}
 
 type balanceCapRefusalJSON struct {
 	Error        string `json:"error"`
@@ -165,22 +186,37 @@ func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.AmountCents < store.CreditPurchaseMinCents || req.AmountCents > store.CreditPurchaseMaxCents {
+	ctx := r.Context()
+	now := time.Now()
+	standing, err := t.BillingStanding(ctx, now)
+	if err != nil {
+		s.writeInternalError(w, r, "team checkout standing", err)
+		return
+	}
+	if maxCents := standing.PurchaseMaxCents(); req.AmountCents < store.CreditPurchaseMinCents || req.AmountCents > maxCents {
 		writeJSON(w, http.StatusBadRequest, codedErrorJSON{
 			Error: fmt.Sprintf("the minimum purchase is $%d and the maximum $%d",
-				store.CreditPurchaseMinCents/100, store.CreditPurchaseMaxCents/100),
+				store.CreditPurchaseMinCents/100, maxCents/100),
 			Code: CheckoutAmountCode,
 		})
 		return
 	}
-	// safety: the cap is held here, before any money moves, counting every
+	// safety: the limits are held here, before any money moves, counting every
 	// checkout of the team still open; the grant that follows a verified
 	// payment is never refused, so a later check would strand the payment.
-	ctx := r.Context()
-	now := time.Now()
 	checkoutID, err := t.OpenCreditCheckout(ctx, req.AmountCents*store.MicroCreditsPerCent, now, checkoutOpenHold)
 	if err != nil {
 		if s.writeBalanceCapRefusal(w, err) {
+			return
+		}
+		var limitErr *store.PurchaseLimitError
+		if errors.As(err, &limitErr) {
+			writeJSON(w, http.StatusConflict, purchaseLimitRefusalJSON{
+				Error: limitErr.Error(), Code: PurchaseLimitCode, Trusted: limitErr.Trusted,
+				LimitCents:     limitErr.LimitMicro / store.MicroCreditsPerCent,
+				PurchasedCents: limitErr.PurchasedMicro / store.MicroCreditsPerCent,
+				AmountCents:    limitErr.AmountMicro / store.MicroCreditsPerCent,
+			})
 			return
 		}
 		if errors.Is(err, store.ErrTeamBeingDeleted) {

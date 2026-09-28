@@ -84,6 +84,8 @@ tags:
     description: Login / logout / session + introspection.
   - name: teams
     description: Signed-in users, their teams, memberships, invitations and runner tokens.
+  - name: operator
+    description: The operator console, answered only for a listed operator account's own session.
   - name: secrets
     description: Named secret material.
   - name: agents
@@ -2110,6 +2112,51 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
 
+  /api/v1/teams/{team}/trust:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    get:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Read a team's billing trust and 30-day purchase limit.
+      responses:
+        "200":
+          description: The team's billing trust.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BillingTrust"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Grant or revoke a team's billing trust on the operator's word.
+      description: >-
+        A granted team buys up to $500 over 30 days, or `limit_cents` when given, whatever the automatic rule says. A revoked team is held to the new-team $50 even when the rule would trust it, and `automatic` returns the team to the rule. The change records the operator, the reason, and the trust before and after as a business event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.billingTrustReq
+              type: object
+              required: [trust, reason]
+              properties:
+                trust: {type: string, enum: [granted, revoked, automatic], description: "`automatic` returns the team to the automatic rule."}
+                reason: {type: string}
+                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
+      responses:
+        "200":
+          description: The team's billing trust after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BillingTrust"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/users:
     get:
       x-sparkwing-scope: admin
@@ -3932,6 +3979,48 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
         "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
+
+  /api/v1/credits/checkouts/closed:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Record a checkout session that ended unpaid.
+      description: |
+        The checkout service reports a session whose delayed payment failed
+        (`failed`) or that expired unpaid (`expired`). An operator credential
+        without the route's scope is refused. The report closes the
+        open, unpaid checkout `team` holds for the session, records a
+        `checkout.failed` or `checkout.expired` business event and stops the
+        checkout counting against the balance cap. A paid or already closed
+        checkout is left as it is and answers `closed: false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.checkoutClosedReq
+              type: object
+              required: [team, session_id, outcome]
+              properties:
+                team: {type: string, description: The team the session was opened for.}
+                session_id: {type: string, description: The payment processor's session id.}
+                outcome: {type: string, enum: [failed, expired]}
+      responses:
+        "200":
+          description: The recorded outcome.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.checkoutClosedJSON
+                type: object
+                properties:
+                  team: {type: string}
+                  session_id: {type: string}
+                  outcome: {type: string}
+                  closed: {type: boolean, description: Whether this report closed the checkout.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: "The team is not registered, or holds no checkout for the session (`unknown_checkout`)."}
 
   /api/v1/credits/units:
     get:
@@ -6500,7 +6589,7 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.teamBillingJSON
                 type: object
-                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, checkout_enabled, can_purchase, usage, grants]
+                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, trusted, purchase_limit_cents, purchased_30d_cents, checkout_enabled, can_purchase, usage, grants]
                 properties:
                   team: {type: string}
                   balance_micro: {type: integer, format: int64}
@@ -6523,6 +6612,9 @@ paths:
                   storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Zero when retained storage is not billed."}
                   storage_free_allowance_bytes: {type: integer, format: int64}
                   storage_charged_micro: {type: integer, format: int64}
+                  trusted: {type: boolean, description: "True once the team earned billing trust or an operator granted it; a trusted team buys up to $500 at once."}
+                  purchase_limit_cents: {type: integer, format: int64, description: "What the team may buy over 30 days: $50 until trusted, $500 once trusted, or an operator's override."}
+                  purchased_30d_cents: {type: integer, format: int64, description: "What the team paid over the last 30 days, less refunds of those payments, plus its checkouts still open or, for three days after their session expired, still awaiting a late payment."}
                   checkout_enabled: {type: boolean}
                   can_purchase: {type: boolean}
                   usage:
@@ -6557,7 +6649,7 @@ paths:
       tags: [teams]
       summary: Open a Stripe Checkout page to buy credits for the active team.
       description: >-
-        An owner of the active team buys between `purchase_min_cents`, the $10 minimum purchase, and `purchase_max_cents`; any other amount answers `400`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
+        An owner of the active team buys between `purchase_min_cents`, the $10 minimum purchase, and `purchase_max_cents`; any other amount answers `400`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`, or when `purchased_30d_cents` plus this purchase would pass `purchase_limit_cents`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
       requestBody:
         required: true
         content:
@@ -6584,20 +6676,31 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
           description: >-
-            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`, the body below). A team whose deletion has begun also answers 409, with only `error`.
+            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`) or pass the team's 30-day purchase limit (`purchase_limit`). A team whose deletion has begun also answers 409, with only `error`.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
-                type: object
-                required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
-                properties:
-                  error: {type: string}
-                  code: {type: string, enum: [balance_cap]}
-                  balance_micro: {type: integer, format: int64}
-                  open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
-                  cap_micro: {type: integer, format: int64}
-                  amount_micro: {type: integer, format: int64}
+                oneOf:
+                  - x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
+                    type: object
+                    required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
+                    properties:
+                      error: {type: string}
+                      code: {type: string, enum: [balance_cap]}
+                      balance_micro: {type: integer, format: int64}
+                      open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
+                      cap_micro: {type: integer, format: int64}
+                      amount_micro: {type: integer, format: int64}
+                  - x-sparkwing-go-type: pkg/controller.purchaseLimitRefusalJSON
+                    type: object
+                    required: [error, code, trusted, limit_cents, purchased_cents, amount_cents]
+                    properties:
+                      error: {type: string}
+                      code: {type: string, enum: [purchase_limit]}
+                      trusted: {type: boolean}
+                      limit_cents: {type: integer, format: int64}
+                      purchased_cents: {type: integer, format: int64, description: What the team paid over 30 days plus its open checkouts.}
+                      amount_cents: {type: integer, format: int64}
         "502": {description: The checkout service or Stripe did not open a session.}
         "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
 
@@ -6805,6 +6908,232 @@ paths:
         "422": {description: "The report was refused; the error names the reason."}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/operator/session:
+    get:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Confirm the caller is a listed operator signed in with its own account.
+      description: >-
+        The dashboard serves the operator console only when this answers 200. No token reaches any operator route.
+      responses:
+        "200":
+          description: The operator's account.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  account_id: {type: string}
+                  name: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/operator/teams:
+    get:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Find up to 20 teams by slug, display name or owner email.
+      parameters:
+        - {name: q, in: query, schema: {type: string}, description: "Matched anywhere in the slug, display name or an owner's email, ignoring case."}
+      responses:
+        "200":
+          description: The matching teams.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.operatorTeamMatchJSON
+                      type: object
+                      properties:
+                        team: {type: string}
+                        display_name: {type: string}
+                        owners: {type: array, items: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/operator/teams/{team}:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    get:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Read a team's balance, billing trust, holds and recent business events.
+      responses:
+        "200":
+          description: The team.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.operatorTeamJSON
+                type: object
+                properties:
+                  team: {type: string}
+                  display_name: {type: string}
+                  owners: {type: array, items: {type: string}}
+                  balance_micro: {type: integer, format: int64}
+                  billing: {$ref: "#/components/schemas/BillingTrust"}
+                  frozen: {type: boolean}
+                  holds: {type: array, items: {type: string}, description: "The dispute or operator holds keeping the team frozen."}
+                  events:
+                    type: array
+                    description: The latest 50 business events, newest first.
+                    items:
+                      x-sparkwing-go-type: pkg/controller.operatorEventJSON
+                      type: object
+                      properties:
+                        at: {type: integer, format: int64}
+                        kind: {type: string}
+                        actor: {type: string}
+                        attrs: {type: object, additionalProperties: true}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/teams/{team}/freeze:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Hold a team's cloud usage.
+      description: >-
+        Adds an operator hold, which stops the team's metered claims until it is released. Like a dispute hold, it also ends the team's automatic billing trust. The hold and its team.frozen business event, naming the operator and reason, commit together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-partial: pkg/controller.operatorActionReq
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
+      responses:
+        "200":
+          description: The team's holds after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OperatorFreeze"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/teams/{team}/grants:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Grant a team free credits.
+      description: >-
+        Adds a free grant of amount_cents, up to $5,000, within the team balance cap. A repeated key answers the grant it already made. The grant and its credit.granted business event, naming the operator and reason, commit together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-partial: pkg/controller.operatorActionReq
+              type: object
+              required: [reason, amount_cents, key]
+              properties:
+                reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
+                amount_cents: {type: integer, format: int64}
+                key: {type: string, description: "Makes a retried grant find the grant it already made."}
+      responses:
+        "201":
+          description: The grant.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreditGrant"}
+        "409": {description: "The grant would take the team past the balance cap."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/teams/{team}/trust:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Grant, revoke or reset a team's billing trust from the operator console.
+      description: >-
+        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor. A limit on a revoked team is refused until trust is granted without one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.billingTrustReq
+              type: object
+              required: [trust, reason]
+              properties:
+                trust: {type: string, enum: [granted, revoked, automatic]}
+                reason: {type: string}
+                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
+      responses:
+        "200":
+          description: The team's billing trust after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BillingTrust"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/teams/{team}/unfreeze:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Release a team's holds.
+      description: >-
+        Releases every hold the operator console placed, and never a payment dispute's hold. Each release and its team.unfrozen business event, naming the operator and reason, commit together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-partial: pkg/controller.operatorActionReq
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
+      responses:
+        "200":
+          description: The team's holds after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OperatorFreeze"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
 components:
   securitySchemes:
     bearerToken:
@@ -6820,7 +7149,7 @@ components:
       name: Authorization
       description: |
         `Authorization: Session <session-id>`. Used only by the
-        dashboard's browser flow after `POST /api/v1/auth/login`.
+        dashboard's browser flow after a password or Google/GitHub sign-in.
   parameters:
     RunID:
       in: path
@@ -7713,6 +8042,27 @@ components:
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
         storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 to 1000000000000, and 0 bills no storage."}
         storage_free_allowance_bytes: {type: integer, format: int64, description: "Retained bytes every team keeps without being billed for them; zero or more."}
+    OperatorFreeze:
+      x-sparkwing-go-type: none
+      type: object
+      properties:
+        team: {type: string}
+        frozen: {type: boolean}
+        holds: {type: array, items: {type: string}}
+    BillingTrust:
+      x-sparkwing-go-type: pkg/controller.billingTrustJSON
+      type: object
+      required: [team, trust, trusted, purchase_limit_cents, purchased_30d_cents]
+      properties:
+        team: {type: string}
+        trust: {type: string, enum: [automatic, granted, revoked], description: "The operator's decision; `automatic` leaves the team to the automatic rule."}
+        trusted: {type: boolean}
+        trust_by: {type: string}
+        trust_at: {type: integer, format: int64, description: Unix seconds.}
+        trust_reason: {type: string}
+        limit_override_cents: {type: integer, format: int64}
+        purchase_limit_cents: {type: integer, format: int64}
+        purchased_30d_cents: {type: integer, format: int64}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object

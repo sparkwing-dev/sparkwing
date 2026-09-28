@@ -1518,7 +1518,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 }
 
 func (s *Server) writeInternalError(w http.ResponseWriter, r *http.Request, operation string, err error) {
-	s.logger.Error(operation, "method", r.Method, "path", r.URL.Path, "err", err)
+	s.logger.Error(operation, append(requestLogAttrs(r), "err", err)...)
 	writeError(w, http.StatusInternalServerError, err)
 }
 

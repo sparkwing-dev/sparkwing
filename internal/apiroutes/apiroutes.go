@@ -27,6 +27,10 @@ const Authenticated = "authenticated"
 // claim holds. A claim route that also names a scope answers either.
 const Claim = "claim"
 
+// Operator marks a route only a listed operator account's own browser session
+// reaches. No token satisfies it, an admin token included.
+const Operator = "operator"
+
 var (
 	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
@@ -97,6 +101,9 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 				}
 			}
 			scope = strings.Join(accepted, "` or `")
+		}
+		if receiver == "mux" && strings.Contains(rest, "requireOperator(") {
+			scope = Operator
 		}
 		if receiver == "mux" && strings.Contains(rest, "newClaim") {
 			if scope == Authenticated {

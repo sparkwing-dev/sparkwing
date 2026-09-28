@@ -35,7 +35,9 @@ func main() {
 		"satisfies any scope check. `public` routes run with no bearer check (the " +
 		"GitHub webhook is HMAC-verified instead); `authenticated` routes take any " +
 		"valid bearer and check no further scope. `claim` routes answer the claim " +
-		"token of one node claim, and only for that claim's own run and node.\n\n")
+		"token of one node claim, and only for that claim's own run and node. " +
+		"`operator` routes answer only the signed-in session of an account the " +
+		"controller lists with --operator-accounts; no token reaches them.\n\n")
 
 	writeRoutes(&b, "Controller", scopes, controller)
 	writeRoutes(&b, "Logs service", scopes, logs)

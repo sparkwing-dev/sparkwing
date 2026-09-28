@@ -66,6 +66,9 @@ const billing = {
   min_billable_seconds: 60,
   purchase_min_cents: 1_000,
   purchase_max_cents: 50_000,
+  trusted: true,
+  purchase_limit_cents: 500_000,
+  purchased_30d_cents: 0,
   rate_table: [
     { cores: 8, micro_per_second: 33_000 },
     { cores: 2, micro_per_second: 9_000 },
@@ -257,6 +260,51 @@ describe("purchase amount", () => {
     assert.match(msg, /up to \$10\.00 more/);
     // Exactly reaching the cap is allowed.
     assert.equal(lib.purchaseProblem(1_000, nearCap), null);
+  });
+});
+
+describe("purchase limit", () => {
+  const newTeam = {
+    ...billing,
+    trusted: false,
+    purchase_max_cents: 5_000,
+    purchase_limit_cents: 5_000,
+    purchased_30d_cents: 3_000,
+  };
+
+  it("refuses a purchase past the 30-day limit and names what remains", () => {
+    assert.equal(lib.purchaseProblem(2_000, newTeam), null);
+    const msg = lib.purchaseProblem(2_001, newTeam);
+    assert.ok(msg);
+    assert.match(msg, /\$50 of credit every 30 days/);
+    assert.match(msg, /bought \$30\.00/);
+    assert.match(msg, /up to \$20\.00 more/);
+    assert.equal(lib.purchaseRemainingCents(newTeam), 2_000);
+    assert.equal(
+      lib.purchaseRemainingCents({ ...newTeam, purchased_30d_cents: 6_000 }),
+      0,
+    );
+  });
+
+  it("states the limit on a purchase_limit refusal", async () => {
+    respond = () =>
+      Response.json(
+        {
+          error: "over limit",
+          code: "purchase_limit",
+          trusted: false,
+          limit_cents: 5_000,
+          purchased_cents: 4_000,
+          amount_cents: 2_000,
+        },
+        { status: 409 },
+      );
+    await assert.rejects(lib.startCheckout(2_000, billing), (err: Error) => {
+      assert.ok(err instanceof lib.BillingApiError);
+      assert.equal(err.code, "purchase_limit");
+      assert.match(err.message, /up to \$10\.00 more/);
+      return true;
+    });
   });
 });
 

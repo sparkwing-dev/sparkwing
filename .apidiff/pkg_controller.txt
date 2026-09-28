@@ -305,12 +305,14 @@ type Principal struct {
 }
 func (p *Principal) HasScope(s string) bool
 func PrincipalFromContext(ctx context.Context) (*Principal, bool)
+const PurchaseLimitCode = "purchase_limit"
 const RecommendedHeartbeatsPerMinute = 1200
 type RequestBudget struct {
 	ClaimsPerMinute     int
 	HeartbeatsPerMinute int
 	RunnersPerToken     int
 }
+const RequestIDHeader = "X-Request-Id"
 type RunRequest struct {
 	RunID       string
 	Pipeline    string
@@ -392,6 +394,7 @@ func (s *Server) WithMailer(m mailer.Mailer) *Server
 func (s *Server) WithMetricsAddr(addr string) *Server
 func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
+func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
@@ -456,6 +459,7 @@ type TrendPoint struct {
 	P95DurMs  int64
 	AvgWaitMs int64
 }
+const UnknownCheckoutCode = "unknown_checkout"
 const UnpricedCPUClassCode = "unpriced_cpu_class"
 const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)

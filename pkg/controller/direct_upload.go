@@ -99,6 +99,9 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		writeError(w, http.StatusForbidden, errors.New("the cache grant is not bound to this live claimant"))
 		return directCaller{}, false
 	}
+	noteAuditPrincipal(r.Context(), &Principal{
+		Name: grant.Claim.Principal, Kind: "cache_grant", Team: store.Team(grant.Team), TokenPrefix: grant.Claim.TokenPrefix,
+	})
 	if !s.allowDataRequest(w, r, store.Team(grant.Team), grant.Claim.TokenPrefix) {
 		return directCaller{}, false
 	}
@@ -137,6 +140,7 @@ func (s *Server) directSourceCaller(w http.ResponseWriter, r *http.Request) (dir
 		writeError(w, http.StatusUnauthorized, errors.New("invalid source upload bearer"))
 		return directCaller{}, false
 	}
+	noteAuditPrincipal(r.Context(), principal)
 	if principal.Kind != store.TokenKindUser || (!principal.HasScope(ScopeRunsWrite) && !principal.HasScope(ScopeAdmin)) {
 		writeError(w, http.StatusForbidden, errors.New("source upload needs a user token with runs.write"))
 		return directCaller{}, false
