@@ -1376,10 +1376,23 @@ func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string,
 	if err != nil {
 		return false, err
 	}
+	var repo *runRepository
 	for _, runner := range live {
 		isMetered, sameTeam := metered[runner.TokenPrefix]
 		if !sameTeam || !labelsSatisfied(summary.HardCapabilities, newClaimLabels(runner.Labels).hard) {
 			continue
+		}
+		if runner.AllowRepos != nil {
+			if repo == nil {
+				read, err := scanRunRepository(tx.QueryRowContext(ctx, runRepositorySQL, runID, string(team)))
+				if err != nil {
+					return false, err
+				}
+				repo = &read
+			}
+			if !repo.admitsNodeFor(runner.AllowRepos) {
+				continue
+			}
 		}
 		// safety: mirrors warmClassFilter, which refuses a metered runner a class above the warm one.
 		if isMetered && class != 0 && class > warmCores {

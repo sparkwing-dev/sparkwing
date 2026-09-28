@@ -985,6 +985,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** A live queue runner holds a node's agent offer window only
+  when its `--allow-repo` list admits the node's repository. A runner limited
+  to other repositories no longer delays every run of its team by five seconds.
 - **sparks:** Overlay resolution no longer appends to a `.gitignore` above the
   project. It used to walk up to ten directories for a `.git`, so a stray
   `.git` in an ancestor such as `/tmp` or a home dotfiles repository received

@@ -78,19 +78,26 @@ func (s *Store) runRepositoryOf(ctx context.Context, scope teamScope, runID stri
 	if scope.all || scope.team == "" {
 		return runRepository{}, ErrClaimantHasNoTeam
 	}
-	var t Trigger
-	var envJSON []byte
-	err := s.queryRow(ctx, `SELECT repo_url, github_owner, github_repo, trigger_env
-		FROM triggers WHERE id = ? AND team = ?`, runID, string(scope.team)).
-		Scan(&t.RepoURL, &t.GithubOwner, &t.GithubRepo, &envJSON)
-	var repo runRepository
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
+	repo, err := scanRunRepository(s.queryRow(ctx, runRepositorySQL, runID, string(scope.team)))
+	if err != nil {
 		return runRepository{}, err
-	default:
-		repo = triggerRunRepository(&t, envJSON)
 	}
 	seen[runID] = repo
 	return repo, nil
+}
+
+const runRepositorySQL = `SELECT repo_url, github_owner, github_repo, trigger_env
+		FROM triggers WHERE id = ? AND team = ?`
+
+func scanRunRepository(row *sql.Row) (runRepository, error) {
+	var t Trigger
+	var envJSON []byte
+	err := row.Scan(&t.RepoURL, &t.GithubOwner, &t.GithubRepo, &envJSON)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return runRepository{}, nil
+	case err != nil:
+		return runRepository{}, err
+	}
+	return triggerRunRepository(&t, envJSON), nil
 }

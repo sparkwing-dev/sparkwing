@@ -8,6 +8,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -105,6 +106,38 @@ func TestOfferRoundWaitsOnlyForALiveCredentialOfTheRunsRepository(t *testing.T) 
 	mint("github:42:Acme/Wid_Gets")
 	if !reopenRound(idle, t, st, "run-gh", "compile") {
 		t.Fatal("a live credential for the push: round closed at once, want the window")
+	}
+}
+
+func TestOfferRoundIgnoresARunnerWhoseAllowListRefusesTheRepository(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	acme := tenantFor(t, st, "acme")
+	prefix := runnerToken(t, acme, "desk")
+	githubWork(t, st, acme, "run-gh", "acme/widgets", nil)
+	runner := func(patterns ...string) context.Context {
+		live := store.RunnerPresence{Name: "desk", TokenPrefix: prefix}
+		if len(patterns) > 0 {
+			allow, err := sourceurl.ParseRepoAllowlist(patterns)
+			if err != nil {
+				t.Fatal(err)
+			}
+			live.AllowRepos = allow
+		}
+		return store.WithQueueRunners(ctx, []store.RunnerPresence{live})
+	}
+	for _, tc := range []struct {
+		name  string
+		ready context.Context
+		want  bool
+	}{
+		{"an allow-list naming another repository", runner("github.com/acme/other"), false},
+		{"an allow-list naming the run's repository", runner("github.com/acme/widgets"), true},
+		{"no allow-list", runner(), true},
+	} {
+		if got := reopenRound(tc.ready, t, st, "run-gh", "compile"); got != tc.want {
+			t.Errorf("%s: round open = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 
