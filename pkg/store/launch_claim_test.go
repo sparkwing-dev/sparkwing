@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -202,5 +203,45 @@ func TestRepoDispatch_ARetryOfAnOptedInRunIsControllerDispatched(t *testing.T) {
 	nodes, err := st.ListNodes(ctx, "run-retry")
 	if err != nil || len(nodes) != 1 || nodes[0].NodeID != store.PlanNodeID {
 		t.Fatalf("retry nodes = %+v %v, want the plan node", nodes, err)
+	}
+}
+
+// A launcher token bills whatever its metered flag says, and a team that
+// cannot pay never holds the queue: seventeen of its unpaid nodes, more than
+// one scan page, sit ahead of a paying team's node, which is the one claimed.
+func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	_, tok, err := st.CreateToken("launcher", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.Metered {
+		t.Fatal("the launcher token was minted metered; the test needs the flag unset")
+	}
+	launcher := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	unpaid, paying := teamHandle(t, st, "unpaid"), teamHandle(t, st, "paying")
+	for _, team := range []*store.Tenant{unpaid, paying} {
+		if err := team.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 17 {
+		intake(t, unpaid, fmt.Sprintf("run-unpaid-%02d", i), "korey", "probe")
+	}
+	if claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil || claim != nil {
+		t.Fatalf("a team with no credits got a launch claim: %+v %v", claim, err)
+	}
+	intake(t, paying, "run-paying", "korey", "probe")
+	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+	if err != nil || claim == nil || claim.Team != "paying" {
+		t.Fatalf("launch claim = %+v %v, want the paying team's node behind the unpaid ones", claim, err)
+	}
+	balance, err := paying.CreditBalanceMicro(ctx)
+	if err != nil || balance >= 100*store.MicroCreditsPerCent {
+		t.Fatalf("paying balance after the claim = %d (%v); the claim reserved nothing", balance, err)
 	}
 }

@@ -39,8 +39,9 @@ const launchScanBatch = 16
 // ClaimLaunch claims a ready node of a controller-dispatched run for the
 // launcher and mints the node's claim token in the same transaction, so a
 // claim never exists without the token its pod reports through. The claim
-// reserves credits exactly as any claim by launcher's token does, and a node
-// whose team cannot pay is passed over for the next one. It returns nil when
+// always reserves the node's team's credits, since a token carrying
+// claims.launch is metered, and a node whose team cannot pay is passed over
+// for the next one. It returns nil when
 // no node is ready.
 //
 // Only nodes that require no executor labels are the launcher's: a Job
@@ -49,46 +50,70 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 	if req.HolderID == "" || req.Deadline <= 0 || req.Deadline > MaxClaimTokenLifetime {
 		return nil, fmt.Errorf("%w: a launch claim needs a holder and a deadline within %s", ErrInvalidInput, MaxClaimTokenLifetime)
 	}
-	named, args := "", []any{now.UnixNano()}
-	if req.RunID != "" || req.NodeID != "" {
-		named, args = ` AND n.run_id = ? AND n.node_id = ?`, append(args, req.RunID, req.NodeID)
-	}
-	rows, err := s.query(ctx, `SELECT n.team, n.run_id, n.node_id FROM nodes n
-  JOIN runs r ON r.team = n.team AND r.id = n.run_id
- WHERE n.kind IN ('`+nodeKindPlan+`', '`+nodeKindWork+`') AND n.ready_at IS NOT NULL AND n.ready_at <= ?
-   AND n.claimed_by IS NULL AND n.status != '`+nodeStatusDone+`' AND n.needs_labels IS NULL
-   AND r.dispatch != '' AND r.cancel_requested_at IS NULL`+named+`
- ORDER BY n.ready_at, n.run_id, n.node_id LIMIT `+fmt.Sprint(launchScanBatch), args...)
-	if err != nil {
-		return nil, err
-	}
-	var candidates []LaunchClaim
-	for rows.Next() {
-		var c LaunchClaim
-		if err := rows.Scan(&c.Team, &c.RunID, &c.NodeID); err != nil {
-			closeRowsOrLog(rows)
-			return nil, err
-		}
-		candidates = append(candidates, c)
-	}
-	closeRowsOrLog(rows)
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
 	coordinatorID, err := s.CoordinatorID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range candidates {
-		claim, err := s.claimLaunchCandidate(ctx, launcher, req, coordinatorID, c, now)
-		if unpaidLaunch(err) {
-			continue
+	var after *launchCursor
+	for {
+		page, err := s.launchCandidates(ctx, req, after, now)
+		if err != nil || len(page) == 0 {
+			return nil, err
 		}
-		if err != nil || claim != nil {
-			return claim, err
+		for _, c := range page {
+			claim, err := s.claimLaunchCandidate(ctx, launcher, req, coordinatorID, c.claim, now)
+			if unpaidLaunch(err) {
+				continue
+			}
+			if err != nil || claim != nil {
+				return claim, err
+			}
 		}
+		after = &page[len(page)-1].cursor
 	}
-	return nil, nil
+}
+
+type launchCursor struct {
+	readyAt       int64
+	runID, nodeID string
+}
+
+type launchCandidate struct {
+	claim  LaunchClaim
+	cursor launchCursor
+}
+
+// safety: the scan pages past every candidate the claim refused, so a queue
+// head of one team's unpaid nodes never hides another team's paid one.
+func (s *Store) launchCandidates(ctx context.Context, req LaunchClaimRequest, after *launchCursor, now time.Time) ([]launchCandidate, error) {
+	where, args := "", []any{now.UnixNano()}
+	if req.RunID != "" || req.NodeID != "" {
+		where, args = ` AND n.run_id = ? AND n.node_id = ?`, append(args, req.RunID, req.NodeID)
+	}
+	if after != nil {
+		where += ` AND (n.ready_at > ? OR (n.ready_at = ? AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))`
+		args = append(args, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
+	}
+	rows, err := s.query(ctx, `SELECT n.team, n.run_id, n.node_id, n.ready_at FROM nodes n
+  JOIN runs r ON r.team = n.team AND r.id = n.run_id
+ WHERE n.kind IN ('`+nodeKindPlan+`', '`+nodeKindWork+`') AND n.ready_at IS NOT NULL AND n.ready_at <= ?
+   AND n.claimed_by IS NULL AND n.status != '`+nodeStatusDone+`' AND n.needs_labels IS NULL
+   AND r.dispatch != '' AND r.cancel_requested_at IS NULL`+where+`
+ ORDER BY n.ready_at, n.run_id, n.node_id LIMIT `+fmt.Sprint(launchScanBatch), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsOrLog(rows)
+	var out []launchCandidate
+	for rows.Next() {
+		var c launchCandidate
+		if err := rows.Scan(&c.claim.Team, &c.claim.RunID, &c.claim.NodeID, &c.cursor.readyAt); err != nil {
+			return nil, err
+		}
+		c.cursor.runID, c.cursor.nodeID = c.claim.RunID, c.claim.NodeID
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // safety: one team's empty balance must not stall every other team's work
