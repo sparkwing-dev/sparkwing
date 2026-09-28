@@ -96,7 +96,7 @@ type plannedNode struct {
 	deps, runsOn, prefers           []string
 	resource                        ExecutorResource
 	retryBudget                     int
-	retryBackoff                    time.Duration
+	retryBackoff, timeout           time.Duration
 	optional, continueOnError       bool
 }
 
@@ -245,12 +245,12 @@ func insertPlannedNodeTx(ctx context.Context, tx *storeTx, team Team, runID stri
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO nodes (team, run_id, node_id, status, kind, deps_json,
        needs_labels, prefers_labels, requested_cores, requested_memory_bytes, credit_cpu_class,
-       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq, approval_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       spec_hash, on_failure_of, continue_on_error, optional, retry_budget, retry_backoff_ms, seq, approval_json, timeout_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(team), runID, n.id, nodeStatusPending, n.kind, deps,
 		needs, prefers, res.Cores, res.MemoryBytes, class,
 		n.specHash, n.onFailureOf, boolInt(n.continueOnError), boolInt(n.optional), n.retryBudget,
-		n.retryBackoff.Milliseconds(), seq, n.approval)
+		n.retryBackoff.Milliseconds(), seq, n.approval, n.timeout.Milliseconds())
 	return err
 }
 
@@ -412,6 +412,7 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 		p.resource.Cores = m.ResCores
 	}
 	p.resource.MemoryBytes = max(m.ResMemoryBytes, 0)
+	p.timeout = min(time.Duration(m.TimeoutMS)*time.Millisecond, MaxClaimTokenLifetime)
 	return p, nil
 }
 

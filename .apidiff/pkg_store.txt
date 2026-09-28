@@ -1118,6 +1118,7 @@ type LaunchClaimRequest struct {
 
 	RunID, NodeID string
 }
+const LaunchDeadlineSlack = 10 * time.Minute
 const LaunchScope = "claims.launch"
 type LegacyAgentClaim struct {
 	RunID       string

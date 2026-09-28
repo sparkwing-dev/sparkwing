@@ -245,3 +245,25 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 		t.Fatalf("paying balance after the claim = %d (%v); the claim reserved nothing", balance, err)
 	}
 }
+
+// The claim token, and so the Job, lives the node's declared timeout plus the
+// slack, never the launcher's whole cap, and the timeout never extends it.
+func TestClaimLaunch_ExpiryFollowsTheNodesTimeout(t *testing.T) {
+	ctx := context.Background()
+	f := newDispatchRun(t, "run-timeout")
+	f.mustAccept(t, planOf(`short|"modifiers":{"timeout_ms":60000}`, `long|"modifiers":{"timeout_ms":86400000}`, "none"))
+	now := time.Now()
+	for node, want := range map[string]time.Duration{
+		"short": time.Minute + store.LaunchDeadlineSlack, "long": time.Hour, "none": time.Hour,
+	} {
+		req := launchRequest()
+		req.RunID, req.NodeID = f.run, node
+		c, err := f.s.ClaimLaunch(ctx, launcherIdentity, req, now)
+		if err != nil || c == nil {
+			t.Fatalf("%s: %+v %v", node, c, err)
+		}
+		if got := c.ExpiresAt.Sub(now); got != want {
+			t.Errorf("%s: token lives %s, want %s", node, got, want)
+		}
+	}
+}

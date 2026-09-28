@@ -6,7 +6,7 @@ package launcher
 import (
 	"errors"
 	"fmt"
-	"strings"
+	"regexp"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -29,17 +29,18 @@ const JobLabel = "sparkwing.dev/job"
 const MaxDeadline = store.MaxClaimTokenLifetime
 
 const (
-	jobUID               = 65534
-	jobTTLAfterFinished  = 60
-	scratchVolume        = "scratch"
-	minimumClassCores    = 2
-	managedByLauncher    = "sparkwing-launcher"
-	jobAppName           = "sparkwing-job"
-	runNodeVerb          = "run-node"
-	jobBearerEnv         = "SPARKWING_AGENT_TOKEN"
-	defaultScratchLimit  = "20Gi"
-	digestPinnedImageSep = "@sha256:"
+	jobUID              = 65534
+	jobTTLAfterFinished = 60
+	scratchVolume       = "scratch"
+	minimumClassCores   = 2
+	managedByLauncher   = "sparkwing-launcher"
+	jobAppName          = "sparkwing-job"
+	runNodeVerb         = "run-node"
+	jobBearerEnv        = "SPARKWING_AGENT_TOKEN"
+	defaultScratchLimit = "20Gi"
 )
+
+var digestPinned = regexp.MustCompile(`^[a-z0-9][a-z0-9.:/_-]*@sha256:[0-9a-f]{64}$`)
 
 // Config is the operator's whole say over a launcher Job. Nothing a pipeline
 // declares reaches a Job except its node's cpu class, which these ceilings
@@ -62,8 +63,8 @@ func (c Config) Validate() error {
 	if c.Namespace == "" || c.ControllerURL == "" {
 		errs = append(errs, errors.New("the namespace and the controller URL are required"))
 	}
-	if !strings.Contains(c.Image, digestPinnedImageSep) {
-		errs = append(errs, fmt.Errorf("image %q is not pinned by digest", c.Image))
+	if !digestPinned.MatchString(c.Image) {
+		errs = append(errs, fmt.Errorf("image %q is not pinned by a sha256 digest", c.Image))
 	}
 	if c.CPUCeiling <= 0 || c.MemoryCeiling <= 0 {
 		errs = append(errs, errors.New("a cpu and a memory ceiling are required"))
@@ -84,10 +85,10 @@ func (c Config) scratchLimit() string {
 	return c.ScratchLimit
 }
 
-// BuildJob returns the Job that runs claim's node. Every field is fixed here
-// or by cfg; the claim contributes its IDs, its token and its class, and the
-// class only through the ceilings.
-func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
+// BuildJob returns the Job that runs claim's node, created at now. Every field
+// is fixed here or by cfg; the claim contributes its IDs, its token, its class
+// only through the ceilings, and its expiry as the Job's deadline.
+func BuildJob(cfg Config, claim store.LaunchClaim, now time.Time) *batchv1.Job {
 	name := k8s.JobName(claim.RunID, claim.NodeID, int(claim.Generation))
 	team := k8s.TeamLabelValue(string(claim.Team))
 	labels := map[string]string{
@@ -110,7 +111,9 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL})
 	}
 	scratch := resource.MustParse(cfg.scratchLimit())
-	deadline := int64(cfg.Deadline.Seconds())
+	// safety: the token expires at claim time plus its deadline, so the Job gets
+	// only what is left of it and never outlives the credential it carries.
+	deadline := max(int64(claim.ExpiresAt.Sub(now).Seconds()), 1)
 	backoff, ttl := int32(0), int32(jobTTLAfterFinished)
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels},

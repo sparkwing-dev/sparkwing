@@ -21,9 +21,12 @@ func testConfig() Config {
 	}
 }
 
+var testNow = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+
 func testClaim() store.LaunchClaim {
 	return store.LaunchClaim{
-		Team: "alpha", RunID: "run-1", NodeID: "build", Generation: 1, Kind: store.ClaimTokenWork,
+		ExpiresAt: testNow.Add(time.Hour),
+		Team:      "alpha", RunID: "run-1", NodeID: "build", Generation: 1, Kind: store.ClaimTokenWork,
 		Dispatch: store.RepoDispatchController, Class: store.CPUClass{Cores: 4, MemoryBytes: 14 << 30},
 		Token: "swc_one",
 	}
@@ -37,7 +40,7 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 	a, b := testClaim(), testClaim()
 	b.Team, b.RunID, b.NodeID, b.Generation, b.Kind, b.Token = "bravo", "run-2", "deploy", 7, store.ClaimTokenPlan, "swc_two"
 	b.Class = store.CPUClass{Cores: 64, MemoryBytes: 1 << 40}
-	ja, jb := BuildJob(cfg, a), BuildJob(cfg, b)
+	ja, jb := BuildJob(cfg, a, testNow), BuildJob(cfg, b, testNow)
 	pa, pb := ja.Spec.Template.Spec, jb.Spec.Template.Spec
 	ca, cb := pa.Containers[0], pb.Containers[0]
 	pa.Containers, pb.Containers, pa.NodeSelector, pb.NodeSelector = nil, nil, nil, nil
@@ -61,7 +64,7 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 }
 
 func TestBuildJob_PinsIdentityVolumesAndPlacement(t *testing.T) {
-	job := BuildJob(testConfig(), testClaim())
+	job := BuildJob(testConfig(), testClaim(), testNow)
 	pod := job.Spec.Template.Spec
 	c := pod.Containers[0]
 	if pod.ServiceAccountName != ServiceAccount || *pod.AutomountServiceAccountToken || *pod.EnableServiceLinks ||
@@ -70,6 +73,10 @@ func TestBuildJob_PinsIdentityVolumesAndPlacement(t *testing.T) {
 	}
 	if *job.Spec.BackoffLimit != 0 || *job.Spec.ActiveDeadlineSeconds != int64(time.Hour.Seconds()) {
 		t.Fatalf("backoff %d deadline %d", *job.Spec.BackoffLimit, *job.Spec.ActiveDeadlineSeconds)
+	}
+	late := BuildJob(testConfig(), testClaim(), testNow.Add(50*time.Minute))
+	if got := *late.Spec.ActiveDeadlineSeconds; got != int64((10 * time.Minute).Seconds()) {
+		t.Fatalf("a Job built 50m into an hour's claim got a %ds deadline, want 600", got)
 	}
 	for _, v := range pod.Volumes {
 		if v.EmptyDir == nil || v.EmptyDir.SizeLimit == nil {
@@ -107,6 +114,9 @@ func TestConfigValidate_RefusesAnUnpinnedOrUncappedLauncher(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Config){
 		"tag image":      func(c *Config) { c.Image = "registry/sparkwing-runner:latest" },
+		"short digest":   func(c *Config) { c.Image = "registry/sparkwing-runner@sha256:abc" },
+		"placeholder":    func(c *Config) { c.Image = "registry/sparkwing-runner@sha256:FILL_FROM_BUILT_IMAGE" },
+		"digest suffix":  func(c *Config) { c.Image = "registry/x@sha256:" + strings.Repeat("a", 64) + "x" },
 		"no cpu ceiling": func(c *Config) { c.CPUCeiling = 0 },
 		"no mem ceiling": func(c *Config) { c.MemoryCeiling = 0 },
 		"past 6h":        func(c *Config) { c.Deadline = 7 * time.Hour },

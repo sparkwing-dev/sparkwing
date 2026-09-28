@@ -147,9 +147,10 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 		return nil, err
 	}
 	var kind, dispatch string
-	if err := tx.QueryRowContext(ctx, `SELECT n.kind, r.dispatch FROM nodes n
+	var timeoutMS int64
+	if err := tx.QueryRowContext(ctx, `SELECT n.kind, r.dispatch, n.timeout_ms FROM nodes n
   JOIN runs r ON r.team = n.team AND r.id = n.run_id
- WHERE n.team = ? AND n.run_id = ? AND n.node_id = ?`, string(c.Team), c.RunID, c.NodeID).Scan(&kind, &dispatch); err != nil {
+ WHERE n.team = ? AND n.run_id = ? AND n.node_id = ?`, string(c.Team), c.RunID, c.NodeID).Scan(&kind, &dispatch, &timeoutMS); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("node", c.RunID+"/"+c.NodeID)
 		}
@@ -159,7 +160,7 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 	if kind == nodeKindPlan {
 		c.Kind = ClaimTokenPlan
 	}
-	c.ExpiresAt = now.Add(req.Deadline)
+	c.ExpiresAt = now.Add(launchDeadline(req.Deadline, time.Duration(timeoutMS)*time.Millisecond))
 	c.Token, err = mintClaimTokenTx(ctx, tx, c.Team, c.RunID, c.NodeID, n.ClaimGeneration, c.Kind, c.ExpiresAt, now)
 	if err != nil {
 		return nil, err
@@ -170,4 +171,18 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 	c.Generation, c.Dispatch = n.ClaimGeneration, RepoDispatch(dispatch)
 	c.Class = CPUClass{Cores: n.CreditCPUClassCores, MemoryBytes: n.CreditCPUClassMemoryBytes}
 	return &c, nil
+}
+
+// LaunchDeadlineSlack is how long past a node's own timeout its claim, and so
+// its Job, lives, so the pod records the timeout before the Job is killed.
+const LaunchDeadlineSlack = 10 * time.Minute
+
+// safety: the claim token, whose expiry is the Job's deadline, runs from the
+// claim, so a node's declared timeout shortens it and never lengthens it past
+// the launcher's cap.
+func launchDeadline(limit, timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return limit
+	}
+	return min(limit, timeout+LaunchDeadlineSlack)
 }
