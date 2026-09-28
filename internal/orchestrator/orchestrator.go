@@ -191,7 +191,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		if opts.ParentRunID != "" {
 			opts.Admission.ParentRunID = opts.ParentRunID
 		} else if opts.Admission.ParentLeaseToken != "" {
-			opts.Admission.ParentRunID = os.Getenv("SPARKWING_RUN_ID")
+			opts.Admission.ParentRunID = parentRunIDFromContext(ctx)
 		}
 	}
 
@@ -1693,7 +1693,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue(), runCharge{})
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, s.runID, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue(), runCharge{})
 	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

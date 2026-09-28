@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -198,6 +200,25 @@ type wingdQuickPipe struct{ sparkwing.Base }
 func (wingdQuickPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(0.5))
 	sparkwing.Job(plan, "quick", func(context.Context) error { return nil })
+	return nil
+}
+
+type wingdNestedInlinePipe struct{ sparkwing.Base }
+
+func (wingdNestedInlinePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "spawn-grandchild", func(ctx context.Context) error {
+		launch := wingdE2EChild.Load()
+		la := testWingdAdmission(launch.home, nil)
+		la.ParentLeaseToken = childAttachTokenFromProcessEnv()
+		res, err := Run(ctx, launch.backends, Options{Pipeline: "wingd-e2e-unpinned", RunID: "grandchild", Admission: la})
+		if err != nil {
+			return err
+		}
+		if res.Status != "success" {
+			return fmt.Errorf("grandchild status %s: %w", res.Status, res.Error)
+		}
+		return nil
+	})
 	return nil
 }
 
@@ -493,6 +514,8 @@ func registerWingdE2EPipelines() {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdHoldPipe{cores: 1.5} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-quick",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdQuickPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-nested-inline",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdNestedInlinePipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-unpinned",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdUnpinnedHoldPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-attach-parent",
@@ -599,6 +622,72 @@ func acquireWingd(t *testing.T, cl *wingdclient.Client, req wingwire.AdmissionRe
 		t.Fatalf("acquire %q: %v", req.RunID, err)
 	}
 	return lease
+}
+
+func TestWingdNestedInlineGrandchildUsesImmediateParent(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 4)
+	backends, _, _ := openWingdBackends(t, home)
+	wingdE2EChild.Store(&wingdChildLaunch{home: home, backends: backends})
+	t.Setenv("SPARKWING_RUN_ID", "root")
+	rootClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rootClient.Close() })
+	rootLease := acquireWingd(t, rootClient, wingwire.AdmissionRequest{RunID: "root", Resources: wingwire.HostResources{Cores: 1}})
+	t.Setenv(wingwire.ChildLeaseTokenEnv, rootLease.Token)
+	t.Cleanup(func() { _ = rootLease.Release() })
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		cancelRun()
+		select {
+		case <-gate.release:
+		default:
+			close(gate.release)
+		}
+		<-done
+	})
+	var result *Result
+	go func() {
+		la := testWingdAdmission(home, nil)
+		la.ParentLeaseToken = rootLease.Token
+		result, _ = Run(runCtx, backends, Options{Pipeline: "wingd-e2e-nested-inline", RunID: "child", Admission: la})
+		close(done)
+	}()
+	gate.awaitStarted(t, "grandchild")
+	data, err := os.ReadFile(filepath.Join(home, "wingd", "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Snapshot struct {
+			Leases []struct {
+				Parents map[string]string `json:"parents"`
+			} `json:"leases"`
+		} `json:"snapshot"`
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	for _, lease := range state.Snapshot.Leases {
+		if parent, ok := lease.Parents["grandchild"]; ok {
+			if parent != "child" {
+				t.Fatalf("grandchild parent = %q, want child", parent)
+			}
+			close(gate.release)
+			<-done
+			if result == nil || result.Status != "success" {
+				t.Fatalf("child result = %+v, want success", result)
+			}
+			return
+		}
+	}
+	t.Fatalf("grandchild lineage missing from daemon state: %+v", state.Snapshot.Leases)
 }
 
 func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome string) {
@@ -1661,7 +1750,7 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 		Resources(sparkwing.Cores(1)).
 		Concurrency(group)
 	r := NewNodeExecutor(backends)
-	ctx := withLocalAdmission(context.Background(), la, "", "", false, 0, runCharge{})
+	ctx := withLocalAdmission(context.Background(), la, "test-run", "", "", false, 0, runCharge{})
 
 	result := make(chan runner.Result, 1)
 	go func() {

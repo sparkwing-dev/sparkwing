@@ -1040,6 +1040,42 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 	}
 }
 
+func TestChildAttachAfterParentExit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		parentRun string
+		exitRoot  bool
+	}{
+		{"old-client-after-root-exit", "", true},
+		{"new-client-after-parent-exit", "departed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home})
+			root := ensure(t, home, "")
+			rootLease := mustAcquire(t, root, coreReq("root", 1))
+			departing := rootLease
+			if !tc.exitRoot {
+				parent := ensure(t, home, "")
+				departing = mustAcquire(t, parent, wingwire.AdmissionRequest{
+					RunID: "departed", ParentRunID: "root", ParentLeaseToken: rootLease.Token,
+				})
+			}
+			survivor := ensure(t, home, "")
+			mustAcquire(t, survivor, wingwire.AdmissionRequest{
+				RunID: "survivor", ParentRunID: "root", ParentLeaseToken: rootLease.Token,
+			})
+			if err := departing.Release(); err != nil {
+				t.Fatal(err)
+			}
+			attacher := ensure(t, home, "")
+			mustAcquire(t, attacher, wingwire.AdmissionRequest{
+				RunID: "late-child", ParentRunID: tc.parentRun, ParentLeaseToken: rootLease.Token,
+			})
+		})
+	}
+}
+
 func TestChildAttachChecksOnlyItsAncestorsWhileSiblingCancellationIsPending(t *testing.T) {
 	home := shortHome(t)
 	entered := make(chan struct{})

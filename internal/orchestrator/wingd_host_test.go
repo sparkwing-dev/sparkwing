@@ -256,7 +256,7 @@ func TestPipelineAdmission_NeverHosts(t *testing.T) {
 
 func TestReservedNodeAdmissionUsesExistingLease(t *testing.T) {
 	la := NewReservedNodeAdmission("/unused", "test", "reserved-token", wingwire.OriginController)
-	ctx, ok := la.attachReservedNode(context.Background(), 37)
+	ctx, ok := la.attachReservedNode(context.Background(), "test-run", 37)
 	if !ok {
 		t.Fatal("reserved admission was not attached")
 	}

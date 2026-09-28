@@ -336,15 +336,60 @@ func (l *Ledger) Attach(id LeaseID, memberID, parentID string) error {
 	if err := l.checkFreshID(memberID); err != nil {
 		return err
 	}
-	_, member := le.members[parentID]
-	if !member && (parentID == "" || parentID != le.ownerID) {
-		return fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, id)
+	parentID, err := l.resolveParent(le, parentID)
+	if err != nil {
+		return err
 	}
 	le.members[memberID] = struct{}{}
 	le.parents[memberID] = parentID
 	l.memberOf[memberID] = id
 	l.mustHoldInvariants()
 	return nil
+}
+
+// ResolveParent finds the nearest live ancestor or lease root for a child attach.
+func (l *Ledger) ResolveParent(id LeaseID, parentID string) (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	le, ok := l.leases[id]
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrUnknownLease, id)
+	}
+	return l.resolveParent(le, parentID)
+}
+
+func (l *Ledger) resolveParent(le *lease, parentID string) (string, error) {
+	root := le.ownerID
+	if root == "" {
+		root = le.requestID
+	}
+	for parentID != "" {
+		if id, live := l.memberOf[parentID]; live {
+			if id != le.id {
+				if parentID != le.ownerID {
+					return "", fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, le.id)
+				}
+			}
+			return parentID, nil
+		}
+		if parentID == root || parentID == le.requestID {
+			return root, nil
+		}
+		if next, known := le.parents[parentID]; known {
+			parentID = next
+			continue
+		}
+		for _, other := range l.leases {
+			if other.id != le.id {
+				_, known := other.parents[parentID]
+				if known || parentID == other.requestID {
+					return "", fmt.Errorf("%w: parent %q on %s", ErrUnknownMember, parentID, le.id)
+				}
+			}
+		}
+		break
+	}
+	return root, nil
 }
 
 func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
@@ -367,7 +412,6 @@ func (l *Ledger) Release(id LeaseID, memberID string) ([]Event, error) {
 			parentID = le.requestID
 		}
 	}
-	delete(le.parents, memberID)
 	for childID, parent := range le.parents {
 		if parent == memberID {
 			le.parents[childID] = parentID

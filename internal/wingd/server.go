@@ -1142,16 +1142,26 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	if parentRunID == "" {
 		parentRunID = d.leaseRun[leaseID]
 	}
+	resolvedParent, err := d.ledger.ResolveParent(leaseID, parentRunID)
+	if err != nil {
+		d.mu.Unlock()
+		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail}); err != nil {
+			c.close()
+		}
+		return
+	}
 	parents := leaseParents(d.ledger.Snapshot())
 	blocked := false
-	for ancestor, hops := parentRunID, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
-		if _, pending := d.cancelPending[ancestor]; pending {
-			blocked = true
-			break
-		}
-		if _, cancelled := d.cancelledRuns[ancestor]; cancelled {
-			blocked = true
-			break
+	for _, start := range []string{parentRunID, resolvedParent} {
+		for ancestor, hops := start, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
+			if _, pending := d.cancelPending[ancestor]; pending {
+				blocked = true
+				break
+			}
+			if _, cancelled := d.cancelledRuns[ancestor]; cancelled {
+				blocked = true
+				break
+			}
 		}
 	}
 	if blocked {
@@ -1161,7 +1171,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 		}
 		return
 	}
-	if err := d.ledger.Attach(leaseID, req.RunID, parentRunID); err != nil {
+	if err := d.ledger.Attach(leaseID, req.RunID, resolvedParent); err != nil {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
 		return

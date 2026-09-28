@@ -200,7 +200,7 @@ type AdmissionRequest struct {
 	// top-level runs.
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
 	// ParentRunID identifies the member that spawned this run. The daemon
-	// checks it against ParentLeaseToken before attaching the child.
+	// checks lease membership and uses a live ancestor if this member exited.
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	// SemaphoresOnly marks a request that draws no host budget even when
 	// Resources is zero: the daemon must not substitute its conservative

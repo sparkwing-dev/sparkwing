@@ -89,6 +89,46 @@ func TestSnapshotPreservesChildLineageAndReleaseReparents(t *testing.T) {
 	}
 }
 
+func TestAttachAfterParentReleaseUsesLiveAncestor(t *testing.T) {
+	l := testLedger(t, 4, 0)
+	lease := mustGrant(t, l, Request{ID: "root", Cores: 1})
+	if err := l.Attach(lease.ID, "parent", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Attach(lease.ID, "survivor", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Release(lease.ID, "parent"); err != nil {
+		t.Fatal(err)
+	}
+	l = restoreRoundTrip(t, l)
+	for _, member := range []struct{ id, parent string }{
+		{"new-client", "parent"},
+		{"old-client", ""},
+		{"unknown-parent", "departed-before-lineage"},
+	} {
+		if err := l.Attach(lease.ID, member.id, member.parent); err != nil {
+			t.Fatalf("Attach %s: %v", member.id, err)
+		}
+		if got := l.Snapshot().Leases[0].Parents[member.id]; got != "root" {
+			t.Fatalf("%s parent = %q, want root", member.id, got)
+		}
+	}
+	other := mustGrant(t, l, Request{ID: "other", Cores: 1})
+	if err := l.Attach(other.ID, "other-child", "other"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Attach(lease.ID, "cross-lease", "other-child"); !errors.Is(err, ErrUnknownMember) {
+		t.Fatalf("cross-lease attach = %v, want unknown member", err)
+	}
+	if _, err := l.Release(other.ID, "other-child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Attach(lease.ID, "cross-departed", "other-child"); !errors.Is(err, ErrUnknownMember) {
+		t.Fatalf("cross-lease departed parent = %v, want unknown member", err)
+	}
+}
+
 func TestRestore_UpgradesPreAdmitSequenceSnapshotByDurableOrder(t *testing.T) {
 	restored, err := Restore(Snapshot{
 		TotalMilliCores:    2000,

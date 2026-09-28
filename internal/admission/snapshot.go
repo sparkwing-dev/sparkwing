@@ -348,14 +348,6 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		if child == ls.RequestID || parent == "" || parent == child {
 			return fmt.Errorf("%w: invalid parent for member %q", ErrInvalidSnapshot, child)
 		}
-		if _, ok := le.members[child]; !ok {
-			return fmt.Errorf("%w: parent entry for unknown member %q", ErrInvalidSnapshot, child)
-		}
-		if parent != ls.RequestID && parent != ls.OwnerID {
-			if _, ok := le.members[parent]; !ok {
-				return fmt.Errorf("%w: unknown parent %q", ErrInvalidSnapshot, parent)
-			}
-		}
 		le.parents[child] = parent
 	}
 	for child := range le.members {
@@ -370,6 +362,11 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		for parent, seen := le.parents[child], map[string]bool{child: true}; parent != ls.RequestID && parent != ls.OwnerID; parent = le.parents[parent] {
 			if parent == "" || seen[parent] {
 				return fmt.Errorf("%w: cyclic or missing parent for %q", ErrInvalidSnapshot, child)
+			}
+			if _, ok := le.parents[parent]; !ok {
+				if _, live := le.members[parent]; !live {
+					return fmt.Errorf("%w: unknown parent %q", ErrInvalidSnapshot, parent)
+				}
 			}
 			seen[parent] = true
 		}

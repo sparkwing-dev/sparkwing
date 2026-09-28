@@ -295,6 +295,10 @@ attached through it, while its parent and siblings continue. Cancelling
 the lease's root run cancels every attached member. A resubmission is a
 different run with a different id.
 
+If a parent exits while another member keeps the lease alive, a later child
+attaches under the nearest live ancestor. This also works for clients that
+send only the inherited lease token.
+
 #### The consumer process
 
 One consumer per sparkwing home claims queued runs and executes them.

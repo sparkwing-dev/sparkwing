@@ -24,7 +24,9 @@ unlock.
 
 - **local admission:** Cancelling a child run cancels its descendants while
   its parent and siblings keep running. Cancelling the lease root still
-  cancels every attached run, including after daemon restart.
+  cancels every attached run, including after daemon restart. Nested inline
+  runs attach to their immediate parent; children launched after a parent
+  exits attach under its nearest live ancestor.
 
 ## [v0.63.0] - 2026-09-27
 ### Changed

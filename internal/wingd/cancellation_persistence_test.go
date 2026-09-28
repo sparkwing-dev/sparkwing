@@ -1,7 +1,9 @@
 package wingd
 
 import (
+	"bytes"
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -72,20 +74,28 @@ func TestPersistStateKeepsNewerChildLineageAfterDelayedCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &Daemon{layout: layout{state: path}, ledger: ledger}
+	enteredOlder := make(chan struct{})
 	resumeOlder := make(chan struct{})
+	d.persistWrite = func(path string, snap admission.Snapshot, events []admissionEvent, cancelled []string) error {
+		if len(snap.Leases[0].Members) == 2 {
+			close(enteredOlder)
+			<-resumeOlder
+		}
+		return writeStateWithCancellations(path, snap, events, cancelled)
+	}
 	olderDone := make(chan error, 1)
-	go func() {
-		<-resumeOlder
-		olderDone <- d.persistState()
-	}()
+	go func() { olderDone <- d.persistState() }()
+	<-enteredOlder
 	if err := ledger.Attach(dec.Lease.ID, "second", "parent"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.persistState(); err != nil {
-		t.Fatal(err)
-	}
+	newerDone := make(chan error, 1)
+	go func() { newerDone <- d.persistState() }()
 	close(resumeOlder)
 	if err := <-olderDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-newerDone; err != nil {
 		t.Fatal(err)
 	}
 	snap, _, _, err := readStateWithCancellations(path)
@@ -94,6 +104,51 @@ func TestPersistStateKeepsNewerChildLineageAfterDelayedCall(t *testing.T) {
 	}
 	if len(snap.Leases) != 1 || len(snap.Leases[0].Members) != 3 || snap.Leases[0].Parents["second"] != "parent" {
 		t.Fatalf("persisted lineage = %+v, want both children", snap.Leases)
+	}
+}
+
+func TestRestoreStateWithoutParentsKeepsFlatRootLineage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	ledger, err := admission.New(admission.Config{TotalCores: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, _, err := ledger.Submit(admission.Request{ID: "root", Cores: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"child", "grandchild"} {
+		if err := ledger.Attach(dec.Lease.ID, id, "root"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ledger.Release(dec.Lease.ID, "root"); err != nil {
+		t.Fatal(err)
+	}
+	snap := ledger.Snapshot()
+	snap.Leases[0].Parents = nil
+	if err := writeState(path, snap, nil); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || bytes.Contains(data, []byte(`"parents"`)) {
+		t.Fatal("legacy state file unexpectedly has parents")
+	}
+	read, _, err := readState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := admission.Restore(*read, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"child", "grandchild"} {
+		if got := restored.Snapshot().Leases[0].Parents[id]; got != "root" {
+			t.Fatalf("%s parent = %q, want root", id, got)
+		}
 	}
 }
 

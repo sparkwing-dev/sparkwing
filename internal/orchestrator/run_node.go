@@ -259,7 +259,7 @@ func RunNodeOnce(
 
 	if admission != nil {
 		priority := planPriorityFromSnapshot(run.PlanSnapshot)
-		if reservedCtx, ok := admission.attachReservedNode(ctx, priority); ok {
+		if reservedCtx, ok := admission.attachReservedNode(ctx, runID, priority); ok {
 			ctx = reservedCtx
 		} else {
 			lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node, priority)
@@ -267,7 +267,7 @@ func RunNodeOnce(
 				return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
 			}
 			defer lease.release()
-			ctx = withLocalAdmission(ctx, admission, lease.token, lease.childToken, lease.hostAdmitted, priority, lease.charge)
+			ctx = withLocalAdmission(ctx, admission, runID, lease.token, lease.childToken, lease.hostAdmitted, priority, lease.charge)
 		}
 	}
 
