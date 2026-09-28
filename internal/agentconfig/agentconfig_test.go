@@ -243,3 +243,10 @@ func TestConfig_LoadsAPreConfigYAMLAgentFileAtACustomPath(t *testing.T) {
 		t.Fatalf("legacy enrolled-mode agent file = %v, want the removal message", err)
 	}
 }
+
+func TestConfig_RefusesASecondDocumentInAPreConfigYAMLAgentFile(t *testing.T) {
+	_, err := Load(writeRawConfig(t, "controller: http://localhost:4344\n---\ntoken: hidden\n"))
+	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("legacy agent file with two documents = %v, want it refused", err)
+	}
+}

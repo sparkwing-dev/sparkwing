@@ -3,6 +3,7 @@ package agentconfig
 import (
 	"errors"
 	"fmt"
+	"io"
 
 	"go.yaml.in/yaml/v3"
 
@@ -35,9 +36,13 @@ func loadLegacyFile(path string) (*Config, bool, error) {
 		return nil, false, nil
 	}
 	defer func() { _ = f.Close() }()
-	var doc yaml.Node
-	if err := yaml.NewDecoder(f).Decode(&doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+	dec := yaml.NewDecoder(f)
+	var doc, trailing yaml.Node
+	if err := dec.Decode(&doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, false, nil
+	}
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return nil, true, fmt.Errorf("parse %s: multiple YAML documents are not allowed", path)
 	}
 	root := doc.Content[0]
 	legacy := false
