@@ -412,7 +412,9 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 		p.resource.Cores = m.ResCores
 	}
 	p.resource.MemoryBytes = max(m.ResMemoryBytes, 0)
-	p.timeout = min(time.Duration(m.TimeoutMS)*time.Millisecond, MaxClaimTokenLifetime)
+	// safety: clamped in milliseconds first, so a huge timeout_ms cannot overflow
+	// the Duration multiply into a negative or short timeout.
+	p.timeout = time.Duration(min(m.TimeoutMS, MaxClaimTokenLifetime.Milliseconds())) * time.Millisecond
 	return p, nil
 }
 

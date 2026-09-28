@@ -2206,7 +2206,7 @@ paths:
       tags: [nodes]
       summary: Claim a ready node of a controller-dispatched run for a launcher Job.
       description: >-
-        Claims the oldest ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. A node whose team cannot pay is passed over. The token expires after `deadline_secs`, which is also the Job's deadline.
+        Claims the oldest ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. A node whose team cannot pay is passed over. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
       requestBody:
         required: true
         content:
@@ -2241,7 +2241,7 @@ paths:
                       cores: {type: integer, format: int64}
                       memory_bytes: {type: integer, format: int64}
                   token: {type: string}
-                  expires_at: {type: string, format: date-time}
+                  lifetime_secs: {type: integer, format: int64, description: "How long the token lives from the claim; the Job's deadline derives from this, not from a clock."}
         "204": {description: No node is ready.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}

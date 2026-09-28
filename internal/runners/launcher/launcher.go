@@ -57,7 +57,7 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 	if err != nil || claim == nil {
 		return false, err
 	}
-	job := BuildJob(l.Config, *claim, time.Now())
+	job := BuildJob(l.Config, *claim)
 	_, err = l.Kube.BatchV1().Jobs(l.Config.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		err = nil

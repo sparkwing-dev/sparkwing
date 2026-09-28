@@ -1108,7 +1108,8 @@ type LaunchClaim struct {
 	Dispatch   RepoDispatch
 	Class      CPUClass
 	Token      string
-	ExpiresAt  time.Time
+
+	LifetimeSecs int64
 }
 type LaunchClaimRequest struct {
 	HolderID string

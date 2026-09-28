@@ -31,7 +31,10 @@ type LaunchClaim struct {
 	Dispatch   RepoDispatch   `json:"dispatch"`
 	Class      CPUClass       `json:"class"`
 	Token      string         `json:"token"`
-	ExpiresAt  time.Time      `json:"expires_at"`
+	// LifetimeSecs is how long the token lives from the claim; a launcher
+	// derives its Job's deadline from it, never from an expiry read against
+	// its own clock.
+	LifetimeSecs int64 `json:"lifetime_secs"`
 }
 
 const launchScanBatch = 16
@@ -208,8 +211,9 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 	if kind == nodeKindPlan {
 		c.Kind = ClaimTokenPlan
 	}
-	c.ExpiresAt = now.Add(launchDeadline(req.Deadline, time.Duration(timeoutMS)*time.Millisecond))
-	c.Token, err = mintClaimTokenTx(ctx, tx, c.Team, c.RunID, c.NodeID, n.ClaimGeneration, c.Kind, c.ExpiresAt, now)
+	lifetime := launchDeadline(req.Deadline, time.Duration(timeoutMS)*time.Millisecond)
+	c.LifetimeSecs = int64(lifetime / time.Second)
+	c.Token, err = mintClaimTokenTx(ctx, tx, c.Team, c.RunID, c.NodeID, n.ClaimGeneration, c.Kind, now.Add(lifetime), now)
 	if err != nil {
 		return nil, err
 	}

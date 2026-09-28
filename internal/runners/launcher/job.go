@@ -28,6 +28,9 @@ const JobLabel = "sparkwing.dev/job"
 // MaxDeadline bounds a Job's life, and with it the life of its claim token.
 const MaxDeadline = store.MaxClaimTokenLifetime
 
+// DeadlineMargin is taken off a claim token's lifetime for its Job's deadline.
+const DeadlineMargin = 30 * time.Second
+
 const (
 	jobUID              = 65534
 	jobTTLAfterFinished = 60
@@ -85,10 +88,10 @@ func (c Config) scratchLimit() string {
 	return c.ScratchLimit
 }
 
-// BuildJob returns the Job that runs claim's node, created at now. Every field
-// is fixed here or by cfg; the claim contributes its IDs, its token, its class
-// only through the ceilings, and its expiry as the Job's deadline.
-func BuildJob(cfg Config, claim store.LaunchClaim, now time.Time) *batchv1.Job {
+// BuildJob returns the Job that runs claim's node. Every field is fixed here
+// or by cfg; the claim contributes its IDs, its token, its class only through
+// the ceilings, and its token's lifetime as the Job's deadline.
+func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 	name := k8s.JobName(claim.RunID, claim.NodeID, int(claim.Generation))
 	team := k8s.TeamLabelValue(string(claim.Team))
 	labels := map[string]string{
@@ -111,9 +114,10 @@ func BuildJob(cfg Config, claim store.LaunchClaim, now time.Time) *batchv1.Job {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL})
 	}
 	scratch := resource.MustParse(cfg.scratchLimit())
-	// safety: the token expires at claim time plus its deadline, so the Job gets
-	// only what is left of it and never outlives the credential it carries.
-	deadline := max(int64(claim.ExpiresAt.Sub(now).Seconds()), 1)
+	// safety: the lifetime runs from the claim on the controller's clock, so the
+	// margin covers the response and the Job create, and the Job never outlives
+	// the credential it carries whatever the launcher's clock says.
+	deadline := max(claim.LifetimeSecs-int64(DeadlineMargin/time.Second), 1)
 	backoff, ttl := int32(0), int32(jobTTLAfterFinished)
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels},

@@ -79,7 +79,8 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 func TestClaimLaunch_MintsATokenBoundToTheClaim(t *testing.T) {
 	ctx := context.Background()
 	f := newDispatchRun(t, "run-token")
-	claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now())
+	claimedAt := time.Now()
+	claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), claimedAt)
 	if err != nil || claim == nil {
 		t.Fatalf("launch claim: %+v %v", claim, err)
 	}
@@ -88,8 +89,8 @@ func TestClaimLaunch_MintsATokenBoundToTheClaim(t *testing.T) {
 	if err != nil || tok.RunID != "run-token" || tok.NodeID != store.PlanNodeID || tok.Generation != claim.Generation {
 		t.Fatalf("authorize = %+v %v", tok, err)
 	}
-	if !claim.ExpiresAt.Equal(tok.ExpiresAt) || claim.ExpiresAt.After(now.Add(time.Hour)) {
-		t.Fatalf("token expiry %v, claim says %v; want at most the one-hour deadline", tok.ExpiresAt, claim.ExpiresAt)
+	if claim.LifetimeSecs != 3600 || !tok.ExpiresAt.Equal(claimedAt.Add(time.Hour)) {
+		t.Fatalf("token expiry %v, claim lifetime %ds; want one hour from the claim", tok.ExpiresAt, claim.LifetimeSecs)
 	}
 	if again, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err != nil || again != nil {
 		t.Fatalf("a held node was claimed twice: %+v %v", again, err)
@@ -251,10 +252,11 @@ func TestClaimLaunch_BillsEveryClaimAndPagesPastUnpaidTeams(t *testing.T) {
 func TestClaimLaunch_ExpiryFollowsTheNodesTimeout(t *testing.T) {
 	ctx := context.Background()
 	f := newDispatchRun(t, "run-timeout")
-	f.mustAccept(t, planOf(`short|"modifiers":{"timeout_ms":60000}`, `long|"modifiers":{"timeout_ms":86400000}`, "none"))
+	f.mustAccept(t, planOf(`short|"modifiers":{"timeout_ms":60000}`, `long|"modifiers":{"timeout_ms":86400000}`,
+		`huge|"modifiers":{"timeout_ms":288230376151771744}`, "none"))
 	now := time.Now()
 	for node, want := range map[string]time.Duration{
-		"short": time.Minute + store.LaunchDeadlineSlack, "long": time.Hour, "none": time.Hour,
+		"short": time.Minute + store.LaunchDeadlineSlack, "long": time.Hour, "huge": time.Hour, "none": time.Hour,
 	} {
 		req := launchRequest()
 		req.RunID, req.NodeID = f.run, node
@@ -262,7 +264,7 @@ func TestClaimLaunch_ExpiryFollowsTheNodesTimeout(t *testing.T) {
 		if err != nil || c == nil {
 			t.Fatalf("%s: %+v %v", node, c, err)
 		}
-		if got := c.ExpiresAt.Sub(now); got != want {
+		if got := time.Duration(c.LifetimeSecs) * time.Second; got != want {
 			t.Errorf("%s: token lives %s, want %s", node, got, want)
 		}
 	}

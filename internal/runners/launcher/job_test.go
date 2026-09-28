@@ -21,12 +21,10 @@ func testConfig() Config {
 	}
 }
 
-var testNow = time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
-
 func testClaim() store.LaunchClaim {
 	return store.LaunchClaim{
-		ExpiresAt: testNow.Add(time.Hour),
-		Team:      "alpha", RunID: "run-1", NodeID: "build", Generation: 1, Kind: store.ClaimTokenWork,
+		LifetimeSecs: int64(time.Hour / time.Second),
+		Team:         "alpha", RunID: "run-1", NodeID: "build", Generation: 1, Kind: store.ClaimTokenWork,
 		Dispatch: store.RepoDispatchController, Class: store.CPUClass{Cores: 4, MemoryBytes: 14 << 30},
 		Token: "swc_one",
 	}
@@ -40,7 +38,7 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 	a, b := testClaim(), testClaim()
 	b.Team, b.RunID, b.NodeID, b.Generation, b.Kind, b.Token = "bravo", "run-2", "deploy", 7, store.ClaimTokenPlan, "swc_two"
 	b.Class = store.CPUClass{Cores: 64, MemoryBytes: 1 << 40}
-	ja, jb := BuildJob(cfg, a, testNow), BuildJob(cfg, b, testNow)
+	ja, jb := BuildJob(cfg, a), BuildJob(cfg, b)
 	pa, pb := ja.Spec.Template.Spec, jb.Spec.Template.Spec
 	ca, cb := pa.Containers[0], pb.Containers[0]
 	pa.Containers, pb.Containers, pa.NodeSelector, pb.NodeSelector = nil, nil, nil, nil
@@ -64,19 +62,15 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 }
 
 func TestBuildJob_PinsIdentityVolumesAndPlacement(t *testing.T) {
-	job := BuildJob(testConfig(), testClaim(), testNow)
+	job := BuildJob(testConfig(), testClaim())
 	pod := job.Spec.Template.Spec
 	c := pod.Containers[0]
 	if pod.ServiceAccountName != ServiceAccount || *pod.AutomountServiceAccountToken || *pod.EnableServiceLinks ||
 		pod.HostNetwork || pod.HostPID || pod.HostIPC {
 		t.Fatalf("pod identity: %+v", pod)
 	}
-	if *job.Spec.BackoffLimit != 0 || *job.Spec.ActiveDeadlineSeconds != int64(time.Hour.Seconds()) {
-		t.Fatalf("backoff %d deadline %d", *job.Spec.BackoffLimit, *job.Spec.ActiveDeadlineSeconds)
-	}
-	late := BuildJob(testConfig(), testClaim(), testNow.Add(50*time.Minute))
-	if got := *late.Spec.ActiveDeadlineSeconds; got != int64((10 * time.Minute).Seconds()) {
-		t.Fatalf("a Job built 50m into an hour's claim got a %ds deadline, want 600", got)
+	if want := int64((time.Hour - DeadlineMargin).Seconds()); *job.Spec.BackoffLimit != 0 || *job.Spec.ActiveDeadlineSeconds != want {
+		t.Fatalf("backoff %d deadline %d, want 0 and the lifetime less the margin %d", *job.Spec.BackoffLimit, *job.Spec.ActiveDeadlineSeconds, want)
 	}
 	for _, v := range pod.Volumes {
 		if v.EmptyDir == nil || v.EmptyDir.SizeLimit == nil {
