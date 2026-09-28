@@ -127,8 +127,6 @@ func githubAppSetupHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		flow, ok := readGitHubAppFlow(r, secure)
-		// safety: a cross-site redirect withholds the Strict session cookie; a page on
-		// this origin makes the next navigation carry it.
 		if !ok && query.Get("state") == "" && query.Get("setup_action") == "update" {
 			renderFlowPage(w, http.StatusOK, flowPage{
 				Title:       "Repository access updated on GitHub",

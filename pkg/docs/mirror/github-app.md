@@ -48,9 +48,8 @@ Only a team owner connects, and only as a signed-in account with a linked GitHub
 The `installation_id` the dashboard sends is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the dashboard origin before `connect/complete` uses the session. A setup return with `setup_action=request` means an organization owner must approve the install; the dashboard says so and the owner connects again after the approval.
 
 When an administrator changes repository access on GitHub outside a connect flow,
-GitHub returns to the setup URL with `setup_action=update`. The dashboard serves
-a same-origin navigation page so the next request carries the Strict session
-cookie, then opens **Team → GitHub** with “Repository access updated on GitHub”.
+GitHub returns to the setup URL with `setup_action=update`, and the dashboard
+opens **Team → GitHub** with “Repository access updated on GitHub”.
 
 The controller binds the installation to the caller's active team only when all of these hold:
 
