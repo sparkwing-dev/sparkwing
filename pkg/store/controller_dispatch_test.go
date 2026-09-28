@@ -217,27 +217,32 @@ func TestAcceptPlan_RefusesInvalidPlansAndWritesNothing(t *testing.T) {
 		huge[i] = fmt.Sprintf("n%d", i)
 	}
 	cases := map[string]string{
-		"not json":           `{"nodes":[`,
-		"two documents":      planOf("a") + planOf("b"),
-		"cycle":              planOf("a:c", "b:a", "c:b"),
-		"recovery cycle":     planOf(`a|"on_failure_of":"b"`, "b:a"),
-		"unknown dependency": planOf("a:ghost"),
-		"self dependency":    planOf("a:a"),
-		"duplicate id":       planOf("a", "a"),
-		"reserved id":        planOf(store.PlanNodeID),
-		"empty segment":      planOf("a//b"),
-		"relative segment":   planOf("a/../b"),
-		"control character":  planOf("a\tb"),
-		"long id":            planOf(strings.Repeat("x", store.MaxNodeIDBytes+1)),
-		"unknown recovery":   planOf(`a|"on_failure_of":"ghost"`),
-		"missing spec hash":  `{"nodes":[{"id":"a","deps":[]}]}`,
-		"dynamic fan-out":    planOf(`a|"dynamic":true`),
-		"approval":           planOf(`a|"approval":{"message":"ok?"}`),
-		"plan concurrency":   `{"plan_concurrency":{"key":"k"},"nodes":[]}`,
-		"plan groups":        `{"plan_concurrency_groups":[{"key":"k"}],"nodes":[]}`,
-		"when runner":        planOf(`a|"modifiers":{"when_runner":["gpu"]}`),
-		"too many nodes":     planOf(huge...),
-		"oversize":           `{"nodes":[],"pad":"` + strings.Repeat("x", store.MaxPlanBytes) + `"}`,
+		"not json":                  `{"nodes":[`,
+		"two documents":             planOf("a") + planOf("b"),
+		"cycle":                     planOf("a:c", "b:a", "c:b"),
+		"recovery cycle":            planOf(`a|"on_failure_of":"b"`, "b:a"),
+		"unknown dependency":        planOf("a:ghost"),
+		"self dependency":           planOf("a:a"),
+		"duplicate id":              planOf("a", "a"),
+		"reserved id":               planOf(store.PlanNodeID),
+		"empty segment":             planOf("a//b"),
+		"relative segment":          planOf("a/../b"),
+		"control character":         planOf("a\tb"),
+		"long id":                   planOf(strings.Repeat("x", store.MaxNodeIDBytes+1)),
+		"unknown recovery":          planOf(`a|"on_failure_of":"ghost"`),
+		"missing spec hash":         `{"nodes":[{"id":"a","deps":[]}]}`,
+		"dynamic fan-out":           planOf(`a|"dynamic":true`),
+		"approval":                  planOf(`a|"approval":{"message":"ok?"}`),
+		"plan concurrency":          `{"plan_concurrency":{"key":"k"},"nodes":[]}`,
+		"plan groups":               `{"plan_concurrency_groups":[{"key":"k"}],"nodes":[]}`,
+		"when runner":               planOf(`a|"modifiers":{"when_runner":["gpu"]}`),
+		"unknown modifier":          planOf(`a|"modifiers":{"retry_forever":true}`),
+		"box concurrency":           planOf(`a|"modifiers":{"conc_group":"g","conc_scope":"box"}`),
+		"unknown on_limit":          planOf(`a|"modifiers":{"conc_group":"g","conc_on_limit":"wait"}`),
+		"groupless limit":           planOf(`a|"modifiers":{"conc_capacity":2}`),
+		"unknown recovery modifier": planOf(`a|"modifiers":{"on_failure":"ghost"}`),
+		"too many nodes":            planOf(huge...),
+		"oversize":                  `{"nodes":[],"pad":"` + strings.Repeat("x", store.MaxPlanBytes) + `"}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -257,6 +262,30 @@ func TestAcceptPlan_RefusesInvalidPlansAndWritesNothing(t *testing.T) {
 				t.Fatalf("the claim could not submit a valid plan after a refused one: %v", err)
 			}
 		})
+	}
+}
+
+// The pipeline's requirements bind every node, node concurrency runs in the
+// pod, and the snapshot upload can no longer replace the accepted plan.
+func TestAcceptPlan_MergesRequiresAndKeepsTheAcceptedPlan(t *testing.T) {
+	f := newDispatchRun(t, "run-requires")
+	body := strings.Replace(planOf(
+		`a|"modifiers":{"runs_on":["linux","gpu"],"conc_group":"deploy","conc_scope":"global","conc_on_limit":"queue","conc_capacity":1}`,
+		"b:a",
+	), `{"pipeline":"demo",`, `{"pipeline":"demo","requires":["gpu","arm64"],`, 1)
+	f.mustAccept(t, body)
+	if got := strings.Join(f.node(t, "a").NeedsLabels, ","); got != "linux,gpu,arm64" {
+		t.Fatalf("a labels = %s", got)
+	}
+	if got := strings.Join(f.node(t, "b").NeedsLabels, ","); got != "gpu,arm64" {
+		t.Fatalf("b labels = %s", got)
+	}
+	ctx := context.Background()
+	if err := f.s.UpdatePlanSnapshot(ctx, f.run, []byte(`{"nodes":[]}`)); !errors.Is(err, store.ErrPlanAccepted) {
+		t.Fatalf("snapshot upload over an accepted plan: err = %v", err)
+	}
+	if r, err := f.s.GetRun(ctx, f.run); err != nil || string(r.PlanSnapshot) != body {
+		t.Fatalf("plan_json changed: %v", err)
 	}
 }
 
@@ -359,6 +388,17 @@ func TestReportAttempt_EdgeKindsDecideDependents(t *testing.T) {
 	if r.Status != "failed" || strings.Contains(r.Error, "maybe") || !strings.Contains(r.Error, "hard") {
 		t.Fatalf("run = %s %q; an optional failure must not count and a hard one must", r.Status, r.Error)
 	}
+}
+
+// Recovery nodes react to the run's verdict and do not set it, so a failed
+// recovery of an optional parent leaves the run successful.
+func TestReportAttempt_ARecoveryNodeDoesNotDecideTheRun(t *testing.T) {
+	f := newDispatchRun(t, "run-recovery-verdict")
+	f.mustAccept(t, planOf(`maybe|"modifiers":{"optional":true,"on_failure":"rescue"}`, `rescue|"on_failure_of":"maybe"`, "ok"))
+	f.mustReport(t, "maybe", "failed")
+	f.mustReport(t, "rescue", "failed")
+	f.mustReport(t, "ok", "success")
+	f.wantRun(t, "success")
 }
 
 func TestReportAttempt_OptionalFailureLeavesTheRunSuccessful(t *testing.T) {

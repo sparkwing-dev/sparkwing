@@ -675,6 +675,7 @@ var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
+var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
 var ErrPlanInvalid = errors.New("store: plan refused")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")

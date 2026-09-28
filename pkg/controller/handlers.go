@@ -226,6 +226,10 @@ func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := tenant.UpdatePlanSnapshot(r.Context(), runID, snapshot); err != nil {
+		if errors.Is(err, store.ErrPlanAccepted) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

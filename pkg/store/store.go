@@ -3891,6 +3891,18 @@ func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string,
 	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
+	var accepted int64
+	err = tx.QueryRowContext(ctx, `SELECT plan_accepted_generation FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),
+		string(team), runID).Scan(&accepted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	if err != nil {
+		return err
+	}
+	if accepted != 0 {
+		return ErrPlanAccepted
+	}
 	sum := sha256.Sum256(snapshot)
 	planHash := "sha256:" + hex.EncodeToString(sum[:])
 	if _, err := tx.ExecContext(ctx, `INSERT INTO run_definition_plans (team, run_id, plan_hash)

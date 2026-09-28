@@ -211,7 +211,9 @@ func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID str
 		if n.status != nodeStatusDone {
 			return nil
 		}
-		if n.optional || outcomeOK(n.outcome) {
+		// safety: the run's verdict is its primary nodes', as the in-process
+		// dispatcher decides it; a recovery node only reacts to one of them.
+		if n.optional || n.onFailureOf != "" || outcomeOK(n.outcome) {
 			continue
 		}
 		switch n.outcome {

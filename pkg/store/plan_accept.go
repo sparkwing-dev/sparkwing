@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,36 +35,59 @@ const (
 // wrapped message names the first reason.
 var ErrPlanInvalid = errors.New("store: plan refused")
 
+// ErrPlanAccepted refuses a plan-snapshot upload for a run whose planning
+// claim's plan was accepted; that plan is the run's for good.
+var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
+
 var specHashRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type submittedPlan struct {
+	Requires  []string          `json:"requires"`
 	Nodes     []submittedNode   `json:"nodes"`
 	PlanConc  *json.RawMessage  `json:"plan_concurrency"`
 	PlanConcs []json.RawMessage `json:"plan_concurrency_groups"`
 }
 
 type submittedNode struct {
-	ID           string              `json:"id"`
-	Deps         []string            `json:"deps"`
-	OptionalDeps []string            `json:"optional_deps"`
-	SpecHash     string              `json:"spec_hash"`
-	Dynamic      bool                `json:"dynamic"`
-	Approval     *json.RawMessage    `json:"approval"`
-	OnFailureOf  string              `json:"on_failure_of"`
-	Modifiers    *submittedModifiers `json:"modifiers"`
+	ID           string           `json:"id"`
+	Deps         []string         `json:"deps"`
+	OptionalDeps []string         `json:"optional_deps"`
+	SpecHash     string           `json:"spec_hash"`
+	Dynamic      bool             `json:"dynamic"`
+	Approval     *json.RawMessage `json:"approval"`
+	OnFailureOf  string           `json:"on_failure_of"`
+	Modifiers    json.RawMessage  `json:"modifiers"`
 }
 
+// safety: decoded strictly, so a modifier this store does not know is refused
+// rather than dropped; every field here is either enforced or runs in the pod.
 type submittedModifiers struct {
-	Retry           int      `json:"retry"`
-	RetryBackoffMS  int64    `json:"retry_backoff_ms"`
-	RetryAuto       bool     `json:"retry_auto"`
-	RunsOn          []string `json:"runs_on"`
-	Prefers         []string `json:"prefers"`
-	WhenRunner      []string `json:"when_runner"`
-	ResCores        float64  `json:"res_cores"`
-	ResMemoryBytes  int64    `json:"res_memory_bytes"`
-	Optional        bool     `json:"optional"`
-	ContinueOnError bool     `json:"continue_on_error"`
+	Retry               int      `json:"retry"`
+	RetryBackoffMS      int64    `json:"retry_backoff_ms"`
+	RetryAuto           bool     `json:"retry_auto"`
+	TimeoutMS           int64    `json:"timeout_ms"`
+	NoProgressTimeoutMS int64    `json:"no_progress_timeout_ms"`
+	RunsOn              []string `json:"runs_on"`
+	Prefers             []string `json:"prefers"`
+	WhenRunner          []string `json:"when_runner"`
+	Cache               bool     `json:"cache"`
+	CacheTTLMS          int64    `json:"cache_ttl_ms"`
+	ConcGroup           string   `json:"conc_group"`
+	ConcCapacity        int      `json:"conc_capacity"`
+	ConcCost            int      `json:"conc_cost"`
+	ConcScope           string   `json:"conc_scope"`
+	ConcOnLimit         string   `json:"conc_on_limit"`
+	ConcQueueTimeoutMS  int64    `json:"conc_queue_timeout_ms"`
+	ConcCancelTimeoutMS int64    `json:"conc_cancel_timeout_ms"`
+	ResCores            float64  `json:"res_cores"`
+	ResMemoryBytes      int64    `json:"res_memory_bytes"`
+	Inline              bool     `json:"inline"`
+	Optional            bool     `json:"optional"`
+	ContinueOnError     bool     `json:"continue_on_error"`
+	OnFailure           string   `json:"on_failure"`
+	HasBeforeRun        bool     `json:"has_before_run"`
+	HasAfterRun         bool     `json:"has_after_run"`
+	HasSkipIf           bool     `json:"has_skip_if"`
 }
 
 type plannedNode struct {
@@ -246,7 +270,7 @@ func validatePlan(body []byte) ([]plannedNode, error) {
 	}
 	out := make([]plannedNode, 0, len(plan.Nodes))
 	for _, n := range plan.Nodes {
-		p, err := planNode(n, known)
+		p, err := planNode(n, known, plan.Requires)
 		if err != nil {
 			return nil, planRefused("node %q: %v", n.ID, err)
 		}
@@ -285,7 +309,7 @@ func validNodeID(id string) error {
 	return nil
 }
 
-func planNode(n submittedNode, known map[string]bool) (plannedNode, error) {
+func planNode(n submittedNode, known map[string]bool, requires []string) (plannedNode, error) {
 	switch {
 	case n.Dynamic:
 		return plannedNode{}, errors.New("dynamic fan-out is not supported")
@@ -322,13 +346,23 @@ func planNode(n submittedNode, known map[string]bool) (plannedNode, error) {
 	if p.deps == nil {
 		p.deps = []string{}
 	}
-	m := n.Modifiers
-	if m == nil {
-		return p, nil
+	var m submittedModifiers
+	if len(n.Modifiers) > 0 && string(n.Modifiers) != "null" {
+		dec := json.NewDecoder(bytes.NewReader(n.Modifiers))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&m); err != nil {
+			return plannedNode{}, fmt.Errorf("modifiers: %w", err)
+		}
 	}
-	if len(m.WhenRunner) > 0 {
-		return plannedNode{}, errors.New("when_runner is not supported yet")
+	if err := checkModifiers(&m); err != nil {
+		return plannedNode{}, err
 	}
+	if m.OnFailure != "" && !known[m.OnFailure] {
+		return plannedNode{}, fmt.Errorf("names recovery node %q, which the plan does not hold", m.OnFailure)
+	}
+	// safety: the pipeline's requirements bind every node, as the in-process
+	// dispatcher merges them into each node's claim labels.
+	m.RunsOn = mergeLabels(m.RunsOn, requires)
 	for _, labels := range [][]string{m.RunsOn, m.Prefers} {
 		if len(labels) > maxNodeLabels {
 			return plannedNode{}, fmt.Errorf("more than %d runner labels", maxNodeLabels)
@@ -350,6 +384,38 @@ func planNode(n submittedNode, known map[string]bool) (plannedNode, error) {
 	}
 	p.resource.MemoryBytes = max(m.ResMemoryBytes, 0)
 	return p, nil
+}
+
+func checkModifiers(m *submittedModifiers) error {
+	switch {
+	case len(m.WhenRunner) > 0:
+		return errors.New("when_runner is not supported yet")
+	case m.ConcScope == "box":
+		return errors.New(`concurrency scope "box" bounds one machine, and each node runs on a machine of its own`)
+	case m.ConcScope != "" && m.ConcScope != "run" && m.ConcScope != "global":
+		return fmt.Errorf("concurrency scope %q is not run or global", m.ConcScope)
+	case m.ConcOnLimit != "" && m.ConcOnLimit != "queue" && m.ConcOnLimit != "fail" &&
+		m.ConcOnLimit != "skip" && m.ConcOnLimit != "cancel_others":
+		return fmt.Errorf("concurrency on_limit %q is not queue, fail, skip or cancel_others", m.ConcOnLimit)
+	case m.ConcGroup == "" && (m.ConcScope != "" || m.ConcOnLimit != "" || m.ConcCapacity != 0 || m.ConcCost != 0):
+		return errors.New("concurrency settings name no conc_group")
+	case m.ConcCapacity < 0 || m.ConcCost < 0 || m.TimeoutMS < 0 || m.NoProgressTimeoutMS < 0 ||
+		m.CacheTTLMS < 0 || m.ConcQueueTimeoutMS < 0 || m.ConcCancelTimeoutMS < 0:
+		return errors.New("a count or duration is negative")
+	}
+	return nil
+}
+
+func mergeLabels(own, extra []string) []string {
+	out := make([]string, 0, len(own)+len(extra))
+	seen := make(map[string]bool, len(own)+len(extra))
+	for _, l := range append(slices.Clone(own), extra...) {
+		if !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func planCycle(nodes []plannedNode) string {

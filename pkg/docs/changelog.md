@@ -39,14 +39,19 @@ unlock.
   /api/v1/runs/{id}/plan` with a plan claim's token validates the plan (at
   most 1,000 nodes and 4 MiB, node ID format, dependency and recovery
   references, no cycles, no plan-level concurrency, dynamic fan-out, approval
-  or `when_runner` nodes), clamps cores, memory, retries and backoff to their
-  ceilings, and in one commit inserts the nodes, finishes the planning node and
-  releases the nodes with no dependencies. A run accepts exactly one plan. `POST
+  or `when_runner` nodes, no modifier it does not know, and no `box`-scoped
+  node concurrency), merges the pipeline's `requires` into every node's runner
+  labels, clamps cores, memory, retries and backoff to their ceilings, and in
+  one commit inserts the nodes, finishes the planning node and releases the
+  nodes with no dependencies. A run accepts exactly one plan, and the
+  plan-snapshot upload answers 409 for that run from then on. `POST
   /api/v1/runs/{id}/nodes/{nodeID}/attempt` records an attempt's outcome,
   output and failure record, and in the same commit either requeues the node
   after its backoff within its retry budget or writes its final outcome, then
   releases or cancels dependents and finishes the run once every node is
-  terminal. A failed attempt that will be retried never releases a dependent.
+  terminal; as in a local run, OnFailure recovery nodes do not decide the
+  run's result. A failed attempt that will be retried never releases a
+  dependent.
   A bearer without a claim token still reaches the plan-snapshot upload at
   `POST /api/v1/runs/{id}/plan`, and no run uses the new path yet. Controllers
   older than schema 77 keep working against a migrated database.
