@@ -37,7 +37,7 @@ const childInvocationsTable = `CREATE TABLE IF NOT EXISTS child_invocations (
     parent_node_id   TEXT NOT NULL,
     claim_generation INTEGER NOT NULL,
     ordinal          INTEGER NOT NULL,
-    pipeline         TEXT NOT NULL,
+    request_digest   TEXT NOT NULL,
     child_run_id     TEXT NOT NULL,
     created_at       INTEGER NOT NULL,
     PRIMARY KEY (team, parent_run_id, parent_node_id, claim_generation, ordinal),
@@ -188,12 +188,12 @@ func (s *Store) resolveControllerApproval(ctx context.Context, runID, nodeID, re
 
 const maxExpiredApprovalsPerPass = 500
 
-type expiredApproval struct {
+type teamNodeRef struct {
 	team          Team
 	runID, nodeID string
 }
 
-func (s *Store) expiredControllerApprovals(ctx context.Context, now time.Time) ([]expiredApproval, error) {
+func (s *Store) expiredControllerApprovals(ctx context.Context, now time.Time) ([]teamNodeRef, error) {
 	rows, err := s.query(ctx, `SELECT a.team, a.run_id, a.node_id FROM approvals a
   JOIN nodes n ON n.team = a.team AND n.run_id = a.run_id AND n.node_id = a.node_id
  WHERE a.resolved_at IS NULL AND a.timeout_ms > 0 AND a.requested_at + (a.timeout_ms * 1000000) < ?
@@ -202,9 +202,9 @@ func (s *Store) expiredControllerApprovals(ctx context.Context, now time.Time) (
 		return nil, err
 	}
 	defer closeRowsOrLog(rows)
-	var out []expiredApproval
+	var out []teamNodeRef
 	for rows.Next() {
-		var e expiredApproval
+		var e teamNodeRef
 		if err := rows.Scan(&e.team, &e.runID, &e.nodeID); err != nil {
 			return nil, err
 		}
@@ -275,4 +275,101 @@ func (s *Store) requestControllerRunCancel(ctx context.Context, runID string, no
 		return true, err
 	}
 	return true, tx.Commit()
+}
+
+// safety: a node of a run with a cancel request is never awarded, so a claim
+// that ends on such a run cannot be replaced by a new one.
+const nodeRunNotCancelled = ` AND NOT EXISTS (SELECT 1 FROM runs cr
+     WHERE cr.team = nodes.team AND cr.id = nodes.run_id AND cr.cancel_requested_at IS NOT NULL)`
+
+const maxExpiredDispatchRunsPerPass = 500
+
+// safety: a controller-dispatched claim whose lease lapsed ends as a failed
+// attempt of its node, so the node is retried within its budget, or cancelled
+// on a cancelled run, and the run settles; each run is its own transaction,
+// locking the run before its nodes and the ledger last.
+func (s *Store) expireDispatchClaims(ctx context.Context, now time.Time) ([][2]string, error) {
+	runs, err := s.expiredDispatchRuns(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	var out [][2]string
+	for _, r := range runs {
+		var expired [][2]string
+		err := s.inTx(ctx, func(tx *storeTx) (err error) {
+			expired, err = s.expireRunClaimsTx(ctx, tx, r.team, r.runID, now)
+			return err
+		})
+		if err != nil {
+			return out, err
+		}
+		out = append(out, expired...)
+	}
+	return out, nil
+}
+
+func (s *Store) expiredDispatchRuns(ctx context.Context, now time.Time) ([]teamNodeRef, error) {
+	rows, err := s.query(ctx, `SELECT DISTINCT team, run_id FROM nodes
+ WHERE kind != '' AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
+   AND `+nodeNotDone+` ORDER BY team, run_id LIMIT ?`, now.UnixNano(), maxExpiredDispatchRunsPerPass)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsOrLog(rows)
+	var out []teamNodeRef
+	for rows.Next() {
+		var e teamNodeRef
+		if err := rows.Scan(&e.team, &e.runID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) expireRunClaimsTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) ([][2]string, error) {
+	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
+		return nil, err
+	}
+	type lapsed struct {
+		nodeID, kind string
+		generation   int64
+		lease        int64
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT node_id, kind, claim_generation, lease_expires_at FROM nodes
+ WHERE team = ? AND run_id = ? AND kind != '' AND claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
+   AND lease_expires_at < ? AND `+nodeNotDone+` ORDER BY node_id`, string(team), runID, now.UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	var items []lapsed
+	for rows.Next() {
+		var l lapsed
+		if err := rows.Scan(&l.nodeID, &l.kind, &l.generation, &l.lease); err != nil {
+			closeRowsOrLog(rows)
+			return nil, err
+		}
+		items = append(items, l)
+	}
+	closeRowsOrLog(rows)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, team, runID)
+	if err != nil {
+		return nil, err
+	}
+	report := AttemptReport{Outcome: outcomeFailed, Error: "claim lease expired", FailureReason: FailureAgentLost}
+	if cancelled {
+		report.Outcome = outcomeCancelled
+	}
+	var out [][2]string
+	for _, l := range items {
+		tok := ClaimToken{Team: team, RunID: runID, NodeID: l.nodeID, Generation: l.generation, Kind: ClaimTokenKind(l.kind)}
+		if err := s.commitAttemptBilledTx(ctx, tx, tok, report, now, time.Unix(0, min(l.lease, now.UnixNano()))); err != nil {
+			return nil, err
+		}
+		out = append(out, [2]string{runID, l.nodeID})
+	}
+	return out, nil
 }

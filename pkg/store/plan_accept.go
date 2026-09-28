@@ -104,6 +104,10 @@ func planRefused(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrPlanInvalid, fmt.Sprintf(format, args...))
 }
 
+// safety: a planning claim lost with its machine is planned once more, as any
+// node within its retry budget is; a second loss fails the run.
+const planNodeRetryBudget = 1
+
 // CreatePlanNode starts a controller-dispatched run: it adds the run's
 // [PlanNodeID] node, ready for a planning claim. The run must exist in team
 // and have no nodes.
@@ -121,10 +125,10 @@ func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO nodes (team, run_id, node_id, status, kind, deps_json,
-       credit_cpu_class, ready_at, placement_hold_from, seq)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+       credit_cpu_class, ready_at, placement_hold_from, retry_budget, seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		string(team), runID, PlanNodeID, nodeStatusPending, nodeKindPlan, []byte("[]"),
-		class, now.UnixNano(), now.UnixNano()); err != nil {
+		class, now.UnixNano(), now.UnixNano(), planNodeRetryBudget); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission = ? WHERE team = ? AND id = ?`,

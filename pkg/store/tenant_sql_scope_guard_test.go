@@ -32,6 +32,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"retention, not one team's data",
 	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
 		"to lock them before their nodes",
+	"(*Store).expiredDispatchRuns": "the expired-claim reaper finds every team's controller-dispatched runs " +
+		"holding a lapsed claim; each is then settled under that team's own run row",
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
 	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
 		"the payment reverses it in that team; a payment id is unique across teams",

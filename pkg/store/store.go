@@ -5969,7 +5969,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
-		    AND `+nodeNotDone+`
+		    AND `+nodeNotDone+nodeRunNotCancelled+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
 		    AND `+nodeExecutionUnsealed+teamClause,
 		awardArgs...,
@@ -6296,8 +6296,14 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
-// claims; ready_at is left intact. Returns reaped pairs.
+// claims; ready_at is left intact. An expired claim on a controller-dispatched
+// run ends as a lost attempt instead, through [Store.ReportAttempt]'s retry
+// and settle. Returns reaped pairs.
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
+	dispatched, err := s.expireDispatchClaims(ctx, time.Now())
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -6311,7 +6317,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
+		    AND lease_expires_at < ? AND kind = '' AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -6335,7 +6341,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	if len(pairs) == 0 {
-		return nil, nil
+		return dispatched, nil
 	}
 	for _, claim := range lapsed {
 		if err := s.settleExpiredClaimTx(ctx, tx, claim, now); err != nil {
@@ -6361,7 +6367,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return pairs, nil
+	return append(dispatched, pairs...), nil
 }
 
 func (s *Store) failExpiredNodeClaims(ctx context.Context) ([][2]string, error) {

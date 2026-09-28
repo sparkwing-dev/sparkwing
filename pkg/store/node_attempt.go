@@ -104,6 +104,14 @@ type attemptNode struct {
 // so this runs once per claim and every write below lands with that digest or
 // not at all.
 func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken, report AttemptReport, now time.Time) error {
+	return s.commitAttemptBilledTx(ctx, tx, tok, report, now, now)
+}
+
+// safety: billedTo ends the attempt's charge window, which for a claim whose
+// lease lapsed is the lapse, not the later pass that noticed it.
+func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok ClaimToken, report AttemptReport,
+	now, billedTo time.Time,
+) error {
 	var n attemptNode
 	err := tx.QueryRowContext(ctx, `SELECT kind, retry_root_run_id, claim_token_prefix, COALESCE(claimed_by, ''),
        claim_membership_id, claim_executor, claim_executor_kind, executor_location, reservation_id,
@@ -131,7 +139,10 @@ func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken
 	if err != nil {
 		return err
 	}
-	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled
+	// safety: a planning claim's own failure is deterministic, so only a lost
+	// planning claim is planned again.
+	retry := report.Outcome == outcomeFailed && ordinal <= n.retryBudget && !cancelled &&
+		(n.kind != nodeKindPlan || report.FailureReason == FailureAgentLost)
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes
@@ -162,7 +173,7 @@ func (s *Store) commitAttemptTx(ctx context.Context, tx *storeTx, tok ClaimToken
 	// the charge follows settle's node writes, and an unmetered attempt, whose
 	// charge window never opened, skips it.
 	if n.chargedThrough != 0 {
-		if _, err := s.chargeNodeTx(ctx, tx, tok.RunID, tok.NodeID, n.tokenPrefix, now, true); err != nil {
+		if _, err := s.chargeNodeTx(ctx, tx, tok.RunID, tok.NodeID, n.tokenPrefix, billedTo, true); err != nil {
 			return err
 		}
 	}

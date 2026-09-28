@@ -312,3 +312,134 @@ func TestEnqueueChildRun_IsIdempotentPerInvocation(t *testing.T) {
 		t.Fatalf("enqueue after cancel: err = %v", err)
 	}
 }
+
+func (f dispatchRun) expireClaim(t *testing.T, nodeID string) {
+	t.Helper()
+	if _, err := f.s.DB().ExecContext(context.Background(), storetest.Rebind(f.s,
+		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`),
+		time.Now().Add(-time.Second).UnixNano(), f.run, nodeID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func recoverClaims(t *testing.T, s *store.Store) {
+	t.Helper()
+	if _, err := store.Maintenance.RecoverExpiredNodeClaims(s, context.Background()); err != nil {
+		t.Fatalf("recover expired claims: %v", err)
+	}
+}
+
+// A cancelled run whose last claimed pod vanishes still finishes: the lapsed
+// claim ends the node cancelled and the run cancelled, and nothing can claim
+// the node again.
+func TestExpiry_ACancelledRunWhosePodVanishesFinishesCancelled(t *testing.T) {
+	f := newDispatchRun(t, "run-expire-cancel")
+	f.mustAccept(t, planOf(`a|"modifiers":{"retry":3,"retry_auto":true}`, "b:a"))
+	f.claim(t, "a", store.ClaimTokenWork)
+	ctx := context.Background()
+	if err := f.s.RequestCancel(ctx, f.run); err != nil {
+		t.Fatal(err)
+	}
+	f.expireClaim(t, "a")
+	recoverClaims(t, f.s)
+	f.wantOutcome(t, "a", "cancelled")
+	f.wantOutcome(t, "b", "cancelled")
+	f.wantRun(t, "cancelled")
+	if _, err := f.s.ClaimNamedNode(ctx, f.claimant, f.run, "a", "holder-late", time.Minute, store.NamedClaimOptions{}); err == nil {
+		t.Fatal("a node of a cancelled run was claimed again")
+	}
+}
+
+// A lapsed claim is a failed attempt: within the node's budget the node goes
+// back to the queue at a new generation with its dependents held, and past it
+// the node fails and settle cancels the dependents and fails the run.
+func TestExpiry_ALapsedClaimRetriesThroughSettle(t *testing.T) {
+	f := newDispatchRun(t, "run-expire-retry")
+	f.mustAccept(t, planOf(`a|"modifiers":{"retry":1,"retry_auto":true}`, "b:a"))
+	first := f.claim(t, "a", store.ClaimTokenWork)
+	f.expireClaim(t, "a")
+	if _, err := f.s.ReapExpiredNodeClaims(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	a := f.node(t, "a")
+	if a.Status != "pending" || a.ClaimedBy != "" || a.AttemptsConsumed != 1 {
+		t.Fatalf("a = %s claimed %q consumed %d, want requeued after one lost attempt", a.Status, a.ClaimedBy, a.AttemptsConsumed)
+	}
+	f.wantReleased(t, "b", false)
+	if _, err := f.report(first, store.AttemptReport{Outcome: "success"}); !errors.Is(err, store.ErrClaimResultConflict) {
+		t.Fatalf("a report from the lapsed claim: err = %v, want conflict", err)
+	}
+	second := f.claim(t, "a", store.ClaimTokenWork)
+	if second.Generation <= first.Generation {
+		t.Fatalf("requeued claim at generation %d, want above %d", second.Generation, first.Generation)
+	}
+	f.expireClaim(t, "a")
+	recoverClaims(t, f.s)
+	f.wantOutcome(t, "a", "failed")
+	f.wantOutcome(t, "b", "cancelled")
+	f.wantRun(t, "failed")
+}
+
+// No path awards a node of a run with a cancel request, even one settle has
+// not yet reached.
+func TestAward_RefusesARunWithACancelRequest(t *testing.T) {
+	f := newDispatchRun(t, "run-award-cancel")
+	f.mustAccept(t, planOf("a", "b"))
+	ctx := context.Background()
+	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
+		`UPDATE runs SET cancel_requested_at = ? WHERE id = ?`), time.Now().UnixNano(), f.run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.ClaimNamedNode(ctx, f.claimant, f.run, "a", "holder-a", time.Minute, store.NamedClaimOptions{}); !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("award on a cancel-requested run: err = %v, want refused", err)
+	}
+	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
+		`UPDATE runs SET cancel_requested_at = NULL WHERE id = ?`), f.run); err != nil {
+		t.Fatal(err)
+	}
+	f.claim(t, "b", store.ClaimTokenWork)
+}
+
+// A later attempt reuses a child only on evidence it is live or succeeded,
+// and only for the same pipeline and arguments.
+func TestEnqueueChildRun_ReusesOnlyALiveChildOfTheSameRequest(t *testing.T) {
+	f := newDispatchRun(t, "run-child-reuse")
+	f.mustAccept(t, planOf(`a|"modifiers":{"retry":3,"retry_auto":true}`))
+	ctx := context.Background()
+	enqueue := func(tok store.ClaimToken, ordinal int64, id, arg string) (string, error) {
+		return f.s.EnqueueChildRun(ctx, tok, ordinal,
+			store.Trigger{ID: id, Pipeline: "child", Args: map[string]string{"env": arg}}, time.Now())
+	}
+	tok := f.claim(t, "a", store.ClaimTokenWork)
+	for i, id := range []string{"done-no-run", "cancelled-early", "succeeded", "other-args"} {
+		if got, err := enqueue(tok, int64(i), id, "prod"); err != nil || got != id {
+			t.Fatalf("enqueue %s: %q %v", id, got, err)
+		}
+	}
+	if _, err := enqueue(tok, 3, "other-args-2", "staging"); !errors.Is(err, store.ErrClaimResultConflict) {
+		t.Fatalf("same invocation with other arguments: err = %v, want conflict", err)
+	}
+	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
+		`UPDATE triggers SET status = 'done' WHERE id = ?`), "done-no-run"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.RequestCancel(ctx, "cancelled-early"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.CreateRun(ctx, store.Run{ID: "succeeded", Pipeline: "child", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.report(tok, store.AttemptReport{Outcome: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	next := f.claim(t, "a", store.ClaimTokenWork)
+	for i, want := range []string{"done-no-run-2", "cancelled-early-2", "succeeded", "other-args-2"} {
+		arg := "prod"
+		if i == 3 {
+			arg = "staging"
+		}
+		if got, err := enqueue(next, int64(i), want, arg); err != nil || got != want {
+			t.Fatalf("ordinal %d on the next attempt: %q %v, want %s", i, got, err, want)
+		}
+	}
+}

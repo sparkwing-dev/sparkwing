@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -15,18 +18,30 @@ import (
 //
 // The same invocation ID returns the same child, so a retry after a lost
 // response starts nothing, while two calls with different ordinals start two
-// children. A later attempt at the node reuses an earlier attempt's child at
-// the same ordinal and pipeline when that child succeeded or has not
-// finished. The claim must be live with no cancel requested on its run.
+// children; the same ID with a different pipeline or arguments is
+// [ErrClaimResultConflict]. A later attempt at the node reuses an earlier
+// attempt's child at the same ordinal, pipeline and arguments only while that
+// child is provably queued, running or succeeded. The claim must be live with
+// no cancel requested on its run.
 func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int64, t Trigger, now time.Time) (childID string, err error) {
 	if ordinal < 0 || t.Pipeline == "" || t.ID == "" {
 		return "", fmt.Errorf("%w: a child run needs an ID, a pipeline and a non-negative ordinal", ErrInvalidInput)
+	}
+	request, err := childRequestDigest(t)
+	if err != nil {
+		return "", err
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return "", err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	// safety: free-tier admission takes its global lock before any run lock,
+	// as every trigger insert does, so the claim checks below run under the
+	// run lock after it.
+	if err := admitFreeTeamRunTx(ctx, tx, tok.Team, now); err != nil {
+		return "", err
+	}
 	if err := lockDispatchRunTx(ctx, tx, tok.Team, tok.RunID); err != nil {
 		return "", err
 	}
@@ -44,26 +59,32 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 	if cancelled {
 		return "", ErrClaimCancelRequested
 	}
-	var pipeline string
-	err = tx.QueryRowContext(ctx, `SELECT child_run_id, pipeline FROM child_invocations
+	var committed string
+	err = tx.QueryRowContext(ctx, `SELECT child_run_id, request_digest FROM child_invocations
  WHERE team = ? AND parent_run_id = ? AND parent_node_id = ? AND claim_generation = ? AND ordinal = ?`,
-		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, ordinal).Scan(&childID, &pipeline)
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, ordinal).Scan(&childID, &committed)
 	switch {
-	case err == nil && pipeline != t.Pipeline:
-		return "", fmt.Errorf("%w: invocation %d already started pipeline %q", ErrClaimResultConflict, ordinal, pipeline)
+	case err == nil && committed != request:
+		return "", fmt.Errorf("%w: invocation %d already started a child with other inputs", ErrClaimResultConflict, ordinal)
 	case err == nil:
 		return childID, nil
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
 	}
+	// safety: a child is reused only on evidence it will still succeed: a run
+	// that succeeded, or one queued or running with no cancel request on it or
+	// its trigger. A trigger no run row backs counts only while it is queued or
+	// claimed, so one finished or cancelled before dispatch starts a new child.
 	err = tx.QueryRowContext(ctx, `SELECT c.child_run_id FROM child_invocations c
   JOIN triggers t ON t.team = c.team AND t.id = c.child_run_id
   LEFT JOIN runs r ON r.team = c.team AND r.id = c.child_run_id
- WHERE c.team = ? AND c.parent_run_id = ? AND c.parent_node_id = ? AND c.ordinal = ? AND c.pipeline = ?
-   AND c.claim_generation < ? AND t.status != ? AND COALESCE(r.status, '') NOT IN (?, ?)
+ WHERE c.team = ? AND c.parent_run_id = ? AND c.parent_node_id = ? AND c.ordinal = ? AND c.request_digest = ?
+   AND c.claim_generation < ?
+   AND (r.status = ? OR (t.cancel_requested_at IS NULL AND (
+        (r.id IS NULL AND t.status IN (?, ?)) OR (r.status IN (?, ?) AND r.cancel_requested_at IS NULL))))
  ORDER BY c.claim_generation DESC LIMIT 1`,
-		string(tok.Team), tok.RunID, tok.NodeID, ordinal, t.Pipeline, tok.Generation,
-		triggerStatusFailed, runStatusFailed, runStatusCancelled).Scan(&childID)
+		string(tok.Team), tok.RunID, tok.NodeID, ordinal, request, tok.Generation,
+		runStatusSuccess, triggerStatusPending, triggerStatusClaimed, runStatusPending, runStatusRunning).Scan(&childID)
 	if errors.Is(err, sql.ErrNoRows) {
 		t.ParentRunID, t.ParentNodeID, t.Status = tok.RunID, tok.NodeID, ""
 		if t.CreatedAt.IsZero() {
@@ -78,10 +99,24 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 		return "", err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO child_invocations
-       (team, parent_run_id, parent_node_id, claim_generation, ordinal, pipeline, child_run_id, created_at)
+       (team, parent_run_id, parent_node_id, claim_generation, ordinal, request_digest, child_run_id, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, ordinal, t.Pipeline, childID, now.UnixNano()); err != nil {
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, ordinal, request, childID, now.UnixNano()); err != nil {
 		return "", err
 	}
 	return childID, tx.Commit()
+}
+
+// safety: encoding/json writes map keys sorted, so equal arguments always
+// digest the same.
+func childRequestDigest(t Trigger) (string, error) {
+	raw, err := json.Marshal(struct {
+		Pipeline string            `json:"pipeline"`
+		Args     map[string]string `json:"args"`
+	}{t.Pipeline, t.Args})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
 }
