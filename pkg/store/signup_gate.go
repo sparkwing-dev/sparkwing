@@ -332,10 +332,23 @@ func lockSignUpGateTx(ctx context.Context, tx *storeTx) (SignUpGate, error) {
 }
 
 func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string, now time.Time) error {
-	_, err := tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO signup_admissions (account_id, kind, at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
 		accountID, kind, now.UnixNano())
-	return err
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	return recordAdmissionEventTx(tx, accountID, kind, now)
+}
+
+func recordAdmissionEventTx(tx *storeTx, accountID, via string, now time.Time) error {
+	return RecordBusinessEvent(tx, BusinessEvent{
+		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID,
+		Attrs: map[string]any{"via": via},
+	})
 }
 
 // safety: g must be the row this transaction locked. The windows start no earlier than the operator last
@@ -515,6 +528,9 @@ func (s *Store) approveOneOnce(ctx context.Context, id string, now time.Time) (A
 		return Account{}, false, err
 	}
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return Account{}, false, err
+	}
+	if err := recordAdmissionEventTx(tx, id, "waitlist", now); err != nil {
 		return Account{}, false, err
 	}
 	acct, err := accountTx(ctx, tx, id)

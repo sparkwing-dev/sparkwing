@@ -2101,8 +2101,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimTokensMigration(ctx, tx, false)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, false)
-	case 78, 79:
+	case 78:
 		return nil
+	case 79:
+		return applyBusinessEventsMigration(ctx, tx, false)
 	case 80:
 		return ensureColumnsSQLite(ctx, tx, "teams", billingTrustCols)
 	default:
@@ -2539,8 +2541,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimTokensMigration(ctx, tx, true)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, true)
-	case 78, 79:
+	case 78:
 		return nil
+	case 79:
+		return applyBusinessEventsMigration(ctx, tx, true)
 	case 80:
 		return addColumnsTx(ctx, tx, "teams", billingTrustColsPostgres)
 	default:
@@ -3796,7 +3800,12 @@ func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg str
 		return err
 	}
 	if changed, err := res.RowsAffected(); err != nil || changed != 0 {
-		return err
+		if err != nil || status != outcomeSuccess {
+			return err
+		}
+		return RecordBusinessEvent(tx, BusinessEvent{
+			Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": runID},
+		})
 	}
 	var priorStatus, priorError string
 	err = tx.QueryRowContext(ctx,

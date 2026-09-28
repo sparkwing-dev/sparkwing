@@ -135,11 +135,22 @@ type BusinessEvent struct {
 	Actor     string
 	Attrs     map[string]any
 }
+const BusinessEventAccountAdmitted = "account.admitted"
 const BusinessEventBillingTrustChanged = "billing.trust_changed"
+const BusinessEventCheckoutExpired = "checkout.expired"
+const BusinessEventCheckoutFailed = "checkout.failed"
+const BusinessEventCheckoutOpened = "checkout.opened"
+const BusinessEventCheckoutPaid = "checkout.paid"
+const BusinessEventCreditGranted = "credit.granted"
+const BusinessEventCreditReversed = "credit.reversed"
+const BusinessEventFirstRunSucceeded = "run.first_succeeded"
 const BusinessEventOperatorCreditGranted = "operator.credit_granted"
 const BusinessEventOperatorTeamFrozen = "operator.team_frozen"
 const BusinessEventOperatorTeamUnfrozen = "operator.team_unfrozen"
 const BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
+const BusinessEventTeamCreated = "team.created"
+const BusinessEventTeamFrozen = "team.frozen"
+const BusinessEventTeamUnfrozen = "team.unfrozen"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
 type CPUClass struct {
@@ -661,6 +672,7 @@ var ErrAttemptInvalid = errors.New("store: attempt report refused")
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
+var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
 var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 var ErrClaimResultConflict = errors.New("store: the claim committed a different result or none")
@@ -2101,7 +2113,7 @@ func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (_ int64, err error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
@@ -2279,10 +2291,13 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
-func (t *Tenant) BusinessEvents(ctx context.Context, kind string) ([]BusinessEvent, error)
+func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
+func (t *Tenant) CloseCreditCheckout(
+	ctx context.Context, sessionID, outcome, actor string, now time.Time,
+) (_ bool, err error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
@@ -2315,7 +2330,7 @@ func (t *Tenant) DeleteGitHubAppTrigger(ctx context.Context, repositoryID int64,
 func (t *Tenant) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (t *Tenant) DeleteInvitation(ctx context.Context, id string, now time.Time) error
 func (t *Tenant) DeleteSecret(name, pipeline string) error
-func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) error
+func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error)
 func (t *Tenant) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error)
 func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (t *Tenant) FinishRun(ctx context.Context, runID, status, errMsg string) error

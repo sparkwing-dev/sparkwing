@@ -41,6 +41,28 @@ unlock.
   through `GET` and `POST /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`
   and a requirement, so a controller older than schema 80 refuses the
   migrated database.
+- **controller:** Audit record for every write request
+  Each non-read request logs one `audit` record with its request id, route
+  pattern, status, duration, client address, a client class read from the
+  user agent (`sparkwing-<component>/<version>`, `browser`,
+  `go-http-client` or `other`, never the raw string), principal kind, the account id or token prefix, team,
+  and the run, node and team ids its path names. It never logs an email,
+  the raw path, query, headers, body or credential. A write whose handler
+  panics is audited as a 500. Empty node and trigger claim polls answering
+  204 are not audited; a pending executor offer is. Read requests and
+  internal-error and egress-refusal logs name the route pattern instead of
+  the path. Every response carries `X-Request-Id`: the caller's
+  value when it is a token of at most 64 characters, otherwise a new one.
+- **controller + store:** Schema 79 adds `business_events`
+  One row per admission, team creation, checkout opened, paid, failed or
+  expired, credit grant or reversal, dispute hold or release, and a team's
+  first successful run, written in the transaction that makes it true. A
+  repeat of the same team, kind and subject writes nothing. Purging a team
+  deletes its events, and deleting an account deletes its admission and
+  removes its id from the rest. `POST /api/v1/credits/checkouts/closed` lets
+  the checkout service (`credits.grant`) close an open, unpaid checkout its
+  team holds for a session that failed or expired.
+
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most

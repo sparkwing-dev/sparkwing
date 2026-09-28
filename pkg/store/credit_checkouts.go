@@ -25,6 +25,10 @@ const creditCheckoutsTableSQLite = `CREATE TABLE IF NOT EXISTS credit_checkouts 
 CREATE INDEX IF NOT EXISTS idx_credit_checkouts_team_expires ON credit_checkouts(team, expires_at);
 CREATE INDEX IF NOT EXISTS idx_credit_checkouts_session ON credit_checkouts(session_id);`
 
+const checkoutCloseWindow = 7 * 24 * time.Hour
+
+var creditCheckoutCloseCols = map[string]string{"closed_at": "INTEGER"}
+
 var creditCheckoutsTablePostgres = strings.NewReplacer("INTEGER", "BIGINT").Replace(creditCheckoutsTableSQLite)
 
 // safety: a freeze is one row per dispute, so one dispute's outcome never
@@ -100,9 +104,12 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", err
 	}
 	nowNS := now.UnixNano()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM credit_checkouts WHERE team = ?
-	    AND (expires_at <= ? OR (expires_at <= ? AND (paid_at IS NOT NULL OR session_id = '')))`,
-		string(t.team), now.Add(-CheckoutSettleWindow).UnixNano(), nowNS); err != nil {
+	// safety: an unpaid checkout outlives its hold until the processor reports
+	// how it ended, so the close finds it; a week bounds a report that never comes.
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM credit_checkouts WHERE team = ? AND expires_at <= ?
+		   AND (paid_at IS NOT NULL OR closed_at IS NOT NULL OR session_id = '' OR expires_at <= ?)`,
+		string(t.team), nowNS, now.Add(-checkoutCloseWindow).UnixNano()); err != nil {
 		return "", err
 	}
 	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
@@ -115,6 +122,12 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		INSERT INTO credit_checkouts (id, team, amount_micro, opened_at, expires_at)
 		VALUES (?, ?, ?, ?, ?)`, id, string(t.team), amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
 		return "", fmt.Errorf("credits: record the checkout: %w", err)
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		At: now, Team: t.team, Kind: BusinessEventCheckoutOpened, SubjectID: id,
+		Attrs: map[string]any{"amount_micro": amountMicro},
+	}); err != nil {
+		return "", err
 	}
 	return id, tx.Commit()
 }
@@ -160,11 +173,13 @@ const CheckoutSettleWindow = 72 * time.Hour
 // safety: a session paid just before expiry is granted when its webhook
 // arrives, which can be days later, so its amount stays counted against the
 // purchase limit until then; otherwise a second checkout could spend the same
-// room and both payments land.
+// room and both payments land. A session the processor reported closed can
+// no longer be paid, so it stops counting.
 func settlingCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (int64, error) {
 	var open sql.NullInt64
 	err := q.QueryRowContext(ctx, `SELECT SUM(amount_micro) FROM credit_checkouts
-	  WHERE team = ? AND paid_at IS NULL AND (expires_at > ? OR (session_id != '' AND expires_at > ?))`,
+	  WHERE team = ? AND paid_at IS NULL AND closed_at IS NULL
+	    AND (expires_at > ? OR (session_id != '' AND expires_at > ?))`,
 		string(team), now.UnixNano(), now.Add(-CheckoutSettleWindow).UnixNano()).Scan(&open)
 	return open.Int64, err
 }
@@ -179,10 +194,81 @@ func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string,
 	return err
 }
 
-// DropCreditCheckout removes a checkout whose session never opened.
-func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) error {
-	_, err := t.s.exec(ctx, `DELETE FROM credit_checkouts WHERE team = ? AND id = ?`, string(t.team), id)
-	return err
+// DropCreditCheckout removes a checkout whose session never opened and
+// records it as [BusinessEventCheckoutFailed] at the session stage.
+func (t *Tenant) DropCreditCheckout(ctx context.Context, id string) (err error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	res, err := tx.ExecContext(ctx, `DELETE FROM credit_checkouts WHERE team = ? AND id = ?`, string(t.team), id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return errors.Join(err, tx.Commit())
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		Team: t.team, Kind: BusinessEventCheckoutFailed, SubjectID: id,
+		Attrs: map[string]any{"stage": "session_open"},
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ErrCheckoutNotFound is returned when a team holds no checkout for the
+// payment session a report names.
+var ErrCheckoutNotFound = errors.New("credits: the team holds no checkout for this session")
+
+// CloseCreditCheckout moves t's checkout for sessionID from open and unpaid
+// to closed with outcome, [BusinessEventCheckoutFailed] or
+// [BusinessEventCheckoutExpired], records that event and stops the checkout
+// counting against the balance cap. It reports whether it closed the
+// checkout: a paid or already closed one is left as it is and records
+// nothing. A session t holds no checkout for is [ErrCheckoutNotFound].
+func (t *Tenant) CloseCreditCheckout(
+	ctx context.Context, sessionID, outcome, actor string, now time.Time,
+) (_ bool, err error) {
+	if outcome != BusinessEventCheckoutFailed && outcome != BusinessEventCheckoutExpired {
+		return false, fmt.Errorf("%w: checkout outcome %q", ErrInvalidInput, outcome)
+	}
+	if sessionID = strings.TrimSpace(sessionID); sessionID == "" {
+		return false, fmt.Errorf("%w: a closed checkout names its session", ErrInvalidInput)
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	var id string
+	var paid, closed sql.NullInt64
+	err = tx.QueryRowContext(ctx,
+		`SELECT id, paid_at, closed_at FROM credit_checkouts WHERE team = ? AND session_id = ?`+tx.forUpdate(),
+		string(t.team), sessionID).Scan(&id, &paid, &closed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrCheckoutNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if paid.Valid || closed.Valid {
+		return false, tx.Commit()
+	}
+	nowNS := now.UnixNano()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE credit_checkouts SET closed_at = ?, expires_at = CASE WHEN expires_at > ? THEN ? ELSE expires_at END
+		 WHERE team = ? AND id = ?`, nowNS, nowNS, nowNS, string(t.team), id); err != nil {
+		return false, err
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		At: now, Team: t.team, Kind: outcome, SubjectID: id, Actor: actor,
+		Attrs: map[string]any{"session_id": sessionID},
+	}); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 // safety: runs inside the paid grant's transaction, so the checkout stops

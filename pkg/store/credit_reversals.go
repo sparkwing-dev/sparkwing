@@ -90,6 +90,9 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 			grant.CreatedBy, now.UnixNano()); err != nil {
 			return CreditReversal{}, fmt.Errorf("credits: insert reversal: %w", err)
 		}
+		if err := recordGrantEventTx(tx, grant, ""); err != nil {
+			return CreditReversal{}, err
+		}
 		out.Grant, out.Created = &grant, true
 		already = paid.AmountMicro
 	}
@@ -175,6 +178,12 @@ func (s *Store) HoldTeamForDispute(
 		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano()); err != nil {
 		return false, err
 	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID,
+		Attrs: map[string]any{"payment_id": paymentID},
+	}); err != nil {
+		return false, err
+	}
 	return true, tx.Commit()
 }
 
@@ -206,7 +215,7 @@ func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, st
 // ReleaseCreditFreezes releases holds on team and reports how many it
 // released: the one hold of disputeID, or every hold when disputeID is empty.
 // [Store.DisputeTeam] finds the team of a dispute named alone.
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error) {
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (_ int64, err error) {
 	team = NormalizeTeam(team)
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
@@ -216,11 +225,40 @@ func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID s
 	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
 	}
-	res, err := s.exec(ctx, query, args...)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	defer rollbackUnlessDone(tx, &err)
+	released, err := releasedDisputesTx(ctx, tx, query+` RETURNING dispute_id`, args...)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range released {
+		if err := RecordBusinessEvent(tx, BusinessEvent{
+			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id,
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(released)), tx.Commit()
+}
+
+func releasedDisputesTx(ctx context.Context, tx *storeTx, query string, args ...any) (_ []string, err error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	var released []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		released = append(released, id)
+	}
+	return released, rows.Err()
 }
 
 // DisputeTeam returns the team a dispute's hold is on.

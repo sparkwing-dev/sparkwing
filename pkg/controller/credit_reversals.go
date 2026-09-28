@@ -199,6 +199,66 @@ func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+type checkoutClosedReq struct {
+	Team      string `json:"team"`
+	SessionID string `json:"session_id"`
+	Outcome   string `json:"outcome"`
+}
+
+var checkoutOutcomeEvents = map[string]string{
+	"failed":  store.BusinessEventCheckoutFailed,
+	"expired": store.BusinessEventCheckoutExpired,
+}
+
+// safety: only the checkout service reports how its sessions ended, and a
+// report closes nothing but an open, unpaid checkout the named team holds for
+// that session, so it cannot release another team's hold or unpay a payment.
+func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
+	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeCreditsGrant) {
+		writeError(w, http.StatusForbidden, fmt.Errorf("closing a checkout needs the %s scope itself", ScopeCreditsGrant))
+		return
+	}
+	var req checkoutClosedReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Team, req.SessionID = strings.TrimSpace(req.Team), strings.TrimSpace(req.SessionID)
+	kind, ok := checkoutOutcomeEvents[req.Outcome]
+	if !ok || req.Team == "" || req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("team, session_id and an outcome of failed or expired are required"))
+		return
+	}
+	tenant, ok := s.namedTenant(w, r, req.Team)
+	if !ok {
+		return
+	}
+	closed, err := tenant.CloseCreditCheckout(r.Context(), req.SessionID, kind, principalName(r), time.Now())
+	if errors.Is(err, store.ErrCheckoutNotFound) {
+		writeJSON(w, http.StatusNotFound, codedErrorJSON{Error: err.Error(), Code: UnknownCheckoutCode})
+		return
+	}
+	if err != nil {
+		s.writeInternalError(w, r, "close checkout", err)
+		return
+	}
+	s.logger.Info("checkout closed unpaid", "team", req.Team, "outcome", req.Outcome, "closed", closed)
+	writeJSON(w, http.StatusOK, checkoutClosedJSON{
+		Team: req.Team, SessionID: req.SessionID, Outcome: req.Outcome, Closed: closed,
+	})
+}
+
+// UnknownCheckoutCode is the code on the 404 a checkout closure gets when
+// the team holds no checkout for the session, which no retry can change.
+const UnknownCheckoutCode = "unknown_checkout"
+
+type checkoutClosedJSON struct {
+	Team      string `json:"team"`
+	SessionID string `json:"session_id"`
+	Outcome   string `json:"outcome"`
+	Closed    bool   `json:"closed"`
+}
+
 // DisputeConflictCode is the code on a 409 refusing a hold or a reversal
 // that names a dispute already held for another payment.
 const DisputeConflictCode = "dispute_conflict"

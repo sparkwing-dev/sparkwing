@@ -684,6 +684,7 @@ func credentialEnd(expires, revoked *time.Time) time.Time {
 type principalCtxKey struct{}
 
 func contextWithPrincipal(ctx context.Context, p *Principal) context.Context {
+	noteAuditPrincipal(ctx, p)
 	return context.WithValue(ctx, principalCtxKey{}, p)
 }
 
