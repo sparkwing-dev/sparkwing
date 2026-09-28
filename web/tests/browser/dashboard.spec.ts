@@ -109,7 +109,7 @@ const finishedDetail = {
 };
 
 test("keeps a long node name visible beside its location icon", async ({ page }) => {
-  const longName = "verify-production-checks";
+  const longName = "verify-release";
   const detail = {
     ...finishedDetail,
     nodes: [{
@@ -1322,8 +1322,12 @@ test("starting a run from the middle pane state keeps Nodes expanded", async ({ 
   await expect(page.getByLabel("Runs rail")).toBeVisible();
   await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
   await page.getByRole("button", { name: "+ Start a run" }).click();
-  await expect(page.getByLabel("Runs rail")).toHaveCount(0);
+  const dialog = page.getByRole("dialog", { name: "Start a run" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel("Runs rail")).toBeVisible();
   await expect(page.getByLabel("Nodes rail")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   await expect(page.getByText("Nodes (1)", { exact: true })).toBeVisible();
   await expect.poll(() => page.locator("#nodes-column").evaluate((pane) => pane.getBoundingClientRect().width)).toBe(208);
 });
@@ -1837,7 +1841,7 @@ test("separates fleet policy, observations, and current activity", async ({
 
   await page.goto("/cluster");
   await expect(
-    page.getByRole("heading", { name: "Fleet", exact: true, level: 1 }),
+    page.getByRole("heading", { name: "Compute", exact: true, level: 1 }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: /design-mac/ }).click();
@@ -1875,7 +1879,7 @@ test("keeps every public dashboard navigation target routable", async ({
     ["Queue", "Admission queue"],
     ["Crons", "Crons"],
     ["Capacity", "Capacity"],
-    ["Fleet", "Fleet"],
+    ["Fleet", "Compute"],
     ["Secrets", "Secrets and variables"],
     ["Analytics (preview)", "Analytics"],
   ] as const;
