@@ -29,6 +29,19 @@ unlock.
   exits attach under its nearest live ancestor while a live descendant retains
   lineage. Otherwise they attach under the lease root, and the daemon logs the
   requested and resolved parents.
+- **admission:** An overloaded or swapping machine no longer gets its
+  admission daemon replaced while it is still working. The supervisor replaces
+  the daemon only when health probes fail and its heartbeat has not moved for a
+  minute, or after five minutes with no answer; time the whole machine spent
+  frozen does not count against it.
+- **admission:** Runs survive a daemon replacement. A running or queued run
+  keeps reconnecting for up to 12 minutes, and the replacement holds each run's
+  lease for two minutes. A lease released during that recovery can stay
+  reserved until the two minutes pass. A missing daemon binary fails at once,
+  and a daemon that exits before serving gets three tries.
+### Docs
+
+- **cli:** Document the selected pipeline commit exposed as `SPARKWING_PIPELINE_REV`
 
 ## [v0.63.0] - 2026-09-27
 ### Changed

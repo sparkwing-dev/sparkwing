@@ -78,6 +78,7 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 			FailureLimit:      2,
 			TermGrace:         time.Millisecond,
 			StartupTimeout:    2 * time.Millisecond,
+			HeartbeatStale:    time.Millisecond,
 			RestartBackoff:    time.Millisecond,
 			MaxRestartBackoff: time.Millisecond,
 		}, Deps{

@@ -12,7 +12,9 @@ The admission daemon starts on demand when a pipeline needs it. Status never
 starts one. Restart replaces only an answering daemon with this installed
 build, using the same drain, durable lease, and reattachment path as automatic
 version takeover; a stopped daemon stays stopped. Stop drains an answering
-daemon and launches no successor.
+daemon and launches no successor. The supervisor keeps a daemon whose heartbeat
+counter advances during failed health probes. A whole-machine pause restarts the
+stale window when the supervisor resumes.
 
 ### Subcommands
 
