@@ -3,7 +3,7 @@
 const ClassAgent = "agent"
 const ClassCloud = "cloud"
 const ClassCoordinator = "coordinator"
-var CloudTools = []string{"git", "go"}
+var CloudTools = parseToolManifest(build.RunnerTools)
 const DefaultClaimWait = 24 * time.Hour
 type Demand struct {
 	Selector []string

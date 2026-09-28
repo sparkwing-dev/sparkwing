@@ -96,7 +96,8 @@ func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capaci
 		p.capacityKnown = true
 	}
 	r.m[key] = p
-	return !seen || !slices.Equal(prev.Labels, p.Labels)
+	return !seen || !slices.Equal(prev.Labels, p.Labels) ||
+		prev.profile.OS != profile.OS || prev.profile.Arch != profile.Arch
 }
 
 // safety: prunes nothing, so it cannot change what a placement read sees.

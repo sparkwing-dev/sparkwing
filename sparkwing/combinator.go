@@ -206,8 +206,13 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 }
 
 // NeedsTools restricts every member to agents that have the named tools. See
-// [JobNode.NeedsTools].
+// [JobNode.NeedsTools]. A [JobFanOutDynamic] group has no members at plan
+// time, so it panics there; call NeedsTools on each node its callback returns.
 func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
+	if g.dynamic {
+		panic("sparkwing: JobGroup.NeedsTools: a dynamic group's members are generated later; " +
+			"call NeedsTools on each node in the JobFanOutDynamic callback")
+	}
 	for _, m := range g.Members() {
 		m.NeedsTools(names...)
 	}

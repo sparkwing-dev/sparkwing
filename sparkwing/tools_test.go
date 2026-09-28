@@ -34,3 +34,17 @@ func TestClaimWaitIsThePlansOwn(t *testing.T) {
 		t.Fatal("ClaimWait did not stick")
 	}
 }
+
+func TestNeedsToolsOnADynamicGroupFailsAtPlanTime(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	src := sparkwing.Job(plan, "discover", &discoverJob{items: []string{"a"}})
+	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
+		return "build-" + s, func(ctx context.Context) error { return nil }
+	})
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(r.(string), "dynamic group") {
+			t.Fatalf("NeedsTools on a dynamic group = %v, want a plan-time panic", r)
+		}
+	}()
+	group.NeedsTools("terraform")
+}

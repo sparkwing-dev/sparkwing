@@ -58,8 +58,6 @@ var reviewedUnscopedSQL = map[string]string{
 		"answer scoped to the asker is no answer; it is how another team's runner is dropped",
 	"(*Store).RecordAgentLabels": "writes the one credential the claim authenticated with; a token " +
 		"prefix is unique across teams",
-	"(*Store).ListWaitingNodes": "the attention sweep reads every team's waiting nodes and judges each " +
-		"only against its own team's agents",
 	"(*Store).ClaimNextTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +
 		"award and the read after it are of the row the scoped select just locked",
 	"(*Store).ClaimSpecificTriggerFor": "shares the claim scan's runtime predicate and its refusal; the " +

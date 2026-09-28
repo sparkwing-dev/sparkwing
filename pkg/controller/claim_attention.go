@@ -30,15 +30,25 @@ func (s *Server) recordAgentLabels(ctx context.Context, tokenPrefix string, labe
 	}
 }
 
+// perf: a tick judges at most this many nodes and resumes after the last one
+// next tick, so a large backlog costs bounded work per tick.
+const claimAttentionBatch = 1000
+
 func (s *Server) sweepClaimAttention(ctx context.Context) {
 	now := time.Now()
-	waiting, err := s.store.ListWaitingNodes(ctx, now.Add(-claimAttentionGrace))
+	waiting, err := s.store.ListWaitingNodes(ctx, now.Add(-claimAttentionGrace), s.attentionCursor, claimAttentionBatch)
 	if err != nil {
 		s.logger.Error("claim attention sweep failed", "err", err)
 		return
 	}
+	s.attentionCursor = [2]string{}
+	if len(waiting) == claimAttentionBatch {
+		last := waiting[len(waiting)-1]
+		s.attentionCursor = [2]string{last.RunID, last.NodeID}
+	}
 	online := s.runnerPresence.byToken(now, agentOnlineWithin)
 	agents := map[store.Team][]agentSighting{}
+	var updates []store.NodeAttention
 	for _, n := range waiting {
 		sightings, ok := agents[n.Team]
 		if !ok {
@@ -47,34 +57,37 @@ func (s *Server) sweepClaimAttention(ctx context.Context) {
 				s.logger.Error("claim attention sweep failed", "err", err)
 				return
 			}
-			sightings = sightAgents(registered, online)
+			sightings = sightAgents(registered, online, now)
 			agents[n.Team] = sightings
 		}
-		reason := claimAttention(n, sightings, s.Metering())
-		if reason == n.Attention {
-			continue
+		if reason := claimAttention(n, sightings, s.Metering()); reason != n.Attention {
+			updates = append(updates, store.NodeAttention{Team: n.Team, RunID: n.RunID, NodeID: n.NodeID, Reason: reason})
 		}
-		if err := s.store.SetNodeAttention(ctx, n.Team, n.RunID, n.NodeID, reason); err != nil {
-			s.logger.Error("claim attention sweep failed", "err", err)
-		}
+	}
+	if err := s.store.SetNodeAttention(ctx, updates); err != nil {
+		s.logger.Error("claim attention sweep failed", "err", err)
 	}
 }
 
 type agentSighting struct {
 	store.RegisteredAgent
-	profile match.Profile
-	online  bool
+	online bool
 }
 
-// safety: an offline agent is judged on what it last advertised.
-func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPresence) []agentSighting {
+// safety: an enrolled executor is judged on its enrolled profile and its
+// heartbeat, as its offers are; any other agent on what it sends when online
+// and on what it last advertised when not.
+func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPresence, now time.Time) []agentSighting {
 	out := make([]agentSighting, 0, len(registered))
 	for _, a := range registered {
-		sighting := agentSighting{RegisteredAgent: a, profile: match.Profile{Name: a.Name, Class: match.ClassAgent, Labels: a.Labels}}
-		if p, ok := online[a.TokenPrefix]; ok {
+		sighting := agentSighting{RegisteredAgent: a}
+		if a.Enrolled {
+			sighting.online = now.Sub(a.LastSeen) <= store.ExecutorRegistrationActiveWindow
+		} else if p, ok := online[a.TokenPrefix]; ok {
 			sighting.online = true
-			sighting.profile.Labels = append(match.SelfAsserted(p.Labels), a.Labels...)
-			sighting.profile.OS, sighting.profile.Arch = p.profile.OS, p.profile.Arch
+			profile := p.profile
+			profile.Name, profile.Class, profile.Labels = a.Name, match.ClassAgent, match.SelfAsserted(p.Labels)
+			sighting.Profile = profile
 		}
 		out = append(out, sighting)
 	}
@@ -82,16 +95,21 @@ func sightAgents(registered []store.RegisteredAgent, online map[string]runnerPre
 }
 
 func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) string {
-	demand := match.Demand{Selector: n.Selector}
+	repo := n.Repo
+	demand := match.Demand{Selector: n.Selector, Repo: &repo, Request: n.Request}
 	var offline []agentSighting
+	var refused []string
 	profiles := make([]match.Profile, 0, len(agents)+1)
 	for _, a := range agents {
-		profiles = append(profiles, a.profile)
-		if match.Evaluate(a.profile, demand).OK() {
-			if a.online {
-				return ""
-			}
+		profiles = append(profiles, a.Profile)
+		verdict := match.Evaluate(a.Profile, demand)
+		switch {
+		case verdict.OK() && a.online:
+			return ""
+		case verdict.OK():
 			offline = append(offline, a)
+		case verdict.Reason == match.ReasonRepo || verdict.Reason == match.ReasonShape:
+			refused = append(refused, a.Name+" ("+string(verdict.Reason)+")")
 		}
 	}
 	if cloud {
@@ -116,6 +134,9 @@ func claimAttention(n store.WaitingNode, agents []agentSighting, cloud bool) str
 			reason += fmt.Sprintf(", as are %d more", len(offline)-1)
 		}
 		return reason
+	}
+	if len(refused) > 0 {
+		return fmt.Sprintf("%s; every agent in team %s that matches refuses it: %s", needs, n.Team, strings.Join(refused, ", "))
 	}
 	unmet, it := unmetTerms(n.Selector, profiles), "it"
 	switch {

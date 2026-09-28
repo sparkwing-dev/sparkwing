@@ -1271,6 +1271,11 @@ type Node struct {
 
 	ArtifactManifest string
 }
+type NodeAttention struct {
+	Team          Team
+	RunID, NodeID string
+	Reason        string
+}
 type NodeBounce struct {
 	RunID  string
 	NodeID string
@@ -1487,7 +1492,9 @@ func RedactedRuns(runs []*Run) []*Run
 type RegisteredAgent struct {
 	Name, TokenPrefix string
 
-	Labels   []string
+	Profile match.Profile
+
+	Enrolled bool
 	LastSeen time.Time
 }
 type RepoFilter = match.RepoFilter
@@ -2067,7 +2074,7 @@ func (s *Store) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err er
 func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (s *Store) ListUsers() ([]User, error)
-func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time) ([]WaitingNode, error)
+func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error)
 func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error)
 func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
@@ -2188,7 +2195,7 @@ func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, mani
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,
 ) (err error)
-func (s *Store) SetNodeAttention(ctx context.Context, team Team, runID, nodeID, reason string) error
+func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) error
 func (s *Store) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
 func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
 func (s *Store) SetOperatorCreditSettings(
@@ -2653,6 +2660,8 @@ type WaitingNode struct {
 	RunID, NodeID string
 	Team          Team
 	Selector      []string
+	Repo          match.Repository
+	Request       match.Resources
 	Attention     string
 }
 const WaitlistReasonDaily = "daily_signups"

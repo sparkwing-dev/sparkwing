@@ -67,7 +67,8 @@ type Server struct {
 	githubWebhook        GitHubWebhookConfig
 	githubCommitStatuses *githubCommitStatusReporter
 
-	queueTimeout time.Duration
+	queueTimeout    time.Duration
+	attentionCursor [2]string
 
 	sessionMaxLifetime time.Duration
 

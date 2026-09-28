@@ -64,13 +64,14 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "deploy", Status: "running", StartedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "apply", Status: "pending", NeedsLabels: []string{"tool:terraform"}}); err != nil {
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "apply", Status: "pending", NeedsLabels: []string{"tool:terraform"}, RequestedCores: 4}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.MarkNodeReady(ctx, "run-1", "apply"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET ready_at = ?`, time.Now().Add(-time.Minute).UnixNano()); err != nil {
+	if _, err := st.DB().ExecContext(ctx, `UPDATE nodes SET ready_at = ?, placement_hold_from = ?`,
+		time.Now().Add(-time.Minute).UnixNano(), time.Now().Add(-time.Minute).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	expect := func(step, want string) {
@@ -101,6 +102,9 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	}
 	expect("the eligible agent is offline", "node apply needs tool:terraform; eligible agent pi is offline (last seen 2026-09-28T10:00:00Z)")
 
+	small := match.Profile{Capacity: match.Resources{Cores: 2}}
+	srv.runnerPresence.record(presenceKey{tokenPrefix: pi.Prefix, name: "pi"}, []string{"tool:terraform"}, nil, small, nil, time.Now())
+	expect("an online agent too small for the node", "node apply needs tool:terraform; every agent in team default that matches refuses it: pi (shape)")
 	srv.runnerPresence.record(presenceKey{tokenPrefix: pi.Prefix, name: "pi"}, []string{"tool:terraform"}, nil, match.Profile{}, nil, time.Now())
 	expect("the eligible agent is online", "")
 
@@ -129,5 +133,67 @@ func TestClaimAttentionCountsSparkwingCloud(t *testing.T) {
 	if got, want := claimAttention(both, nil, true),
 		"node ship needs tool:helm; no agent in team acme has it and Sparkwing Cloud runners don't provide it"; got != want {
 		t.Fatalf("reason = %q, want %q", got, want)
+	}
+}
+
+// An enrolled executor counts as online by its heartbeat, since its assisted
+// offers record no presence, and is judged on its enrolled profile.
+func TestClaimAttentionReadsAnEnrolledExecutorsHeartbeat(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	srv := New(st, nil)
+	_, desk, err := st.CreateToken("agent:desk", store.TokenKindRunner, []string{"nodes.claim"}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.EnrollExecutor(ctx, desk.Prefix, store.Executor{
+		Name: "desk", Kind: "agent", Location: "local", Principal: "agent:desk",
+		Capabilities: []string{"tool:terraform"}, MaxConcurrent: 1,
+		Budget: store.ExecutorResource{Cores: 8, MemoryBytes: 16 << 30},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	node := store.WaitingNode{NodeID: "apply", Team: store.DefaultTeam, Selector: []string{"tool:terraform"}}
+	heartbeat := func(at time.Time) string {
+		t.Helper()
+		if _, err := st.DB().ExecContext(ctx, `UPDATE executors SET last_seen = ?`, at.UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+		registered, err := st.ListRegisteredAgents(ctx, store.DefaultTeam)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return claimAttention(node, sightAgents(registered, srv.runnerPresence.byToken(time.Now(), agentOnlineWithin), time.Now()), false)
+	}
+	if got := heartbeat(time.Now()); got != "" {
+		t.Fatalf("a heartbeating enrolled executor with the tool leaves %q", got)
+	}
+	seen := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	if got, want := heartbeat(seen), "node apply needs tool:terraform; eligible agent desk is offline (last seen 2026-09-28T10:00:00Z)"; got != want {
+		t.Fatalf("reason = %q, want %q", got, want)
+	}
+	node.Request = match.Resources{Cores: 16}
+	if got := heartbeat(time.Now()); got != "node apply needs tool:terraform; every agent in team default that matches refuses it: desk (shape)" {
+		t.Fatalf("a node larger than the enrolled budget = %q", got)
+	}
+}
+
+// A new platform with the same labels is still worth storing.
+func TestPresenceReportsAPlatformChange(t *testing.T) {
+	reg := newRunnerPresenceRegistry()
+	key := presenceKey{tokenPrefix: "swr_pi", name: "pi"}
+	amd := match.Profile{OS: "linux", Arch: "amd64"}
+	if !reg.record(key, []string{"tool:git"}, nil, amd, nil, time.Now()) {
+		t.Fatal("a first record is not reported")
+	}
+	if reg.record(key, []string{"tool:git"}, nil, amd, nil, time.Now()) {
+		t.Fatal("an unchanged record is reported")
+	}
+	if !reg.record(key, []string{"tool:git"}, nil, match.Profile{OS: "linux", Arch: "arm64"}, nil, time.Now()) {
+		t.Fatal("a changed architecture is not reported")
 	}
 }

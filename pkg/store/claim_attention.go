@@ -70,7 +70,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, wait time.Duration) ([
 	defer rollbackOrLog(tx)
 	rows, err := tx.QueryContext(ctx, `SELECT n.run_id, n.node_id, n.attention_reason FROM nodes n JOIN runs r ON r.id = n.run_id
  WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
-   AND n.ready_at + CASE WHEN r.claim_wait_ns > 0 THEN r.claim_wait_ns ELSE ? END < ?`,
+   AND COALESCE(n.placement_hold_from, n.ready_at) + CASE WHEN r.claim_wait_ns > 0 THEN r.claim_wait_ns ELSE ? END < ?`,
 		wait.Nanoseconds(), now)
 	if err != nil {
 		return nil, err
@@ -120,8 +120,11 @@ func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, label
 // RegisteredAgent is a live agent credential of a team, online or not.
 type RegisteredAgent struct {
 	Name, TokenPrefix string
-	// Labels are what it last advertised plus any an enrollment granted.
-	Labels   []string
+	// Profile is what an enrollment grants, or else what the agent advertised
+	// on its latest claim.
+	Profile match.Profile
+	// Enrolled marks an enrolled executor, whose LastSeen is its heartbeat.
+	Enrolled bool
 	LastSeen time.Time
 }
 
@@ -129,7 +132,7 @@ type RegisteredAgent struct {
 // runner tokens and enrolled executors.
 func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]RegisteredAgent, error) {
 	rows, err := s.query(ctx, `SELECT t.prefix, t.principal, t.advertised_labels_json, t.last_used_at,
-       e.name, e.capabilities_json, e.last_seen
+       e.name, e.location, e.capabilities_json, e.accept_repos_json, e.budget_cores, e.budget_memory_bytes, e.last_seen
   FROM tokens t LEFT JOIN executors e ON e.token_prefix = t.prefix
  WHERE t.team = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)
    AND (t.kind = 'runner' OR e.name IS NOT NULL)
@@ -142,45 +145,61 @@ func (s *Store) ListRegisteredAgents(ctx context.Context, team Team) ([]Register
 	for rows.Next() {
 		var a RegisteredAgent
 		var principal string
-		var advertised, granted []byte
+		var advertised, caps, accept []byte
 		var usedNS, seenNS sql.NullInt64
-		var executor sql.NullString
-		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &usedNS, &executor, &granted, &seenNS); err != nil {
+		var name, location sql.NullString
+		var cores sql.NullFloat64
+		var memory sql.NullInt64
+		if err := rows.Scan(&a.TokenPrefix, &principal, &advertised, &usedNS,
+			&name, &location, &caps, &accept, &cores, &memory, &seenNS); err != nil {
 			return nil, err
 		}
-		a.Name = strings.TrimPrefix(principal, agentPrincipalPrefix)
-		if executor.Valid {
-			a.Name = executor.String
-		}
-		for _, raw := range [][]byte{advertised, granted} {
-			var labels []string
-			if len(raw) > 0 && json.Unmarshal(raw, &labels) == nil {
-				a.Labels = append(a.Labels, match.SelfAsserted(labels)...)
+		if name.Valid {
+			e := Executor{
+				Name: name.String, Location: location.String,
+				Budget: ExecutorResource{Cores: cores.Float64, MemoryBytes: memory.Int64},
 			}
+			e.decodeGrants(caps, accept)
+			a.Name, a.Profile, a.Enrolled = e.Name, e.profile(), true
+			a.LastSeen = time.Unix(0, seenNS.Int64)
+			out = append(out, a)
+			continue
 		}
-		if last := max(usedNS.Int64, seenNS.Int64); last > 0 {
-			a.LastSeen = time.Unix(0, last)
+		a.Name = strings.TrimPrefix(principal, agentPrincipalPrefix)
+		a.Profile = match.Profile{Name: a.Name, Class: match.ClassAgent}
+		if len(advertised) > 0 && json.Unmarshal(advertised, &a.Profile.Labels) == nil {
+			a.Profile.Labels = match.SelfAsserted(a.Profile.Labels)
+		}
+		if usedNS.Int64 > 0 {
+			a.LastSeen = time.Unix(0, usedNS.Int64)
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
 }
 
-// WaitingNode is a ready node no agent holds.
+// WaitingNode is a ready node no agent holds, with what a claim of it checks.
 type WaitingNode struct {
 	RunID, NodeID string
 	Team          Team
 	Selector      []string
+	Repo          match.Repository
+	Request       match.Resources
 	Attention     string
 }
 
-// ListWaitingNodes lists the unpinned ready nodes that have waited since
-// before readyBefore with no claim.
-func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time) ([]WaitingNode, error) {
-	rows, err := s.query(ctx, `SELECT run_id, node_id, team, needs_labels, attention_reason FROM nodes
- WHERE ready_at IS NOT NULL AND ready_at < ? AND claimed_by IS NULL AND `+nodeNotDone+`
-   AND required_coordinator_id = '' AND required_executor_location = ''
- ORDER BY run_id, node_id`, readyBefore.UnixNano())
+// ListWaitingNodes lists up to limit unpinned nodes, ordered by run and node
+// after the key after, that first became ready before readyBefore and that no
+// agent has claimed.
+func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
+	rows, err := s.query(ctx, `SELECT n.run_id, n.node_id, n.team, n.needs_labels, n.attention_reason,
+       n.requested_cores, n.requested_memory_bytes, tr.repo_url, tr.github_owner, tr.github_repo, tr.trigger_env
+  FROM nodes n LEFT JOIN triggers tr ON tr.id = n.run_id AND tr.team = n.team
+ WHERE n.ready_at IS NOT NULL AND COALESCE(n.placement_hold_from, n.ready_at) < ?
+   AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
+   AND n.required_coordinator_id = '' AND n.required_executor_location = ''
+   AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))
+ ORDER BY n.run_id, n.node_id LIMIT ?`, readyBefore.UnixNano(), after[0], after[0], after[1], limit)
 	if err != nil {
 		return nil, err
 	}
@@ -189,21 +208,47 @@ func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time) ([]
 	for rows.Next() {
 		var n WaitingNode
 		var team string
-		var needs []byte
-		if err := rows.Scan(&n.RunID, &n.NodeID, &team, &needs, &n.Attention); err != nil {
+		var needs, env []byte
+		var url, owner, repo sql.NullString
+		if err := rows.Scan(&n.RunID, &n.NodeID, &team, &needs, &n.Attention,
+			&n.Request.Cores, &n.Request.MemoryBytes, &url, &owner, &repo, &env); err != nil {
 			return nil, err
 		}
 		n.Team = Team(team)
 		decodeCandidateLabels(n.RunID, n.NodeID, needs, &n.Selector)
+		if url.Valid {
+			n.Repo = triggerRunRepository(&Trigger{RepoURL: url.String, GithubOwner: owner.String, GithubRepo: repo.String}, env)
+		}
 		out = append(out, n)
 	}
 	return out, rows.Err()
 }
 
-// SetNodeAttention records why a waiting node has no agent to claim it, or
-// clears the record with an empty reason. A claimed node keeps none.
-func (s *Store) SetNodeAttention(ctx context.Context, team Team, runID, nodeID, reason string) error {
-	_, err := s.exec(ctx, `UPDATE nodes SET attention_reason = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone, reason, string(team), runID, nodeID)
-	return err
+// NodeAttention is why one waiting node has no agent to claim it; an empty
+// Reason clears the record.
+type NodeAttention struct {
+	Team          Team
+	RunID, NodeID string
+	Reason        string
+}
+
+// SetNodeAttention records the reasons in one transaction. A node claimed
+// since the sweep read it keeps none.
+func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	for _, u := range updates {
+		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET attention_reason = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
+			u.Reason, string(u.Team), u.RunID, u.NodeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

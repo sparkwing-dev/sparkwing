@@ -16,7 +16,8 @@ import (
 func ageReadyNode(t *testing.T, s *store.Store, runID string, age time.Duration) {
 	t.Helper()
 	if _, err := s.DB().ExecContext(context.Background(), storetest.Rebind(s,
-		`UPDATE nodes SET ready_at = ? WHERE run_id = ?`), time.Now().Add(-age).UnixNano(), runID); err != nil {
+		`UPDATE nodes SET ready_at = ?, placement_hold_from = ? WHERE run_id = ?`),
+		time.Now().Add(-age).UnixNano(), time.Now().Add(-age).UnixNano(), runID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -60,12 +61,12 @@ func TestNodeAttentionShowsOnTheRunUntilAClaim(t *testing.T) {
 	ctx := context.Background()
 	seedMatchNode(t, s, "run-tf", "", 1, "tool:terraform")
 	ageReadyNode(t, s, "run-tf", time.Minute)
-	waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-30*time.Second))
+	waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-30*time.Second), [2]string{}, 10)
 	if err != nil || len(waiting) != 1 || !slices.Equal(waiting[0].Selector, []string{"tool:terraform"}) {
 		t.Fatalf("waiting = %+v, %v", waiting, err)
 	}
 	const reason = "node work needs tool:terraform; no agent in team default has it"
-	if err := s.SetNodeAttention(ctx, store.DefaultTeam, "run-tf", "work", reason); err != nil {
+	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-tf", NodeID: "work", Reason: reason}}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := s.GetRun(ctx, "run-tf")
@@ -97,7 +98,20 @@ func TestUnclaimedNodesFailAtTheirClaimWait(t *testing.T) {
 	}
 	ageReadyNode(t, s, "run-default", 2*time.Hour)
 	ageReadyNode(t, s, "run-short", 2*time.Hour)
-	if err := s.SetNodeAttention(ctx, store.DefaultTeam, "run-short", "work", "node work needs tool:terraform"); err != nil {
+	// safety: an agent that cannot take the nodes polls, moving ready_at forward;
+	// the waits still run from when each node first became ready.
+	for i := range 3 {
+		if _, err := s.ClaimNextReadyNode(ctx, store.ClaimIdentity{Principal: "agent:pi", TokenPrefix: "swr_pi"},
+			"pi:"+string(rune('a'+i)), time.Minute, []string{"tool:git"}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("an ineligible poll = %v", err)
+		}
+	}
+	if waiting, err := s.ListWaitingNodes(ctx, time.Now().Add(-time.Hour), [2]string{}, 10); err != nil || len(waiting) != 2 {
+		t.Fatalf("waiting after ineligible polls = %+v, %v; want both nodes", waiting, err)
+	}
+	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
+		Team: store.DefaultTeam, RunID: "run-short", NodeID: "work", Reason: "node work needs tool:terraform",
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	pairs, err := store.Maintenance.FailStaleQueuedNodes(s, ctx, match.DefaultClaimWait)
@@ -132,8 +146,26 @@ func TestRegisteredAgentsCarryTheirLastLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	agents, err := s.ListRegisteredAgents(ctx, store.DefaultTeam)
-	if err != nil || len(agents) != 1 || agents[0].Name != "pi" ||
-		!slices.Equal(agents[0].Labels, []string{"tool:git", "arch=arm64"}) {
+	if err != nil || len(agents) != 1 || agents[0].Name != "pi" || agents[0].Enrolled ||
+		!slices.Equal(agents[0].Profile.Labels, []string{"tool:git", "arch=arm64"}) {
 		t.Fatalf("agents = %+v, %v; want pi with its labels less the forged name", agents, err)
+	}
+}
+
+// Waiting nodes come back in pages, so one sweep tick reads a bounded batch.
+func TestWaitingNodesPage(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	for _, run := range []string{"run-a", "run-b", "run-c"} {
+		seedMatchNode(t, s, run, "", 1, "tool:terraform")
+		ageReadyNode(t, s, run, time.Minute)
+	}
+	first, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 2)
+	if err != nil || len(first) != 2 || first[1].RunID != "run-b" {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	rest, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{first[1].RunID, first[1].NodeID}, 2)
+	if err != nil || len(rest) != 1 || rest[0].RunID != "run-c" {
+		t.Fatalf("second page = %+v, %v", rest, err)
 	}
 }

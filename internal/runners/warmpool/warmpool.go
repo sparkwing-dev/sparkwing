@@ -142,7 +142,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				if unmatchableSince.IsZero() {
 					unmatchableSince = now
 				}
-				if unmatchableExpired(unmatchableSince, now, r.cfg.UnmatchableGrace) {
+				if unmatchableExpired(unmatchableSince, now, r.grace(req)) {
 					return r.failUnmatchable(ctx, req, n)
 				}
 				if time.Since(lastUnmatchableLog) >= unmatchableLogEvery {
@@ -268,6 +268,14 @@ func (r *Runner) pollRun(ctx context.Context, runID string, wait *runWait) {
 // run marked as needing attention, rather than failing within minutes.
 const DefaultUnmatchableGrace = match.DefaultClaimWait
 
+// safety: a pipeline's own claim wait binds here as it does at the controller.
+func (r *Runner) grace(req runner.Request) time.Duration {
+	if req.ClaimWait > 0 {
+		return req.ClaimWait
+	}
+	return r.cfg.UnmatchableGrace
+}
+
 // safety: the grace runs from the first sighting of an unmatchable node, and a
 // wait exactly as long as the grace is still inside it.
 func unmatchableExpired(since, now time.Time, grace time.Duration) bool {
@@ -290,7 +298,7 @@ type UnmatchableEvent struct {
 func (r *Runner) failUnmatchable(ctx context.Context, req runner.Request, n *store.Node) runner.Result {
 	msg := fmt.Sprintf(
 		"no runner advertises the labels %v within %s, and this dispatcher's fallback advertises %v",
-		n.NeedsLabels, r.cfg.UnmatchableGrace, r.fallbackLabels)
+		n.NeedsLabels, r.grace(req), r.fallbackLabels)
 	if n.CreditCPUClassCores > 0 {
 		msg += fmt.Sprintf("; the node is billed at the %d-core class, which the warm pool does not serve",
 			n.CreditCPUClassCores)
@@ -298,7 +306,7 @@ func (r *Runner) failUnmatchable(ctx context.Context, req runner.Request, n *sto
 	payload, err := json.Marshal(UnmatchableEvent{
 		NeedsLabels: n.NeedsLabels, FallbackLabels: r.fallbackLabels,
 		CPUClassCores: n.CreditCPUClassCores,
-		GraceSeconds:  r.cfg.UnmatchableGrace.Seconds(), Detail: msg,
+		GraceSeconds:  r.grace(req).Seconds(), Detail: msg,
 	})
 	if err != nil {
 		r.logger.Warn("warmpool: encoding the refusal failed",

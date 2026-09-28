@@ -559,10 +559,10 @@ func TestRunnerDoesNotRouteRequiredLabelsToUnlabelledFallback(t *testing.T) {
 	r := New(ctrl, fallback, Config{
 		PollInterval:     time.Millisecond,
 		ClaimWaitTimeout: 5 * time.Millisecond,
-		UnmatchableGrace: time.Millisecond,
+		UnmatchableGrace: time.Hour,
 	}, quietTestLogger())
 
-	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build"})
+	result := r.RunNode(context.Background(), runner.Request{RunID: "run-1", NodeID: "build", ClaimWait: time.Millisecond})
 	if result.Outcome != sparkwing.Failed {
 		t.Fatalf("result = %+v, want failed", result)
 	}
@@ -610,7 +610,7 @@ func TestRunnerDoesNotRouteRequiredLabelsToUnlabelledFallback(t *testing.T) {
 }
 
 // A grace that has not run out leaves the node queued for a runner that may
-// still appear.
+// still appear, and the run's own claim wait is the grace.
 func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
 	polled := make(chan struct{})
 	var polledOnce sync.Once
@@ -629,12 +629,14 @@ func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
 	r := New(ctrl, fallback, Config{
 		PollInterval:     time.Millisecond,
 		ClaimWaitTimeout: 2 * time.Millisecond,
-		UnmatchableGrace: time.Hour,
+		UnmatchableGrace: time.Millisecond,
 	}, quietTestLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan runner.Result, 1)
-	go func() { done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"}) }()
+	go func() {
+		done <- r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build", ClaimWait: time.Hour})
+	}()
 	// safety: the package timeout is what bounds a runner that never polls, so
 	// the test waits on the signal itself rather than on the wall clock.
 	<-polled

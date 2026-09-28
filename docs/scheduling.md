@@ -83,13 +83,22 @@ lacks one it declares.
 sw.Job(plan, "apply", &Apply{}).NeedsTools("terraform")
 ```
 
+`JobGroup.NeedsTools` applies to the members a group has at plan time, so it
+panics on a `JobFanOutDynamic` group; call `NeedsTools` on each node its
+callback returns. An enrolled executor has the tools its enrollment grants as
+`tool:<name>` capabilities.
+
 ## Waiting nodes and `needs_attention`
 
-A node no agent can claim does not fail fast. After 30 seconds unclaimed the
-controller checks every agent registered to the node's team, online or
-offline, plus Sparkwing Cloud on a metered controller. When no online agent
-and no Cloud runner could run it, the run's `needs_attention` field (on the
-run and in the run list) says why:
+A node no agent can claim does not fail fast. Once it has waited 30 seconds
+since it first became ready, the controller checks every agent registered to
+the node's team, online or offline, plus Sparkwing Cloud on a metered
+controller. Agents are judged as their claims are, on the selector, the run's
+repository and the node's resource request: an enrolled executor on its
+enrolled profile and online while it heartbeats, any other agent on what its
+latest claim sent and online while it polls. When no online agent and no Cloud
+runner could run the node, the run's `needs_attention` field (on the run and
+in the run list) says why:
 
 - `node apply needs tool:terraform; no agent in team acme has it and Sparkwing
   Cloud runners don't provide it` when nothing registered satisfies the
@@ -97,12 +106,22 @@ run and in the run list) says why:
 - `node apply needs tool:terraform; eligible agent pi is offline (last seen
   2026-09-28T10:00:00Z)` when an agent that could run it is offline, matched
   on the labels and platform it advertised on its last claim.
+- `node apply needs tool:terraform; every agent in team acme that matches
+  refuses it: pi (shape)` when the matching agents refuse the node's
+  repository (`repo`) or cannot hold its request (`shape`).
+
+The sweep runs every 10 seconds and judges at most 1,000 waiting nodes per
+tick, resuming after the last one on the next tick. On Postgres with 5,000
+waiting nodes a tick that rewrites 1,000 reasons took about 350 ms and a tick
+that changes none about 10 ms.
 
 The field clears when an agent claims the node, and on the next sweep once an
 eligible agent is online. The node waits up to its claim wait, 24 hours by
 default or what `plan.ClaimWait(d)` sets for the pipeline, then fails as
-unclaimable with `queue_timeout` and the reason as its error. A missing tool
-is never retried automatically.
+unclaimable with `queue_timeout` and the reason as its error. Both the
+30 seconds and the claim wait run from when the node first became ready, so an
+agent that polls and cannot take the node does not postpone either. A missing
+tool is never retried automatically.
 
 ## Per-node modifiers (Go SDK)
 
