@@ -49,9 +49,10 @@ func (EscapeProbe) Help() string {
 		"credential-named environment variables other than the pod's own claim token, Kubernetes API " +
 		"authorization at the Service VIP and each endpoint (SelfSubjectRulesReview, a dry-run Job mounting " +
 		"sparkwing-database, GET secrets), a controller admin route with the pod's own token, IMDSv2, the " +
-		"kubelet on its own and named nodes, and TCP to dind, RDS, argocd, loki, tempo and the Stratum ports. " +
-		"It prints pass or fail per probe, never a value, and fails the run if any probe succeeds or a " +
-		"required target is missing. Run it in a throwaway team with no credit or secrets."
+		"kubelet on its own and named nodes, and TCP to dind, RDS, argocd, loki and tempo. It also requires " +
+		"the public internet: HTTPS to github.com and TCP to a public resolver's port 53 must succeed. " +
+		"It prints a verdict per probe, never a value, and fails the run if a fenced probe succeeds, a " +
+		"public one fails, or a required target is missing. Run it in a throwaway team with no credit or secrets."
 }
 
 func (EscapeProbe) Examples() []sparkwing.Example {
@@ -69,8 +70,8 @@ type probeResult struct {
 	detail  string
 }
 
-// safety: only denied and blocked pass the gate; anything a probe could not
-// settle fails it, so the gate never passes because a probe errored.
+// safety: only denied, blocked and open pass the gate; anything a probe could
+// not settle fails it, so the gate never passes because a probe errored.
 type verdict string
 
 const (
@@ -78,9 +79,13 @@ const (
 	blocked      verdict = "blocked"
 	reached      verdict = "REACHED"
 	inconclusive verdict = "INCONCLUSIVE"
+	// safety: open is a public destination reached and closed one missed, which
+	// means the egress policy is tighter than customers are promised.
+	open   verdict = "open"
+	closed verdict = "CLOSED"
 )
 
-func (v verdict) failsGate() bool { return v != denied && v != blocked }
+func (v verdict) failsGate() bool { return v != denied && v != blocked && v != open }
 
 // safety: a policy drop shows as a timeout, a policy reject as an unreachable
 // host or network, and a closed port as a refusal; any DNS failure, even a
@@ -152,21 +157,27 @@ const (
 	apiVIP      = "kubernetes.default.svc:443"
 )
 
-// safety: these are the fenced services and the Stratum mining ports a hijacked
-// pod would dial; a probe that connects to any of them fails the run.
+// safety: these are the fenced in-cluster services; a probe that connects to
+// any of them fails the run.
 var tcpTargets = map[string]string{
-	"dind":      "dind.sparkwing.svc.cluster.local:2375",
-	"argocd":    "argocd-server.argocd.svc.cluster.local:443",
-	"loki":      "loki.monitoring.svc.cluster.local:3100",
-	"tempo":     "tempo.monitoring.svc.cluster.local:3200",
-	"stratum-a": "pool.supportxmr.com:3333",
-	"stratum-b": "pool.supportxmr.com:4444",
-	"stratum-c": "pool.supportxmr.com:14444",
+	"dind":   "dind.sparkwing.svc.cluster.local:2375",
+	"argocd": "argocd-server.argocd.svc.cluster.local:443",
+	"loki":   "loki.monitoring.svc.cluster.local:3100",
+	"tempo":  "tempo.monitoring.svc.cluster.local:3200",
 }
+
+// safety: Jobs are promised the internet on every port but SMTP, so failing
+// to open these fails the run. 1.1.1.1:53 is a long-stable anycast resolver
+// that takes TCP on a non-web port and needs no lookup, so it tests the port
+// range alone.
+const (
+	publicHTTPS  = "https://github.com/"
+	publicNonWeb = "1.1.1.1:53"
+)
 
 func (p prober) run() []probeResult {
 	out := p.fileProbes()
-	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe())
+	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.publicHTTPSProbe(), p.publicPortProbe())
 	for name, addr := range tcpTargets {
 		out = append(out, p.tcpProbe("tcp "+name, addr))
 	}
@@ -296,6 +307,30 @@ func (p prober) status(method, url, bearer string, body []byte, header map[strin
 	_, _ = io.Copy(io.Discard, resp.Body) //nolint:errcheck // see above
 	_ = resp.Body.Close()
 	return resp.StatusCode, nil
+}
+
+func egressVerdict(reachedIt bool) verdict {
+	if reachedIt {
+		return open
+	}
+	return closed
+}
+
+func (p prober) publicHTTPSProbe() probeResult {
+	code, err := p.status(http.MethodGet, publicHTTPS, "", nil, nil)
+	return probeResult{
+		name: "egress https github.com", verdict: egressVerdict(err == nil && code > 0),
+		detail: "fetches a public HTTPS page",
+	}
+}
+
+func (p prober) publicPortProbe() probeResult {
+	conn, err := p.dial("tcp", publicNonWeb, 3*time.Second)
+	closeConn(conn)
+	return probeResult{
+		name: "egress tcp public non-web port", verdict: egressVerdict(err == nil),
+		detail: "opens TCP to a public resolver's port 53",
+	}
 }
 
 func (p prober) imdsProbe() probeResult {

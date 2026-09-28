@@ -33,6 +33,9 @@ var (
 func cluster(status int, rules string, err error, bearers *[]string) *http.Client {
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		*bearers = append(*bearers, r.Header.Get("Authorization"))
+		if r.URL.Host == "github.com" {
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -56,8 +59,17 @@ func fencedProber(bearers *[]string) prober {
 		args:       EscapeProbeArgs{RDS: "db:5432", APIHosts: "10.0.36.1"},
 		env:        []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller"},
 		readFile:   routeFile,
-		dial:       func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, refused },
+		dial:       openInternet(func(string) error { return refused }),
 		httpClient: cluster(http.StatusForbidden, "", nil, bearers),
+	}
+}
+
+func openInternet(fenced func(addr string) error) func(string, string, time.Duration) (net.Conn, error) {
+	return func(_, addr string, _ time.Duration) (net.Conn, error) {
+		if addr == publicNonWeb {
+			return nil, nil
+		}
+		return nil, fenced(addr)
 	}
 }
 
@@ -105,7 +117,7 @@ func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 	p.httpClient = cluster(http.StatusCreated, `{"status":{"resourceRules":[{"resources":["secrets"]}]}}`, nil, &bearers)
 	results := byName(p.run())
 	for _, name := range []string{
-		"env credential", "read token", "imds", "controller admin route", "tcp rds", "tcp dind", "tcp stratum-a",
+		"env credential", "read token", "imds", "controller admin route", "tcp rds", "tcp dind", "tcp loki",
 		"kube-api kubernetes.default.svc:443 rules", "kube-api 10.0.36.1:443 dry-run job",
 		"kube-api 10.0.36.1:443 secrets", "kubelet 169.254.1.1",
 	} {
@@ -241,5 +253,27 @@ func TestEscapeProbe_RulesReviewVerdicts(t *testing.T) {
 		if got := p.rulesVerdict("https://api", ""); got != c.want {
 			t.Errorf("%s: %s, want %s", name, got, c.want)
 		}
+	}
+}
+
+// The earlier web-and-git-only policy passed every negative probe, so only the
+// positive ones can catch it: port 53 on the public resolver is dropped, and
+// the gate must fail on it. With no internet at all, HTTPS fails too.
+func TestEscapeProbe_ATooTightPolicyFailsTheGate(t *testing.T) {
+	var bearers []string
+	webOnly := fencedProber(&bearers)
+	webOnly.dial = func(_, addr string, _ time.Duration) (net.Conn, error) {
+		if addr == publicNonWeb {
+			return nil, timeoutErr{}
+		}
+		return nil, refused
+	}
+	if r := byName(webOnly.run())["egress tcp public non-web port"]; r.verdict != closed || !r.verdict.failsGate() {
+		t.Fatalf("a web-and-git-only policy: %+v, want the public non-web port closed", r)
+	}
+	offline := webOnly
+	offline.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, timeoutErr{} })}
+	if r := byName(offline.run())["egress https github.com"]; r.verdict != closed {
+		t.Fatalf("no internet at all: %+v, want HTTPS closed", r)
 	}
 }
