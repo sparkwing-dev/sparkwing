@@ -125,23 +125,8 @@ func recordLocalTriggerFailure(ctx context.Context, state StateBackend, trig *st
 	}))
 	if err := state.FinishRun(book, trig.ID, "failed", "local dispatch: "+dispatchErr.Error()); err != nil {
 		noteLostStateWrite(book, "finish run", trig.ID, err)
-		if runStillOpen(book, state, trig.ID) {
-			return
-		}
 	}
 	_ = state.FinishTrigger(book, trig.ID)
-}
-
-type runReader interface {
-	GetRun(ctx context.Context, runID string) (*store.Run, error)
-}
-
-// safety: the local orphan sweep visits only running runs, so a run left
-// pending under a finished trigger is never closed; keeping the trigger
-// claimed lets its lease lapse and the dispatch run again.
-func runStillOpen(ctx context.Context, runs runReader, runID string) bool {
-	run, err := runs.GetRun(ctx, runID)
-	return err != nil || run.FinishedAt == nil
 }
 
 // safety: this is an optional interface because a run hosted behind the

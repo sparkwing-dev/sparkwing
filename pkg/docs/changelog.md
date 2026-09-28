@@ -915,9 +915,7 @@ unlock.
 ### Fixed
 
 - **runner:** A local trigger whose dispatch fails records the dispatch error on
-  its failed run again, instead of a failed run with no error. When that write
-  itself fails, the trigger stays claimed until its lease lapses and the
-  dispatch runs again, rather than leaving the run pending.
+  its failed run again, instead of a failed run with no error.
 
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close

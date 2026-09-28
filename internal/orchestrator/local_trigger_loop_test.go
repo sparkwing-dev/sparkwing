@@ -633,14 +633,6 @@ func TestClaimedTriggerFailure_RecordsTheDispatchError(t *testing.T) {
 	}
 }
 
-func refuseRunFinish(t *testing.T, st *store.Store) {
-	t.Helper()
-	if _, err := st.DB().Exec(`CREATE TRIGGER refuse_run_finish BEFORE UPDATE OF finished_at ON runs
-		BEGIN SELECT RAISE(ABORT, 'run finish refused'); END`); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertTriggerStatus(t *testing.T, st *store.Store, id, want string) {
 	t.Helper()
 	trig, err := st.GetTrigger(context.Background(), id)
@@ -650,17 +642,6 @@ func assertTriggerStatus(t *testing.T, st *store.Store, id, want string) {
 	if trig.Status != want {
 		t.Fatalf("trigger status = %q, want %q", trig.Status, want)
 	}
-}
-
-func TestLocalTriggerFailure_UnrecordedRunKeepsTheTriggerClaimed(t *testing.T) {
-	st := consumerTestStore(t, t.TempDir())
-	claimed := claimedChildTrigger(t, st, "run-unrecorded", "deploy")
-	refuseRunFinish(t, st)
-
-	recordLocalTriggerFailure(context.Background(), localState{st: st}, claimed,
-		errors.New("compile failed"), quietLogger())
-
-	assertTriggerStatus(t, st, "run-unrecorded", "claimed")
 }
 
 func TestLocalTriggerFailure_RunTheChildFinishedStillFinishesTheTrigger(t *testing.T) {
@@ -677,16 +658,6 @@ func TestLocalTriggerFailure_RunTheChildFinishedStillFinishesTheTrigger(t *testi
 	recordLocalTriggerFailure(ctx, localState{st: st}, claimed, errors.New("exit status 1"), quietLogger())
 
 	assertTriggerStatus(t, st, "run-child-finished", "failed")
-}
-
-func TestClaimedTriggerFailure_UnrecordedRunKeepsTheTriggerClaimed(t *testing.T) {
-	st := consumerTestStore(t, t.TempDir())
-	claimed := claimedChildTrigger(t, st, "run-consumer-unrecorded", "deploy")
-	refuseRunFinish(t, st)
-
-	finishClaimedTriggerFailure(context.Background(), st, claimed, quietLogger(), errors.New("compile failed"))
-
-	assertTriggerStatus(t, st, "run-consumer-unrecorded", "claimed")
 }
 
 func TestLocalSetupFailureChild(t *testing.T) {

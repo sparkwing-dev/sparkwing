@@ -485,9 +485,6 @@ func settleClaimedTriggerDispatch(
 	if ok, ferr := st.FinishRunAtGeneration(book, trig.ID, trig.ClaimSeq,
 		"failed", "local dispatch: "+err.Error()); ferr != nil {
 		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", ferr)
-		if runStillOpen(book, st, trig.ID) {
-			return
-		}
 	} else if !ok {
 		logger.Warn("dispatch failure not recorded; the claim was superseded",
 			"trigger_id", trig.ID)
@@ -534,9 +531,6 @@ func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *sto
 	}
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "failed", "local dispatch: "+err.Error()); finishErr != nil {
 		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", finishErr)
-		if runStillOpen(ctx, st, trig.ID) {
-			return
-		}
 	}
 	if _, finishErr := st.FinishTriggerAtGeneration(ctx, trig.ID, trig.ClaimSeq); finishErr != nil {
 		logger.Warn("finish failed trigger", "trigger_id", trig.ID, "err", finishErr)
