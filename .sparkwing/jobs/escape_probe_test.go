@@ -3,9 +3,11 @@ package jobs
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -16,49 +18,47 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 const secretValue = "swc_the-claim-token-value"
 
-func cluster(open bool, bearers *[]string) *http.Client {
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+var (
+	refused     = &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	dnsMiss     = &net.DNSError{Err: "no such host", Name: "dind", IsNotFound: true}
+	errTLSBroke = errors.New("tls: handshake failure")
+)
+
+func cluster(status int, rules string, err error, bearers *[]string) *http.Client {
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		*bearers = append(*bearers, r.Header.Get("Authorization"))
-		if !open {
-			return nil, errors.New("connection refused")
+		if err != nil {
+			return nil, err
 		}
-		status, body := http.StatusOK, ""
-		switch {
-		case strings.HasSuffix(r.URL.Path, "selfsubjectrulesreviews"):
-			status, body = http.StatusCreated, `{"status":{"resourceRules":[{"resources":["secrets"]}]}}`
-		case strings.HasSuffix(r.URL.Path, "/jobs"):
-			status = http.StatusCreated
+		code, body := status, ""
+		if strings.HasSuffix(r.URL.Path, "selfsubjectrulesreviews") && status == http.StatusCreated {
+			body = rules
 		}
-		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 }
 
-func testProber(open bool, bearers *[]string) prober {
-	env := []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller"}
-	p := prober{
-		args: EscapeProbeArgs{RDS: "db:5432", APIHosts: "10.0.36.1"},
-		env:  env,
-		readFile: func(path string) ([]byte, error) {
-			if path == "/proc/net/route" {
-				return []byte("Iface\tDestination\tGateway\neth0\t00000000\t0101FEA9\n"), nil
-			}
-			return nil, errors.New("no such file")
-		},
-		dial:       func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, errors.New("refused") },
-		httpClient: cluster(open, bearers),
+func routeFile(path string) ([]byte, error) {
+	if path == "/proc/net/route" {
+		return []byte("Iface\tDestination\tGateway\neth0\t00000000\t0101FEA9\n"), nil
 	}
-	if open {
-		p.env = append(p.env, "AWS_SECRET_ACCESS_KEY=AKIAvalue")
-		fenced := p.readFile
-		p.readFile = func(path string) ([]byte, error) {
-			if path == "/proc/net/route" {
-				return fenced(path)
-			}
-			return []byte("sa-token-value"), nil
-		}
-		p.dial = func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, nil }
+	return nil, fs.ErrNotExist
+}
+
+func fencedProber(bearers *[]string) prober {
+	return prober{
+		args:       EscapeProbeArgs{RDS: "db:5432", APIHosts: "10.0.36.1"},
+		env:        []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller"},
+		readFile:   routeFile,
+		dial:       func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, refused },
+		httpClient: cluster(http.StatusForbidden, "", nil, bearers),
 	}
-	return p
 }
 
 func byName(results []probeResult) map[string]probeResult {
@@ -69,13 +69,22 @@ func byName(results []probeResult) map[string]probeResult {
 	return out
 }
 
-// A fenced pod passes every probe, including with its own claim token set: the
-// token it is meant to hold is not a leak.
+// A fenced pod passes: every endpoint either denies it or the network drops
+// or refuses it, and its own claim token is not a leak.
 func TestEscapeProbe_AFencedPodPassesEveryProbe(t *testing.T) {
 	var bearers []string
-	for _, r := range testProber(false, &bearers).run() {
-		if r.succeeded {
-			t.Errorf("%s: failed a fenced pod (%s)", r.name, r.detail)
+	for name, p := range map[string]prober{
+		"denied": fencedProber(&bearers),
+		"dropped": func() prober {
+			p := fencedProber(&bearers)
+			p.httpClient = cluster(0, "", timeoutErr{}, &bearers)
+			return p
+		}(),
+	} {
+		for _, r := range p.run() {
+			if r.verdict.failsGate() {
+				t.Errorf("%s: %s: %s (%s)", name, r.name, r.verdict, r.detail)
+			}
 		}
 	}
 }
@@ -84,14 +93,24 @@ func TestEscapeProbe_AFencedPodPassesEveryProbe(t *testing.T) {
 // kubelet and TCP probes, and no result carries a value it read.
 func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 	var bearers []string
-	results := byName(testProber(true, &bearers).run())
+	p := fencedProber(&bearers)
+	p.env = append(p.env, "AWS_SECRET_ACCESS_KEY=AKIAvalue")
+	p.readFile = func(path string) ([]byte, error) {
+		if path == "/proc/net/route" {
+			return routeFile(path)
+		}
+		return []byte("sa-token-value"), nil
+	}
+	p.dial = func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, nil }
+	p.httpClient = cluster(http.StatusCreated, `{"status":{"resourceRules":[{"resources":["secrets"]}]}}`, nil, &bearers)
+	results := byName(p.run())
 	for _, name := range []string{
 		"env credential", "read token", "imds", "controller admin route", "tcp rds", "tcp dind", "tcp stratum-a",
 		"kube-api kubernetes.default.svc:443 rules", "kube-api 10.0.36.1:443 dry-run job",
 		"kube-api 10.0.36.1:443 secrets", "kubelet 169.254.1.1",
 	} {
-		if r, ok := results[name]; !ok || !r.succeeded {
-			t.Errorf("%s: %+v, want a failed probe", name, r)
+		if r, ok := results[name]; !ok || r.verdict != reached {
+			t.Errorf("%s: %+v, want reached", name, r)
 		}
 	}
 	for _, r := range results {
@@ -111,24 +130,56 @@ func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 	}
 }
 
+// A probe that errors for any reason but a drop or a refusal, or that gets an
+// answer that is neither a grant nor a denial, has proved nothing, so it fails
+// the gate rather than passing it.
+func TestEscapeProbe_AnUnsettledProbeFailsTheGate(t *testing.T) {
+	var bearers []string
+	dns := fencedProber(&bearers)
+	dns.dial = func(_, _ string, _ time.Duration) (net.Conn, error) { return nil, dnsMiss }
+	tls := fencedProber(&bearers)
+	tls.httpClient = cluster(0, "", errTLSBroke, &bearers)
+	notFound := fencedProber(&bearers)
+	notFound.httpClient = cluster(http.StatusNotFound, "", nil, &bearers)
+	unreadable := fencedProber(&bearers)
+	unreadable.readFile = func(string) ([]byte, error) { return nil, errors.New("I/O error") }
+	for name, c := range map[string]struct {
+		p     prober
+		probe string
+	}{
+		"dns miss":         {dns, "tcp dind"},
+		"tls failure":      {tls, "kube-api 10.0.36.1:443 secrets"},
+		"tls on rules":     {tls, "kube-api kubernetes.default.svc:443 rules"},
+		"404 from the api": {notFound, "kube-api 10.0.36.1:443 dry-run job"},
+		"404 on imds":      {notFound, "imds"},
+		"no route file":    {unreadable, "kubelet own node"},
+		"unreadable token": {unreadable, "read token"},
+	} {
+		r, ok := byName(c.p.run())[c.probe]
+		if !ok || r.verdict != inconclusive || !r.verdict.failsGate() {
+			t.Errorf("%s: %s = %+v, want inconclusive", name, c.probe, r)
+		}
+	}
+}
+
 func TestEscapeProbe_AMissingTargetFailsTheGate(t *testing.T) {
 	var bearers []string
-	p := testProber(false, &bearers)
+	p := fencedProber(&bearers)
 	p.args = EscapeProbeArgs{}
 	results := byName(p.run())
 	for _, name := range []string{"tcp rds", "kube-api endpoints"} {
-		if r := results[name]; !r.succeeded || !strings.Contains(r.detail, "required") {
+		if r := results[name]; !r.verdict.failsGate() || !strings.Contains(r.detail, "required") {
 			t.Errorf("%s: %+v, want an unprobed target to fail", name, r)
 		}
 	}
 }
 
 func TestEscapeProbe_EnvProbeSkipsOnlyTheClaimToken(t *testing.T) {
-	if (prober{env: []string{"SPARKWING_AGENT_TOKEN=x", "PATH=/usr/bin"}}).envProbe().succeeded {
+	if (prober{env: []string{"SPARKWING_AGENT_TOKEN=x", "PATH=/usr/bin"}}).envProbe().verdict.failsGate() {
 		t.Fatal("the pod's own claim token failed the env probe")
 	}
 	for _, kv := range []string{"GITHUB_TOKEN=x", "aws_access_key_id=x", "DB_PASSWORD=x", "SPARKWING_AGENT_TOKEN2=x"} {
-		if !(prober{env: []string{kv}}).envProbe().succeeded {
+		if !(prober{env: []string{kv}}).envProbe().verdict.failsGate() {
 			t.Errorf("env probe missed %q", kv)
 		}
 	}

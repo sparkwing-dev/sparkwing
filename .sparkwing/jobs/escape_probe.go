@@ -7,14 +7,17 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -61,9 +64,52 @@ func (EscapeProbe) Examples() []sparkwing.Example {
 // safety: detail names what was tried, never what was found, so a red run's
 // logs carry no leaked credential.
 type probeResult struct {
-	name      string
-	succeeded bool
-	detail    string
+	name    string
+	verdict verdict
+	detail  string
+}
+
+// safety: only denied and blocked pass the gate; anything a probe could not
+// settle fails it, so the gate never passes because a probe errored.
+type verdict string
+
+const (
+	denied       verdict = "denied"
+	blocked      verdict = "blocked"
+	reached      verdict = "REACHED"
+	inconclusive verdict = "INCONCLUSIVE"
+)
+
+func (v verdict) failsGate() bool { return v != denied && v != blocked }
+
+// safety: a policy drop shows as a timeout and a closed port as a refusal;
+// any other failure, a DNS miss or a TLS error, says nothing about the fence.
+func netVerdict(err error) verdict {
+	var ne net.Error
+	switch {
+	case err == nil:
+		return reached
+	case errors.Is(err, syscall.ECONNREFUSED), errors.As(err, &ne) && ne.Timeout(), errors.Is(err, context.DeadlineExceeded):
+		return blocked
+	default:
+		return inconclusive
+	}
+}
+
+func httpVerdict(code int, err error) verdict {
+	switch {
+	case err != nil:
+		if v := netVerdict(err); v == blocked {
+			return blocked
+		}
+		return inconclusive
+	case code >= 200 && code < 300:
+		return reached
+	case code == http.StatusUnauthorized || code == http.StatusForbidden:
+		return denied
+	default:
+		return inconclusive
+	}
 }
 
 type prober struct {
@@ -133,6 +179,11 @@ func (p prober) run() []probeResult {
 	nodes := splitList(p.args.Nodes)
 	if gw := p.ownNode(); gw != "" {
 		nodes = append(nodes, gw)
+	} else {
+		out = append(out, probeResult{
+			name: "kubelet own node", verdict: inconclusive,
+			detail: "not probed: the pod's node address could not be read",
+		})
 	}
 	for _, node := range nodes {
 		out = append(out, p.tcpProbe("kubelet "+node, net.JoinHostPort(node, kubeletPort)))
@@ -142,7 +193,7 @@ func (p prober) run() []probeResult {
 }
 
 func missingTarget(name, flag string) probeResult {
-	return probeResult{name: name, succeeded: true, detail: "not probed: " + flag + " is required"}
+	return probeResult{name: name, verdict: inconclusive, detail: "not probed: " + flag + " is required"}
 }
 
 func (p prober) required(name, target string, probe func(string) probeResult) []probeResult {
@@ -169,7 +220,14 @@ func (p prober) fileProbes() []probeResult {
 			continue
 		}
 		_, err := p.readFile(path)
-		out = append(out, probeResult{name: "read " + filepath.Base(path), succeeded: err == nil, detail: "reads a credential file"})
+		v := reached
+		switch {
+		case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+			v = denied
+		case err != nil:
+			v = inconclusive
+		}
+		out = append(out, probeResult{name: "read " + filepath.Base(path), verdict: v, detail: "reads a credential file"})
 	}
 	return out
 }
@@ -192,11 +250,11 @@ func (p prober) envProbe() probeResult {
 		up := strings.ToUpper(key)
 		for _, name := range credentialNames {
 			if strings.Contains(up, name) {
-				return probeResult{name: "env credential", succeeded: true, detail: "a credential-named variable other than the claim token is set"}
+				return probeResult{name: "env credential", verdict: reached, detail: "a credential-named variable other than the claim token is set"}
 			}
 		}
 	}
-	return probeResult{name: "env credential", detail: "no credential-named variable other than the claim token is set"}
+	return probeResult{name: "env credential", verdict: denied, detail: "no credential-named variable other than the claim token is set"}
 }
 
 func closeConn(conn net.Conn) {
@@ -208,15 +266,15 @@ func closeConn(conn net.Conn) {
 func (p prober) tcpProbe(name, addr string) probeResult {
 	conn, err := p.dial("tcp", addr, 2*time.Second)
 	closeConn(conn)
-	return probeResult{name: name, succeeded: err == nil, detail: "opens a TCP connection to a fenced service"}
+	return probeResult{name: name, verdict: netVerdict(err), detail: "opens a TCP connection to a fenced service"}
 }
 
 // safety: the status code is the whole verdict, so the body is drained unread
 // and never reaches a result.
-func (p prober) status(method, url, bearer string, body []byte, header map[string]string) int {
+func (p prober) status(method, url, bearer string, body []byte, header map[string]string) (int, error) {
 	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
@@ -226,21 +284,18 @@ func (p prober) status(method, url, bearer string, body []byte, header map[strin
 	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return 0
+		return 0, err
 	}
 	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return 0
+		return 0, err
 	}
-	if err := resp.Body.Close(); err != nil {
-		return 0
-	}
-	return resp.StatusCode
+	return resp.StatusCode, resp.Body.Close()
 }
 
 func (p prober) imdsProbe() probeResult {
-	code := p.status(http.MethodPut, "http://169.254.169.254/latest/api/token", "", nil,
+	code, err := p.status(http.MethodPut, "http://169.254.169.254/latest/api/token", "", nil,
 		map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"})
-	return probeResult{name: "imds", succeeded: code == http.StatusOK, detail: "fetches an IMDSv2 token"}
+	return probeResult{name: "imds", verdict: httpVerdict(code, err), detail: "fetches an IMDSv2 token"}
 }
 
 // safety: the pod's own claim token must open no route beyond its claim, so an
@@ -250,9 +305,9 @@ func (p prober) adminRouteProbe() probeResult {
 	if base == "" {
 		return missingTarget("controller admin route", "SPARKWING_CONTROLLER_URL")
 	}
-	code := p.status(http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/tokens", p.getenv(ownTokenEnv), nil, nil)
+	code, err := p.status(http.MethodGet, strings.TrimRight(base, "/")+"/api/v1/tokens", p.getenv(ownTokenEnv), nil, nil)
 	return probeResult{
-		name: "controller admin route", succeeded: code >= 200 && code < 300,
+		name: "controller admin route", verdict: httpVerdict(code, err),
 		detail: "lists tokens with the pod's own claim token",
 	}
 }
@@ -271,21 +326,23 @@ func (p prober) kubeProbes(api string) []probeResult {
 	}
 	base := "https://" + api
 	jsonHeader := map[string]string{"Content-Type": "application/json"}
-	rules := p.rulesGrantSensitive(base, bearer)
-	job := p.status(http.MethodPost, base+"/apis/batch/v1/namespaces/sparkwing/jobs?dryRun=All", bearer, []byte(dryRunJob), jsonHeader)
-	secrets := p.status(http.MethodGet, base+"/api/v1/namespaces/sparkwing/secrets", bearer, nil, nil)
+	job, jobErr := p.status(http.MethodPost, base+"/apis/batch/v1/namespaces/sparkwing/jobs?dryRun=All", bearer, []byte(dryRunJob), jsonHeader)
+	secrets, secretsErr := p.status(http.MethodGet, base+"/api/v1/namespaces/sparkwing/secrets", bearer, nil, nil)
 	return []probeResult{
-		{name: "kube-api " + api + " rules", succeeded: rules, detail: "SelfSubjectRulesReview grants jobs or secrets"},
-		{name: "kube-api " + api + " dry-run job", succeeded: job >= 200 && job < 300, detail: "dry-run creates a Job mounting sparkwing-database"},
-		{name: "kube-api " + api + " secrets", succeeded: secrets == http.StatusOK, detail: "lists secrets in sparkwing"},
+		{name: "kube-api " + api + " rules", verdict: p.rulesVerdict(base, bearer), detail: "SelfSubjectRulesReview grants jobs or secrets"},
+		{name: "kube-api " + api + " dry-run job", verdict: httpVerdict(job, jobErr), detail: "dry-run creates a Job mounting sparkwing-database"},
+		{name: "kube-api " + api + " secrets", verdict: httpVerdict(secrets, secretsErr), detail: "lists secrets in sparkwing"},
 	}
 }
 
-func (p prober) rulesGrantSensitive(base, bearer string) bool {
+// safety: a review the API answers settles the question either way; only a
+// grant on jobs, secrets or everything breaches, and an answer the probe cannot
+// read settles nothing.
+func (p prober) rulesVerdict(base, bearer string) verdict {
 	body := []byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectRulesReview","spec":{"namespace":"sparkwing"}}`)
 	req, err := http.NewRequest(http.MethodPost, base+"/apis/authorization.k8s.io/v1/selfsubjectrulesreviews", bytes.NewReader(body))
 	if err != nil {
-		return false
+		return inconclusive
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if bearer != "" {
@@ -293,11 +350,14 @@ func (p prober) rulesGrantSensitive(base, bearer string) bool {
 	}
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return false
+		return httpVerdict(0, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
-		return false
+		if v := httpVerdict(resp.StatusCode, nil); v == denied {
+			return denied
+		}
+		return inconclusive
 	}
 	var review struct {
 		Status struct {
@@ -307,16 +367,16 @@ func (p prober) rulesGrantSensitive(base, bearer string) bool {
 		} `json:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
-		return false
+		return inconclusive
 	}
 	for _, rule := range review.Status.ResourceRules {
 		for _, r := range rule.Resources {
 			if r == "*" || r == "jobs" || r == "secrets" {
-				return true
+				return reached
 			}
 		}
 	}
-	return false
+	return denied
 }
 
 // safety: NetworkPolicy never blocks a pod's traffic to its own node, and the
@@ -344,11 +404,10 @@ func (p prober) ownNode() string {
 func reportProbes(ctx context.Context, where string, results []probeResult) error {
 	var breached []string
 	for _, r := range results {
-		verdict := "pass"
-		if r.succeeded {
-			verdict, breached = "FAIL", append(breached, r.name)
+		if r.verdict.failsGate() {
+			breached = append(breached, r.name)
 		}
-		sparkwing.Info(ctx, "%s: %s: %s (%s)", where, verdict, r.name, r.detail)
+		sparkwing.Info(ctx, "%s: %s: %s (%s)", where, r.verdict, r.name, r.detail)
 	}
 	if len(breached) > 0 {
 		return fmt.Errorf("%s: containment breached or unprobed: %s", where, strings.Join(breached, ", "))
