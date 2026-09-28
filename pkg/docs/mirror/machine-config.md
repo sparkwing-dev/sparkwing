@@ -34,7 +34,7 @@ profiles:
       token: swu_...
 repos:
   repos:
-    - path: /home/me/code/app
+    - path: /srv/code/app
   fallback_paths:
     - ~/code
 admission:

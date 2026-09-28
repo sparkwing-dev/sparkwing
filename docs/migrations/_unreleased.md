@@ -51,7 +51,7 @@ Before:
   mode: auto
 ~/.config/sparkwing/repos.yaml
   repos:
-    - path: /home/me/code/app
+    - path: /srv/code/app
 ```
 
 After:
@@ -67,7 +67,7 @@ admission:
   budget: 50%,8gb
 repos:
   repos:
-    - path: /home/me/code/app
+    - path: /srv/code/app
 ```
 
 **Path overrides.** `SPARKWING_CONFIG` names the file. `SPARKWING_PROFILES`,
@@ -114,11 +114,13 @@ the daemon starts, then run `sparkwing daemon restart`. Back up `secrets.key`
 with `state.db`; losing it loses every local secret. Sparkwing refuses to
 create a new key while `state.db` holds values sealed under another one.
 
-**Before upgrading.** Stop the daemon with `sparkwing daemon stop` and copy
-`state.db` from `SPARKWING_HOME` somewhere safe. That copy is the way back.
+**Before upgrading.** Stop the daemon with `sparkwing daemon stop`, then back
+up `state.db` in `SPARKWING_HOME` with its write-ahead log files as
+[Back up](../backup-restore.md#sqlite) describes. That backup is the way back.
 
 **Automatic import.** The daemon imports both dotenv files once, the first
-time it opens `state.db`. Each name becomes an unscoped secret shared with
+time it opens `state.db`, which `sparkwing secrets` creates when the files
+exist and `state.db` does not. Each name becomes an unscoped secret shared with
 every pipeline; a name in both files imports once, masked. A name the store
 already holds keeps the store's value. The import is all or nothing and is
 recorded in `state.db`, so it never runs again: a secret deleted afterwards
@@ -163,8 +165,9 @@ for `sparkwing daemon restart`. A run no daemon hosts reads `state.db`
 directly with the same key, and fails a secret read while the dotenv files
 wait to be imported.
 
-**Rolling back.** Stop the daemon, restore the `state.db` copy taken before
-the upgrade, and reinstall the older release. It reads the old settings files
+**Rolling back.** Stop the daemon, restore that backup as
+[Restore](../backup-restore.md#restore) describes, and reinstall the older
+release. It reads the old settings files
 and dotenv files, which the upgrade left as they were, so any setting or
 secret changed after the upgrade, which lives only in `config.yaml` and
 `state.db`, must be redone by hand.
