@@ -232,8 +232,8 @@ type NodeAttention struct {
 	Reason        string
 }
 
-// SetNodeAttention records the reasons. A node claimed since the sweep read
-// it keeps none.
+// SetNodeAttention records the reasons. A node claimed or withdrawn from the
+// queue since the sweep read it keeps none.
 //
 // safety: each reason is its own autocommitted single-row statement, so the
 // sweep never holds one node's lock while it waits for another's, and run
@@ -244,7 +244,7 @@ func (s *Store) SetNodeAttention(ctx context.Context, updates []NodeAttention) e
 	var errs []error
 	for _, u := range updates {
 		if _, err := s.exec(ctx, `UPDATE nodes SET attention_reason = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
+ WHERE team = ? AND run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone,
 			u.Reason, string(u.Team), u.RunID, u.NodeID); err != nil {
 			errs = append(errs, err)
 		}

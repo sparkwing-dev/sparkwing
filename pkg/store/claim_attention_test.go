@@ -224,3 +224,32 @@ func TestSetNodeAttentionHoldsOneNodeLockAtATime(t *testing.T) {
 		t.Fatalf("run-y = %+v, %v; want its reason once the lock is released", run, err)
 	}
 }
+
+// A node withdrawn from the queue between the sweep's read and its write keeps
+// no reason.
+func TestSetNodeAttentionSkipsANodeRevokedSinceTheRead(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	seedMatchNode(t, s, "run-r", "", 1, "tool:terraform")
+	ageReadyNode(t, s, "run-r", time.Minute)
+	waiting, err := s.ListWaitingNodes(ctx, time.Now(), [2]string{}, 10)
+	if err != nil || len(waiting) != 1 {
+		t.Fatalf("waiting = %+v, %v", waiting, err)
+	}
+	if revoked, err := s.RevokeNodeReady(ctx, "run-r", "work"); err != nil || !revoked {
+		t.Fatalf("revoke = %v, %v", revoked, err)
+	}
+	if err := s.SetNodeAttention(ctx, []store.NodeAttention{{
+		Team: waiting[0].Team, RunID: "run-r", NodeID: "work", Reason: "stale",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := s.DB().QueryRowContext(ctx, storetest.Rebind(s,
+		`SELECT attention_reason FROM nodes WHERE run_id = ? AND node_id = ?`), "run-r", "work").Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "" {
+		t.Fatalf("a revoked node was given the reason %q", reason)
+	}
+}

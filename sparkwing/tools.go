@@ -17,15 +17,21 @@ import (
 // plan time. A node no agent can claim waits and marks its run as needing
 // attention until one can, for up to its plan's ClaimWait.
 func (n *JobNode) NeedsTools(names ...string) *JobNode {
+	mustKnowTools("NeedsTools", names)
 	for _, name := range names {
-		if !match.IsKnownTool(name) {
-			panic(fmt.Sprintf("sparkwing: NeedsTools(%q): not a known tool; known tools are %v", name, match.KnownTools))
-		}
 		if label := match.ToolPrefix + name; !slices.Contains(n.tools, label) {
 			n.tools = append(n.tools, label)
 		}
 	}
 	return n
+}
+
+func mustKnowTools(caller string, names []string) {
+	for _, name := range names {
+		if !match.IsKnownTool(name) {
+			panic(fmt.Sprintf("sparkwing: %s(%q): not a known tool; known tools are %v", caller, name, match.KnownTools))
+		}
+	}
 }
 
 // ClaimWait bounds how long each of the run's ready nodes waits for an agent

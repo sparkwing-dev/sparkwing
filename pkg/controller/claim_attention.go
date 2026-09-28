@@ -32,22 +32,22 @@ func (s *Server) recordAgentLabels(ctx context.Context, tokenPrefix string, labe
 
 // perf: a tick judges at most this many nodes and resumes after the last one
 // next tick, so a large backlog costs bounded work per tick.
-var claimAttentionBatch = 1000
+const claimAttentionBatch = 1000
 
 // safety: a pass reads only nodes ready before it began, so nodes that arrive
 // behind its cursor cannot keep it from wrapping, and every waiting node is
-// judged within ceil(N/claimAttentionBatch) ticks.
-func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time) {
+// judged within ceil(N/batch) ticks.
+func (s *Server) sweepClaimAttention(ctx context.Context, now time.Time, batch int) {
 	if s.attentionCursor == ([2]string{}) {
 		s.attentionPassAt = now
 	}
-	waiting, err := s.store.ListWaitingNodes(ctx, s.attentionPassAt.Add(-claimAttentionGrace), s.attentionCursor, claimAttentionBatch)
+	waiting, err := s.store.ListWaitingNodes(ctx, s.attentionPassAt.Add(-claimAttentionGrace), s.attentionCursor, batch)
 	if err != nil {
 		s.logger.Error("claim attention sweep failed", "err", err)
 		return
 	}
 	s.attentionCursor = [2]string{}
-	if len(waiting) == claimAttentionBatch {
+	if len(waiting) == batch {
 		last := waiting[len(waiting)-1]
 		s.attentionCursor = [2]string{last.RunID, last.NodeID}
 	}

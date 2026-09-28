@@ -1567,7 +1567,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 						"invocations", recovery.Invocations)
 				}
 			}
-			s.sweepClaimAttention(ctx, time.Now())
+			s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
 			if pairs, err := store.Maintenance.FailStaleQueuedNodes(s.store, ctx, match.DefaultClaimWait); err != nil {
 				s.logger.Error("queue-timeout sweep failed", "err", err)
 			} else {

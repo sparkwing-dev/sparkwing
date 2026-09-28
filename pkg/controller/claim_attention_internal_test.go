@@ -77,7 +77,7 @@ func TestClaimAttentionNamesWhyARunWaits(t *testing.T) {
 	}
 	expect := func(step, want string) {
 		t.Helper()
-		srv.sweepClaimAttention(ctx, time.Now())
+		srv.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
 		if single, listed := runAttention(t, ts.URL, "run-1"); single != want || listed != want {
 			t.Fatalf("%s: run says %q, run list says %q; want %q", step, single, listed, want)
 		}
@@ -210,9 +210,6 @@ func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 	srv := New(st, nil)
-	batch := claimAttentionBatch
-	claimAttentionBatch = 2
-	t.Cleanup(func() { claimAttentionBatch = batch })
 	seed := func(runID string, readyAt time.Time) {
 		t.Helper()
 		if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
@@ -233,7 +230,7 @@ func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
 	for _, run := range []string{"run-a", "run-b", "run-c"} {
 		seed(run, start.Add(-time.Minute))
 	}
-	srv.sweepClaimAttention(ctx, start)
+	srv.sweepClaimAttention(ctx, start, 2)
 	if err := st.SetNodeAttention(ctx, []store.NodeAttention{{Team: store.DefaultTeam, RunID: "run-a", NodeID: "work"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +238,7 @@ func TestClaimAttentionPassWrapsDespiteNewNodes(t *testing.T) {
 		tick := start.Add(time.Duration(i) * 100 * time.Second)
 		seed(fmt.Sprintf("run-d%dx", i), tick.Add(-time.Minute))
 		seed(fmt.Sprintf("run-d%dy", i), tick.Add(-time.Minute))
-		srv.sweepClaimAttention(ctx, tick)
+		srv.sweepClaimAttention(ctx, tick, 2)
 	}
 	if run, err := st.GetRun(ctx, "run-a"); err != nil || run.NeedsAttention == "" {
 		t.Fatalf("run-a = %+v, %v; the node behind the cursor was never judged again", run, err)

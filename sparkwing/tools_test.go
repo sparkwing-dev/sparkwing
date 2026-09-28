@@ -55,3 +55,17 @@ func TestNeedsToolsReachesADynamicGroupsGeneratedMembers(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupNeedsToolsRejectsAnUnknownToolWhenCalled(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	src := sparkwing.Job(plan, "discover", &discoverJob{items: []string{"a"}})
+	group := sparkwing.JobFanOutDynamic(plan, "builds", src, func(s string) (string, any) {
+		return "build-" + s, func(ctx context.Context) error { return nil }
+	})
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(r.(string), `JobGroup.NeedsTools("terraformm")`) {
+			t.Fatalf("an unknown tool on a dynamic group = %v, want a panic at the call", r)
+		}
+	}()
+	group.NeedsTools("terraformm")
+}

@@ -2,6 +2,7 @@ package sparkwing
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 )
@@ -127,8 +128,9 @@ func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (
 			job := coerceJobArg("JobFanOutDynamic", id, x)
 			node := newNode("JobFanOutDynamic", id, job)
 			g.mu.Lock()
-			node.NeedsTools(g.tools...)
+			tools := slices.Clone(g.tools)
 			g.mu.Unlock()
+			node.NeedsTools(tools...)
 			out = append(out, node)
 		}
 		return out
@@ -214,6 +216,7 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 // including the members a [JobFanOutDynamic] group generates later. See
 // [JobNode.NeedsTools].
 func (g *JobGroup) NeedsTools(names ...string) *JobGroup {
+	mustKnowTools("JobGroup.NeedsTools", names)
 	g.mu.Lock()
 	g.tools = append(g.tools, names...)
 	g.mu.Unlock()
