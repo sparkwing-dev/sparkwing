@@ -135,9 +135,8 @@ func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, clas
 		retryAfter = concurrency.RetryAfter
 	}
 
-	s.logger.Warn("egress refused",
-		"code", body.Code, "principal", body.Principal,
-		"class", string(class), "path", r.URL.Path)
+	s.logger.Warn("egress refused", append(requestLogAttrs(r),
+		"code", body.Code, "principal", body.Principal, "class", string(class))...)
 	w.Header().Set("Retry-After", strconv.Itoa(int(retryAfterSeconds(retryAfter))))
 	writeJSON(w, http.StatusTooManyRequests, body)
 }

@@ -48,7 +48,7 @@ func TestAgentsLogsInternalStoreFailure(t *testing.T) {
 	if got := logs.String(); !strings.Contains(got, "list registered agents") ||
 		!strings.Contains(got, "no such table: nodes") ||
 		!strings.Contains(got, `"method":"GET"`) ||
-		!strings.Contains(got, `"path":"/api/v1/agents"`) {
+		!strings.Contains(got, `"route":"/api/v1/agents"`) {
 		t.Fatalf("internal error log = %s", got)
 	}
 }

@@ -68,7 +68,7 @@ func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	}
 	req.Header.Set("Authorization", owner.auth)
 	req.Header.Set("X-Request-Id", "req-audit-1")
-	req.Header.Set("User-Agent", strings.Repeat("u", 300))
+	req.Header.Set("User-Agent", "agent\t"+strings.Repeat("u", 300))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -95,22 +95,22 @@ func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	}
 	for key, want := range map[string]any{
 		"request_id": "req-audit-1", "method": "DELETE", "principal_kind": store.TokenKindUser,
-		"team": owner.team, "user_agent": strings.Repeat("u", 128),
+		"team": owner.team, "principal_id": owner.id, "user_agent": "agent" + strings.Repeat("u", 123),
 	} {
 		if deleted[key] != want {
 			t.Errorf("audit %s = %v, want %v", key, deleted[key], want)
 		}
 	}
-	for _, key := range []string{"principal_id", "client_ip", "status", "dur_ms", "ts"} {
+	for _, key := range []string{"client_ip", "status", "dur_ms", "ts"} {
 		if deleted[key] == nil || deleted[key] == "" {
 			t.Errorf("audit record has no %s: %v", key, deleted)
 		}
 	}
-	if minted["principal_id"] != "root" {
-		t.Errorf("token-authenticated audit principal = %v, want root", minted["principal_id"])
+	if prefix, _ := minted["principal_id"].(string); prefix == "" || !strings.HasPrefix(f.admin, prefix) {
+		t.Errorf("token-authenticated audit principal = %v, want the token's prefix", minted["principal_id"])
 	}
 	all := logs.String()
-	for _, leak := range []string{secretName, "leak-me-query", f.admin, strings.TrimPrefix(owner.auth, "Session ")} {
+	for _, leak := range []string{secretName, "leak-me-query", f.admin, strings.TrimPrefix(owner.auth, "Session "), "olga@example.com", `agent\t`} {
 		if strings.Contains(all, leak) {
 			t.Errorf("log carries %q:\n%s", leak, all)
 		}

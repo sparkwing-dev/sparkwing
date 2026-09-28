@@ -24,11 +24,14 @@ unlock.
 
 - **controller:** Audit record for every write request
   Each non-read request logs one `audit` record with its request id, route
-  pattern, status, duration, client address, user agent, principal kind and
-  name or token prefix, team, and the run, node and team ids its path names.
-  It never logs the raw path, query, headers, body or credential. Empty claim
-  polls answering 204 are not audited. Read requests log their route pattern
-  instead of their path. Every response carries `X-Request-Id`: the caller's
+  pattern, status, duration, client address, user agent with control
+  characters removed, principal kind, the account id or token prefix, team,
+  and the run, node and team ids its path names. It never logs an email,
+  the raw path, query, headers, body or credential. A write whose handler
+  panics is audited as a 500. Empty node and trigger claim polls answering
+  204 are not audited; a pending executor offer is. Read requests and
+  internal-error and egress-refusal logs name the route pattern instead of
+  the path. Every response carries `X-Request-Id`: the caller's
   value when it is a token of at most 64 characters, otherwise a new one.
 - **controller + store:** Schema 79 adds `business_events`
   One row per admission, team creation, checkout opened, paid, failed or

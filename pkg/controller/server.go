@@ -1676,19 +1676,33 @@ func withRequestLog(
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestID(r)
 		w.Header().Set(RequestIDHeader, id)
-		ctx, rec := withAuditRecord(r.Context())
+		ctx, rec := withAuditRecord(r.Context(), id, routeLabel(r))
 		r = r.WithContext(ctx)
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
 			writer = &flushingStatusRecorder{statusRecorder: rw}
 		}
-		route := routeLabel(r)
 		start := time.Now()
+		finish := func(status int) {
+			elapsed := time.Since(start)
+			observeHTTPRequest(rec.route, r.Method, status, elapsed)
+			logRequest(ctx, logger, r, rec, w.Header(), status, elapsed, clientIP(r))
+		}
+		// safety: a handler that panics still made its write attempt, so it is
+		// logged as a 500 before the panic continues to the server.
+		defer func() {
+			if p := recover(); p != nil {
+				status := http.StatusInternalServerError
+				if p == http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
+					status = rw.status
+				}
+				finish(status)
+				panic(p)
+			}
+		}()
 		next.ServeHTTP(writer, r)
-		elapsed := time.Since(start)
-		observeHTTPRequest(route, r.Method, rw.status, elapsed)
-		logRequest(ctx, logger, r, rec, id, route, rw.status, elapsed, clientIP(r))
+		finish(rw.status)
 	})
 }
 
