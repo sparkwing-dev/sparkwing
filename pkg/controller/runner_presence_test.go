@@ -28,7 +28,12 @@ func TestRunnerPresenceLiveCarriesTheClaimCredential(t *testing.T) {
 // liveness window, however many runners of any team have polled it since.
 func TestRunnerPresenceCompleteOnlyAfterAWholeWindow(t *testing.T) {
 	reg := newRunnerPresenceRegistry()
-	start := reg.since
+	start := time.Now()
+	if reg.complete(start.Add(time.Hour), time.Minute) {
+		t.Fatal("a registry that never accepted a request vouched for its runners")
+	}
+	reg.listening(start)
+	reg.listening(start.Add(time.Second))
 	reg.record(presenceKey{tokenPrefix: "swr_other", name: "busy"}, nil, nil, nil, start)
 	if reg.complete(start.Add(time.Minute-time.Nanosecond), time.Minute) {
 		t.Fatal("a registry younger than the window vouched for its runners")

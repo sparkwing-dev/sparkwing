@@ -683,6 +683,12 @@ func TestRunnerFallsBackAtOnceOnlyWhenTheControllerCanVouch(t *testing.T) {
 		}
 		srv := httptest.NewServer(controller.New(st, quietTestLogger()).
 			WithLocalFirstPlacement(nil, 0, tc.liveness).Handler())
+		// safety: the registry's clock starts at the first request it hears.
+		if resp, err := http.Get(srv.URL + "/"); err != nil {
+			t.Fatal(err)
+		} else {
+			_ = resp.Body.Close()
+		}
 		fallback := &fallbackRunner{}
 		r := New(client.New(srv.URL, nil), fallback,
 			Config{PollInterval: 5 * time.Millisecond, ClaimWaitTimeout: 5 * time.Second}, quietTestLogger())

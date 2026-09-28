@@ -3,6 +3,7 @@ package controller
 import (
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -45,19 +46,32 @@ func (p runnerPresence) freeSlots() int {
 type runnerPresenceRegistry struct {
 	mu sync.Mutex
 	m  map[presenceKey]runnerPresence
-	// safety: a registry younger than the liveness window may be missing a live
-	// runner that has not polled since the controller started.
-	since time.Time
+	// safety: when the controller accepted its first request, in Unix nanoseconds;
+	// zero until then. Startup work before serving is not listening.
+	since atomic.Int64
 }
 
 func newRunnerPresenceRegistry() *runnerPresenceRegistry {
-	return &runnerPresenceRegistry{m: map[presenceKey]runnerPresence{}, since: time.Now()}
+	return &runnerPresenceRegistry{m: map[presenceKey]runnerPresence{}}
+}
+
+// safety: starts the registry's clock once, at the first request it could hear.
+func (r *runnerPresenceRegistry) listening(now time.Time) {
+	if r != nil && r.since.Load() == 0 {
+		r.since.CompareAndSwap(0, now.UnixNano())
+	}
 }
 
 // safety: only a registry that has listened for a whole liveness window can
-// say no runner is live, whichever teams have polled it since.
+// say no runner is live, whichever teams have polled it since. Each controller
+// replica keeps its own registry, so this holds only for a single replica,
+// which the chart enforces.
 func (r *runnerPresenceRegistry) complete(now time.Time, within time.Duration) bool {
-	return r != nil && within > 0 && now.Sub(r.since) >= within
+	if r == nil || within <= 0 {
+		return false
+	}
+	since := r.since.Load()
+	return since != 0 && now.Sub(time.Unix(0, since)) >= within
 }
 
 func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, allowRepos *sourceurl.RepoAllowlist, at time.Time) {
