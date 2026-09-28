@@ -22,6 +22,15 @@ unlock.
 
 ### Added
 
+- **controller:** Audit record for every write request
+  Each non-read request logs one `audit` record with its request id, route
+  pattern, status, duration, client address, user agent, principal kind and
+  name or token prefix, team, and the run, node and team ids its path names.
+  It never logs the raw path, query, headers, body or credential. Empty claim
+  polls answering 204 are not audited. Read requests log their route pattern
+  instead of their path. Every response carries `X-Request-Id`: the caller's
+  value when it is a token of at most 64 characters, otherwise a new one.
+
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most

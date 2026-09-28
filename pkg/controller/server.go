@@ -883,7 +883,9 @@ func (s *Server) Handler() http.Handler {
 	mux, router := s.routers()
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
-		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
+		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
+			return ratelimit.ClientIP(r, s.loginLimit.trusted)
+		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.runnerPresence.listening(time.Now())
 		if !s.Metering() {
@@ -1667,8 +1669,14 @@ func (s *Server) sampleCreditLedger(ctx context.Context) {
 	ledgerSnapshot.set(totals)
 }
 
-func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*http.Request) string) http.Handler {
+func withRequestLog(
+	next http.Handler, logger *slog.Logger, routeLabel, clientIP func(*http.Request) string,
+) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := requestID(r)
+		w.Header().Set(RequestIDHeader, id)
+		ctx, rec := withAuditRecord(r.Context())
+		r = r.WithContext(ctx)
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		writer := http.ResponseWriter(rw)
 		if _, ok := w.(http.Flusher); ok {
@@ -1679,14 +1687,7 @@ func withRequestLog(next http.Handler, logger *slog.Logger, routeLabel func(*htt
 		next.ServeHTTP(writer, r)
 		elapsed := time.Since(start)
 		observeHTTPRequest(route, r.Method, rw.status, elapsed)
-		logger.Info(
-			"http",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"route", route,
-			"status", rw.status,
-			"dur_ms", elapsed.Milliseconds(),
-		)
+		logRequest(ctx, logger, r, rec, id, route, rw.status, elapsed, clientIP(r))
 	})
 }
 
