@@ -244,7 +244,7 @@ func TestDispatchedNodeFetchesAnSSHMirrorThroughItsOwnGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimed, err := client.NewWithToken(ctrlSrv.URL, nil, token).
-		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-1", time.Minute, false)
+		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-1", time.Minute, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

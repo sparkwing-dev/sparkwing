@@ -128,7 +128,11 @@ var (
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
-	ErrInvitationLimit  = errors.New("store: this team has sent as many invitations as it may for now")
+	// ErrAgentNameTaken refuses a runner token for a name another live runner
+	// token of the team already carries, because a node selector and a
+	// workload identity bound to name= would admit either machine.
+	ErrAgentNameTaken  = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
+	ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 )
 
 // Account is one human, what the API calls a user. Email is the address the
@@ -1376,6 +1380,16 @@ func (t *Tenant) createRunnerTokenOnce(
 	}
 	if live >= MaxRunnerTokensPerTeam {
 		return "", nil, ErrRunnerTokenLimit
+	}
+	var named int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM tokens
+		WHERE team = ? AND kind = ? AND principal = ? AND (revoked_at IS NULL OR revoked_at > ?) AND (expires_at IS NULL OR expires_at > ?)`,
+		string(t.team), TokenKindRunner, principal, at, at).Scan(&named); err != nil {
+		return "", nil, err
+	}
+	if named > 0 {
+		return "", nil, fmt.Errorf("%w: %s", ErrAgentNameTaken, principal)
 	}
 	raw, tok, err := createTokenRow(ctx, tx, t.team, principal, TokenKindRunner, scopes, RunnerTokenLifetime, now,
 		TokenOptions{CreatedBy: createdBy})

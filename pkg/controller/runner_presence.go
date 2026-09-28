@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -31,9 +31,10 @@ type runnerPresence struct {
 	awarded int
 	// safety: a caller that only ever polls has proved nothing, so labels alone
 	// cannot reserve the queue for a machine that never executes.
-	claimed    bool
-	allowRepos *sourceurl.RepoAllowlist
-	UpdatedAt  time.Time
+	claimed   bool
+	profile   match.Profile
+	available match.Resources
+	UpdatedAt time.Time
 }
 
 func (p runnerPresence) freeSlots() int {
@@ -74,7 +75,7 @@ func (r *runnerPresenceRegistry) complete(now time.Time, within time.Duration) b
 	return since != 0 && now.Sub(time.Unix(0, since)) >= within
 }
 
-func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, allowRepos *sourceurl.RepoAllowlist, at time.Time) {
+func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capacity *claimCapacity, profile match.Profile, resources *claimResources, at time.Time) {
 	if r == nil || key.name == "" {
 		return
 	}
@@ -82,7 +83,10 @@ func (r *runnerPresenceRegistry) record(key presenceKey, labels []string, capaci
 	defer r.mu.Unlock()
 	p := runnerPresence{
 		Labels: append([]string(nil), labels...), UpdatedAt: at,
-		claimed: r.m[key].claimed, allowRepos: allowRepos,
+		claimed: r.m[key].claimed, profile: profile,
+	}
+	if resources != nil {
+		p.available = resources.Availability
 	}
 	if capacity != nil {
 		p.MaxConcurrent = capacity.MaxConcurrent
@@ -141,7 +145,7 @@ func (r *runnerPresenceRegistry) live(now time.Time, within time.Duration, exclu
 		}
 		out = append(out, store.RunnerPresence{
 			Name: key.name, Labels: p.Labels, FreeSlots: p.freeSlots(), TokenPrefix: key.tokenPrefix,
-			AllowRepos: presenceRepoFilter(p.allowRepos),
+			Profile: p.profile, Available: p.available,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -173,13 +177,4 @@ func presenceName(holderID string) string {
 		return name
 	}
 	return holderID
-}
-
-// safety: a nil list must reach the store as a nil interface, or a runner that
-// sent none would read as one whose list admits nothing.
-func presenceRepoFilter(allow *sourceurl.RepoAllowlist) store.RepoFilter {
-	if allow == nil {
-		return nil
-	}
-	return *allow
 }

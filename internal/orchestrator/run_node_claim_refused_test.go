@@ -105,7 +105,7 @@ func TestRunNodeCommand_StopsWhenTheClaimRenewalIsRefused(t *testing.T) {
 	defer srv.Close()
 
 	claimed, err := client.NewWithToken(srv.URL, nil, token).
-		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-refused", time.Minute, false)
+		ClaimNodeByID(ctx, runID, nodeID, "k8s-job:sw-refused", time.Minute, false, nil)
 	if err != nil {
 		t.Fatalf("dispatcher claim: %v", err)
 	}

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -137,7 +137,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			// safety: a labeled node may fall back only when the fallback explicitly
 			// advertises every label. Most callers configure none.
-			if !sparkwingruntime.MatchLabels(n.NeedsLabels, r.fallbackLabels) {
+			if !match.Evaluate(match.Profile{Labels: r.fallbackLabels}, match.Demand{Selector: n.NeedsLabels}).OK() {
 				now := time.Now()
 				if unmatchableSince.IsZero() {
 					unmatchableSince = now

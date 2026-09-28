@@ -614,6 +614,7 @@ type EgressUsage struct {
 }
 const EgressUsageRetentionMonths = 13
 var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete or credits.grant scope")
+var ErrAgentNameTaken = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
@@ -764,11 +765,13 @@ type ExecutionStart struct {
 	ExecutorName string
 }
 type Executor struct {
-	Name             string
-	TokenPrefix      string
-	Kind             string
-	Location         string
-	Capabilities     []string
+	Name         string
+	TokenPrefix  string
+	Kind         string
+	Location     string
+	Capabilities []string
+
+	AcceptRepos      []string
 	BasePriority     int
 	PriorityCeiling  int
 	MaxConcurrent    int
@@ -834,10 +837,7 @@ type ExecutorMembershipSnapshot struct {
 	MaxConcurrent           int
 }
 const ExecutorRegistrationActiveWindow = 2 * time.Minute
-type ExecutorResource struct {
-	Cores       float64
-	MemoryBytes int64
-}
+type ExecutorResource = match.Resources
 type ExecutorSchedulingSummary struct {
 	RunID                 string
 	NodeID                string
@@ -1133,6 +1133,8 @@ const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
 type NamedClaimOptions struct {
 	SizesToClass bool
+
+	Labels []string
 }
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
@@ -1416,10 +1418,7 @@ func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
 func RedactedRuns(runs []*Run) []*Run
-type RepoFilter interface {
-	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
-}
-func RepoFilterFrom(ctx context.Context) (RepoFilter, bool)
+type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
 type RetentionSweep struct {
@@ -1533,11 +1532,13 @@ type RunnerPresence struct {
 
 	Labels []string
 
+	Profile match.Profile
+
 	FreeSlots int
 
-	TokenPrefix string
+	Available match.Resources
 
-	AllowRepos RepoFilter
+	TokenPrefix string
 }
 const RunnerScaleMaxRunners = 1_000_000
 const RunnerScaleMaxStepCredits = 10_000_000 * CreditsPerDollar
@@ -2564,12 +2565,12 @@ type WaitlistedAccount struct {
 	Reason       string
 }
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
+func WithClaimProfile(ctx context.Context, profile match.Profile) context.Context
 func WithCreatingPrincipal(ctx context.Context, principal string) context.Context
 func WithExecutionAttemptOrdinal(ctx context.Context, ordinal int) context.Context
 func WithGitHubRunnerScope(ctx context.Context, scope GitHubRunnerScope) context.Context
 func WithNodeClaimFence(ctx context.Context, fence NodeClaimFence) context.Context
 func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Context
-func WithRepoFilter(ctx context.Context, filter RepoFilter) context.Context
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context

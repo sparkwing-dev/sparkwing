@@ -29,9 +29,11 @@ type Client struct {
 	runnerIdentity atomic.Pointer[string]
 
 	triggerNodeRunner string
-	// bug: Old controllers reject allow_repos, so send it only after capability discovery.
-	allowRepos []string
-	repoFilter atomic.Int32
+	// bug: Old controllers reject allow_repos, platform and resources, so they
+	// are sent only after capability discovery.
+	allowRepos     []string
+	claimResources func() *ClaimResources
+	claimCaps      atomic.Pointer[claimCapabilities]
 
 	pollAdvice atomic.Int64
 }
@@ -799,22 +801,19 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error) {
 // trigger_source filters. The controller returns only triggers that
 // match both lists. Empty/nil on either axis means "accept any".
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error) {
-	allowRepos := c.claimAllowRepos(ctx)
+	req := map[string]any{}
+	if len(pipelines) > 0 {
+		req["pipelines"] = pipelines
+	}
+	if len(sources) > 0 {
+		req["trigger_sources"] = sources
+	}
+	if c.triggerNodeRunner != "" {
+		req["node_runner"] = c.triggerNodeRunner
+	}
+	c.addClaimProfile(ctx, req, c.claimAllowRepos(ctx))
 	var body io.Reader
-	if len(pipelines) > 0 || len(sources) > 0 || c.triggerNodeRunner != "" || allowRepos != nil {
-		req := map[string]any{}
-		if len(pipelines) > 0 {
-			req["pipelines"] = pipelines
-		}
-		if len(sources) > 0 {
-			req["trigger_sources"] = sources
-		}
-		if c.triggerNodeRunner != "" {
-			req["node_runner"] = c.triggerNodeRunner
-		}
-		if allowRepos != nil {
-			req["allow_repos"] = allowRepos
-		}
+	if len(req) > 0 {
 		buf, _ := json.Marshal(req)
 		body = bytes.NewReader(buf)
 	}
@@ -1234,9 +1233,7 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 	if capacity != nil {
 		body["capacity"] = capacity
 	}
-	if allowRepos := c.claimAllowRepos(ctx); allowRepos != nil {
-		body["allow_repos"] = allowRepos
-	}
+	c.addClaimProfile(ctx, body, c.claimAllowRepos(ctx))
 	buf, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+"/api/v1/nodes/claim", bytes.NewReader(buf))
@@ -1279,9 +1276,10 @@ func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, lab
 //
 // sizesToClass reports that the caller creates the node's executor at the cpu
 // class the claim bills; a metered caller that does not is refused a class
-// above the one the warm pool serves.
+// above the one the warm pool serves. labels are what the caller asserts for
+// that executor, which the node's selector is checked against.
 func (c *Client) ClaimNodeByID(
-	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool,
+	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool, labels []string,
 ) (*store.Node, error) {
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/claim",
 		url.PathEscape(runID), url.PathEscape(nodeID))
@@ -1291,6 +1289,16 @@ func (c *Client) ClaimNodeByID(
 	}
 	if sizesToClass {
 		body["sizes_to_class"] = true
+	}
+	// safety: the caller runs the node somewhere other than this process, so
+	// this machine's platform and resources say nothing about it.
+	if caps := c.claimCapabilities(ctx); caps.Profile {
+		if len(labels) > 0 {
+			body["labels"] = labels
+		}
+		if allowRepos := c.claimAllowRepos(ctx); allowRepos != nil {
+			body["allow_repos"] = allowRepos
+		}
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {

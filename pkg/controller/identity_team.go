@@ -346,7 +346,7 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	raw, tok, err := t.CreateRunnerToken(r.Context(), runnerPrincipalPrefix+name, runnerTokenScopes, p.AccountID, time.Now().UTC())
-	if errors.Is(err, store.ErrRunnerTokenLimit) {
+	if errors.Is(err, store.ErrRunnerTokenLimit) || errors.Is(err, store.ErrAgentNameTaken) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}

@@ -29,6 +29,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // BusyTimeoutEnvVar names the environment override for the SQLite
@@ -1063,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 77
+const expectedSchemaVersion = 81
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2100,6 +2101,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimTokensMigration(ctx, tx, false)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, false)
+	// safety: v78 to v80 belong to migrations another line of work lands; a
+	// merge takes those in place of these empty steps.
+	case 78, 79, 80:
+		return nil
+	case 81:
+		return ensureColumnsSQLite(ctx, tx, "executors", executorAcceptCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2534,6 +2541,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimTokensMigration(ctx, tx, true)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, true)
+	// safety: v78 to v80 belong to migrations another line of work lands; a
+	// merge takes those in place of these empty steps.
+	case 78, 79, 80:
+		return nil
+	case 81:
+		return addColumnsTx(ctx, tx, "executors", executorAcceptCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2970,6 +2983,12 @@ var triggerRepoInheritedCols = map[string]string{
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+}
+
+// safety: NULL accepts every repository, so a row an older binary writes keeps
+// the behavior it had.
+var executorAcceptCols = map[string]string{
+	"accept_repos_json": "BLOB",
 }
 
 // #nosec G101 -- column names, not credentials
@@ -5602,7 +5621,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	if err != nil {
 		return nil, err
 	}
-	labels := newClaimLabels(runnerLabels)
+	profile := claimProfileFrom(ctx, claimant, runnerLabels)
 	placement, _ := ClaimPlacementFromContext(ctx)
 	warm, err := s.warmClassFilter(ctx, claimant)
 	if err != nil {
@@ -5618,7 +5637,7 @@ func (s *Store) ClaimNextReadyNodeAs(ctx context.Context, claimant ClaimIdentity
 	}
 
 	for range maxClaimAttempts {
-		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, labels, placement, warm, scope)
+		target, mismatched, err := s.scanClaimCandidates(ctx, coordinatorID, profile, runnerLabels, placement, warm, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -5659,6 +5678,7 @@ type claimCandidate struct {
 	holdFrom *time.Time
 	needs    []string
 	prefers  []string
+	request  match.Resources
 	decision placementDecision
 }
 
@@ -5738,14 +5758,15 @@ func (f warmClassFilter) refusesCharge(charge ExecutorResource) bool {
 
 // safety: walks the queue outside any transaction, so a poll that takes nothing
 // writes nothing and holds no lock.
-func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, labels claimLabels, placement ClaimPlacement, warm warmClassFilter, scope teamScope) (*claimCandidate, []nodeKey, error) {
+func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, profile match.Profile, runnerLabels []string,
+	placement ClaimPlacement, warm warmClassFilter, scope teamScope,
+) (*claimCandidate, []nodeKey, error) {
 	var mismatched []nodeKey
 	var cursor *claimCandidate
 	ghScope, scoped := GitHubRunnerScopeFrom(ctx)
 	admitted := map[string]bool{}
-	allow, filtered := RepoFilterFrom(ctx)
-	needRepo := filtered || placement.needsRunRepository()
-	repos := map[string]runRepository{}
+	needRepo := profile.Accept != nil || placement.needsRunRepository()
+	repos := map[string]match.Repository{}
 	for range claimScanRounds {
 		batch, err := s.readClaimCandidates(ctx, coordinatorID, cursor, warm, scope)
 		if err != nil {
@@ -5753,7 +5774,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 		}
 		for i := range batch {
 			n := &batch[i]
-			if !labelsSatisfied(n.needs, labels.hard) {
+			if !match.Evaluate(profile, match.Demand{Selector: n.needs}).OK() {
 				mismatched = append(mismatched, nodeKey{runID: n.runID, nodeID: n.nodeID})
 				continue
 			}
@@ -5766,15 +5787,20 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 					continue
 				}
 			}
-			var repo runRepository
+			// safety: the request the plan declared is on the row, so matching it
+			// costs no read however many nodes a hold passes over.
+			demand := match.Demand{Selector: n.needs, Request: n.request}
 			if needRepo {
-				if repo, err = s.runRepositoryOf(ctx, scope, n.runID, repos); err != nil {
+				repo, err := s.runRepositoryOf(ctx, scope, n.runID, repos)
+				if err != nil {
 					return nil, nil, err
 				}
+				demand.Repo = &repo
 			}
 			// safety: the node stays queued for a runner whose list admits its
-			// repository, so passing over it writes nothing.
-			if filtered && !repo.admitsNodeFor(allow) {
+			// repository and whose capacity holds it, so passing over it writes
+			// nothing.
+			if !match.Evaluate(profile, demand).OK() {
 				continue
 			}
 			refused, err := warm.refuses(ctx, storeRowQuerier{s}, n.runID, n.nodeID)
@@ -5788,7 +5814,7 @@ func (s *Store) scanClaimCandidates(ctx context.Context, coordinatorID string, l
 			if refused {
 				continue
 			}
-			n.decision = placement.decide(n.needs, n.prefers, repo, labels, n.holdFrom, time.Now())
+			n.decision = placement.decide(demand, n.prefers, runnerLabels, n.holdFrom, time.Now())
 			if n.decision.hold {
 				continue
 			}
@@ -5830,7 +5856,8 @@ func (s *Store) readClaimCandidates(
 		args = append(args, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
 	}
 	args = append(args, claimScanBatch)
-	rows, err := s.query(ctx, `SELECT run_id, node_id, ready_at, placement_hold_from, needs_labels, prefers_labels
+	rows, err := s.query(ctx, `SELECT run_id, node_id, ready_at, placement_hold_from, needs_labels, prefers_labels,
+        requested_cores, requested_memory_bytes
  FROM nodes
 	WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
 	AND required_coordinator_id = '' AND required_executor_location = ''
@@ -5849,7 +5876,7 @@ func (s *Store) readClaimCandidates(
 		var holdFromNS sql.NullInt64
 		var needsJSON, prefersJSON []byte
 		if err := rows.Scan(&candidate.runID, &candidate.nodeID, &candidate.readyAt,
-			&holdFromNS, &needsJSON, &prefersJSON); err != nil {
+			&holdFromNS, &needsJSON, &prefersJSON, &candidate.request.Cores, &candidate.request.MemoryBytes); err != nil {
 			return nil, err
 		}
 		if holdFromNS.Valid {
@@ -6012,35 +6039,6 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		return nil, err
 	}
 	return &n.Node, nil
-}
-
-func labelsSatisfied(needed []string, have map[string]struct{}) bool {
-	for _, term := range needed {
-		if term == "" {
-			continue
-		}
-		if !labelTermSatisfied(term, have) {
-			return false
-		}
-	}
-	return true
-}
-
-func labelTermSatisfied(term string, have map[string]struct{}) bool {
-	if !strings.ContainsRune(term, ',') {
-		_, ok := have[strings.TrimSpace(term)]
-		return ok
-	}
-	for _, alt := range strings.Split(term, ",") {
-		alt = strings.TrimSpace(alt)
-		if alt == "" {
-			continue
-		}
-		if _, ok := have[alt]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // UpdateNodeActivity sets status_detail and bumps last_heartbeat.
@@ -6441,7 +6439,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT run_id, node_id FROM nodes
+		`SELECT run_id, node_id, needs_labels, team, requested_cores, requested_memory_bytes FROM nodes
 		  WHERE ready_at IS NOT NULL AND claimed_by IS NULL
 		    AND ready_at < ? AND `+nodeNotDone,
 		threshold)
@@ -6449,13 +6447,15 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 		return nil, err
 	}
 	var pairs [][2]string
+	var stale []staleNode
 	for rows.Next() {
-		var rid, nid string
-		if err := rows.Scan(&rid, &nid); err != nil {
+		var n staleNode
+		if err := rows.Scan(&n.runID, &n.nodeID, &n.needsJSON, &n.team, &n.request.Cores, &n.request.MemoryBytes); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		pairs = append(pairs, [2]string{rid, nid})
+		pairs = append(pairs, [2]string{n.runID, n.nodeID})
+		stale = append(stale, n)
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
@@ -6465,15 +6465,20 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, olderThan time.Duratio
 		return nil, nil
 	}
 	now := time.Now().UnixNano()
-	for _, p := range pairs {
+	live, _ := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
+	for i, p := range pairs {
+		nearest, err := nearestRunnerTx(ctx, tx, stale[i], live)
+		if err != nil {
+			return nil, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET `+nodeFailSet+`,
-       error = 'no runner claimed this node before the queue deadline',
+       error = ?,
        failure_reason = ?, finished_at = ?,
        ready_at = NULL
  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL AND `+nodeNotDone,
-			FailureQueueTimeout, now, p[0], p[1]); err != nil {
+			"no runner claimed this node before the queue deadline"+nearest, FailureQueueTimeout, now, p[0], p[1]); err != nil {
 			return nil, err
 		}
 	}
@@ -7470,7 +7475,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		sel += clause
 		args = append(args, scopeArgs...)
 	}
-	allow, filtered := RepoFilterFrom(ctx)
+	profile := claimProfileFrom(ctx, claimant, nil)
+	filtered := profile.Accept != nil
 	// safety: a filtered claimant reads the queue in batches and passes over
 	// every trigger its list does not admit, so another repository's run at the
 	// head of the queue never hides the one it may build.
@@ -7510,7 +7516,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 					return nil, notFound("claimable trigger", "")
 				}
 			}
-			if filtered && !triggerAdmittedBy(allow, &row.t, row.envJSON) {
+			repo := triggerRunRepository(&row.t, row.envJSON)
+			if filtered && !match.Evaluate(profile, match.Demand{Repo: &repo, Trigger: true}).OK() {
 				continue
 			}
 			t, argsJSON, envJSON, createdNS, found = row.t, row.argsJSON, row.envJSON, row.createdNS, true

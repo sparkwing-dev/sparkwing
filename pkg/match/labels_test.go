@@ -1,9 +1,9 @@
-package sparkwingruntime_test
+package match_test
 
 import (
 	"testing"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 func TestMatchLabels_EmptyNeededMatchesAnything(t *testing.T) {
@@ -17,10 +17,10 @@ func TestMatchLabels_EmptyNeededMatchesAnything(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if !sparkwingruntime.MatchLabels(nil, tc.have) {
+			if !matchLabels(nil, tc.have) {
 				t.Errorf("nil needed should match %v", tc.have)
 			}
-			if !sparkwingruntime.MatchLabels([]string{}, tc.have) {
+			if !matchLabels([]string{}, tc.have) {
 				t.Errorf("empty needed should match %v", tc.have)
 			}
 		})
@@ -41,7 +41,7 @@ func TestMatchLabels_AndAcrossTerms(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := sparkwingruntime.MatchLabels(tc.needed, tc.have)
+			got := matchLabels(tc.needed, tc.have)
 			if got != tc.want {
 				t.Errorf("MatchLabels(%v, %v) = %v, want %v", tc.needed, tc.have, got, tc.want)
 			}
@@ -66,7 +66,7 @@ func TestMatchLabels_CommaOrWithinTerm(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := sparkwingruntime.MatchLabels(tc.needed, tc.have)
+			got := matchLabels(tc.needed, tc.have)
 			if got != tc.want {
 				t.Errorf("MatchLabels(%v, %v) = %v, want %v", tc.needed, tc.have, got, tc.want)
 			}
@@ -89,7 +89,7 @@ func TestMatchLabels_MixedAndOr(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := sparkwingruntime.MatchLabels(needed, tc.have)
+			got := matchLabels(needed, tc.have)
 			if got != tc.want {
 				t.Errorf("MatchLabels(%v, %v) = %v, want %v", needed, tc.have, got, tc.want)
 			}
@@ -97,16 +97,7 @@ func TestMatchLabels_MixedAndOr(t *testing.T) {
 	}
 }
 
-func TestMatchLabelsSet_EquivalentToMatchLabels(t *testing.T) {
-	needed := []string{"os=linux,macos", "amd64"}
-	have := []string{"os=macos", "amd64", "extra"}
-
-	set := make(map[string]struct{}, len(have))
-	for _, l := range have {
-		set[l] = struct{}{}
-	}
-
-	if a, b := sparkwingruntime.MatchLabels(needed, have), sparkwingruntime.MatchLabelsSet(needed, set); a != b {
-		t.Errorf("MatchLabels = %v, MatchLabelsSet = %v; expected agreement", a, b)
-	}
+// safety: the dispatcher's own check, over labels it trusts as they stand.
+func matchLabels(needed, have []string) bool {
+	return match.Evaluate(match.Profile{Labels: have}, match.Demand{Selector: needed}).OK()
 }

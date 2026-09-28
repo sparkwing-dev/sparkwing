@@ -122,7 +122,7 @@ func TestOfferRoundIgnoresARunnerWhoseAllowListRefusesTheRepository(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			live.AllowRepos = allow
+			live.Profile.Accept = allow
 		}
 		return store.WithQueueRunners(ctx, []store.RunnerPresence{live})
 	}

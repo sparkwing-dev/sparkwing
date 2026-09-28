@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
+
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -47,7 +49,7 @@ func TestBusyLegacyRunnerHeartbeatUpdatesObservedLivenessWithoutPolling(t *testi
 	}
 	s := New(st, nil).EnableAuthFromStore()
 	key := presenceKey{tokenPrefix: identity.Prefix, name: "moonborn"}
-	s.runnerPresence.record(key, []string{"local"}, &claimCapacity{MaxConcurrent: 1, ActiveClaims: 1}, nil, old)
+	s.runnerPresence.record(key, []string{"local"}, &claimCapacity{MaxConcurrent: 1, ActiveClaims: 1}, match.Profile{}, nil, old)
 	server := httptest.NewServer(s.Handler())
 	defer server.Close()
 	beat, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/runs/run/nodes/work/heartbeat",

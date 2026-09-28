@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // ErrExecutorCredentialMismatch means an executor is enrolled to another
@@ -47,19 +49,19 @@ const (
 const ExecutorKindLocal = "local"
 
 // ExecutorResource is a CPU and memory capacity or charge.
-type ExecutorResource struct {
-	Cores       float64 `json:"cores" yaml:"cores"`
-	MemoryBytes int64   `json:"memory_bytes" yaml:"memory_bytes"`
-}
+type ExecutorResource = match.Resources
 
 // Executor is one administrator-enrolled execution membership.
 type Executor struct {
-	id               string
-	Name             string           `json:"name"`
-	TokenPrefix      string           `json:"-"`
-	Kind             string           `json:"kind"`
-	Location         string           `json:"location"`
-	Capabilities     []string         `json:"capabilities,omitempty"`
+	id           string
+	Name         string   `json:"name"`
+	TokenPrefix  string   `json:"-"`
+	Kind         string   `json:"kind"`
+	Location     string   `json:"location"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	// AcceptRepos narrows the repositories the executor takes, as host/path
+	// patterns. Nil takes every repository; an empty list takes none.
+	AcceptRepos      []string         `json:"accept_repos,omitempty"`
 	BasePriority     int              `json:"base_priority"`
 	PriorityCeiling  int              `json:"priority_ceiling"`
 	MaxConcurrent    int              `json:"max_concurrent"`
@@ -118,6 +120,16 @@ func (s *Store) EnrollExecutor(ctx context.Context, tokenPrefix string, e Execut
 }
 
 func enrollExecutorWith(ctx context.Context, tx *storeTx, tokenPrefix string, executor Executor, caps []byte) error {
+	var accept []byte
+	if executor.AcceptRepos != nil {
+		if _, err := match.ParseAccept(executor.AcceptRepos); err != nil {
+			return fmt.Errorf("%w: executor accept_repos: %w", ErrInvalidInput, err)
+		}
+		var err error
+		if accept, err = json.Marshal(executor.AcceptRepos); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE executors
    SET last_seen = CASE WHEN token_prefix = ? THEN last_seen ELSE 0 END,
@@ -130,13 +142,13 @@ UPDATE executors
 	   supervisor_requirements_json = CASE WHEN token_prefix = ? THEN supervisor_requirements_json ELSE NULL END,
 	   body_runtime_requirements_json = CASE WHEN token_prefix = ? THEN body_runtime_requirements_json ELSE NULL END,
 	   runner_build_identity_json = CASE WHEN token_prefix = ? THEN runner_build_identity_json ELSE NULL END,
-       token_prefix = ?, kind = ?, location = ?, capabilities_json = ?,
+       token_prefix = ?, kind = ?, location = ?, capabilities_json = ?, accept_repos_json = ?,
        base_priority = ?, priority_ceiling = ?, max_concurrent = ?,
        budget_cores = ?, budget_memory_bytes = ?, principal = ?
  WHERE name = ?`,
 		tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix,
 		tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix, tokenPrefix,
-		tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
+		tokenPrefix, executor.Kind, executor.Location, caps, accept, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
 		executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal, executor.Name)
 	if err != nil {
 		return err
@@ -159,11 +171,11 @@ UPDATE executors
 		}
 		_, err = tx.ExecContext(ctx, `
 INSERT INTO executors
-    (executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+    (executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
      budget_cores, budget_memory_bytes, principal, last_seen,
      headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
-			executorID, executor.Name, tokenPrefix, executor.Kind, executor.Location, caps, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 0)`,
+			executorID, executor.Name, tokenPrefix, executor.Kind, executor.Location, caps, accept, executor.BasePriority, executor.PriorityCeiling, executor.MaxConcurrent,
 			executor.Budget.Cores, executor.Budget.MemoryBytes, executor.Principal)
 		if err != nil {
 			return err
@@ -334,7 +346,7 @@ func (t *Tenant) ListExecutors(ctx context.Context) ([]Executor, error) {
 
 func (s *Store) listExecutors(ctx context.Context, team Team, scoped bool) ([]Executor, error) {
 	query := `
-SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors`
@@ -352,15 +364,15 @@ SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_
 	var out []Executor
 	for rows.Next() {
 		var e Executor
-		var caps []byte
+		var caps, accept []byte
 		var seen int64
 		var reported int
-		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &accept, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 			&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 			&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(caps, &e.Capabilities)
+		e.decodeGrants(caps, accept)
 		if seen > 0 {
 			e.LastSeen = time.Unix(0, seen)
 		}
@@ -446,6 +458,9 @@ type ExecutorSchedulingSummary struct {
 	RunPriority           int              `json:"run_priority"`
 	RequiredCoordinatorID string           `json:"required_coordinator_id,omitempty"`
 	RequiredLocation      string           `json:"required_location,omitempty"`
+	// safety: the run's repository, resolved by the store on every path that
+	// awards, so an executor's accept list binds preparation, offer and award.
+	repo *match.Repository
 }
 
 // ExecutorMembershipSnapshot binds a registered executor to one controller
@@ -541,10 +556,16 @@ func (s *Store) schedulingSummaryTx(ctx context.Context, tx *storeTx, runID, nod
 		return ExecutorSchedulingSummary{}, err
 	}
 	var plan []byte
-	if err := tx.QueryRowContext(ctx, `SELECT plan_json FROM runs WHERE id = ?`, runID).Scan(&plan); err != nil {
+	var team string
+	if err := tx.QueryRowContext(ctx, `SELECT plan_json, team FROM runs WHERE id = ?`, runID).Scan(&plan, &team); err != nil {
+		return ExecutorSchedulingSummary{}, err
+	}
+	repo, err := scanRunRepository(tx.QueryRowContext(ctx, runRepositorySQL, runID, team))
+	if err != nil {
 		return ExecutorSchedulingSummary{}, err
 	}
 	return ExecutorSchedulingSummary{
+		repo:  &repo,
 		RunID: runID, NodeID: nodeID, HardCapabilities: append([]string(nil), n.NeedsLabels...),
 		PreferredCapabilities: snapshotNodePrefers(plan, nodeID), Resources: charge, ResourceDigest: executorResourceDigest(charge), Slots: 1,
 		RunPriority: snapshotRunPriority(plan), RequiredCoordinatorID: n.RequiredCoordinatorID,
@@ -757,7 +778,7 @@ func loadExecutorsForSchedulingTx(ctx context.Context, tx *storeTx, activeAfter 
 		args = append(args, string(team))
 	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors WHERE last_seen >= ?`+filter+` ORDER BY name LIMIT ?`, append(args, MaxEnrolledExecutors+1)...)
@@ -806,7 +827,7 @@ func loadExecutorsByNameTx(ctx context.Context, tx *storeTx, names []string) (ma
 		args[i] = names[i]
 	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors WHERE name IN (`+strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")+`) ORDER BY name`, args...)
@@ -829,16 +850,16 @@ func scanExecutors(rows *sql.Rows) ([]Executor, error) {
 	var out []Executor
 	for rows.Next() {
 		var e Executor
-		var caps []byte
+		var caps, accept []byte
 		var seen int64
 		var reported int
-		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps,
+		if err := rows.Scan(&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &accept,
 			&e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 			&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 			&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal(caps, &e.Capabilities)
+		e.decodeGrants(caps, accept)
 		e.LastSeen = time.Unix(0, seen)
 		e.HeadroomReported = reported != 0
 		out = append(out, e)
@@ -847,10 +868,10 @@ func scanExecutors(rows *sql.Rows) ([]Executor, error) {
 }
 
 func executorEffectivePriority(e Executor, summary ExecutorSchedulingSummary) int {
-	capSet := executorTrustSet(e)
+	profile := e.profile()
 	preferenceBoost := 0
 	for i, preference := range summary.PreferredCapabilities {
-		if labelsSatisfied([]string{preference}, capSet) {
+		if match.TermSatisfied(profile, preference) {
 			preferenceBoost = len(summary.PreferredCapabilities) - i
 			break
 		}
@@ -920,55 +941,46 @@ func executorExclusionReason(e Executor, summary ExecutorSchedulingSummary, acti
 
 func executorHardExclusionReason(e Executor, summary ExecutorSchedulingSummary, coordinatorID string) string {
 	if summary.RequiredCoordinatorID != "" && summary.RequiredCoordinatorID != coordinatorID {
-		return "trusted_placement"
+		return string(match.ReasonTrustedPlacement)
 	}
 	if summary.RequiredLocation != "" && (summary.RequiredLocation == executorLocationUnknown || summary.RequiredLocation != e.Location) {
-		return "trusted_placement"
+		return string(match.ReasonTrustedPlacement)
 	}
-	capSet := executorTrustSet(e)
-	placementMissing, capabilityMissing := false, false
-	for _, term := range summary.HardCapabilities {
-		if term == "" || labelTermSatisfied(term, capSet) {
-			continue
-		}
-		if executorTermContainsPlacement(term) {
-			placementMissing = true
-		} else {
-			capabilityMissing = true
-		}
-	}
-	if placementMissing {
-		return "trusted_placement"
-	}
-	if capabilityMissing {
-		return "hard_capability"
-	}
-	return ""
+	return string(match.Evaluate(e.profile(), match.Demand{
+		Selector: summary.HardCapabilities, Repo: summary.repo, Request: summary.Resources,
+	}).Reason)
 }
 
-func executorTermContainsPlacement(term string) bool {
-	for _, value := range strings.Split(term, ",") {
-		value = strings.TrimSpace(value)
-		if value == "local" || strings.HasPrefix(value, "location=") {
-			return true
-		}
-	}
-	return false
-}
-
-func executorTrustSet(e Executor) map[string]struct{} {
-	trusted := make(map[string]struct{}, len(e.Capabilities)+1)
-	for _, capability := range e.Capabilities {
-		if capability != "local" && !strings.HasPrefix(capability, "location=") {
-			trusted[capability] = struct{}{}
-		}
+// safety: every field comes off the enrolled row an administrator wrote, and
+// coordinator placement is never grantable to an enrolled helper. An accept
+// list that no longer parses admits nothing rather than everything.
+func (e Executor) profile() match.Profile {
+	p := match.Profile{
+		Name: e.Name, Class: match.ClassAgent, Labels: match.SelfAsserted(e.Capabilities), Capacity: e.Budget,
 	}
 	if e.Location == executorLocationLocal || e.Location == executorLocationCloud {
-		trusted["location="+e.Location] = struct{}{}
+		p.Location = e.Location
 	}
-	// safety: coordinator placement is never grantable to an enrolled helper.
-	delete(trusted, "location="+executorLocationCoordinator)
-	return trusted
+	if e.AcceptRepos != nil {
+		accept, err := match.ParseAccept(e.AcceptRepos)
+		if err != nil {
+			slog.Warn("an enrolled executor's accept list does not parse, so it takes no repository",
+				"executor", e.Name, "err", err)
+		}
+		p.Accept = accept
+	}
+	return p
+}
+
+// safety: a grant column that will not decode grants nothing, so an unreadable
+// accept list takes no repository.
+func (e *Executor) decodeGrants(caps, accept []byte) {
+	if json.Unmarshal(caps, &e.Capabilities) != nil {
+		e.Capabilities = nil
+	}
+	if len(accept) != 0 && (json.Unmarshal(accept, &e.AcceptRepos) != nil || e.AcceptRepos == nil) {
+		e.AcceptRepos = []string{}
+	}
 }
 
 func executorResourceDigest(resource ExecutorResource) string {
@@ -979,15 +991,15 @@ func executorResourceDigest(resource ExecutorResource) string {
 
 func (s *Store) getExecutor(ctx context.Context, name string) (Executor, error) {
 	var e Executor
-	var caps []byte
+	var caps, accept []byte
 	var seen int64
 	var reported int
 	err := s.queryRow(ctx, `
-SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors WHERE name = ?`, name).Scan(
-		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &accept, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -996,7 +1008,7 @@ SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_
 	if err != nil {
 		return Executor{}, err
 	}
-	_ = json.Unmarshal(caps, &e.Capabilities)
+	e.decodeGrants(caps, accept)
 	if seen > 0 {
 		e.LastSeen = time.Unix(0, seen)
 	}
@@ -1135,15 +1147,15 @@ func lockAllExecutorRowsCanonicalTx(ctx context.Context, tx *storeTx) error {
 
 func (s *Store) getExecutorTx(ctx context.Context, tx *storeTx, name string) (Executor, error) {
 	var e Executor
-	var caps []byte
+	var caps, accept []byte
 	var seen int64
 	var reported int
 	err := tx.QueryRowContext(ctx, `
-SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, name, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
   FROM executors WHERE name = ?`, name).Scan(
-		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		&e.id, &e.Name, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &accept, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes, &e.QueueDepth)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1152,7 +1164,7 @@ SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_
 	if err != nil {
 		return Executor{}, err
 	}
-	_ = json.Unmarshal(caps, &e.Capabilities)
+	e.decodeGrants(caps, accept)
 	if seen > 0 {
 		e.LastSeen = time.Unix(0, seen)
 	}
@@ -1218,15 +1230,15 @@ func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, cl
 		return nil, err
 	}
 	var e Executor
-	var caps []byte
+	var caps, accept []byte
 	var reported int
 	var seen int64
 	err = tx.QueryRowContext(ctx, `
-SELECT executor_id, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
+SELECT executor_id, token_prefix, kind, location, capabilities_json, accept_repos_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes
   FROM executors WHERE name = ?`, executorName).Scan(
-		&e.id, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
+		&e.id, &e.TokenPrefix, &e.Kind, &e.Location, &caps, &accept, &e.BasePriority, &e.PriorityCeiling, &e.MaxConcurrent,
 		&e.Budget.Cores, &e.Budget.MemoryBytes, &e.Principal, &seen,
 		&reported, &e.Headroom.Cores, &e.Headroom.MemoryBytes)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1238,7 +1250,7 @@ SELECT executor_id, token_prefix, kind, location, capabilities_json, base_priori
 	if e.TokenPrefix != claimant.TokenPrefix || claimant.TokenPrefix == "" || e.Principal != claimant.Principal {
 		return nil, fmt.Errorf("%w: %s", ErrExecutorCredentialMismatch, executorName)
 	}
-	_ = json.Unmarshal(caps, &e.Capabilities)
+	e.decodeGrants(caps, accept)
 	e.HeadroomReported = reported != 0
 	if seen > 0 {
 		e.LastSeen = time.Unix(0, seen)

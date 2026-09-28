@@ -535,12 +535,12 @@ func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
 ) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
-	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true)
+	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true, r.cfg.Labels)
 	// safety: only the operator's metered pool may claim it sizes a node to its
 	// cpu class, so an unmetered installation claims the node plainly and gets
 	// the pod shape it always had.
 	if errors.Is(err, store.ErrLockHeld) {
-		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false)
+		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false, r.cfg.Labels)
 	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",

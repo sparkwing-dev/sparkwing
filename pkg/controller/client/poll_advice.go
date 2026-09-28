@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/executorinfo"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -69,66 +71,97 @@ func (c *Client) WithAllowRepos(patterns []string) *Client {
 	return c
 }
 
-const (
-	repoFilterUnknown int32 = iota
-	repoFilterAdvertised
-	repoFilterAbsent
-)
+// ClaimResources is what a runner reports about its CPU and memory with each
+// claim: Capacity is the most it could give one node, Availability what it has
+// free now.
+type ClaimResources struct {
+	Capacity     store.ExecutorResource `json:"capacity"`
+	Availability store.ExecutorResource `json:"availability"`
+}
+
+// WithClaimResources has every trigger and node claim report what fn returns,
+// alongside the platform the client detects for itself. Both go only to a
+// controller whose GET /api/v1/capabilities advertises claims.profile. A nil
+// report sends no resources. It returns the same client for chaining; set it
+// before the client serves requests.
+func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client {
+	c.claimResources = fn
+	return c
+}
+
+type claimCapabilities struct {
+	AllowRepos bool `json:"allow_repos"`
+	Profile    bool `json:"profile"`
+}
 
 // perf: A slow capabilities read may delay one claim, not hold it indefinitely.
 const capabilitiesReadTimeout = 5 * time.Second
 
 // bug: A failed capabilities read is not cached as unsupported; the next claim rechecks.
-func (c *Client) claimAllowRepos(ctx context.Context) []string {
-	if c.allowRepos == nil {
-		return nil
+func (c *Client) claimCapabilities(ctx context.Context) claimCapabilities {
+	if caps := c.claimCaps.Load(); caps != nil {
+		return *caps
 	}
-	switch c.repoFilter.Load() {
-	case repoFilterAdvertised:
-		return c.allowRepos
-	case repoFilterAbsent:
-		return nil
+	caps, known := c.readClaimCapabilities(ctx)
+	if known {
+		c.claimCaps.Store(&caps)
 	}
-	advertised, known := c.readRepoFilterCapability(ctx)
-	if !known {
-		return nil
-	}
-	if advertised {
-		c.repoFilter.Store(repoFilterAdvertised)
-		return c.allowRepos
-	}
-	c.repoFilter.Store(repoFilterAbsent)
-	return nil
+	return caps
 }
 
-func (c *Client) readRepoFilterCapability(ctx context.Context) (advertised, known bool) {
+func (c *Client) claimAllowRepos(ctx context.Context) []string {
+	if c.allowRepos == nil || !c.claimCapabilities(ctx).AllowRepos {
+		return nil
+	}
+	return c.allowRepos
+}
+
+var observedPlatform = sync.OnceValue(executorinfo.DetectObservedPlatform)
+
+// safety: a controller that does not read these fields refuses a claim that
+// carries them, so they go only where the capability is advertised.
+func (c *Client) addClaimProfile(ctx context.Context, body map[string]any, allowRepos []string) {
+	if allowRepos != nil {
+		body["allow_repos"] = allowRepos
+	}
+	if !c.claimCapabilities(ctx).Profile {
+		return
+	}
+	platform := observedPlatform()
+	body["platform"] = map[string]string{"os": platform.OS, "arch": platform.Arch}
+	if c.claimResources != nil {
+		if resources := c.claimResources(); resources != nil {
+			body["resources"] = resources
+		}
+	}
+}
+
+func (c *Client) readClaimCapabilities(ctx context.Context) (claimCapabilities, bool) {
 	ctx, cancel := context.WithTimeout(ctx, capabilitiesReadTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/capabilities", nil)
 	if err != nil {
-		return false, false
+		return claimCapabilities{}, false
 	}
 	resp, err := c.do(req)
 	if err != nil {
-		return false, false
+		return claimCapabilities{}, false
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return false, true
+		return claimCapabilities{}, true
 	default:
-		return false, false
+		return claimCapabilities{}, false
 	}
 	var caps struct {
-		Claims struct {
-			AllowRepos bool `json:"allow_repos"`
-		} `json:"claims"`
+		Claims claimCapabilities `json:"claims"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&caps); err != nil {
-		return false, false
+		return claimCapabilities{}, false
 	}
-	return caps.Claims.AllowRepos, true
+	return caps.Claims, true
 }
 
 const meteredInProcessNodesCode = "metered_inprocess_nodes"

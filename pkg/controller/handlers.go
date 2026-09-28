@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"net/http"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -1380,24 +1382,44 @@ type claimTriggerReq struct {
 	TriggerSources []string `json:"trigger_sources,omitempty"`
 	// NodeRunner is how the claimant runs the trigger's nodes: inprocess,
 	// k8s or warm. Empty means inprocess.
-	NodeRunner string `json:"node_runner,omitempty"`
-	// AllowRepos is the claimant's repository list; see claimRepoContext.
-	AllowRepos []string `json:"allow_repos,omitempty"`
+	NodeRunner string          `json:"node_runner,omitempty"`
+	AllowRepos []string        `json:"allow_repos,omitempty"`
+	Platform   *claimPlatform  `json:"platform,omitempty"`
+	Resources  *claimResources `json:"resources,omitempty"`
 }
 
-// claimRepoContext confines a claim to the repositories the runner's owner
-// allows. A list that is present, even empty, binds; an absent one is a runner
-// that sends none, which claims as it always has and refuses a disallowed run
-// itself, since the controller cannot tell whether it fetches source.
-func claimRepoContext(ctx context.Context, patterns []string) (context.Context, *sourceurl.RepoAllowlist, error) {
-	if patterns == nil {
-		return ctx, nil, nil
+type claimPlatform struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+}
+
+type claimResources struct {
+	Capacity     match.Resources `json:"capacity"`
+	Availability match.Resources `json:"availability"`
+}
+
+// safety: an allow list that is present, even empty, binds; an absent one
+// claims as it always has, and the runner refuses a disallowed run itself.
+// The platform and resources steer scheduling only.
+func claimProfileContext(ctx context.Context, allowRepos []string, platform *claimPlatform, resources *claimResources) (context.Context, match.Profile, error) {
+	var profile match.Profile
+	if allowRepos != nil {
+		allow, err := sourceurl.ParseRepoAllowlist(allowRepos)
+		if err != nil {
+			return ctx, profile, fmt.Errorf("allow_repos: %w", err)
+		}
+		profile.Accept = allow
 	}
-	allow, err := sourceurl.ParseRepoAllowlist(patterns)
-	if err != nil {
-		return ctx, nil, fmt.Errorf("allow_repos: %w", err)
+	if platform != nil {
+		profile.OS, profile.Arch = platform.OS, platform.Arch
 	}
-	return store.WithRepoFilter(ctx, allow), &allow, nil
+	if r := resources; r != nil {
+		if r.Capacity.Cores < 0 || math.IsNaN(r.Capacity.Cores) || math.IsInf(r.Capacity.Cores, 0) || r.Capacity.MemoryBytes < 0 {
+			return ctx, profile, errors.New("resources.capacity must be finite and non-negative")
+		}
+		profile.Capacity = r.Capacity
+	}
+	return store.WithClaimProfile(ctx, profile), profile, nil
 }
 
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
@@ -1409,7 +1431,7 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	if s.refuseMeteredInProcessNodes(w, r, body.NodeRunner) {
 		return
 	}
-	ctx, _, err := claimRepoContext(r.Context(), body.AllowRepos)
+	ctx, _, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -1683,8 +1705,9 @@ type claimNodeReq struct {
 	Headroom       *claimHeadroom  `json:"headroom,omitempty"`
 	Capacity       *claimCapacity  `json:"capacity,omitempty"`
 	Binding        json.RawMessage `json:"execution_binding,omitempty"`
-	// AllowRepos is the claimant's repository list; see claimRepoContext.
-	AllowRepos []string `json:"allow_repos,omitempty"`
+	AllowRepos     []string        `json:"allow_repos,omitempty"`
+	Platform       *claimPlatform  `json:"platform,omitempty"`
+	Resources      *claimResources `json:"resources,omitempty"`
 }
 
 type claimHeadroom struct {
@@ -1836,14 +1859,27 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("capacity must carry non-negative max_concurrent and active_claims"))
 		return
 	}
-	claimCtx, allow, err := claimRepoContext(r.Context(), body.AllowRepos)
+	claimCtx, profile, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	s.recordAdvertisedHeadroom(r, body.HolderID, body.Headroom)
 	claimer := presenceKey{tokenPrefix: claimIdentity(r).TokenPrefix, name: presenceName(body.HolderID)}
-	s.runnerPresence.record(claimer, body.Labels, body.Capacity, allow, time.Now())
+	profile.Name = presenceName(body.HolderID)
+	if name, ok := strings.CutPrefix(claimIdentity(r).Principal, runnerPrincipalPrefix); ok {
+		profile.Name = name
+	}
+	// safety: the machine's admission daemon sees load the runner's own
+	// bookkeeping does not, so its free capacity lowers what the runner claims.
+	resources := body.Resources
+	if resources != nil && body.Headroom != nil {
+		lowered := *resources
+		lowered.Availability.Cores = min(lowered.Availability.Cores, body.Headroom.Cores)
+		lowered.Availability.MemoryBytes = min(lowered.Availability.MemoryBytes, body.Headroom.MemoryBytes)
+		resources = &lowered
+	}
+	s.runnerPresence.record(claimer, body.Labels, body.Capacity, profile, resources, time.Now())
 	n, err := s.store.ClaimNextReadyNode(s.placementContext(claimCtx, claimer),
 		claimIdentity(r), body.HolderID, lease, body.Labels)
 	if writeClaimTeamRefusal(w, err) {
@@ -1877,7 +1913,11 @@ type claimNamedNodeReq struct {
 	LeaseSecs int    `json:"lease_secs"`
 	// safety: without this the caller runs the node on an executor it already
 	// has, so a metered claim is held to the class the warm pool serves.
-	SizesToClass bool `json:"sizes_to_class,omitempty"`
+	SizesToClass bool            `json:"sizes_to_class,omitempty"`
+	Labels       []string        `json:"labels,omitempty"`
+	AllowRepos   []string        `json:"allow_repos,omitempty"`
+	Platform     *claimPlatform  `json:"platform,omitempty"`
+	Resources    *claimResources `json:"resources,omitempty"`
 }
 
 func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
@@ -1894,9 +1934,14 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 	if !s.mayClaimNamedNode(w, r, runID, nodeID) {
 		return
 	}
-	n, err := s.store.ClaimNamedNode(r.Context(), claimIdentity(r), runID, nodeID,
+	ctx, _, err := claimProfileContext(r.Context(), body.AllowRepos, body.Platform, body.Resources)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	n, err := s.store.ClaimNamedNode(ctx, claimIdentity(r), runID, nodeID,
 		body.HolderID, time.Duration(body.LeaseSecs)*time.Second,
-		store.NamedClaimOptions{SizesToClass: body.SizesToClass})
+		store.NamedClaimOptions{SizesToClass: body.SizesToClass, Labels: body.Labels})
 	if writeClaimTeamRefusal(w, err) {
 		return
 	}
@@ -1930,8 +1975,8 @@ func (s *Server) handleClaimNamedNode(w http.ResponseWriter, r *http.Request) {
 
 // safety: naming a node skips the queue, and every pipeline pod carries a
 // claim-scoped token, so an unlabeled node the queue already opened is fair
-// game and anything else needs the run's dispatch claim. A named claim
-// advertises no labels, so nothing else could honor a requirement.
+// game and anything else needs the run's dispatch claim. The store then checks
+// the node's selector against the labels the claim sent.
 func (s *Server) mayClaimNamedNode(w http.ResponseWriter, r *http.Request, runID, nodeID string) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.HasScope(ScopeAdmin) {

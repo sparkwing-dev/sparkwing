@@ -29,11 +29,10 @@ queue timeout above takes over once the run has nodes.
 
 ## Label-match semantics
 
-Labels are compared as **literal equality strings** -- the matcher does
-no parsing of `key=value`, so `os=linux` is one opaque token that must
-appear verbatim in the runner's advertised set. Within a single term,
-commas are **alternatives (OR)**; across separate terms, matches compose
-with **AND**:
+Labels are compared as **literal equality strings**, so `gpu` or
+`tier=fast` must appear verbatim in the runner's advertised set. Within a
+single term, commas are **alternatives (OR)**; across separate terms,
+matches compose with **AND**:
 
 ```
 needs ["linux"]            have ["linux"]          -> match
@@ -44,6 +43,28 @@ needs ["linux,macos","amd64"] have ["macos","amd64"] -> match
 ```
 
 Empty / no needed labels match any runner.
+
+A few keys are answered from facts the runner cannot choose for itself.
+Every claim route, and the dispatcher's own `WhenRunner` check, uses the one
+matcher in `pkg/match`, so they agree:
+
+- `name=<agent>` matches only the runner whose token was minted for that
+  agent name. A runner asserting `name=...` as a label matches nothing, and a
+  team holds one live runner token per agent name.
+- `os=` and `arch=` match the platform the runner detects and reports with
+  every claim. A runner that reports none falls back to an `os=` or `arch=`
+  label.
+- `local`, `location=`, `class=` and `team=` labels a runner asserts are
+  dropped.
+
+A runner also reports its capacity: the smallest CPU and memory limit along
+its cgroup ancestry, or the host's totals. A node whose resource request
+exceeds that capacity is never handed to it. What the runner has free right
+now only decides whether it holds a node back from the cloud.
+
+A node that reaches the queue deadline fails with an error naming the live
+runner of its team that came closest and what stopped it, for example
+`nearest runner moonborn: selector (gpu)`.
 
 ## Per-node modifiers (Go SDK)
 

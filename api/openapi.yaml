@@ -1231,6 +1231,8 @@ paths:
                   items: {type: string}
                   description: >-
                     Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
+                platform: {$ref: "#/components/schemas/ClaimPlatform"}
+                resources: {$ref: "#/components/schemas/ClaimResources"}
       responses:
         "200":
           description: Claimed trigger.
@@ -1850,6 +1852,8 @@ paths:
                   items: {type: string}
                   description: >-
                     Repositories this runner's owner allows it to build, as host/path patterns where '*' matches within one path segment. A list that is present, even empty, confines the claim to runs from matching repositories; an absent list claims as before.
+                platform: {$ref: "#/components/schemas/ClaimPlatform"}
+                resources: {$ref: "#/components/schemas/ClaimResources"}
       responses:
         "200":
           description: Claimed node.
@@ -3064,6 +3068,10 @@ paths:
                   properties:
                     cores: {type: number, minimum: 0}
                     memory_bytes: {type: integer, format: int64, minimum: 0}
+                accept_repos:
+                  type: array
+                  items: {type: string}
+                  description: Repositories the executor takes, as host/path patterns. Absent takes every repository; an empty list takes none.
       responses:
         "204": {description: Executor enrolled. Empty body.}
         "400": {description: Invalid enrollment or credential prefix.}
@@ -4416,6 +4424,16 @@ paths:
                 holder_id: {type: string}
                 lease_secs: {type: integer}
                 sizes_to_class: {type: boolean, description: "The caller creates the node's executor at the cpu class the claim bills; without it a metered claim is held to the class the warm pool serves."}
+                labels:
+                  type: array
+                  items: {type: string}
+                  description: Labels of the executor the caller runs the node on; the node's selector is checked against them.
+                allow_repos:
+                  type: array
+                  items: {type: string}
+                  description: The caller's repository list, as on a node claim.
+                platform: {$ref: "#/components/schemas/ClaimPlatform"}
+                resources: {$ref: "#/components/schemas/ClaimResources"}
       responses:
         "200":
           description: Claimed node.
@@ -4495,6 +4513,7 @@ paths:
                     required: [allow_repos]
                     properties:
                       allow_repos: {type: boolean, description: Trigger and node claims read allow_repos; a runner sends the list only when this is true.}
+                      profile: {type: boolean, description: Trigger and node claims read platform and resources; a runner sends them only when this is true.}
                   github_app:
                     x-sparkwing-go-type: pkg/controller.capabilitiesGitHubApp
                     type: object
@@ -7992,8 +8011,24 @@ components:
         helper_maximum: {type: integer}
         execution_binding:
           $ref: "#/components/schemas/ExecutionClaimBinding"
+    ClaimPlatform:
+      x-sparkwing-go-type: pkg/controller.claimPlatform
+      type: object
+      description: The platform the claimant detected for itself; it steers scheduling only.
+      required: [os, arch]
+      properties:
+        os: {type: string}
+        arch: {type: string}
+    ClaimResources:
+      x-sparkwing-go-type: pkg/controller.claimResources
+      type: object
+      description: The most the claimant could give one node, and what it has free now; they steer scheduling only.
+      required: [capacity, availability]
+      properties:
+        capacity: {$ref: "#/components/schemas/ExecutorResource"}
+        availability: {$ref: "#/components/schemas/ExecutorResource"}
     ExecutorResource:
-      x-sparkwing-go-type: pkg/store.ExecutorResource
+      x-sparkwing-go-type: pkg/match.Resources
       type: object
       required: [cores, memory_bytes]
       properties:

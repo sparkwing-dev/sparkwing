@@ -110,6 +110,7 @@ type capabilitiesGitHubApp struct {
 type capabilitiesClaims struct {
 	// AllowRepos reports that trigger and node claims take allow_repos.
 	AllowRepos bool `json:"allow_repos"`
+	Profile    bool `json:"profile"`
 }
 
 // safety: unauthenticated, because a signed-out browser draws the sign-in page from it; it reports only
@@ -120,6 +121,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, _ *http.Request) {
 	resp.Billing.Enabled = s.Metering()
 	resp.Auth.Providers = s.signInProviders()
 	resp.Claims.AllowRepos = true
+	resp.Claims.Profile = true
 	if s.githubApp != nil {
 		resp.GitHubApp = &capabilitiesGitHubApp{Slug: s.githubApp.client.Slug(), SourceTokens: true}
 	}

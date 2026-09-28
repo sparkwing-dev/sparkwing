@@ -150,6 +150,12 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v77 adds defaulted node and run columns an older binary never
 	// names, so an older binary keeps writing the migrated database.
 	77: {controllerDispatchNodeCols, controllerDispatchRunCols},
+	78: nil,
+	79: nil,
+	80: nil,
+	// safety: v81 adds one nullable executor column an older binary never
+	// names, so an older binary keeps writing the migrated database.
+	81: {executorAcceptCols},
 }
 
 func columnSpecMaps() []map[string]string {

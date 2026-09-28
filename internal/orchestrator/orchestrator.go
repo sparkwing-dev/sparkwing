@@ -2278,7 +2278,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 
 	if labels := node.WhenRunnerLabels(); len(labels) > 0 {
 		if adv, ok := activeRunner.(runner.LabelAdvertiser); ok {
-			if !sparkwingruntime.MatchLabels(labels, adv.AdvertisedLabels()) {
+			if !dispatcherMatches(labels, adv.AdvertisedLabels()) {
 				s.markSkipped(node.ID(),
 					fmt.Sprintf("WhenRunner labels %v not satisfied by active runner %v",
 						labels, adv.AdvertisedLabels()))
