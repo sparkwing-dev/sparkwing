@@ -881,7 +881,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 func (s *Server) Handler() http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
+	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1251,9 +1251,13 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) authenticated(next http.Handler) http.Handler {
+func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if raw, route := claimRouteFor(mux, r); route != nil {
+			s.serveClaim(w, r, raw, route, next)
+			return
+		}
 		// safety: a session is resolved even while bearer auth is off, because
 		// a signed-in account's team and role come only from its session and a
 		// request carrying one must not fall through as an anonymous caller.

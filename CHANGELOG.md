@@ -22,6 +22,14 @@ unlock.
 
 ### Added
 
+- **controller + store:** Schema 76 adds `claim_tokens`, the store for
+  claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
+  generation, expires with its claim's lease and at a hard deadline of at most
+  6 hours, and is checked against the claim row on every request, so a lost,
+  finished, superseded or cancelled claim is refused on its next request. No
+  controller route accepts these tokens yet, and no path issues them; existing
+  clients see no change. Controllers older than schema 76 keep working against
+  a migrated database.
 - **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads
   one source bundle directly to S3 before creating a run, including from a Git
   checkout with no cloud-reachable origin. The bundle counts against the team's

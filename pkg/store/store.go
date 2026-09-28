@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 75
+const expectedSchemaVersion = 76
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2096,6 +2096,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	case 75:
 		return applyCreditValueMigration(ctx, tx)
+	case 76:
+		return applyClaimTokensMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2526,6 +2528,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	case 75:
 		return applyCreditValueMigration(ctx, tx)
+	case 76:
+		return applyClaimTokensMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -5462,6 +5466,17 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return err
+	}
+	// safety: the reset puts the claim generation back to 0, so a token from
+	// the reset attempt would authorize again once a later claim reaches its
+	// generation.
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_tokens WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes

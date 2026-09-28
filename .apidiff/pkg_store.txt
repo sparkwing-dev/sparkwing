@@ -114,7 +114,26 @@ type ClaimPlacement struct {
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
+const ClaimReporting
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
+const ClaimResult
+type ClaimRouteClass int
+const ClaimSensitive ClaimRouteClass = iota + 1
+type ClaimToken struct {
+	Prefix     string
+	Team       Team
+	RunID      string
+	NodeID     string
+	Generation int64
+	Kind       ClaimTokenKind
+	ExpiresAt  time.Time
+
+	Ended bool
+}
+type ClaimTokenKind string
+const ClaimTokenPlan ClaimTokenKind = "plan"
+const ClaimTokenPrefix = "swc"
+const ClaimTokenWork ClaimTokenKind = "work"
 type ClaimedRun struct {
 	Team     Team
 	Pipeline string
@@ -588,7 +607,10 @@ var ErrAmbiguousAccount = errors.New("store: more than one account holds that ad
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
+var ErrClaimCancelRequested = errors.New("store: the run this claim belongs to is being cancelled")
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
+var ErrClaimResultConflict = errors.New("store: the claim committed a different result or none")
+var ErrClaimTokenInvalid = errors.New("store: invalid or expired claim token")
 var ErrClaimantHasNoTeam = errors.New("store: claim credential carries no team")
 var ErrComputeLimit = errors.New("compute limit reached")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
@@ -1038,6 +1060,7 @@ var Maintenance = storeMaintenanceFns{
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
 const MaxCLITokensPerMember = 10
+const MaxClaimTokenLifetime = 6 * time.Hour
 const MaxCreatedTeams = 3
 const MaxCreditGrantMicro = 1_000_000_000_000_000
 const MaxCreditMaxChargeSeconds = 86_400
@@ -1748,6 +1771,7 @@ func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Tim
 func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Time) ([]Account, error)
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
+func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
 func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool) (Upload, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
@@ -1944,6 +1968,9 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
+func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
+	kind ClaimTokenKind, expiresAt, now time.Time,
+) (string, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)

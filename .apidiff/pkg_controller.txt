@@ -461,6 +461,7 @@ const UnsupportedRouteError = "unsupported"
 func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request)
 
 # methods on un-declared receiver types (likely a bug)
+func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (t *creditRateTableIn) UnmarshalJSON(raw []byte) error
 func (creditsCollector) Collect(ch chan<- prometheus.Metric)
 func (creditsCollector) Describe(ch chan<- *prometheus.Desc)
