@@ -45,6 +45,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +
 		"names one team's row and the fence checked before it proves the caller holds that run",
 	"backfillRunEventUsageTx": "a v52 migration that counts every run's events onto that run's own row",
+	"applyTriggerCreditCursorMigration": "a v73 migration check that refuses the upgrade while any team " +
+		"holds an open trigger reservation, because the schema is the deployment's and a reservation open in any team " +
+		"predates the paid cursor the migration adds",
 	"duplicateTeamGrantReferences": "a v52 migration check that groups every team's grants by team to find " +
 		"the rows the per-team reference key would refuse",
 	"(*Store).runnerTeams": "asks which team each live runner's credential belongs to, so an " +
