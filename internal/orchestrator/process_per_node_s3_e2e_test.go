@@ -41,6 +41,10 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		"    mirror_local: false\n"+
 		"    state: { type: s3, bucket: %s, prefix: state }\n"+
 		"    logs:  { type: s3, bucket: %s, prefix: logs }\n", bucket, bucket))
+	// safety: a config file others can read is refused as private config.
+	if err := os.Chmod(profiles, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	runEnv := append(os.Environ(),
 		"SPARKWING_HOME="+home,
