@@ -633,6 +633,33 @@ func TestClaimedTriggerFailure_RecordsTheDispatchError(t *testing.T) {
 	}
 }
 
+func assertTriggerStatus(t *testing.T, st *store.Store, id, want string) {
+	t.Helper()
+	trig, err := st.GetTrigger(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status != want {
+		t.Fatalf("trigger status = %q, want %q", trig.Status, want)
+	}
+}
+
+func TestLocalTriggerFailure_RunTheChildFinishedStillFinishesTheTrigger(t *testing.T) {
+	st := consumerTestStore(t, t.TempDir())
+	ctx := context.Background()
+	claimed := claimedChildTrigger(t, st, "run-child-finished", "deploy")
+	if err := st.CreateRun(ctx, store.Run{ID: "run-child-finished", Pipeline: "deploy", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(ctx, "run-child-finished", "failed", "node build failed"); err != nil {
+		t.Fatal(err)
+	}
+
+	recordLocalTriggerFailure(ctx, localState{st: st}, claimed, errors.New("exit status 1"), quietLogger())
+
+	assertTriggerStatus(t, st, "run-child-finished", "failed")
+}
+
 func TestLocalSetupFailureChild(t *testing.T) {
 	if os.Getenv("SPARKWING_LOCAL_SETUP_TEST_CHILD") != "1" {
 		t.Skip("child process fixture")

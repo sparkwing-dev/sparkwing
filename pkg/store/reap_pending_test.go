@@ -127,3 +127,36 @@ func TestReapStalePendingRuns_RespectsGracePeriod(t *testing.T) {
 		t.Fatalf("fresh stuck run should be inside grace window; got reaps %v", ids)
 	}
 }
+
+func TestReconcileOrphanedLocalRuns_ReapsAStalePendingRunUnderAFinishedTrigger(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	for id, age := range map[string]time.Duration{
+		"run-stale": 5*store.DefaultLeaseDuration + time.Minute,
+		"run-fresh": time.Minute,
+	} {
+		if err := s.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "deploy", CreatedAt: time.Now().Add(-age)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateRun(ctx, store.Run{ID: id, Pipeline: "deploy", Status: "pending", StartedAt: time.Now().Add(-age)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.FinishTrigger(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := store.Maintenance.ReconcileOrphanedLocalRuns(s, ctx, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	for id, want := range map[string]string{"run-stale": "failed", "run-fresh": "pending"} {
+		run, err := s.GetRun(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status != want {
+			t.Errorf("%s status = %q, want %q", id, run.Status, want)
+		}
+	}
+}

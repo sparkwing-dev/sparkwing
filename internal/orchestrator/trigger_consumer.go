@@ -474,12 +474,14 @@ func settleClaimedTriggerDispatch(
 	}
 	// safety: the dispatched child may already have created this row, and the
 	// terminal write below is the one that has to land.
-	_ = st.CreateRun(book, store.Run{
+	if cerr := st.CreateRun(book, store.Run{
 		ID:        trig.ID,
 		Pipeline:  trig.Pipeline,
 		Status:    "pending",
 		StartedAt: time.Now(),
-	})
+	}); cerr != nil {
+		logger.Warn("create failed run", "trigger_id", trig.ID, "err", cerr)
+	}
 	if ok, ferr := st.FinishRunAtGeneration(book, trig.ID, trig.ClaimSeq,
 		"failed", "local dispatch: "+err.Error()); ferr != nil {
 		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", ferr)
@@ -524,7 +526,9 @@ func finishCancelledClaimedTrigger(ctx context.Context, st *store.Store, trig *s
 func finishClaimedTriggerFailure(ctx context.Context, st *store.Store, trig *store.Trigger, logger *slog.Logger, err error) {
 	// safety: the dispatched child may already have created this row, and the
 	// terminal write below is the one that has to land.
-	_ = st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()})
+	if cerr := st.CreateRun(ctx, store.Run{ID: trig.ID, Pipeline: trig.Pipeline, Status: "pending", StartedAt: time.Now()}); cerr != nil {
+		logger.Warn("create failed run", "trigger_id", trig.ID, "err", cerr)
+	}
 	if _, finishErr := st.FinishRunAtGeneration(ctx, trig.ID, trig.ClaimSeq, "failed", "local dispatch: "+err.Error()); finishErr != nil {
 		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", finishErr)
 	}

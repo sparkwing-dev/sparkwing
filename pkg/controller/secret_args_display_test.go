@@ -24,10 +24,15 @@ const (
 
 func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
 	t.Helper()
+	seedSecretArgRunAs(t, st, id, "failed")
+}
+
+func seedSecretArgRunAs(t *testing.T, st *store.Store, id, status string) {
+	t.Helper()
 	err := st.CreateRun(context.Background(), store.Run{
 		ID:        id,
 		Pipeline:  "deploy",
-		Status:    "failed",
+		Status:    status,
 		GitBranch: "main",
 		GitSHA:    "abc123",
 		Args:      map[string]string{"token": ctlSecretValue, "env": ctlVisibleValue},
@@ -160,9 +165,12 @@ func TestSecretArgs_ControllerRejectsOlderWriterInputHash(t *testing.T) {
 
 func TestSecretArgs_ControllerPipelineLatestRedacts(t *testing.T) {
 	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
+	seedSecretArgRunAs(t, st, "run-1", "pending")
+	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+		t.Fatal(err)
+	}
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest",
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest?status=failed"))
+		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"))
 }
 
 func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
@@ -341,13 +349,16 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
-	seedSecretArgRun(t, st, "run-1")
+	seedSecretArgRunAs(t, st, "run-1", "pending")
+	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+		t.Fatal(err)
+	}
 	const q = "?include=" + store.IncludeSecretValues
 	assertRedactedResponse(t, "GET /api/v1/runs"+q, getBody(t, srv.URL+"/api/v1/runs"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"+q))
 	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest"+q,
-		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q+"&status=failed"))
+		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
 		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
 }

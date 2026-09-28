@@ -8008,6 +8008,14 @@ func (s *Store) reconcileOrphanedLocalRuns(ctx context.Context, threshold time.D
 			return 0, err
 		}
 	}
+	// safety: a local dispatch failure whose run finish did not land leaves
+	// the run pending under a finished trigger, and only this pass can close it.
+	pendingIDs, err := s.reapStalePendingRuns(ctx, 5*DefaultLeaseDuration,
+		"reaped: trigger finished without recording its run")
+	if err != nil {
+		return len(orphanIDs), err
+	}
+	orphanIDs = append(orphanIDs, pendingIDs...)
 
 	if err := s.withExecutorEligibilityTx(ctx, func(tx *storeTx) error {
 		_, err := tx.ExecContext(ctx, `
