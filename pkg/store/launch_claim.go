@@ -54,23 +54,64 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 	if err != nil {
 		return nil, err
 	}
+	named := req.RunID != "" || req.NodeID != ""
 	var after *launchCursor
-	for {
+	if !named {
+		after = s.launchResumePoint()
+	}
+	wrapped := false
+	for range launchMaxPages {
 		page, err := s.launchCandidates(ctx, req, after, now)
-		if err != nil || len(page) == 0 {
+		if err != nil {
 			return nil, err
+		}
+		if len(page) == 0 {
+			if after == nil || wrapped {
+				s.resetLaunchResume(named, nil)
+				return nil, nil
+			}
+			after, wrapped = nil, true
+			continue
 		}
 		for _, c := range page {
 			claim, err := s.claimLaunchCandidate(ctx, launcher, req, coordinatorID, c.claim, now)
 			if unpaidLaunch(err) {
 				continue
 			}
-			if err != nil || claim != nil {
-				return claim, err
+			if err != nil {
+				return nil, err
+			}
+			if claim != nil {
+				s.resetLaunchResume(named, nil)
+				return claim, nil
 			}
 		}
 		after = &page[len(page)-1].cursor
 	}
+	s.resetLaunchResume(named, after)
+	return nil, nil
+}
+
+// launchMaxPages bounds one poll's scan; a poll that spends it resumes the
+// next one where it stopped, so a queue of unpayable nodes costs each poll a
+// fixed amount and still lets every node behind it be reached in turn.
+const launchMaxPages = 4
+
+func (s *Store) launchResumePoint() *launchCursor {
+	s.launchResumeMu.Lock()
+	defer s.launchResumeMu.Unlock()
+	return s.launchResume
+}
+
+// safety: a claim that names its node scans that node alone, so it neither
+// reads nor moves the queue's resume point.
+func (s *Store) resetLaunchResume(named bool, c *launchCursor) {
+	if named {
+		return
+	}
+	s.launchResumeMu.Lock()
+	defer s.launchResumeMu.Unlock()
+	s.launchResume = c
 }
 
 type launchCursor struct {
@@ -83,8 +124,9 @@ type launchCandidate struct {
 	cursor launchCursor
 }
 
-// safety: the scan pages past every candidate the claim refused, so a queue
-// head of one team's unpaid nodes never hides another team's paid one.
+// safety: the scan pages past the candidates a claim refused, and a spent
+// budget resumes there, so a queue head of one team's unpaid nodes never hides
+// another team's paid one.
 func (s *Store) launchCandidates(ctx context.Context, req LaunchClaimRequest, after *launchCursor, now time.Time) ([]launchCandidate, error) {
 	where, args := "", []any{now.UnixNano()}
 	if req.RunID != "" || req.NodeID != "" {

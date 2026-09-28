@@ -113,6 +113,8 @@ type Store struct {
 	runnerCapMu     sync.Mutex
 	runnerCapCache  map[Team]runnerCapEntry
 	runnerCapEpoch  uint64
+	launchResumeMu  sync.Mutex
+	launchResume    *launchCursor
 }
 
 // Dialect reports the SQL dialect this Store was opened against.

@@ -296,3 +296,46 @@ func TestClaimLaunch_WaitsForTheRunRowLock(t *testing.T) {
 		t.Fatalf("after the holder released the run: %+v %v", claim, err)
 	}
 }
+
+// One poll scans a bounded number of candidates, and the next poll resumes
+// where it stopped, so a paying team's node behind more unpaid nodes than one
+// poll reads is still reached on a later poll, and the queue wraps afterwards.
+func TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	_, tok, err := st.CreateToken("launcher", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	unpaid, paying := teamHandle(t, st, "unpaid"), teamHandle(t, st, "paying")
+	for _, team := range []*store.Tenant{unpaid, paying} {
+		if err := team.SetRepoDispatch(ctx, "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 70 {
+		intake(t, unpaid, fmt.Sprintf("run-unpaid-%02d", i), "korey", "probe")
+	}
+	intake(t, paying, "run-paying", "korey", "probe")
+	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil || claim != nil {
+		t.Fatalf("the first poll read past its budget to %+v (%v)", claim, err)
+	}
+	claim, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+	if err != nil || claim == nil || claim.Team != "paying" {
+		t.Fatalf("the second poll = %+v %v, want the paying node it resumed to", claim, err)
+	}
+	intake(t, paying, "run-paying-2", "korey", "probe")
+	var second *store.LaunchClaim
+	for poll := 0; poll < 3 && second == nil; poll++ {
+		if second, err = st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if second == nil || second.RunID != "run-paying-2" {
+		t.Fatalf("after wrapping, polls reached %+v, want run-paying-2", second)
+	}
+}
