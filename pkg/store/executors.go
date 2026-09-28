@@ -1211,7 +1211,8 @@ func (s *Store) claimReadyNodeForExecutorTx(ctx context.Context, tx *storeTx, cl
 	n := &nodeRecord{}
 	err := scanNodeRow(tx.QueryRowContext(ctx, `SELECT `+nodeSelectColumns+`
   FROM nodes
- WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+teamClause+tx.forUpdate(),
+ WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
+   AND `+nodeTriggerDispatched+teamClause+tx.forUpdate(),
 		append([]any{runID, nodeID}, teamArgs...)...), n)
 	if errors.Is(err, ErrNotFound) {
 		return nil, notFound("ready node for executor", "")

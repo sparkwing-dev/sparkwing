@@ -43,7 +43,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"a scope that is not exactly one team is refused there",
 	"(*Store).bumpMismatchedNodes":  "shares the claim scan's runtime predicate and its refusal",
 	"executorPrepareCandidateQuery": "shares the claim scan's runtime predicate and its refusal",
-	"(*Store).awardScannedNode": "the award carries the same runtime predicate; the read that follows " +
+	"(*Store).awardScannedNodeTx": "the award carries the same runtime predicate; the read that follows " +
 		"it is of the row the award just proved in team",
 	"(*Store).ClaimNamedNode": "shares the claim scan's runtime predicate and its refusal",
 	"refuseEventOverLimitsTx": "reads one run's event counters for a cap on that run; the run id " +

@@ -262,6 +262,7 @@ var tenantTables = []string{
 	"node_steps",
 	"nodes",
 	"pipeline_profiles",
+	"repos",
 	"run_definition_plans",
 	"runs",
 	"secrets",
@@ -292,6 +293,7 @@ var keyedAtCreation = []string{
 	"team_build_trust",
 	"claim_tokens", "child_invocations",
 	"business_events",
+	"repos",
 }
 
 // safety: executors is here because an executor enrolls with the deployment

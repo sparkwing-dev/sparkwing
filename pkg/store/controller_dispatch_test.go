@@ -44,14 +44,7 @@ func (f dispatchRun) claim(t *testing.T, nodeID string, kind store.ClaimTokenKin
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	node, err := f.s.ClaimNamedNode(ctx, f.claimant, f.run, nodeID, "holder-"+nodeID, time.Minute, store.NamedClaimOptions{})
-	if err != nil {
-		t.Fatalf("claim %s: %v", nodeID, err)
-	}
-	raw, err := f.s.MintClaimToken(ctx, store.DefaultTeam, f.run, nodeID, node.ClaimGeneration, kind, now.Add(time.Hour), now)
-	if err != nil {
-		t.Fatalf("mint %s: %v", nodeID, err)
-	}
+	raw := f.claimRaw(t, nodeID, kind)
 	tok, err := f.s.AuthorizeClaimToken(ctx, raw, store.ClaimResult, now)
 	if err != nil {
 		t.Fatalf("authorize %s: %v", nodeID, err)

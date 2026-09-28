@@ -16,15 +16,18 @@ func (f dispatchRun) claimRaw(t *testing.T, nodeID string, kind store.ClaimToken
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	node, err := f.s.ClaimNamedNode(ctx, f.claimant, f.run, nodeID, "holder-"+nodeID, time.Minute, store.NamedClaimOptions{})
-	if err != nil {
-		t.Fatalf("claim %s: %v", nodeID, err)
+	// safety: a retry waits out its backoff before the launcher may claim it,
+	// and these tests drive the retry at once.
+	if n := f.node(t, nodeID); n.ReadyAt != nil && n.ReadyAt.After(now) {
+		now = *n.ReadyAt
 	}
-	raw, err := f.s.MintClaimToken(ctx, store.DefaultTeam, f.run, nodeID, node.ClaimGeneration, kind, now.Add(time.Hour), now)
-	if err != nil {
-		t.Fatalf("mint %s: %v", nodeID, err)
+	c, err := f.s.ClaimLaunch(ctx, f.claimant, store.LaunchClaimRequest{
+		HolderID: "holder-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: f.run, NodeID: nodeID,
+	}, now)
+	if err != nil || c == nil || c.Kind != kind {
+		t.Fatalf("claim %s as %s: %+v %v", nodeID, kind, c, err)
 	}
-	return raw
+	return c.Token
 }
 
 func (f dispatchRun) authorize(t *testing.T, raw string, class store.ClaimRouteClass) (store.ClaimToken, error) {

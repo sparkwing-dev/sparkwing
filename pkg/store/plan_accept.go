@@ -120,6 +120,13 @@ func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now
 	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
 		return err
 	}
+	if err := insertPlanNodeTx(ctx, tx, team, runID, RepoDispatchController, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertPlanNodeTx(ctx context.Context, tx *storeTx, team Team, runID string, dispatch RepoDispatch, now time.Time) error {
 	class, err := readyCPUClassTx(ctx, tx, ExecutorResource{})
 	if err != nil {
 		return err
@@ -131,11 +138,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
 		class, now.UnixNano(), now.UnixNano(), planNodeRetryBudget); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET admission = ? WHERE team = ? AND id = ?`,
-		RunAdmissionPlanning, string(team), runID); err != nil {
-		return err
-	}
-	return tx.Commit()
+	_, err = tx.ExecContext(ctx, `UPDATE runs SET admission = ?, dispatch = ? WHERE team = ? AND id = ?`,
+		RunAdmissionPlanning, string(dispatch), string(team), runID)
+	return err
 }
 
 // AcceptPlan commits the plan body a planning claim submits, as the claim's
