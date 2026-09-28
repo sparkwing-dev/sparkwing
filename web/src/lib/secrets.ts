@@ -49,8 +49,10 @@ export function scopeLabel(
   audience: SecretsAudience = "team",
 ) {
   if (row.pipeline) return `Pipeline: ${row.pipeline}`;
+  // Local runs read as this machine's admin, which reaches an unshared row too.
+  if (audience === "local") return row.shared ? "Every pipeline" : "Every pipeline (unshared)";
   if (!row.shared) return "No runs (operator reads only)";
-  return audience === "local" ? "Every pipeline" : "Team";
+  return "Team";
 }
 
 export function rowKey(row: Pick<StoredSecret, "name" | "pipeline">): string {

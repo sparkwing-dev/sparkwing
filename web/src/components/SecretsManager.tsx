@@ -34,15 +34,24 @@ const labelClass =
 
 const copy: Record<
   SecretsAudience,
-  { variablesHint: string; variableKind: string; unscoped: string }
+  {
+    secretsHint: string;
+    variablesHint: string;
+    variableKind: string;
+    unscoped: string;
+  }
 > = {
   team: {
+    secretsHint:
+      "Write-only. A secret's value is never shown again after it is saved, to anyone; only a run of a pipeline it answers can read it.",
     variablesHint:
       "Plain configuration. Every member can read a variable's value, and runs see it unmasked in logs.",
     variableKind: "Variable (readable by members)",
     unscoped: "Team (every pipeline)",
   },
   local: {
+    secretsHint:
+      "Masked in run logs and not shown on this page. `sparkwing secrets get` on this machine, and any program that can reach this dashboard's address, can still read a secret's value.",
     variablesHint:
       "Plain configuration. This page shows a variable's value, and runs see it unmasked in logs.",
     variableKind: "Variable (plain config, not masked)",
@@ -138,7 +147,7 @@ export default function SecretsManager({
       )}
       <Panel
         title="Secrets"
-        hint="Write-only. A secret's value is never shown again after it is saved, to anyone; only a run of a pipeline it answers can read it."
+        hint={copy[audience].secretsHint}
       >
         {listBody(secrets, "No secrets yet.", (row) => (
           <SecretRow

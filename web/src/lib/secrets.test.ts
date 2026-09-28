@@ -206,7 +206,8 @@ describe("listing", () => {
       secrets.scopeLabel({ pipeline: "deploy" }, "local"),
       "Pipeline: deploy",
     );
-    assert.match(secrets.scopeLabel({}, "local"), /No runs/);
+    assert.doesNotMatch(secrets.scopeLabel({}, "local"), /No runs/);
+    assert.match(secrets.scopeLabel({}, "local"), /Every pipeline/);
   });
 
   it("finds the row a draft would replace", () => {
