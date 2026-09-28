@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -352,5 +353,59 @@ func TestClaimLaunch_BoundsEachPollAndResumesWhereItStopped(t *testing.T) {
 	}
 	if second == nil || second.RunID != "run-paying-2" {
 		t.Fatalf("after wrapping, polls reached %+v, want run-paying-2", second)
+	}
+}
+
+// Concurrent polls share one resume point and each advances it past the pages
+// it read, so four polls at once cover four budgets of the queue and reach a
+// paying node behind 200 unpaid ones, which four polls from one stale point
+// never would.
+func TestClaimLaunch_ConcurrentPollsNeverRollTheResumePointBack(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.New(t).Open(t)
+	_, tok, err := st.CreateToken("launcher", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := store.ClaimIdentity{Principal: tok.Principal, TokenPrefix: tok.Prefix}
+	unpaid, paying := teamHandle(t, st, "unpaid"), teamHandle(t, st, "paying")
+	for _, team := range []*store.Tenant{unpaid, paying} {
+		if err := optInForTest(t, st, team, "korey", "probe"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 200 {
+		intake(t, unpaid, fmt.Sprintf("run-unpaid-%03d", i), "korey", "probe")
+	}
+	intake(t, paying, "run-paying", "korey", "probe")
+	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, 100*store.MicroCreditsPerCent, "pay_launch", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	claims := make(chan *store.LaunchClaim, 4)
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+			if err != nil {
+				t.Errorf("poll: %v", err)
+			}
+			claims <- c
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(claims)
+	var got []string
+	for c := range claims {
+		if c != nil {
+			got = append(got, c.RunID)
+		}
+	}
+	if len(got) != 1 || got[0] != "run-paying" {
+		t.Fatalf("four concurrent polls claimed %v, want run-paying once", got)
 	}
 }

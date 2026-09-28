@@ -60,7 +60,11 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 	named := req.RunID != "" || req.NodeID != ""
 	var after *launchCursor
 	if !named {
-		after = s.launchResumePoint()
+		// safety: one poll reads and advances the resume point under one lock,
+		// so a slower concurrent poll can never roll it back.
+		s.launchResumeMu.Lock()
+		defer s.launchResumeMu.Unlock()
+		after = s.launchResume
 	}
 	wrapped := false
 	for range launchMaxPages {
@@ -100,21 +104,13 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 // fixed amount and still lets every node behind it be reached in turn.
 const launchMaxPages = 4
 
-func (s *Store) launchResumePoint() *launchCursor {
-	s.launchResumeMu.Lock()
-	defer s.launchResumeMu.Unlock()
-	return s.launchResume
-}
-
 // safety: a claim that names its node scans that node alone, so it neither
-// reads nor moves the queue's resume point.
+// reads nor moves the queue's resume point; ClaimLaunch holds launchResumeMu
+// for every other call.
 func (s *Store) resetLaunchResume(named bool, c *launchCursor) {
-	if named {
-		return
+	if !named {
+		s.launchResume = c
 	}
-	s.launchResumeMu.Lock()
-	defer s.launchResumeMu.Unlock()
-	s.launchResume = c
 }
 
 type launchCursor struct {
