@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -51,9 +52,13 @@ func assertV75RestatesTheRunnerScaleStep(t *testing.T, newTarget func(*testing.T
 			if got := readStepSetting(t, current); got != tc.old {
 				t.Fatalf("step on a current store = %q, want %q unchanged", got, tc.old)
 			}
-			if _, err := current.DB().ExecContext(ctx,
-				`DELETE FROM sparkwing_schema_version WHERE version >= 75`); err != nil {
-				t.Fatalf("stamp v74: %v", err)
+			for _, statement := range []string{
+				`DELETE FROM sparkwing_requirements WHERE name = 'credit-value-v1'`,
+				`DELETE FROM sparkwing_schema_version WHERE version >= 75`,
+			} {
+				if _, err := current.DB().ExecContext(ctx, statement); err != nil {
+					t.Fatalf("stamp v74 with %q: %v", statement, err)
+				}
 			}
 			_ = current.Close()
 
@@ -66,6 +71,15 @@ func assertV75RestatesTheRunnerScaleStep(t *testing.T, newTarget func(*testing.T
 			}
 			if v, err := upgraded.CurrentSchemaVersion(ctx); err != nil || v != store.ExpectedSchemaVersion() {
 				t.Fatalf("schema after upgrade = %d, %v; want %d", v, err, store.ExpectedSchemaVersion())
+			}
+			requirements, err := upgraded.Requirements(ctx)
+			if err != nil || !slices.Contains(requirements, "credit-value-v1") {
+				t.Fatalf("upgraded requirements = %v, %v", requirements, err)
+			}
+			older := slices.DeleteFunc(slices.Clone(store.KnownRequirements()),
+				func(name string) bool { return name == "credit-value-v1" })
+			if missing := store.MissingRequirements(older, requirements); !slices.Contains(missing, "credit-value-v1") {
+				t.Fatalf("a controller predating v75 accepts the restated step: missing %v", missing)
 			}
 			_ = upgraded.Close()
 

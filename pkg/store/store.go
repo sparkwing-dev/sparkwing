@@ -1845,6 +1845,7 @@ var migrationRequirements = map[int][]string{
 	71: {"github-app-cron-identity-v1"},
 	72: {"storage-commit-receipts-v1"},
 	73: {"trigger-credit-cursor-v1"},
+	75: {creditValueRequirement},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -1859,6 +1860,11 @@ const (
 // behind it and every upsert on those tables fails; the requirement is
 // what makes it refuse the store instead.
 const teamScopedUserKeysRequirement = "team-scoped-user-keys"
+
+// safety: v75 restates runner_scale_step_credits in the $0.001 credit, so a
+// binary predating it reads the step in its own credit and scales runner caps
+// 20 times sooner; the requirement makes that binary refuse the store instead.
+const creditValueRequirement = "credit-value-v1"
 
 // safety: the SQLite handle allows one connection, so a migration reaching for *Store deadlocks against its own tx.
 func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {

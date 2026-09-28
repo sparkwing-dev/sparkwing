@@ -777,7 +777,8 @@ unlock.
   minute. An installation that stored a rate or a rate table keeps its prices
   until an operator writes new ones. Schema v59 multiplies a stored
   `runner_scale_step_credits` by 200 and schema v75 divides it by 20, so the
-  step keeps its dollar value. The dashboard shows charges to a hundredth of a
+  step keeps its dollar value; its `credit-value-v1` requirement makes an
+  older controller refuse the upgraded database. The dashboard shows charges to a hundredth of a
   credit, because a runner second costs a fraction of one. See
   [Schema 75: a credit is $0.001](docs/migrations/_unreleased.md#schema-75-a-credit-is-0001).
 

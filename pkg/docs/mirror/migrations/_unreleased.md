@@ -23,9 +23,12 @@ A credit is $0.001 and keeps that value. `micro_per_credit` reads 100,000 and
 balances, grants and charges keep their dollar value and the checkout service
 needs no change to grant. Schema 75 divides a stored
 `runner_scale_step_credits` by 20, rounding to the nearest credit and never
-below one, so the step keeps its dollar value. Upgrade every controller
-together: a controller older than schema 75 reads the restated step in its
-own credit and scales runner caps 20 times sooner.
+below one, so the step keeps its dollar value. The `credit-value-v1`
+requirement makes a controller older than schema 75 refuse the upgraded
+database rather than read the restated step in its own credit and scale
+runner caps 20 times sooner, so upgrade every controller together. To roll
+back, stop the upgraded controller, restore a backup taken before the
+upgrade, and start the older build.
 
 The default rate ladder moves to 2-core 9,000, 4-core 18,000 and 8-core 33,000
 micro-credits a second. An installation that stored

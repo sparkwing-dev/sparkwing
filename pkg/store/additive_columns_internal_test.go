@@ -148,7 +148,6 @@ var additiveColumnSources = map[int][]map[string]string{
 	69: {githubAppTriggerOptionCols},
 	70: nil,
 	74: nil,
-	75: nil,
 }
 
 func columnSpecMaps() []map[string]string {
