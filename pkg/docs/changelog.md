@@ -32,6 +32,9 @@ unlock.
   lease for two minutes. A lease released during that recovery can stay
   reserved until the two minutes pass. A missing daemon binary fails at once,
   and a daemon that exits before serving gets three tries.
+### Docs
+
+- **cli:** Document the selected pipeline commit exposed as `SPARKWING_PIPELINE_REV`
 
 ## [v0.63.0] - 2026-09-27
 ### Changed
