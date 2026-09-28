@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ func testKeyring(t *testing.T) *localsecrets.Keyring {
 	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
 	t.Setenv(localsecrets.KeyEnv, "")
 	t.Setenv(localsecrets.PreviousKeyEnv, "")
-	ring, err := localsecrets.LoadKeyring(false)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		t.Fatalf("load keyring: %v", err)
 	}
@@ -139,7 +140,8 @@ func TestDaemonAPI_RefusesSecretsWithoutTheKeyTheStoreNeeds(t *testing.T) {
 	}
 }
 
-func TestDaemonAPI_ImportsLegacyFilesAndReportsThemOnce(t *testing.T) {
+func legacyConfigDir(t *testing.T, secretsEnv string) {
+	t.Helper()
 	if err := os.MkdirAll(paths.TestSandbox(), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -153,10 +155,13 @@ func TestDaemonAPI_ImportsLegacyFilesAndReportsThemOnce(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(xdg, "sparkwing"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(xdg, "sparkwing", "secrets.env"), []byte("TOKEN=from-dotenv\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(xdg, "sparkwing", "secrets.env"), []byte(secretsEnv), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
 
+func TestDaemonAPI_ImportsLegacyFilesAndReportsThemOnce(t *testing.T) {
+	legacyConfigDir(t, "TOKEN=from-dotenv\n")
 	home := wingdTestHome(t)
 	sock, _ := startAPIDaemon(t, home, nil)
 	httpClient := NewAPISocketClient(sock)
@@ -179,5 +184,80 @@ func TestDaemonAPI_ImportsLegacyFilesAndReportsThemOnce(t *testing.T) {
 	sec, err := daemonSecretsClient(t, sock).GetSecret(ctx, "TOKEN")
 	if err != nil || sec.Value != "from-dotenv" || !sec.Shared {
 		t.Fatalf("GET TOKEN = %+v, %v; want the imported shared value", sec, err)
+	}
+}
+
+func TestDaemonAPI_AWrongKeyImportsNothing(t *testing.T) {
+	legacyConfigDir(t, "TOKEN=from-dotenv\n")
+	home := wingdTestHome(t)
+	seed, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := store.Secret{Name: "SEALED", Masked: true, Shared: true}
+	if row.Value, err = controller.SealSecretValue(other, store.DefaultTeam, &row, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.CreateOrReplaceSecret(row, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sock, _ := startAPIDaemonWith(t, home, nil, func(api *wingdAPI) {
+		wrong := filepath.Join(t.TempDir(), "secrets.key")
+		if err := os.WriteFile(wrong, bytes.Repeat([]byte{8}, secrets.KeySize), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(localsecrets.KeyFileEnv, wrong)
+		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		api.secrets = ring
+	})
+	httpClient := NewAPISocketClient(sock)
+	defer httpClient.CloseIdleConnections()
+	var out strings.Builder
+	if err := importLegacySecretsOverSocket(context.Background(), httpClient, &out); err == nil {
+		t.Fatal("the import route answered a daemon holding the wrong key")
+	}
+	st, err := store.OpenReadOnly(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("TOKEN was imported under the wrong key: %v", err)
+	}
+}
+
+func TestDaemonAPI_ImportReadsOnlyTheFilesTheDaemonResolves(t *testing.T) {
+	legacyConfigDir(t, "")
+	elsewhere := filepath.Join(t.TempDir(), "planted.env")
+	if err := os.WriteFile(elsewhere, []byte("PLANTED=x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := wingdTestHome(t)
+	sock, _ := startAPIDaemon(t, home, nil)
+	req, err := http.NewRequest(http.MethodPost, HostedAPIBaseURL+"/api/v1/local/secrets/import",
+		strings.NewReader(`{"secrets":"`+elsewhere+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpClient := NewAPISocketClient(sock)
+	defer httpClient.CloseIdleConnections()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if _, err := daemonSecretsClient(t, sock).GetSecret(context.Background(), "PLANTED"); err == nil {
+		t.Fatal("the import route read a file the caller named")
 	}
 }

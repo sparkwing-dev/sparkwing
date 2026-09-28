@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,12 +19,9 @@ import (
 )
 
 // APISecretsImportRoute imports the dotenv files local secrets lived in before
-// the runs store held them. Only the daemon serves it, over its socket; the
-// caller names the files it resolved, because its config directory is the one
-// the operator means.
+// the runs store held them. Only the daemon serves it, over its socket, and it
+// reads only the files the daemon itself resolves.
 const APISecretsImportRoute = "POST /api/v1/local/secrets/import"
-
-const maxSecretsImportBody = 8 << 10
 
 type secretsImportResponse struct {
 	Files []localsecrets.ImportedFile `json:"files"`
@@ -48,9 +46,15 @@ func (a *wingdAPI) importLegacyOnOpen(ctx context.Context, rw *store.Store, ciph
 }
 
 func (a *wingdAPI) importLegacySecrets(w http.ResponseWriter, r *http.Request) {
-	var files localsecrets.LegacyFiles
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxSecretsImportBody)).Decode(&files); err != nil {
-		http.Error(w, "decode request: "+err.Error(), http.StatusBadRequest)
+	files, warning := localsecrets.FindLegacyFiles()
+	if warning != "" {
+		a.logger.Warn(warning)
+	}
+	if files.Empty() {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(secretsImportResponse{Files: []localsecrets.ImportedFile{}}); err != nil {
+			a.logger.Warn("write the secrets import answer", "err", err)
+		}
 		return
 	}
 	rw, ro, err := a.runs.Create(r.Context())
@@ -59,8 +63,8 @@ func (a *wingdAPI) importLegacySecrets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.handlerFor(r.Context(), rw, ro)
-	if err := a.secrets.MissingKey(r.Context(), rw); err != nil {
-		writeImportError(w, err)
+	if problem := a.secretsFault(); problem != "" {
+		writeImportError(w, errors.New(problem))
 		return
 	}
 	now := time.Now()
@@ -102,15 +106,10 @@ func importLegacySecretsOverSocket(ctx context.Context, httpClient *http.Client,
 	if files.Empty() {
 		return nil
 	}
-	body, err := json.Marshal(files)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, HostedAPIBaseURL+"/api/v1/local/secrets/import", http.NoBody)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, HostedAPIBaseURL+"/api/v1/local/secrets/import", strings.NewReader(string(body)))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("import local secrets: %w", err)
@@ -150,7 +149,7 @@ func ImportLegacySecretsInProcess(ctx context.Context, dbPath string) (err error
 	if files.Empty() {
 		return nil
 	}
-	ring, err := localsecrets.LoadKeyring(false)
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 	if err != nil {
 		return err
 	}

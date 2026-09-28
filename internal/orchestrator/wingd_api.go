@@ -330,11 +330,13 @@ func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controll
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), APIRequestTimeout)
 	defer cancel()
-	a.importLegacyOnOpen(ctx, rw, cipher)
+	// safety: the reseal proves the key against the values already sealed
+	// before the import seals anything, so a wrong key imports nothing.
 	srv := controller.New(rw, a.logger).WithSecretsCipher(cipher)
 	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
 		return a.refuseSecrets(err)
 	}
+	a.importLegacyOnOpen(ctx, rw, cipher)
 	return cipher
 }
 
