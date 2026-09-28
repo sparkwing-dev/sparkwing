@@ -238,6 +238,9 @@ func createTokenRow(
 	if !ok {
 		return "", nil, fmt.Errorf("tokens: unknown kind %q", kind)
 	}
+	if err := retireExpiredAgentName(ctx, e, team, principal, kind, now); err != nil {
+		return "", nil, err
+	}
 	if err := refuseTakenAgentName(ctx, e, team, principal, kind, now, opts.replaces); err != nil {
 		return "", nil, err
 	}
@@ -246,15 +249,86 @@ func createTokenRow(
 		return "", nil, err
 	}
 	tok, err := insertTokenRow(ctx, e, raw, team, principal, kind, scopes, ttl, now, opts)
+	if isAgentNameCollision(err) {
+		return "", nil, fmt.Errorf("%w: %s", ErrAgentNameTaken, principal)
+	}
 	if err != nil {
 		return "", nil, err
 	}
 	return raw, tok, nil
 }
 
+const agentNameIndexName = "idx_tokens_agent_name"
+
+// safety: the index cannot read the clock, so it holds every unrevoked agent
+// token; a rotation predecessor carries its grace-end revoked_at and falls
+// outside it, while [refuseTakenAgentName] still counts it until that time.
+const agentNameIndexedRow = `kind = 'runner' AND revoked_at IS NULL AND substr(principal, 1, 6) = 'agent:'`
+
+const agentNameIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + agentNameIndexName +
+	` ON tokens(team, principal) WHERE ` + agentNameIndexedRow
+
+// safety: an expired agent token still holds its name's index slot, so a mint
+// stamps its death as a revocation at the moment it expired, which leaves
+// [Token.IsValid] answering exactly as before.
+func retireExpiredAgentName(ctx context.Context, e tokenExecer, team Team, principal, kind string, now time.Time) error {
+	if kind != TokenKindRunner || !strings.HasPrefix(principal, agentPrincipalPrefix) {
+		return nil
+	}
+	_, err := e.ExecContext(ctx, `UPDATE tokens SET revoked_at = expires_at
+		WHERE team = ? AND principal = ? AND `+agentNameIndexedRow+`
+		  AND expires_at IS NOT NULL AND expires_at <= ?`,
+		string(team), principal, now.UTC().Unix())
+	return err
+}
+
+// hack: SQLite names the indexed columns in its error and Postgres names the index.
+func isAgentNameCollision(err error) bool {
+	if !isUniqueViolation(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, agentNameIndexName) || strings.Contains(msg, "tokens.team, tokens.principal")
+}
+
+func applyAgentNameIndexMigration(ctx context.Context, q migrationQueryExecer, now time.Time) (err error) {
+	if _, err := q.ExecContext(ctx, `UPDATE tokens SET revoked_at = expires_at
+		WHERE `+agentNameIndexedRow+` AND expires_at IS NOT NULL AND expires_at <= ?`, now.UTC().Unix()); err != nil {
+		return err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT team, principal, COUNT(*) FROM tokens
+		WHERE `+agentNameIndexedRow+`
+		GROUP BY team, principal HAVING COUNT(*) > 1 ORDER BY team, principal`)
+	if err != nil {
+		return err
+	}
+	var dupes []string
+	for rows.Next() {
+		var team, principal string
+		var n int
+		if err := rows.Scan(&team, &principal, &n); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		dupes = append(dupes, fmt.Sprintf("team %s %s (%d tokens)", team, principal, n))
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(dupes) > 0 {
+		return fmt.Errorf("tokens: more than one live runner token carries the same agent name: %s; "+
+			"revoke all but one token of each name, then upgrade", strings.Join(dupes, ", "))
+	}
+	_, err = q.ExecContext(ctx, agentNameIndex)
+	return err
+}
+
 // safety: every mint path passes through here, so a second live runner token
-// for one agent name cannot be minted by any of them. A mint outside a locked
-// team row can still race another; the team settings mint locks it.
+// for one agent name cannot be minted by any of them. Two racing mints both
+// pass this read, and [agentNameIndex] refuses the second insert.
 func refuseTakenAgentName(ctx context.Context, q tokenExecer, team Team, principal, kind string, now time.Time, replaces string) (err error) {
 	if kind != TokenKindRunner || !strings.HasPrefix(principal, agentPrincipalPrefix) {
 		return nil
@@ -552,20 +626,13 @@ func (s *Store) rotateToken(
 		return "", nil, nil, errors.New("token is already revoked")
 	}
 
-	// safety: the replacement inherits the original's team; a rotation that
-	// re-minted into [DefaultTeam] would move the credential out of the team
-	// whose work it authorizes.
-	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Team, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
-		TokenOptions{Metered: oldTok.Metered, replaces: oldTok.Prefix})
-	if err != nil {
-		return "", nil, nil, err
-	}
-
+	// safety: the predecessor is revoked before its successor is inserted, so
+	// it has left the agent-name index by the time the successor enters it.
 	revokeAt := now.Add(grace).UTC()
 	res, err := tx.ExecContext(ctx,
-		`UPDATE tokens SET revoked_at = ?, replaced_by = ?
+		`UPDATE tokens SET revoked_at = ?
           WHERE prefix = ? AND (revoked_at IS NULL OR revoked_at > ?)`,
-		revokeAt.Unix(), newTok.Prefix, prefix, revokeAt.Unix(),
+		revokeAt.Unix(), prefix, revokeAt.Unix(),
 	)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
@@ -580,6 +647,19 @@ func (s *Store) rotateToken(
 	}
 	if n > 1 {
 		return "", nil, nil, fmt.Errorf("tokens: prefix %q matched %d rows, aborting", prefix, n)
+	}
+
+	// safety: the replacement inherits the original's team; a rotation that
+	// re-minted into [DefaultTeam] would move the credential out of the team
+	// whose work it authorizes.
+	raw, newTok, err := createTokenRow(ctx, tx, oldTok.Team, oldTok.Principal, oldTok.Kind, oldTok.Scopes, ttl, now,
+		TokenOptions{Metered: oldTok.Metered, replaces: oldTok.Prefix})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET replaced_by = ? WHERE prefix = ?`,
+		newTok.Prefix, prefix); err != nil {
+		return "", nil, nil, fmt.Errorf("tokens: rotate update: %w", err)
 	}
 	oldTok.RevokedAt = &revokeAt
 	oldTok.ReplacedBy = newTok.Prefix

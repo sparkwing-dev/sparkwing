@@ -160,6 +160,10 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v81 adds one nullable executor column an older binary never
 	// names, so an older binary keeps writing the migrated database.
 	81: {executorAcceptCols},
+	// safety: v82 adds a unique index and no column. An older binary still
+	// reads and writes the store; its agent-token rotation, which inserts the
+	// successor before revoking the predecessor, fails on the index instead.
+	82: nil,
 }
 
 func columnSpecMaps() []map[string]string {

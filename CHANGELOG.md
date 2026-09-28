@@ -1498,6 +1498,15 @@ unlock.
 
 ### Security
 
+- **store:** Schema v82 adds a unique index that holds one unrevoked runner
+  token per agent name in a team, so two concurrent mints of one name can no
+  longer both succeed. A rotation still overlaps its predecessor until the
+  grace ends. Minting a name retires its expired tokens by stamping their
+  expiry as their revocation. The upgrade refuses to run, and names each team
+  and agent, when a store already holds two live tokens for one agent name;
+  revoke all but one and restart. An older binary keeps reading and writing
+  the store, but its rotation of an agent token fails on the index.
+
 - **controller:** `POST /webhooks/github/{pipeline}` no longer runs a pull
   request from a fork. A `pull_request` delivery whose head repository is not
   its base repository, or whose head repository was deleted, answers `202`

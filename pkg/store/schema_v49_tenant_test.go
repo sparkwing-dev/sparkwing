@@ -38,6 +38,7 @@ func downgradeTenantKeyToV48(t *testing.T, st *store.Store) {
 		`DROP INDEX IF EXISTS idx_credit_grants_team_reference`,
 		`DROP INDEX IF EXISTS idx_triggers_team_created`,
 		`DROP INDEX IF EXISTS idx_credit_charges_team_amount`,
+		`DROP INDEX IF EXISTS idx_tokens_agent_name`,
 	}
 	for _, table := range store.TenantTablesForTest() {
 		stmts = append(stmts, `ALTER TABLE `+table+` DROP COLUMN team`)

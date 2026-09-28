@@ -28,6 +28,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"then runs under that team's own row lock",
 	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
 	"lockCommittedTx":       "the storage pass reconciles every team's count of one store from one bucket listing",
+	"applyAgentNameIndexMigration": "the schema migration retires expired agent tokens and refuses duplicate agent names in every team " +
+		"before it builds the index that spans them",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
 		"retention, not one team's data",
 	"expiredClaimRunsTx": "the expired-claim reaper finds every team's runs holding a lapsed claim, " +
