@@ -13,7 +13,7 @@ import (
 func TestASlowStartingDaemonIsNotReplaced(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		child := newSupervisorTestChild()
-		var starts, probes atomic.Int32
+		var starts, probes, heartbeat atomic.Int32
 		answering := make(chan struct{})
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan error, 1)
@@ -23,7 +23,9 @@ func TestASlowStartingDaemonIsNotReplaced(t *testing.T) {
 				ProbeTimeout:      time.Millisecond,
 				FailureLimit:      2,
 				TermGrace:         time.Millisecond,
-				StartupTimeout:    time.Minute,
+				StartupTimeout:    5 * time.Millisecond,
+				HeartbeatStale:    10 * time.Millisecond,
+				FailureCeiling:    time.Minute,
 				RestartBackoff:    time.Millisecond,
 				MaxRestartBackoff: time.Millisecond,
 			}, Deps{
@@ -40,6 +42,7 @@ func TestASlowStartingDaemonIsNotReplaced(t *testing.T) {
 					}
 					return nil
 				},
+				Heartbeat: func() (uint64, error) { return uint64(heartbeat.Add(1)), nil },
 			})
 		}()
 
@@ -79,6 +82,7 @@ func TestReplacementsBackOffUntilADaemonStaysHealthy(t *testing.T) {
 				err := Loop(t.Context(), Config{
 					ProbeInterval: time.Millisecond, ProbeTimeout: time.Millisecond,
 					FailureLimit: 2, TermGrace: tc.termGrace, StartupTimeout: 5 * time.Millisecond,
+					HeartbeatStale: time.Millisecond,
 					RestartBackoff: time.Millisecond, MaxRestartBackoff: 20 * time.Millisecond,
 				}, Deps{
 					Start: func() (Child, error) {
@@ -145,6 +149,7 @@ func TestSupervisorCancellationDuringBackoff(t *testing.T) {
 		err := Loop(ctx, Config{
 			ProbeInterval: time.Millisecond, ProbeTimeout: time.Millisecond,
 			FailureLimit: 1, TermGrace: time.Millisecond, StartupTimeout: time.Millisecond,
+			HeartbeatStale: time.Millisecond,
 			RestartBackoff: time.Second, MaxRestartBackoff: time.Second,
 		}, Deps{
 			Start: func() (Child, error) {

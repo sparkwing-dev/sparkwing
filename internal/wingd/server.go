@@ -188,6 +188,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return ErrNotElected
 	}
 	defer d.releaseLock()
+	heartbeatStop := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	go d.heartbeatLoop(heartbeatStop, heartbeatDone)
+	defer func() {
+		close(heartbeatStop)
+		<-heartbeatDone
+		if err := os.Remove(filepath.Join(d.layout.dir, "heartbeat")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			d.cfg.logf("heartbeat cleanup: %v", err)
+		}
+	}()
 	defer func() {
 		_ = os.Remove(d.layout.sock)
 		_ = os.Remove(d.layout.apiSock)
@@ -242,6 +252,52 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.mu.Unlock()
 		go d.serveConn(c)
 	}
+}
+
+func (d *Daemon) heartbeatLoop(stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	path := filepath.Join(d.layout.dir, "heartbeat")
+	writer, err := openHeartbeat(path)
+	if err != nil {
+		d.cfg.logf("heartbeat open: %v", err)
+		return
+	}
+	defer func() {
+		if err := writer.close(); err != nil {
+			d.cfg.logf("heartbeat close: %v", err)
+		}
+	}()
+	var lastErrorLog time.Time
+	var counter uint64
+	for {
+		stopping, err := d.heartbeatTick(writer, counter+1)
+		if stopping {
+			return
+		}
+		counter++
+		if err != nil {
+			if lastErrorLog.IsZero() || time.Since(lastErrorLog) >= time.Minute {
+				d.cfg.logf("heartbeat write: %v", err)
+				lastErrorLog = time.Now()
+			}
+		}
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *Daemon) heartbeatTick(writer *heartbeatWriter, counter uint64) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.shuttingDown {
+		return true, nil
+	}
+	return false, writer.write(counter)
 }
 
 func (d *Daemon) watchContext(ctx context.Context) {

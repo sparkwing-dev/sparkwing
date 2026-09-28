@@ -239,6 +239,18 @@ func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	if reclaimed.Token != token {
 		t.Fatalf("reattach returned token %q, want %q", reclaimed.Token, token)
 	}
+	defer reclaimed.Release()
+	childClient := ensure(t, home, "")
+	child, err := childClient.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID: "later", ParentLeaseToken: token,
+	}, nil)
+	if err != nil {
+		t.Fatalf("later node after parent reattach: %v", err)
+	}
+	if child.Token != token {
+		t.Fatalf("later node token %q, want parent token %q", child.Token, token)
+	}
+	defer child.Release()
 }
 
 func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {

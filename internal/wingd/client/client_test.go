@@ -60,9 +60,12 @@ func TestSupersedes(t *testing.T) {
 	}
 }
 
-func TestDefaultReattachTimeoutFitsInsideDaemonGrace(t *testing.T) {
-	if defaultReattachTimeout*3 > wingd.DefaultGraceWindow {
-		t.Fatalf("reattach timeout %s does not fit safely inside daemon grace %s", defaultReattachTimeout, wingd.DefaultGraceWindow)
+func TestRecoveryBudgetsCoverFailureCeilingsAndRetryPacing(t *testing.T) {
+	if defaultReattachTimeout < 2*5*time.Minute+15*time.Second+30*time.Second+30*time.Second {
+		t.Fatalf("reattach timeout %s does not cover two stalled children and replacement backoff", defaultReattachTimeout)
+	}
+	if wingd.DefaultGraceWindow < 3*retryMaxDelay {
+		t.Fatalf("daemon grace %s does not cover reconnect pacing %s", wingd.DefaultGraceWindow, retryMaxDelay)
 	}
 }
 

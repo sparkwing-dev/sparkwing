@@ -13,14 +13,17 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 const (
 	defaultProbeInterval     = 2 * time.Second
-	defaultProbeTimeout      = time.Second
+	defaultProbeTimeout      = 3 * time.Second
 	defaultFailureLimit      = 3
 	defaultStartupTimeout    = 30 * time.Second
+	defaultHeartbeatStale    = wingd.HeartbeatStaleWindow
+	defaultFailureCeiling    = 5 * time.Minute
 	defaultRestartBackoff    = time.Second
 	defaultMaxRestartBackoff = 30 * time.Second
 )
@@ -43,6 +46,8 @@ type Config struct {
 	FailureLimit   int
 	TermGrace      time.Duration
 	StartupTimeout time.Duration
+	HeartbeatStale time.Duration
+	FailureCeiling time.Duration
 	// RestartBackoff doubles on each replacement up to MaxRestartBackoff, and resets once a child has stayed
 	// healthy for MaxRestartBackoff.
 	RestartBackoff    time.Duration
@@ -50,9 +55,24 @@ type Config struct {
 }
 
 type Deps struct {
-	Start func() (Child, error)
-	Probe func(context.Context) error
-	Logf  func(string, ...any)
+	Start     func() (Child, error)
+	Probe     func(context.Context) error
+	Heartbeat func() (uint64, error)
+	Logf      func(string, ...any)
+}
+
+func (c Config) heartbeatStale() time.Duration {
+	if c.HeartbeatStale > 0 {
+		return c.HeartbeatStale
+	}
+	return defaultHeartbeatStale
+}
+
+func (c Config) failureCeiling() time.Duration {
+	if c.FailureCeiling > 0 {
+		return c.FailureCeiling
+	}
+	return defaultFailureCeiling
 }
 
 func (c Config) validate() error {
@@ -133,6 +153,10 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 	started := time.Now()
 	var ready bool
 	var healthySince time.Time
+	var failureSince, lastProgress, lastWarning, lastTick time.Time
+	var lastHeartbeat uint64
+	var haveHeartbeat bool
+	var staleSamples int
 	failures := 0
 	for {
 
@@ -147,9 +171,22 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 		case err := <-child.Wait():
 			return false, false, err
 		case <-ticker.C:
+			tick := time.Now()
+			stallThreshold := 2 * (cfg.ProbeInterval + cfg.ProbeTimeout)
+			stalled := !lastTick.IsZero() && tick.Sub(lastTick) > stallThreshold
+			lastTick = tick
 			probeCtx, cancel := context.WithTimeout(ctx, cfg.ProbeTimeout)
 			err := deps.Probe(probeCtx)
 			cancel()
+			if time.Since(tick) > stallThreshold {
+				stalled = true
+			}
+			if stalled {
+				// safety: a stopped supervisor cannot judge progress made during the same machine stall.
+				lastProgress = time.Now()
+				failureSince = time.Time{}
+				staleSamples = 0
+			}
 			if err == nil {
 				ready = true
 				if healthySince.IsZero() {
@@ -159,27 +196,67 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 					resetBackoff = true
 				}
 				failures = 0
+				failureSince = time.Time{}
+				staleSamples = 0
+				lastWarning = time.Time{}
 				continue
 			}
 			healthySince = time.Time{}
+			if failureSince.IsZero() {
+				failureSince = time.Now()
+			}
+			if deps.Heartbeat != nil {
+				if counter, herr := deps.Heartbeat(); herr == nil {
+					if haveHeartbeat && counter != lastHeartbeat {
+						lastProgress = time.Now()
+						staleSamples = 0
+					}
+					lastHeartbeat = counter
+					haveHeartbeat = true
+				}
+			}
+			staleSince := started
+			if !lastProgress.IsZero() {
+				staleSince = lastProgress
+			}
+			if time.Since(staleSince) >= cfg.heartbeatStale() {
+				staleSamples++
+			} else {
+				staleSamples = 0
+			}
+			stale := staleSamples >= cfg.FailureLimit
+			ceiling := time.Since(failureSince) >= cfg.failureCeiling()
 			if !ready {
-				if time.Since(started) < cfg.StartupTimeout {
+				if !ceiling && (time.Since(started) < cfg.StartupTimeout || !stale) {
+					if !stale && deps.Logf != nil && (lastWarning.IsZero() || time.Since(lastWarning) >= cfg.heartbeatStale()) {
+						deps.Logf("startup probe failed but daemon heartbeat advances: %v", err)
+						lastWarning = time.Now()
+					}
 					continue
 				}
 				if deps.Logf != nil {
-					deps.Logf("daemon did not answer a probe within %s of starting; replacing it", cfg.StartupTimeout)
+					if ceiling && !stale {
+						deps.Logf("replacing daemon during startup: HARD CEILING of %s continuous probe failure reached despite advancing heartbeat (last probe: %v)", cfg.failureCeiling(), err)
+					} else {
+						deps.Logf("replacing daemon during startup: no successful probe for %s and heartbeat stale for %s (last probe: %v)", time.Since(started), time.Since(staleSince), err)
+					}
 				}
 				return true, false, stopChild(child, cfg.TermGrace)
 			}
 			failures++
-			if deps.Logf != nil {
-				deps.Logf("health probe %d/%d failed: %v", failures, cfg.FailureLimit, err)
-			}
-			if failures < cfg.FailureLimit {
+			if failures < cfg.FailureLimit || (!stale && !ceiling) {
+				if deps.Logf != nil && (lastWarning.IsZero() || time.Since(lastWarning) >= cfg.heartbeatStale()) {
+					deps.Logf("health probes failing (%d consecutive), but daemon heartbeat is %s old; keeping daemon (last probe: %v)", failures, time.Since(staleSince), err)
+					lastWarning = time.Now()
+				}
 				continue
 			}
 			if deps.Logf != nil {
-				deps.Logf("health probe failed %d times; replacing unresponsive daemon", failures)
+				if ceiling && !stale {
+					deps.Logf("replacing daemon: HARD CEILING of %s continuous probe failure reached despite advancing heartbeat (last probe: %v)", cfg.failureCeiling(), err)
+				} else {
+					deps.Logf("replacing daemon: %d failed probes and heartbeat stale for %s (last probe: %v)", failures, time.Since(staleSince), err)
+				}
 			}
 			if err := stopChild(child, cfg.TermGrace); err != nil {
 				return false, false, err
@@ -316,6 +393,13 @@ func Run(args []string) error {
 
 		Probe: func(ctx context.Context) error {
 			return wingdclient.HealthProbe(ctx, *home)
+		},
+		Heartbeat: func() (uint64, error) {
+			path, err := wingd.HeartbeatPath(*home)
+			if err != nil {
+				return 0, err
+			}
+			return wingd.ReadHeartbeat(path)
 		},
 		Logf: logger.Printf,
 	})

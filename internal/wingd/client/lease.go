@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -22,7 +21,9 @@ type Lease struct {
 
 	// safety: Release writes on the same connection recoverWatch replaces, so
 	// both take connMu.
-	connMu sync.Mutex
+	connMu         sync.Mutex
+	recoveryMu     sync.Mutex
+	recoveryCancel context.CancelFunc
 }
 
 func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (*Lease, error) {
@@ -42,7 +43,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 			if werr := retry.wait(ctx, err); werr != nil {
 				return nil, werr
 			}
-			if rerr := cl.recoverConn(ctx); rerr != nil {
+			if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
 				return nil, rerr
 			}
 			continue
@@ -54,7 +55,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 		if err := retry.wait(ctx, transient); err != nil {
 			return nil, err
 		}
-		if rerr := cl.recoverConn(ctx); rerr != nil {
+		if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
 			return nil, rerr
 		}
 	}
@@ -100,7 +101,7 @@ func (cl *Client) Reattach(ctx context.Context, token, runID string) (*Lease, er
 		if err := retry.wait(ctx, transient); err != nil {
 			return nil, err
 		}
-		if rerr := cl.recoverConn(ctx); rerr != nil {
+		if rerr := cl.recoverAdmissionConn(ctx); rerr != nil {
 			return nil, rerr
 		}
 	}
@@ -126,8 +127,15 @@ func (cl *Client) readReattach(token, runID string) (lease *Lease, terminal, tra
 	}
 }
 
+// safety: keep recoveryMu until connMu is owned, or a recovery could start
+// after the cancel check and hold the connection lock for its full retry budget.
 func (l *Lease) Release() error {
+	l.recoveryMu.Lock()
+	if l.recoveryCancel != nil {
+		l.recoveryCancel()
+	}
 	l.connMu.Lock()
+	l.recoveryMu.Unlock()
 	defer l.connMu.Unlock()
 	_ = l.cl.write(&wingwire.Release{LeaseToken: l.Token})
 	return l.cl.Close()
@@ -207,24 +215,41 @@ func (l *Lease) watchLease(onEvicted func(wingwire.Evicted), onCancel func(wingw
 }
 
 func (l *Lease) recoverWatch() (recovered bool, recoverErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultReattachTimeout)
+	l.recoveryMu.Lock()
+	l.recoveryCancel = cancel
+	l.recoveryMu.Unlock()
+	defer func() {
+		l.recoveryMu.Lock()
+		l.recoveryCancel = nil
+		l.recoveryMu.Unlock()
+		cancel()
+	}()
 	l.connMu.Lock()
 	defer l.connMu.Unlock()
 	if l.cl.closed.Load() {
 		return false, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultReattachTimeout)
-	defer cancel()
-	if err := l.cl.connect(ctx); err != nil {
+	stop := l.cl.cancelOnDone(ctx)
+	defer stop()
+	if err := l.cl.reconnect(ctx, defaultReattachTimeout); err != nil {
 		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v); run continues without eviction watch or daemon-side cancel", l.RunID, err)
 		return false, err
 	}
-	if _, terminal, transient := l.cl.readReattach(l.Token, l.RunID); terminal != nil || transient != nil {
-		recoverErr := errors.Join(terminal, transient)
-		l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v); run continues without eviction watch or daemon-side cancel",
-			l.RunID, recoverErr)
-		return false, recoverErr
+	retry := newRetry("lease re-attach", 0)
+	for {
+		if _, terminal, transient := l.cl.readReattach(l.Token, l.RunID); terminal != nil {
+			l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v); run continues without eviction watch or daemon-side cancel", l.RunID, terminal)
+			return false, terminal
+		} else if transient == nil {
+			return true, nil
+		} else if err := retry.wait(ctx, transient); err != nil {
+			return false, err
+		}
+		if err := l.cl.reconnect(ctx, defaultReattachTimeout); err != nil {
+			return false, err
+		}
 	}
-	return true, nil
 }
 
 func (cl *Client) CancelLease(ctx context.Context, runID string) (bool, error) {

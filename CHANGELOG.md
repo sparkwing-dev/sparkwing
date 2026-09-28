@@ -20,6 +20,18 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **admission:** A daemon with an advancing heartbeat counter survives missed
+  health probes during overload. A machine pause restarts the stale window;
+  several stale samples or five minutes of continuous probe failure trigger
+  replacement. Unix heartbeats advance through a shared mapping.
+- **admission:** Lease holders and queued runs retry across longer replacement
+  gaps. Restored leases stay available for two minutes after daemon startup.
+  Releasing a lease during recovery can leave its capacity reserved until that
+  grace expires. Missing daemon hosts fail immediately; hosts that exit before
+  serving get at most three attempts.
+
 ## [v0.63.0] - 2026-09-27
 ### Changed
 
