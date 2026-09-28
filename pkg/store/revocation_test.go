@@ -62,7 +62,7 @@ func TestDeleteUser_RevokesSessionsAndTokens(t *testing.T) {
 	if _, err := s.CreateUser("mallory", "correct-horse", []string{"admin"}, now); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	rawSession, _, _, err := s.CreateSession("mallory", []string{"admin"}, time.Hour, now)
+	rawSession, _, _, err := s.CreateSession(t.Context(), "mallory", []string{"admin"}, time.Hour, now)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDeleteUser_RevokesSessionsAndTokens(t *testing.T) {
 	if sessions != 1 {
 		t.Fatalf("deleted sessions = %d, want 1", sessions)
 	}
-	if _, err := s.LookupSession(rawSession, now.Add(time.Second)); err == nil {
+	if _, err := s.LookupSession(t.Context(), rawSession, now.Add(time.Second)); err == nil {
 		t.Fatalf("session of a deleted user still resolves")
 	}
 	if _, err := s.LookupToken(rawToken, now.Add(time.Second)); err == nil {

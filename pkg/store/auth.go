@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -66,18 +67,18 @@ func sessionDigest(rawSession string) string {
 // so a browser keeps cookies a working backend would still resolve.
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 
-func (s *Store) csrfSigningKey() ([]byte, error) {
+func (s *Store) csrfSigningKey(ctx context.Context) ([]byte, error) {
 	s.csrfKeyMu.Lock()
 	defer s.csrfKeyMu.Unlock()
 	if len(s.csrfKey) > 0 {
 		return s.csrfKey, nil
 	}
-	stored, found, err := s.storedCSRFKey()
+	stored, found, err := s.storedCSRFKey(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		if stored, err = s.mintCSRFKey(); err != nil {
+		if stored, err = s.mintCSRFKey(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -90,9 +91,9 @@ func (s *Store) csrfSigningKey() ([]byte, error) {
 }
 
 // safety: reading before writing keeps a read-only store, and every process past the first, off the write path.
-func (s *Store) storedCSRFKey() (string, bool, error) {
+func (s *Store) storedCSRFKey(ctx context.Context) (string, bool, error) {
 	var stored string
-	err := s.queryRowNoCtx(
+	err := s.queryRow(ctx,
 		`SELECT value FROM sparkwing_meta WHERE key = ?`, metaKeySessionCSRFKey,
 	).Scan(&stored)
 	switch {
@@ -104,12 +105,12 @@ func (s *Store) storedCSRFKey() (string, bool, error) {
 	return stored, true, nil
 }
 
-func (s *Store) mintCSRFKey() (string, error) {
+func (s *Store) mintCSRFKey(ctx context.Context) (string, error) {
 	minted := make([]byte, sha256.Size)
 	if _, err := rand.Read(minted); err != nil {
 		return "", err
 	}
-	tx, err := s.beginTx(context.Background())
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return "", fmt.Errorf("sessions: begin csrf key: %w", err)
 	}
@@ -142,8 +143,8 @@ func (s *Store) mintCSRFKey() (string, error) {
 	return stored, nil
 }
 
-func (s *Store) deriveCSRFToken(rawSession string) (string, error) {
-	key, err := s.csrfSigningKey()
+func (s *Store) deriveCSRFToken(ctx context.Context, rawSession string) (string, error) {
+	key, err := s.csrfSigningKey(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +171,7 @@ func rehashSessions(ctx context.Context, tx *storeTx) error {
 
 // CreateSession returns a raw session id and its CSRF token. The table stores
 // the session digest; the CSRF token is derived on demand and never stored.
-func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error) {
+func (s *Store) CreateSession(ctx context.Context, principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error) {
 	if principal == "" {
 		return "", "", nil, errors.New("sessions: principal required")
 	}
@@ -182,14 +183,14 @@ func (s *Store) CreateSession(principal string, scopes []string, ttl time.Durati
 		return "", "", nil, err
 	}
 
-	csrfToken, err = s.deriveCSRFToken(rawSession)
+	csrfToken, err = s.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
 		return "", "", nil, err
 	}
 
 	expires := now.Add(ttl).UTC()
 	scopeStr := joinScopes(scopes)
-	_, err = s.execNoCtx(`
+	_, err = s.exec(ctx, `
         INSERT INTO sessions (hash, principal, scopes, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?)
     `, sessionDigest(rawSession), principal, scopeStr, now.UTC().Unix(), expires.Unix())
@@ -216,31 +217,31 @@ func newSessionID() (string, error) {
 }
 
 // LookupSession resolves a raw session id; bumps last_used_at on hit.
-func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error) {
-	return s.lookupSession(rawSession, now, 0, 0)
+func (s *Store) LookupSession(ctx context.Context, rawSession string, now time.Time) (*Session, error) {
+	return s.lookupSession(ctx, rawSession, now, 0, 0)
 }
 
 // LookupSessionAndRenew resolves a live session and extends its expiry from
 // this use. A row past maxLifetime is returned without renewal for its caller
 // to revoke.
-func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
 	if ttl <= 0 {
 		return nil, errors.New("sessions: ttl must be positive")
 	}
-	return s.lookupSession(rawSession, now, ttl, maxLifetime)
+	return s.lookupSession(ctx, rawSession, now, ttl, maxLifetime)
 }
 
-func (s *Store) lookupSession(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
+func (s *Store) lookupSession(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error) {
 	if rawSession == "" {
 		return nil, errors.New("empty session")
 	}
 	digest := sessionDigest(rawSession)
 	// safety: minting a key drops every session it cannot sign for, so resolve the key before reading the row.
-	csrfToken, err := s.deriveCSRFToken(rawSession)
+	csrfToken, err := s.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrSessionBackend, err)
 	}
-	row := s.queryRowNoCtx(`
+	row := s.queryRow(ctx, `
         SELECT principal, scopes, team, account_id,
                created_at, expires_at, last_used_at
           FROM sessions
@@ -284,7 +285,7 @@ func (s *Store) lookupSession(rawSession string, now time.Time, ttl, maxLifetime
 				renewed = limit
 			}
 		}
-		result, err := s.execNoCtx(`UPDATE sessions
+		result, err := s.exec(ctx, `UPDATE sessions
 			SET last_used_at = CASE WHEN last_used_at > ? THEN last_used_at ELSE ? END,
 				expires_at = CASE
 				WHEN expires_at > ? THEN expires_at
@@ -305,10 +306,12 @@ func (s *Store) lookupSession(rawSession string, now time.Time, ttl, maxLifetime
 			sess.ExpiresAt = renewed
 		}
 	} else {
-		_, _ = s.execNoCtx(
+		if _, err := s.exec(ctx,
 			`UPDATE sessions SET last_used_at = ? WHERE hash = ?`,
 			now.UTC().Unix(), digest,
-		)
+		); err != nil {
+			slog.Warn("sessions: recording a session's last use failed", "err", err)
+		}
 	}
 	if ttl == 0 || sess.LastUsedAt == nil || sess.LastUsedAt.Before(now) {
 		ts := now.UTC()

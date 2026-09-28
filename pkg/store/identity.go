@@ -1029,8 +1029,7 @@ func (s *Store) CreateAccountSession(
 	if err != nil {
 		return "", "", nil, err
 	}
-	//nolint:contextcheck // the CSRF key is read or minted once per store under its own transaction, as CreateSession does
-	if csrfToken, err = s.deriveCSRFToken(rawSession); err != nil {
+	if csrfToken, err = s.deriveCSRFToken(ctx, rawSession); err != nil {
 		return "", "", nil, err
 	}
 	expires := now.Add(ttl).UTC()
@@ -1059,8 +1058,7 @@ func (s *Store) CreateIdentityAccountSession(
 	if err != nil {
 		return "", "", nil, err
 	}
-	//nolint:contextcheck // the CSRF key is read or minted once per store under its own transaction
-	csrfToken, err = s.deriveCSRFToken(rawSession)
+	csrfToken, err = s.deriveCSRFToken(ctx, rawSession)
 	if err != nil {
 		return "", "", nil, err
 	}

@@ -62,7 +62,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, err)
 		return
 	}
-	rawSession, csrf, sess, err := s.store.CreateSession(u.Name, u.Scopes, s.sessionInitialTTL(), now)
+	rawSession, csrf, sess, err := s.store.CreateSession(r.Context(), u.Name, u.Scopes, s.sessionInitialTTL(), now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -132,7 +132,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().UTC()
-	sess, err := s.store.LookupSessionAndRenew(raw, now, sessionTTL, s.sessionMaxLifetime)
+	sess, err := s.store.LookupSessionAndRenew(r.Context(), raw, now, sessionTTL, s.sessionMaxLifetime)
 	if err != nil {
 		// safety: a backend fault answered 401 would read as expiry and clear the dashboard's session cookies.
 		if errors.Is(err, store.ErrSessionBackend) {

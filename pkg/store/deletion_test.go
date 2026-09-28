@@ -116,7 +116,7 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if n := countWhere(t, st, "runs", "team = 'acme' AND status = 'cancelled'"); n != 1 {
 		t.Fatalf("queued run not cancelled: %d cancelled", n)
 	}
-	sess, err := st.LookupSession(memberSession, now)
+	sess, err := st.LookupSession(t.Context(), memberSession, now)
 	if err != nil || sess.Team != member.PersonalTeam {
 		t.Fatalf("member session = %+v, %v; want moved to %s", sess, err, member.PersonalTeam)
 	}
@@ -255,7 +255,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if _, err := st.Account(ctx, leaver.Account.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("account after deletion = %v, want ErrNotFound", err)
 	}
-	if _, err := st.LookupSession(session, now); err == nil {
+	if _, err := st.LookupSession(t.Context(), session, now); err == nil {
 		t.Fatal("the deleted account's session still authenticates")
 	}
 	for table, where := range map[string]string{

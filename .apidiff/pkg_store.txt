@@ -1932,7 +1932,7 @@ func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
 func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
 func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig Trigger, r Run) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
-func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
+func (s *Store) CreateSession(ctx context.Context, principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateTeam(ctx context.Context, accountID string, slug Team, displayName string, now time.Time) (TeamInfo, error)
 func (s *Store) CreateToken(principal, kind string, scopes []string, ttl time.Duration, now time.Time) (string, *Token, error)
 func (s *Store) CreateTokenIfNoneExist(raw, principal, kind string, scopes []string, now time.Time) (bool, error)
@@ -2025,7 +2025,7 @@ func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary Execu
 func (s *Store) HoldTeamForDispute(
 	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
 ) (bool, error)
-func (s *Store) IdentityLinkStateKey() ([]byte, error)
+func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error)
 func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error)
 func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
@@ -2058,8 +2058,8 @@ func (s *Store) ListStorageQuotas(ctx context.Context) (_ []StorageQuota, err er
 func (s *Store) ListTokens(kind string, includeRevoked bool) ([]Token, error)
 func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, error)
 func (s *Store) ListUsers() ([]User, error)
-func (s *Store) LookupSession(rawSession string, now time.Time) (*Session, error)
-func (s *Store) LookupSessionAndRenew(rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
+func (s *Store) LookupSession(ctx context.Context, rawSession string, now time.Time) (*Session, error)
+func (s *Store) LookupSessionAndRenew(ctx context.Context, rawSession string, now time.Time, ttl, maxLifetime time.Duration) (*Session, error)
 func (s *Store) LookupToken(raw string, now time.Time) (*Token, error)
 func (s *Store) LookupTokenByPrefix(prefix string) (*Token, error)
 func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMaintenanceOptions) (ConcurrencyMaintenanceResult, error)

@@ -226,7 +226,7 @@ func TestIdentitySessionSwitchNamesTheTeamItLeaves(t *testing.T) {
 	if err := st.SwitchSessionTeam(ctx, raw, a.Account.ID, a.PersonalTeam, "second"); err != nil {
 		t.Fatal(err)
 	}
-	sess, err := st.LookupSession(raw, time.Now())
+	sess, err := st.LookupSession(t.Context(), raw, time.Now())
 	if err != nil || sess.Team != "second" || sess.AccountID != a.Account.ID {
 		t.Fatalf("session = %+v, %v", sess, err)
 	}

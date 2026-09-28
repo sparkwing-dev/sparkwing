@@ -281,8 +281,8 @@ func (s *Store) consumeFlowNonce(ctx context.Context, table, nonce string, expir
 // IdentityLinkStateKey is the key a controller signs link-flow state with.
 // It derives from the deployment's session key, so every replica agrees on
 // it and rotating that key voids flows in progress along with sessions.
-func (s *Store) IdentityLinkStateKey() ([]byte, error) {
-	key, err := s.csrfSigningKey()
+func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error) {
+	key, err := s.csrfSigningKey(ctx)
 	if err != nil {
 		return nil, err
 	}

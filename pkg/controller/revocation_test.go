@@ -171,7 +171,7 @@ func TestDeleteUser_InvalidatesSessionAndTokens(t *testing.T) {
 	if _, err := f.store.CreateUser("mallory", "correct-horse", []string{ScopeAdmin}, now); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	rawSession, _, _, err := f.store.CreateSession("mallory", []string{ScopeAdmin}, time.Hour, now)
+	rawSession, _, _, err := f.store.CreateSession(t.Context(), "mallory", []string{ScopeAdmin}, time.Hour, now)
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestDeleteUser_InvalidatesSessionAndTokens(t *testing.T) {
 	if got := f.whoamiStatus(t, raw); got != http.StatusUnauthorized {
 		t.Fatalf("whoami after delete = %d, want 401", got)
 	}
-	if _, err := f.store.LookupSession(rawSession, now.Add(time.Second)); err == nil {
+	if _, err := f.store.LookupSession(t.Context(), rawSession, now.Add(time.Second)); err == nil {
 		t.Fatalf("session of a deleted user still resolves")
 	}
 }

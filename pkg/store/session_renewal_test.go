@@ -8,16 +8,16 @@ import (
 func TestSessionRenewalKeepsLaterExpiryAndRefusesDeletedRow(t *testing.T) {
 	s := newTestStore(t)
 	created := time.Now().UTC().Truncate(time.Second)
-	raw, _, _, err := s.CreateSession("alice", []string{"runs.read"}, 7*24*time.Hour, created)
+	raw, _, _, err := s.CreateSession(t.Context(), "alice", []string{"runs.read"}, 7*24*time.Hour, created)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	newer, err := s.LookupSessionAndRenew(raw, created.Add(2*24*time.Hour), 7*24*time.Hour, 30*24*time.Hour)
+	newer, err := s.LookupSessionAndRenew(t.Context(), raw, created.Add(2*24*time.Hour), 7*24*time.Hour, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	older, err := s.LookupSessionAndRenew(raw, created.Add(24*time.Hour), 7*24*time.Hour, 30*24*time.Hour)
+	older, err := s.LookupSessionAndRenew(t.Context(), raw, created.Add(24*time.Hour), 7*24*time.Hour, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestSessionRenewalKeepsLaterExpiryAndRefusesDeletedRow(t *testing.T) {
 	if err := s.DeleteSession(raw); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LookupSessionAndRenew(raw, created.Add(3*24*time.Hour), 7*24*time.Hour, 30*24*time.Hour); err == nil {
+	if _, err := s.LookupSessionAndRenew(t.Context(), raw, created.Add(3*24*time.Hour), 7*24*time.Hour, 30*24*time.Hour); err == nil {
 		t.Error("revoked session authenticated")
 	}
 }

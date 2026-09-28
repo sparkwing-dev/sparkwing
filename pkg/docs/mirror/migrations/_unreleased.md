@@ -470,6 +470,14 @@ node runner, and the controller refuses `inprocess` with `403`
 - A metered `k8s` or `warm` claim answers `402` while the team's balance cannot
   cover the cheapest class's first minute, and the trigger stays pending.
 
+## Session methods take a context
+
+`pkg/store` callers pass the request's context first:
+`CreateSession(ctx, principal, scopes, ttl, now)`,
+`LookupSession(ctx, raw, now)`,
+`LookupSessionAndRenew(ctx, raw, now, ttl, maxLifetime)` and
+`IdentityLinkStateKey(ctx)`. Behavior is otherwise unchanged.
+
 ## BoundCipher takes the owning team
 
 `controller.BoundCipher` binds an envelope to the team that owns its row.

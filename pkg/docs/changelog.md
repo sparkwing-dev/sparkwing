@@ -821,6 +821,12 @@ unlock.
 
 ### Changed
 
+- **store (Breaking):** `Store.CreateSession`, `LookupSession`,
+  `LookupSessionAndRenew` and `IdentityLinkStateKey` take a leading
+  `context.Context`, so a cancelled request stops the session and CSRF-key
+  queries it started. A failed `last_used_at` update on `LookupSession` is
+  logged rather than dropped silently. See the
+  [migration guide](docs/migrations/_unreleased.md#session-methods-take-a-context).
 - **controller + store (Breaking):** `name=` in a selector matches only the
   runner whose token was minted for that agent name; a runner asserting
   `name=`, `class=`, `team=`, `local` or `location=` as a label no longer

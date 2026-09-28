@@ -317,7 +317,7 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 	if session.err != nil {
 		t.Fatalf("session creation: %v", session.err)
 	}
-	if _, err := st.LookupSession(session.raw, time.Now()); err == nil {
+	if _, err := st.LookupSession(t.Context(), session.raw, time.Now()); err == nil {
 		t.Fatal("session created during unlink survived revocation")
 	}
 }
@@ -490,10 +490,10 @@ func TestUnlinkedSignInNoLongerReachesTheAccount(t *testing.T) {
 	if gone.Subject != "gh-1" || ended != 1 {
 		t.Fatalf("unlink = %+v, ended %d sessions; want gh-1 and one session", gone, ended)
 	}
-	if _, err := st.LookupSession(keep, now); err != nil {
+	if _, err := st.LookupSession(t.Context(), keep, now); err != nil {
 		t.Fatalf("the session that unlinked = %v, want it kept", err)
 	}
-	if _, err := st.LookupSession(other, now); err == nil {
+	if _, err := st.LookupSession(t.Context(), other, now); err == nil {
 		t.Fatal("another session of the account survived the unlink")
 	}
 
@@ -549,7 +549,7 @@ func TestIdentityLinkStateIsUsedOnce(t *testing.T) {
 	if empty, err := st.ConsumeIdentityLinkState(ctx, "", expires, now); err != nil || empty {
 		t.Fatalf("empty nonce = %v, %v; want refused", empty, err)
 	}
-	k1, err := st.IdentityLinkStateKey()
+	k1, err := st.IdentityLinkStateKey(ctx)
 	if err != nil || len(k1) == 0 {
 		t.Fatalf("IdentityLinkStateKey = %x, %v", k1, err)
 	}
