@@ -168,13 +168,7 @@ func TestKeyring_EnvKeyOverridesTheKeyFile(t *testing.T) {
 	t.Setenv(localsecrets.KeyEnv, base64.StdEncoding.EncodeToString(envKey))
 	st := openStore(t)
 
-	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{ClearEnv: true, Create: true})
-	if err != nil {
-		t.Fatalf("load keyring: %v", err)
-	}
-	if v, set := os.LookupEnv(localsecrets.KeyEnv); set {
-		t.Errorf("%s = %q after a clearing load, want it unset", localsecrets.KeyEnv, v)
-	}
+	ring := loadRing(t)
 	sealRow(t, ring.For(st), st, "TOKEN", "abc")
 
 	byEnv, err := secrets.NewCipher(envKey)

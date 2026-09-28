@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
@@ -46,7 +45,7 @@ func spawnDetached(bin, home, version string) error {
 	cmd.Stdin = nil
 	cmd.Stdout = logF
 	cmd.Stderr = logF
-	cmd.Env = secretkeyenv.Environ(os.Environ())
+	cmd.Env = os.Environ()
 	cmd.SysProcAttr = detachSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		// safety: a log this spawn created and never wrote to would imply a

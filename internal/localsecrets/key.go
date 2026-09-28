@@ -24,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
-	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -70,9 +69,6 @@ var ErrNoKeyToCreate = errors.New("no local secrets key")
 
 // KeyringOptions choose how [LoadKeyring] treats this process.
 type KeyringOptions struct {
-	// ClearEnv removes the key variables from this process's environment
-	// once read, which a long-lived server does so no child inherits them.
-	ClearEnv bool
 	// Create lets the first seal create the key file. Only the process that
 	// owns the machine's store may: the daemon, or a run on a machine with
 	// no daemon at all.
@@ -99,20 +95,13 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	if err != nil {
 		return nil, err
 	}
-	current, err := decodeEnvKey(KeyEnv, secretkeyenv.Key())
+	current, err := decodeEnvKey(KeyEnv, os.Getenv("SPARKWING_SECRETS_KEY"))
 	if err != nil {
 		return nil, err
 	}
-	previous, err := decodeEnvKey(PreviousKeyEnv, secretkeyenv.PreviousKey())
+	previous, err := decodeEnvKey(PreviousKeyEnv, os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY"))
 	if err != nil {
 		return nil, err
-	}
-	if opts.ClearEnv {
-		for _, name := range []string{KeyEnv, PreviousKeyEnv} {
-			if err := os.Unsetenv(name); err != nil {
-				return nil, fmt.Errorf("clear %s from the environment: %w", name, err)
-			}
-		}
 	}
 	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
 	if current == nil {

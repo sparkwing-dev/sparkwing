@@ -15,7 +15,6 @@ import (
 	"golang.org/x/term"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fleet"
-	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -25,12 +24,6 @@ import (
 )
 
 func Main() {
-	// safety: pipeline code runs in this process and in the commands it
-	// starts, and none of it may inherit the key that opens every secret.
-	if err := secretkeyenv.Hold(); err != nil {
-		fmt.Fprintln(os.Stderr, "hold the secrets key:", err)
-		os.Exit(1)
-	}
 	projectCfg := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {

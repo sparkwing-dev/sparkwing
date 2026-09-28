@@ -68,7 +68,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	}
 	ring := opts.Secrets
 	if ring == nil {
-		loaded, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{ClearEnv: true, Create: true})
+		loaded, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
 		if err != nil {
 			return fmt.Errorf("local secrets key: %w", err)
 		}

@@ -158,8 +158,6 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	var ctrl *controller.Server
 	if !useS3OnlyReader {
-		// safety: the environment keeps the key variables, because this
-		// process can start the admission daemon and runs, which need them.
 		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
 		if err != nil {
 			return fmt.Errorf("local secrets key: %w", err)
