@@ -116,7 +116,8 @@ type GitCredentialRelease struct {
 }
 
 // ErrClaimNotLive refuses a release whose claimant no longer holds a live
-// claim on the run when the release commits.
+// claim on the run when the release commits, and a claim token whose claim
+// was lost, finished, released or superseded by a later generation.
 var ErrClaimNotLive = errors.New("store: the claim on the run is no longer live")
 
 const gitCredentialCols = `id, team, host, kind, username, secret, known_hosts, fingerprint,

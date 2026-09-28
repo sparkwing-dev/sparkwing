@@ -23,6 +23,10 @@ const Public = "public"
 // declares no further scope, so any valid bearer satisfies it.
 const Authenticated = "authenticated"
 
+// Claim marks a route that answers a claim token, the credential one node
+// claim holds. A claim route that also names a scope answers either.
+const Claim = "claim"
+
 var (
 	handleRE = regexp.MustCompile(`(\w+)\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
 
@@ -93,6 +97,13 @@ func Parse(file string, scopes map[string]string) ([]Route, error) {
 				}
 			}
 			scope = strings.Join(accepted, "` or `")
+		}
+		if receiver == "mux" && strings.Contains(rest, "newClaim") {
+			if scope == Authenticated {
+				scope = Claim
+			} else {
+				scope = Claim + "` or `" + scope
+			}
 		}
 		routes = append(routes, Route{Method: method, Path: path, Scope: scope})
 	}

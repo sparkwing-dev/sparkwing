@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 75
+const expectedSchemaVersion = 77
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2096,6 +2096,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	case 75:
 		return applyCreditValueMigration(ctx, tx)
+	case 76:
+		return applyClaimTokensMigration(ctx, tx, false)
+	case 77:
+		return applyControllerDispatchMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2526,6 +2530,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	case 75:
 		return applyCreditValueMigration(ctx, tx)
+	case 76:
+		return applyClaimTokensMigration(ctx, tx, true)
+	case 77:
+		return applyControllerDispatchMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3882,6 +3890,18 @@ func (s *Store) updatePlanSnapshot(ctx context.Context, team Team, runID string,
 	}
 	if err := s.assertRunMutationFenceTx(ctx, tx, team, runID); err != nil {
 		return err
+	}
+	var accepted int64
+	err = tx.QueryRowContext(ctx, `SELECT plan_accepted_generation FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),
+		string(team), runID).Scan(&accepted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return notFound("run", runID)
+	}
+	if err != nil {
+		return err
+	}
+	if accepted != 0 {
+		return ErrPlanAccepted
 	}
 	sum := sha256.Sum256(snapshot)
 	planHash := "sha256:" + hex.EncodeToString(sum[:])
@@ -5473,6 +5493,17 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM node_steps WHERE run_id = ? AND node_id = ?`, runID, nodeID); err != nil {
+		return err
+	}
+	// safety: the reset puts the claim generation back to 0, so a token from
+	// the reset attempt would authorize again once a later claim reaches its
+	// generation.
+	team, err := creditTeamForRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_tokens WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID); err != nil {
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
@@ -7570,6 +7601,11 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 		return false, ErrLockHeld
 	}
 	if reservedAt != 0 && !creditMeteringDisabled(ctx) {
+		// safety: exhaustion finishes the run under the ledger, so the run
+		// row is locked first, in the order lockTeamRunRowTx names.
+		if err := lockRunRow(ctx, tx, id); err != nil {
+			return false, err
+		}
 		if err := lockCreditLedgerTx(ctx, tx); err != nil {
 			return false, err
 		}

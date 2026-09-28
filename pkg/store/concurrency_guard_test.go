@@ -28,7 +28,7 @@ func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
 		t.Errorf("%q appears %d times in pkg/store sources, want exactly 5 (canonical node/trigger/concurrency fragments plus trigger finish)", "lease_expires_at > ?", got)
 	}
 	for helper, want := range map[string]int{
-		"nodeClaimLiveSQL(":    16,
+		"nodeClaimLiveSQL(":    17,
 		"triggerClaimLiveSQL(": 11,
 	} {
 		if got := strings.Count(src, helper); got != want {

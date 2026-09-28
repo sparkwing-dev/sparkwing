@@ -881,7 +881,7 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 func (s *Server) Handler() http.Handler {
 	s.requireAuthForTeams()
 	mux, router := s.routers()
-	router.Handle("/", s.authenticated(s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
+	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -913,7 +913,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
-	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
+	mux.Handle("POST /api/v1/runs/{id}/plan", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan}, planClaimBinding, s.handleAcceptPlan).orElse(requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/attempt", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}, nil, s.handleReportAttempt))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
@@ -1252,9 +1253,13 @@ func WriteUnsupportedRoute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) authenticated(next http.Handler) http.Handler {
+func (s *Server) authenticated(mux *http.ServeMux, next http.Handler) http.Handler {
 	byToken := s.authMiddleware().Middleware(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if raw, route := claimRouteFor(mux, r); route != nil {
+			s.serveClaim(w, r, raw, route, next)
+			return
+		}
 		// safety: a session is resolved even while bearer auth is off, because
 		// a signed-in account's team and role come only from its session and a
 		// request carrying one must not fall through as an anonymous caller.

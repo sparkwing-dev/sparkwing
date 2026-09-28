@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"maps"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -138,7 +139,15 @@ func routeScope(handler ast.Expr) (string, bool) {
 	default:
 		return "", false
 	}
-	if name != "requireScope" {
+	switch {
+	// safety: a claim route admits only a claim token of its own run and node,
+	// and orElse hands every other bearer to the route it wraps, which must be
+	// scoped itself.
+	case name == "orElse":
+		return routeScope(call.Args[0])
+	case strings.HasPrefix(name, "newClaim"):
+		return "claim", true
+	case name != "requireScope":
 		return "", false
 	}
 	scope, ok := call.Args[0].(*ast.Ident)
