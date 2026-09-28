@@ -225,3 +225,10 @@ func TestBandTeamNode_FailsWithoutTheKey(t *testing.T) {
 		t.Fatal("a band Job without the team key still refuses beta's node")
 	}
 }
+
+func TestBuildJob_UnbilledBandJobStillSelectsItsTeamsNode(t *testing.T) {
+	job := classJob(t, Config{Image: "img", Team: "acme", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, 0)
+	if !selects(job, teamNode("acme")) || selects(job, teamNode("beta")) {
+		t.Fatalf("an unbilled band Job selects %v, want only acme's node", job.Spec.Template.Spec.NodeSelector)
+	}
+}

@@ -862,8 +862,12 @@ func (r *Runner) buildJob(
 	}
 	affinity := teamAntiAffinity(team)
 	var podAnnotations map[string]string
-	if selector[cpuBandKey] != "" && class.Cores > 0 {
-		container.Resources = bandClassResources(class, r.cfg)
+	if selector[cpuBandKey] != "" {
+		// safety: a band node holds one team from boot to release whatever the
+		// claim billed, so an unmetered claim's pod is kept to its team too.
+		if class.Cores > 0 {
+			container.Resources = bandClassResources(class, r.cfg)
+		}
 		selector = teamNodeSelector(selector, team)
 		affinity = oneJobPerNode()
 		// safety: Karpenter drift and consolidation evict a running pod
