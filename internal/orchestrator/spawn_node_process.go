@@ -7,7 +7,6 @@ import (
 	goruntime "runtime"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
-	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -119,7 +118,7 @@ func (h *nodeSpawnHandler) runnerMismatch(ctx context.Context, child *sparkwing.
 	if info := sparkwing.Runner(ctx); info != nil && len(info.Labels) > 0 {
 		advertised = info.Labels
 	}
-	if sparkwingruntime.MatchLabels(labels, advertised) {
+	if dispatcherMatches(labels, advertised) {
 		return "", false
 	}
 	return fmt.Sprintf("WhenRunner labels %v not satisfied by active runner %v",

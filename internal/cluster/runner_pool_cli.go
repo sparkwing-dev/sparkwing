@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -114,11 +115,60 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 			"reserve", cfg.LocalReserve, "source", cfg.SourceName)
 	}
 
+	held := newHeldResources()
+	ctrl.WithClaimResources(held.report)
 	exec := func(execCtx context.Context, n *store.Node, holderID string) {
+		defer held.hold(n)()
 		executePooledNode(execCtx, ctrl, cfg.ControllerURL, cfg.LogsURL, cfg.GitcacheURL, cfg.AllowRepos, cfg.Token,
 			n, holderID, cfg.Lease, cfg.HeartbeatInterval, cfg.SourceName, logger, admission, provider)
 	}
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
+}
+
+// safety: every claim reports the capacity left after the nodes this runner is
+// executing, so the controller's hold never counts room already spent.
+type heldResources struct {
+	capacity store.ExecutorResource
+	mu       sync.Mutex
+	held     store.ExecutorResource
+}
+
+func newHeldResources() *heldResources {
+	cores, memBytes := wingd.ProcessCapacity()
+	return &heldResources{capacity: store.ExecutorResource{Cores: cores, MemoryBytes: int64(memBytes)}}
+}
+
+// safety: a node that declared nothing is billed one core, so it holds one.
+func (h *heldResources) hold(n *store.Node) func() {
+	ask := store.ExecutorResource{Cores: n.RequestedCores, MemoryBytes: n.RequestedMemoryBytes}
+	if ask.Cores <= 0 && ask.MemoryBytes <= 0 {
+		ask.Cores = 1
+	}
+	h.mu.Lock()
+	h.held.Cores += ask.Cores
+	h.held.MemoryBytes += ask.MemoryBytes
+	h.mu.Unlock()
+	return func() {
+		h.mu.Lock()
+		h.held.Cores -= ask.Cores
+		h.held.MemoryBytes -= ask.MemoryBytes
+		h.mu.Unlock()
+	}
+}
+
+func (h *heldResources) report() *client.ClaimResources {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	free := func(total, used float64) float64 {
+		if total <= 0 {
+			return 0
+		}
+		return max(total-used, 0)
+	}
+	return &client.ClaimResources{Capacity: h.capacity, Availability: store.ExecutorResource{
+		Cores:       free(h.capacity.Cores, h.held.Cores),
+		MemoryBytes: int64(free(float64(h.capacity.MemoryBytes), float64(h.held.MemoryBytes))),
+	}}
 }
 
 func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {

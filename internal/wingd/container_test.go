@@ -262,3 +262,20 @@ func TestContainerSensor_ArbitratedCoresIsTheSmallerOfTheTwo(t *testing.T) {
 		t.Errorf("arbitratedCores with no sensor = %v; want the machine's 24", cores)
 	}
 }
+
+// A service under a systemd slice inherits the slice's limits, which sit on an
+// ancestor of the process's own cgroup rather than on its leaf.
+func TestContainerSensor_CapacityLimits_ReadsTheCgroupAncestry(t *testing.T) {
+	root := writeCgroupV2(t, map[string]string{
+		"sparkwing.slice/cpu.max":                      "200000 100000",
+		"sparkwing.slice/memory.max":                   "1073741824",
+		"sparkwing.slice/agent.service/cpu.max":        "max 100000",
+		"sparkwing.slice/agent.service/memory.max":     "max",
+		"sparkwing.slice/agent.service/cgroup.threads": "1",
+	})
+	mustWrite(t, filepath.Join(root, "proc", "self", "cgroup"), "0::/sparkwing.slice/agent.service\n")
+	cores, mem := newContainerSensor(root).capacityLimits()
+	if cores != 2 || mem != 1<<30 {
+		t.Fatalf("capacityLimits = %v,%d want the slice's 2,%d", cores, mem, uint64(1)<<30)
+	}
+}

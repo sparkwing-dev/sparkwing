@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // NamedClaimOptions says what a named claim will give the node it takes.
@@ -15,6 +17,9 @@ type NamedClaimOptions struct {
 	// pool. A caller that runs the node on a pod it already has leaves it
 	// false and is held to the warm class.
 	SizesToClass bool
+	// Labels are the labels the caller asserts for the executor it will run
+	// the node on, which the node's selector is checked against.
+	Labels []string
 }
 
 // ClaimNamedNode awards one node the caller names to holderID with a fresh
@@ -23,8 +28,9 @@ type NamedClaimOptions struct {
 // itself, so its own process holds the fence every node mutation is checked
 // against.
 //
-// Unlike the queue claim it passes over no candidate and reads no label: the
-// caller already decided this node is its work. It still refuses a node
+// Unlike the queue claim it passes over no candidate: the caller already
+// decided this node is its work. It still refuses a node whose selector or
+// repository the caller's profile does not admit, a node
 // another claim holds, a node that finished, a node of a run that finished,
 // one pinned to a coordinator or executor location, and one whose execution
 // policy is sealed. A node that exists but cannot be awarded returns
@@ -107,6 +113,32 @@ func (s *Store) ClaimNamedNode(
 	}
 	candidate := claimCandidate{runID: runID, nodeID: nodeID}
 	decodeCandidateLabels(runID, nodeID, needsJSON, &candidate.needs)
+	// safety: an administrator marks only the operator's own pool token
+	// metered, and that pool launches every node on a Cloud executor, so the
+	// mark grants the cloud class and location the pool had before selectors
+	// were checked here. It grants no exception to a repository list.
+	profile := claimProfileFrom(ctx, claimant, opts.Labels)
+	if warm.metered {
+		profile.Class, profile.Location = match.ClassCloud, executorLocationCloud
+	}
+	demand := match.Demand{Selector: candidate.needs}
+	if profile.Accept != nil {
+		repo, err := s.runRepositoryOf(ctx, scope, runID, map[string]match.Repository{})
+		if err != nil {
+			return nil, err
+		}
+		demand.Repo = &repo
+	}
+	// safety: a dispatcher older than the labels field sends none, so a node
+	// whose selector its labels would have to satisfy is refused, never
+	// admitted unchecked.
+	if verdict := match.Evaluate(profile, demand); !verdict.OK() {
+		hint := ""
+		if len(opts.Labels) == 0 {
+			hint = "; the claim sent no labels, so upgrade the dispatcher to one that sends its executor's labels"
+		}
+		return nil, fmt.Errorf("%w: the claimant's profile refuses the node: %s%s", ErrLockHeld, verdict, hint)
+	}
 	decodeCandidateLabels(runID, nodeID, prefersJSON, &candidate.prefers)
 	placement, _ := ClaimPlacementFromContext(ctx)
 	// safety: naming a node is the dispatcher taking work no preferred runner

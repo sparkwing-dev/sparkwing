@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // Placement reasons stamped on a node when a legacy claim wins it.
@@ -20,24 +22,45 @@ const (
 )
 
 // RunnerPresence is one legacy claim-mode runner a controller has heard from
-// recently. Labels are self-asserted, so they steer the soft preference alone
-// and never satisfy a hard requirement.
+// recently.
 type RunnerPresence struct {
 	Name string
 	// Labels are the terms the runner asserted for itself on its last claim.
+	// They steer the soft preference as sent; a hard selector reads them only
+	// after [match.SelfAsserted] strips the keys a runner may not assert.
 	Labels []string
+	// Profile is what the controller knows of the runner apart from its labels:
+	// the name its credential grants, its observed platform and capacity, and
+	// the repositories it accepts.
+	Profile match.Profile
 	// FreeSlots is how many more nodes the runner said it can take. A runner
 	// that advertised no capacity reports none, so it holds nothing back: an
 	// unknown ceiling is not evidence of room.
 	FreeSlots int
+	// Available is the capacity the runner said it has free now, read only in
+	// the dimensions its Profile reports a capacity for.
+	Available match.Resources
 	// TokenPrefix is the credential the runner last claimed with. The store
 	// reads the runner's team off that credential's row, so a live runner of
 	// another team never holds a node back; empty is the unauthenticated
 	// local runner, which belongs to [DefaultTeam].
 	TokenPrefix string
-	// AllowRepos is the repository list the runner sent with its last claim.
-	// Nil is a runner that sent none and may take any repository.
-	AllowRepos RepoFilter
+}
+
+func (r RunnerPresence) profile() match.Profile {
+	p := r.Profile
+	p.Labels = match.SelfAsserted(r.Labels)
+	return p
+}
+
+// safety: the hold and the offer window ask this one question, so they cannot
+// disagree about which runner could take a node. A runner with no free slot
+// still keeps the offer window, whose five seconds cover one poll.
+func liveRunnerCould(r RunnerPresence, d match.Demand, needSlot bool) bool {
+	if needSlot && (r.FreeSlots < 1 || !match.Fits(r.Profile.Capacity, r.Available, d.Request).OK()) {
+		return false
+	}
+	return match.Evaluate(r.profile(), d).OK()
 }
 
 // ClaimPlacement is the local-first policy applied to one legacy claim. A node
@@ -87,15 +110,15 @@ type placementDecision struct {
 	nodeOwned bool
 }
 
-func (p ClaimPlacement) decide(needs, nodePrefers []string, repo runRepository, runner claimLabels, holdFrom *time.Time, now time.Time) placementDecision {
+func (p ClaimPlacement) decide(demand match.Demand, nodePrefers, runnerLabels []string, holdFrom *time.Time, now time.Time) placementDecision {
 	prefers := p.prefersFor(nodePrefers)
 	nodeOwned := len(nodePrefers) > 0
 	switch {
 	case len(prefers) == 0:
 		return placementDecision{reason: PlacementNone}
-	case preferenceMet(prefers, runner.soft):
+	case preferenceMet(prefers, runnerLabels):
 		return placementDecision{reason: PlacementPreferred, nodeOwned: nodeOwned}
-	case p.Hold > 0 && holdFrom != nil && now.Before(holdFrom.Add(p.Hold)) && p.someLiveRunnerCanTakeIt(needs, prefers, repo):
+	case p.Hold > 0 && holdFrom != nil && now.Before(holdFrom.Add(p.Hold)) && p.someLiveRunnerCanTakeIt(demand, prefers):
 		return placementDecision{hold: true, nodeOwned: nodeOwned}
 	default:
 		return placementDecision{reason: PlacementFallback, nodeOwned: nodeOwned}
@@ -168,18 +191,10 @@ func (s *Store) runnerTeams(ctx context.Context, live []RunnerPresence) (_ map[s
 }
 
 // safety: a runner that cannot execute the node is no reason to withhold it
-// from one that can, so the preference alone never earns a hold, and neither
-// does a runner whose repository list would refuse the node's run.
-func (p ClaimPlacement) someLiveRunnerCanTakeIt(needs, prefers []string, repo runRepository) bool {
+// from one that can, so the preference alone never earns a hold.
+func (p ClaimPlacement) someLiveRunnerCanTakeIt(demand match.Demand, prefers []string) bool {
 	for _, runner := range p.Live {
-		if runner.FreeSlots < 1 {
-			continue
-		}
-		if runner.AllowRepos != nil && !repo.admitsNodeFor(runner.AllowRepos) {
-			continue
-		}
-		labels := newClaimLabels(runner.Labels)
-		if labelsSatisfied(needs, labels.hard) && preferenceMet(prefers, labels.soft) {
+		if liveRunnerCould(runner, demand, true) && preferenceMet(prefers, runner.Labels) {
 			return true
 		}
 	}
@@ -187,13 +202,12 @@ func (p ClaimPlacement) someLiveRunnerCanTakeIt(needs, prefers []string, repo ru
 }
 
 // safety: one satisfied term is the whole preference, as in the enrolled offer
-// round where the first matching term ranks an executor.
-func preferenceMet(prefers []string, have map[string]struct{}) bool {
+// round where the first matching term ranks an executor. A preference reads the
+// labels as asserted, because a runner's own location speaks to it.
+func preferenceMet(prefers, labels []string) bool {
+	asserted := match.Profile{Labels: labels}
 	for _, term := range prefers {
-		if term == "" {
-			continue
-		}
-		if labelTermSatisfied(term, have) {
+		if term != "" && match.TermSatisfied(asserted, term) {
 			return true
 		}
 	}
@@ -207,37 +221,11 @@ func (p ClaimPlacement) needsRunRepository() bool {
 		return false
 	}
 	for _, runner := range p.Live {
-		if runner.AllowRepos != nil {
+		if runner.Profile.Accept != nil {
 			return true
 		}
 	}
 	return false
-}
-
-// safety: a hard requirement and a soft preference read different sets, because
-// a runner's self-asserted location speaks only to the preference.
-type claimLabels struct {
-	hard map[string]struct{}
-	soft map[string]struct{}
-}
-
-func newClaimLabels(labels []string) claimLabels {
-	out := claimLabels{
-		hard: make(map[string]struct{}, len(labels)),
-		soft: make(map[string]struct{}, len(labels)),
-	}
-	for _, label := range labels {
-		if label == "" {
-			continue
-		}
-		out.soft[label] = struct{}{}
-		// safety: a runner asserts its own location, so those terms buy it no
-		// hard requirement; the soft preference is the one place they speak.
-		if label != "local" && !strings.HasPrefix(label, "location=") {
-			out.hard[label] = struct{}{}
-		}
-	}
-	return out
 }
 
 type nodeKey struct {

@@ -554,3 +554,26 @@ New GitHub Actions credential exchanges record the verified OIDC run ID.
 Upgrade every process sharing a runs store before relying on the new execution
 history fields. Older binaries do not record the new runner identity, and a
 mixed deployment can still produce attempts with incomplete attribution.
+
+## One agent matcher
+
+Every claim route now asks `pkg/match` whether a runner may take a node.
+
+- **Agent names.** `name=<agent>` matches the runner whose token principal is
+  `agent:<agent>`. Every mint path refuses a second live runner token for the
+  same name, so revoke the old one first. `RotateToken` is the one overlap:
+  the replacement and its predecessor are both live until the grace ends.
+- **Named claims.** A caller of `Client.ClaimNodeByID` passes the labels of
+  the executor it runs the node on as the new last argument; pass `nil` for
+  none. A labeled node is refused to a caller whose labels do not satisfy it,
+  including a dispatcher older than this release, which sends no labels:
+  upgrade Kubernetes dispatchers before their pipelines need labeled nodes run
+  by name. The operator's metered pool keeps matching `location=cloud` nodes.
+- **Store API.** `store.WithRepoFilter` is replaced by
+  `store.WithClaimProfile(ctx, match.Profile{Accept: filter})`, and
+  `RunnerPresence.AllowRepos` by `RunnerPresence.Profile.Accept`.
+  `store.ExecutorResource` is now an alias of `match.Resources`.
+- **Exclusion reasons.** Executor eligibility previews report `selector` where
+  they reported `hard_capability`, and `shape` for a node whose request exceeds
+  the executor's budget.
+

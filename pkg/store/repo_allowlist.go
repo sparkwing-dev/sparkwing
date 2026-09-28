@@ -4,83 +4,66 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // RepoFilter decides which repositories a claim may take work from.
-// AdmitsRepository reads the fields a trigger names its repository with and
-// reports whether they name one and whether the filter admits it; fields that
-// disagree or do not parse name one that no filter admits.
-type RepoFilter interface {
-	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
-}
+type RepoFilter = match.RepoFilter
 
-type repoFilterKey struct{}
+type claimProfileKey struct{}
 
-// WithRepoFilter confines the trigger and node claims made under ctx to work
-// whose repository filter admits, which is how a runner that fetches source
-// with its own credentials claims only what its owner lets it build. A context
-// without a filter claims every repository, as a runner that sends no list
-// always has; such a runner refuses a disallowed run itself.
+// WithClaimProfile carries what a claimant reported about itself into the
+// trigger and node claims made under ctx: its observed platform and capacity
+// and the repositories it accepts. The store overwrites the granted fields,
+// name and class, from the credential, and replaces the labels with the ones
+// the claim sent less the keys a claimant may not assert.
 //
-// A trigger is admitted only when it names a repository the filter admits: a
-// trigger naming none has no source such a runner could fetch. A node is
-// admitted when its run names no repository, since it then runs without
-// fetching source, or names one the filter admits.
-func WithRepoFilter(ctx context.Context, filter RepoFilter) context.Context {
-	return context.WithValue(ctx, repoFilterKey{}, filter)
+// An Accept filter admits a trigger only when the trigger names a repository
+// the filter admits, and a node when its run names none or one it admits. A
+// context without a profile claims every repository, as a runner that sends
+// no list always has; such a runner refuses a disallowed run itself.
+func WithClaimProfile(ctx context.Context, profile match.Profile) context.Context {
+	return context.WithValue(ctx, claimProfileKey{}, profile)
 }
 
-// RepoFilterFrom returns the filter [WithRepoFilter] set on ctx.
-func RepoFilterFrom(ctx context.Context) (RepoFilter, bool) {
-	filter, ok := ctx.Value(repoFilterKey{}).(RepoFilter)
-	return filter, ok && filter != nil
+// safety: the granted fields come off the credential, never off the context,
+// so nothing a claimant sent can name it or raise its class.
+func claimProfileFrom(ctx context.Context, claimant ClaimIdentity, labels []string) match.Profile {
+	p, _ := ctx.Value(claimProfileKey{}).(match.Profile)
+	p.Name = ""
+	if name, ok := strings.CutPrefix(claimant.Principal, agentPrincipalPrefix); ok {
+		p.Name = name
+	}
+	p.Class = match.ClassAgent
+	p.Location = ""
+	p.Labels = match.SelfAsserted(labels)
+	return p
 }
 
-// runRepository is the repository fields of a run's trigger.
-type runRepository struct {
-	repoURL, githubRepository, githubOwner, githubRepo string
-	// safety: an environment that does not decode cannot be shown to name an
-	// allowed repository, so no filter admits it.
-	undecodable bool
-}
+const agentPrincipalPrefix = "agent:"
 
-func triggerRunRepository(t *Trigger, envJSON []byte) runRepository {
+func triggerRunRepository(t *Trigger, envJSON []byte) match.Repository {
 	env, decoded := decodeTriggerEnv(envJSON)
-	return runRepository{
-		repoURL: t.RepoURL, githubRepository: env["GITHUB_REPOSITORY"],
-		githubOwner: t.GithubOwner, githubRepo: t.GithubRepo, undecodable: !decoded,
+	return match.Repository{
+		URL: t.RepoURL, GitHubRepository: env["GITHUB_REPOSITORY"],
+		GitHubOwner: t.GithubOwner, GitHubRepo: t.GithubRepo, Undecodable: !decoded,
 	}
-}
-
-func (r runRepository) admittedBy(filter RepoFilter) (named, admitted bool) {
-	if r.undecodable {
-		return true, false
-	}
-	return filter.AdmitsRepository(r.repoURL, r.githubRepository, r.githubOwner, r.githubRepo)
-}
-
-func triggerAdmittedBy(filter RepoFilter, t *Trigger, envJSON []byte) bool {
-	named, admitted := triggerRunRepository(t, envJSON).admittedBy(filter)
-	return named && admitted
-}
-
-func (r runRepository) admitsNodeFor(filter RepoFilter) bool {
-	named, admitted := r.admittedBy(filter)
-	return !named || admitted
 }
 
 // runRepositoryOf reads the repository fields of runID's trigger within
 // scope's team. A run with no trigger names none.
-func (s *Store) runRepositoryOf(ctx context.Context, scope teamScope, runID string, seen map[string]runRepository) (runRepository, error) {
+func (s *Store) runRepositoryOf(ctx context.Context, scope teamScope, runID string, seen map[string]match.Repository) (match.Repository, error) {
 	if repo, ok := seen[runID]; ok {
 		return repo, nil
 	}
 	if scope.all || scope.team == "" {
-		return runRepository{}, ErrClaimantHasNoTeam
+		return match.Repository{}, ErrClaimantHasNoTeam
 	}
 	repo, err := scanRunRepository(s.queryRow(ctx, runRepositorySQL, runID, string(scope.team)))
 	if err != nil {
-		return runRepository{}, err
+		return match.Repository{}, err
 	}
 	seen[runID] = repo
 	return repo, nil
@@ -89,15 +72,15 @@ func (s *Store) runRepositoryOf(ctx context.Context, scope teamScope, runID stri
 const runRepositorySQL = `SELECT repo_url, github_owner, github_repo, trigger_env
 		FROM triggers WHERE id = ? AND team = ?`
 
-func scanRunRepository(row *sql.Row) (runRepository, error) {
+func scanRunRepository(row *sql.Row) (match.Repository, error) {
 	var t Trigger
 	var envJSON []byte
 	err := row.Scan(&t.RepoURL, &t.GithubOwner, &t.GithubRepo, &envJSON)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		return runRepository{}, nil
+		return match.Repository{}, nil
 	case err != nil:
-		return runRepository{}, err
+		return match.Repository{}, err
 	}
 	return triggerRunRepository(&t, envJSON), nil
 }

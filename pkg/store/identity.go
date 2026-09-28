@@ -128,7 +128,11 @@ var (
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
-	ErrInvitationLimit  = errors.New("store: this team has sent as many invitations as it may for now")
+	// ErrAgentNameTaken refuses a runner token for a name another live runner
+	// token of the team already carries, because a node selector and a
+	// workload identity bound to name= would admit either machine.
+	ErrAgentNameTaken  = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
+	ErrInvitationLimit = errors.New("store: this team has sent as many invitations as it may for now")
 )
 
 // Account is one human, what the API calls a user. Email is the address the

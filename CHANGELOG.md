@@ -65,6 +65,22 @@ unlock.
   removes its id from the rest. `POST /api/v1/credits/checkouts/closed` lets
   the checkout service (`credits.grant`) close an open, unpaid checkout its
   team holds for a session that failed or expired.
+- **controller + runner:** One matcher, `pkg/match`, decides every claim
+  route: trigger and queue claims, named claims, enrolled-executor
+  preparation, offer and award, the local-first hold, the offer window, the
+  dispatcher's `WhenRunner` check and the warm pool's fallback. Runners report
+  their platform (`os`, `arch`) with every claim without configuration, and
+  pool runners report their capacity (the smallest CPU and memory limit along
+  their cgroup ancestry, else the host's) and what is free after the nodes they
+  run. The fields go only to a controller whose `GET /api/v1/capabilities`
+  advertises `claims.profile`, and they steer scheduling only. A node whose
+  request exceeds a runner's capacity is never handed to that runner; one that
+  exceeds what a live runner has free no longer holds a node back for it.
+- **controller + store:** Schema 81 adds an enrolled executor's
+  `accept_repos`, set with the enrollment API. Preparation, the offer and the
+  award read it from the stored row, so an executor is never offered or
+  awarded a node whose run's repository its list refuses. Controllers older
+  than schema 81 keep working against a migrated database.
 
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
@@ -805,6 +821,23 @@ unlock.
 
 ### Changed
 
+- **controller + store (Breaking):** `name=` in a selector matches only the
+  runner whose token was minted for that agent name; a runner asserting
+  `name=`, `class=`, `team=`, `local` or `location=` as a label no longer
+  satisfies anything with it. Every mint path refuses a second live runner
+  token for an agent name the team already uses (409 from team settings, 400
+  from the admin token route), so revoke the old token first; rotation may
+  overlap its own predecessor until the grace ends. A named claim (`POST
+  /api/v1/runs/{id}/nodes/{nodeID}/claim`) now checks the node's selector
+  against the `labels` the claim sends and applies the claimant's
+  `allow_repos`. The operator's metered pool is granted class and location
+  `cloud`, so its `location=cloud` nodes still match, and a repository list it
+  sends still binds. A Kubernetes dispatcher sends its configured labels; one
+  older than this release sends none and is refused a labeled node, as is a
+  dispatcher whose labels do not satisfy it. Executor exclusion
+  reasons rename `hard_capability` to `selector` and add `shape` for a node
+  larger than the executor's budget. See the
+  [migration guide](docs/migrations/_unreleased.md#one-agent-matcher).
 - **controller + runner:** A node skips the five-second agent offer window
   when nothing but its coordinator could claim it: no live eligible executor
   of the run's team, no live queue runner of that team whose labels and CPU

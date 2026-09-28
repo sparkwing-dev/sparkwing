@@ -64,6 +64,8 @@ type enrollAgentReq struct {
 	PriorityCeiling int            `json:"priority_ceiling"`
 	MaxConcurrent   int            `json:"max_concurrent"`
 	Budget          AgentResources `json:"budget"`
+	// safety: absent takes every repository and an empty list takes none.
+	AcceptRepos []string `json:"accept_repos,omitempty"`
 }
 
 func normalizeEnrollment(name string, in enrollAgentReq) (store.Executor, error) {
@@ -109,8 +111,8 @@ func normalizeEnrollment(name string, in enrollAgentReq) (store.Executor, error)
 	return store.Executor{
 		Name: name, Kind: in.Kind, Location: in.Location, Capabilities: capabilities,
 		BasePriority: in.BasePriority, PriorityCeiling: in.PriorityCeiling,
-		MaxConcurrent: in.MaxConcurrent,
-		Budget:        store.ExecutorResource{Cores: in.Budget.Cores, MemoryBytes: in.Budget.MemoryBytes},
+		MaxConcurrent: in.MaxConcurrent, AcceptRepos: in.AcceptRepos,
+		Budget: store.ExecutorResource{Cores: in.Budget.Cores, MemoryBytes: in.Budget.MemoryBytes},
 	}, nil
 }
 
@@ -134,6 +136,10 @@ func (s *Server) handleEnrollAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	executor.Principal = token.Principal
 	if err := s.store.EnrollExecutor(r.Context(), token.Prefix, executor); err != nil {
+		if errors.Is(err, store.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 		if errors.Is(err, store.ErrExecutorEnrollmentLimit) {
 			writeError(w, http.StatusConflict, store.ErrExecutorEnrollmentLimit)
 			return

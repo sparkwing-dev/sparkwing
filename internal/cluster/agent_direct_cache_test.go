@@ -182,7 +182,7 @@ func TestAnOffClusterAgentUsesTheAnnouncedCacheWithItsGrant(t *testing.T) {
 	execute := func(token, runID string) *store.Node {
 		t.Helper()
 		ctrl := client.NewWithToken(ctrlSrv.URL, nil, token)
-		claimed, err := ctrl.ClaimNodeByID(ctx, runID, "build", "runner:"+runID, time.Minute, false)
+		claimed, err := ctrl.ClaimNodeByID(ctx, runID, "build", "runner:"+runID, time.Minute, false, nil)
 		if err != nil {
 			t.Fatalf("claim %s: %v", runID, err)
 		}

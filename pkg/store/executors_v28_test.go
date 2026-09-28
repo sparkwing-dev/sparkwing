@@ -295,9 +295,9 @@ func TestPreviewExecutorEligibilitySharesAwardFiltersAndSafeReasons(t *testing.T
 	}{
 		{name: "offline", summary: base, seen: now.Add(-3 * time.Minute), headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "offline"},
 		{name: "placement", summary: store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"location=local"}}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "trusted_placement"},
-		{name: "capability", summary: store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"gpu"}}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "hard_capability"},
+		{name: "capability", summary: store.ExecutorSchedulingSummary{Slots: 1, HardCapabilities: []string{"gpu"}}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "selector"},
 		{name: "slots", summary: store.ExecutorSchedulingSummary{Slots: 2}, seen: now, headroom: store.ExecutorResource{Cores: 4}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "slot_limit"},
-		{name: "budget", summary: store.ExecutorSchedulingSummary{Slots: 1, Resources: store.ExecutorResource{Cores: 5}}, seen: now, headroom: store.ExecutorResource{Cores: 8}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "resource_budget"},
+		{name: "budget", summary: store.ExecutorSchedulingSummary{Slots: 1, Resources: store.ExecutorResource{Cores: 5}}, seen: now, headroom: store.ExecutorResource{Cores: 8}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "shape"},
 		{name: "headroom", summary: store.ExecutorSchedulingSummary{Slots: 1, Resources: store.ExecutorResource{Cores: 3}}, seen: now, headroom: store.ExecutorResource{Cores: 2}, concurrent: 1, budget: store.ExecutorResource{Cores: 4}, want: "headroom"},
 	}
 	for _, test := range tests {

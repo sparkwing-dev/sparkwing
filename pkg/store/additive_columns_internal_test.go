@@ -157,6 +157,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v79 adds one nullable checkout column an older binary never
 	// names, so an older binary keeps writing the migrated database.
 	79: {creditCheckoutCloseCols},
+	// safety: v81 adds one nullable executor column an older binary never
+	// names, so an older binary keeps writing the migrated database.
+	81: {executorAcceptCols},
 }
 
 func columnSpecMaps() []map[string]string {

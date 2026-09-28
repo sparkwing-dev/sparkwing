@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
@@ -18,7 +19,7 @@ func allowRepos(t *testing.T, patterns ...string) context.Context {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.WithRepoFilter(context.Background(), allow)
+	return store.WithClaimProfile(context.Background(), match.Profile{Accept: allow})
 }
 
 func seedRepoTrigger(t *testing.T, st *store.Store, id, repoURL string, at time.Time) {
@@ -127,7 +128,7 @@ func TestPlacementHoldIgnoresALocalRunnerWhoseListRefusesTheRepository(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				local.AllowRepos = allow
+				local.Profile.Accept = allow
 			}
 			ctx := store.WithClaimPlacement(context.Background(), store.ClaimPlacement{
 				DefaultPrefers: []string{"location=local"}, Hold: time.Hour, Live: []store.RunnerPresence{local},

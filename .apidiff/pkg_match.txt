@@ -1,0 +1,54 @@
+# pkg/match
+
+const ClassAgent = "agent"
+const ClassCloud = "cloud"
+const ClassCoordinator = "coordinator"
+type Demand struct {
+	Selector []string
+
+	Repo *Repository
+
+	Trigger bool
+	Request Resources
+}
+func Evaluate(p Profile, d Demand) Verdict
+func Fits(capacity, available, request Resources) Verdict
+func ParseAccept(patterns []string) (RepoFilter, error)
+type Profile struct {
+	Name, Class, Location string
+
+	Labels []string
+
+	OS, Arch string
+
+	Capacity Resources
+
+	Accept RepoFilter
+}
+type Reason string
+const ReasonAvailability Reason = "availability"
+const ReasonRepo Reason = "repo"
+const ReasonSelector Reason = "selector"
+const ReasonShape Reason = "shape"
+const ReasonTrustedPlacement Reason = "trusted_placement"
+type RepoFilter interface {
+	AdmitsRepository(repoURL, githubRepository, githubOwner, githubRepo string) (named, admitted bool)
+}
+type Repository struct {
+	URL, GitHubRepository, GitHubOwner, GitHubRepo string
+
+	Undecodable bool
+}
+type Resources struct {
+	Cores       float64
+	MemoryBytes int64
+}
+func SelfAsserted(labels []string) []string
+func TermSatisfied(p Profile, term string) bool
+type Verdict struct {
+	Reason Reason
+
+	Term string
+}
+func (v Verdict) OK() bool
+func (v Verdict) String() string

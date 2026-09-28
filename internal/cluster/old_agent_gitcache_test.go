@@ -132,7 +132,7 @@ func TestOldAgentFetchesAnOperatorRunThroughTheControllerProxy(t *testing.T) {
 	claim := func(token, runID, holder string) {
 		t.Helper()
 		if _, err := client.NewWithToken(ctrlSrv.URL, nil, token).
-			ClaimNodeByID(ctx, runID, "hello", holder, time.Minute, false); err != nil {
+			ClaimNodeByID(ctx, runID, "hello", holder, time.Minute, false, nil); err != nil {
 			t.Fatalf("claim %s: %v", runID, err)
 		}
 	}

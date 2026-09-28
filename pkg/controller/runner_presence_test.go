@@ -3,6 +3,8 @@ package controller
 import (
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // The store reads a live runner's team off its credential, so the registry
@@ -13,7 +15,7 @@ func TestRunnerPresenceLiveCarriesTheClaimCredential(t *testing.T) {
 	reg := newRunnerPresenceRegistry()
 	now := time.Now()
 	laptop := presenceKey{tokenPrefix: "swr_acmelaptop", name: "laptop"}
-	reg.record(laptop, []string{"location=local"}, &claimCapacity{MaxConcurrent: 2}, nil, now)
+	reg.record(laptop, []string{"location=local"}, &claimCapacity{MaxConcurrent: 2}, match.Profile{}, nil, now)
 
 	live := reg.live(now, time.Minute, presenceKey{})
 	if len(live) != 1 {
@@ -34,7 +36,7 @@ func TestRunnerPresenceCompleteOnlyAfterAWholeWindow(t *testing.T) {
 	}
 	reg.listening(start)
 	reg.listening(start.Add(time.Second))
-	reg.record(presenceKey{tokenPrefix: "swr_other", name: "busy"}, nil, nil, nil, start)
+	reg.record(presenceKey{tokenPrefix: "swr_other", name: "busy"}, nil, nil, match.Profile{}, nil, start)
 	if reg.complete(start.Add(time.Minute-time.Nanosecond), time.Minute) {
 		t.Fatal("a registry younger than the window vouched for its runners")
 	}

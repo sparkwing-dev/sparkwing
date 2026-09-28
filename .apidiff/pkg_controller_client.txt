@@ -37,6 +37,10 @@ type ClaimCapacity struct {
 	MaxConcurrent int
 	ActiveClaims  int
 }
+type ClaimResources struct {
+	Capacity     store.ExecutorResource
+	Availability store.ExecutorResource
+}
 type Client struct {
 }
 func (c *Client) AcknowledgeNodeExecutionStart(ctx context.Context, runID, nodeID string, start store.ExecutionStart) error
@@ -53,7 +57,7 @@ func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (b
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
 func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
 func (c *Client) ClaimNodeByID(
-	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool,
+	ctx context.Context, runID, nodeID, holderID string, lease time.Duration, sizesToClass bool, labels []string,
 ) (*store.Node, error)
 func (c *Client) ClaimNodeWithCapacity(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, capacity *ClaimCapacity) (*store.Node, error)
 func (c *Client) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*store.Trigger, error)
@@ -192,6 +196,7 @@ func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail s
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
 func (c *Client) WithAllowRepos(patterns []string) *Client
+func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client
 func (c *Client) WithRunnerIdentity(id string) *Client
 func (c *Client) WithTriggerNodeRunner(kind string) *Client
 func (c *Client) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error

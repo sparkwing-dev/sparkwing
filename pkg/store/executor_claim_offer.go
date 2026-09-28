@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/executionpolicy"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 const (
@@ -218,6 +219,7 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		return nil, err
 	}
 	var runtimeRefusal error
+	repos := map[string]match.Repository{}
 	for _, item := range hardEligible {
 		plan, ok := plans[item.runID]
 		if !ok {
@@ -237,6 +239,13 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 			Resources:             charge, ResourceDigest: executorResourceDigest(charge), Slots: 1,
 			RunPriority: snapshotRunPriority(plan.raw), RequiredCoordinatorID: item.requiredCoordinatorID,
 			RequiredLocation: item.requiredLocation,
+		}
+		if executor.AcceptRepos != nil {
+			repo, err := s.runRepositoryOf(ctx, oneTeam(Team(plan.team)), item.runID, repos)
+			if err != nil {
+				return nil, err
+			}
+			summary.repo = &repo
 		}
 		membership, err := executorMembershipFromSnapshot(executor, claimant, summary, usage.ByExecutor[executorName],
 			authorityID, coordinatorID, activeAfter)
@@ -1376,13 +1385,14 @@ func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string,
 	if err != nil {
 		return false, err
 	}
-	var repo *runRepository
+	var repo *match.Repository
 	for _, runner := range live {
 		isMetered, sameTeam := metered[runner.TokenPrefix]
-		if !sameTeam || !labelsSatisfied(summary.HardCapabilities, newClaimLabels(runner.Labels).hard) {
+		if !sameTeam {
 			continue
 		}
-		if runner.AllowRepos != nil {
+		demand := match.Demand{Selector: summary.HardCapabilities, Request: summary.Resources}
+		if runner.Profile.Accept != nil {
 			if repo == nil {
 				read, err := scanRunRepository(tx.QueryRowContext(ctx, runRepositorySQL, runID, string(team)))
 				if err != nil {
@@ -1390,9 +1400,10 @@ func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string,
 				}
 				repo = &read
 			}
-			if !repo.admitsNodeFor(runner.AllowRepos) {
-				continue
-			}
+			demand.Repo = repo
+		}
+		if !liveRunnerCould(runner, demand, false) {
+			continue
 		}
 		// safety: mirrors warmClassFilter, which refuses a metered runner a class above the warm one.
 		if isMetered && class != 0 && class > warmCores {

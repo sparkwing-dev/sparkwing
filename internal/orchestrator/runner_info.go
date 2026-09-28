@@ -7,6 +7,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -57,6 +58,13 @@ func podRunnerInfo() *sparkwing.RunnerInfo {
 		labels = sparkwingruntime.NormalizeLabels(strings.Split(labelsRaw, ","))
 	}
 	return &sparkwing.RunnerInfo{Name: name, Type: typ, Labels: labels}
+}
+
+// safety: the dispatcher's labels are its own configuration, so they are trusted
+// as they stand; the check is static, so a busy runner never skips a WhenRunner
+// job for want of a slot.
+func dispatcherMatches(selector, advertised []string) bool {
+	return match.Evaluate(match.Profile{Labels: advertised}, match.Demand{Selector: selector}).OK()
 }
 
 func defaultLocalLabels() []string {
