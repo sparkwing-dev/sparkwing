@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // RequestIDHeader carries a request's correlation id. A caller's value is
@@ -85,13 +85,26 @@ func auditPrincipalID(p *Principal) string {
 	}
 }
 
-func sanitizeUserAgent(ua string) string {
-	return clip(strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
+var sparkwingAgent = regexp.MustCompile(`^(sparkwing-[a-z]{1,24})(?:/(v?[0-9][0-9A-Za-z.+-]{0,31}))?(?:[ ;(]|$)`)
+
+// safety: a user agent is whatever the caller sends, including an address
+// or a token, so the record keeps only a class read from it: a Sparkwing
+// component and its version, a browser, a Go client, or other.
+func clientClass(ua string) string {
+	if m := sparkwingAgent.FindStringSubmatch(ua); m != nil {
+		if m[2] == "" {
+			return m[1]
 		}
-		return r
-	}, ua))
+		return m[1] + "/" + m[2]
+	}
+	switch {
+	case strings.HasPrefix(ua, "Mozilla/"):
+		return "browser"
+	case strings.HasPrefix(ua, "Go-http-client/"):
+		return "go-http-client"
+	default:
+		return "other"
+	}
 }
 
 func requestID(r *http.Request) string {
@@ -135,7 +148,7 @@ func logRequest(ctx context.Context, logger *slog.Logger, r *http.Request, rec *
 	attrs := []any{
 		"ts", time.Now().UTC().Format(time.RFC3339Nano), "request_id", rec.id,
 		"method", r.Method, "route", rec.route, "status", status, "dur_ms", elapsed.Milliseconds(),
-		"client_ip", clientIP, "user_agent", sanitizeUserAgent(r.UserAgent()),
+		"client_ip", clientIP, "client_class", clientClass(r.UserAgent()),
 	}
 	if p := rec.principal; p != nil {
 		attrs = append(attrs, "principal_kind", p.Kind, "principal_id", auditPrincipalID(p), "team", string(p.Team))

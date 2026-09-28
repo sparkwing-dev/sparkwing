@@ -110,3 +110,22 @@ func TestInternalErrorLogNamesTheRouteNotThePath(t *testing.T) {
 		t.Fatalf("error log carries the raw path: %s", logs.String())
 	}
 }
+
+// The audit record keeps a class of client, never the caller's own string.
+func TestClientClassNeverCarriesTheRawUserAgent(t *testing.T) {
+	for ua, want := range map[string]string{
+		"sparkwing-cli/0.91.2 (linux/amd64)":                     "sparkwing-cli/0.91.2",
+		"sparkwing-runner/v1.4.0":                                "sparkwing-runner/v1.4.0",
+		"sparkwing-controller":                                   "sparkwing-controller",
+		"sparkwing-cli/pat@example.com":                          "other",
+		"sparkwing-cli/1.0swk_secret@example.com":                "other",
+		"Mozilla/5.0 (X11; Linux x86_64) Chrome/140.0":           "browser",
+		"Go-http-client/1.1":                                     "go-http-client",
+		"curl/8.5.0 pat@example.com Bearer swk_abcdef0123456789": "other",
+		"": "other",
+	} {
+		if got := clientClass(ua); got != want {
+			t.Errorf("clientClass(%q) = %q, want %q", ua, got, want)
+		}
+	}
+}

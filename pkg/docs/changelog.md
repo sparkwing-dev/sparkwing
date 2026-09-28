@@ -24,8 +24,9 @@ unlock.
 
 - **controller:** Audit record for every write request
   Each non-read request logs one `audit` record with its request id, route
-  pattern, status, duration, client address, user agent with control
-  characters removed, principal kind, the account id or token prefix, team,
+  pattern, status, duration, client address, a client class read from the
+  user agent (`sparkwing-<component>/<version>`, `browser`,
+  `go-http-client` or `other`, never the raw string), principal kind, the account id or token prefix, team,
   and the run, node and team ids its path names. It never logs an email,
   the raw path, query, headers, body or credential. A write whose handler
   panics is audited as a 500. Empty node and trigger claim polls answering
