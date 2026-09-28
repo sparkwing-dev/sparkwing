@@ -36,12 +36,12 @@ var configDirProviders = map[string]bool{
 var configDirWriters = []string{
 	"cmd/sparkwing/configure_init.go",
 	"cmd/sparkwing/versionhold.go",
-	"internal/agentconfig/agentconfig.go",
 	"internal/configguard/configguard.go",
+	"internal/localsecrets/key.go",
 	"internal/profile/profile.go",
 	"internal/repos/repos.go",
-	"internal/secrets/dotenv.go",
-	"internal/wingd/budget_resolve.go",
+	"internal/userconfig/legacy_migrate.go",
+	"internal/userconfig/userconfig.go",
 }
 
 type modeCall struct {
