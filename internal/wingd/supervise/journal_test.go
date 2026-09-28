@@ -25,7 +25,7 @@ func TestJournalReplacementCapturesDumpAndEvidence(t *testing.T) {
 			return path, os.WriteFile(path, []byte("goroutine 1"), 0o600)
 		},
 		Journal: func(k string, data map[string]any) { kind, evidence = k, data },
-	}, 3, errors.New("probe timed out"), 40, 42, time.Minute, true, 4*time.Second)
+	}, true, 3, errors.New("probe timed out"), 40, 42, time.Minute, true, 4*time.Second)
 	if kind != "replacement" || evidence["failed_probes"] != 3 || evidence["last_heartbeat_counter"] != uint64(42) || evidence["ceiling"] != true {
 		t.Fatalf("evidence: %s %+v", kind, evidence)
 	}
@@ -49,7 +49,7 @@ func TestJournalReplacementBoundsBlockedCapture(t *testing.T) {
 				return "", nil
 			},
 			Journal: func(_ string, data map[string]any) { evidence = data },
-		}, 3, errors.New("probe timed out"), 1, 1, time.Second, false, 0)
+		}, true, 3, errors.New("probe timed out"), 1, 1, time.Second, false, 0)
 		if elapsed := time.Since(start); elapsed != time.Second {
 			t.Fatalf("replacement capture took %s", elapsed)
 		}
@@ -58,6 +58,23 @@ func TestJournalReplacementBoundsBlockedCapture(t *testing.T) {
 		}
 		close(release)
 		synctest.Wait()
+	})
+}
+
+func TestJournalReplacementSkipsDumpBeforeReady(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var evidence map[string]any
+		recordReplacement(context.Background(), newSupervisorTestChild(), Deps{
+			CaptureDump: func(context.Context, Child) (string, error) {
+				t.Fatal("capture called before readiness")
+				return "", nil
+			},
+			Journal: func(_ string, data map[string]any) { evidence = data },
+		}, false, 1, errors.New("probe failed"), 0, 0, 0, false, 0)
+		if elapsed := time.Since(start); elapsed != 0 || evidence["dump_error"] != "daemon not ready, no dump" {
+			t.Fatalf("replacement took %s, evidence = %+v", elapsed, evidence)
+		}
 	})
 }
 
@@ -242,7 +259,7 @@ func TestJournalLateCaptureLeavesSuccessorSource(t *testing.T) {
 			CaptureDump: func(ctx context.Context, child Child) (string, error) {
 				return captureDump(ctx, child, dir)
 			},
-		}, 1, errors.New("probe failed"), 0, 0, 0, false, 0)
+		}, true, 1, errors.New("probe failed"), 0, 0, 0, false, 0)
 		if err := os.WriteFile(source+".tmp", []byte("successor"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +291,7 @@ func TestJournalLateDumpWriteRemovesOnlyItsOwnFile(t *testing.T) {
 					return os.WriteFile(path, body, 0o600)
 				})
 			},
-		}, 1, errors.New("probe failed"), 0, 0, 0, false, 0)
+		}, true, 1, errors.New("probe failed"), 0, 0, 0, false, 0)
 		oldPath := <-started
 		successorPath := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", int64(math.MaxInt64)))
 		if err := os.WriteFile(successorPath, []byte("successor"), 0o600); err != nil {
@@ -315,13 +332,13 @@ func TestJournalSupervisorQueueDoesNotBlockOnDisk(t *testing.T) {
 		defer cancel()
 		release := make(chan struct{})
 		var records []journal.Record
-		queue := queueSupervisorJournal(ctx, func(r journal.Record) error {
+		queue, drained := queueSupervisorJournal(ctx, func(r journal.Record) error {
 			if len(records) == 0 {
 				<-release
 			}
 			records = append(records, r)
 			return nil
-		}, nil)
+		}, nil, func() uint64 { return 1 })
 		queue("first", nil)
 		synctest.Wait()
 		done := make(chan struct{})
@@ -338,8 +355,9 @@ func TestJournalSupervisorQueueDoesNotBlockOnDisk(t *testing.T) {
 			t.Fatal("journal queue blocked behind disk append")
 		}
 		close(release)
-		synctest.Wait()
-		if len(records) != supervisorJournalBuffer+2 || records[1].Kind != "dropped" || records[1].Data["count"] != uint64(1) {
+		cancel()
+		<-drained
+		if len(records) != supervisorJournalBuffer+2 || records[len(records)-1].Kind != "dropped" || records[len(records)-1].Data["count"] != uint64(1) {
 			t.Fatalf("records: %+v", records)
 		}
 		for i, r := range records {
@@ -347,7 +365,36 @@ func TestJournalSupervisorQueueDoesNotBlockOnDisk(t *testing.T) {
 				t.Fatalf("record %d: %+v", i, r)
 			}
 		}
-		cancel()
 		synctest.Wait()
+	})
+}
+
+func TestJournalSupervisorStampsBeforeDiskAndDrainsOnCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		blocked := make(chan struct{})
+		release := make(chan struct{})
+		var records []journal.Record
+		incarnation := uint64(7)
+		queue, drained := queueSupervisorJournal(ctx, func(r journal.Record) error {
+			if len(records) == 0 {
+				close(blocked)
+				<-release
+			}
+			records = append(records, r)
+			return nil
+		}, nil, func() uint64 { return incarnation })
+		queue("probe_failure_start", nil)
+		<-blocked
+		queuedAt := time.Now()
+		queue("replacement", nil)
+		incarnation = 8
+		time.Sleep(time.Second)
+		cancel()
+		close(release)
+		<-drained
+		if len(records) != 2 || records[1].Kind != "replacement" || records[1].Seq != 2 || records[1].Incarnation != 7 || records[1].TS.Before(queuedAt) || !records[1].TS.Before(time.Now()) {
+			t.Fatalf("drained records = %+v", records)
+		}
 	})
 }

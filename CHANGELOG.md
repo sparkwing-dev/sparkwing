@@ -37,6 +37,11 @@ unlock.
   supervisor dumps retain the ten most recently modified files. `daemon events`
   and `daemon explain` report skipped records on stderr; explanations include
   descendant runs. Policy endpoint records omit URL credentials and query parameters.
+- **admission:** Batched grants read held capacity without repeatedly sorting the
+  ledger. Supervisor records retain their enqueue time and daemon identity and
+  drain on shutdown. Daemon identity advances after clock changes; interrupted
+  counter temp files are removed. Replacements before readiness skip stack dumps,
+  and journal endpoint records omit URL fragments.
 - **admission:** An overloaded or swapping machine no longer gets its
   admission daemon replaced while it is still working. The supervisor replaces
   the daemon only when health probes fail and its heartbeat has not moved for a

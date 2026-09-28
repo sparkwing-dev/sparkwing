@@ -71,10 +71,10 @@ func TestJournalIncarnationIncreases(t *testing.T) {
 	if second := NextIncarnation(); second <= first {
 		t.Fatalf("incarnation did not advance: %d, %d", first, second)
 	}
-	if err := PersistIncarnation(dir, first); err != nil {
+	if _, err := PersistIncarnation(dir, first); err != nil {
 		t.Fatal(err)
 	}
-	if err := PersistIncarnation(dir, first+1); err != nil {
+	if _, err := PersistIncarnation(dir, first+1); err != nil {
 		t.Fatal(err)
 	}
 	if Incarnation(dir) != first+1 {
@@ -118,13 +118,13 @@ func TestJournalIncarnationRepairsCorruptFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			n := uint64(42)
-			if err := PersistIncarnation(dir, n); err == nil {
+			if _, err := PersistIncarnation(dir, n); err == nil {
 				t.Fatal("missing corruption warning")
 			}
 			if got := Incarnation(dir); got != n {
 				t.Fatalf("repaired incarnation = %d, want %d", got, n)
 			}
-			if err := PersistIncarnation(dir, n+1); err != nil || Incarnation(dir) != n+1 {
+			if _, err := PersistIncarnation(dir, n+1); err != nil || Incarnation(dir) != n+1 {
 				t.Fatalf("next after repair = %d, %v", Incarnation(dir), err)
 			}
 		})
@@ -133,13 +133,13 @@ func TestJournalIncarnationRepairsCorruptFile(t *testing.T) {
 
 func TestJournalIncarnationWriteFailureKeepsSelectedValue(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "missing")
-	if err := PersistIncarnation(dir, 7); err == nil {
+	if _, err := PersistIncarnation(dir, 7); err == nil {
 		t.Fatal("missing write warning")
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := PersistIncarnation(dir, 7); err != nil || Incarnation(dir) != 7 {
+	if _, err := PersistIncarnation(dir, 7); err != nil || Incarnation(dir) != 7 {
 		t.Fatalf("repaired write = %d, %v", Incarnation(dir), err)
 	}
 }
@@ -150,21 +150,50 @@ func TestJournalIncarnationContinuesWhenReadFails(t *testing.T) {
 	if err := os.Mkdir(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := PersistIncarnation(dir, 42); err == nil {
+	if _, err := PersistIncarnation(dir, 42); err == nil {
 		t.Fatal("missing read warning")
 	}
 }
 
 func TestJournalIncarnationOlderRepairDoesNotRegressCounter(t *testing.T) {
 	dir := t.TempDir()
-	if err := PersistIncarnation(dir, 100); err != nil {
+	if _, err := PersistIncarnation(dir, 100); err != nil {
 		t.Fatal(err)
 	}
-	if err := PersistIncarnation(dir, 99); err != nil {
+	if _, err := PersistIncarnation(dir, 99); err != nil {
 		t.Fatal(err)
 	}
-	if got := Incarnation(dir); got != 100 {
-		t.Fatalf("incarnation regressed to %d", got)
+	if got := Incarnation(dir); got != 101 {
+		t.Fatalf("incarnation = %d, want 101", got)
+	}
+}
+
+func TestJournalIncarnationRemovesInterruptedTemps(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := PersistIncarnation(dir, 10); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "incarnation-abandoned.tmp")
+	if err := os.WriteFile(stale, []byte("11"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := PersistIncarnation(dir, 1)
+	if err != nil || selected != 11 || Incarnation(dir) != 11 {
+		t.Fatalf("selected = %d, stored = %d, err = %v", selected, Incarnation(dir), err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("interrupted temp remains: %v", err)
+	}
+}
+
+func TestJournalIncarnationCounterExhaustion(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "incarnation"), []byte("18446744073709551615"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := PersistIncarnation(dir, 1)
+	if selected != 0 || err == nil || Incarnation(dir) != ^uint64(0) {
+		t.Fatalf("selected = %d, stored = %d, err = %v", selected, Incarnation(dir), err)
 	}
 }
 

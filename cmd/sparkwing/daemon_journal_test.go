@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 )
@@ -204,6 +205,13 @@ func TestExplainEventRendersKnownKindsWithoutRawJSON(t *testing.T) {
 	unknownPeer := explainEvent(journal.Record{Kind: "connection_closed", Data: map[string]any{"role": "idle"}})
 	if unknownPeer != "Connection closed for an unknown peer (idle)" {
 		t.Fatalf("unknown peer = %q", unknownPeer)
+	}
+}
+
+func TestExplainReattachOmitsTimeDerivedIncarnation(t *testing.T) {
+	got := explainEvent(journal.Record{Kind: "reattach_accepted", Incarnation: uint64(time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC).UnixNano())})
+	if got != "Reattached after daemon replacement" {
+		t.Fatalf("reattach explanation = %q", got)
 	}
 }
 

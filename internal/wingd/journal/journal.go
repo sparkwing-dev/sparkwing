@@ -350,15 +350,16 @@ func NextIncarnation() uint64 {
 	}
 }
 
-// PersistIncarnation records the selected identity and reports counter file errors.
-func PersistIncarnation(dir string, n uint64) (result error) {
+// PersistIncarnation records the next identity and returns the value written.
+func PersistIncarnation(dir string, n uint64) (selected uint64, result error) {
 	path := filepath.Join(dir, "incarnation")
 	var readErr error
 	if b, err := os.ReadFile(path); err == nil {
 		if previous, err := parseIncarnation(b); err == nil {
-			if previous >= n {
-				return nil
+			if previous == ^uint64(0) {
+				return 0, fmt.Errorf("incarnation counter exhausted")
 			}
+			n = previous + 1
 		} else {
 			readErr = fmt.Errorf("invalid incarnation %q", strings.TrimSpace(string(b)))
 		}
@@ -367,7 +368,7 @@ func PersistIncarnation(dir string, n uint64) (result error) {
 	}
 	tmp, err := os.CreateTemp(dir, "incarnation-*.tmp")
 	if err != nil {
-		return errors.Join(readErr, fmt.Errorf("create incarnation temp: %w", err))
+		return n, errors.Join(readErr, fmt.Errorf("create incarnation temp: %w", err))
 	}
 	tmpPath := tmp.Name()
 	defer func() {
@@ -377,15 +378,23 @@ func PersistIncarnation(dir string, n uint64) (result error) {
 	}()
 	_, writeErr := tmp.Write([]byte(fmt.Sprint(n)))
 	if err := errors.Join(writeErr, tmp.Close()); err != nil {
-		return errors.Join(readErr, fmt.Errorf("write incarnation: %w", err))
-	}
-	if Incarnation(dir) >= n {
-		return readErr
+		return n, errors.Join(readErr, fmt.Errorf("write incarnation: %w", err))
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		return errors.Join(readErr, fmt.Errorf("replace incarnation: %w", err))
+		return n, errors.Join(readErr, fmt.Errorf("replace incarnation: %w", err))
 	}
-	return readErr
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return n, errors.Join(readErr, fmt.Errorf("list incarnation temps: %w", err))
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "incarnation-") && strings.HasSuffix(entry.Name(), ".tmp") {
+			if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				result = errors.Join(result, fmt.Errorf("remove incarnation temp: %w", err))
+			}
+		}
+	}
+	return n, errors.Join(readErr, result)
 }
 
 // Incarnation reads the latest elected daemon number.

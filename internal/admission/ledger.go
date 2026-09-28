@@ -44,6 +44,13 @@ type Ledger struct {
 	restoredBurstLimit int64
 }
 
+// Used returns the resources held by live leases.
+func (l *Ledger) Used() (float64, uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return float64(l.usedMilliCores) / 1000, l.usedMemory
+}
+
 type spec struct {
 	id                        string
 	admit                     uint64

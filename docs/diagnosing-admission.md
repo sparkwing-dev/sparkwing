@@ -8,9 +8,10 @@ store. `events.jsonl` and its numbered rotations hold daemon records;
 streams together retain at most 50 MiB. The newest ten replacement dumps add at
 most 20 MiB. The latest `d.log.stacks` source adds up to 2 MiB, so journal
 and replacement evidence retain at most 72 MiB. An `incarnation` file
-stores a time-derived daemon identity when writable. The daemon selects that
-identity before serving and updates the file in the background, so file errors
-cannot delay admission. `seq` increases within a source and incarnation.
+stores the daemon identity. Each replacement advances a readable stored value
+by one; a missing or unreadable file uses a time-derived identity. File errors
+are logged, and admission continues. `seq` increases within a source and
+incarnation.
 
 ```sh
 sparkwing daemon events --run RUN_ID -o json
@@ -54,6 +55,9 @@ stopping the daemon, the supervisor signals its SIGUSR1 diagnostic handler and
 saves up to 2 MiB as `dump-<timestamp>.txt` in the same directory. It keeps the
 ten most recently modified dumps; the next stack capture replaces `d.log.stacks`. A
 failed capture, including on Windows where SIGUSR1 is unavailable, appears in
-`dump_error`; replacement proceeds after a wait of at most one second. Journal
-writes do not hold admission or replacement. Policy endpoint URLs in records
-omit userinfo and query parameters.
+`dump_error`; replacement proceeds after a wait of at most one second. A daemon
+that never became ready records `daemon not ready, no dump` without waiting.
+Supervisor records keep their enqueue time and daemon identity, and buffered
+records drain on supervisor shutdown. Journal writes do not hold admission or
+replacement. Policy endpoint URLs in records keep only the scheme, host, and
+path; userinfo, query parameters, and fragments are omitted.

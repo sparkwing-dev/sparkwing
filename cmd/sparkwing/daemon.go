@@ -326,6 +326,9 @@ func explainEvent(r journal.Record) string {
 	case "child_attach_request":
 		return "Requested child attachment to " + field("requested_parent")
 	case "reattach_accepted":
+		if r.Incarnation >= 1_000_000_000_000_000 {
+			return "Reattached after daemon replacement"
+		}
 		return fmt.Sprintf("Reattached after daemon replacement (incarnation %d)", r.Incarnation)
 	case "reattach_request":
 		return "Requested lease reattachment"

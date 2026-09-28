@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 
@@ -269,7 +269,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 						deps.Logf("replacing daemon during startup: no successful probe for %s and heartbeat stale for %s (last probe: %v)", time.Since(started), time.Since(staleSince), err)
 					}
 				}
-				recordReplacement(ctx, child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
+				recordReplacement(ctx, child, deps, false, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 				return true, false, stopChild(child, cfg.TermGrace)
 			}
 			failures++
@@ -287,7 +287,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 					deps.Logf("replacing daemon: %d failed probes and heartbeat stale for %s (last probe: %v)", failures, time.Since(staleSince), err)
 				}
 			}
-			recordReplacement(ctx, child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
+			recordReplacement(ctx, child, deps, true, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 			if err := stopChild(child, cfg.TermGrace); err != nil {
 				return false, false, err
 			}
@@ -296,9 +296,11 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 	}
 }
 
-func recordReplacement(ctx context.Context, child Child, deps Deps, failures int, probeErr error, firstHeartbeat, lastHeartbeat uint64, stale time.Duration, ceiling bool, tickGap time.Duration) {
+func recordReplacement(ctx context.Context, child Child, deps Deps, ready bool, failures int, probeErr error, firstHeartbeat, lastHeartbeat uint64, stale time.Duration, ceiling bool, tickGap time.Duration) {
 	data := map[string]any{"failed_probes": failures, "last_error": probeErr.Error(), "first_heartbeat_counter": firstHeartbeat, "last_heartbeat_counter": lastHeartbeat, "stale_ms": stale.Milliseconds(), "ceiling": ceiling, "largest_tick_gap_ms": tickGap.Milliseconds()}
-	if deps.CaptureDump != nil {
+	if !ready {
+		data["dump_error"] = "daemon not ready, no dump"
+	} else if deps.CaptureDump != nil {
 		type result struct {
 			path string
 			err  error
@@ -520,37 +522,57 @@ func pruneDumps(ctx context.Context, dir string, limit int) error {
 	return pruneErr
 }
 
-func queueSupervisorJournal(ctx context.Context, appendRecord func(journal.Record) error, logf func(string, ...any)) func(string, map[string]any) {
+func queueSupervisorJournal(ctx context.Context, appendRecord func(journal.Record) error, logf func(string, ...any), incarnation func() uint64) (func(string, map[string]any), <-chan struct{}) {
 	records := make(chan journal.Record, supervisorJournalBuffer)
-	var dropped atomic.Uint64
+	done := make(chan struct{})
+	var mu sync.Mutex
+	var seq, dropped uint64
+	closed := false
 	go func() {
-		var seq uint64
-		write := func(r journal.Record) {
-			seq++
-			r.Seq, r.TS = seq, time.Now().UTC()
+		defer close(done)
+		for r := range records {
 			if err := appendRecord(r); err != nil && logf != nil {
 				logf("journal: %v", err)
 			}
 		}
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case r := <-records:
-				if n := dropped.Swap(0); n > 0 {
-					write(journal.Record{Kind: "dropped", Data: map[string]any{"count": n}})
-				}
-				write(r)
+		mu.Lock()
+		if dropped > 0 {
+			seq++
+			r := journal.Record{Kind: "dropped", Data: map[string]any{"count": dropped}, Seq: seq, TS: time.Now().UTC(), Incarnation: incarnation()}
+			mu.Unlock()
+			if err := appendRecord(r); err != nil && logf != nil {
+				logf("journal: %v", err)
 			}
+		} else {
+			mu.Unlock()
 		}
 	}()
+	go func() {
+		<-ctx.Done()
+		mu.Lock()
+		closed = true
+		close(records)
+		mu.Unlock()
+	}()
 	return func(kind string, data map[string]any) {
-		select {
-		case records <- journal.Record{Kind: kind, Data: data}:
-		default:
-			dropped.Add(1)
+		mu.Lock()
+		defer mu.Unlock()
+		if closed || ctx.Err() != nil {
+			return
 		}
-	}
+		if dropped > 0 && len(records) < cap(records)-1 {
+			seq++
+			records <- journal.Record{Kind: "dropped", Data: map[string]any{"count": dropped}, Seq: seq, TS: time.Now().UTC(), Incarnation: incarnation()}
+			dropped = 0
+		}
+		if len(records) == cap(records) {
+			dropped++
+			return
+		}
+		r := journal.Record{Kind: kind, Data: data, Seq: seq + 1, TS: time.Now().UTC(), Incarnation: incarnation()}
+		records <- r
+		seq++
+	}, done
 }
 
 // safety: signaling the handle rather than the pid means a child the kernel
@@ -594,11 +616,13 @@ func Run(args []string) error {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	appendJournal := queueSupervisorJournal(ctx, func(r journal.Record) error {
-		r.Incarnation = journal.Incarnation(dir)
+	appendJournal, journalDone := queueSupervisorJournal(ctx, func(r journal.Record) error {
 		return journal.AppendSupervisor(dir, r)
-	}, logger.Printf)
+	}, logger.Printf, func() uint64 { return journal.Incarnation(dir) })
+	defer func() {
+		stop()
+		<-journalDone
+	}()
 	return Loop(ctx, Config{
 		ProbeInterval:     defaultProbeInterval,
 		ProbeTimeout:      defaultProbeTimeout,

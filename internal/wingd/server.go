@@ -192,14 +192,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.releaseLock()
 	incarnation := journal.NextIncarnation()
+	incarnation, persistErr := journal.PersistIncarnation(d.layout.dir, incarnation)
+	if incarnation == 0 {
+		return persistErr
+	}
+	if persistErr != nil {
+		d.cfg.logf("journal incarnation: %v", persistErr)
+	}
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()
-	go func() {
-		if err := journal.PersistIncarnation(d.layout.dir, incarnation); err != nil {
-			d.cfg.logf("journal incarnation: %v", err)
-		}
-	}()
 	heartbeatStop := make(chan struct{})
 	heartbeatDone := make(chan struct{})
 	go d.heartbeatLoop(heartbeatStop, heartbeatDone)

@@ -340,13 +340,7 @@ func externalWord(measured bool, value string) string {
 }
 
 func (d *Daemon) usedLocked() (cores float64, mem uint64) {
-	snap := d.ledger.Snapshot()
-	var milli int64
-	for _, ls := range snap.Leases {
-		milli += ls.MilliCores
-		mem += ls.MemoryBytes
-	}
-	return float64(milli) / 1000.0, mem
+	return d.ledger.Used()
 }
 
 func absDiffU(a, b uint64) uint64 {

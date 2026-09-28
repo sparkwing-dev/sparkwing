@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
@@ -57,13 +58,16 @@ func journalPolicy(p AdmissionPolicy) map[string]any {
 
 func journalEndpoint(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Opaque != "" {
 		return ""
 	}
-	u.User = nil
-	u.RawQuery = ""
-	u.ForceQuery = false
-	return u.String()
+	if u.Scheme == "" && !strings.HasPrefix(raw, "/") && strings.Contains(strings.SplitN(raw, "/", 2)[0], "@") {
+		u, err = url.Parse("//" + raw)
+		if err != nil {
+			return ""
+		}
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
 }
 
 func (d *Daemon) recordWindow(now time.Time, ev admissionEvent, c *conn, data map[string]any) {

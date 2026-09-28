@@ -97,3 +97,18 @@ func TestJournalPolicyRedactsEndpointCredentials(t *testing.T) {
 		t.Fatalf("malformed journal endpoint = %q", got)
 	}
 }
+
+func TestJournalEndpointKeepsOnlyLocation(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://person:password@example.test/advise?token=secret#fragment": "https://example.test/advise",
+		"//person:password@example.test/advise?token=secret#fragment":       "//example.test/advise",
+		"person@example.test/advise?token=secret#fragment":                  "//example.test/advise",
+		"person:password@example.test/advise?token=secret#fragment":         "",
+		"/advise?token=secret#fragment":                                     "/advise",
+		"mailto:person:password@example.test?token=secret#fragment":         "",
+	} {
+		if got := journalEndpoint(raw); got != want {
+			t.Errorf("journalEndpoint(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
