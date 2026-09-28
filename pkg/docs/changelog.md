@@ -955,6 +955,14 @@ unlock.
 
 ### Fixed
 
+- **store:** A database migrated by v0.61.0 through v0.63.0 now upgrades.
+  Those releases numbered the node claim token column as schema 49, so the
+  upgrade stopped at schema 50 for want of the team table. Opening such a
+  database adds the team key before schema 50. Schema 50 now records the
+  `team-credit-exhaustion-v1` requirement, so a v0.63.0 binary refuses a
+  SQLite database whose upgrade stopped after moving the credit exhaustion
+  clock. Schema 74 adds the node claim token column to databases that lack it.
+
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
   the claim and fail the run; a ledger error refuses renewal. Runners stop on

@@ -34,8 +34,8 @@ func assertV73TriggerCreditCursorUpgrade(t *testing.T, target *storetest.Target)
 		t.Fatal(err)
 	}
 	defer func() { _ = up.Close() }()
-	if got, err := up.CurrentSchemaVersion(context.Background()); err != nil || got != 73 {
-		t.Fatalf("upgraded schema = %d, %v; want 73", got, err)
+	if got, err := up.CurrentSchemaVersion(context.Background()); err != nil || got != store.ExpectedSchemaVersion() {
+		t.Fatalf("upgraded schema = %d, %v; want %d", got, err, store.ExpectedSchemaVersion())
 	}
 	rows, err := up.DB().QueryContext(t.Context(),
 		`SELECT credit_paid_seconds, credit_paid_amount_micro, credit_reservation_id FROM triggers WHERE 1 = 0`)
@@ -130,7 +130,7 @@ func downgradeTriggerCreditCursor(t *testing.T, st *store.Store) {
 		`ALTER TABLE triggers DROP COLUMN credit_paid_amount_micro`,
 		`ALTER TABLE triggers DROP COLUMN credit_reservation_id`,
 		`DELETE FROM sparkwing_requirements WHERE name = 'trigger-credit-cursor-v1'`,
-		`DELETE FROM sparkwing_schema_version WHERE version = 73`,
+		`DELETE FROM sparkwing_schema_version WHERE version >= 73`,
 	} {
 		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatalf("downgrade v73 with %q: %v", statement, err)
