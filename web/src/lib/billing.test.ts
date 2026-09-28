@@ -55,21 +55,21 @@ afterEach(() => {
   runtime.fetch = realFetch;
 });
 
-// The contract's decided pricing: 5,000 micro per credit, 20,000 credits per
-// dollar, 2/4/8 vCPU classes at one credit per vCPU-second.
+// The contract's decided pricing: a credit is $0.001, 100,000 micro to the
+// credit, and the 2/4/8 vCPU classes are priced at 90% of GitHub Actions.
 const billing = {
   team: "acme",
   balance_micro: 123_000_000,
   balance_cap_micro: 500_000_000_000,
-  micro_per_credit: 5_000,
-  credits_per_dollar: 20_000,
+  micro_per_credit: 100_000,
+  credits_per_dollar: 1_000,
   min_billable_seconds: 60,
-  purchase_min_cents: 500,
+  purchase_min_cents: 1_000,
   purchase_max_cents: 50_000,
   rate_table: [
-    { cores: 8, micro_per_second: 40_000 },
-    { cores: 2, micro_per_second: 10_000 },
-    { cores: 4, micro_per_second: 20_000 },
+    { cores: 8, micro_per_second: 33_000 },
+    { cores: 2, micro_per_second: 9_000 },
+    { cores: 4, micro_per_second: 18_000 },
   ],
   storage_rate_micro_per_gb_day: 0,
   storage_free_allowance_bytes: 0,
@@ -82,23 +82,23 @@ const billing = {
 
 describe("balance", () => {
   it("converts micro to whole credits and dollars", () => {
-    assert.equal(lib.balanceCredits(123_000_000, billing), 24_600);
+    assert.equal(lib.balanceCredits(123_000_000, billing), 1_230);
     assert.equal(lib.balanceUSD(123_000_000, billing), 1.23);
-    assert.equal(lib.fmtCredits(24_600), "24,600");
+    assert.equal(lib.fmtCredits(1_230), "1,230");
     assert.equal(lib.fmtUSD(1.23), "$1.23");
   });
 
   it("never rounds a balance up", () => {
-    // 4,999 micro is just short of one credit and a fraction of a cent.
-    assert.equal(lib.balanceCredits(4_999, billing), 0);
-    assert.equal(lib.balanceCredits(1_999_999, billing), 399);
+    // 99,999 micro is just short of one credit and a fraction of a cent.
+    assert.equal(lib.balanceCredits(99_999, billing), 0);
+    assert.equal(lib.balanceCredits(1_999_999, billing), 19);
     assert.equal(lib.balanceUSD(1_999_999, billing), 0.01);
     assert.equal(lib.balanceUSD(999_999, billing), 0);
   });
 
   it("rounds a negative balance toward zero and keeps its sign", () => {
-    assert.equal(lib.balanceCredits(-7_500, billing), -1);
-    assert.equal(lib.fmtCredits(lib.balanceCredits(-4_999, billing)), "0");
+    assert.equal(lib.balanceCredits(-150_000, billing), -1);
+    assert.equal(lib.fmtCredits(lib.balanceCredits(-99_999, billing)), "0");
     assert.equal(lib.fmtUSD(-2.5), "-$2.50");
   });
 
@@ -109,16 +109,19 @@ describe("balance", () => {
     assert.equal(lib.fmtUSDShort(12.5), "$12.50");
     assert.equal(
       lib.fmtCredits(lib.balanceCredits(billing.balance_cap_micro, billing)),
-      "100,000,000",
+      "5,000,000",
     );
   });
 });
 
 describe("charges and grants", () => {
-  it("round to the nearest credit and cent", () => {
-    assert.equal(lib.amountCredits(2_800_000, billing), 560);
-    assert.equal(lib.amountCredits(7_500, billing), 2);
-    assert.equal(lib.amountCredits(-500_000_000, billing), -100_000);
+  it("round to the nearest hundredth of a credit and cent", () => {
+    assert.equal(lib.amountCredits(2_800_000, billing), 28);
+    // Three two-core seconds, 0.27 credits, must not read as free.
+    assert.equal(lib.amountCredits(27_000, billing), 0.27);
+    assert.equal(lib.fmtCredits(lib.amountCredits(27_000, billing)), "0.27");
+    assert.equal(lib.amountCredits(540_400, billing), 5.4);
+    assert.equal(lib.amountCredits(-500_000_000, billing), -5_000);
     assert.equal(lib.amountUSD(500_000_000, billing), 5);
     assert.equal(lib.amountUSD(1_500_000, billing), 0.02);
   });
@@ -138,19 +141,32 @@ describe("price table", () => {
       rows.map((r) => r.cores),
       [2, 4, 8],
     );
-    assert.equal(rows[0].creditsPerSecond, 2);
-    assert.equal(rows[0].creditsPerMinute, 120);
-    assert.equal(lib.fmtRateUSD(rows[0].usdPerHour), "$0.36");
-    assert.equal(lib.fmtRateUSD(rows[1].usdPerHour), "$0.72");
-    assert.equal(lib.fmtRateUSD(rows[2].usdPerHour), "$1.44");
-    assert.equal(lib.fmtRate(rows[2].creditsPerMinute), "480");
+    assert.equal(lib.fmtRate(rows[0].creditsPerSecond), "0.09");
+    assert.equal(lib.fmtRate(rows[0].creditsPerMinute), "5.4");
+    assert.equal(lib.fmtRateUSD(rows[0].usdPerHour), "$0.32");
+    assert.equal(lib.fmtRateUSD(rows[1].usdPerHour), "$0.65");
+    assert.equal(lib.fmtRateUSD(rows[2].usdPerHour), "$1.19");
+    assert.equal(lib.fmtRate(rows[2].creditsPerMinute), "19.8");
   });
 
   it("computes the per-vCPU-hour headline", () => {
+    const price = lib.vcpuHourPrice({
+      ...billing,
+      rate_table: [
+        { cores: 2, micro_per_second: 9_000 },
+        { cores: 4, micro_per_second: 18_000 },
+      ],
+    });
+    assert.ok(price);
+    assert.equal(lib.fmtRateUSD(price.usd), "$0.16");
+    assert.equal(price.uniform, true);
+  });
+
+  it("headlines the eight-core price, the cheapest vCPU on the default ladder", () => {
     const price = lib.vcpuHourPrice(billing);
     assert.ok(price);
-    assert.equal(lib.fmtRateUSD(price.usd), "$0.18");
-    assert.equal(price.uniform, true);
+    assert.equal(lib.fmtRateUSD(price.usd), "$0.15");
+    assert.equal(price.uniform, false);
   });
 
   it("reports the lowest per-vCPU price when classes differ", () => {
@@ -190,7 +206,7 @@ describe("storagePrice", () => {
       storage_free_allowance_bytes: 10 * 2 ** 30,
     });
     assert.ok(price);
-    assert.equal(price.creditsPerGBDay, 72);
+    assert.equal(price.creditsPerGBDay, 3.6);
     assert.equal(lib.fmtRateUSD(price.usdPerGBDay), "$0.0036");
     assert.equal(price.freeGB, 10);
     assert.equal(lib.fmtGB(price.freeGB), "10 GB");
@@ -213,19 +229,20 @@ describe("purchase amount", () => {
   });
 
   it("states the credits an amount buys", () => {
-    assert.equal(lib.creditsForCents(2_500, billing), 500_000);
-    assert.equal(lib.creditsForCents(1, billing), 200);
+    assert.equal(lib.creditsForCents(2_500, billing), 25_000);
+    assert.equal(lib.creditsForCents(1, billing), 10);
     assert.equal(
       lib.fmtCredits(lib.creditsForCents(50_000, billing)),
-      "10,000,000",
+      "500,000",
     );
   });
 
   it("accepts the inclusive range and refuses outside it", () => {
-    assert.equal(lib.purchaseProblem(500, billing), null);
+    assert.equal(lib.purchaseProblem(1_000, billing), null);
     assert.equal(lib.purchaseProblem(50_000, billing), null);
-    const range = "Enter an amount from $5 to $500.";
-    assert.equal(lib.purchaseProblem(499, billing), range);
+    const range = "Enter an amount from $10 to $500.";
+    assert.equal(lib.purchaseProblem(999, billing), "Minimum purchase $10.");
+    assert.equal(lib.purchaseProblem(500, billing), "Minimum purchase $10.");
     assert.equal(lib.purchaseProblem(50_001, billing), range);
     assert.equal(lib.purchaseProblem(null, billing), range);
   });
@@ -236,7 +253,7 @@ describe("purchase amount", () => {
     assert.ok(msg);
     assert.match(msg, /capped at \$5,000/);
     assert.match(msg, /\$4,990\.00/);
-    assert.match(msg, /99,800,000 credits/);
+    assert.match(msg, /4,990,000 credits/);
     assert.match(msg, /up to \$10\.00 more/);
     // Exactly reaching the cap is allowed.
     assert.equal(lib.purchaseProblem(1_000, nearCap), null);
@@ -316,7 +333,7 @@ describe("startCheckout", () => {
       assert.match(err.message, /capped at \$5,000/);
       assert.match(
         err.message,
-        /balance is \$4,995\.00 \(99,900,000 credits\)/,
+        /balance is \$4,995\.00 \(4,995,000 credits\)/,
       );
       assert.match(err.message, /up to \$5\.00 more/);
       return true;
