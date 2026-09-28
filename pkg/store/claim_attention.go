@@ -190,13 +190,14 @@ type WaitingNode struct {
 
 // ListWaitingNodes lists up to limit unpinned nodes, ordered by run and node
 // after the key after, that first became ready before readyBefore and that no
-// agent has claimed.
+// agent has claimed. A controller-dispatched node is the launcher's, so no
+// agent's absence explains its wait and it is not listed.
 func (s *Store) ListWaitingNodes(ctx context.Context, readyBefore time.Time, after [2]string, limit int) ([]WaitingNode, error) {
 	rows, err := s.query(ctx, `SELECT n.run_id, n.node_id, n.team, n.needs_labels, n.attention_reason,
        n.requested_cores, n.requested_memory_bytes, tr.repo_url, tr.github_owner, tr.github_repo, tr.trigger_env
   FROM nodes n LEFT JOIN triggers tr ON tr.id = n.run_id AND tr.team = n.team
  WHERE n.ready_at IS NOT NULL AND COALESCE(n.placement_hold_from, n.ready_at) < ?
-   AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
+   AND n.claimed_by IS NULL AND n.`+nodeNotDone+` AND n.`+nodeTriggerDispatched+`
    AND n.required_coordinator_id = '' AND n.required_executor_location = ''
    AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))
  ORDER BY n.run_id, n.node_id LIMIT ?`, readyBefore.UnixNano(), after[0], after[0], after[1], limit)

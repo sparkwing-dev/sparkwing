@@ -253,3 +253,14 @@ func TestSetNodeAttentionSkipsANodeRevokedSinceTheRead(t *testing.T) {
 		t.Fatalf("a revoked node was given the reason %q", reason)
 	}
 }
+
+// Only the launcher claims a controller-dispatched node, so the attention
+// sweep, which judges waits by the agents that could claim, skips it.
+func TestWaitingNodesSkipAControllerDispatchedNode(t *testing.T) {
+	f := newDispatchRun(t, "run-dispatched")
+	f.mustAccept(t, planOf(`a`))
+	waiting, err := f.s.ListWaitingNodes(context.Background(), time.Now().Add(time.Hour), [2]string{}, 10)
+	if err != nil || len(waiting) != 0 {
+		t.Fatalf("waiting = %+v, %v; want none", waiting, err)
+	}
+}
