@@ -145,8 +145,13 @@ type agentLossPlan struct {
 	} `json:"nodes"`
 }
 
-func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecovery, error) {
+func (s *Store) recoverExpiredNodeClaims(ctx context.Context) (out []AgentLossRecovery, err error) {
 	now := time.Now()
+	defer func() {
+		for _, pair := range s.expireDispatchClaimsLogged(ctx, now) {
+			out = append(out, AgentLossRecovery{RunID: pair[0], NodeID: pair[1], Started: true})
+		}
+	}()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -173,7 +178,7 @@ func (s *Store) recoverExpiredNodeClaims(ctx context.Context) ([]AgentLossRecove
 	       execution_started_at, attempts_consumed, credit_charged_through, lease_expires_at, claim_token_prefix
  FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-   AND lease_expires_at < ? AND `+nodeNotDone+` AND run_id IN (`+placeholders(len(runIDs))+`)`+s.forUpdate(),
+   AND lease_expires_at < ? AND kind = '' AND `+nodeNotDone+` AND run_id IN (`+placeholders(len(runIDs))+`)`+s.forUpdate(),
 		append([]any{now.UnixNano()}, stringsToAny(runIDs)...)...)
 	if err != nil {
 		return nil, err
@@ -349,7 +354,7 @@ const maxExpiredClaimRunsPerPass = 500
 func expiredClaimRunsTx(ctx context.Context, tx *storeTx, now time.Time) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT run_id FROM nodes
  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-   AND lease_expires_at < ? AND `+nodeNotDone+` ORDER BY run_id LIMIT ?`, now.UnixNano(), maxExpiredClaimRunsPerPass)
+   AND lease_expires_at < ? AND kind = '' AND `+nodeNotDone+` ORDER BY run_id LIMIT ?`, now.UnixNano(), maxExpiredClaimRunsPerPass)
 	if err != nil {
 		return nil, err
 	}

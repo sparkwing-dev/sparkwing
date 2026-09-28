@@ -39,6 +39,7 @@ const (
 	runStatusRunning   = "running"
 	runStatusFailed    = "failed"
 	runStatusCancelled = "cancelled"
+	runStatusSuccess   = "success"
 )
 
 const runTerminalIn = `status IN ('success','failed','cancelled')`

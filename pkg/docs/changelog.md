@@ -38,8 +38,8 @@ unlock.
   retry-budget columns and the run's accepted plan generation. `POST
   /api/v1/runs/{id}/plan` with a plan claim's token validates the plan (at
   most 1,000 nodes and 4 MiB, node ID format, dependency and recovery
-  references, no cycles, no plan-level concurrency, dynamic fan-out, approval
-  or `when_runner` nodes, no modifier it does not know, and no `box`-scoped
+  references, no cycles, no plan-level concurrency, dynamic fan-out or
+  `when_runner` nodes, no modifier it does not know, and no `box`-scoped
   node concurrency), merges the pipeline's `requires` into every node's runner
   labels, clamps cores, memory, retries and backoff to their ceilings, and in
   one commit inserts the nodes, finishes the planning node and releases the
@@ -55,6 +55,33 @@ unlock.
   A bearer without a claim token still reaches the plan-snapshot upload at
   `POST /api/v1/runs/{id}/plan`, and no run uses the new path yet. Controllers
   older than schema 77 keep working against a migrated database.
+- **controller + store:** Controller-dispatched runs gain cancellation,
+  approval gates and child-run bookkeeping. Schema 78 adds the run's
+  admission state (`planning` until its plan is accepted, then `admitted`) and
+  cancel request, a node's cancel request and approval settings, and
+  `child_invocations`. `POST /api/v1/runs/{id}/cancel` on such a run needs no
+  trigger holder: in one commit it cancels every node no claim holds,
+  including open approval gates, whose approvals are resolved `denied`, and
+  marks the claimed ones. From then on the run releases and retries nothing,
+  its claims are refused data but may still report, an attempt reported in
+  that window keeps its true outcome, no node of the run is claimed again, and
+  the run finishes `cancelled`, also when a claimed pod vanishes. On these
+  runs an expired claim is a failed attempt: the node is retried within its
+  retry budget (a lost planning claim is planned once more) and the run
+  settles, instead of the claim being cleared or failed on its own. A
+  plan may now hold approval gates (`message`, `timeout_ms`, `on_timeout`),
+  but not one with a SkipIf. A gate opens once its upstreams finish, is never
+  handed to a runner, and is decided once: a person's resolution and the
+  controller's timeout race under the run's lock and the loser writes nothing
+  (the resolve route answers 409). A timed-out gate follows its `on_timeout`
+  policy, so `approve` succeeds instead of failing. A child run still planning
+  keeps its parent's node timeout paused instead of reading as admitted, and
+  a child run started from a claim is keyed by its invocation (the claim's
+  run, node and generation plus the call's ordinal) and its pipeline and
+  arguments: the same invocation gets the same child, the same invocation
+  with other inputs is refused, and a later attempt reuses an earlier child
+  with the same inputs only while it is queued, running or succeeded.
+  Controllers older than schema 78 keep working against a migrated database.
 - **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads
   one source bundle directly to S3 before creating a run, including from a Git
   checkout with no cloud-reachable origin. The bundle counts against the team's

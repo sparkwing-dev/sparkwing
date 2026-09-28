@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 77
+const expectedSchemaVersion = 78
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2100,6 +2100,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimTokensMigration(ctx, tx, false)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, false)
+	case 78:
+		return applyRunControlMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2534,6 +2536,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimTokensMigration(ctx, tx, true)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, true)
+	case 78:
+		return applyRunControlMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3545,6 +3549,9 @@ type Run struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// ParentRunID identifies the spawning RunAndAwait caller.
 	ParentRunID string `json:"parent_run_id,omitempty"`
+	// Admission is a controller-dispatched run's admission state, one of
+	// the RunAdmission constants; it is empty for any other run.
+	Admission string `json:"admission,omitempty"`
 	// DeclaredRepo is the repository the submitter typed (e.g.
 	// "my-app"). It is metadata for display and filtering, and it
 	// grants nothing, because no step proves the submitter owns the
@@ -3934,7 +3941,7 @@ func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error {
 
 // safety: every run read shares this list, because a column added to runs
 // has to reach each of them and scanRun together or the scan misaligns.
-const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at`
+const runColumns = `id, pipeline, status, trigger_source, git_branch, git_sha, args_json, plan_json, error, created_at, started_at, finished_at, parent_run_id, declared_repo, repo_url, github_owner, github_repo, retry_of, retried_as, retry_source, retry_cause_node_id, retry_avoid_coordinator_id, retry_avoid_executor_kind, retry_avoid_executor_id, retry_avoid_until, replay_of_run_id, replay_of_node_id, invocation_json, annotation_count, top_annotation, annotations_json, last_heartbeat_at, admission`
 
 // GetRun fetches a single run by ID.
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
@@ -4304,7 +4311,7 @@ func scanRun(rs rowScanner) (*Run, error) {
 		&r.RetryAvoidExecutorID, &retryAvoidUntilNS,
 		&r.ReplayOfRunID, &r.ReplayOfNodeID, &invocationJSON,
 		&r.AnnotationCount, &r.TopAnnotation, &annotationsJSON,
-		&heartbeatNS)
+		&heartbeatNS, &r.Admission)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, notFound("run", "")
@@ -5973,7 +5980,7 @@ func (s *Store) awardScannedNode(ctx context.Context, candidate claimCandidate, 
 		        credit_charged_through = 0,
 		        placement_reason = ?, claim_generation = claim_generation + 1
 		  WHERE run_id = ? AND node_id = ? AND claimed_by IS NULL`+readyClause+`
-		    AND `+nodeNotDone+`
+		    AND `+nodeNotDone+nodeRunNotCancelled+`
 		    AND required_coordinator_id = '' AND required_executor_location = ''
 		    AND `+nodeExecutionUnsealed+teamClause,
 		awardArgs...,
@@ -6300,8 +6307,11 @@ func (s *Store) PrincipalHoldsProfileClaim(ctx context.Context, key string, clai
 }
 
 // ReapExpiredNodeClaims clears claimed_by/lease_expires_at on expired
-// claims; ready_at is left intact. Returns reaped pairs.
-func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) {
+// claims; ready_at is left intact. An expired claim on a controller-dispatched
+// run ends as a lost attempt instead, through [Store.ReportAttempt]'s retry
+// and settle, in a pass of its own after this one. Returns reaped pairs.
+func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error) {
+	defer func() { out = append(out, s.expireDispatchClaimsLogged(ctx, time.Now())...) }()
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -6315,7 +6325,7 @@ func (s *Store) ReapExpiredNodeClaims(ctx context.Context) ([][2]string, error) 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT run_id, node_id, credit_charged_through, lease_expires_at, claim_token_prefix FROM nodes
 		  WHERE claimed_by IS NOT NULL AND lease_expires_at IS NOT NULL
-		    AND lease_expires_at < ? AND `+nodeNotDone+s.forUpdateSkipLocked(),
+		    AND lease_expires_at < ? AND kind = '' AND `+nodeNotDone+s.forUpdateSkipLocked(),
 		now)
 	if err != nil {
 		return nil, err
@@ -7655,6 +7665,9 @@ func (s *Store) HeartbeatTrigger(ctx context.Context, id string, lease time.Dura
 // two statements leaves the flag on a claimed trigger, which is the
 // cooperative path again.
 func (s *Store) RequestCancel(ctx context.Context, id string) error {
+	if handled, err := s.requestControllerRunCancel(ctx, id, time.Now()); handled || err != nil {
+		return err
+	}
 	cancelled, err := s.CancelPendingTrigger(ctx, id)
 	if err != nil {
 		return err
@@ -7761,6 +7774,10 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error {
 func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) {
 	now := time.Now()
 	nowNS := now.UnixNano()
+	controlled, err := s.timeOutControllerApprovals(ctx, now)
+	if err != nil {
+		return controlled, err
+	}
 
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -7773,7 +7790,9 @@ func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) 
 		WHERE resolved_at IS NULL
 		  AND timeout_ms > 0
 		  AND requested_at + (timeout_ms * 1000000) < ?
-	`, nowNS)
+		  AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.team = approvals.team
+		      AND n.run_id = approvals.run_id AND n.node_id = approvals.node_id AND n.kind = ?)
+	`, nowNS, nodeKindApproval)
 	if err != nil {
 		return nil, err
 	}
@@ -7791,7 +7810,7 @@ func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) 
 		return nil, err
 	}
 	if len(pairs) == 0 {
-		return nil, nil
+		return controlled, nil
 	}
 
 	for _, p := range pairs {
@@ -7816,7 +7835,7 @@ func (s *Store) reapTimedOutApprovals(ctx context.Context) ([][2]string, error) 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return pairs, nil
+	return append(controlled, pairs...), nil
 }
 
 func (s *Store) reapStalePendingRuns(ctx context.Context, grace time.Duration, reason string) ([]string, error) {
@@ -8740,6 +8759,11 @@ SELECT run_id, node_id, requested_at, message, timeout_ms, on_timeout,
 // ResolveApproval stamps resolution on a pending row.
 // ErrNotFound when missing; ErrLockHeld when already resolved.
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error) {
+	if handled, err := s.resolveControllerApproval(ctx, runID, nodeID, resolution, approver, comment); err != nil {
+		return nil, err
+	} else if handled {
+		return s.GetApproval(ctx, runID, nodeID)
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err

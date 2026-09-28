@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	nodeKindPlan = "plan"
-	nodeKindWork = "work"
+	nodeKindPlan     = "plan"
+	nodeKindWork     = "work"
+	nodeKindApproval = "approval"
 )
 
 const (
@@ -55,16 +56,20 @@ var controllerDispatchRunCols = map[string]string{
 }
 
 func applyControllerDispatchMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	if !postgres {
-		if err := ensureColumnsSQLite(ctx, tx, "nodes", controllerDispatchNodeCols); err != nil {
-			return err
-		}
-		return ensureColumnsSQLite(ctx, tx, "runs", controllerDispatchRunCols)
-	}
-	pg := strings.NewReplacer("INTEGER", "BIGINT", "BLOB", "BYTEA")
-	for table, cols := range map[string]map[string]string{
+	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
 		"nodes": controllerDispatchNodeCols, "runs": controllerDispatchRunCols,
-	} {
+	})
+}
+
+func addDispatchColumnsTx(ctx context.Context, tx *storeTx, postgres bool, tables map[string]map[string]string) error {
+	pg := strings.NewReplacer("INTEGER", "BIGINT", "BLOB", "BYTEA")
+	for table, cols := range tables {
+		if !postgres {
+			if err := ensureColumnsSQLite(ctx, tx, table, cols); err != nil {
+				return err
+			}
+			continue
+		}
 		converted := make(map[string]string, len(cols))
 		for name, def := range cols {
 			converted[name] = pg.Replace(def)
@@ -77,20 +82,22 @@ func applyControllerDispatchMigration(ctx context.Context, tx *storeTx, postgres
 }
 
 type settleNode struct {
-	id, status, outcome, onFailureOf string
-	deps                             []string
-	continueOnError, optional        bool
-	waiting                          bool
+	id, kind, status, outcome, onFailureOf string
+	deps                                   []string
+	continueOnError, optional              bool
+	waiting, unclaimed                     bool
+	approval                               []byte
 }
 
 // safety: the caller holds the run row (lockDispatchRunTx) and calls this in the
 // transaction that made the change, so no transition is visible without the
 // releases, skips, cancels and run verdict it implies; with nothing due it
-// writes nothing.
+// writes nothing. On a cancel-requested run it cancels only unclaimed nodes.
 func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now time.Time) error {
 	var status string
-	err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`,
-		string(team), runID).Scan(&status)
+	var cancelAt sql.NullInt64
+	err := tx.QueryRowContext(ctx, `SELECT status, cancel_requested_at FROM runs WHERE team = ? AND id = ?`,
+		string(team), runID).Scan(&status, &cancelAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return notFound("run", runID)
 	}
@@ -104,11 +111,30 @@ func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now tim
 	if err != nil {
 		return err
 	}
+	if cancelAt.Valid {
+		for _, n := range nodes {
+			if n.status == NodeStatusApprovalPending || (n.status == nodeStatusPending && n.unclaimed) {
+				if err := finishUnrunNodeTx(ctx, tx, team, runID, n.id, outcomeCancelled, "run-cancelled", now); err != nil {
+					return err
+				}
+				// safety: a cancelled gate is resolved too, so it never waits in
+				// the pending-approvals list or reaches the timeout reaper.
+				if n.status == NodeStatusApprovalPending {
+					if err := stampApprovalTx(ctx, tx, team, runID, n.id, ApprovalResolutionDenied,
+						approvalControllerActor, "run cancelled", now); err != nil {
+						return err
+					}
+				}
+				n.status, n.outcome = nodeStatusDone, outcomeCancelled
+			}
+		}
+		return finalizeSettledRunTx(ctx, tx, team, runID, nodes, true)
+	}
 	byID := make(map[string]*settleNode, len(nodes))
 	for _, n := range nodes {
 		byID[n.id] = n
 	}
-	var ready []string
+	var ready []*settleNode
 	for changed := true; changed; {
 		changed = false
 		for _, n := range nodes {
@@ -120,7 +146,7 @@ func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now tim
 			case "":
 				continue
 			case nodeStatusPending:
-				ready = append(ready, n.id)
+				ready = append(ready, n)
 			default:
 				if err := finishUnrunNodeTx(ctx, tx, team, runID, n.id, verdict, reason, now); err != nil {
 					return err
@@ -131,19 +157,25 @@ func settleTx(ctx context.Context, tx *storeTx, team Team, runID string, now tim
 			n.waiting = false
 		}
 	}
-	for _, id := range ready {
+	for _, n := range ready {
+		if n.kind == nodeKindApproval {
+			if err := openApprovalTx(ctx, tx, team, runID, n, now); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET ready_at = ?, placement_hold_from = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND status = ? AND ready_at IS NULL AND claimed_by IS NULL`,
-			now.UnixNano(), now.UnixNano(), string(team), runID, id, nodeStatusPending); err != nil {
+			now.UnixNano(), now.UnixNano(), string(team), runID, n.id, nodeStatusPending); err != nil {
 			return err
 		}
 	}
-	return finalizeSettledRunTx(ctx, tx, team, runID, nodes)
+	return finalizeSettledRunTx(ctx, tx, team, runID, nodes, false)
 }
 
 func loadSettleNodesTx(ctx context.Context, tx *storeTx, team Team, runID string) ([]*settleNode, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT node_id, status, outcome, deps_json, on_failure_of,
-       continue_on_error, optional, ready_at IS NULL AND claimed_by IS NULL
+	rows, err := tx.QueryContext(ctx, `SELECT node_id, kind, status, outcome, deps_json, on_failure_of,
+       continue_on_error, optional, ready_at IS NULL, claimed_by IS NULL, approval_json
   FROM nodes WHERE team = ? AND run_id = ? ORDER BY seq, node_id`, string(team), runID)
 	if err != nil {
 		return nil, err
@@ -154,8 +186,8 @@ func loadSettleNodesTx(ctx context.Context, tx *storeTx, team Team, runID string
 		n := &settleNode{}
 		var deps []byte
 		var unreleased bool
-		if err := rows.Scan(&n.id, &n.status, &n.outcome, &deps, &n.onFailureOf,
-			&n.continueOnError, &n.optional, &unreleased); err != nil {
+		if err := rows.Scan(&n.id, &n.kind, &n.status, &n.outcome, &deps, &n.onFailureOf,
+			&n.continueOnError, &n.optional, &unreleased, &n.unclaimed, &n.approval); err != nil {
 			return nil, err
 		}
 		if len(deps) > 0 {
@@ -163,7 +195,7 @@ func loadSettleNodesTx(ctx context.Context, tx *storeTx, team Team, runID string
 				return nil, fmt.Errorf("node %s/%s deps: %w", runID, n.id, err)
 			}
 		}
-		n.waiting = n.status == nodeStatusPending && unreleased
+		n.waiting = n.status == nodeStatusPending && unreleased && n.unclaimed
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -197,12 +229,13 @@ func releaseVerdict(n *settleNode, byID map[string]*settleNode) (string, string)
 
 func finishUnrunNodeTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, outcome, reason string, now time.Time) error {
 	_, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, outcome = ?, error = ?, finished_at = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
-		nodeStatusDone, outcome, reason, now.UnixNano(), string(team), runID, nodeID, nodeStatusPending)
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status IN (?, ?) AND claimed_by IS NULL`,
+		nodeStatusDone, outcome, reason, now.UnixNano(), string(team), runID, nodeID,
+		nodeStatusPending, NodeStatusApprovalPending)
 	return err
 }
 
-func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID string, nodes []*settleNode) error {
+func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID string, nodes []*settleNode, cancelRequested bool) error {
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -227,6 +260,8 @@ func finalizeSettledRunTx(ctx context.Context, tx *storeTx, team Team, runID str
 	}
 	status, msg := "success", ""
 	switch {
+	case cancelRequested:
+		status, msg = runStatusCancelled, "cancel requested"
 	case len(failed) > 0 || len(cancelled) > 0:
 		status = runStatusFailed
 		var parts []string
@@ -254,10 +289,10 @@ func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string
 	return err
 }
 
-// safety: the store's lock order is executor eligibility, trigger, run, node
-// rows, then the credit ledger; a transaction that needs two of them takes them
-// in that order, so siblings serialize on the run and nothing deadlocks. A path
-// that locks a node and then touches its run takes this lock first.
+// safety: lock order is executor eligibility, trigger, run, node rows, free
+// tier, credit ledger, so siblings serialize on the run and nothing deadlocks.
+// A charged event locks its node before free-tier admission; a trigger insert
+// admitting first locks only rows it creates. Lock a node's run before the node.
 func lockTeamRunRowTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),

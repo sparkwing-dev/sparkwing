@@ -46,6 +46,15 @@ func childPlanAdmissionScan(ctx context.Context, state StateBackend, concurrency
 		}
 		return childPlanAdmission{Status: childPlanAdmissionUnknown}, err
 	}
+	// safety: a controller-dispatched child has an empty plan until its plan
+	// is accepted, which would read as admitted with no keys; until then it
+	// is queued, so the parent's timeout stays paused while it plans.
+	if run.Admission == store.RunAdmissionPlanning {
+		if run.Status != "pending" && run.Status != "running" {
+			return childPlanAdmission{Status: childPlanAdmissionUnknown}, nil
+		}
+		return childPlanAdmission{Status: childPlanAdmissionQueued, QueuedAt: run.CreatedAt}, nil
+	}
 	keys, err := planConcurrencyKeys(run.PlanSnapshot)
 	if err != nil {
 		return childPlanAdmission{Status: childPlanAdmissionUnknown}, err

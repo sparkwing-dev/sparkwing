@@ -1020,7 +1020,7 @@ SELECT executor_name, membership_id, claim_principal, claim_token_prefix, holder
 	   required_coordinator_id = CASE WHEN required_coordinator_id = '' THEN ? ELSE required_coordinator_id END,
 	   required_executor_location = CASE WHEN required_executor_location = '' THEN ? ELSE required_executor_location END
  WHERE run_id = ? AND node_id = ? AND ready_at IS NOT NULL
-	   AND claimed_by IS NULL AND `+nodeNotDone+`
+	   AND claimed_by IS NULL AND `+nodeNotDone+nodeRunNotCancelled+`
 	   AND (required_coordinator_id = '' OR required_coordinator_id = ?)
 	   AND (required_executor_location = '' OR (required_executor_location != 'unknown' AND required_executor_location = ?))`,
 		item.HolderID, item.Claimant.Principal, item.Claimant.TokenPrefix,

@@ -231,22 +231,24 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 
 // safety: the run's own row decides, and a run with no row reads as cancelled,
 // so a run no trigger names can never pass as "not cancelled" through a NULL.
-// Schema 78 moves the request onto runs and nodes; this is the one read to switch.
+// A cancel request lands on the run for a controller-dispatched run and on its
+// trigger for one a trigger holder drives; either one counts.
 func claimRunCancelled(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row,
 	team Team, runID string,
 ) (bool, error) {
 	var status string
-	var requested sql.NullInt64
-	err := queryRow(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
+	var runRequested, triggerRequested sql.NullInt64
+	err := queryRow(ctx, `SELECT r.status, r.cancel_requested_at, t.cancel_requested_at FROM runs r
   LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
- WHERE r.team = ? AND r.id = ?`, string(team), runID).Scan(&status, &requested)
+ WHERE r.team = ? AND r.id = ?`, string(team), runID).Scan(&status, &runRequested, &triggerRequested)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return requested.Valid || (status != runStatusPending && status != runStatusRunning), nil
+	return runRequested.Valid || triggerRequested.Valid ||
+		(status != runStatusPending && status != runStatusRunning), nil
 }
 
 // ClaimResultCommit is the result a live claim is about to commit, identified
