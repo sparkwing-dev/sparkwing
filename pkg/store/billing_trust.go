@@ -233,6 +233,11 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	if before, err = billingStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
 	}
+	// safety: a revocation usually answers a chargeback, so only a grant that
+	// names no limit restores trust; raising a limit never does it in passing.
+	if before.Trust == BillingTrustRevoked && c.LimitCents > 0 {
+		return before, after, fmt.Errorf("%w: the team's trust is revoked; restore trust before setting a limit", ErrInvalidInput)
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_trust = ?, billing_trust_by = ?, billing_trust_at = ?,
 	    billing_trust_reason = ?, billing_purchase_limit_cents = ? WHERE name = ?`,
 		c.Trust, c.Actor, now.UnixNano(), c.Reason, c.LimitCents, string(t.team)); err != nil {

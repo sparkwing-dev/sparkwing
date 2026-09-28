@@ -97,9 +97,22 @@ describe("review", () => {
     );
     assert.match(
       lib.actionEffect(team, "unfreeze", ""),
-      /Every hold on Acme is released \(2 now\)/,
+      /The 1 operator hold\(s\) on Acme are released\. 1 dispute hold\(s\) stay/,
     );
     assert.match(lib.actionEffect(team, "freeze", ""), /loses automatic trust/);
+  });
+
+  it("offers no limit on a revoked team and releases only operator holds", () => {
+    const revoked = { ...team, billing: { ...team.billing, trust: "revoked" as const } };
+    assert.deepEqual(lib.availableActions(revoked), [
+      "grant-trust",
+      "reset-trust",
+      "grant-credits",
+      "unfreeze",
+    ]);
+    assert.ok(lib.availableActions(team).includes("set-limit"));
+    const disputed = { ...team, holds: ["dp_1"] };
+    assert.deepEqual(lib.availableActions(disputed).slice(-1), ["freeze"]);
   });
 
   it("truncates the balance to cents", () => {

@@ -21,6 +21,7 @@ import {
   actionLabels,
   actionProblem,
   actionRequest,
+  availableActions,
   balanceCents,
   getOperatorTeam,
   needsAmount,
@@ -189,18 +190,6 @@ function Fact({
       <dd>{children}</dd>
     </div>
   );
-}
-
-function availableActions(team: OperatorTeam): ActionKind[] {
-  const b = team.billing;
-  const out: ActionKind[] = [];
-  if (b.trust !== "granted") out.push("grant-trust");
-  if (b.trust !== "revoked") out.push("revoke-trust");
-  if (b.trust !== "automatic") out.push("reset-trust");
-  out.push("set-limit");
-  if (b.limit_override_cents) out.push("clear-limit");
-  out.push("grant-credits", team.frozen ? "unfreeze" : "freeze");
-  return out;
 }
 
 function ActionForm({

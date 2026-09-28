@@ -6911,6 +6911,8 @@ paths:
   /api/v1/operator/session:
     get:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Confirm the caller is a listed operator signed in with its own account.
       description: >-
@@ -6932,6 +6934,8 @@ paths:
   /api/v1/operator/teams:
     get:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Find up to 20 teams by slug, display name or owner email.
       parameters:
@@ -6962,6 +6966,8 @@ paths:
       - {name: team, in: path, required: true, schema: {type: string}}
     get:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Read a team's balance, billing trust, holds and recent business events.
       responses:
@@ -7000,10 +7006,12 @@ paths:
       - {name: team, in: path, required: true, schema: {type: string}}
     post:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Hold a team's cloud usage.
       description: >-
-        Adds an operator hold, which stops the team's metered claims until it is released. Like a dispute hold, it also ends the team's automatic billing trust. Recorded as an operator.team_frozen business event with the operator and reason.
+        Adds an operator hold, which stops the team's metered claims until it is released. Like a dispute hold, it also ends the team's automatic billing trust. The hold and its team.frozen business event, naming the operator and reason, commit together.
       requestBody:
         required: true
         content:
@@ -7030,10 +7038,12 @@ paths:
       - {name: team, in: path, required: true, schema: {type: string}}
     post:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Grant a team free credits.
       description: >-
-        Adds a free grant of amount_cents, up to $5,000, within the team balance cap. A repeated key answers the grant it already made. Recorded as an operator.credit_granted business event with the operator and reason.
+        Adds a free grant of amount_cents, up to $5,000, within the team balance cap. A repeated key answers the grant it already made. The grant and its credit.granted business event, naming the operator and reason, commit together.
       requestBody:
         required: true
         content:
@@ -7041,7 +7051,7 @@ paths:
             schema:
               x-sparkwing-go-partial: pkg/controller.operatorActionReq
               type: object
-              required: [reason, amount_cents]
+              required: [reason, amount_cents, key]
               properties:
                 reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
                 amount_cents: {type: integer, format: int64}
@@ -7063,10 +7073,12 @@ paths:
       - {name: team, in: path, required: true, schema: {type: string}}
     post:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Grant, revoke or reset a team's billing trust from the operator console.
       description: >-
-        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor.
+        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor. A limit on a revoked team is refused until trust is granted without one.
       requestBody:
         required: true
         content:
@@ -7095,10 +7107,12 @@ paths:
       - {name: team, in: path, required: true, schema: {type: string}}
     post:
       x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
       tags: [operator]
       summary: Release a team's holds.
       description: >-
-        Releases the hold named by dispute_id, or every hold when it is empty. Recorded as an operator.team_unfrozen business event with the operator and reason.
+        Releases every hold the operator console placed, and never a payment dispute's hold. Each release and its team.unfrozen business event, naming the operator and reason, commit together.
       requestBody:
         required: true
         content:
@@ -7109,7 +7123,6 @@ paths:
               required: [reason]
               properties:
                 reason: {type: string, description: "Why, up to 500 characters; recorded with the action."}
-                dispute_id: {type: string}
       responses:
         "200":
           description: The team's holds after the change.
@@ -7136,7 +7149,7 @@ components:
       name: Authorization
       description: |
         `Authorization: Session <session-id>`. Used only by the
-        dashboard's browser flow after `POST /api/v1/auth/login`.
+        dashboard's browser flow after a password or Google/GitHub sign-in.
   parameters:
     RunID:
       in: path

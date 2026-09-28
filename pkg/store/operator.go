@@ -5,15 +5,6 @@ import (
 	"strings"
 )
 
-// Business event kinds for what an operator does to a team from the
-// operator console. Each carries the operator as its actor and the reason
-// they gave.
-const (
-	BusinessEventOperatorCreditGranted = "operator.credit_granted"
-	BusinessEventOperatorTeamFrozen    = "operator.team_frozen"
-	BusinessEventOperatorTeamUnfrozen  = "operator.team_unfrozen"
-)
-
 // TeamMatch is one team a search found, with its owners' email addresses.
 type TeamMatch struct {
 	Slug        Team
@@ -60,22 +51,4 @@ func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err e
 		}
 	}
 	return out, rows.Err()
-}
-
-// RecordOperatorEvent records ev on t in a transaction of its own.
-func (t *Tenant) RecordOperatorEvent(ctx context.Context, ev BusinessEvent) (err error) {
-	subject, err := newCreditID("op")
-	if err != nil {
-		return err
-	}
-	ev.Team, ev.SubjectID = t.team, subject
-	tx, err := t.s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if err := RecordBusinessEvent(tx, ev); err != nil {
-		return err
-	}
-	return tx.Commit()
 }

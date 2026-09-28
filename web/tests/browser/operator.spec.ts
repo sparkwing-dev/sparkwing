@@ -80,6 +80,9 @@ test("an action is sent only after its confirmation names the team and effect", 
   const seen = await mockOperator(page);
   await page.goto("/operator?team=acme");
   await page.getByLabel("Action").selectOption({ label: "Grant credits" });
+  await expect(
+    page.getByLabel("Action").locator("option", { hasText: "Set limit override" }),
+  ).toHaveCount(0);
   await page.getByLabel("Amount in US dollars").fill("20");
   const review = page.getByRole("button", { name: "Review" });
   await expect(review).toBeDisabled();

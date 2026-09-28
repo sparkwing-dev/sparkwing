@@ -674,6 +674,8 @@ type CreditGrantRequest struct {
 	Reference   string
 	Reverses    string
 	CreatedBy   string
+	// Reason is why an operator made the grant, recorded on its business event.
+	Reason string
 	// Checkout names the payment session a paid grant settles, so the
 	// checkout it opened stops counting against the balance cap.
 	Checkout string
@@ -863,7 +865,7 @@ func (s *Store) recordCreditGrant(
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
-	if err := recordGrantEventTx(tx, grant, req.Checkout); err != nil {
+	if err := recordGrantEventTx(tx, grant, req.Checkout, req.Reason); err != nil {
 		return CreditGrantResult{}, err
 	}
 	if req.Kind == CreditGrantPaid {
@@ -889,7 +891,7 @@ func (s *Store) recordCreditGrant(
 
 // safety: a paid grant is the checkout's payment arriving, so it is recorded
 // as the checkout paid rather than as a grant.
-func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout string) error {
+func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout, reason string) error {
 	kind := BusinessEventCreditGranted
 	switch g.Kind {
 	case CreditGrantPaid:
@@ -903,6 +905,9 @@ func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout string) error {
 	}
 	if checkout != "" {
 		attrs["session_id"] = checkout
+	}
+	if reason != "" {
+		attrs["reason"] = reason
 	}
 	return RecordBusinessEvent(tx, BusinessEvent{
 		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,

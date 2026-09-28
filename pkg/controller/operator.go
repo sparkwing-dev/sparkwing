@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -138,8 +137,7 @@ type operatorActionReq struct {
 	Reason      string `json:"reason"`
 	AmountCents int64  `json:"amount_cents,omitempty"`
 	// safety: a retried grant carries the same key and finds the grant it already made.
-	Key       string `json:"key,omitempty"`
-	DisputeID string `json:"dispute_id,omitempty"`
+	Key string `json:"key,omitempty"`
 }
 
 func decodeOperatorAction(w http.ResponseWriter, r *http.Request) (operatorActionReq, bool) {
@@ -155,16 +153,6 @@ func decodeOperatorAction(w http.ResponseWriter, r *http.Request) (operatorActio
 	return req, true
 }
 
-// safety: the action has already committed when this runs, so a failure to
-// record it is logged rather than answered as a failure the operator would retry.
-func (s *Server) recordOperatorEvent(r *http.Request, t *store.Tenant, kind, reason string, attrs map[string]any) {
-	attrs["reason"] = reason
-	ev := store.BusinessEvent{Kind: kind, Actor: operatorActor(r), At: time.Now(), Attrs: attrs}
-	if err := t.RecordOperatorEvent(r.Context(), ev); err != nil {
-		s.logger.Error("operator action applied but not recorded", "team", string(t.Team()), "kind", kind, "err", err)
-	}
-}
-
 func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeOperatorAction(w, r)
 	if !ok {
@@ -174,17 +162,17 @@ func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("amount_cents must be 1 to %d", store.MaxPurchaseLimitCents))
 		return
 	}
+	if req.Key = strings.TrimSpace(req.Key); req.Key == "" {
+		writeError(w, http.StatusBadRequest, errors.New("key is required, so a retried grant grants once"))
+		return
+	}
 	t, ok := s.namedTenant(w, r, r.PathValue("team"))
 	if !ok {
 		return
 	}
-	ref := ""
-	if key := strings.TrimSpace(req.Key); key != "" {
-		ref = "console:" + key
-	}
 	res, err := t.RecordCreditGrant(r.Context(), store.CreditGrantRequest{
 		Kind: store.CreditGrantFree, AmountMicro: req.AmountCents * store.MicroCreditsPerCent,
-		Reference: ref, CreatedBy: operatorActor(r),
+		Reference: "console:" + req.Key, CreatedBy: operatorActor(r), Reason: req.Reason,
 	})
 	if s.writeBalanceCapRefusal(w, err) {
 		return
@@ -192,10 +180,6 @@ func (s *Server) handleOperatorGrant(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
-	}
-	if res.Created {
-		s.recordOperatorEvent(r, t, store.BusinessEventOperatorCreditGranted, req.Reason,
-			map[string]any{"amount_cents": req.AmountCents, "grant_id": res.Grant.ID})
 	}
 	writeJSON(w, http.StatusCreated, creditGrantToJSON(res.Grant))
 }
@@ -209,12 +193,10 @@ func (s *Server) handleOperatorFreeze(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	hold := "operator-" + strings.ToLower(rand.Text())
-	if _, err := s.store.HoldTeamForDispute(r.Context(), t.Team(), hold, "", req.Reason, time.Now()); err != nil {
+	if _, err := t.HoldByOperator(r.Context(), operatorActor(r), req.Reason, time.Now()); err != nil {
 		s.writeInternalError(w, r, "operator freeze", err)
 		return
 	}
-	s.recordOperatorEvent(r, t, store.BusinessEventOperatorTeamFrozen, req.Reason, map[string]any{"hold": hold})
 	s.writeOperatorFreeze(w, r, t)
 }
 
@@ -227,14 +209,9 @@ func (s *Server) handleOperatorUnfreeze(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	n, err := s.store.ReleaseCreditFreezes(r.Context(), t.Team(), req.DisputeID, time.Now())
-	if err != nil {
+	if _, err := t.ReleaseOperatorHolds(r.Context(), operatorActor(r), req.Reason, time.Now()); err != nil {
 		s.writeInternalError(w, r, "operator unfreeze", err)
 		return
-	}
-	if n > 0 {
-		s.recordOperatorEvent(r, t, store.BusinessEventOperatorTeamUnfrozen, req.Reason,
-			map[string]any{"hold": req.DisputeID, "released": n})
 	}
 	s.writeOperatorFreeze(w, r, t)
 }

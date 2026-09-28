@@ -90,7 +90,7 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 			grant.CreatedBy, now.UnixNano()); err != nil {
 			return CreditReversal{}, fmt.Errorf("credits: insert reversal: %w", err)
 		}
-		if err := recordGrantEventTx(tx, grant, ""); err != nil {
+		if err := recordGrantEventTx(tx, grant, "", ""); err != nil {
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
@@ -143,6 +143,28 @@ var ErrDisputeConflict = errors.New("credits: the dispute is already held for an
 // returns [ErrUnknownTeam] for a team that is not registered.
 func (s *Store) HoldTeamForDispute(
 	ctx context.Context, team Team, disputeID, paymentID, reason string, now time.Time,
+) (bool, error) {
+	return s.holdTeam(ctx, team, disputeID, paymentID, reason, "", now)
+}
+
+// OperatorHoldPrefix begins the id of every hold an operator places by hand,
+// which keeps those holds apart from a payment dispute's.
+const OperatorHoldPrefix = "operator-"
+
+// HoldByOperator holds t on actor's word and returns the hold's id. The hold
+// and its business event, naming actor and reason, commit together.
+func (t *Tenant) HoldByOperator(ctx context.Context, actor, reason string, now time.Time) (string, error) {
+	id, err := newCreditID("hold")
+	if err != nil {
+		return "", err
+	}
+	id = OperatorHoldPrefix + id
+	_, err = t.s.holdTeam(ctx, t.team, id, "", reason, actor, now)
+	return id, err
+}
+
+func (s *Store) holdTeam(
+	ctx context.Context, team Team, disputeID, paymentID, reason, actor string, now time.Time,
 ) (_ bool, err error) {
 	team = NormalizeTeam(team)
 	disputeID, paymentID = strings.TrimSpace(disputeID), strings.TrimSpace(paymentID)
@@ -178,9 +200,14 @@ func (s *Store) HoldTeamForDispute(
 		disputeID, string(team), paymentID, truncate(reason, 500), now.UnixNano()); err != nil {
 		return false, err
 	}
+	attrs := map[string]any{"payment_id": paymentID}
+	// safety: a dispute's reason is the card holder's free text and stays off
+	// the event; an operator's reason is the record of their decision.
+	if actor != "" {
+		attrs["reason"] = reason
+	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID,
-		Attrs: map[string]any{"payment_id": paymentID},
+		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID, Actor: actor, Attrs: attrs,
 	}); err != nil {
 		return false, err
 	}
@@ -215,7 +242,20 @@ func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, st
 // ReleaseCreditFreezes releases holds on team and reports how many it
 // released: the one hold of disputeID, or every hold when disputeID is empty.
 // [Store.DisputeTeam] finds the team of a dispute named alone.
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (_ int64, err error) {
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error) {
+	return s.releaseFreezes(ctx, team, disputeID, false, "", "", now)
+}
+
+// ReleaseOperatorHolds releases every hold an operator placed on t, and never
+// a payment dispute's. Each release and its business event, naming actor and
+// reason, commit together.
+func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error) {
+	return t.s.releaseFreezes(ctx, t.team, "", true, actor, reason, now)
+}
+
+func (s *Store) releaseFreezes(
+	ctx context.Context, team Team, disputeID string, operatorOnly bool, actor, reason string, now time.Time,
+) (_ int64, err error) {
 	team = NormalizeTeam(team)
 	if team == "" {
 		return 0, errors.New("credits: a release names the team")
@@ -224,6 +264,9 @@ func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID s
 	args := []any{now.UnixNano(), string(team)}
 	if disputeID = strings.TrimSpace(disputeID); disputeID != "" {
 		query, args = query+` AND dispute_id = ?`, append(args, disputeID)
+	}
+	if operatorOnly {
+		query, args = query+` AND dispute_id LIKE ?`, append(args, OperatorHoldPrefix+"%")
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -234,9 +277,13 @@ func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID s
 	if err != nil {
 		return 0, err
 	}
+	var releaseAttrs map[string]any
+	if actor != "" {
+		releaseAttrs = map[string]any{"reason": reason}
+	}
 	for _, id := range released {
 		if err := RecordBusinessEvent(tx, BusinessEvent{
-			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id,
+			At: now, Team: team, Kind: BusinessEventTeamUnfrozen, SubjectID: id, Actor: actor, Attrs: releaseAttrs,
 		}); err != nil {
 			return 0, err
 		}

@@ -113,9 +113,30 @@ export function actionEffect(
       return `${name} receives ${fmtCents(cents)} of free credit.`;
     case "freeze":
       return `${name}'s cloud runs stop starting until it is unfrozen, and it loses automatic trust for good.`;
-    case "unfreeze":
-      return `Every hold on ${name} is released (${team.holds.length} now), so its cloud runs start again.`;
+    case "unfreeze": {
+      const disputes = team.holds.length - operatorHolds(team).length;
+      return `The ${operatorHolds(team).length} operator hold(s) on ${name} are released.${disputes ? ` ${disputes} dispute hold(s) stay, so it stays frozen.` : " Its cloud runs start again."}`;
+    }
   }
+}
+
+// operatorHolds are the holds the console placed; a payment dispute's hold is
+// released only outside it.
+export function operatorHolds(team: OperatorTeam): string[] {
+  return team.holds.filter((h) => h.startsWith("operator-"));
+}
+
+// availableActions offers no limit on a revoked team, because raising a limit
+// must never restore trust in passing.
+export function availableActions(team: OperatorTeam): ActionKind[] {
+  const b = team.billing;
+  const out: ActionKind[] = [];
+  if (b.trust !== "granted") out.push("grant-trust");
+  if (b.trust !== "revoked") out.push("revoke-trust", "set-limit");
+  if (b.trust !== "automatic") out.push("reset-trust");
+  if (b.limit_override_cents) out.push("clear-limit");
+  out.push("grant-credits", operatorHolds(team).length ? "unfreeze" : "freeze");
+  return out;
 }
 
 // actionRequest is the controller call the confirmed action makes.

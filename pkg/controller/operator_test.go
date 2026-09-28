@@ -1,7 +1,9 @@
 package controller_test
 
 import (
+	"fmt"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -75,6 +77,11 @@ type operatorTeam struct {
 		TrustReason        string `json:"trust_reason"`
 		PurchaseLimitCents int64  `json:"purchase_limit_cents"`
 	} `json:"billing"`
+	Events []struct {
+		Kind  string         `json:"kind"`
+		Actor string         `json:"actor"`
+		Attrs map[string]any `json:"attrs"`
+	} `json:"events"`
 }
 
 func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
@@ -110,6 +117,9 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 	if code := f.call("POST", base+"/grants", operator.auth, map[string]any{"amount_cents": 500_001, "reason": "too much"}, nil); code != http.StatusBadRequest {
 		t.Errorf("a grant over $5,000 = %d want 400", code)
 	}
+	if code := f.call("POST", base+"/grants", operator.auth, map[string]any{"amount_cents": 100, "reason": "no key"}, nil); code != http.StatusBadRequest {
+		t.Errorf("a grant with no key = %d want 400", code)
+	}
 	grant := map[string]any{"amount_cents": 2_000, "reason": "launch promo", "key": "k1"}
 	for range 2 {
 		if code := f.call("POST", base+"/grants", operator.auth, grant, nil); code != http.StatusCreated {
@@ -133,5 +143,59 @@ func TestOperatorConsole_FindsATeamAndActsOnItWithAReason(t *testing.T) {
 
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "resolved"}, &team); code != http.StatusOK || team.Frozen || len(team.Holds) != 0 {
 		t.Errorf("unfreeze = %d %+v", code, team)
+	}
+
+	if code := f.call("GET", base, operator.auth, nil, &team); code != http.StatusOK {
+		t.Fatalf("read = %d", code)
+	}
+	var history []string
+	for _, ev := range team.Events {
+		history = append(history, ev.Kind+" by "+ev.Actor+": "+fmt.Sprint(ev.Attrs["reason"]))
+	}
+	want := []string{
+		"team.unfrozen by korey@example.com: resolved",
+		"team.frozen by korey@example.com: abuse report",
+		"credit.granted by korey@example.com: launch promo",
+		"billing.trust_changed by korey@example.com: known customer",
+		"team.created by " + owner.id + ": <nil>",
+	}
+	if !slices.Equal(history, want) {
+		t.Errorf("history = %q\nwant %q", history, want)
+	}
+}
+
+func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
+	f, operator, owner := operatorFixture(t)
+	base := "/api/v1/operator/teams/" + owner.team
+	revoke := map[string]any{"trust": "revoked", "reason": "chargeback"}
+	if code := f.call("POST", base+"/trust", operator.auth, revoke, nil); code != http.StatusOK {
+		t.Fatalf("revoke = %d", code)
+	}
+	limit := map[string]any{"trust": "granted", "reason": "vip", "limit_cents": 250_000}
+	if code := f.call("POST", base+"/trust", operator.auth, limit, nil); code != http.StatusBadRequest {
+		t.Errorf("a limit on a revoked team = %d want 400", code)
+	}
+	var team operatorTeam
+	if f.call("GET", base, operator.auth, nil, &team); team.Billing.Trust != "revoked" {
+		t.Errorf("a refused limit changed the trust to %q", team.Billing.Trust)
+	}
+	if code := f.call("POST", base+"/trust", operator.auth, map[string]any{"trust": "granted", "reason": "resolved"}, nil); code != http.StatusOK {
+		t.Fatalf("restore = %d", code)
+	}
+	if code := f.call("POST", base+"/trust", operator.auth, limit, nil); code != http.StatusOK {
+		t.Errorf("a limit after trust is restored = %d want 200", code)
+	}
+
+	if code := f.call("POST", "/api/v1/credits/freezes", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "dispute_id": "dp_1", "reason": "chargeback",
+	}, nil); code != http.StatusOK {
+		t.Fatalf("dispute hold = %d", code)
+	}
+	if code := f.call("POST", base+"/freeze", operator.auth, map[string]any{"reason": "abuse"}, nil); code != http.StatusOK {
+		t.Fatalf("freeze = %d", code)
+	}
+	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "done"}, &team); code != http.StatusOK ||
+		!team.Frozen || !slices.Equal(team.Holds, []string{"dp_1"}) {
+		t.Errorf("unfreeze = %d %+v, want only the dispute hold left", code, team)
 	}
 }

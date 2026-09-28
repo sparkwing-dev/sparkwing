@@ -266,11 +266,15 @@ confirms the session through `GET /api/v1/operator/session`, and it forwards
 the console's writes under the same CSRF check as every other browser write.
 With no account listed, the console is off.
 
-A trust change records its business event with the operator and reason in the
-same transaction. A grant, a hold and a release record an
-`operator.credit_granted`, `operator.team_frozen` or `operator.team_unfrozen`
-event with the operator and reason once the action commits. A console hold is
-a hold like a dispute's, so it also ends the team's automatic trust.
+Every action commits together with its business event, which names the
+operator and the reason: `billing.trust_changed` for trust and the limit,
+`credit.granted` for a grant, `team.frozen` and `team.unfrozen` for holds. A
+grant carries a key, and a retried grant with the same key grants once. A limit
+on a revoked team is refused until trust is granted again without one, so
+raising a limit never undoes a revocation. The console places holds of its own
+and releases only those; a payment dispute's hold stays until it is released
+outside the console. A console hold is a hold like a dispute's, so it also ends
+the team's automatic trust.
 
 ## Retained storage
 

@@ -26,9 +26,12 @@ unlock.
   by slug, name or owner email, shows its balance, 30-day purchases against
   its limit, trust, holds and recent business events, and grants, revokes or
   resets trust, sets or clears the limit override, grants free credits and
-  holds or releases the team. Each action needs a reason and a confirmation.
-  Only accounts listed with `--operator-accounts` reach it, through their
-  own signed-in session; no token does, an admin token included.
+  holds or releases its own holds, never a dispute's. Each action needs a
+  reason and a confirmation, and commits with a business event naming the
+  operator and reason. Only accounts listed with `--operator-accounts` reach
+  it, through their own signed-in session; no token does, an admin token
+  included. A limit override on a revoked team is refused until trust is
+  restored.
 - **controller + store:** A team buys at most $50 of credit over 30 days, and
   at most $50 at once, until it is trusted; a trusted team buys up to $500.
   A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
