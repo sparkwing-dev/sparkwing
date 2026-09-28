@@ -12,8 +12,9 @@ import (
 // the automatic rule; granted trusts it whatever the rule says, and revoked
 // holds it to the new-team limits whatever the rule says.
 const (
-	BillingTrustGranted = "granted"
-	BillingTrustRevoked = "revoked"
+	BillingTrustAutomatic = ""
+	BillingTrustGranted   = "granted"
+	BillingTrustRevoked   = "revoked"
 )
 
 // What a team may buy per [PurchaseLimitWindow]. A prepaid team cannot spend
@@ -198,7 +199,8 @@ const (
 
 // BillingTrustChange is an operator's decision on a team's trust.
 type BillingTrustChange struct {
-	// Trust is [BillingTrustGranted] or [BillingTrustRevoked].
+	// Trust is [BillingTrustGranted], [BillingTrustRevoked], or
+	// [BillingTrustAutomatic] to return the team to the automatic rule.
 	Trust  string
 	Actor  string
 	Reason string
@@ -211,8 +213,8 @@ type BillingTrustChange struct {
 // standing before and after it. The change and its business event commit
 // together.
 func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error) {
-	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked {
-		return before, after, fmt.Errorf("%w: trust must be %q or %q", ErrInvalidInput, BillingTrustGranted, BillingTrustRevoked)
+	if c.Trust != BillingTrustGranted && c.Trust != BillingTrustRevoked && c.Trust != BillingTrustAutomatic {
+		return before, after, fmt.Errorf("%w: trust must be %q, %q or automatic", ErrInvalidInput, BillingTrustGranted, BillingTrustRevoked)
 	}
 	if c.Reason == "" || c.Actor == "" {
 		return before, after, fmt.Errorf("%w: a trust change names its actor and reason", ErrInvalidInput)

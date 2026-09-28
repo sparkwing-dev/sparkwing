@@ -180,9 +180,16 @@ func TestOperatorTrustGrantAndRevoke(t *testing.T) {
 	if _, err := earned.OpenCreditCheckout(ctx, dollarsMicro(20), aged, time.Hour); !errors.Is(err, store.ErrPurchaseLimit) {
 		t.Fatalf("a revoked team's $20 checkout = %v, want the new-team limit", err)
 	}
+	_, after, err = earned.SetBillingTrust(ctx, store.BillingTrustChange{
+		Trust: store.BillingTrustAutomatic, Actor: "korey", Reason: "resolved",
+	}, aged)
+	if err != nil || after.Trust != store.BillingTrustAutomatic || !after.Trusted || after.TrustReason != "resolved" {
+		t.Fatalf("reset = %+v, %v; want the automatic rule to trust the team again", after, err)
+	}
 
 	for _, bad := range []store.BillingTrustChange{
-		{Trust: "", Actor: "korey", Reason: "x"},
+		{Trust: "trusted", Actor: "korey", Reason: "x"},
+		{Trust: store.BillingTrustAutomatic, Actor: "korey", Reason: "x", LimitCents: 100_000},
 		{Trust: store.BillingTrustGranted, Actor: "korey"},
 		{Trust: store.BillingTrustRevoked, Actor: "korey", Reason: "x", LimitCents: 100_000},
 		{Trust: store.BillingTrustGranted, Actor: "korey", Reason: "x", LimitCents: store.MaxPurchaseLimitCents + 1},

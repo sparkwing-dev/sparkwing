@@ -2131,7 +2131,7 @@ paths:
       tags: [teams]
       summary: Grant or revoke a team's billing trust on the operator's word.
       description: >-
-        A granted team buys up to $500 over 30 days, or `limit_cents` when given, whatever the automatic rule says. A revoked team is held to the new-team $50 even when the rule would trust it. The change records the operator and the reason.
+        A granted team buys up to $500 over 30 days, or `limit_cents` when given, whatever the automatic rule says. A revoked team is held to the new-team $50 even when the rule would trust it, and `automatic` returns the team to the rule. The change records the operator, the reason, and the trust before and after as a business event.
       requestBody:
         required: true
         content:
@@ -2141,7 +2141,7 @@ paths:
               type: object
               required: [trust, reason]
               properties:
-                trust: {type: string, enum: [granted, revoked]}
+                trust: {type: string, enum: [granted, revoked, automatic], description: "`automatic` returns the team to the automatic rule."}
                 reason: {type: string}
                 limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
       responses:
@@ -7778,7 +7778,7 @@ components:
       required: [team, trust, trusted, purchase_limit_cents, purchased_30d_cents]
       properties:
         team: {type: string}
-        trust: {type: string, enum: ["", granted, revoked], description: "The operator's decision; empty leaves the team to the automatic rule."}
+        trust: {type: string, enum: [automatic, granted, revoked], description: "The operator's decision; `automatic` leaves the team to the automatic rule."}
         trusted: {type: boolean}
         trust_by: {type: string}
         trust_at: {type: integer, format: int64, description: Unix seconds.}

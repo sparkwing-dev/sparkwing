@@ -113,6 +113,7 @@ type BillingStanding struct {
 	PurchasedMicro int64
 }
 func (b BillingStanding) PurchaseMaxCents() int64
+const BillingTrustAutomatic = ""
 type BillingTrustChange struct {
 	Trust  string
 	Actor  string

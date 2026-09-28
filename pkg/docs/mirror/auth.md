@@ -214,7 +214,7 @@ oldest unrefunded payment is at least 30 days old, it has spent at least $50,
 and it has never been held over a dispute. The operator grants or revokes
 trust, with a reason, through `POST /api/v1/teams/{team}/trust`; a grant may
 raise the limit to $5,000, and a revocation holds the team to the new-team
-limits even when it would earn trust. Team -> Billing shows the limit and what
+limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
 Purchases are final, so a refund is the operator's decision and is made by

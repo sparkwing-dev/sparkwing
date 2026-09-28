@@ -26,9 +26,17 @@ type billingTrustJSON struct {
 	Purchased30dCents  int64  `json:"purchased_30d_cents"`
 }
 
+// safety: the wire names the automatic rule rather than sending an empty
+// string, so an omitted trust field can never reset a team's trust.
+const trustAutomatic = "automatic"
+
 func billingTrustBody(team store.Team, b store.BillingStanding) billingTrustJSON {
+	trust := b.Trust
+	if trust == store.BillingTrustAutomatic {
+		trust = trustAutomatic
+	}
 	out := billingTrustJSON{
-		Team: string(team), Trust: b.Trust, Trusted: b.Trusted, TrustBy: b.TrustBy,
+		Team: string(team), Trust: trust, Trusted: b.Trusted, TrustBy: b.TrustBy,
 		TrustReason: b.TrustReason, LimitOverrideCents: b.LimitOverrideCents,
 		PurchaseLimitCents: b.LimitMicro / store.MicroCreditsPerCent,
 		Purchased30dCents:  b.PurchasedMicro / store.MicroCreditsPerCent,
@@ -62,12 +70,20 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	trust := req.Trust
+	switch trust {
+	case trustAutomatic:
+		trust = store.BillingTrustAutomatic
+	case store.BillingTrustAutomatic:
+		writeError(w, http.StatusBadRequest, errors.New("trust must be granted, revoked or automatic"))
+		return
+	}
 	actor := ""
 	if p, ok := PrincipalFromContext(r.Context()); ok {
 		actor = p.Name
 	}
 	_, after, err := t.SetBillingTrust(r.Context(), store.BillingTrustChange{
-		Trust: req.Trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
+		Trust: trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
 	}, time.Now())
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):

@@ -468,4 +468,11 @@ func TestBillingTrust_OperatorGrantsAndRevokes(t *testing.T) {
 	if code := f.call("GET", path, "Bearer "+f.admin, nil, &got); code != http.StatusOK || got.Trust != "revoked" {
 		t.Errorf("read after revoke = %d %+v", code, got)
 	}
+	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"reason": "no trust named"}, nil); code != http.StatusBadRequest {
+		t.Errorf("a change naming no trust = %d want 400", code)
+	}
+	if code := f.call("POST", path, "Bearer "+f.admin, map[string]any{"trust": "automatic", "reason": "cleared"}, &got); code != http.StatusOK ||
+		got.Trust != "automatic" || got.Trusted || got.TrustReason != "cleared" || got.PurchaseLimitCents != 5_000 {
+		t.Errorf("reset = %d %+v, want the automatic rule", code, got)
+	}
 }

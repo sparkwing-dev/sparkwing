@@ -30,8 +30,8 @@ unlock.
   three days after its session expires, the longest a paid session's
   webhook can arrive late. A team earns trust when its oldest unrefunded payment
   is 30 days old, it has spent $50 and it has never been held over a dispute.
-  The operator grants or revokes trust through `GET` and `POST
-  /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`
+  The operator grants, revokes or resets trust to the automatic rule
+  through `GET` and `POST /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`
   and a requirement, so a controller older than schema 80 refuses the
   migrated database.
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
