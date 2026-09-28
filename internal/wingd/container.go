@@ -26,6 +26,24 @@ func newContainerSensor(root string) *containerSensor {
 	return &containerSensor{root: root, now: time.Now}
 }
 
+// ProcessCapacity reports the most CPU and memory this process could ever use:
+// the smallest cgroup limit along its cgroup ancestry, or the host's totals
+// where no cgroup limits it. A dimension it cannot read is zero.
+func ProcessCapacity() (cores float64, memBytes uint64) {
+	host, err := sampleHost()
+	if err != nil {
+		return 0, 0
+	}
+	cores, memBytes = newContainerSensor("/").capacityLimits()
+	if cores == 0 || cores > host.TotalCores {
+		cores = host.TotalCores
+	}
+	if memBytes == 0 || memBytes > host.TotalMemoryBytes {
+		memBytes = host.TotalMemoryBytes
+	}
+	return cores, memBytes
+}
+
 func containerSensorFor(cfg Config) *containerSensor {
 	switch {
 	case cfg.ContainerRoot != "":
@@ -41,16 +59,16 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	if s == nil {
 		return 0, 0
 	}
-	if dir, ok := s.v2Dir(); ok {
-		if c, ok := parseCPUMax(s.readTrim(filepath.Join(dir, "cpu.max"))); ok {
+	// safety: a limit on any ancestor binds this process, so a systemd slice
+	// that caps the service's parent is read as well as the leaf.
+	for _, dir := range s.v2Ancestry() {
+		if c, ok := parseCPUMax(s.readTrim(filepath.Join(dir, "cpu.max"))); ok && (cores == 0 || c < cores) {
 			cores = c
 		}
-		if n, ok := parseCpuset(s.readTrim(filepath.Join(dir, "cpuset.cpus.effective"))); ok {
-			if cores == 0 || float64(n) < cores {
-				cores = float64(n)
-			}
+		if n, ok := parseCpuset(s.readTrim(filepath.Join(dir, "cpuset.cpus.effective"))); ok && (cores == 0 || float64(n) < cores) {
+			cores = float64(n)
 		}
-		if m, ok := parseMemMax(s.readTrim(filepath.Join(dir, "memory.max"))); ok {
+		if m, ok := parseMemMax(s.readTrim(filepath.Join(dir, "memory.max"))); ok && (memBytes == 0 || m < memBytes) {
 			memBytes = m
 		}
 	}
@@ -119,6 +137,22 @@ func (s *containerSensor) v2Dir() (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (s *containerSensor) v2Ancestry() []string {
+	rel, ok := cgroupV2Path(s.readFile(filepath.Join("proc", "self", "cgroup")))
+	if !ok {
+		return nil
+	}
+	base := filepath.Join(s.root, "sys", "fs", "cgroup")
+	var dirs []string
+	for dir := filepath.Join(base, rel); strings.HasPrefix(dir, base); dir = filepath.Dir(dir) {
+		dirs = append(dirs, dir)
+		if dir == base {
+			break
+		}
+	}
+	return dirs
 }
 
 func (s *containerSensor) capacityV1() (cores float64, memBytes uint64) {
