@@ -30,6 +30,13 @@ unlock.
   polls answering 204 are not audited. Read requests log their route pattern
   instead of their path. Every response carries `X-Request-Id`: the caller's
   value when it is a token of at most 64 characters, otherwise a new one.
+- **controller + store:** Schema 79 adds `business_events`
+  One row per admission, team creation, checkout opened, paid, failed or
+  expired, credit grant or reversal, dispute hold or release, and a team's
+  first successful run, written in the transaction that makes it true. A
+  repeat of the same team, kind and subject writes nothing.
+  `POST /api/v1/credits/checkouts/closed` lets the checkout service
+  (`credits.grant`) record a session that failed or expired unpaid.
 
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim

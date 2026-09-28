@@ -38,6 +38,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
+| `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
 | `GET` | `/api/v1/credits/history` | `runs.read` |

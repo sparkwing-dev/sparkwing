@@ -199,6 +199,43 @@ func (s *Server) handleCreditFreeze(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+type checkoutClosedReq struct {
+	Team      string `json:"team"`
+	SessionID string `json:"session_id"`
+	Outcome   string `json:"outcome"`
+}
+
+var checkoutOutcomeEvents = map[string]string{
+	"failed":  store.BusinessEventCheckoutFailed,
+	"expired": store.BusinessEventCheckoutExpired,
+}
+
+// safety: the checkout service names the team its session was opened for, as
+// it does on a paid grant, and the record is scoped to that team.
+func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
+	var req checkoutClosedReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Team, req.SessionID = strings.TrimSpace(req.Team), strings.TrimSpace(req.SessionID)
+	kind, ok := checkoutOutcomeEvents[req.Outcome]
+	if !ok || req.Team == "" || req.SessionID == "" {
+		writeError(w, http.StatusBadRequest, errors.New("team, session_id and an outcome of failed or expired are required"))
+		return
+	}
+	tenant, ok := s.namedTenant(w, r, req.Team)
+	if !ok {
+		return
+	}
+	if err := tenant.CloseCreditCheckout(r.Context(), req.SessionID, kind, time.Now()); err != nil {
+		s.writeInternalError(w, r, "close checkout", err)
+		return
+	}
+	s.logger.Info("checkout closed unpaid", "team", req.Team, "session", req.SessionID, "outcome", req.Outcome)
+	writeJSON(w, http.StatusOK, req)
+}
+
 // DisputeConflictCode is the code on a 409 refusing a hold or a reversal
 // that names a dispute already held for another payment.
 const DisputeConflictCode = "dispute_conflict"

@@ -125,11 +125,59 @@ func openCheckoutMicroTx(ctx context.Context, tx *storeTx, team Team, nowNS int6
 // AttachCreditCheckout names the payment session a checkout opened and the
 // moment it expires, so the paid grant finds the checkout and an unpaid one
 // stops counting against the cap when the session can no longer be paid.
-func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error {
-	_, err := t.s.exec(ctx,
-		`UPDATE credit_checkouts SET session_id = ?, expires_at = ? WHERE team = ? AND id = ?`,
-		sessionID, expiresAt.UnixNano(), string(t.team), id)
-	return err
+func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) (err error) {
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	var amount int64
+	err = tx.QueryRowContext(ctx,
+		`UPDATE credit_checkouts SET session_id = ?, expires_at = ? WHERE team = ? AND id = ? RETURNING amount_micro`,
+		sessionID, expiresAt.UnixNano(), string(t.team), id).Scan(&amount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		Team: t.team, Kind: BusinessEventCheckoutOpened, SubjectID: sessionID,
+		Attrs: map[string]any{"checkout_id": id, "amount_micro": amount},
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CloseCreditCheckout records that the payment session sessionID ended
+// unpaid, as [BusinessEventCheckoutFailed] or [BusinessEventCheckoutExpired],
+// and stops its checkout counting against the balance cap. A session with
+// no open checkout of t's, because it was paid or already pruned, is still
+// recorded. A repeat of the same outcome writes nothing.
+func (t *Tenant) CloseCreditCheckout(ctx context.Context, sessionID, outcome string, now time.Time) (err error) {
+	if outcome != BusinessEventCheckoutFailed && outcome != BusinessEventCheckoutExpired {
+		return fmt.Errorf("%w: checkout outcome %q", ErrInvalidInput, outcome)
+	}
+	if sessionID = strings.TrimSpace(sessionID); sessionID == "" {
+		return fmt.Errorf("%w: a closed checkout names its session", ErrInvalidInput)
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE credit_checkouts SET expires_at = ? WHERE team = ? AND session_id = ? AND paid_at IS NULL AND expires_at > ?`,
+		now.UnixNano(), string(t.team), sessionID, now.UnixNano()); err != nil {
+		return err
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		At: now, Team: t.team, Kind: outcome, SubjectID: sessionID,
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DropCreditCheckout removes a checkout whose session never opened.

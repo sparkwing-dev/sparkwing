@@ -863,6 +863,9 @@ func (s *Store) recordCreditGrant(
 		req.CreatedBy, now.UnixNano()); err != nil {
 		return CreditGrantResult{}, fmt.Errorf("credits: insert grant: %w", err)
 	}
+	if err := recordGrantEventTx(tx, grant, req.Checkout); err != nil {
+		return CreditGrantResult{}, err
+	}
 	if req.Kind == CreditGrantPaid {
 		if err := markCreditCheckoutPaidTx(ctx, tx, team, req.Checkout, now.UnixNano()); err != nil {
 			return CreditGrantResult{}, err
@@ -882,6 +885,28 @@ func (s *Store) recordCreditGrant(
 	}
 	s.invalidateRunnerCap()
 	return CreditGrantResult{Grant: grant, Created: true}, nil
+}
+
+// safety: a paid grant is the checkout's payment arriving, so it is recorded
+// as the checkout paid rather than as a grant.
+func recordGrantEventTx(tx *storeTx, g CreditGrant, checkout string) error {
+	kind := BusinessEventCreditGranted
+	switch g.Kind {
+	case CreditGrantPaid:
+		kind = BusinessEventCheckoutPaid
+	case CreditGrantReversal:
+		kind = BusinessEventCreditReversed
+	}
+	attrs := map[string]any{"grant_kind": g.Kind, "amount_micro": g.AmountMicro, "reference": g.Reference}
+	if g.Reverses != "" {
+		attrs["reverses"] = g.Reverses
+	}
+	if checkout != "" {
+		attrs["session_id"] = checkout
+	}
+	return RecordBusinessEvent(tx, BusinessEvent{
+		At: g.CreatedAt, Team: g.Team, Kind: kind, SubjectID: g.ID, Actor: g.CreatedBy, Attrs: attrs,
+	})
 }
 
 // safety: a webhook replay carries the terms it carried the first time, so

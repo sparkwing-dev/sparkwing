@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 77
+const expectedSchemaVersion = 79
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -2100,6 +2100,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimTokensMigration(ctx, tx, false)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, false)
+	case 78:
+		return nil
+	case 79:
+		return applyBusinessEventsMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2534,6 +2538,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimTokensMigration(ctx, tx, true)
 	case 77:
 		return applyControllerDispatchMigration(ctx, tx, true)
+	case 78:
+		return nil
+	case 79:
+		return applyBusinessEventsMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -3787,7 +3795,12 @@ func finishRunOnceTx(ctx context.Context, tx *storeTx, runID, status, errMsg str
 		return err
 	}
 	if changed, err := res.RowsAffected(); err != nil || changed != 0 {
-		return err
+		if err != nil || status != outcomeSuccess {
+			return err
+		}
+		return RecordBusinessEvent(tx, BusinessEvent{
+			Team: team, Kind: BusinessEventFirstRunSucceeded, Attrs: map[string]any{"run_id": runID},
+		})
 	}
 	var priorStatus, priorError string
 	err = tx.QueryRowContext(ctx,

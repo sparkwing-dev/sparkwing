@@ -3933,6 +3933,45 @@ paths:
         "404": {description: "No paid grant carries the payment id, no hold names the dispute, or the team is not registered."}
         "409": {description: "The dispute is already held for another payment or team (`dispute_conflict`)."}
 
+  /api/v1/credits/checkouts/closed:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Record a checkout session that ended unpaid.
+      description: |
+        The checkout service reports a session whose delayed payment failed
+        (`failed`) or that expired unpaid (`expired`). The controller records
+        a `checkout.failed` or `checkout.expired` business event for `team`
+        and stops the session's open checkout counting against the balance
+        cap. A repeat of the same session and outcome writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.checkoutClosedReq
+              type: object
+              required: [team, session_id, outcome]
+              properties:
+                team: {type: string, description: The team the session was opened for.}
+                session_id: {type: string, description: The payment processor's session id.}
+                outcome: {type: string, enum: [failed, expired]}
+      responses:
+        "200":
+          description: The recorded outcome.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.checkoutClosedReq
+                type: object
+                properties:
+                  team: {type: string}
+                  session_id: {type: string}
+                  outcome: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: The team is not registered.}
+
   /api/v1/credits/units:
     get:
       x-sparkwing-scope: credits.grant

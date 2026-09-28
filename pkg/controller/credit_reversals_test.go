@@ -63,10 +63,11 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 	}
 
 	allowed := map[string]bool{
-		"POST /api/v1/credits/grants":    true,
-		"POST /api/v1/credits/reversals": true,
-		"POST /api/v1/credits/freezes":   true,
-		"GET /api/v1/credits/units":      true,
+		"POST /api/v1/credits/grants":           true,
+		"POST /api/v1/credits/reversals":        true,
+		"POST /api/v1/credits/freezes":          true,
+		"POST /api/v1/credits/checkouts/closed": true,
+		"GET /api/v1/credits/units":             true,
 		// safety: both answer any authenticated caller, the first with its own
 		// identity and the second with the service URLs.
 		"GET /api/v1/auth/whoami": true,
@@ -219,5 +220,39 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	f.call("GET", "/api/v1/team/billing", owner.auth, nil, &b)
 	if b.Frozen {
 		t.Error("the team is still frozen after the release")
+	}
+}
+
+// The checkout service reports a session that ended unpaid, and the team it
+// names records it once however often the report is delivered.
+func TestCheckoutClosedIsRecordedOncePerSession(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.user("o", "olga@example.com")
+	grant := f.creditsGrantToken()
+	body := map[string]any{"team": owner.team, "session_id": "cs_1", "outcome": "expired"}
+	for range 2 {
+		if code := f.call("POST", "/api/v1/credits/checkouts/closed", grant, body, nil); code != http.StatusOK {
+			t.Fatalf("closed checkout = %d, want 200", code)
+		}
+	}
+	for _, bad := range []map[string]any{
+		{"team": owner.team, "session_id": "cs_2", "outcome": "paid"},
+		{"session_id": "cs_2", "outcome": "failed"},
+	} {
+		if code := f.call("POST", "/api/v1/credits/checkouts/closed", grant, bad, nil); code != http.StatusBadRequest {
+			t.Errorf("closed checkout %v = %d, want 400", bad, code)
+		}
+	}
+	if code := f.call("POST", "/api/v1/credits/checkouts/closed", owner.auth,
+		map[string]any{"team": owner.team, "session_id": "cs_3", "outcome": "failed"}, nil); code != http.StatusForbidden {
+		t.Errorf("a team owner reporting a closed checkout = %d, want 403", code)
+	}
+	tn, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCheckoutExpired)
+	if err != nil || len(events) != 1 || events[0].SubjectID != "cs_1" {
+		t.Fatalf("expired events = %+v, %v; want one for cs_1", events, err)
 	}
 }

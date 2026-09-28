@@ -101,6 +101,27 @@ type AttemptReport struct {
 }
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
+type BusinessEvent struct {
+	ID        string
+	At        time.Time
+	Team      Team
+	Account   string
+	Kind      string
+	SubjectID string
+	Actor     string
+	Attrs     map[string]any
+}
+const BusinessEventAccountAdmitted = "account.admitted"
+const BusinessEventCheckoutExpired = "checkout.expired"
+const BusinessEventCheckoutFailed = "checkout.failed"
+const BusinessEventCheckoutOpened = "checkout.opened"
+const BusinessEventCheckoutPaid = "checkout.paid"
+const BusinessEventCreditGranted = "credit.granted"
+const BusinessEventCreditReversed = "credit.reversed"
+const BusinessEventFirstRunSucceeded = "run.first_succeeded"
+const BusinessEventTeamCreated = "team.created"
+const BusinessEventTeamFrozen = "team.frozen"
+const BusinessEventTeamUnfrozen = "team.unfrozen"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
 type CPUClass struct {
@@ -1412,6 +1433,7 @@ const QueueStateReady = "ready"
 const QueueStateRunning = "running"
 const QueueStateWaiting = "waiting"
 func QueueStates() []string
+func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error
 func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
@@ -2047,7 +2069,7 @@ func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait
 func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
 func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
-func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
+func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (_ int64, err error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
@@ -2216,11 +2238,13 @@ func (t *Tenant) ActiveExecutorActivity(ctx context.Context, now time.Time) (map
 func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBinding, now time.Time) (GitHubRunnerBinding, error)
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
-func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
+func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) (err error)
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
+func (t *Tenant) BusinessEvents(ctx context.Context, kind string) (_ []BusinessEvent, err error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
+func (t *Tenant) CloseCreditCheckout(ctx context.Context, sessionID, outcome string, now time.Time) (err error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
