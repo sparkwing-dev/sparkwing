@@ -947,6 +947,9 @@ unlock.
 
 ### Fixed
 
+- **controller:** An executor offer round now sets its priority target from the
+  node's own team's executors. Another team's higher-priority executor no
+  longer holds this team's best offer until the five-second deadline.
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
   the claim and fail the run; a ledger error refuses renewal. Runners stop on

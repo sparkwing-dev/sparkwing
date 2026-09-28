@@ -637,37 +637,23 @@ func executorMembershipFromSnapshot(e Executor, claimant ClaimIdentity, summary 
 }
 
 // HighestActiveExecutorPriority returns the largest attainable score among
-// active registered executors that satisfy the same hard slot/resource filter.
+// active registered executors of the node's team that satisfy the same hard
+// slot/resource filter.
 func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary ExecutorSchedulingSummary, activeAfter time.Time) (int, error) {
-	executors, err := s.ListExecutors(ctx)
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
-	if len(executors) > MaxEnrolledExecutors {
-		return 0, ErrExecutorEnrollmentLimit
-	}
-	highest := 0
-	now := time.Now()
-	usage, err := s.loadExecutorUsage(ctx, now)
-	if err != nil {
-		return 0, err
-	}
-	coordinatorID, err := s.CoordinatorID(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for _, e := range executors {
-		used := usage.ByExecutor[e.Name]
-		reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
-		if reason == "" {
-			highest = max(highest, executorEffectivePriority(e, summary))
-		}
-	}
-	return highest, nil
+	defer rollbackOrLog(tx)
+	return s.highestActiveExecutorPriorityTx(ctx, tx, summary, activeAfter, time.Now())
 }
 
 func (s *Store) highestActiveExecutorPriorityTx(ctx context.Context, tx *storeTx, summary ExecutorSchedulingSummary, activeAfter, now time.Time) (int, error) {
-	executors, err := loadExecutorsForSchedulingTx(ctx, tx, activeAfter)
+	team, _, err := runOwnerTx(ctx, tx, summary.RunID)
+	if err != nil {
+		return 0, err
+	}
+	executors, err := loadExecutorsForSchedulingTx(ctx, tx, activeAfter, team)
 	if err != nil {
 		return 0, err
 	}
@@ -756,12 +742,25 @@ func scanExecutorUsage(rows *sql.Rows) (executorUsageSnapshot, error) {
 	return out, rows.Err()
 }
 
-func loadExecutorsForSchedulingTx(ctx context.Context, tx *storeTx, activeAfter time.Time) ([]Executor, error) {
+// safety: only team's executors can offer for team's node, so another team's
+// executor must not raise the target that decides when an offer is awarded.
+// A single-team install skips the filter because claimScope gives that team
+// the credentials no token row backs as well.
+func loadExecutorsForSchedulingTx(ctx context.Context, tx *storeTx, activeAfter time.Time, team Team) ([]Executor, error) {
+	var teams int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM teams`).Scan(&teams); err != nil {
+		return nil, err
+	}
+	filter, args := "", []any{activeAfter.UnixNano()}
+	if teams > 1 {
+		filter = ` AND EXISTS (SELECT 1 FROM tokens WHERE prefix = executors.token_prefix AND team = ?)`
+		args = append(args, string(team))
+	}
 	rows, err := tx.QueryContext(ctx, `
 SELECT executor_id, name, token_prefix, kind, location, capabilities_json, base_priority, priority_ceiling, max_concurrent,
        budget_cores, budget_memory_bytes, principal, last_seen,
        headroom_reported, headroom_cores, headroom_memory_bytes, queue_depth
-  FROM executors WHERE last_seen >= ? ORDER BY name LIMIT ?`, activeAfter.UnixNano(), MaxEnrolledExecutors+1)
+  FROM executors WHERE last_seen >= ?`+filter+` ORDER BY name LIMIT ?`, append(args, MaxEnrolledExecutors+1)...)
 	if err != nil {
 		return nil, err
 	}
