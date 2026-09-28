@@ -18,8 +18,8 @@ func TestHoldTakesTheKeyOutOfTheEnvironmentAndEnvironHandsItOn(t *testing.T) {
 			t.Errorf("%s = %q after Hold, want it unset so a step inherits nothing", name, v)
 		}
 	}
-	if got := Lookup("SPARKWING_SECRETS_KEY"); got != "current" {
-		t.Errorf("Lookup = %q, want the held key", got)
+	if got, prev := Key(), PreviousKey(); got != "current" || prev != "previous" {
+		t.Errorf("Key, PreviousKey = %q, %q; want the held keys", got, prev)
 	}
 	got := Environ([]string{"PATH=/bin", "SPARKWING_SECRETS_KEY=stale"})
 	want := []string{"PATH=/bin", "SPARKWING_SECRETS_KEY=current", "SPARKWING_SECRETS_PREVIOUS_KEY=previous"}

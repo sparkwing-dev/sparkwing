@@ -99,13 +99,20 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	if err != nil {
 		return nil, err
 	}
-	current, err := envKey(KeyEnv, opts.ClearEnv)
+	current, err := decodeEnvKey(KeyEnv, secretkeyenv.Key())
 	if err != nil {
 		return nil, err
 	}
-	previous, err := envKey(PreviousKeyEnv, opts.ClearEnv)
+	previous, err := decodeEnvKey(PreviousKeyEnv, secretkeyenv.PreviousKey())
 	if err != nil {
 		return nil, err
+	}
+	if opts.ClearEnv {
+		for _, name := range []string{KeyEnv, PreviousKeyEnv} {
+			if err := os.Unsetenv(name); err != nil {
+				return nil, fmt.Errorf("clear %s from the environment: %w", name, err)
+			}
+		}
 	}
 	k := &Keyring{path: path, previous: previous, fromEnv: current != nil, mayCreate: opts.Create}
 	if current == nil {
@@ -127,13 +134,7 @@ func LoadKeyring(opts KeyringOptions) (*Keyring, error) {
 	return k, nil
 }
 
-func envKey(name string, clear bool) ([]byte, error) {
-	v := secretkeyenv.Lookup(name)
-	if clear {
-		if err := os.Unsetenv(name); err != nil {
-			return nil, fmt.Errorf("clear %s from the environment: %w", name, err)
-		}
-	}
+func decodeEnvKey(name, v string) ([]byte, error) {
 	if v == "" {
 		return nil, nil
 	}

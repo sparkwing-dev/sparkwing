@@ -38,7 +38,21 @@ var legacyFiles = []legacyFile{
 	{name: "repos.yaml", section: Repos},
 }
 
-var legacyEnv = []string{"SPARKWING_FLEET_CONFIG", "SPARKWING_PROFILES", "SPARKWING_REPOS"}
+// safety: each variable is read by its literal name so the docs check that
+// every variable the code reads is documented can see all three.
+func legacyEnvSet() []string {
+	var set []string
+	for _, v := range []struct{ name, value string }{
+		{"SPARKWING_FLEET_CONFIG", os.Getenv("SPARKWING_FLEET_CONFIG")},
+		{"SPARKWING_PROFILES", os.Getenv("SPARKWING_PROFILES")},
+		{"SPARKWING_REPOS", os.Getenv("SPARKWING_REPOS")},
+	} {
+		if v.value != "" {
+			set = append(set, v.name)
+		}
+	}
+	return set
+}
 
 var legacyValidators = map[string]func(*yaml.Node) error{}
 
@@ -107,10 +121,8 @@ func Leftovers() []Leftover {
 			}
 		}
 	}
-	for _, name := range legacyEnv {
-		if os.Getenv(name) != "" {
-			out = append(out, Leftover{Name: name, MovesTo: PathEnv + ", which names config.yaml itself", Variable: true})
-		}
+	for _, name := range legacyEnvSet() {
+		out = append(out, Leftover{Name: name, MovesTo: PathEnv + ", which names config.yaml itself", Variable: true})
 	}
 	return out
 }
@@ -184,12 +196,7 @@ func legacyRedirect(path string) string {
 }
 
 func checkLegacyEnv() error {
-	var set []string
-	for _, name := range legacyEnv {
-		if os.Getenv(name) != "" {
-			set = append(set, name)
-		}
-	}
+	set := legacyEnvSet()
 	if len(set) == 0 {
 		return nil
 	}

@@ -11,8 +11,13 @@ import (
 	"sync"
 )
 
+const (
+	keyName         = "SPARKWING_SECRETS_KEY"
+	previousKeyName = "SPARKWING_SECRETS_PREVIOUS_KEY"
+)
+
 // Names are the variables that carry a local secrets key.
-var Names = []string{"SPARKWING_SECRETS_KEY", "SPARKWING_SECRETS_PREVIOUS_KEY"}
+var Names = []string{keyName, previousKeyName}
 
 var (
 	mu   sync.Mutex
@@ -25,26 +30,41 @@ var (
 func Hold() error {
 	mu.Lock()
 	defer mu.Unlock()
-	for _, name := range Names {
-		v, ok := os.LookupEnv(name)
-		if !ok {
-			continue
+	// safety: each variable is read by its literal name so the docs check that
+	// every variable the code reads is documented can see both.
+	for _, v := range []struct{ name, value string }{
+		{keyName, os.Getenv("SPARKWING_SECRETS_KEY")},
+		{previousKeyName, os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY")},
+	} {
+		if v.value != "" {
+			held[v.name] = v.value
 		}
-		if v != "" {
-			held[name] = v
-		}
-		if err := os.Unsetenv(name); err != nil {
+		if err := os.Unsetenv(v.name); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Lookup returns name from the environment, or the value [Hold] took.
-func Lookup(name string) string {
-	if v := os.Getenv(name); v != "" {
+// Key returns SPARKWING_SECRETS_KEY from the environment, or the value
+// [Hold] took.
+func Key() string {
+	if v := os.Getenv("SPARKWING_SECRETS_KEY"); v != "" {
 		return v
 	}
+	return heldValue(keyName)
+}
+
+// PreviousKey returns SPARKWING_SECRETS_PREVIOUS_KEY from the environment,
+// or the value [Hold] took.
+func PreviousKey() string {
+	if v := os.Getenv("SPARKWING_SECRETS_PREVIOUS_KEY"); v != "" {
+		return v
+	}
+	return heldValue(previousKeyName)
+}
+
+func heldValue(name string) string {
 	mu.Lock()
 	defer mu.Unlock()
 	return held[name]
