@@ -114,21 +114,29 @@ the daemon starts, then run `sparkwing daemon restart`. Back up `secrets.key`
 with `state.db`; losing it loses every local secret. Sparkwing refuses to
 create a new key while `state.db` holds values sealed under another one.
 
-**Automatic import.** The daemon imports both dotenv files the first time it
-opens `state.db`, and `sparkwing secrets` and local runs ask it to whenever
-the files exist. Each name becomes an unscoped secret shared with every
-pipeline; a name in both files imports once, masked. A name the store already
-holds keeps the store's value, and the import names it. Each file's import is
-recorded, so a secret deleted afterwards stays deleted. The files are not
-changed, so an older sparkwing on the machine keeps reading them. The notice
-`imported N secrets from <file>; <file> is no longer read and can be deleted`
-prints once per file; delete the file once no older sparkwing needs it. The
-automatic import will be removed in a later release; after that, the files
-are ignored.
+**Before upgrading.** Stop the daemon with `sparkwing daemon stop` and copy
+`state.db` from `SPARKWING_HOME` somewhere safe. That copy is the way back.
 
-**Path overrides.** `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` no longer
-name a file, and the import skips both files while either is set. Add those
-values by hand:
+**Automatic import.** The daemon imports both dotenv files once, the first
+time it opens `state.db`. Each name becomes an unscoped secret shared with
+every pipeline; a name in both files imports once, masked. A name the store
+already holds keeps the store's value. The import is all or nothing and is
+recorded in `state.db`, so it never runs again: a secret deleted afterwards
+stays deleted, and later edits to the files are ignored. The daemon log names
+what it imported. Check the result with `sparkwing secrets list`. The files
+are not changed, so an older sparkwing on the machine keeps reading them;
+delete them once no older sparkwing needs them. The automatic import will be
+removed in a later release; after that, the files are ignored.
+
+**A failed import.** A malformed or unreadable file imports nothing, and until
+the import succeeds `sparkwing secrets` and every secret a local run reads
+fail with the import error, naming the file and line. Fix the file, then run
+`sparkwing daemon restart`.
+
+**Path overrides.** The import reads the files `SPARKWING_SECRETS` and
+`SPARKWING_CONFIG_ENV` name when they are set in the daemon's environment;
+after the import neither variable does anything. If the daemon starts without
+them, add those values by hand:
 
 ```bash
 sparkwing secrets set --name API_TOKEN --file ./token
@@ -140,19 +148,26 @@ that home's `state.db`, does not import the machine's files, and refuses to
 create the machine's key; point `SPARKWING_SECRETS_KEY_FILE` inside the home.
 
 **`sparkwing serve --allow-remote`.** The dashboard now manages local secrets
-without an account, so a remote bind lets every host that reaches it read,
-write and delete them; the server warns at startup. A browser origin on
+without an account, so a remote bind lets every host that reaches it list,
+overwrite and delete them; the server warns at startup. It never serves a
+masked value. A browser origin on
 another loopback port is refused unless it is the dev server's port 3100.
 
-**Pipeline steps.** A pipeline binary takes `SPARKWING_SECRETS_KEY` and
-`SPARKWING_SECRETS_PREVIOUS_KEY` out of its environment before any pipeline
-code runs and hands them only to the daemon and its own node processes, so a
-step and the commands it starts no longer see them.
+**What the key protects.** It keeps a copied or backed-up `state.db` sealed.
+Code running as your account, pipeline steps included, can read the key file
+and ask the daemon for any secret, as it could read the dotenv files before.
 
 **An older daemon.** A daemon from an earlier release stores values
 unencrypted, so `sparkwing secrets set` refuses to write through it and asks
 for `sparkwing daemon restart`. A run no daemon hosts reads `state.db`
-directly with the same key.
+directly with the same key, and fails a secret read while the dotenv files
+wait to be imported.
+
+**Rolling back.** Stop the daemon, restore the `state.db` copy taken before
+the upgrade, and reinstall the older release. It reads the old settings files
+and dotenv files, which the upgrade left as they were, so any setting or
+secret changed after the upgrade, which lives only in `config.yaml` and
+`state.db`, must be redone by hand.
 
 ## Schema 73: trigger credit cursor
 
@@ -289,8 +304,8 @@ own billing in the dashboard.
 
 ## Upgrading a controller from v0.60.0
 
-v0.60.0 runs schema v47. This release migrates the database to v72 when the
-controller first starts, and a v0.60.0 binary cannot open it afterwards, so
+v0.60.0 runs schema v47. This release migrates the database to its current
+schema when the controller first starts, and a v0.60.0 binary cannot open it afterwards, so
 the backup is the only way back.
 
 1. Read the sections below for anything your deployment configures.
@@ -301,7 +316,7 @@ the backup is the only way back.
 4. Start the controller with the same `SPARKWING_SECRETS_KEY` it ran with. Its
    first start migrates the schema and reseals stored secrets, and logs how
    many it resealed.
-5. Verify: the startup line reads `runs-store schema 72`,
+5. Verify: the startup line reports the new `runs-store schema`,
    `GET /api/v1/health` answers, and `sparkwing runs list` shows your history.
 
 To roll back, stop the controller, restore the backup, and start v0.60.0.

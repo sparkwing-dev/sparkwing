@@ -100,19 +100,23 @@ The daemon creates the key file on the first stored secret; no other process
 creates it, so a daemon started with `SPARKWING_SECRETS_KEY` and a
 the dashboard (`sparkwing serve`) started without it cannot end up with two keys. The dashboard
 and a run refuse to seal until the key exists; store the first secret with
-`sparkwing secrets set`. A run on a machine with no daemon at all creates the
-key when it imports the dotenv files. Sparkwing reads the key file only as an
+`sparkwing secrets set`. Sparkwing reads the key file only as an
 owner-only regular file that is not a symlink. It refuses to create one
 while `state.db` already holds sealed values, because a second key would leave
 rows only the first one opens; restore the old file or set
 `SPARKWING_SECRETS_KEY` to it. Set these variables in the environment the
-daemon starts in, then run `sparkwing daemon restart`; the daemon clears them
-from its own environment once read. `SPARKWING_SECRETS_PREVIOUS_KEY` keeps a
+daemon starts in, then run `sparkwing daemon restart`; like any variable,
+they reach every process started from that environment, pipeline steps
+included. `SPARKWING_SECRETS_PREVIOUS_KEY` keeps a
 retired key readable until `sparkwing secrets rotate` reseals every value under
 the current one. Back up `secrets.key` with `state.db`: neither opens the other
 alone. A command running under a `SPARKWING_HOME` of its own refuses to create
 the machine's key file; point `SPARKWING_SECRETS_KEY_FILE` at a file inside
 that home.
+
+The key keeps a copied or backed-up `state.db` sealed. It does not keep
+secrets from code running as your account: a pipeline step can read the key
+file, and the daemon answers every process of your account.
 
 A run the daemon hosts reads its secrets through the daemon. A run with no
 daemon reads `state.db` directly and opens values with the same key. A fleet
@@ -126,24 +130,25 @@ administrator. `sparkwing secrets set` stores a local secret without
 
 ### Moving from secrets.env and config.env
 
-The local secret store used to be two dotenv files in the config directory:
-`secrets.env` for masked values and `config.env` for `--plain` ones. The daemon
-imports them the first time it opens `state.db`, and `sparkwing secrets` and
-local runs ask it to whenever the files exist. Each name becomes an unscoped,
-shared row; a name in both files imports once, masked, with the `config.env`
-value that runs used. A name `state.db` already holds keeps the store's value,
-and the import names it. Each file's import is recorded with a hash of its
-content, so a secret deleted after the import stays deleted, and a file edited
-afterwards imports only its new names. The files are left in place for an
-older sparkwing still on the machine; the notice
-`imported N secrets from <file>; <file> is no longer read and can be deleted`
-prints once per file.
+The local secret store used to be two dotenv files: `secrets.env` for masked
+values and `config.env` for `--plain` ones, in the config directory or where
+`SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` pointed. The daemon imports the
+files its own environment names, once, when it first opens `state.db`. Each
+name becomes an unscoped, shared row; a name in both files imports once,
+masked, with the `config.env` value that runs used. A name `state.db` already
+holds keeps the store's value. The import parses both files before it writes
+anything, then commits the rows and a record of the import in one
+transaction. Once recorded it never runs again, so a secret deleted afterwards
+stays deleted and later edits to the files are ignored. The daemon log names
+each imported name and each name that kept the store's value. The files are
+left in place for an older sparkwing still on the machine; delete them once
+none needs them.
 
-The import reads only the default paths. `SPARKWING_SECRETS` and
-`SPARKWING_CONFIG_ENV` no longer name a file, and while either is set the
-import is skipped with a warning; add those values with `sparkwing secrets set`.
-A command running under a `SPARKWING_HOME` of its own does not import the
-machine's files. This automatic import will be removed in a later release.
+An import that fails, on a malformed line for example, imports nothing. Until
+it succeeds, `sparkwing secrets` and every secret a local run reads fail with
+its error; fix the file and run `sparkwing daemon restart`. A command running
+under a `SPARKWING_HOME` of its own does not import the machine's files. This
+automatic import will be removed in a later release.
 
 ## Moving from the per-file settings
 

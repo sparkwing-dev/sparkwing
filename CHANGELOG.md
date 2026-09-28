@@ -723,13 +723,15 @@ unlock.
   daemon's controller API; a run with no daemon reads `state.db` directly.
   `secrets set`, `get` and `delete` take `--pipeline` locally, `secrets rotate`
   works without `--profile`, and the dashboard's Secrets page works without
-  an account. `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` no longer name a
-  file. The daemon imports the dotenv files once and leaves them in place;
-  this automatic import will be removed in a later release. See
+  an account. The daemon imports the dotenv files, or the files
+  `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` name, once and all or
+  nothing, and leaves them in place; a failed import fails secret reads with
+  its error. This automatic import will be removed in a later release. See
   [Local secrets in state.db](docs/migrations/_unreleased.md#local-secrets-in-statedb).
 - **cli + web (Breaking):** `sparkwing serve --allow-remote` now exposes this
-  machine's local secrets: every host that reaches the address can read,
-  write and delete them, and the server warns about it at startup. A browser
+  machine's local secrets: every host that reaches the address can list,
+  overwrite and delete them, and the server warns about it at startup. The
+  local server never serves a masked value. A browser
   origin on another loopback port is refused unless it is the dev server's
   port 3100, and a browser write with a body must send `application/json`.
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
