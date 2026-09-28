@@ -51,6 +51,8 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	c.AllowUnauthenticated = token == ""
 	c.EgressDailyAlarmBytes = cfg.GlobalDailyAlarmBytes
 	c.EgressDailyCapBytes = cfg.GlobalDailyCapBytes
+	// safety: New replaces globals that a store measurement still running from an earlier test reads.
+	measureOnce.Wait()
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)

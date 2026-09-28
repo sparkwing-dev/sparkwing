@@ -80,6 +80,8 @@ func newBlobServerWith(t *testing.T, token string, configure func(*Config, *s3.C
 	if configure != nil {
 		configure(&c, raw)
 	}
+	// safety: New replaces globals that a store measurement still running from an earlier test reads.
+	measureOnce.Wait()
 	s, err := New(c)
 	if err != nil {
 		t.Fatalf("New: %v", err)

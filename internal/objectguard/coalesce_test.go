@@ -84,3 +84,23 @@ func waitFor(t *testing.T, what string, done func() bool) {
 	}
 	t.Fatalf("timed out waiting for %s", what)
 }
+
+func TestCoalescerWaitCoversTheRepeat(t *testing.T) {
+	var c objectguard.Coalescer
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	runs := 0
+
+	c.Go(func() {
+		runs++
+		started <- struct{}{}
+		<-release
+	})
+	<-started
+	c.Go(func() { t.Error("a turned-away request ran its own job") })
+	close(release)
+	c.Wait()
+	if runs != 2 {
+		t.Errorf("Wait returned after %d run(s), want the first run and its repeat", runs)
+	}
+}

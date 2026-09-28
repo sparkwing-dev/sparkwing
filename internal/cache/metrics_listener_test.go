@@ -26,6 +26,8 @@ func newServerForListeners(t *testing.T, metricsAddr string) *Server {
 	cfg.SSHKeyDir = filepath.Join(root, "no-ssh-key")
 	cfg.APIToken = "s3cret"
 	cfg.MetricsAddr = metricsAddr
+	// safety: New replaces globals that a store measurement still running from an earlier test reads.
+	measureOnce.Wait()
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
