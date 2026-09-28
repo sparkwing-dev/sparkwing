@@ -464,21 +464,22 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_credits_reversed_micro_total` | Counter | (none) | Micro-credits refunded payments took back out of the ledger, reported positive; a reversal never joins the granted series, so summing that series over `kind` stays the money paid in |
 | `sparkwing_credits_reserved_micro_total` | Counter | (none) | Micro-credits claims reserved up front |
 | `sparkwing_credits_charged_micro_total` | Counter | (none) | Micro-credits execution billed |
-| `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned from the unused tail of a claim reservation |
+| `sparkwing_credits_refunded_micro_total` | Counter | (none) | Micro-credits returned to claims whose machine never started, or whose setup the platform failed |
 | `sparkwing_credits_storage_micro_total` | Counter | (none) | Micro-credits retained bytes billed; this series buys no runner time, so the charged series does not carry it |
 | `sparkwing_requests_by_principal_total` | Counter | `credential` | Requests that authenticated, by the kind of credential behind them: `user`, `runner`, `service` or `other` |
 
 `sparkwing_node_seconds_total{placement="cloud"}` is the billing line, and it
 comes from the credit ledger rather than from a request handler. A metered claim
-reserves a minute up front for concurrent spend safety. The reservation remains
-fully refundable until the live claim records its exact execution attempt, so
-queueing, Kubernetes provisioning, image pulls and runner startup add no cloud
-seconds. A finish or expired claim before execution returns the complete
-reservation. After execution starts, the series counts the reservation as the
-node consumes it and a finish refunds the unused part. The figure only grows,
-which is what a counter has to do. A node the credit-exhaustion sweep cancels
-settles there. A started node whose lease expires keeps its remaining
-reservation charged when the controller cannot establish a later stop instant.
+reserves the 60-second minimum up front for concurrent spend safety. The series
+leaves a node's reservation out until billing starts on the machine that runs
+it, and a trigger's until its claim settles, so queueing and Kubernetes
+provisioning add no cloud seconds and a claim whose machine never started
+returns its whole reservation. Once billing starts the reservation is consumed
+rather than refunded: the series counts the whole minimum, and heartbeats add
+the seconds past it. Two refunds return billed seconds and lower the series: a
+node setup the platform fails before execution, and a trigger claim requeued
+before its run started, which also returns what its heartbeats charged. A node the
+credit-exhaustion sweep cancels settles there.
 
 The `local` series counts what this controller process settled for an unmetered
 credential, read from the claiming credential recorded on the node, and it

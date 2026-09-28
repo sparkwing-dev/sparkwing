@@ -188,6 +188,14 @@ requirement makes older controllers refuse the upgraded database.
 To roll back, stop the upgraded controller, restore the backup, and start the
 older build. Do not delete the requirement from a live database.
 
+## 60-second minimum billable duration
+
+Drain metered node and trigger claims before deploying the controller that
+raises the minimum to 60 seconds. A claim reserved at 20 seconds under the
+older build is covered for 60 once its pod first renews under the new one, and
+`sparkwing_node_seconds_total{placement="cloud"}` dips by 40 seconds for each
+such claim still open. No database migration is required.
+
 ## Team runner cap
 
 Pass the team to `Store.RunnerCapFor(ctx, team, now)`. Its paid total and cap

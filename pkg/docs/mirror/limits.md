@@ -13,7 +13,7 @@ what it costs the operator is storage, bandwidth and controller time.
 
 Cloud Jobs request the pipeline's pinned or measured CPU and memory from
 Kubernetes. The credit ledger still prices each claim at the smallest class
-that covers those resources, with a 20-second minimum. A 0.25-core request
+that covers those resources, with a 60-second minimum. A 0.25-core request
 therefore fits a 0.25-core allocatable node but pays for the 2-core class.
 See [Runner classes](auth.md#runner-classes).
 Each metered heartbeat charges elapsed work and renews the claim together. If

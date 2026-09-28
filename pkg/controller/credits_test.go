@@ -295,7 +295,7 @@ func TestCredits_TriggerHeartbeatLedgerFailureRefusesRenewal(t *testing.T) {
 		t.Fatalf("claim = %+v, %v", claimed, err)
 	}
 	if _, err := f.store.DB().Exec(`UPDATE triggers SET credit_reserved_at = ? WHERE id = ?`,
-		time.Now().Add(-25*time.Second).UnixNano(), claimed.ID); err != nil {
+		time.Now().Add(-(store.MinBillableSeconds+5)*time.Second).UnixNano(), claimed.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.DB().Exec(`CREATE TRIGGER reject_trigger_usage BEFORE INSERT ON credit_charges

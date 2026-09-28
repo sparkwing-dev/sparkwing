@@ -734,6 +734,14 @@ unlock.
   local server never serves a masked value. A browser
   origin on another loopback port is refused unless it is the dev server's
   port 3100, and a browser write with a body must send `application/json`.
+- **controller:** A metered node or trigger claim now pays at least 60 seconds
+  at its class's rate, up from 20. Billing stays per second past the minimum.
+  A claim reserves the 60 seconds up front, so a balance below one minute at
+  the class is refused with `402`. `GET /api/v1/team/billing` reports
+  `min_billable_seconds: 60`. Drain metered claims before deploying, because
+  a claim reserved at 20 seconds would be covered for 60. See
+  [60-second minimum billable duration](docs/migrations/_unreleased.md#60-second-minimum-billable-duration).
+
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
   Idle-tail appends start after 100 ms. A sequence

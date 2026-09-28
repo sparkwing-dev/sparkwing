@@ -133,7 +133,7 @@ func TestDispatchedClaimBillsFromThePodsFirstRenewal(t *testing.T) {
 
 	// safety: fetch and compile run between the renewal and the execution
 	// start, so the execution start must leave the window where it is.
-	setup := renewed.Add(30 * time.Second)
+	setup := renewed.Add((store.MinBillableSeconds + 10) * time.Second)
 	if res, err := s.ChargeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, setup); err != nil ||
 		res.Charge == nil || res.Charge.Seconds != 10 {
 		t.Fatalf("setup charge = %+v, %v; want the ten seconds past the minimum", res.Charge, err)
@@ -146,8 +146,8 @@ func TestDispatchedClaimBillsFromThePodsFirstRenewal(t *testing.T) {
 	if _, err := s.FinalizeNodeCredits(ctx, n.RunID, n.NodeID, claimant.TokenPrefix, setup); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
-	if got, want := mustBalance(t, s), granted-30*unpinnedNodeRateMicro; got != want {
-		t.Fatalf("balance = %d, want thirty seconds from the renewal billed, %d", got, want)
+	if got, want := mustBalance(t, s), granted-(store.MinBillableSeconds+10)*unpinnedNodeRateMicro; got != want {
+		t.Fatalf("balance = %d, want the minimum and ten seconds from the renewal billed, %d", got, want)
 	}
 }
 
