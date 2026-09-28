@@ -1700,7 +1700,7 @@ func withRequestLog(
 					status = rw.status
 				}
 				finish(status)
-				panic(p)
+				panic(p) //nolint:forbidigo // re-raise so net/http still sees the handler's panic
 			}
 		}()
 		next.ServeHTTP(writer, r)
