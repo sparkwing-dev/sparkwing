@@ -215,7 +215,7 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 			return ClaimToken{}, ErrClaimNotLive
 		}
 		if class == ClaimSensitive {
-			cancelled, err := claimRunCancelled(ctx, s.queryRow, tok.Team, tok.RunID)
+			cancelled, err := claimRunCancelled(ctx, s.queryRow, tok.Team, tok.RunID, "")
 			if err != nil {
 				return ClaimToken{}, err
 			}
@@ -231,29 +231,40 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 
 // safety: the run's own row decides, and a run with no row reads as cancelled,
 // so a run no trigger names can never pass as "not cancelled" through a NULL.
-// Schema 77 moves the request onto runs and nodes; this is the one read to switch.
+// lock is appended to both reads; a writer passes a share lock so a cancel or a
+// run finish cannot commit between this read and the write it fences.
 func claimRunCancelled(ctx context.Context, queryRow func(context.Context, string, ...any) *sql.Row,
-	team Team, runID string,
+	team Team, runID, lock string,
 ) (bool, error) {
 	var status string
-	var requested sql.NullInt64
-	err := queryRow(ctx, `SELECT r.status, t.cancel_requested_at FROM runs r
-  LEFT JOIN triggers t ON t.team = r.team AND t.id = r.id
- WHERE r.team = ? AND r.id = ?`, string(team), runID).Scan(&status, &requested)
+	err := queryRow(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`+lock,
+		string(team), runID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return requested.Valid || (status != runStatusPending && status != runStatusRunning), nil
+	if status != runStatusPending && status != runStatusRunning {
+		return true, nil
+	}
+	var requested sql.NullInt64
+	err = queryRow(ctx, `SELECT cancel_requested_at FROM triggers WHERE team = ? AND id = ?`+lock,
+		string(team), runID).Scan(&requested)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return requested.Valid, nil
 }
 
 // safety: authorization reads the claim before the handler runs, so a store
 // function writing on a sensitive route's behalf calls this in its own
 // transaction; it locks the node row and refuses a claim lost or cancelled since.
 func assertClaimSensitiveTx(ctx context.Context, tx *storeTx, tok ClaimToken, now time.Time) error {
-	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID, tx.forShare())
 	if err != nil {
 		return err
 	}

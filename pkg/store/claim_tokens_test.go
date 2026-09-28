@@ -3,6 +3,8 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -20,7 +22,11 @@ type claimedFixture struct {
 
 func claimForToken(t *testing.T, runID string) claimedFixture {
 	t.Helper()
-	s := storetest.Open(t)
+	return claimOn(t, storetest.Open(t), runID)
+}
+
+func claimOn(t *testing.T, s *store.Store, runID string) claimedFixture {
+	t.Helper()
 	identity := store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"}
 	readyNode(t, s, runID, "build")
 	node, err := s.ClaimNextReadyNode(context.Background(), identity, "holder-1", time.Minute, nil)
@@ -317,6 +323,50 @@ func TestClaimToken_SensitiveWriteFenceRechecksInsideTheTransaction(t *testing.T
 	if err := store.AssertClaimSensitiveForTest(ctx, lost.s, lostTok, now); !errors.Is(err, store.ErrClaimNotLive) {
 		t.Fatalf("fence after the lease lapsed: err = %v", err)
 	}
+}
+
+// A cancel that commits after the fence read but before the sensitive write
+// would let that write land on a cancelled run, so the cancel has to wait for
+// the fenced transaction to end.
+func TestClaimToken_PostgresCancelWaitsForAnInFlightSensitiveWrite(t *testing.T) {
+	f := claimOn(t, storetest.NewPostgres(t).Open(t), "run-race")
+	ctx := context.Background()
+	now := time.Now()
+	raw := f.mint(t, now)
+	tok := wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, nil)
+	if err := f.s.CreateTrigger(ctx, store.Trigger{ID: "run-race", Pipeline: "demo", Status: "claimed", CreatedAt: now}); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	pid, release, err := store.HoldClaimSensitiveForTest(ctx, f.s, tok, now)
+	if err != nil {
+		t.Fatalf("hold fence: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- f.s.RequestCancel(ctx, "run-race") }()
+	for {
+		select {
+		case err := <-done:
+			_ = release()
+			t.Fatalf("cancel committed while a fenced sensitive write was open (err = %v)", err)
+		default:
+		}
+		var blocked int
+		if err := f.s.DB().QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM pg_stat_activity
+			WHERE %d = ANY(pg_blocking_pids(pid))`, pid)).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked > 0 {
+			break
+		}
+		runtime.Gosched()
+	}
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	wantClaimAuth(t, f.s, raw, store.ClaimSensitive, now, store.ErrClaimCancelRequested)
 }
 
 func TestClaimToken_ReplayAnswersOnlyTheCommittedDigest(t *testing.T) {
