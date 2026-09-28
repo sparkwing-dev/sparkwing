@@ -8,7 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -18,7 +21,10 @@ const (
 	daemonFile     = "events.jsonl"
 	supervisorFile = "supervisor-events.jsonl"
 	maxRecordBytes = 1 << 20
+	closeDeadline  = 100 * time.Millisecond
 )
+
+var lastIncarnation atomic.Uint64
 
 // Record describes one decision or observation made by the daemon or its supervisor.
 type Record struct {
@@ -35,7 +41,7 @@ type Record struct {
 	Data         map[string]any `json:"data,omitempty"`
 }
 
-// Writer accepts bounded, nonblocking event submissions and drains them on Close.
+// Writer accepts bounded, nonblocking event submissions and attempts a bounded drain on Close.
 type Writer struct {
 	ch          chan Record
 	done        chan struct{}
@@ -62,9 +68,7 @@ func (w *Writer) Enqueue(r Record) {
 	if w.closed {
 		return
 	}
-	if r.TS.IsZero() {
-		r.TS = time.Now().UTC()
-	}
+	r.TS = time.Now().UTC()
 	if w.dropped > 0 && len(w.ch) < cap(w.ch)-1 {
 		w.seq++
 		w.ch <- Record{TS: r.TS, Seq: w.seq, Incarnation: w.incarnation, Source: "daemon", Kind: "dropped", Data: map[string]any{"count": w.dropped}}
@@ -79,29 +83,69 @@ func (w *Writer) Enqueue(r Record) {
 	}
 }
 
-// Close flushes accepted records and reports any final overflow.
+// Close gives accepted records a short flush deadline and reports abandoned records.
 func (w *Writer) Close() {
 	w.mu.Lock()
-	if w.closed {
-		w.mu.Unlock()
-		<-w.done
-		return
+	if !w.closed {
+		w.closed = true
+		if w.dropped > 0 {
+			w.seq++
+			report := Record{TS: time.Now().UTC(), Seq: w.seq, Incarnation: w.incarnation, Source: "daemon", Kind: "dropped", Data: map[string]any{"count": w.dropped}}
+			select {
+			case w.ch <- report:
+				w.dropped = 0
+			default:
+				select {
+				case <-w.ch:
+					w.dropped++
+				default:
+				}
+				report.Data["count"] = w.dropped
+				select {
+				case w.ch <- report:
+					w.dropped = 0
+				default:
+				}
+			}
+		}
+		close(w.ch)
 	}
-	w.closed = true
-	if w.dropped > 0 {
-		w.seq++
-		w.ch <- Record{TS: time.Now().UTC(), Seq: w.seq, Incarnation: w.incarnation, Source: "daemon", Kind: "dropped", Data: map[string]any{"count": w.dropped}}
-		w.dropped = 0
-	}
-	close(w.ch)
 	w.mu.Unlock()
-	<-w.done
+	timer := time.NewTimer(closeDeadline)
+	defer timer.Stop()
+	select {
+	case <-w.done:
+	case <-timer.C:
+		w.mu.Lock()
+		var abandoned uint64
+		// safety: the writer may still finish its current write, so only queued records count as abandoned.
+		for r := range w.ch {
+			if r.Kind == "dropped" {
+				if count, ok := r.Data["count"].(uint64); ok {
+					abandoned += count
+					continue
+				}
+			}
+			abandoned++
+		}
+		w.dropped += abandoned
+		w.mu.Unlock()
+		if abandoned > 0 && w.logf != nil {
+			go w.logf("journal: close deadline dropped %d queued records", abandoned)
+		}
+	}
 }
 
 func (w *Writer) run() {
 	defer close(w.done)
+	a := &appender{dir: w.dir, name: daemonFile, maxSize: 16 << 20, files: 3}
+	defer func() {
+		if err := a.close(); err != nil && w.logf != nil {
+			w.logf("journal: %v", err)
+		}
+	}()
 	for r := range w.ch {
-		if err := appendRecord(w.dir, daemonFile, 16<<20, 3, r); err != nil && w.logf != nil {
+		if err := a.append(r); err != nil && w.logf != nil {
 			w.logf("journal: %v", err)
 		}
 	}
@@ -109,14 +153,29 @@ func (w *Writer) run() {
 
 // AppendSupervisor writes a supervisor record to a separate stream in the same directory.
 func AppendSupervisor(dir string, r Record) error {
-	r.TS, r.Source = time.Now().UTC(), "supervisor"
+	if r.TS.IsZero() {
+		r.TS = time.Now().UTC()
+	}
+	r.Source = "supervisor"
 	return appendRecord(dir, supervisorFile, 1<<20, 2, r)
 }
 
 func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
-	if err := fssecure.EnsureDir(dir); err != nil {
-		return err
-	}
+	a := &appender{dir: dir, name: name, maxSize: maxSize, files: files}
+	err := a.append(r)
+	return errors.Join(err, a.close())
+}
+
+type appender struct {
+	dir     string
+	name    string
+	maxSize int64
+	files   int
+	f       *os.File
+	size    int64
+}
+
+func (a *appender) append(r Record) error {
 	line, err := json.Marshal(r)
 	if err != nil {
 		return err
@@ -124,17 +183,44 @@ func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
 	if len(line) > maxRecordBytes {
 		return fmt.Errorf("journal record exceeds 1 MiB")
 	}
-	if int64(len(line)+1) > maxSize {
+	if int64(len(line)+1) > a.maxSize {
 		return fmt.Errorf("journal record exceeds file cap")
 	}
-	path := filepath.Join(dir, name)
+	if a.f == nil {
+		if err := a.open(); err != nil {
+			return err
+		}
+	}
+	if a.size+int64(len(line)+1) > a.maxSize {
+		if err := a.rotate(); err != nil {
+			return err
+		}
+		if err := a.open(); err != nil {
+			return err
+		}
+	}
+	n, err := a.f.Write(append(line, '\n'))
+	a.size += int64(n)
+	if err != nil || n != len(line)+1 {
+		if err == nil {
+			err = fmt.Errorf("short journal write")
+		}
+		err = errors.Join(err, a.close())
+	}
+	return err
+}
+
+func (a *appender) open() error {
+	if err := fssecure.EnsureDir(a.dir); err != nil {
+		return err
+	}
+	path := filepath.Join(a.dir, a.name)
 	fi, err := os.Stat(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	rotate := false
 	if err == nil {
-		rotate = fi.Size()+int64(len(line)+1) > maxSize
+		a.size = fi.Size()
 		if fi.Size() > 0 {
 			f, err := os.Open(path)
 			if err != nil {
@@ -142,49 +228,66 @@ func appendRecord(dir, name string, maxSize int64, files int, r Record) error {
 			}
 			last := make([]byte, 1)
 			_, err = f.ReadAt(last, fi.Size()-1)
-			_ = f.Close()
+			err = errors.Join(err, f.Close())
 			if err != nil {
 				return err
 			}
-			rotate = rotate || last[0] != '\n'
-		}
-	}
-	if rotate {
-		if fi.Size() > maxSize {
-			if err := os.Remove(path); err != nil {
-				return err
-			}
-			rotate = false
-		}
-	}
-	if rotate {
-		if err := os.Remove(fmt.Sprintf("%s.%d", path, files-1)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		for i := files - 1; i >= 1; i-- {
-			old := path
-			if i > 1 {
-				old = fmt.Sprintf("%s.%d", path, i-1)
-			}
-			if err := os.Rename(old, fmt.Sprintf("%s.%d", path, i)); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
+			if fi.Size() > a.maxSize {
+				if err := os.Remove(path); err != nil {
+					return err
+				}
+				a.size = 0
+			} else if last[0] != '\n' {
+				if err := a.rotate(); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
-	if err != nil {
+	a.f, err = fssecure.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
+	return err
+}
+
+func (a *appender) rotate() error {
+	if err := a.close(); err != nil {
 		return err
 	}
-	_, err = f.Write(append(line, '\n'))
-	if cerr := f.Close(); err == nil {
-		err = cerr
+	path := filepath.Join(a.dir, a.name)
+	if err := os.Remove(fmt.Sprintf("%s.%d", path, a.files-1)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
+	for i := a.files - 1; i >= 1; i-- {
+		old := path
+		if i > 1 {
+			old = fmt.Sprintf("%s.%d", path, i-1)
+		}
+		if err := os.Rename(old, fmt.Sprintf("%s.%d", path, i)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	a.size = 0
+	return nil
+}
+
+func (a *appender) close() error {
+	if a.f == nil {
+		return nil
+	}
+	err := a.f.Close()
+	a.f = nil
 	return err
 }
 
 // Read returns all retained records, including records written by the supervisor.
 func Read(dir string) ([]Record, error) {
+	records, _, err := ReadWithStats(dir)
+	return records, err
+}
+
+// ReadWithStats returns retained records and the number of malformed or oversized lines skipped.
+func ReadWithStats(dir string) ([]Record, int, error) {
 	var records []Record
+	var skipped int
 	for _, stream := range []struct {
 		name  string
 		files int
@@ -199,7 +302,7 @@ func Read(dir string) ([]Record, error) {
 				continue
 			}
 			if err != nil {
-				return nil, err
+				return nil, skipped, err
 			}
 			lines := bytes.Split(body, []byte{'\n'})
 			for lineIndex, line := range lines {
@@ -208,43 +311,81 @@ func Read(dir string) ([]Record, error) {
 					continue
 				}
 				if len(line) > maxRecordBytes {
-					return nil, fmt.Errorf("%s: oversized journal record", path)
+					skipped++
+					continue
 				}
 				var r Record
 				if err := json.Unmarshal(line, &r); err != nil {
-					if last && body[len(body)-1] != '\n' {
-						continue
-					}
-					return nil, fmt.Errorf("%s: %w", path, err)
+					skipped++
+					continue
 				}
 				records = append(records, r)
 			}
 		}
 	}
-	sort.SliceStable(records, func(i, j int) bool { return records[i].TS.Before(records[j].TS) })
-	return records, nil
+	sort.SliceStable(records, func(i, j int) bool {
+		a, b := records[i], records[j]
+		if !a.TS.Equal(b.TS) {
+			return a.TS.Before(b.TS)
+		}
+		if a.Incarnation != b.Incarnation {
+			return a.Incarnation < b.Incarnation
+		}
+		return a.Seq < b.Seq
+	})
+	return records, skipped, nil
 }
 
-// NextIncarnation advances the counter after daemon election has acquired its lock.
-func NextIncarnation(dir string) (uint64, error) {
+// NextIncarnation chooses a daemon identity without waiting for journal storage.
+func NextIncarnation() uint64 {
+	for {
+		n := uint64(time.Now().UnixNano())
+		previous := lastIncarnation.Load()
+		if n <= previous {
+			n = previous + 1
+		}
+		if lastIncarnation.CompareAndSwap(previous, n) {
+			return n
+		}
+	}
+}
+
+// PersistIncarnation records the selected identity and reports counter file errors.
+func PersistIncarnation(dir string, n uint64) (result error) {
 	path := filepath.Join(dir, "incarnation")
-	var n uint64
+	var readErr error
 	if b, err := os.ReadFile(path); err == nil {
-		if _, err := fmt.Sscan(string(b), &n); err != nil {
-			return 0, err
+		if previous, err := parseIncarnation(b); err == nil {
+			if previous >= n {
+				return nil
+			}
+		} else {
+			readErr = fmt.Errorf("invalid incarnation %q", strings.TrimSpace(string(b)))
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return 0, err
+		readErr = fmt.Errorf("read incarnation: %w", err)
 	}
-	n++
-	tmp := path + ".tmp"
-	if err := fssecure.WriteFile(tmp, []byte(fmt.Sprint(n))); err != nil {
-		return 0, err
+	tmp, err := os.CreateTemp(dir, "incarnation-*.tmp")
+	if err != nil {
+		return errors.Join(readErr, fmt.Errorf("create incarnation temp: %w", err))
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return 0, err
+	tmpPath := tmp.Name()
+	defer func() {
+		if err := os.Remove(tmpPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, fmt.Errorf("remove incarnation temp: %w", err))
+		}
+	}()
+	_, writeErr := tmp.Write([]byte(fmt.Sprint(n)))
+	if err := errors.Join(writeErr, tmp.Close()); err != nil {
+		return errors.Join(readErr, fmt.Errorf("write incarnation: %w", err))
 	}
-	return n, nil
+	if Incarnation(dir) >= n {
+		return readErr
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return errors.Join(readErr, fmt.Errorf("replace incarnation: %w", err))
+	}
+	return readErr
 }
 
 // Incarnation reads the latest elected daemon number.
@@ -253,9 +394,13 @@ func Incarnation(dir string) uint64 {
 	if err != nil {
 		return 0
 	}
-	var n uint64
-	if _, err := fmt.Sscan(string(b), &n); err != nil {
+	n, err := parseIncarnation(b)
+	if err != nil {
 		return 0
 	}
 	return n
+}
+
+func parseIncarnation(b []byte) (uint64, error) {
+	return strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
 }

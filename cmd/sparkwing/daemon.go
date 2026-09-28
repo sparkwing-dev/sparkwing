@@ -84,12 +84,18 @@ func runDaemon(args []string) error {
 	}
 }
 
-func daemonJournal(home string) ([]journal.Record, error) {
+func daemonJournal(home string) ([]journal.Record, int, error) {
 	dir, err := wingd.StateDir(home)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return journal.Read(dir)
+	return journal.ReadWithStats(dir)
+}
+
+func reportSkippedJournalRecords(skipped int) {
+	if skipped > 0 {
+		fmt.Fprintf(os.Stderr, "Skipped %d unreadable journal records.\n", skipped)
+	}
 }
 
 func runDaemonEvents(args []string) error {
@@ -121,10 +127,11 @@ func runDaemonEvents(args []string) error {
 	if err != nil {
 		return err
 	}
-	records, err := daemonJournal(*home)
+	records, skipped, err := daemonJournal(*home)
 	if err != nil {
 		return err
 	}
+	reportSkippedJournalRecords(skipped)
 	if len(records) == 0 && format != "json" {
 		dir, err := wingd.StateDir(*home)
 		if err != nil {
@@ -199,16 +206,38 @@ func runDaemonExplain(args []string) error {
 	if err != nil {
 		return err
 	}
-	records, err := daemonJournal(*home)
+	records, skipped, err := daemonJournal(*home)
 	if err != nil {
 		return err
 	}
+	reportSkippedJournalRecords(skipped)
+	children := make(map[string][]string)
 	related := map[string]bool{*run: true}
 	for _, r := range records {
+		if r.DisplayRunID == *run && r.RunID != "" {
+			related[r.RunID] = true
+		}
+		if r.RunID == "" {
+			continue
+		}
 		for _, field := range []string{"owner_run_id", "requested_owner_run_id", "requested_parent", "resolved_parent"} {
 			owner, _ := r.Data[field].(string)
-			if owner == *run && r.RunID != "" {
-				related[r.RunID] = true
+			if owner != "" {
+				children[owner] = append(children[owner], r.RunID)
+			}
+		}
+	}
+	queue := make([]string, 0, len(related))
+	for id := range related {
+		queue = append(queue, id)
+	}
+	for len(queue) > 0 {
+		owner := queue[0]
+		queue = queue[1:]
+		for _, child := range children[owner] {
+			if !related[child] {
+				related[child] = true
+				queue = append(queue, child)
 			}
 		}
 	}

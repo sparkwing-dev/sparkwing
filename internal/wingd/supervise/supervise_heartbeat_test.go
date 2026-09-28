@@ -88,7 +88,7 @@ func TestStaleHeartbeatAndFailedProbesReplaceDaemon(t *testing.T) {
 				mu.Unlock()
 				return 1, nil
 			},
-			CaptureDump: func(child Child) (string, error) {
+			CaptureDump: func(_ context.Context, child Child) (string, error) {
 				if child != first {
 					t.Errorf("captured a successor's dump")
 				}

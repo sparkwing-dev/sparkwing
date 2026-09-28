@@ -31,6 +31,27 @@ func captureDaemonOutput(t *testing.T, run func() error) string {
 	return string(body)
 }
 
+func captureDaemonErrorOutput(t *testing.T, run func() error) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = old }()
+	if err := run(); err != nil {
+		t.Fatal(err)
+	}
+	_ = writer.Close()
+	body, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
 func TestDaemonExplainAndEventsReadWithoutDaemon(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "wingd")
@@ -101,6 +122,57 @@ func TestDaemonExplainIncludesOwnedSlotsAndChildAttaches(t *testing.T) {
 	}
 	if strings.Contains(plain, "other-slot") {
 		t.Fatalf("unrelated slot included: %s", plain)
+	}
+}
+
+func TestDaemonExplainFollowsDescendantsTransitively(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "wingd")
+	for _, record := range []journal.Record{
+		{Kind: "grant", RunID: "grandchild", Data: map[string]any{"wait_ms": 3}},
+		{Kind: "request", RunID: "grandchild", Data: map[string]any{"requested_parent": "child"}},
+		{Kind: "request", RunID: "child", Data: map[string]any{"owner_run_id": "root"}},
+		{Kind: "grant", RunID: "unrelated", Data: map[string]any{"wait_ms": 5}},
+	} {
+		if err := journal.AppendSupervisor(dir, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output := captureDaemonOutput(t, func() error {
+		return runDaemonExplain([]string{"--home", home, "--run", "root", "-o", "json"})
+	})
+	if strings.Count(output, `"run_id":"grandchild"`) != 2 || !strings.Contains(output, `"run_id":"child"`) || strings.Contains(output, `"run_id":"unrelated"`) {
+		t.Fatalf("transitive timeline: %s", output)
+	}
+}
+
+func TestDaemonJournalReportsSkippedRecords(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "wingd")
+	if err := journal.AppendSupervisor(dir, journal.Record{Kind: "grant", RunID: "run-1"}); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(filepath.Join(dir, "supervisor-events.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("bad json\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []func() error{
+		func() error { return runDaemonEvents([]string{"--home", home, "-o", "json"}) },
+		func() error { return runDaemonExplain([]string{"--home", home, "--run", "run-1", "-o", "json"}) },
+	} {
+		warning := captureDaemonErrorOutput(t, func() error {
+			_ = captureDaemonOutput(t, run)
+			return nil
+		})
+		if !strings.Contains(warning, "Skipped 1 unreadable journal records") {
+			t.Fatalf("skip warning: %q", warning)
+		}
 	}
 }
 

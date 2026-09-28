@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"net/url"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
@@ -50,8 +51,19 @@ func journalPolicy(p AdmissionPolicy) map[string]any {
 	return map[string]any{
 		"mode":       p.Mode,
 		"scheduling": scheduling,
-		"jev":        map[string]any{"model": j.Model, "endpoint": j.Endpoint, "timeout": j.Timeout, "min_confidence": j.MinConfidence, "min_probability": j.MinProbability, "max_backfill": j.MaxBackfill},
+		"jev":        map[string]any{"model": j.Model, "endpoint": journalEndpoint(j.Endpoint), "timeout": j.Timeout, "min_confidence": j.MinConfidence, "min_probability": j.MinProbability, "max_backfill": j.MaxBackfill},
 	}
+}
+
+func journalEndpoint(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.ForceQuery = false
+	return u.String()
 }
 
 func (d *Daemon) recordWindow(now time.Time, ev admissionEvent, c *conn, data map[string]any) {

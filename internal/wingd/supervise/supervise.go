@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -29,6 +34,9 @@ const (
 	defaultFailureCeiling    = 5 * time.Minute
 	defaultRestartBackoff    = time.Second
 	defaultMaxRestartBackoff = 30 * time.Second
+	maxDumps                 = 10
+	maxDumpBytes             = 2 << 20
+	supervisorJournalBuffer  = 64
 )
 
 // DefaultTermGrace is how long the supervisor lets a daemon it stopped exit
@@ -62,7 +70,7 @@ type Deps struct {
 	Probe       func(context.Context) error
 	Heartbeat   func() (uint64, error)
 	Logf        func(string, ...any)
-	CaptureDump func(Child) (string, error)
+	CaptureDump func(context.Context, Child) (string, error)
 	Journal     func(string, map[string]any)
 }
 
@@ -261,7 +269,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 						deps.Logf("replacing daemon during startup: no successful probe for %s and heartbeat stale for %s (last probe: %v)", time.Since(started), time.Since(staleSince), err)
 					}
 				}
-				recordReplacement(child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
+				recordReplacement(ctx, child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 				return true, false, stopChild(child, cfg.TermGrace)
 			}
 			failures++
@@ -279,7 +287,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 					deps.Logf("replacing daemon: %d failed probes and heartbeat stale for %s (last probe: %v)", failures, time.Since(staleSince), err)
 				}
 			}
-			recordReplacement(child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
+			recordReplacement(ctx, child, deps, episodeFailures, err, firstHeartbeat, lastHeartbeat, time.Since(staleSince), ceiling, largestTickGap)
 			if err := stopChild(child, cfg.TermGrace); err != nil {
 				return false, false, err
 			}
@@ -288,15 +296,31 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 	}
 }
 
-func recordReplacement(child Child, deps Deps, failures int, probeErr error, firstHeartbeat, lastHeartbeat uint64, stale time.Duration, ceiling bool, tickGap time.Duration) {
+func recordReplacement(ctx context.Context, child Child, deps Deps, failures int, probeErr error, firstHeartbeat, lastHeartbeat uint64, stale time.Duration, ceiling bool, tickGap time.Duration) {
 	data := map[string]any{"failed_probes": failures, "last_error": probeErr.Error(), "first_heartbeat_counter": firstHeartbeat, "last_heartbeat_counter": lastHeartbeat, "stale_ms": stale.Milliseconds(), "ceiling": ceiling, "largest_tick_gap_ms": tickGap.Milliseconds()}
 	if deps.CaptureDump != nil {
-		path, err := deps.CaptureDump(child)
-		if err != nil {
-			data["dump_error"] = err.Error()
-		} else {
-			data["dump_path"] = path
+		type result struct {
+			path string
+			err  error
 		}
+		captured := make(chan result, 1)
+		captureCtx, cancel := context.WithTimeout(ctx, time.Second)
+		go func() {
+			path, err := deps.CaptureDump(captureCtx, child)
+			captured <- result{path, err}
+		}()
+		select {
+		case result := <-captured:
+			if result.path != "" {
+				data["dump_path"] = result.path
+			}
+			if result.err != nil {
+				data["dump_error"] = result.err.Error()
+			}
+		case <-captureCtx.Done():
+			data["dump_error"] = "goroutine dump timed out"
+		}
+		cancel()
 	}
 	if deps.Journal != nil {
 		deps.Journal("replacement", data)
@@ -316,7 +340,7 @@ func stopChild(child Child, grace time.Duration) error {
 			return waitErr
 		default:
 			if forceErr := killAndWaitChild(child, done, grace); forceErr != nil {
-				return fmt.Errorf("wingd supervisor: terminate child: %v; forced stop: %w", err, forceErr)
+				return fmt.Errorf("wingd supervisor: terminate child: %w; forced stop: %w", err, forceErr)
 			}
 			return nil
 		}
@@ -379,45 +403,177 @@ func (c *execChild) Kill() error {
 
 func (c *execChild) dumpSignal() error { return signalExited(signalDump(c.cmd.Process)) }
 
-func captureDump(child Child, dir string) (string, error) {
-	signaler, ok := child.(interface{ dumpSignal() error })
-	if !ok {
-		return "", errors.New("child has no dump signal")
-	}
+func captureDump(ctx context.Context, child Child, dir string) (string, error) {
+	return captureDumpWithWrite(ctx, child, dir, fssecure.WriteFile)
+}
+
+func captureDumpWithWrite(ctx context.Context, child Child, dir string, write func(string, []byte) error) (string, error) {
 	source := filepath.Join(dir, "d.log.stacks")
 	previous, err := os.Stat(source)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := pruneDumps(ctx, dir, maxDumps-1); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	signaler, ok := child.(interface{ dumpSignal() error })
+	if !ok {
+		return "", errors.New("child has no dump signal")
+	}
 	start := time.Now()
 	if err := signaler.dumpSignal(); err != nil {
 		return "", err
 	}
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if fi, err := os.Stat(source); err == nil && (previous == nil || !os.SameFile(previous, fi)) {
-			body, err := os.ReadFile(source)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		f, err := os.Open(source)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				_ = f.Close()
+				return "", err
+			}
+			fi, err := f.Stat()
 			if err != nil {
+				_ = f.Close()
 				return "", err
 			}
-			path := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", start.UnixNano()))
-			if err := fssecure.WriteFile(path, body); err != nil {
+			if err := ctx.Err(); err != nil {
+				_ = f.Close()
 				return "", err
 			}
-			return path, nil
+			if previous == nil || !os.SameFile(previous, fi) {
+				body, err := io.ReadAll(io.LimitReader(f, maxDumpBytes))
+				_ = f.Close()
+				if err != nil {
+					return "", err
+				}
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				path := filepath.Join(dir, fmt.Sprintf("dump-%d.txt", start.UnixNano()))
+				if err := write(path, body); err != nil {
+					return "", errors.Join(err, os.Remove(path))
+				}
+				if err := ctx.Err(); err != nil {
+					return "", errors.Join(err, os.Remove(path))
+				}
+				return path, nil
+			}
+			_ = f.Close()
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
 		select {
 		case <-ticker.C:
-		case <-deadline.C:
-			return "", errors.New("goroutine dump timed out")
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
 	}
 }
 
-// safety: signalling the handle rather than the pid means a child the kernel
+func pruneDumps(ctx context.Context, dir string, limit int) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var pruneErr error
+	type dump struct {
+		name string
+		ts   int64
+	}
+	var dumps []dump
+	for _, entry := range entries {
+		value, ok := strings.CutPrefix(entry.Name(), "dump-")
+		if !ok {
+			continue
+		}
+		value, ok = strings.CutSuffix(value, ".txt")
+		if !ok {
+			continue
+		}
+		ts, err := strconv.ParseInt(value, 10, 64)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			info, err := entry.Info()
+			if err != nil {
+				pruneErr = errors.Join(pruneErr, err)
+				continue
+			}
+			if info.Size() > maxDumpBytes {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				pruneErr = errors.Join(pruneErr, os.Remove(filepath.Join(dir, entry.Name())))
+				continue
+			}
+			dumps = append(dumps, dump{entry.Name(), ts})
+		}
+	}
+	sort.Slice(dumps, func(i, j int) bool { return dumps[i].ts > dumps[j].ts })
+	for _, stale := range dumps[min(len(dumps), limit):] {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pruneErr = errors.Join(pruneErr, os.Remove(filepath.Join(dir, stale.name)))
+	}
+	return pruneErr
+}
+
+func queueSupervisorJournal(ctx context.Context, appendRecord func(journal.Record) error, logf func(string, ...any)) func(string, map[string]any) {
+	records := make(chan journal.Record, supervisorJournalBuffer)
+	var dropped atomic.Uint64
+	go func() {
+		var seq uint64
+		write := func(r journal.Record) {
+			seq++
+			r.Seq, r.TS = seq, time.Now().UTC()
+			if err := appendRecord(r); err != nil && logf != nil {
+				logf("journal: %v", err)
+			}
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case r := <-records:
+				if n := dropped.Swap(0); n > 0 {
+					write(journal.Record{Kind: "dropped", Data: map[string]any{"count": n}})
+				}
+				write(r)
+			}
+		}
+	}()
+	return func(kind string, data map[string]any) {
+		select {
+		case records <- journal.Record{Kind: kind, Data: data}:
+		default:
+			dropped.Add(1)
+		}
+	}
+}
+
+// safety: signaling the handle rather than the pid means a child the kernel
 // has already reaped answers ErrProcessDone instead of letting the signal reach
 // whichever process inherited its pid.
 func signalExited(err error) error {
@@ -457,9 +613,12 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	var supervisorSeq uint64
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	appendJournal := queueSupervisorJournal(ctx, func(r journal.Record) error {
+		r.Incarnation = journal.Incarnation(dir)
+		return journal.AppendSupervisor(dir, r)
+	}, logger.Printf)
 	return Loop(ctx, Config{
 		ProbeInterval:     defaultProbeInterval,
 		ProbeTimeout:      defaultProbeTimeout,
@@ -484,12 +643,7 @@ func Run(args []string) error {
 			return wingd.ReadHeartbeat(path)
 		},
 		Logf:        logger.Printf,
-		CaptureDump: func(child Child) (string, error) { return captureDump(child, dir) },
-		Journal: func(kind string, data map[string]any) {
-			supervisorSeq++
-			if err := journal.AppendSupervisor(dir, journal.Record{Seq: supervisorSeq, Incarnation: journal.Incarnation(dir), Kind: kind, Data: data}); err != nil {
-				logger.Printf("journal: %v", err)
-			}
-		},
+		CaptureDump: func(ctx context.Context, child Child) (string, error) { return captureDump(ctx, child, dir) },
+		Journal:     appendJournal,
 	})
 }

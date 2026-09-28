@@ -5,8 +5,12 @@ The daemon keeps a bounded JSON Lines journal in `<SPARKWING_HOME>/wingd/`, besi
 `sparkwing daemon status`. The journal survives daemon exit and needs no runs
 store. `events.jsonl` and its numbered rotations hold daemon records;
 `supervisor-events.jsonl` and its rotations hold supervisor records. The two
-streams together retain at most 50 MiB. An `incarnation` file increments when a
-daemon wins election. `seq` increases within a source and incarnation.
+streams together retain at most 50 MiB. The newest ten replacement dumps add at
+most 20 MiB. The latest `d.log.stacks` source adds up to 2 MiB, so journal
+and replacement evidence retain at most 72 MiB. An `incarnation` file
+stores a time-derived daemon identity when writable. The daemon selects that
+identity before serving and updates the file in the background, so file errors
+cannot delay admission. `seq` increases within a source and incarnation.
 
 ```sh
 sparkwing daemon events --run RUN_ID -o json
@@ -19,9 +23,11 @@ Both commands read files directly, even when the daemon is down. `events` can
 filter by run, elapsed duration, repeated kind, or incarnation. It shows the
 newest 50 matching records by default. Use `--offset 50` for the previous 50 or
 `--limit 0` for every retained record. New arrivals can shift an offset between
-reads. JSON output is one record per line and is the default when piped; a
-terminal gets human output. With no retained journal, human `events` output
-prints the directory it checked. `explain` renders a run's admission timeline in sentences, including
+reads. Unreadable records are skipped, and their count is printed on stderr.
+Records are ordered by timestamp, incarnation, then sequence. JSON output is
+one record per line and is the default when piped; a terminal gets human output.
+With no retained journal, human `events` output prints the directory it checked.
+`explain` renders a run's admission timeline in sentences, including descendant
 node slot requests and attached children owned by that run. Its JSON output
 preserves the structured records. A retained record carries a timestamp, source,
 incarnation, sequence, kind, run identity where known, and decision inputs in
@@ -45,6 +51,9 @@ failure episode. A `replacement` record gives the failed probe count, last
 error, heartbeat counter, stale duration, whether the continuous failure
 ceiling fired, largest supervisor tick gap, and the `dump_path`. On Unix, before
 stopping the daemon, the supervisor signals its SIGUSR1 diagnostic handler and
-saves the result as `dump-<timestamp>.txt` in the same directory. A failed
-capture, including on Windows where SIGUSR1 is unavailable, appears in
-`dump_error`; replacement still proceeds after a bounded wait.
+saves up to 2 MiB as `dump-<timestamp>.txt` in the same directory. It keeps the
+newest ten dumps; the next stack capture replaces `d.log.stacks`. A
+failed capture, including on Windows where SIGUSR1 is unavailable, appears in
+`dump_error`; replacement proceeds after a wait of at most one second. Journal
+writes do not hold admission or replacement. Policy endpoint URLs in records
+omit userinfo and query parameters.

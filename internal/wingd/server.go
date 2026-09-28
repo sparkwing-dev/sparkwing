@@ -191,13 +191,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return ErrNotElected
 	}
 	defer d.releaseLock()
-	incarnation, err := journal.NextIncarnation(d.layout.dir)
-	if err != nil {
-		return fmt.Errorf("wingd: incarnation: %w", err)
-	}
+	incarnation := journal.NextIncarnation()
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)
 	defer d.journal.Close()
+	go func() {
+		if err := journal.PersistIncarnation(d.layout.dir, incarnation); err != nil {
+			d.cfg.logf("journal incarnation: %v", err)
+		}
+	}()
 	heartbeatStop := make(chan struct{})
 	heartbeatDone := make(chan struct{})
 	go d.heartbeatLoop(heartbeatStop, heartbeatDone)
@@ -812,7 +814,6 @@ func (d *Daemon) terminalCheckReason(err error) string {
 }
 
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
-	c.runID, c.journalRunID, c.displayRunID, c.pipeline, c.repo, c.pid = req.RunID, req.RunID, req.DisplayRunID, req.Pipeline, req.Repo, req.PID
 	data := map[string]any{"resources": req.Resources, "class": req.Class, "priority": req.Priority}
 	if req.ParentLeaseToken != "" {
 		data["child_attach"] = true
@@ -823,7 +824,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if req.OwnerRunID != "" {
 		data["requested_owner_run_id"] = req.OwnerRunID
 	}
-	d.recordJournal("request", c, data)
+	d.recordJournal("request", &conn{runID: req.RunID, displayRunID: req.DisplayRunID, pipeline: req.Pipeline, repo: req.Repo, pid: req.PID}, data)
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
 			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
@@ -889,6 +890,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		ar.ReservationBypassBudgetMS = d.cfg.admissionPolicy().Jev.maxBackfill().Milliseconds()
 	}
 	c.runID = req.RunID
+	c.journalRunID = req.RunID
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
@@ -1288,6 +1290,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
+	c.journalRunID = req.RunID
 	c.ownerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
@@ -1329,7 +1332,6 @@ func leaseSemaphores(snap admission.Snapshot, id admission.LeaseID) []string {
 }
 
 func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
-	c.runID, c.journalRunID = req.RunID, req.RunID
 	d.recordJournal("reattach_request", &conn{runID: req.RunID}, nil)
 	d.mu.Lock()
 	leaseID, err := d.ledger.Reattach(req.LeaseToken)
@@ -1403,6 +1405,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	c.resources = d.leaseCharge[leaseID]
 	c.members = []string{reclaimed}
 	c.runID = reclaimed
+	c.journalRunID = reclaimed
 	for _, m := range c.members {
 		d.byRun[m] = c
 	}

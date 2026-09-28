@@ -144,10 +144,13 @@ func queueBlockerResource(key, reason string) string {
 }
 
 func queueBlocker(snap admission.Snapshot, resource, runID string) string {
+	if resource == "" {
+		return ""
+	}
 	for i, waiter := range snap.Waiters {
 		if waiter.RequestID == runID {
 			for j := i - 1; j >= 0; j-- {
-				if _, ok := waiterResources(snap.Waiters[j])[resource]; ok {
+				if waiterUsesResource(snap.Waiters[j], resource) {
 					return snap.Waiters[j].RequestID
 				}
 			}
@@ -186,6 +189,25 @@ func queueBlocker(snap admission.Snapshot, resource, runID string) string {
 		}
 	}
 	return ""
+}
+
+func waiterUsesResource(waiter admission.WaiterState, resource string) bool {
+	switch resource {
+	case "cores":
+		return waiter.MilliCores > 0
+	case "memory":
+		return waiter.MemoryBytes > 0
+	}
+	key, semaphore := strings.CutPrefix(resource, "semaphore:")
+	if !semaphore {
+		return false
+	}
+	for _, claim := range waiter.Claims {
+		if claim.Key == key && claim.Policy != admission.PolicyCancelOthers {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Daemon) waiterDeliveriesLocked() []delivery {
