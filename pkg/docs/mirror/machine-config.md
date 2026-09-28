@@ -85,7 +85,7 @@ keep the write there.
 
 ## Local secrets
 
-`sparkwing secrets` without `--profile`, local runs, and `sparkwing web` share
+`sparkwing secrets` without `--profile`, local runs, and the dashboard (`sparkwing serve`) share
 one secret store: the `secrets` table of `state.db`, which the sparkwing daemon
 serves on its API socket. Every value is sealed with the controller's cipher
 (XChaCha20-Poly1305, bound to the row's name, scope and flags) under a 32-byte
@@ -96,7 +96,13 @@ key:
 - otherwise the key file, `secrets.key` in the config directory, or the path
   `SPARKWING_SECRETS_KEY_FILE` names. It holds the 32 raw bytes, owner-only.
 
-The first stored secret creates the key file. Sparkwing refuses to create one
+The daemon creates the key file on the first stored secret; no other process
+creates it, so a daemon started with `SPARKWING_SECRETS_KEY` and a
+the dashboard (`sparkwing serve`) started without it cannot end up with two keys. The dashboard
+and a run refuse to seal until the key exists; store the first secret with
+`sparkwing secrets set`. A run on a machine with no daemon at all creates the
+key when it imports the dotenv files. Sparkwing reads the key file only as an
+owner-only regular file that is not a symlink. It refuses to create one
 while `state.db` already holds sealed values, because a second key would leave
 rows only the first one opens; restore the old file or set
 `SPARKWING_SECRETS_KEY` to it. Set these variables in the environment the

@@ -95,15 +95,18 @@ gone; the daemon reads the `admission` section.
 
 ## Local secrets in state.db
 
-`sparkwing secrets` without `--profile`, local runs and `sparkwing web` keep
+`sparkwing secrets` without `--profile`, local runs and the dashboard (`sparkwing serve`) keep
 this machine's secrets in the `secrets` table of `state.db` in
 `SPARKWING_HOME`, instead of `~/.config/sparkwing/secrets.env` (masked) and
 `config.env` (`--plain`). The sparkwing daemon serves them on its API socket
 and starts when a command needs it. Every value is sealed with the
 controller's cipher.
 
-**The key.** The first stored secret creates `~/.config/sparkwing/secrets.key`
-(or `$XDG_CONFIG_HOME/sparkwing/secrets.key`), 32 random bytes, owner-only.
+**The key.** The daemon creates `~/.config/sparkwing/secrets.key`
+(or `$XDG_CONFIG_HOME/sparkwing/secrets.key`), 32 random bytes, owner-only, on
+the first stored secret; the dashboard (`sparkwing serve`) and runs never create it, so store
+the first secret with `sparkwing secrets set`. A key file that others can read
+or that is a symlink is refused.
 `SPARKWING_SECRETS_KEY` (base64 of 32 bytes, as for `sparkwing-controller`)
 overrides the file, and `SPARKWING_SECRETS_KEY_FILE` moves it. Set them where
 the daemon starts, then run `sparkwing daemon restart`. Back up `secrets.key`
@@ -134,6 +137,16 @@ sparkwing secrets set --name REGION --value us-east-1 --plain
 A command running under a `SPARKWING_HOME` of its own keeps its secrets in
 that home's `state.db`, does not import the machine's files, and refuses to
 create the machine's key; point `SPARKWING_SECRETS_KEY_FILE` inside the home.
+
+**`sparkwing serve --allow-remote`.** The dashboard now manages local secrets
+without an account, so a remote bind lets every host that reaches it read,
+write and delete them; the server warns at startup. A browser origin on
+another loopback port is refused unless it is the dev server's port 3100.
+
+**Pipeline steps.** A pipeline binary takes `SPARKWING_SECRETS_KEY` and
+`SPARKWING_SECRETS_PREVIOUS_KEY` out of its environment before any pipeline
+code runs and hands them only to the daemon and its own node processes, so a
+step and the commands it starts no longer see them.
 
 **An older daemon.** A daemon from an earlier release stores values
 unencrypted, so `sparkwing secrets set` refuses to write through it and asks

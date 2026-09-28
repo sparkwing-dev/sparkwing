@@ -11,7 +11,7 @@ Manage secrets in this machine's local store or on a controller
 Without --profile, reads and writes this machine's local secret store:
 the secrets table of state.db in SPARKWING_HOME, which the sparkwing
 daemon serves on its API socket and starts when needed. Local runs,
-'sparkwing web' and these commands share it. Every value is sealed
+the dashboard ('sparkwing serve') and these commands share it. Every value is sealed
 under the key in ~/.config/sparkwing/secrets.key
 ($XDG_CONFIG_HOME/sparkwing when that variable is set), which the first
 stored secret creates; SPARKWING_SECRETS_KEY (base64 of 32 bytes)

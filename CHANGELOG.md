@@ -719,7 +719,7 @@ unlock.
   sealed with the controller's cipher under a key in
   `~/.config/sparkwing/secrets.key` that the first stored secret creates, or
   under `SPARKWING_SECRETS_KEY`. `sparkwing secrets` without `--profile`,
-  local runs and `sparkwing web` read and write them through the sparkwing
+  local runs and the dashboard (`sparkwing serve`) read and write them through the sparkwing
   daemon's controller API; a run with no daemon reads `state.db` directly.
   `secrets set`, `get` and `delete` take `--pipeline` locally, `secrets rotate`
   works without `--profile`, and the dashboard's Secrets page works without
@@ -727,6 +727,11 @@ unlock.
   file. The daemon imports the dotenv files once and leaves them in place;
   this automatic import will be removed in a later release. See
   [Local secrets in state.db](docs/migrations/_unreleased.md#local-secrets-in-statedb).
+- **cli + web (Breaking):** `sparkwing serve --allow-remote` now exposes this
+  machine's local secrets: every host that reaches the address can read,
+  write and delete them, and the server warns about it at startup. A browser
+  origin on another loopback port is refused unless it is the dev server's
+  port 3100, and a browser write with a body must send `application/json`.
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
   Idle-tail appends start after 100 ms. A sequence

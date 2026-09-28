@@ -1807,12 +1807,15 @@ Use serve restart for replacement. Build identity is reported separately
 from readiness; missing artifact evidence is unknown.
 
 The listener accepts loopback Host headers and rejects a browser Origin
-that is neither loopback, the --addr host, nor listed in --allow-origin.
---allow-remote widens the Host check only.`,
+that is neither a loopback origin on the served port or the dashboard's
+dev-server port 3100, the --addr host, nor listed in --allow-origin. A
+browser write with a body must send application/json. --allow-remote
+widens the Host check only, and exposes this machine's local secrets to
+every host that reaches the address.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
-		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read secrets.", Group: "Bind"},
+		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read, write and delete this machine's local secrets.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},
@@ -3212,7 +3215,7 @@ var cmdSecret = Command{
 	Description: `Without --profile, reads and writes this machine's local secret store:
 the secrets table of state.db in SPARKWING_HOME, which the sparkwing
 daemon serves on its API socket and starts when needed. Local runs,
-'sparkwing web' and these commands share it. Every value is sealed
+the dashboard ('sparkwing serve') and these commands share it. Every value is sealed
 under the key in ~/.config/sparkwing/secrets.key
 ($XDG_CONFIG_HOME/sparkwing when that variable is set), which the first
 stored secret creates; SPARKWING_SECRETS_KEY (base64 of 32 bytes)
