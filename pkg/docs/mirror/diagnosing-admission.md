@@ -47,6 +47,12 @@ inputs. `connection_opened`, `connection_handshake`, `connection_closed`,
 probe connections are omitted; supervisor failure episodes record their health.
 `dropped` counts records lost when the bounded writer buffer filled.
 
+`child_attach` records carry the requested parent ID and the resolved live
+parent ID. A rejected child attach names the requested parent and, when an
+ancestor blocks it, the resolved parent and blocking ancestor. `cancel` records
+carry the requesting peer's identity, affected live runs, and blocked descendant
+IDs, including departed descendants that cannot attach again.
+
 The supervisor records `probe_failure_start` and `probe_failure_end` once per
 failure episode. A `replacement` record gives the failed probe count, last
 error, heartbeat counter, stale duration, whether the continuous failure

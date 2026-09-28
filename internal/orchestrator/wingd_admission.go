@@ -29,6 +29,7 @@ type LocalAdmission struct {
 	Version string
 
 	ParentLeaseToken string
+	ParentRunID      string
 
 	Origin wingwire.Origin
 
@@ -67,12 +68,12 @@ func NewReservedNodeAdmission(home, version, leaseToken string, origin wingwire.
 	}
 }
 
-func (la *LocalAdmission) attachReservedNode(ctx context.Context, priority int) (context.Context, bool) {
+func (la *LocalAdmission) attachReservedNode(ctx context.Context, runID string, priority int) (context.Context, bool) {
 	if la == nil || la.reservedNodeLeaseToken == "" {
 		return ctx, false
 	}
 	token := la.reservedNodeLeaseToken
-	return withLocalAdmission(ctx, la, token, token, true, priority, runCharge{}), true
+	return withLocalAdmission(ctx, la, runID, token, token, true, priority, runCharge{}), true
 }
 
 const defaultQueueHeartbeat = 30 * time.Second
@@ -403,6 +404,7 @@ func (la *LocalAdmission) attachChildRun(
 		Repo:             currentRepoShortName(),
 		PID:              os.Getpid(),
 		ParentLeaseToken: la.ParentLeaseToken,
+		ParentRunID:      la.ParentRunID,
 		Origin:           la.Origin,
 	}, nil)
 	if err != nil {
@@ -1020,6 +1022,7 @@ type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
 	la           *LocalAdmission
+	runID        string
 	token        string
 	childToken   string
 	hostAdmitted bool
@@ -1029,6 +1032,7 @@ type localAdmissionState struct {
 func withLocalAdmission(
 	ctx context.Context,
 	la *LocalAdmission,
+	runID string,
 	leaseToken string,
 	childToken string,
 	hostAdmitted bool,
@@ -1041,13 +1045,14 @@ func withLocalAdmission(
 	ctx = withAdmittedCharge(ctx, charge)
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
 		la:           la,
+		runID:        runID,
 		token:        leaseToken,
 		childToken:   childToken,
 		hostAdmitted: hostAdmitted,
 		priority:     priority,
 	})
 	if leaseToken != "" {
-		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken}
+		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken, "SPARKWING_RUN_ID": runID}
 		if childToken != "" {
 			env[wingwire.ChildLeaseTokenEnv] = childToken
 		}
@@ -1106,6 +1111,14 @@ func leaseTriggerEnv(ctx context.Context) map[string]string {
 		return nil
 	}
 	return map[string]string{wingwire.LeaseTokenEnv: token}
+}
+
+func parentRunIDFromContext(ctx context.Context) string {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if ok && state.token != "" {
+		return state.runID
+	}
+	return os.Getenv("SPARKWING_RUN_ID")
 }
 
 func childAttachTokenFromEnv(env map[string]string) string {

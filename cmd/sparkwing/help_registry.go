@@ -55,7 +55,7 @@ for event records and dump paths.`,
 
 var cmdDaemonEvents = Command{
 	Path: "sparkwing daemon events", Synopsis: "Read retained admission events without starting the daemon",
-	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.",
+	Description: "Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.",
 	Flags:       []FlagSpec{{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect", Group: "Input"}, {Name: "run", Argument: "ID", Desc: "Filter by run ID", Group: "Input"}, {Name: "since", Argument: "DURATION", Desc: "Lookback duration", Group: "Input"}, {Name: "kind", Argument: "KIND", Desc: "Record kind (repeatable)", Group: "Input"}, {Name: "incarnation", Argument: "N", Desc: "Daemon incarnation", Group: "Input"}, {Name: "limit", Argument: "N", Desc: "Maximum records (default 50; 0 for all)", Group: "Input"}, {Name: "offset", Argument: "N", Desc: "Matching records to skip from newest", Group: "Input"}, {Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"}},
 	GroupOrder:  []string{"Input", "Output", "Other"},
 	Examples:    []Example{{"Events for one run", "sparkwing daemon events --run abc -o json"}},
@@ -3205,7 +3205,12 @@ acknowledges. Already-finished runs surface a per-id error but
 don't abort the batch.
 
 Pass --run once per id (repeatable). Use --run - to read ids
-from stdin, one per line.`,
+from stdin, one per line. For local runs sharing an admission lease,
+cancelling a child also cancels its descendants. Its parent and siblings
+continue. Cancelling the root cancels every member of that lease.
+Children launched after a parent exits attach under its nearest live ancestor
+while a live descendant retains its lineage. Otherwise they attach under the
+lease root, and the daemon logs the parent resolution.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},

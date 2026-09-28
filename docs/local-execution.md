@@ -169,6 +169,8 @@ source may be missing or unbuildable.
 Retries preserve the selected pipeline commit and recreate its compile worktree.
 They execute in a snapshot of the original execution revision, following the
 same checkout rules as other retries.
+The pipeline process receives the selected commit as `SPARKWING_PIPELINE_REV`;
+Sparkwing also records it as `pipeline_revision` in the run invocation.
 
 #### Making a retry safe
 
@@ -290,8 +292,16 @@ consumer claims it, cancellation is a store transaction that marks the
 run cancelled and takes it off the queue -- no dashboard and no profile
 required. Once it is running, the admission daemon holding the run's
 process cancels it the same way it cancels any local run. Either way the
-cancellation names one run id and can only reach that run: a
-resubmission is a different run with a different id.
+cancellation names one run id. Cancelling a child also cancels runs
+attached through it, while its parent and siblings continue. Cancelling
+the lease's root run cancels every attached member. A resubmission is a
+different run with a different id.
+
+If a parent exits while another member keeps the lease alive, a later child
+attaches under the nearest live ancestor while a live descendant retains its
+lineage. Otherwise it attaches under the lease root and the daemon logs the
+requested and resolved parents. Clients that send only the inherited lease
+token also attach under the root.
 
 #### The consumer process
 

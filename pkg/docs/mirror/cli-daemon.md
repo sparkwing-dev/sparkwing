@@ -43,7 +43,7 @@ sparkwing daemon stop
 
 Read retained admission events without starting the daemon
 
-Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.
+Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Child attach records show requested and resolved parents; cancel records show affected and blocked runs. Unreadable records are skipped and counted on stderr. Human output names the directory when no events are retained. JSON output is one record per line.
 
 ### Flags
 

@@ -55,7 +55,6 @@ type Daemon struct {
 
 	mu                  sync.Mutex
 	persistMu           sync.Mutex
-	persistedEventSeq   uint64
 	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string) error
 	ledger              *admission.Ledger
 	conns               map[*conn]struct{}
@@ -366,12 +365,11 @@ func (d *Daemon) finalShutdown() {
 	for c := range d.conns {
 		toClose = append(toClose, c)
 	}
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	for _, c := range toClose {
 		c.close()
 	}
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
 	d.awaitAPI(APIDrainWindow)
@@ -553,13 +551,12 @@ func (d *Daemon) expireGrace() {
 		released++
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
 	if released > 0 {
 		d.cfg.logf("grace expired: released %d unreclaimed lease(s)", released)
 	}
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func (d *Daemon) now() time.Time { return d.cfg.now() }
@@ -956,7 +953,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			d.touchLocked()
 			d.mu.Unlock()
 			existing.close()
-			d.flush(deliveries, snap)
+			d.flush(deliveries)
 			return
 		case roleHolder:
 			if len(existing.members) != 1 {
@@ -1044,11 +1041,10 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			events = append(events, d.ledger.CancelWaiter(req.RunID)...)
 			delete(d.byRun, req.RunID)
 			deliveries := d.routeLocked(events)
-			snap := d.ledger.Snapshot()
 			d.touchLocked()
 			d.mu.Unlock()
 			d.recordJournal("denied", c, map[string]any{"reason": "capacity", "nonblocking": true})
-			d.flush(deliveries, snap)
+			d.flush(deliveries)
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "capacity", Policy: wingwire.PolicyFail, Reason: "capacity is not immediately available"})
 			return
 		}
@@ -1065,10 +1061,9 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
@@ -1237,7 +1232,7 @@ func (d *Daemon) forceReleaseSuperseded(leases []admission.LeaseID) {
 }
 
 func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
-	d.recordJournal("child_attach_request", &conn{runID: req.RunID}, map[string]any{"requested_parent": req.OwnerRunID})
+	d.recordJournal("child_attach_request", &conn{runID: req.RunID}, map[string]any{"requested_parent": req.ParentRunID})
 	d.mu.Lock()
 	if _, pending := d.cancelPending[req.RunID]; pending {
 		d.mu.Unlock()
@@ -1260,31 +1255,53 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	leaseID, err := d.ledger.Reattach(req.ParentLeaseToken)
 	if err != nil {
 		d.mu.Unlock()
-		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent lease missing"})
+		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent lease missing", "requested_parent": req.ParentRunID})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
 		return
 	}
-	for _, lease := range d.ledger.Snapshot().Leases {
-		if lease.ID != leaseID {
-			continue
-		}
-		for _, member := range lease.Members {
-			if _, pending := d.cancelPending[member]; pending {
-				d.mu.Unlock()
-				d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent cancellation pending", "parent_run_id": member})
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
-				return
-			}
-			if _, cancelled := d.cancelledRuns[member]; cancelled {
-				d.mu.Unlock()
-				d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent cancelled", "parent_run_id": member})
-				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
-				return
-			}
-		}
-		break
+	parentRunID := req.ParentRunID
+	if parentRunID == "" {
+		parentRunID = d.leaseRun[leaseID]
 	}
-	if err := d.ledger.Attach(leaseID, req.RunID); err != nil {
+	resolvedParent, err := d.ledger.ResolveParent(leaseID, parentRunID)
+	if err != nil {
+		d.mu.Unlock()
+		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent resolution failed", "error": err.Error(), "requested_parent": req.ParentRunID, "parent_run_id": parentRunID})
+		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail}); err != nil {
+			c.close()
+		}
+		return
+	}
+	parents := leaseParents(d.ledger.Snapshot())
+	blocked := false
+	var blockedAncestor, blockedReason string
+	for _, start := range []string{parentRunID, resolvedParent} {
+		for ancestor, hops := start, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
+			if _, pending := d.cancelPending[ancestor]; pending {
+				blocked = true
+				if blockedAncestor == "" {
+					blockedAncestor, blockedReason = ancestor, "parent cancellation pending"
+				}
+				break
+			}
+			if _, cancelled := d.cancelledRuns[ancestor]; cancelled {
+				blocked = true
+				if blockedAncestor == "" {
+					blockedAncestor, blockedReason = ancestor, "parent cancelled"
+				}
+				break
+			}
+		}
+	}
+	if blocked {
+		d.mu.Unlock()
+		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": blockedReason, "parent_run_id": blockedAncestor, "requested_parent": req.ParentRunID, "resolved_parent": resolvedParent})
+		if err := c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail}); err != nil {
+			c.close()
+		}
+		return
+	}
+	if err := d.ledger.Attach(leaseID, req.RunID, resolvedParent); err != nil {
 		d.mu.Unlock()
 		d.recordJournal("rejected", &conn{runID: req.RunID}, map[string]any{"reason": "parent attach failed", "error": err.Error()})
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "parent", Policy: wingwire.PolicyFail})
@@ -1305,14 +1322,16 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.finalizable = true
 	c.resources = d.leaseCharge[leaseID]
 	c.origin = req.Origin
-	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
 	d.leaseMembers[leaseID] = append(d.leaseMembers[leaseID], req.RunID)
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
-	d.recordJournal("child_attach", c, map[string]any{"requested_parent": req.OwnerRunID, "resolved_parent": c.parentRun})
+	d.recordJournal("child_attach", c, map[string]any{"requested_parent": req.ParentRunID, "resolved_parent": resolvedParent})
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if resolvedParent != req.ParentRunID {
+		d.cfg.logf("child attach: run=%s requested_parent=%q resolved_parent=%q", req.RunID, req.ParentRunID, resolvedParent)
+	}
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	_ = c.send(&wingwire.Grant{
@@ -1412,11 +1431,10 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		d.byRun[m] = c
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.recordJournal("reattach_accepted", c, map[string]any{"lease_id": leaseID, "member": reclaimed})
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", reclaimed, leaseID)
@@ -1468,10 +1486,9 @@ func (d *Daemon) handleRelease(c *conn, _ *wingwire.Release) {
 	}
 	events := d.releaseConnLocked(c)
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
@@ -1479,9 +1496,8 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	d.mu.Lock()
 	d.draining = true
 	remaining := len(d.leaseRun)
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.closeAPIListener()
@@ -1506,17 +1522,42 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	}
 	waiter := target.role == roleWaiter
 	affected := []string{req.RunID}
+	var parents map[string]string
 	if !waiter {
-		for _, lease := range d.ledger.Snapshot().Leases {
-			if lease.ID == target.leaseID {
-				affected = append([]string(nil), lease.Members...)
+		snap := d.ledger.Snapshot()
+		parents = leaseParents(snap)
+		affected = nil
+		for _, lease := range snap.Leases {
+			for _, member := range lease.Members {
+				for ancestor, hops := member, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
+					if ancestor == req.RunID {
+						affected = append(affected, member)
+						break
+					}
+				}
+			}
+		}
+	}
+	affectedSet := make(map[string]struct{}, len(affected))
+	for _, runID := range affected {
+		affectedSet[runID] = struct{}{}
+	}
+	var blockedIDs []string
+	for descendant := range parents {
+		if _, live := affectedSet[descendant]; live {
+			continue
+		}
+		for ancestor, hops := descendant, 0; ancestor != "" && hops <= len(parents); ancestor, hops = parents[ancestor], hops+1 {
+			if ancestor == req.RunID {
+				blockedIDs = append(blockedIDs, descendant)
 				break
 			}
 		}
 	}
+	blockedIDs = append(blockedIDs, affected...)
 	const reason = "cancelled via sparkwing runs cancel"
 	identity := &conn{runID: target.runID, displayRunID: target.displayRunID, pipeline: target.pipeline, repo: target.repo, pid: target.pid}
-	for _, runID := range affected {
+	for _, runID := range blockedIDs {
 		d.cancelPending[runID] = struct{}{}
 	}
 	d.mu.Unlock()
@@ -1533,8 +1574,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
 			var orphaned []string
 			d.mu.Lock()
-			for _, runID := range affected {
+			for _, runID := range blockedIDs {
 				delete(d.cancelPending, runID)
+			}
+			for _, runID := range affected {
 				if _, disconnected := d.disconnectedPending[runID]; disconnected {
 					delete(d.disconnectedPending, runID)
 					orphaned = append(orphaned, runID)
@@ -1548,14 +1591,16 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			return
 		}
 	}
-	d.recordJournal("cancel", identity, map[string]any{"requesting_pid": pid, "pid_known": known, "requesting_uid": uid, "uid_known": uidKnown, "affected_runs": affected})
+	d.recordJournal("cancel", identity, map[string]any{"requesting_pid": pid, "pid_known": known, "requesting_uid": uid, "uid_known": uidKnown, "affected_runs": affected, "blocked_runs": blockedIDs})
 
 	d.mu.Lock()
 	current := make(map[*conn]string)
-	for _, runID := range affected {
+	for _, runID := range blockedIDs {
 		delete(d.cancelPending, runID)
-		delete(d.disconnectedPending, runID)
 		d.recordCancelledRunLocked(runID)
+	}
+	for _, runID := range affected {
+		delete(d.disconnectedPending, runID)
 		if owner := d.byRun[runID]; owner != nil {
 			if _, seen := current[owner]; !seen {
 				current[owner] = runID
@@ -1576,10 +1621,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		}
 	}
 	deliveries := d.routeLocked(events)
-	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	persistErr := d.persistState(snap)
+	persistErr := d.persistState()
 	if persistErr != nil {
 		d.cfg.logf("cancel: persist tombstone: %v", persistErr)
 	}
@@ -1606,6 +1650,16 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
+func leaseParents(snap admission.Snapshot) map[string]string {
+	parents := make(map[string]string)
+	for _, lease := range snap.Leases {
+		for child, parent := range lease.Parents {
+			parents[child] = parent
+		}
+	}
+	return parents
+}
+
 func (d *Daemon) handleQueueState(c *conn) {
 	qs := d.readQueueState()
 	_ = c.send(&qs)
@@ -1613,10 +1667,7 @@ func (d *Daemon) handleQueueState(c *conn) {
 
 func (d *Daemon) handleStatsReset(c *conn) {
 	d.events.reset()
-	d.mu.Lock()
-	snap := d.ledger.Snapshot()
-	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
+	if err := d.persistState(); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("stats reset: admission-outcome window cleared")
@@ -1683,7 +1734,6 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			events = d.cancelWaiterLocked(c.runID)
 		}
 		deliveries := d.routeLocked(events)
-		snap := d.ledger.Snapshot()
 		d.touchConnLocked(c)
 		if c.handshaked {
 			d.recordJournal("connection_closed", c, map[string]any{"role": role.String(), "holder_liveness": c.holderLiveness})
@@ -1694,7 +1744,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
 			d.finalizeAsync(orphan)
 		}
-		d.flush(deliveries, snap)
+		d.flush(deliveries)
 	})
 }
 
@@ -1729,8 +1779,8 @@ func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 	return events
 }
 
-func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
-	persistErr := d.persistState(snap)
+func (d *Daemon) flush(deliveries []delivery) {
+	persistErr := d.persistState()
 	if persistErr != nil {
 		d.cfg.logf("persist: %v", persistErr)
 	}
@@ -1755,13 +1805,11 @@ func (d *Daemon) recordCancelledRunLocked(runID string) {
 	delete(d.cancelledRuns, oldest)
 }
 
-func (d *Daemon) persistState(snap admission.Snapshot) error {
+func (d *Daemon) persistState() error {
 	d.persistMu.Lock()
 	defer d.persistMu.Unlock()
-	if snap.EventSeq < d.persistedEventSeq {
-		return nil
-	}
 	d.mu.Lock()
+	snap := d.ledger.Snapshot()
 	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
 	d.mu.Unlock()
 	write := d.persistWrite
@@ -1772,7 +1820,6 @@ func (d *Daemon) persistState(snap admission.Snapshot) error {
 	} else if err := writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
 		return err
 	}
-	d.persistedEventSeq = snap.EventSeq
 	return nil
 }
 
@@ -1847,7 +1894,7 @@ func (d *Daemon) handleSetPriority(c *conn, req *wingwire.SetPriority) {
 	d.touchLocked()
 	d.mu.Unlock()
 
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 	d.cfg.logf("priority: run %s re-ranked %d -> %d across %d participant(s)", req.RunID, previous, priority, len(targets))
 	d.sendPriorityAck(c, req.RunID, &wingwire.SetPriorityAck{
 		Found:        true,

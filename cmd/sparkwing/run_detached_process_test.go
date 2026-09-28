@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -591,13 +592,16 @@ func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 	const recovered = "run-recovered"
-	if err := st.CreateTrigger(ctx, store.Trigger{
-		ID: recovered, Pipeline: "fixture", CreatedAt: now, TriggerSource: "runs-submit",
-		TriggerEnv: map[string]string{orchestrator.SubmitRepoDirKey: e.repoDir},
-	}); err != nil {
+	if err := orchestrator.CaptureSubmissionEnvironment(e.home, recovered, e.env(), slog.Default()); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateRun(ctx, store.Run{
+	if err := st.CreateTriggerWithRun(ctx, store.Trigger{
+		ID: recovered, Pipeline: "fixture", CreatedAt: now, TriggerSource: "runs-submit",
+		TriggerEnv: map[string]string{
+			orchestrator.SubmitRepoDirKey:                 e.repoDir,
+			orchestrator.SubmissionEnvironmentCapturedKey: "1",
+		},
+	}, store.Run{
 		ID: recovered, Pipeline: "fixture", Status: "pending",
 		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
 	}); err != nil {
@@ -607,6 +611,13 @@ func TestRunDetached_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	e.mustRun("runs", "consumer", "start", "--home", e.home)
 
 	waitUntil(t, "the restarted consumer to execute the queued run", 60*time.Second, func() bool {
+		run, err := st.GetRun(ctx, recovered)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status == "failed" {
+			t.Fatalf("restarted consumer refused queued run: %s", run.Error)
+		}
 		lines := e.markerLines()
 		return len(lines) == 2 && lines[1] == recovered
 	})

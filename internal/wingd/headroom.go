@@ -202,14 +202,13 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, ownedByRoot map[int]float64,
 	if len(events) == 0 {
 		deliveries = append(deliveries, d.waiterDeliveriesLocked()...)
 	}
-	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,
 		externalWord(stat.CPUMeasured, fmt.Sprintf("%.1f", externalCores)))
 	if !stat.MemoryMeasured {
 		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
 	}
-	d.flush(deliveries, snap)
+	d.flush(deliveries)
 }
 
 func headroomFromReserveExternal(total, reserved, external uint64) uint64 {

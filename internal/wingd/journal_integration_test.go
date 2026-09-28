@@ -49,6 +49,13 @@ func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 	queuedClient := ensure(t, home, "")
 	defer queuedClient.Close()
 	holder := mustAcquire(t, holderClient, semReq("holder", "pool", 1, 1, wingwire.PolicyQueue))
+	deniedClient := ensure(t, home, "")
+	deniedReq := semReq("nonblocking", "pool", 1, 1, wingwire.PolicyQueue)
+	deniedReq.NonBlocking = true
+	if lease, err := deniedClient.Acquire(context.Background(), deniedReq, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("nonblocking request acquired a held semaphore")
+	}
 	positions, result := acquireAsync(queuedClient, semReq("waiting", "pool", 1, 1, wingwire.PolicyQueue))
 	waitForQueue(t, positions)
 	if err := holder.Release(); err != nil {
@@ -70,8 +77,11 @@ func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var requested, queued, grantedRecord bool
+	var requested, queued, grantedRecord, denied bool
 	for _, record := range records {
+		if record.RunID == "nonblocking" && record.Kind == "denied" {
+			denied = record.Data["reason"] == "capacity" && record.Data["nonblocking"] == true
+		}
 		if record.RunID != "waiting" {
 			continue
 		}
@@ -84,9 +94,103 @@ func TestJournalRecordsQueueBlockerAndGrant(t *testing.T) {
 			_, grantedRecord = record.Data["wait_ms"]
 		}
 	}
-	if !requested || !queued || !grantedRecord {
-		t.Fatalf("missing request/queue/grant evidence: request=%t queued=%t grant=%t records=%+v", requested, queued, grantedRecord, records)
+	if !requested || !queued || !grantedRecord || !denied {
+		t.Fatalf("missing admission evidence: request=%t queued=%t grant=%t denied=%t records=%+v", requested, queued, grantedRecord, denied, records)
 	}
+}
+
+func TestJournalRecordsChildLineageAndCancelScope(t *testing.T) {
+	home := shortHome(t)
+	td := startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
+	})
+	root := ensure(t, home, "")
+	rootLease := mustAcquire(t, root, coreReq("root", 1))
+	foreign := ensure(t, home, "")
+	mustAcquire(t, foreign, coreReq("foreign", 1))
+	var departedLease *client.Lease
+	for _, member := range []struct{ id, parent string }{
+		{"parent", "root"}, {"departed", "parent"}, {"grandchild", "departed"},
+	} {
+		child := ensure(t, home, "")
+		lease := mustAcquire(t, child, wingwire.AdmissionRequest{
+			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
+		})
+		if member.id == "departed" {
+			departedLease = lease
+		}
+	}
+	if err := departedLease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	adopted := ensure(t, home, "")
+	mustAcquire(t, adopted, wingwire.AdmissionRequest{
+		RunID: "adopted", ParentRunID: "departed", ParentLeaseToken: rootLease.Token,
+	})
+	wrong := ensure(t, home, "")
+	if lease, err := wrong.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID: "wrong", ParentRunID: "foreign", ParentLeaseToken: rootLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("cross-lease parent was accepted")
+	}
+	control := ensure(t, home, "")
+	if found, err := control.CancelLease(context.Background(), "parent"); err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	late := ensure(t, home, "")
+	if lease, err := late.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID: "late", ParentRunID: "departed", ParentLeaseToken: rootLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("cancelled ancestor allowed child attach")
+	}
+	td.stopAndWait(t)
+	dir, err := wingd.StateDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := journal.Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attached, wrongParent, blocked, cancelled bool
+	for _, record := range records {
+		switch {
+		case record.RunID == "adopted" && record.Kind == "child_attach":
+			attached = record.Data["requested_parent"] == "departed" && record.Data["resolved_parent"] == "parent"
+		case record.RunID == "wrong" && record.Kind == "rejected":
+			wrongParent = record.Data["reason"] == "parent resolution failed" && record.Data["requested_parent"] == "foreign" && record.Data["parent_run_id"] == "foreign"
+		case record.RunID == "late" && record.Kind == "rejected":
+			blocked = record.Data["reason"] == "parent cancelled" && record.Data["parent_run_id"] == "departed" && record.Data["requested_parent"] == "departed" && record.Data["resolved_parent"] == "root"
+		case record.RunID == "parent" && record.Kind == "cancel":
+			affected, affectedOK := record.Data["affected_runs"].([]any)
+			blockedRuns, blockedOK := record.Data["blocked_runs"].([]any)
+			if affectedOK && blockedOK {
+				cancelled = containsRunIDs(affected, "parent", "grandchild", "adopted") && containsRunIDs(blockedRuns, "parent", "grandchild", "adopted", "departed")
+			}
+		}
+	}
+	if !attached || !wrongParent || !blocked || !cancelled {
+		t.Fatalf("journal lineage evidence: attached=%t resolution=%t blocked=%t cancel=%t", attached, wrongParent, blocked, cancelled)
+	}
+}
+
+func containsRunIDs(values []any, ids ...string) bool {
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		id, ok := value.(string)
+		if ok {
+			seen[id] = true
+		}
+	}
+	for _, id := range ids {
+		if !seen[id] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestHealthProbeProducesNoConnectionJournalRecords(t *testing.T) {

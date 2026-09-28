@@ -42,6 +42,16 @@ unlock.
   drain on shutdown. Daemon identity advances after clock changes; interrupted
   counter temp files are removed. Replacements before readiness skip stack dumps,
   and journal endpoint records omit URL fragments.
+- **admission:** Child attach records show the requested and resolved parent.
+  Rejected attaches name the blocking ancestor or failed parent resolution, and
+  cancellation records include live affected runs and blocked descendants.
+- **local admission:** Cancelling a child run cancels its descendants while
+  its parent and siblings keep running. Cancelling the lease root still
+  cancels every attached run, including after daemon restart. Nested inline
+  runs attach to their immediate parent; children launched after a parent
+  exits attach under its nearest live ancestor while a live descendant retains
+  lineage. Otherwise they attach under the lease root, and the daemon logs the
+  requested and resolved parents.
 - **admission:** An overloaded or swapping machine no longer gets its
   admission daemon replaced while it is still working. The supervisor replaces
   the daemon only when health probes fail and its heartbeat has not moved for a
@@ -52,6 +62,9 @@ unlock.
   lease for two minutes. A lease released during that recovery can stay
   reserved until the two minutes pass. A missing daemon binary fails at once,
   and a daemon that exits before serving gets three tries.
+### Docs
+
+- **cli:** Document the selected pipeline commit exposed as `SPARKWING_PIPELINE_REV`
 
 ## [v0.63.0] - 2026-09-27
 ### Changed

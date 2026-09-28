@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -1007,7 +1008,7 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 	home := shortHome(t)
 	entered := make(chan struct{})
 	resume := make(chan struct{})
-	startDaemon(t, wingd.Config{
+	td := startDaemon(t, wingd.Config{
 		Home: home,
 		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
 			close(entered)
@@ -1033,6 +1034,171 @@ func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing
 	}, nil); err == nil {
 		_ = lease.Release()
 		t.Fatal("child attached to a lease whose member cancellation was pending")
+	}
+	close(resume)
+	if err := <-done; err != nil {
+		t.Fatalf("CancelLease: %v", err)
+	}
+	td.stopAndWait(t)
+	dir, err := wingd.StateDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := journal.Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Kind == "rejected" && record.RunID == "late-child" &&
+			record.Data["reason"] == "parent cancellation pending" &&
+			record.Data["parent_run_id"] == "cancel-parent-pending" &&
+			record.Data["requested_parent"] == "" &&
+			record.Data["resolved_parent"] == "cancel-parent-pending" {
+			return
+		}
+	}
+	t.Fatal("missing journal record for pending parent cancellation")
+}
+
+func TestChildAttachAfterParentExit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		parentRun string
+		exitRoot  bool
+	}{
+		{"old-client-after-root-exit", "", true},
+		{"new-client-after-parent-exit", "departed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home})
+			root := ensure(t, home, "")
+			rootLease := mustAcquire(t, root, coreReq("root", 1))
+			departing := rootLease
+			if !tc.exitRoot {
+				parent := ensure(t, home, "")
+				departing = mustAcquire(t, parent, wingwire.AdmissionRequest{
+					RunID: "departed", ParentRunID: "root", ParentLeaseToken: rootLease.Token,
+				})
+			}
+			survivor := ensure(t, home, "")
+			mustAcquire(t, survivor, wingwire.AdmissionRequest{
+				RunID: "survivor", ParentRunID: "root", ParentLeaseToken: rootLease.Token,
+			})
+			if err := departing.Release(); err != nil {
+				t.Fatal(err)
+			}
+			attacher := ensure(t, home, "")
+			mustAcquire(t, attacher, wingwire.AdmissionRequest{
+				RunID: "late-child", ParentRunID: tc.parentRun, ParentLeaseToken: rootLease.Token,
+			})
+		})
+	}
+}
+
+func TestChildAttachLogsResolvedUnknownParent(t *testing.T) {
+	home := shortHome(t)
+	log := &logCapture{}
+	startDaemon(t, wingd.Config{Home: home, Logf: log.logf})
+	root := ensure(t, home, "")
+	rootLease := mustAcquire(t, root, coreReq("root", 1))
+	child := ensure(t, home, "")
+	mustAcquire(t, child, wingwire.AdmissionRequest{
+		RunID: "child", ParentRunID: "unknown-parent", ParentLeaseToken: rootLease.Token,
+	})
+	if !log.contains(`child attach: run=child requested_parent="unknown-parent" resolved_parent="root"`) {
+		t.Fatalf("missing parent resolution log:\n%s", log.joined())
+	}
+}
+
+func TestChildAttachRejectsDepartedLineageUnderCancelledAncestor(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error { return nil }},
+	})
+	root := ensure(t, home, "")
+	rootLease := mustAcquire(t, root, coreReq("root", 1))
+	var departedLease *client.Lease
+	for _, member := range []struct{ id, parent string }{
+		{"parent", "root"}, {"departed", "parent"}, {"grandchild", "departed"},
+	} {
+		child := ensure(t, home, "")
+		lease := mustAcquire(t, child, wingwire.AdmissionRequest{
+			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: rootLease.Token,
+		})
+		if member.id == "departed" {
+			departedLease = lease
+		}
+	}
+	if err := departedLease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	control := ensure(t, home, "")
+	if found, err := control.CancelLease(context.Background(), "parent"); err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	late := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := late.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "late", ParentRunID: "departed", ParentLeaseToken: rootLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("late child attached through a cancelled ancestor")
+	}
+}
+
+func TestChildAttachChecksOnlyItsAncestorsWhileSiblingCancellationIsPending(t *testing.T) {
+	home := shortHome(t)
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-resume:
+		default:
+			close(resume)
+		}
+	})
+	startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func([]string, string) error {
+			close(entered)
+			<-resume
+			return nil
+		}},
+	})
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("parent", 1))
+	for _, id := range []string{"child-a", "child-b"} {
+		child := ensure(t, home, "")
+		mustAcquire(t, child, wingwire.AdmissionRequest{
+			RunID: id, ParentRunID: "parent", ParentLeaseToken: parentLease.Token,
+		})
+	}
+	control := ensure(t, home, "")
+	done := make(chan error, 1)
+	go func() {
+		_, err := control.CancelLease(context.Background(), "child-a")
+		done <- err
+	}()
+	<-entered
+
+	for _, member := range []struct {
+		id, parent string
+		allowed    bool
+	}{
+		{"blocked-grandchild", "child-a", false},
+		{"new-sibling", "parent", true},
+		{"new-nephew", "child-b", true},
+	} {
+		child := ensure(t, home, "")
+		lease, err := child.Acquire(context.Background(), wingwire.AdmissionRequest{
+			RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+		}, nil)
+		if (err == nil) != member.allowed {
+			t.Fatalf("attach %s: lease=%v err=%v, allowed=%t", member.id, lease, err, member.allowed)
+		}
 	}
 	close(resume)
 	if err := <-done; err != nil {
@@ -1212,6 +1378,136 @@ func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	}
 	if len(qs.Holders) != 0 {
 		t.Fatalf("holders after acknowledged cancel = %+v", qs.Holders)
+	}
+}
+
+func TestExplicitCancelRespectsRunTree(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		target   string
+		restart  bool
+		wantGone []string
+		wantLive []string
+	}{
+		{"child", "child-a", false, []string{"child-a", "grandchild"}, []string{"child-b", "parent"}},
+		{"root", "parent", false, []string{"child-a", "child-b", "grandchild", "parent"}, nil},
+		{"child-after-restart", "child-a", true, []string{"child-a", "grandchild"}, []string{"child-b", "parent"}},
+		{"root-after-restart", "parent", true, []string{"child-a", "child-b", "grandchild", "parent"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shortHome(t)
+			finalized := make(chan []string, 1)
+			cancelLog := make(chan string, 1)
+			cfg := wingd.Config{
+				Home: home,
+				Logf: func(format string, args ...any) {
+					if strings.HasPrefix(format, "cancel: run=") {
+						cancelLog <- fmt.Sprintf(format, args...)
+					}
+				},
+				Runs: &wingd.FuncRunStore{FinalizeCancelled: func(runIDs []string, _ string) error {
+					finalized <- append([]string(nil), runIDs...)
+					return nil
+				}},
+			}
+			first := startDaemon(t, cfg)
+			parent := ensure(t, home, "")
+			parentLease := mustAcquire(t, parent, coreReq("parent", 1))
+			for _, member := range []struct{ id, parent string }{
+				{"child-a", "parent"}, {"child-b", "parent"}, {"grandchild", "child-a"},
+			} {
+				child := ensure(t, home, "")
+				mustAcquire(t, child, wingwire.AdmissionRequest{
+					RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+				})
+			}
+			if tc.restart {
+				first.stop()
+				if err := first.waitExit(t, 3*time.Second); err != nil {
+					t.Fatalf("first daemon exit: %v", err)
+				}
+				startDaemon(t, cfg)
+				for _, id := range []string{"parent", "child-a", "child-b", "grandchild"} {
+					rejoining := ensure(t, home, "")
+					if _, err := rejoining.Reattach(context.Background(), parentLease.Token, id); err != nil {
+						t.Fatalf("reattach %s: %v", id, err)
+					}
+				}
+			}
+			control := ensure(t, home, "")
+			if found, err := control.CancelLease(context.Background(), tc.target); err != nil || !found {
+				t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+			}
+			gotGone := <-finalized
+			slices.Sort(gotGone)
+			if !slices.Equal(gotGone, tc.wantGone) {
+				t.Fatalf("finalized = %v, want %v", gotGone, tc.wantGone)
+			}
+			line := <-cancelLog
+			_, listed, ok := strings.Cut(line, " affected=")
+			if !ok {
+				t.Fatalf("cancel log = %q, missing affected runs", line)
+			}
+			gotLogged := strings.Split(listed, ",")
+			slices.Sort(gotLogged)
+			if !slices.Equal(gotLogged, tc.wantGone) {
+				t.Fatalf("cancel log affected = %v, want %v", gotLogged, tc.wantGone)
+			}
+			qs, err := control.QueueState(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotLive := make([]string, 0, len(qs.Holders))
+			for _, holder := range qs.Holders {
+				gotLive = append(gotLive, holder.RunID)
+			}
+			slices.Sort(gotLive)
+			if !slices.Equal(gotLive, tc.wantLive) {
+				t.Fatalf("remaining holders = %v, want %v", gotLive, tc.wantLive)
+			}
+			if tc.target == "child-a" {
+				for _, member := range []struct{ id, parent string }{
+					{"new-sibling", "parent"}, {"new-nephew", "child-b"},
+				} {
+					child := ensure(t, home, "")
+					mustAcquire(t, child, wingwire.AdmissionRequest{
+						RunID: member.id, ParentRunID: member.parent, ParentLeaseToken: parentLease.Token,
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestExplicitCancelFindsChildAttachedThroughOwnedNodeLease(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan []string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		Runs: &wingd.FuncRunStore{FinalizeCancelled: func(runIDs []string, _ string) error {
+			finalized <- append([]string(nil), runIDs...)
+			return nil
+		}},
+	})
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("parent", 1))
+	node := ensure(t, home, "")
+	nodeLease := mustAcquire(t, node, wingwire.AdmissionRequest{
+		RunID: "node-slot", OwnerRunID: "parent", OwnerLeaseToken: parentLease.Token,
+		SubLease: true, SemaphoresOnly: true,
+	})
+	child := ensure(t, home, "")
+	mustAcquire(t, child, wingwire.AdmissionRequest{
+		RunID: "child", ParentRunID: "parent", ParentLeaseToken: nodeLease.Token,
+	})
+	control := ensure(t, home, "")
+	if found, err := control.CancelLease(context.Background(), "parent"); err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	got := <-finalized
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"child", "parent"}) {
+		t.Fatalf("finalized = %v, want child and parent", got)
 	}
 }
 

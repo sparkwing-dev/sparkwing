@@ -98,6 +98,11 @@
           "omitempty": true
         },
         {
+          "name": "parent_run_id",
+          "kind": "string",
+          "omitempty": true
+        },
+        {
           "name": "semaphores_only",
           "kind": "bool",
           "omitempty": true
