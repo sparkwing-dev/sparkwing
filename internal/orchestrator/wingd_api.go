@@ -230,12 +230,6 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 func (a *wingdAPI) health(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rw, ro, err := a.runs.Handles(ctx)
-	// safety: dotenv files waiting to be imported need a store to import into.
-	if errors.Is(err, errRunStoreAbsent) {
-		if files, ferr := localsecrets.FindLegacyFiles(); ferr != nil || !files.Empty() {
-			rw, ro, err = a.runs.Create(ctx)
-		}
-	}
 	switch {
 	case errors.Is(err, errRunStoreAbsent):
 		writeAPIHealth(w, http.StatusOK, "ok", "absent", "", "")

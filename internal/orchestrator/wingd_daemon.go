@@ -83,6 +83,13 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	// safety: dotenv files waiting to be imported need a store; creating it before serving keeps the
+	// migrations out of the health probe a CLI gives three seconds.
+	if files, ferr := localsecrets.FindLegacyFiles(); ferr != nil || !files.Empty() {
+		if _, _, err := runs.Create(ctx); err != nil {
+			logf("create the runs store for the local dotenv secrets: %v", err)
+		}
+	}
 	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger, ring)
 	cfg := wingd.Config{
 		Home:               opts.Home,
