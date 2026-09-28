@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -282,9 +281,18 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	if got, err := ro.CurrentSchemaVersion(context.Background()); err != nil || got != 29 {
 		t.Fatalf("read-only schema = %d, %v; want unchanged v29", got, err)
 	}
-	wantListed := slices.DeleteFunc(store.KnownRequirements(), func(name string) bool {
-		return slices.Contains(postV29RequirementNames, name)
-	})
+	wantListed := []string{
+		"declared-run-repo",
+		"github-app-cron-identity-v1",
+		"inherited-holder-marker",
+		"pipeline-scoped-secrets",
+		"repo-scoped-secrets",
+		"session-token-digest",
+		"storage-commit-receipts-v1",
+		"team-scoped-user-keys",
+		"trigger-credit-cursor-v1",
+		"unique-token-prefix",
+	}
 	if got, err := ro.Requirements(context.Background()); err != nil || !reflect.DeepEqual(got, wantListed) {
 		t.Fatalf("read-only requirements = %v, %v; want %v", got, err, wantListed)
 	}
