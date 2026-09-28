@@ -1905,7 +1905,7 @@ func (s *Store) HoldTeamForDispute(
 ) (_ bool, err error)
 func (s *Store) IdentityLinkStateKey() ([]byte, error)
 func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error)
-func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, marks func(present []string) (map[string]string, error), now time.Time) (err error)
+func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -2045,7 +2045,6 @@ func (s *Store) SetCronScheduleNextDue(ctx context.Context, id string, next *tim
 func (s *Store) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (s *Store) SetEventLimits(ctx context.Context, limits EventLimits) (err error)
 func (s *Store) SetFreeTeamSlots(ctx context.Context, slots int64) error
-func (s *Store) SetImportMarks(ctx context.Context, marks map[string]string, now time.Time) (err error)
 func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
 func (s *Store) SetNodeArtifactManifestCharged(
 	ctx context.Context, principal, runID, nodeID, manifestDigest string,

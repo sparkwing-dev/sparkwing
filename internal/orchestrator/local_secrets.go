@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
@@ -16,37 +15,11 @@ import (
 // same rows as `sparkwing secrets` and the dashboard; a run no daemon hosts
 // reads the machine's runs store itself, never the standalone store it
 // records its own state in, because that is not where secrets are kept.
-func localRunSecrets(ctx context.Context, paths Paths, opts Options, hosted Backends, sel hostedSelection) secrets.Source {
-	if hosted.APISocket != "" {
-		importClient := NewAPISocketClient(hosted.APISocket)
-		defer importClient.CloseIdleConnections()
-		if err := ImportLegacySecretsOverSocket(ctx, importClient); err != nil {
-			fmt.Fprintf(os.Stderr, "sparkwing: %v\n", err)
-		}
-	} else {
-		importLegacySecretsStandalone(ctx, paths, sel, opts.DryRun)
-	}
-	return localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
-}
-
 func localSecretsFor(ctx context.Context, paths Paths, b Backends, runID, pipeline string) secrets.Source {
 	if c, ok := b.State.(*client.Client); ok && b.APISocket != "" {
 		return localsecrets.SocketSource(ctx, c, runID)
 	}
 	return localsecrets.StoreSource(paths.StateDB(), pipeline)
-}
-
-// safety: only a machine with no daemon at all lets a run write the shared
-// runs store, because a daemon of another version may hold it at a schema
-// this binary would migrate out from under it; that daemon imports the files
-// itself once it runs this release.
-func importLegacySecretsStandalone(ctx context.Context, paths Paths, sel hostedSelection, dryRun bool) {
-	if dryRun || sel.standalone != standaloneNoDaemon {
-		return
-	}
-	if err := ImportLegacySecretsInProcess(ctx, paths.StateDB()); err != nil {
-		fmt.Fprintf(os.Stderr, "sparkwing: %v\n", err)
-	}
 }
 
 // LocalAPIHealth is what the admission daemon reports about the controller

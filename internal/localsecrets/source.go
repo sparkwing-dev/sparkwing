@@ -53,9 +53,9 @@ type storeSource struct {
 	path     string
 	pipeline string
 
-	once    sync.Once
-	cipher  *Cipher
-	ringErr error
+	once     sync.Once
+	cipher   *Cipher
+	setupErr error
 }
 
 func (s *storeSource) read(name string) (_ string, _ bool, err error) {
@@ -71,23 +71,27 @@ func (s *storeSource) read(name string) (_ string, _ bool, err error) {
 			err = fmt.Errorf("close the local secrets store %s: %w", s.path, cerr)
 		}
 	}()
+	s.once.Do(func() {
+		// safety: a name the import has not brought in would read as missing.
+		if s.setupErr = PendingImport(context.Background(), st); s.setupErr != nil {
+			return
+		}
+		ring, err := LoadKeyring(KeyringOptions{})
+		if err != nil {
+			s.setupErr = err
+			return
+		}
+		s.cipher = ring.For(nil)
+	})
+	if s.setupErr != nil {
+		return "", false, s.setupErr
+	}
 	sec, err := st.GetSecretForPipeline(name, s.pipeline)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", false, secrets.ErrSecretMissing
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("read secret %s: %w", name, err)
-	}
-	s.once.Do(func() {
-		ring, err := LoadKeyring(KeyringOptions{})
-		if err != nil {
-			s.ringErr = err
-			return
-		}
-		s.cipher = ring.For(nil)
-	})
-	if s.ringErr != nil {
-		return "", false, s.ringErr
 	}
 	value, err := controller.OpenSecretValue(s.cipher, store.DefaultTeam, sec)
 	if err != nil {

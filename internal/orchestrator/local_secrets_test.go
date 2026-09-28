@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,30 +159,45 @@ func legacyConfigDir(t *testing.T, secretsEnv string) {
 	}
 }
 
-func TestDaemonAPI_ImportsLegacyFilesAndReportsThemOnce(t *testing.T) {
+func TestDaemonAPI_ImportsLegacyFilesWhenItOpensTheStore(t *testing.T) {
 	legacyConfigDir(t, "TOKEN=from-dotenv\n")
 	home := wingdTestHome(t)
 	sock, _ := startAPIDaemon(t, home, nil)
-	httpClient := NewAPISocketClient(sock)
-	defer httpClient.CloseIdleConnections()
-	ctx := context.Background()
+	c := daemonSecretsClient(t, sock)
+	seedRun(t, c, "run-1", "n")
 
-	var first, second strings.Builder
-	if err := importLegacySecretsOverSocket(ctx, httpClient, &first); err != nil {
-		t.Fatalf("import: %v", err)
+	value, masked, err := localsecrets.SocketSource(context.Background(), c, "run-1").Read("TOKEN")
+	if err != nil || value != "from-dotenv" || !masked {
+		t.Fatalf("run read TOKEN = %q, masked %v, %v; want the imported value", value, masked, err)
 	}
-	if !strings.Contains(first.String(), "imported 1 secrets") || !strings.Contains(first.String(), "can be deleted") {
-		t.Fatalf("first notice = %q, want the one-time import line", first.String())
+	if _, _, err := localsecrets.StoreSource(filepath.Join(home, "state.db"), "p").Read("TOKEN"); err != nil {
+		t.Fatalf("a run reading the store after the import: %v", err)
 	}
-	if err := importLegacySecretsOverSocket(ctx, httpClient, &second); err != nil {
-		t.Fatalf("second import: %v", err)
+}
+
+func TestDaemonAPI_AMalformedLegacyFileFailsSecretReadsWithTheImportError(t *testing.T) {
+	legacyConfigDir(t, "TOKEN=fine\nthis is not dotenv\n")
+	home := wingdTestHome(t)
+	sock, _ := startAPIDaemon(t, home, nil)
+	c := daemonSecretsClient(t, sock)
+	seedRun(t, c, "run-1", "n")
+
+	health, err := ReadLocalAPIHealth(context.Background(), sock)
+	if err != nil || !strings.Contains(health.SecretsProblem, "secrets.env:2") {
+		t.Fatalf("health = %+v, %v; want a secrets problem naming secrets.env:2", health, err)
 	}
-	if second.Len() != 0 {
-		t.Fatalf("second notice = %q, want nothing", second.String())
+	for _, name := range []string{"TOKEN", "NEVER_SET"} {
+		_, _, err := localsecrets.SocketSource(context.Background(), c, "run-1").Read(name)
+		if err == nil || errors.Is(err, secrets.ErrSecretMissing) || !strings.Contains(err.Error(), "secrets.env:2") {
+			t.Errorf("run read %s = %v, want the import error", name, err)
+		}
 	}
-	sec, err := daemonSecretsClient(t, sock).GetSecret(ctx, "TOKEN")
-	if err != nil || sec.Value != "from-dotenv" || !sec.Shared {
-		t.Fatalf("GET TOKEN = %+v, %v; want the imported shared value", sec, err)
+	_, _, err = localsecrets.StoreSource(filepath.Join(home, "state.db"), "p").Read("TOKEN")
+	if err == nil || !strings.Contains(err.Error(), "have not been imported") {
+		t.Errorf("a run reading the store directly = %v, want the pending import named", err)
+	}
+	if _, err := c.ListRuns(context.Background(), store.RunFilter{}); err != nil {
+		t.Fatalf("a failed import stopped the runs routes: %v", err)
 	}
 }
 
@@ -221,11 +235,8 @@ func TestDaemonAPI_AWrongKeyImportsNothing(t *testing.T) {
 		}
 		api.secrets = ring
 	})
-	httpClient := NewAPISocketClient(sock)
-	defer httpClient.CloseIdleConnections()
-	var out strings.Builder
-	if err := importLegacySecretsOverSocket(context.Background(), httpClient, &out); err == nil {
-		t.Fatal("the import route answered a daemon holding the wrong key")
+	if health, err := ReadLocalAPIHealth(context.Background(), sock); err != nil || health.SecretsProblem == "" {
+		t.Fatalf("health = %+v, %v; want a secrets problem from the wrong key", health, err)
 	}
 	st, err := store.OpenReadOnly(filepath.Join(home, "state.db"))
 	if err != nil {
@@ -234,30 +245,5 @@ func TestDaemonAPI_AWrongKeyImportsNothing(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	if _, err := st.GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("TOKEN was imported under the wrong key: %v", err)
-	}
-}
-
-func TestDaemonAPI_ImportReadsOnlyTheFilesTheDaemonResolves(t *testing.T) {
-	legacyConfigDir(t, "")
-	elsewhere := filepath.Join(t.TempDir(), "planted.env")
-	if err := os.WriteFile(elsewhere, []byte("PLANTED=x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	home := wingdTestHome(t)
-	sock, _ := startAPIDaemon(t, home, nil)
-	req, err := http.NewRequest(http.MethodPost, HostedAPIBaseURL+"/api/v1/local/secrets/import",
-		strings.NewReader(`{"secrets":"`+elsewhere+`"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpClient := NewAPISocketClient(sock)
-	defer httpClient.CloseIdleConnections()
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if _, err := daemonSecretsClient(t, sock).GetSecret(context.Background(), "PLANTED"); err == nil {
-		t.Fatal("the import route read a file the caller named")
 	}
 }

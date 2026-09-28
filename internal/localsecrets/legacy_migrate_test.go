@@ -41,14 +41,14 @@ func legacyDir(t *testing.T, files map[string]string) (string, localsecrets.Lega
 			t.Fatal(err)
 		}
 	}
-	found, warning := localsecrets.FindLegacyFiles()
-	if warning != "" {
-		t.Fatalf("FindLegacyFiles warned: %s", warning)
+	found, err := localsecrets.FindLegacyFiles()
+	if err != nil {
+		t.Fatalf("FindLegacyFiles: %v", err)
 	}
 	return dir, found
 }
 
-func importNow(t *testing.T, st *store.Store, files localsecrets.LegacyFiles) []localsecrets.ImportedFile {
+func importNow(t *testing.T, st *store.Store, files localsecrets.LegacyFiles) *localsecrets.ImportResult {
 	t.Helper()
 	got, err := localsecrets.ImportLegacy(context.Background(), st, loadRing(t).For(st), files, time.Now())
 	if err != nil {
@@ -65,9 +65,8 @@ func TestImportLegacy_SealsBothFilesAsSharedRowsAndLeavesThemInPlace(t *testing.
 	})
 	st := openStore(t)
 
-	got := importNow(t, st, files)
-	if len(got) != 2 || got[0].Imported != 2 || got[1].Imported != 1 {
-		t.Fatalf("import = %+v, want 2 from secrets.env and 1 from config.env", got)
+	if got := importNow(t, st, files); strings.Join(got.Imported, ",") != "QUOTED,REGION,TOKEN" {
+		t.Fatalf("import = %+v, want all three names", got)
 	}
 	ring := loadRing(t)
 	for name, want := range map[string]struct {
@@ -86,12 +85,8 @@ func TestImportLegacy_SealsBothFilesAsSharedRowsAndLeavesThemInPlace(t *testing.
 			t.Errorf("%s opened as %q, %v; want %q", name, value, err, want.value)
 		}
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "secrets.env"))
-	if err != nil || string(body) != secretsBody {
+	if body, err := os.ReadFile(filepath.Join(dir, "secrets.env")); err != nil || string(body) != secretsBody {
 		t.Errorf("secrets.env after import = %q, %v; want it untouched", body, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "secrets.env.migrated")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("import left a .migrated copy: %v", err)
 	}
 }
 
@@ -103,14 +98,11 @@ func TestImportLegacy_TheStoreWinsAConflict(t *testing.T) {
 	sealRow(t, ring.For(st), st, "SAME", "equal")
 
 	got := importNow(t, st, files)
-	if len(got) != 1 || got[0].Imported != 1 || strings.Join(got[0].Conflicts, ",") != "TOKEN" {
+	if strings.Join(got.Imported, ",") != "NEW" || strings.Join(got.Conflicts, ",") != "TOKEN" {
 		t.Fatalf("import = %+v, want NEW imported and only TOKEN in conflict", got)
 	}
 	if value, err := openRow(t, ring.For(st), st, "TOKEN"); err != nil || value != "from-store" {
 		t.Errorf("TOKEN = %q, %v; want the store's value", value, err)
-	}
-	if notice := got[0].Notice(); !strings.Contains(notice, "TOKEN") || !strings.Contains(notice, "can be deleted") {
-		t.Errorf("notice %q names neither the conflict nor what to do with the file", notice)
 	}
 }
 
@@ -134,54 +126,78 @@ func TestImportLegacy_ANameInBothFilesImportsMasked(t *testing.T) {
 	}
 }
 
-func TestImportLegacy_RunsOnceAndKeepsADeletedNameDeleted(t *testing.T) {
-	_, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n"})
+func TestImportLegacy_RunsOnceSoADeletedNameStaysDeleted(t *testing.T) {
+	dir, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n"})
 	st := openStore(t)
 	importNow(t, st, files)
 	if err := st.DeleteSecret("TOKEN", ""); err != nil {
 		t.Fatal(err)
 	}
-
-	if again := importNow(t, st, files); len(again) != 0 {
-		t.Fatalf("second import = %+v, want nothing imported", again)
-	}
-	if _, err := st.GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("TOKEN after a repeated import = %v, want it still deleted", err)
-	}
-}
-
-func TestImportLegacy_AnInterruptedImportRunsAgainWhole(t *testing.T) {
-	_, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\nOTHER=def\n"})
-	st := openStore(t)
-	ctx := context.Background()
-	cipher := loadRing(t).For(st)
-	boom := errors.New("crash before commit")
-	row := store.Secret{Name: "TOKEN", Masked: true, Shared: true, Value: "enc:v3:partial"}
-	if err := st.ImportSecrets(ctx, []store.Secret{row}, func([]string) (map[string]string, error) {
-		return nil, boom
-	}, time.Now()); !errors.Is(err, boom) {
-		t.Fatalf("interrupted import = %v, want the injected failure", err)
-	}
-	if _, err := st.GetSecretRow("TOKEN", ""); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a row outlived the failed transaction: %v", err)
-	}
-
-	got, err := localsecrets.ImportLegacy(ctx, st, cipher, files, time.Now())
-	if err != nil || len(got) != 1 || got[0].Imported != 2 {
-		t.Fatalf("import after the interruption = %+v, %v; want both names", got, err)
-	}
-}
-
-func TestImportLegacy_AChangedFileImportsItsNewNames(t *testing.T) {
-	dir, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n"})
-	st := openStore(t)
-	importNow(t, st, files)
 	if err := os.WriteFile(filepath.Join(dir, "secrets.env"), []byte("TOKEN=abc\nLATER=xyz\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := importNow(t, st, files)
-	if len(got) != 1 || got[0].Imported != 1 || len(got[0].Conflicts) != 0 {
-		t.Fatalf("import of the changed file = %+v, want LATER alone", got)
+
+	if again := importNow(t, st, files); again != nil {
+		t.Fatalf("second import = %+v, want none", again)
+	}
+	for _, name := range []string{"TOKEN", "LATER"} {
+		if _, err := st.GetSecretRow(name, ""); !errors.Is(err, store.ErrNotFound) {
+			t.Errorf("%s after a second import = %v, want absent", name, err)
+		}
+	}
+	// Control: the same file does bring both names into a store never imported into.
+	if fresh := importNow(t, openStore(t), files); strings.Join(fresh.Imported, ",") != "LATER,TOKEN" {
+		t.Fatalf("import into a fresh store = %+v, want both names", fresh)
+	}
+}
+
+func TestImportLegacy_AMalformedFileImportsNothingUntilFixed(t *testing.T) {
+	dir, files := legacyDir(t, map[string]string{
+		"secrets.env": "TOKEN=abc\n",
+		"config.env":  "REGION=us-east-1\nnot a dotenv line\n",
+	})
+	st := openStore(t)
+	ctx := context.Background()
+
+	_, err := localsecrets.ImportLegacy(ctx, st, loadRing(t).For(st), files, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "config.env:2") {
+		t.Fatalf("import of a malformed file = %v, want an error naming config.env:2", err)
+	}
+	for _, name := range []string{"TOKEN", "REGION"} {
+		if _, gerr := st.GetSecretRow(name, ""); !errors.Is(gerr, store.ErrNotFound) {
+			t.Errorf("%s was imported beside a malformed file: %v", name, gerr)
+		}
+	}
+	if perr := localsecrets.PendingImport(ctx, st); perr == nil {
+		t.Error("PendingImport after a failed import = nil, want the files named")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "config.env"), []byte("REGION=us-east-1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := importNow(t, st, files); strings.Join(got.Imported, ",") != "REGION,TOKEN" {
+		t.Fatalf("import after the fix = %+v, want both names", got)
+	}
+	if perr := localsecrets.PendingImport(ctx, st); perr != nil {
+		t.Errorf("PendingImport after the import = %v, want nil", perr)
+	}
+}
+
+func TestImportSecrets_ARowAlreadyPresentFailsTheWholeImport(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	if err := st.CreateOrReplaceSecret(store.Secret{Name: "B", Value: "x"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rows := []store.Secret{{Name: "A", Value: "enc:a"}, {Name: "B", Value: "enc:b"}}
+	if err := st.ImportSecrets(ctx, rows, "mark", "{}", time.Now()); err == nil {
+		t.Fatal("ImportSecrets over an existing row succeeded")
+	}
+	if _, err := st.GetSecretRow("A", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("A outlived the failed transaction: %v", err)
+	}
+	if _, done, err := st.ImportMark(ctx, "mark"); err != nil || done {
+		t.Errorf("mark after the failed transaction = %v, %v; want unset", done, err)
 	}
 }
 
@@ -200,28 +216,21 @@ func TestImportLegacy_RefusesWithoutTheKeyTheStoreNeeds(t *testing.T) {
 	}
 }
 
-func TestTakeLegacyReport_TellsOnce(t *testing.T) {
-	_, files := legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n"})
-	st := openStore(t)
-	importNow(t, st, files)
-	ctx := context.Background()
-
-	first, err := localsecrets.TakeLegacyReport(ctx, st, files, time.Now())
-	if err != nil || len(first) != 1 || first[0].Imported != 1 {
-		t.Fatalf("first report = %+v, %v; want the one file", first, err)
-	}
-	second, err := localsecrets.TakeLegacyReport(ctx, st, files, time.Now())
-	if err != nil || len(second) != 0 {
-		t.Fatalf("second report = %+v, %v; want nothing", second, err)
-	}
-}
-
-func TestFindLegacyFiles_SkipsWhenAPathVariableIsSet(t *testing.T) {
+func TestFindLegacyFiles_ReadsTheFileAPathVariableNames(t *testing.T) {
 	legacyDir(t, map[string]string{"secrets.env": "TOKEN=abc\n"})
-	t.Setenv("SPARKWING_SECRETS", filepath.Join(t.TempDir(), "elsewhere.env"))
-	files, warning := localsecrets.FindLegacyFiles()
-	if !files.Empty() || !strings.Contains(warning, "SPARKWING_SECRETS") {
-		t.Fatalf("FindLegacyFiles = %+v, %q; want no files and a warning naming the variable", files, warning)
+	elsewhere, err := os.MkdirTemp(paths.TestSandbox(), "elsewhere-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(elsewhere) })
+	named := filepath.Join(elsewhere, "mine.env")
+	if err := os.WriteFile(named, []byte("MINE=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPARKWING_SECRETS", named)
+	files, err := localsecrets.FindLegacyFiles()
+	if err != nil || files.Secrets != named {
+		t.Fatalf("FindLegacyFiles = %+v, %v; want the file SPARKWING_SECRETS names", files, err)
 	}
 }
 
@@ -236,8 +245,7 @@ func TestFindLegacyFiles_SkipsTheMachinesFilesUnderAHomeOfItsOwn(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", machine)
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	files, warning := localsecrets.FindLegacyFiles()
-	if !files.Empty() || warning == "" {
-		t.Fatalf("FindLegacyFiles under a scratch home = %+v, %q; want no files and a warning", files, warning)
+	if files, err := localsecrets.FindLegacyFiles(); err != nil || !files.Empty() {
+		t.Fatalf("FindLegacyFiles under a scratch home = %+v, %v; want none", files, err)
 	}
 }

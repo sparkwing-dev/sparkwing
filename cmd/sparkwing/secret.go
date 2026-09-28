@@ -95,9 +95,6 @@ func localSecretsTarget(ctx context.Context, verb string, write bool) (*secretsT
 			"run `sparkwing daemon restart` to start this release's daemon", verb, daemon, apiErr)
 	}
 	httpClient := orchestrator.NewAPISocketClient(sock)
-	if err := orchestrator.ImportLegacySecretsOverSocket(ctx, httpClient); err != nil {
-		fmt.Fprintf(os.Stderr, "sparkwing: %v\n", err)
-	}
 	health, err := orchestrator.ReadLocalAPIHealth(ctx, sock)
 	if err != nil {
 		httpClient.CloseIdleConnections()

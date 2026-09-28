@@ -10,12 +10,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func hostSecretsDaemon(t *testing.T, home string) {
+// hostSecretsDaemon hosts the daemon `sparkwing secrets` starts in this
+// process and returns a stop that waits for it, as a restart needs.
+func hostSecretsDaemon(t *testing.T, home string) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -37,25 +41,33 @@ func hostSecretsDaemon(t *testing.T, home string) {
 			},
 		}
 	}
-	t.Cleanup(func() {
+	stop := func() {
 		secretsDaemonOptions = previous
 		cancel()
 		if started {
+			started = false
 			if err := <-done; err != nil {
 				t.Errorf("daemon: %v", err)
 			}
 		}
-	})
+	}
+	t.Cleanup(stop)
+	return stop
 }
 
-func TestSecretsWithoutAProfileUseTheDaemonsSealedStore(t *testing.T) {
+// secretsHome points this test at a fresh sparkwing home and config
+// directory, and returns both.
+func secretsHome(t *testing.T) (home, configDir string) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("slow: hosts the admission daemon")
 	}
-	home := queueHome(t)
+	home = queueHome(t)
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(home, "secrets.key"))
 	t.Setenv(localsecrets.KeyEnv, "")
+	t.Setenv("SPARKWING_SECRETS", "")
+	t.Setenv("SPARKWING_CONFIG_ENV", "")
 	if err := os.MkdirAll(paths.TestSandbox(), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +77,24 @@ func TestSecretsWithoutAProfileUseTheDaemonsSealedStore(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(xdg) })
 	t.Setenv("XDG_CONFIG_HOME", xdg)
+	configDir = filepath.Join(xdg, "sparkwing")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return home, configDir
+}
+
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSecretsWithoutAProfileUseTheDaemonsSealedStore(t *testing.T) {
+	home, _ := secretsHome(t)
 	hostSecretsDaemon(t, home)
 
 	if out := captureStdout(t, func() {
@@ -120,5 +150,85 @@ func TestSecretsWithoutAProfileUseTheDaemonsSealedStore(t *testing.T) {
 	})
 	if err := runSecretGet([]string{"--name", "TOKEN"}); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("get after delete = %v, want not found", err)
+	}
+}
+
+// An upgrade finds the per-file settings, the dotenv secret files and a runs
+// store holding history, and imports the dotenv files once.
+func TestUpgradeImportsLegacySettingsAndDotenvSecretsOnce(t *testing.T) {
+	home, dir := secretsHome(t)
+	writeFiles(t, dir, map[string]string{
+		"profiles.yaml": "profiles:\n  prod:\n    controller: {url: https://api.example}\n",
+		"secrets.env":   "TOKEN=from-dotenv\n",
+		"config.env":    "REGION=us-east-1\n",
+	})
+	st, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	configPath, err := userconfig.Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := profile.Load(configPath); err != nil || cfg.Profiles["prod"] == nil {
+		t.Fatalf("profiles after the upgrade = %+v, %v; want prod copied from profiles.yaml", cfg, err)
+	}
+	stop := hostSecretsDaemon(t, home)
+	listed := captureStdout(t, func() {
+		if err := runSecretList(nil); err != nil {
+			t.Fatalf("list: %v", err)
+		}
+	})
+	if !strings.Contains(listed, "TOKEN") || !strings.Contains(listed, "REGION") {
+		t.Fatalf("list after the upgrade = %q, want both imported names", listed)
+	}
+
+	captureStdout(t, func() {
+		if err := runSecretDelete([]string{"--name", "TOKEN"}); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+	})
+	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=from-dotenv\nLATER=added\n"})
+	stop()
+	hostSecretsDaemon(t, home)
+	listed = captureStdout(t, func() {
+		if err := runSecretList(nil); err != nil {
+			t.Fatalf("list after a restart: %v", err)
+		}
+	})
+	if strings.Contains(listed, "TOKEN") || strings.Contains(listed, "LATER") || !strings.Contains(listed, "REGION") {
+		t.Fatalf("list after a restart = %q, want REGION alone: the import runs once", listed)
+	}
+}
+
+func TestUpgradeWithAMalformedDotenvFileFailsSecretsUntilFixed(t *testing.T) {
+	home, dir := secretsHome(t)
+	writeFiles(t, dir, map[string]string{"secrets.env": "TOKEN=fine\n", "config.env": "not a dotenv line\n"})
+	st, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	stop := hostSecretsDaemon(t, home)
+	if err := runSecretList(nil); err == nil || !strings.Contains(err.Error(), "config.env:1") {
+		t.Fatalf("list with a malformed config.env = %v, want the import error naming config.env:1", err)
+	}
+	if err := runSecretSet([]string{"--name", "OTHER", "--value", "x"}); err == nil {
+		t.Fatal("set succeeded while the import had failed")
+	}
+
+	writeFiles(t, dir, map[string]string{"config.env": "REGION=us-east-1\n"})
+	stop()
+	hostSecretsDaemon(t, home)
+	listed := captureStdout(t, func() {
+		if err := runSecretList(nil); err != nil {
+			t.Fatalf("list after the fix and a restart: %v", err)
+		}
+	})
+	if !strings.Contains(listed, "TOKEN") || !strings.Contains(listed, "REGION") {
+		t.Fatalf("list after the fix = %q, want both names", listed)
 	}
 }

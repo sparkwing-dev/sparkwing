@@ -813,7 +813,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 		opts.RunID = newRunID()
 	}
 	if opts.LocalOnly || opts.SecretSource == nil {
-		opts.SecretSource = localRunSecrets(ctx, paths, opts, hosted, selection)
+		opts.SecretSource = localSecretsFor(ctx, paths, hosted, opts.RunID, opts.Pipeline)
 	}
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
 		return nil, fmt.Errorf("ensure run dir: %w", err)

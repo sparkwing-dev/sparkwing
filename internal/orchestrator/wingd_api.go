@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,7 +117,7 @@ const APIHealthRoute = "GET /api/v1/health"
 // encryption and would store a value as plaintext.
 const APISecretsSealed = "sealed"
 
-var apiLocalRoutes = []string{APIHealthRoute, APISecretsImportRoute}
+var apiLocalRoutes = []string{APIHealthRoute}
 
 var (
 	apiStreamMux = routeSet(apiStreamRoutes)
@@ -196,11 +197,7 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel = context.WithTimeout(ctx, a.requestTimeout)
 		defer cancel()
 	}
-	if pattern := localRoute(r); pattern != "" {
-		if pattern == APISecretsImportRoute {
-			a.importLegacySecrets(w, r.WithContext(ctx))
-			return
-		}
+	if localRoute(r) {
 		a.health(w, r.WithContext(ctx))
 		return
 	}
@@ -217,7 +214,14 @@ func (a *wingdAPI) route(w http.ResponseWriter, r *http.Request) {
 		writeAPIUnavailable(w, err)
 		return
 	}
-	a.handlerFor(ctx, rw, ro).ServeHTTP(w, r.WithContext(ctx))
+	handler := a.handlerFor(ctx, rw, ro)
+	// safety: a secret the import did not bring in would read as missing, so
+	// every secret route answers with why the store's secrets are unavailable.
+	if problem := a.secretsFault(); problem != "" && strings.HasPrefix(r.URL.Path, "/api/v1/secrets") {
+		http.Error(w, "local secrets unavailable: "+problem, http.StatusServiceUnavailable)
+		return
+	}
+	handler.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // safety: the daemon answers this itself because a controller needs a store
@@ -284,9 +288,9 @@ func streamingRoute(r *http.Request) bool {
 	return pattern != ""
 }
 
-func localRoute(r *http.Request) string {
+func localRoute(r *http.Request) bool {
 	_, pattern := apiLocalMux.Handler(r)
-	return pattern
+	return pattern != ""
 }
 
 func writeAPIUnavailable(w http.ResponseWriter, err error) {
@@ -336,7 +340,9 @@ func (a *wingdAPI) prepareSecrets(ctx context.Context, rw *store.Store) controll
 	if _, err := srv.ResealStoredSecrets(ctx); err != nil {
 		return a.refuseSecrets(err)
 	}
-	a.importLegacyOnOpen(ctx, rw, cipher)
+	if err := a.importLegacySecrets(ctx, rw, cipher); err != nil {
+		return a.refuseSecrets(err)
+	}
 	return cipher
 }
 
