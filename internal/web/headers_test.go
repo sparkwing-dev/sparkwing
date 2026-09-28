@@ -58,15 +58,13 @@ func TestSecurityHeadersOnEveryResponse(t *testing.T) {
 }
 
 func TestHSTSNeedsTLSEvidence(t *testing.T) {
-	trusted, err := ratelimit.ParseTrustedProxyCIDRs("10.0.0.0/8")
-	if err != nil {
-		t.Fatalf("parse CIDRs: %v", err)
-	}
+	trusted := ratelimit.NewProxyAuth("s3cret")
 	for _, tc := range []struct {
 		name      string
 		opts      HandlerOptions
 		peer      string
 		forwarded string
+		secret    string
 		tls       bool
 		want      string
 	}{
@@ -74,27 +72,31 @@ func TestHSTSNeedsTLSEvidence(t *testing.T) {
 		{name: "TLS listener", tls: true, want: hstsValue},
 		{
 			name:      "trusted forwarded https",
-			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			opts:      HandlerOptions{ProxyAuth: trusted},
 			peer:      "10.1.2.3:9999",
 			forwarded: "https",
+			secret:    "s3cret",
 			want:      hstsValue,
 		},
 		{
-			name:      "untrusted forwarded https",
-			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			name:      "wrong secret forwarded https",
+			opts:      HandlerOptions{ProxyAuth: trusted},
 			peer:      "203.0.113.9:9999",
 			forwarded: "https",
+			secret:    "guess",
 		},
 		{
 			name:      "trusted forwarded http",
-			opts:      HandlerOptions{TrustedProxyCIDRs: trusted},
+			opts:      HandlerOptions{ProxyAuth: trusted},
 			peer:      "10.1.2.3:9999",
 			forwarded: "http",
+			secret:    "s3cret",
 		},
 		{
-			name:      "forwarded https without trusted CIDRs",
+			name:      "forwarded https without a configured secret",
 			peer:      "10.1.2.3:9999",
 			forwarded: "https",
+			secret:    "s3cret",
 		},
 		{name: "operator asserts TLS", opts: HandlerOptions{HSTS: true}, want: hstsValue},
 	} {
@@ -105,6 +107,9 @@ func TestHSTSNeedsTLSEvidence(t *testing.T) {
 			}
 			if tc.forwarded != "" {
 				req.Header.Set("X-Forwarded-Proto", tc.forwarded)
+			}
+			if tc.secret != "" {
+				req.Header.Set(ratelimit.ProxyAuthHeader, tc.secret)
 			}
 			if tc.tls {
 				req.TLS = &tls.ConnectionState{}

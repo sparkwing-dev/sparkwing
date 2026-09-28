@@ -135,15 +135,12 @@ that is not an authentication rejection answers `503` with a generic
 message and the detail goes to the controller log.
 
 Login throttling keys on the TCP peer and ignores forwarded headers until
-you name the proxy networks in `--trusted-proxy-cidrs` (chart:
-`controller.trustedProxyCIDRs`). The dashboard forwards each browser's
-address to the controller, so that list must include the web pod's source
-or every dashboard login shares one client budget. Set the web pod's
-address where you pin it; where the pod IP is unknown, set the cluster pod
-CIDR (`10.244.0.0/16` on kubeadm and kind, `10.42.0.0/16` on k3s) and
-accept that any pod in that range can then supply `X-Forwarded-For`. List
-the narrowest range that contains the web pod. Leaving it empty stays safe
-and turns coarse: every browser then shares the proxy's budget.
+the controller holds the proxy secret in `--proxy-auth-secret-file` (chart:
+`proxyAuth.name`). A request then counts against the budget of its
+`X-Real-IP` only when it carries that secret in `X-Sparkwing-Proxy-Auth`,
+which the ingress and the dashboard send and a client cannot forge. Without
+the secret every browser shares the proxy's budget, which stays safe and turns
+coarse. [auth.md](auth.md) covers the ingress setup.
 
 ## Trigger and list-query limits
 

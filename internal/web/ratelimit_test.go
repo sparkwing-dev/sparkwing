@@ -3,7 +3,6 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"testing"
 	"time"
 
@@ -67,49 +66,30 @@ func TestRateLimitMiddleware_DirectPeerCannotRotateWithForwardedHeader(t *testin
 	}
 }
 
-func TestRateLimitMiddleware_TrustedProxyIgnoresSpoofedLeftChain(t *testing.T) {
-	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	h := rateLimitMiddleware(ratelimit.New(2, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestRateLimitMiddleware_KeysOnRelayedAddressOnlyWithTheSecret(t *testing.T) {
+	h := rateLimitMiddleware(ratelimit.New(1, time.Minute), ratelimit.NewProxyAuth("s3cret"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	for attempt, spoofed := range []string{"unknown", "also-bad", "still-not-an-ip"} {
+	send := func(secret, client string) int {
 		req := httptest.NewRequest(http.MethodPost, "/login", nil)
 		req.RemoteAddr = "10.0.0.5:5000"
-		req.Header.Set("X-Forwarded-For", spoofed+", 203.0.113.9")
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		want := http.StatusOK
-		if attempt == 2 {
-			want = http.StatusTooManyRequests
-		}
-		if rec.Code != want {
-			t.Fatalf("attempt %d status = %d, want %d", attempt+1, rec.Code, want)
-		}
-	}
-}
-
-func TestRateLimitMiddleware_MalformedLeftPrefixDoesNotCollapseClients(t *testing.T) {
-	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	h := rateLimitMiddleware(ratelimit.New(1, time.Minute), trusted, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	send := func(client string) int {
-		req := httptest.NewRequest(http.MethodPost, "/login", nil)
-		req.RemoteAddr = "10.0.0.5:5000"
-		req.Header.Set("X-Forwarded-For", "unknown, "+client)
+		req.Header.Set(ratelimit.ProxyAuthHeader, secret)
+		req.Header.Set("X-Real-IP", client)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code
 	}
 	for attempt, tc := range []struct {
-		client string
-		want   int
+		secret, client string
+		want           int
 	}{
-		{client: "203.0.113.9", want: http.StatusOK},
-		{client: "203.0.113.10", want: http.StatusOK},
-		{client: "203.0.113.9", want: http.StatusTooManyRequests},
+		{secret: "s3cret", client: "203.0.113.9", want: http.StatusOK},
+		{secret: "s3cret", client: "203.0.113.10", want: http.StatusOK},
+		{secret: "s3cret", client: "203.0.113.9", want: http.StatusTooManyRequests},
+		{secret: "guess", client: "203.0.113.11", want: http.StatusOK},
+		{secret: "guess", client: "203.0.113.12", want: http.StatusTooManyRequests},
 	} {
-		if got := send(tc.client); got != tc.want {
+		if got := send(tc.secret, tc.client); got != tc.want {
 			t.Fatalf("attempt %d status = %d, want %d", attempt+1, got, tc.want)
 		}
 	}

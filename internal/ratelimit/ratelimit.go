@@ -4,10 +4,12 @@
 package ratelimit
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -162,69 +164,79 @@ func (l *Limiter) gcLocked(now time.Time) {
 	}
 }
 
-// ClientIP returns the address a limiter should key on: the TCP peer,
-// or the nearest untrusted address in an append-style X-Forwarded-For
-// chain when the peer is itself a trusted proxy.
-func ClientIP(r *http.Request, trustedProxyCIDRs []netip.Prefix) string {
+// ProxyAuthHeader carries the secret a fronting proxy presents to
+// vouch for the X-Real-IP and X-Forwarded-Proto it sets.
+const ProxyAuthHeader = "X-Sparkwing-Proxy-Auth"
+
+// ProxyAuth recognizes requests relayed by a proxy that holds the
+// shared secret. A nil *ProxyAuth recognizes none, so every forwarded
+// header is ignored.
+type ProxyAuth struct{ secret []byte }
+
+// LoadProxyAuth reads the shared proxy secret from path. An empty path
+// returns nil; a file with no secret in it is an error.
+func LoadProxyAuth(path string) (*ProxyAuth, error) {
+	if path == "" {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	p := NewProxyAuth(string(raw))
+	if p == nil {
+		return nil, fmt.Errorf("%s holds no secret", path)
+	}
+	return p, nil
+}
+
+// NewProxyAuth recognizes requests carrying secret, ignoring surrounding
+// whitespace. A blank secret returns nil.
+func NewProxyAuth(secret string) *ProxyAuth {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return nil
+	}
+	return &ProxyAuth{secret: []byte(secret)}
+}
+
+// Relayed reports whether r carries exactly one copy of the secret.
+func (p *ProxyAuth) Relayed(r *http.Request) bool {
+	if p == nil {
+		return false
+	}
+	got := r.Header.Values(ProxyAuthHeader)
+	return len(got) == 1 && subtle.ConstantTimeCompare([]byte(got[0]), p.secret) == 1
+}
+
+// Relay stamps an outbound request to the controller with the client
+// address this process verified, and the secret that vouches for it.
+// A nil *ProxyAuth or an empty address strips both headers instead, so
+// a caller's copy never travels onward.
+func (p *ProxyAuth) Relay(h http.Header, clientIP string) {
+	if p == nil || clientIP == "" {
+		h.Del(ProxyAuthHeader)
+		h.Del("X-Real-IP")
+		return
+	}
+	h.Set(ProxyAuthHeader, string(p.secret))
+	h.Set("X-Real-IP", clientIP)
+}
+
+// ClientIP returns the address a limiter, an audit record or a relay
+// should attribute r to: the single X-Real-IP of a request p
+// recognizes as relayed, and the TCP peer otherwise.
+func ClientIP(r *http.Request, p *ProxyAuth) string {
 	peer, ok := remoteIP(r.RemoteAddr)
 	if !ok {
 		return r.RemoteAddr
 	}
-	if !isTrustedProxy(peer, trustedProxyCIDRs) {
-		return peer.String()
-	}
-	client := peer
-	values := r.Header.Values("X-Forwarded-For")
-	for i := len(values) - 1; i >= 0; i-- {
-		remaining := values[i]
-		for {
-			comma := strings.LastIndexByte(remaining, ',')
-			raw := remaining
-			if comma >= 0 {
-				raw = remaining[comma+1:]
-				remaining = remaining[:comma]
-			}
-			ip, err := netip.ParseAddr(strings.TrimSpace(raw))
-			if err != nil || ip.Zone() != "" {
-				return peer.String()
-			}
-			client = ip.Unmap()
-			if !isTrustedProxy(client, trustedProxyCIDRs) {
-				return client.String()
-			}
-			if comma < 0 {
-				break
-			}
+	if forwarded := r.Header.Values("X-Real-IP"); len(forwarded) == 1 && p.Relayed(r) {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(forwarded[0])); err == nil && ip.Zone() == "" {
+			return ip.Unmap().String()
 		}
 	}
-	return client.String()
-}
-
-// ParseTrustedProxyCIDRs parses a comma-separated CIDR list into
-// masked prefixes. IPv4-mapped prefixes normalize to IPv4; an empty
-// string yields no prefixes, which makes every peer untrusted.
-func ParseTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	parts := strings.Split(raw, ",")
-	prefixes := make([]netip.Prefix, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		prefix, err := netip.ParsePrefix(part)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR %q: %w", part, err)
-		}
-		if prefix.Addr().Is4In6() {
-			if prefix.Bits() < 96 {
-				return nil, fmt.Errorf("IPv4-mapped CIDR %q must use prefix length /96 through /128", part)
-			}
-			prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
-		}
-		prefixes = append(prefixes, prefix.Masked())
-	}
-	return prefixes, nil
+	return peer.String()
 }
 
 func remoteIP(remoteAddr string) (netip.Addr, bool) {
@@ -237,21 +249,4 @@ func remoteIP(remoteAddr string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return ip.Unmap(), true
-}
-
-// PeerIsTrustedProxy reports whether a request's TCP peer address, in
-// host:port or bare host form, sits inside one of the trusted proxy
-// prefixes. Callers use it before believing any forwarded header.
-func PeerIsTrustedProxy(remoteAddr string, trustedProxyCIDRs []netip.Prefix) bool {
-	ip, ok := remoteIP(remoteAddr)
-	return ok && isTrustedProxy(ip, trustedProxyCIDRs)
-}
-
-func isTrustedProxy(ip netip.Addr, trustedProxyCIDRs []netip.Prefix) bool {
-	for _, prefix := range trustedProxyCIDRs {
-		if prefix.Contains(ip) {
-			return true
-		}
-	}
-	return false
 }

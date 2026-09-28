@@ -84,8 +84,8 @@ spec:
             {{- if and .Values.ingress.enabled (not .Values.ingress.tls) (kindIs "bool" .Values.ingress.allowInsecure) .Values.ingress.allowInsecure }}
             - "--allow-insecure-cookies-remote"
             {{- end }}
-            {{- with .Values.web.trustedProxyCIDRs }}
-            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
+            {{- if .Values.proxyAuth.name }}
+            - "--proxy-auth-secret-file=/etc/sparkwing/proxy-auth/secret"
             {{- end }}
           env:
             - name: SPARKWING_HOME
@@ -115,6 +115,11 @@ spec:
               mountPath: /tmp
             - name: sparkwing-home
               mountPath: /tmp/sparkwing
+            {{- if .Values.proxyAuth.name }}
+            - name: proxy-auth
+              mountPath: /etc/sparkwing/proxy-auth
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
           livenessProbe:
@@ -134,3 +139,11 @@ spec:
           emptyDir: {}
         - name: sparkwing-home
           emptyDir: {}
+        {{- if .Values.proxyAuth.name }}
+        - name: proxy-auth
+          secret:
+            secretName: {{ .Values.proxyAuth.name | quote }}
+            items:
+              - key: {{ .Values.proxyAuth.key | quote }}
+                path: secret
+        {{- end }}

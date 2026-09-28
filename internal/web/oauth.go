@@ -14,8 +14,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 // safety: the flow cookie is what proves the browser finishing a sign-in is the
@@ -80,8 +78,7 @@ func oauthStartHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		next := safeNext(r.URL.Query().Get("next"))
-		start, err := controllerOAuthStart(r.Context(), controllerURL, provider.Name, oauthRedirectURI(r, provider.Name),
-			ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
+		start, err := controllerOAuthStart(r.Context(), controllerURL, provider.Name, oauthRedirectURI(r, provider.Name))
 		if err != nil {
 			renderLoginPage(w, r, withSignInProviders(r.Context(), opts, loginPageData{
 				Next: next, Error: provider.Label + " sign-in is unavailable right now.",
@@ -130,7 +127,7 @@ func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 			return
 		}
 		exchanged, err := controllerOAuthExchange(r.Context(), controllerURL, provider.Name, code, flow.Verifier,
-			oauthRedirectURI(r, provider.Name), ratelimit.ClientIP(r, opts.TrustedProxyCIDRs))
+			oauthRedirectURI(r, provider.Name))
 		if err != nil {
 			refuseOAuth(w, r, opts, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return
@@ -210,11 +207,9 @@ func readOAuthFlow(r *http.Request, secure bool) (oauthFlow, bool) {
 	return flow, true
 }
 
-// safety: the client IP keys the controller's start budget, so without it every
-// browser behind this dashboard shares one bucket.
-func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirectURI, clientIP string) (*oauthStartResp, error) {
+func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirectURI string) (*oauthStartResp, error) {
 	var out oauthStartResp
-	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/start", clientIP,
+	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/start",
 		map[string]string{"redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}
@@ -227,9 +222,9 @@ func controllerOAuthStart(ctx context.Context, controllerURL, provider, redirect
 	return &out, nil
 }
 
-func controllerOAuthExchange(ctx context.Context, controllerURL, provider, code, verifier, redirectURI, clientIP string) (*oauthExchangeResp, error) {
+func controllerOAuthExchange(ctx context.Context, controllerURL, provider, code, verifier, redirectURI string) (*oauthExchangeResp, error) {
 	var out oauthExchangeResp
-	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/exchange", clientIP,
+	if err := postControllerJSON(ctx, controllerURL, "/api/v1/auth/oauth/"+provider+"/exchange",
 		map[string]string{"code": code, "verifier": verifier, "redirect_uri": redirectURI}, &out); err != nil {
 		return nil, err
 	}
@@ -260,11 +255,11 @@ func (e *controllerStatusError) Error() string {
 	return fmt.Sprintf("controller %s: %d: %s", e.Path, e.Status, e.Message)
 }
 
-func postControllerJSON(ctx context.Context, controllerURL, path, clientIP string, body, out any) error {
-	return postControllerJSONAs(ctx, controllerURL, path, clientIP, "", body, out)
+func postControllerJSON(ctx context.Context, controllerURL, path string, body, out any) error {
+	return postControllerJSONAs(ctx, controllerURL, path, "", body, out)
 }
 
-func postControllerJSONAs(ctx context.Context, controllerURL, path, clientIP, sessionID string, body, out any) error {
+func postControllerJSONAs(ctx context.Context, controllerURL, path, sessionID string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -275,13 +270,10 @@ func postControllerJSONAs(ctx context.Context, controllerURL, path, clientIP, se
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if clientIP != "" {
-		req.Header.Set("X-Forwarded-For", clientIP)
-	}
 	if sessionID != "" {
 		req.Header.Set("Authorization", sessionAuthorization(sessionID))
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Transport: controllerTransport, Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

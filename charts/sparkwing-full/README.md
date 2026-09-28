@@ -256,7 +256,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.bootstrapAdminToken.name` | Secret holding the first admin token, stored as an admin credential before the listener binds when the tokens table is empty. | `""` |
 | `controller.requireAuth` | Refuse to start when no live token exists. On an upgrade of a cluster that already holds a token it needs nothing else; on a fresh install without `bootstrapAdminToken` the controller crash-loops, because the window that would mint the first token is exactly what the flag closes. The render does not refuse that pairing, because it cannot see what the state DB holds. | `false` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
-| `controller.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. Include the web pod's source, or dashboard logins all share one budget; when the pod IP is unknown, use the cluster pod CIDR. | `[]` |
 | `controller.argon2MemoryBudgetMB` | Memory ceiling in MiB for concurrent argon2id hashing; each hash holds 64 MiB. | `256` |
 
 ### Web
@@ -270,7 +269,6 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | (defaults to `sparkwing-runner-bundle.controller.tokenSecret`) |
 | `web.addr` | Address the web pod binds. Empty binds `0.0.0.0:<web.port>`, which the Service needs; a loopback value is reachable only through a port-forward. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
-| `web.trustedProxyCIDRs` | Proxy source CIDRs allowed to supply `X-Forwarded-For` for login throttling. | `[]` |
 
 ### Security and volume ownership
 
@@ -291,6 +289,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `ingress.hosts[].host` | Hostname for the dashboard. | `sparkwing.example.com` |
 | `ingress.tls` | TLS section. Empty fails the render unless `ingress.allowInsecure`; presence-only, `secretName` optional. | `[]` |
 | `ingress.allowInsecure` | Publish the dashboard without TLS or without a login gate. Bool only. | `false` |
+| `proxyAuth.name` / `proxyAuth.key` | Secret the ingress sends in `X-Sparkwing-Proxy-Auth`, overwriting any client copy, alongside `X-Real-IP`. The controller and web believe a forwarded address only with it, and web relays each browser's address to the controller with it. Empty name keys throttling and audit on the TCP peer. | `""` / `secret` |
 
 ### Runner-bundle sub-chart
 

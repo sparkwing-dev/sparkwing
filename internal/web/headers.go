@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
-	"net/netip"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
@@ -43,16 +42,17 @@ func securityHeadersMiddleware(opts HandlerOptions, next http.Handler) http.Hand
 		}
 		ctx := context.WithValue(r.Context(), cspNonceCtxKey{}, nonce)
 		ctx = context.WithValue(ctx, requestTLSCtxKey{}, overTLS)
+		ctx = context.WithValue(ctx, relayCtxKey{}, relay{proxy: opts.ProxyAuth, clientIP: ratelimit.ClientIP(r, opts.ProxyAuth)})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 func requestOverTLS(r *http.Request, opts HandlerOptions) bool {
-	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r, opts.TrustedProxyCIDRs)
+	return opts.HSTS || r.TLS != nil || forwardedHTTPS(r, opts.ProxyAuth)
 }
 
-func forwardedHTTPS(r *http.Request, trustedProxyCIDRs []netip.Prefix) bool {
-	if !ratelimit.PeerIsTrustedProxy(r.RemoteAddr, trustedProxyCIDRs) {
+func forwardedHTTPS(r *http.Request, proxy *ratelimit.ProxyAuth) bool {
+	if !proxy.Relayed(r) {
 		return false
 	}
 	proto := r.Header.Get("X-Forwarded-Proto")
@@ -95,4 +95,24 @@ func newCSPNonce() string {
 func cspNonceFrom(ctx context.Context) string {
 	nonce, _ := ctx.Value(cspNonceCtxKey{}).(string)
 	return nonce
+}
+
+type relayCtxKey struct{}
+
+type relay struct {
+	proxy    *ratelimit.ProxyAuth
+	clientIP string
+}
+
+// safety: every controller call carries the served browser's address and its secret,
+// or all browsers share the dashboard pod's budgets on the controller.
+var controllerTransport http.RoundTripper = relayTransport{base: http.DefaultTransport}
+
+type relayTransport struct{ base http.RoundTripper }
+
+func (t relayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rel, _ := req.Context().Value(relayCtxKey{}).(relay)
+	req = req.Clone(req.Context())
+	rel.proxy.Relay(req.Header, rel.clientIP)
+	return t.base.RoundTrip(req)
 }

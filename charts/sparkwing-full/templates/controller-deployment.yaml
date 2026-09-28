@@ -86,8 +86,8 @@ spec:
             {{- if $logsURL }}
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
-            {{- with .Values.controller.trustedProxyCIDRs }}
-            - {{ printf "--trusted-proxy-cidrs=%s" (join "," .) | quote }}
+            {{- if .Values.proxyAuth.name }}
+            - "--proxy-auth-secret-file=/etc/sparkwing/proxy-auth/secret"
             {{- end }}
             {{- with .Values.controller.argon2MemoryBudgetMB }}
             - {{ printf "--argon2-memory-budget-mb=%d" (int .) | quote }}
@@ -252,6 +252,11 @@ spec:
               mountPath: {{ include "sparkwing-full.controller.bootstrapAdminTokenDir" . | quote }}
               readOnly: true
             {{- end }}
+            {{- if .Values.proxyAuth.name }}
+            - name: proxy-auth
+              mountPath: /etc/sparkwing/proxy-auth
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           startupProbe:
@@ -297,4 +302,12 @@ spec:
         - name: bootstrap-admin-token
           secret:
             secretName: {{ .Values.controller.bootstrapAdminToken.name | quote }}
+        {{- end }}
+        {{- if .Values.proxyAuth.name }}
+        - name: proxy-auth
+          secret:
+            secretName: {{ .Values.proxyAuth.name | quote }}
+            items:
+              - key: {{ .Values.proxyAuth.key | quote }}
+                path: secret
         {{- end }}

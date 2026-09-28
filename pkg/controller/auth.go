@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -189,7 +188,7 @@ type Authenticator struct {
 	negCount    atomic.Int64
 	flights     sync.Map
 	prefixes    *ratelimit.Limiter
-	trusted     []netip.Prefix
+	proxy       *ratelimit.ProxyAuth
 	logger      *slog.Logger
 	now         func() time.Time
 	afterLookup func()
@@ -256,11 +255,10 @@ func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator {
 	}
 }
 
-// WithTrustedProxyCIDRs names the proxy source networks allowed to
-// supply X-Forwarded-For when the bearer failure budget resolves a
-// caller's address. Empty keys it on the TCP peer.
-func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator {
-	a.trusted = prefixes
+// WithProxyAuth names the proxy secret that lets a relayed request's
+// X-Real-IP key the bearer failure budget. Nil keys it on the TCP peer.
+func (a *Authenticator) WithProxyAuth(p *ratelimit.ProxyAuth) *Authenticator {
+	a.proxy = p
 	return a
 }
 
@@ -549,7 +547,7 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			a.writeAuthFailure(w, err)
 			return
 		}
-		p, err := a.authenticate(raw, ratelimit.ClientIP(r, a.trusted))
+		p, err := a.authenticate(raw, ratelimit.ClientIP(r, a.proxy))
 		if err != nil {
 			a.writeAuthFailure(w, err)
 			return

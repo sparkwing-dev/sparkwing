@@ -33,7 +33,7 @@ func operatorSession(r *http.Request, controllerURL string) bool {
 		return false
 	}
 	req.Header.Set("Authorization", sessionAuthorization(id))
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := (&http.Client{Transport: controllerTransport, Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return false
 	}

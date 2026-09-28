@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -123,68 +124,79 @@ func TestLimiter_EvictionKeepsServingNewClients(t *testing.T) {
 	}
 }
 
-func TestClientIP_TrustedProxyChain(t *testing.T) {
-	trustedEdge := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	trustedIPv6Edge := []netip.Prefix{netip.MustParsePrefix("2001:db8:1::/48")}
-	trustedChain := []netip.Prefix{
-		netip.MustParsePrefix("10.0.0.0/8"),
-		netip.MustParsePrefix("192.168.0.0/16"),
-	}
+func TestClientIP_HonorsForwardedAddressOnlyWithTheSecret(t *testing.T) {
+	auth := &ProxyAuth{secret: []byte("s3cret")}
 	cases := []struct {
 		name       string
-		xff        []string
+		auth       *ProxyAuth
+		secrets    []string
+		realIPs    []string
 		remoteAddr string
-		trusted    []netip.Prefix
 		want       string
 	}{
-		{name: "default ignores forwarded header", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
-		{name: "trusted edge accepts client", xff: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "198.51.100.7"},
-		{name: "trusted IPv6 edge accepts client", xff: []string{"2001:db8:ffff::7"}, remoteAddr: "[2001:db8:1::5]:5000", trusted: trustedIPv6Edge, want: "2001:db8:ffff::7"},
-		{name: "append chain stops at nearest untrusted hop", xff: []string{"198.51.100.99, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "malformed left prefix after client is ignored", xff: []string{"unknown, 203.0.113.9"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "multiple trusted hops", xff: []string{"198.51.100.7, 192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
-		{name: "multiple header fields", xff: []string{"198.51.100.7", "192.168.1.5"}, remoteAddr: "10.0.0.1:5000", trusted: trustedChain, want: "198.51.100.7"},
-		{name: "malformed chain falls back to peer", xff: []string{"198.51.100.7, unknown"}, remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
-		{name: "untrusted peer ignores valid chain", xff: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", trusted: trustedEdge, want: "203.0.113.9"},
-		{name: "missing forwarded header uses peer", remoteAddr: "10.0.0.1:5000", trusted: trustedEdge, want: "10.0.0.1"},
+		{name: "secret present uses forwarded address", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "10.0.0.1:5000", want: "198.51.100.7"},
+		{name: "IPv6 forwarded address", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"2001:db8::7"}, remoteAddr: "10.0.0.1:5000", want: "2001:db8::7"},
+		{name: "missing secret ignores spoofed address", auth: auth, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "wrong secret ignores spoofed address", auth: auth, secrets: []string{"guess"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "second secret copy is refused", auth: auth, secrets: []string{"guess", "s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "second address copy is refused", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7", "198.51.100.8"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "no configured secret ignores a presented one", secrets: []string{"s3cret"}, realIPs: []string{"198.51.100.7"}, remoteAddr: "203.0.113.9:5000", want: "203.0.113.9"},
+		{name: "malformed forwarded address uses peer", auth: auth, secrets: []string{"s3cret"}, realIPs: []string{"unknown"}, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
+		{name: "direct call uses peer", auth: auth, remoteAddr: "10.0.0.1:5000", want: "10.0.0.1"},
 		{name: "peer without port", remoteAddr: "127.0.0.1", want: "127.0.0.1"},
-		{name: "malformed peer stays opaque", remoteAddr: "local-peer", trusted: trustedEdge, want: "local-peer"},
+		{name: "malformed peer stays opaque", auth: auth, remoteAddr: "local-peer", want: "local-peer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/login", nil)
 			req.RemoteAddr = tc.remoteAddr
-			for _, value := range tc.xff {
-				req.Header.Add("X-Forwarded-For", value)
+			req.Header.Set("X-Forwarded-For", "192.0.2.66")
+			for _, v := range tc.secrets {
+				req.Header.Add(ProxyAuthHeader, v)
 			}
-			if got := ClientIP(req, tc.trusted); got != tc.want {
+			for _, v := range tc.realIPs {
+				req.Header.Add("X-Real-IP", v)
+			}
+			if got := ClientIP(req, tc.auth); got != tc.want {
 				t.Fatalf("ClientIP=%q want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestParseTrustedProxyCIDRs(t *testing.T) {
-	prefixes, err := ParseTrustedProxyCIDRs(" 10.0.0.5/8, 192.168.0.0/16, 2001:db8:1::1/48, ::ffff:10.0.0.5/104 ")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+func TestProxyAuthRelayStripsWithoutASecret(t *testing.T) {
+	h := http.Header{}
+	h.Set(ProxyAuthHeader, "client-supplied")
+	h.Set("X-Real-IP", "192.0.2.66")
+	(*ProxyAuth)(nil).Relay(h, "198.51.100.7")
+	if h.Get(ProxyAuthHeader) != "" || h.Get("X-Real-IP") != "" {
+		t.Fatalf("relay without a secret kept %v", h)
 	}
-	want := []string{"10.0.0.0/8", "192.168.0.0/16", "2001:db8:1::/48", "10.0.0.0/8"}
-	if len(prefixes) != len(want) {
-		t.Fatalf("got %d prefixes, want %d", len(prefixes), len(want))
+	(&ProxyAuth{secret: []byte("s3cret")}).Relay(h, "198.51.100.7")
+	if h.Get(ProxyAuthHeader) != "s3cret" || h.Get("X-Real-IP") != "198.51.100.7" {
+		t.Fatalf("relay stamped %v", h)
 	}
-	for i, w := range want {
-		if got := prefixes[i].String(); got != w {
-			t.Fatalf("prefix %d = %q, want %q", i, got, w)
-		}
+}
+
+func TestLoadProxyAuth(t *testing.T) {
+	if p, err := LoadProxyAuth(""); p != nil || err != nil {
+		t.Fatalf("empty path = %v, %v; want nil, nil", p, err)
 	}
-	if empty, err := ParseTrustedProxyCIDRs(""); err != nil || empty != nil {
-		t.Fatalf("empty input: %v %v", empty, err)
+	dir := t.TempDir()
+	good := filepath.Join(dir, "secret")
+	if err := os.WriteFile(good, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, raw := range []string{"10.0.0.1", "not-a-cidr", "::ffff:10.0.0.0/64"} {
-		if _, err := ParseTrustedProxyCIDRs(raw); err == nil {
-			t.Fatalf("ParseTrustedProxyCIDRs(%q) succeeded", raw)
-		}
+	p, err := LoadProxyAuth(good)
+	if err != nil || string(p.secret) != "s3cret" {
+		t.Fatalf("LoadProxyAuth = %v, %v; want the trimmed secret", p, err)
+	}
+	blank := filepath.Join(dir, "blank")
+	if err := os.WriteFile(blank, []byte(" \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadProxyAuth(blank); err == nil {
+		t.Fatal("a blank secret file loaded")
 	}
 }
 

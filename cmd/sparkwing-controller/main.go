@@ -114,10 +114,11 @@ func run(args []string) error {
 			"relying parties' cached key sets verify tokens across the switch.")
 	oidcTokenTTL := fs.Duration("oidc-token-ttl", oidcissuer.DefaultTTL,
 		"lifetime of an OIDC ID token, from 1m to 1h")
-	trustedProxyCIDRsRaw := fs.String("trusted-proxy-cidrs", "",
-		"comma-separated proxy source CIDRs allowed to supply X-Forwarded-For "+
-			"for login throttling; empty ignores forwarded headers and keys the "+
-			"limiter on the TCP peer")
+	proxyAuthSecretFile := fs.String("proxy-auth-secret-file", "",
+		"file holding the secret a fronting proxy or the dashboard sends in "+
+			ratelimit.ProxyAuthHeader+"; only a request carrying it has its X-Real-IP "+
+			"key login throttling, the bearer failure budget and the request log. "+
+			"Empty ignores forwarded headers and keys them on the TCP peer")
 	argonBudgetMB := fs.Int("argon2-memory-budget-mb",
 		int(store.DefaultArgon2MemoryBudget>>20),
 		fmt.Sprintf("memory ceiling in MiB for concurrent argon2id password and "+
@@ -309,9 +310,9 @@ func run(args []string) error {
 			"controller) and for laptop-local use.")
 	_ = fs.Parse(args)
 
-	trustedProxyCIDRs, err := ratelimit.ParseTrustedProxyCIDRs(*trustedProxyCIDRsRaw)
+	proxyAuth, err := ratelimit.LoadProxyAuth(*proxyAuthSecretFile)
 	if err != nil {
-		return fmt.Errorf("--trusted-proxy-cidrs: %w", err)
+		return fmt.Errorf("--proxy-auth-secret-file: %w", err)
 	}
 	egressCfg, egressNamed, err := readEgress()
 	if err != nil {
@@ -472,7 +473,7 @@ func run(args []string) error {
 	}
 
 	srv := controller.New(st, nil).
-		WithTrustedProxyCIDRs(trustedProxyCIDRs).
+		WithProxyAuth(proxyAuth).
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithGitHubWebhookConfig(webhookCfg).
 		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), *dashboardURL).

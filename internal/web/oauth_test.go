@@ -66,7 +66,7 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/auth/oauth/google/start", "/api/v1/auth/oauth/github/start":
 		body := decode()
 		body["path"] = r.URL.Path
-		body["x-forwarded-for"] = r.Header.Get("X-Forwarded-For")
+		body["x-real-ip"] = r.Header.Get("X-Real-IP")
 		c.starts = append(c.starts, body)
 		_ = json.NewEncoder(w).Encode(oauthStartResp{
 			AuthorizeURL: fakeAuthorizeURL, State: fakeOAuthState, Verifier: fakeVerifier,

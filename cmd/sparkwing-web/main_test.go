@@ -46,10 +46,10 @@ func TestResolveAuthControllerURL(t *testing.T) {
 	}
 }
 
-func TestRunRejectsMalformedTrustedProxyCIDRs(t *testing.T) {
-	err := run([]string{"--trusted-proxy-cidrs", "10.0.0.1"})
-	if err == nil || !strings.Contains(err.Error(), "--trusted-proxy-cidrs") {
-		t.Fatalf("error = %v, want trusted proxy CIDR error", err)
+func TestRunRejectsUnreadableProxyAuthSecret(t *testing.T) {
+	err := run([]string{"--proxy-auth-secret-file", filepath.Join(t.TempDir(), "missing")})
+	if err == nil || !strings.Contains(err.Error(), "--proxy-auth-secret-file") {
+		t.Fatalf("error = %v, want the proxy secret file error", err)
 	}
 }
 

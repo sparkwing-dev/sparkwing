@@ -36,7 +36,7 @@ func (a *Authenticator) Authenticate(raw string) (*Principal, error)
 func (a *Authenticator) Invalidate(prefix string)
 func (a *Authenticator) Middleware(next http.Handler) http.Handler
 func (a *Authenticator) WithLogger(l *slog.Logger) *Authenticator
-func (a *Authenticator) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Authenticator
+func (a *Authenticator) WithProxyAuth(p *ratelimit.ProxyAuth) *Authenticator
 const BalanceCapCode = "balance_cap"
 const BootstrapAdminPrincipal = "bootstrap:admin"
 type BoundCipher interface {
@@ -396,6 +396,7 @@ func (s *Server) WithMetricsListener(ln net.Listener) *Server
 func (s *Server) WithOIDCIssuer(iss *oidcissuer.Issuer) *Server
 func (s *Server) WithOperatorAccounts(ids []string) *Server
 func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server
+func (s *Server) WithProxyAuth(p *ratelimit.ProxyAuth) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithRequestBudget(b RequestBudget) *Server
@@ -408,7 +409,6 @@ func (s *Server) WithStoragePass(cache, logs *teamblob.Store) *Server
 func (s *Server) WithTeamDownloadCaps(free, funded int64) *Server
 func (s *Server) WithTeamStorage(ts TeamStorage) *Server
 func (s *Server) WithTokenRequestBudget(b TokenRequestBudget) *Server
-func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server
 type ServicesResponse struct {
 	DataDownloadURL string
 

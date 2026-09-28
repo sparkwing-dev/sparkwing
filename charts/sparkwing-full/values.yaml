@@ -72,19 +72,6 @@ controller:
     name: ""
     key: token
 
-  # Proxy source CIDRs allowed to supply X-Forwarded-For for login
-  # throttling. This must include the dashboard pod's address: the web
-  # deployment forwards each browser's address to the controller, and
-  # an untrusted source is ignored, which collapses every dashboard
-  # login into one budget. Set the web pod's address when you pin it;
-  # when the pod IP is unknown, set the cluster pod CIDR, for example
-  # 10.244.0.0/16 (kubeadm/kind), 10.42.0.0/16 (k3s), or the value of
-  # `kubectl cluster-info dump | grep cluster-cidr`. Every pod in the
-  # listed range can then supply X-Forwarded-For, so list the
-  # narrowest range that contains the web pod. Empty keys the limiter
-  # on the TCP peer. List proxy networks, not client networks.
-  trustedProxyCIDRs: []
-
   # Memory ceiling in MiB for concurrent argon2id password and token
   # hashing. Each hash holds 64 MiB while it runs, so the default
   # admits four at a time and keeps unauthenticated login traffic
@@ -337,9 +324,6 @@ web:
   # requireLogin is false; the dashboard refuses to start otherwise.
   allowUnauthenticatedRemote: false
 
-  # Proxy source CIDRs allowed to supply X-Forwarded-For. Empty ignores it.
-  trustedProxyCIDRs: []
-
   resources:
     requests:
       cpu: 10m
@@ -389,6 +373,16 @@ ingress:
   # `--allow-insecure-cookies-remote`, so a browser can hold a session
   # over plain HTTP.
   allowInsecure: false
+
+# Secret shared by the ingress, the dashboard and the controller. The
+# ingress must send it in X-Sparkwing-Proxy-Auth with X-Real-IP on every
+# request, and overwrite any copy a client sent; only a request carrying
+# it has its X-Real-IP key login throttling and audit records, and the
+# dashboard relays each browser's address to the controller with it.
+# Empty name ignores forwarded headers and keys everything on the TCP peer.
+proxyAuth:
+  name: ""
+  key: secret
 
 # -----------------------------------------------------------------------
 # 4. ServiceAccount + RBAC for the controller. The controller needs

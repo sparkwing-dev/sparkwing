@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -769,13 +768,14 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 	})
 }
 
-// WithTrustedProxyCIDRs names the proxy source networks allowed to
-// supply X-Forwarded-For for login throttling. Empty keys the login
-// limiter on the TCP peer and ignores forwarded headers.
-func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
-	s.loginLimit = newLoginLimiter(prefixes)
+// WithProxyAuth names the secret a fronting proxy or the dashboard
+// presents to vouch for a request's X-Real-IP. Login throttling, the
+// bearer failure budget and the request log then key on that address;
+// nil keys them on the TCP peer and ignores forwarded headers.
+func (s *Server) WithProxyAuth(p *ratelimit.ProxyAuth) *Server {
+	s.loginLimit = newLoginLimiter(p)
 	if s.auth != nil {
-		s.auth.WithTrustedProxyCIDRs(prefixes)
+		s.auth.WithProxyAuth(p)
 	}
 	return s
 }
@@ -817,7 +817,7 @@ const tokenCacheTTL = 60 * time.Second
 
 func (s *Server) storeAuthenticator() *Authenticator {
 	return NewAuthenticator(s.store, tokenCacheTTL).
-		WithTrustedProxyCIDRs(s.loginLimit.trusted).
+		WithProxyAuth(s.loginLimit.proxy).
 		WithLogger(s.logger)
 }
 
@@ -885,7 +885,7 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("/", s.authenticated(mux, s.githubRunnerFence(s.tokenBudgeted(s.teamBoundary(mux, unsupportedRouteFallback(mux))))))
 	h := withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux), func(r *http.Request) string {
-			return ratelimit.ClientIP(r, s.loginLimit.trusted)
+			return ratelimit.ClientIP(r, s.loginLimit.proxy)
 		})))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.runnerPresence.listening(time.Now())

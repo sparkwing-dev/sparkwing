@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -95,8 +94,14 @@ type HandlerOptions struct {
 
 	Version string
 
-	RequireLogin      bool
-	TrustedProxyCIDRs []netip.Prefix
+	RequireLogin bool
+
+	// ProxyAuth recognizes requests a fronting proxy relays with the
+	// shared secret, whose X-Real-IP and X-Forwarded-Proto then count.
+	// The dashboard relays the address it settles on, with the same
+	// secret, on every call it makes to the controller. Nil ignores
+	// forwarded headers and strips them from those calls.
+	ProxyAuth *ratelimit.ProxyAuth
 
 	// HSTS asserts that browsers reach this dashboard over TLS even
 	// though the process serves plaintext, for operators who terminate
@@ -288,9 +293,9 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.HandleFunc("GET /login", loginPageHandler(opts))
 	loginLimiter := ratelimit.New(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, loginSubmitHandler(opts))))
+		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.ProxyAuth, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",
-		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.TrustedProxyCIDRs, bootstrapSubmitHandler(opts))))
+		csrfFormMiddleware(cookiesSecure(opts), rateLimitMiddleware(loginLimiter, opts.ProxyAuth, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(cookiesSecure(opts), logoutHandler(opts)))
 	router.HandleFunc("GET /auth/{provider}/start", oauthStartHandler(opts))
 	router.HandleFunc("GET /auth/{provider}/callback", oauthCallbackHandler(opts))
@@ -624,6 +629,7 @@ func controllerProxy(controllerURL, token string, loginRequired, forwardSession 
 		})
 	}
 	proxy := &httputil.ReverseProxy{
+		Transport: controllerTransport,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(u)
 			pr.Out.Header.Del("Cookie")

@@ -577,3 +577,22 @@ Every claim route now asks `pkg/match` whether a runner may take a node.
   they reported `hard_capability`, and `shape` for a node whose request exceeds
   the executor's budget.
 
+
+## Proxy secret replaces trusted proxy CIDRs
+
+`sparkwing-controller` and `sparkwing-web` no longer accept
+`--trusted-proxy-cidrs`, and the full chart drops
+`controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs`. Neither process
+takes a client address from `X-Forwarded-For` any more. A startup that still passes the flag fails.
+
+1. Generate a random secret and store it as a Kubernetes Secret.
+2. Configure the fronting proxy to send it in `X-Sparkwing-Proxy-Auth` and the
+   client address in `X-Real-IP` on every request, overwriting any copy the
+   client sent. ingress-nginx sets `X-Real-IP` already; add the secret through
+   its `proxy-set-headers` ConfigMap.
+3. Pass the secret file to both processes with `--proxy-auth-secret-file`, or
+   set the chart's `proxyAuth.name` and `proxyAuth.key`.
+
+Until the secret is in place, login throttling, the bearer failure budget and
+audit `client_ip` key on the TCP peer, so browsers behind one proxy share its
+budget.
