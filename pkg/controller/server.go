@@ -912,7 +912,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
-	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
+	mux.Handle("POST /api/v1/runs/{id}/plan", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan}, planClaimBinding, s.handleAcceptPlan).orElse(requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/attempt", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}, nil, s.handleReportAttempt))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))

@@ -29,10 +29,27 @@ unlock.
   finished, superseded or cancelled claim is refused on its next request. A
   route admits only the token kinds (`plan`, `work`) it declares and only the
   run it binds; a claim that has ended gets its committed result replayed
-  (200 when identical, 409 otherwise) and writes nothing. No
-  controller route accepts these tokens yet, and no path issues them; existing
-  clients see no change. Controllers older than schema 76 keep working against
-  a migrated database.
+  (200 when identical, 409 otherwise) and writes nothing. Only the plan and
+  attempt routes below accept these tokens, and no path issues them yet;
+  existing clients see no change. Controllers older than schema 76 keep working
+  against a migrated database.
+- **controller + store:** Controller-dispatched runs gain plan acceptance and
+  attempt reporting. Schema 77 adds node kind, spec hash, dependency-edge and
+  retry-budget columns and the run's accepted plan generation. `POST
+  /api/v1/runs/{id}/plan` with a plan claim's token validates the plan (at
+  most 1,000 nodes and 4 MiB, node ID format, dependency and recovery
+  references, no cycles, no plan-level concurrency, dynamic fan-out, approval
+  or `when_runner` nodes), clamps cores, memory, retries and backoff to their
+  ceilings, and in one commit inserts the nodes, finishes the planning node and
+  releases the nodes with no dependencies. A run accepts exactly one plan. `POST
+  /api/v1/runs/{id}/nodes/{nodeID}/attempt` records an attempt's outcome,
+  output and failure record, and in the same commit either requeues the node
+  after its backoff within its retry budget or writes its final outcome, then
+  releases or cancels dependents and finishes the run once every node is
+  terminal. A failed attempt that will be retried never releases a dependent.
+  A bearer without a claim token still reaches the plan-snapshot upload at
+  `POST /api/v1/runs/{id}/plan`, and no run uses the new path yet. Controllers
+  older than schema 77 keep working against a migrated database.
 - **cli + controller + runner (Breaking):** Cloud `--working-tree` now uploads
   one source bundle directly to S3 before creating a run, including from a Git
   checkout with no cloud-reachable origin. The bundle counts against the team's

@@ -147,6 +147,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// already carries, so an older binary keeps writing the migrated database.
 	74: {nodeClaimTokenPrefixCols},
 	76: nil,
+	// safety: v77 adds defaulted node and run columns an older binary never
+	// names, so an older binary keeps writing the migrated database.
+	77: {controllerDispatchNodeCols, controllerDispatchRunCols},
 }
 
 func columnSpecMaps() []map[string]string {

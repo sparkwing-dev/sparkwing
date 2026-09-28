@@ -89,6 +89,16 @@ const Argon2HashBytes = int64(argonMemory) << 10
 func Argon2Shed() int64
 func Argon2Slots() int
 const AttemptOrdinalHeader = "X-Sparkwing-Attempt-Ordinal"
+type AttemptReport struct {
+	Outcome       string
+	Error         string
+	FailureReason string
+
+	Output json.RawMessage
+
+	Failure          json.RawMessage
+	ArtifactManifest string
+}
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
@@ -607,6 +617,7 @@ var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry th
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
 var ErrAmbiguousAccount = errors.New("store: more than one account holds that address; name the account by id")
+var ErrAttemptInvalid = errors.New("store: attempt report refused")
 var ErrBindingLimit = errors.New("store: this team binds as many repositories as it may")
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrCLITokenLimit = errors.New("store: this member holds as many CLI tokens as a member may")
@@ -664,6 +675,7 @@ var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
+var ErrPlanInvalid = errors.New("store: plan refused")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
@@ -1062,6 +1074,7 @@ var Maintenance = storeMaintenanceFns{
 	SweepLRUConcurrencyCache:      (*Store).sweepLRUConcurrencyCache,
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
+const MaxAttemptOutputBytes = 1 << 20
 const MaxCLITokensPerMember = 10
 const MaxClaimTokenLifetime = 6 * time.Hour
 const MaxCreatedTeams = 3
@@ -1080,7 +1093,12 @@ const MaxInvitationEmailsPerDay = 5
 const MaxInvitationsPerDay = 100
 const MaxLeaseDuration = 10 * time.Minute
 const MaxNodeDispatchEnvelope = 4 << 20
+const MaxNodeIDBytes = 200
+const MaxNodeRetries = 10
 const MaxOpenInvitations = 50
+const MaxPlanBytes = MaxNodeDispatchEnvelope
+const MaxPlanNodes = 1000
+const MaxRetryBackoff = 5 * time.Minute
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 10
 const MaxSecretValueBytes = 128 << 10
@@ -1353,6 +1371,7 @@ type PipelineSummary struct {
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
 const PlacementPreferred = "preference"
+const PlanNodeID = "plan"
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -1753,6 +1772,7 @@ type StorageUsage struct {
 type Store struct {
 }
 func (s *Store) AcceptInvitation(ctx context.Context, accountID, invitationID string, now time.Time) (InvitationAcceptance, error)
+func (s *Store) AcceptPlan(ctx context.Context, commit ClaimResultCommit, body []byte, now time.Time) (replayed bool, err error)
 func (s *Store) Account(ctx context.Context, id string) (Account, error)
 func (s *Store) AccountByEmail(ctx context.Context, email string) (_ Account, err error)
 func (s *Store) AccountIdentities(ctx context.Context, accountID string) (_ []Identity, err error)
@@ -1837,6 +1857,7 @@ func (s *Store) CreateIdentityAccountSession(
 ) (rawSession, csrfToken string, sess *Session, err error)
 func (s *Store) CreateNode(ctx context.Context, n Node) error
 func (s *Store) CreateOrReplaceSecret(sec Secret, now time.Time) error
+func (s *Store) CreatePlanNode(ctx context.Context, team Team, runID string, now time.Time) (err error)
 func (s *Store) CreateRetryWithRun(ctx context.Context, sourceRunID string, trig Trigger, r Run) error
 func (s *Store) CreateRun(ctx context.Context, r Run) error
 func (s *Store) CreateSession(principal string, scopes []string, ttl time.Duration, now time.Time) (rawSession, csrfToken string, sess *Session, err error)
@@ -2031,6 +2052,7 @@ func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, 
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
+func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, report AttemptReport, now time.Time) (replayed bool, err error)
 func (s *Store) RequestCancel(ctx context.Context, id string) error
 func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)

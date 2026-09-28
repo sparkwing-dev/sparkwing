@@ -262,19 +262,31 @@ paths:
   /api/v1/runs/{id}/plan:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [runs]
-      summary: Upload the run's plan-snapshot blob.
+      summary: Upload the run's plan-snapshot blob, or accept a plan claim's plan.
       description: |
-        Body is opaque bytes (typically JSON serialized plan).
-        Content-Type is ignored.
+        With a scoped bearer the body is opaque bytes (typically JSON
+        serialized plan) that replace the stored snapshot; Content-Type is
+        ignored.
+
+        With the claim token of the run's planning claim the body is the plan
+        document. The controller validates it, inserts its nodes, finishes the
+        planning node and releases the nodes with no dependencies, all in one
+        commit. A run accepts one plan: the identical body replays 200 after
+        the claim ends, and any other body is 409. A plan the controller will
+        not run is 422 and writes nothing. The claim route answers with a
+        status only.
       requestBody:
         required: true
         content:
           application/octet-stream:
             schema: {type: string, format: binary}
       responses:
+        "200": {description: "The claim's plan was accepted or replayed."}
         "204": {description: Plan stored.}
+        "409": {description: "The run accepted a different plan, or the claim ended without submitting this one."}
+        "422": {description: "The plan was refused; the error names the first reason."}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/cancel:
@@ -6748,6 +6760,50 @@ paths:
               schema: {type: integer}
               description: Seconds until the cap resets.
         "503": {description: No signer is configured for the selected request path.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/attempt:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Report the end of a claim's attempt at its node.
+      description: |
+        The claim token's holder reports the attempt's outcome, error, output
+        and failure record. One commit records the attempt, retries the node
+        within its budget after its backoff or writes its final outcome, ends
+        the claim, releases the dependents that became runnable and finishes
+        the run once every node is terminal. A failed attempt that will be
+        retried releases no dependent. The identical report replays 200 after
+        the claim ends; any other is 409 and writes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              x-sparkwing-go-type: pkg/store.AttemptReport
+              required: [outcome]
+              properties:
+                outcome: {type: string}
+                error: {type: string}
+                failure_reason: {type: string}
+                output: {description: The node's JSON output.}
+                failure: {description: The failure record an OnFailure recovery node receives.}
+                artifact_manifest: {type: string}
+      responses:
+        "200": {description: "The attempt was recorded or replayed."}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "409": {description: "The claim committed a different report, or ended without one."}
+        "422": {description: "The report was refused; the error names the reason."}
+        "500": {$ref: "#/components/responses/InternalError"}
 
 components:
   securitySchemes:

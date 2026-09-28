@@ -51,3 +51,19 @@ func HoldClaimSensitiveForTest(ctx context.Context, s *Store, tok ClaimToken, no
 	}
 	return pid, tx.Rollback, nil
 }
+
+// SettleForTest settles runID in a transaction of its own under its run row.
+func SettleForTest(ctx context.Context, s *Store, team Team, runID string, now time.Time) error {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackOrLog(tx)
+	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
+		return err
+	}
+	if err := settleTx(ctx, tx, team, runID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

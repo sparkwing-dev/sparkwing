@@ -25,7 +25,8 @@ type claimRouteFixture struct {
 	results *int
 }
 
-// safety: these routes stand in for real ones; no production route admits a claim token.
+// safety: these routes stand in for one route of each class, so every class is
+// exercised whichever production routes adopt it.
 func newClaimRouteFixture(t *testing.T) claimRouteFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -172,9 +173,9 @@ func TestClaimRoute_CancelAndFinishRefuseTheVeryNextRequest(t *testing.T) {
 	wantStatus(t, f, http.MethodPost, reportA, f.raw, http.StatusForbidden, "claim_ended")
 }
 
-// No production route is a claim route, so a claim token is refused on the
-// real router exactly as any unrecognized bearer is.
-func TestClaimRoute_TheControllerRouterAdmitsNoClaimToken(t *testing.T) {
+// On the real router a claim token reaches only the claim routes; every other
+// route refuses it exactly as it refuses any unrecognized bearer.
+func TestClaimRoute_OtherControllerRoutesRefuseAClaimToken(t *testing.T) {
 	f := newClaimRouteFixture(t)
 	h := f.srv.Handler()
 	for _, path := range []string{"/api/v1/runs/run-a", "/api/v1/runs/run-a/nodes/build/logs", "/api/v1/secrets/x"} {

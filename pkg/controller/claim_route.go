@@ -35,6 +35,15 @@ type claimTokenRoute struct {
 	next   http.Handler
 	result claimResultHandler
 	store  *store.Store
+	// safety: serves only requests that carry no claim token, so a path a
+	// claim route shares with a scoped route keeps that route for every
+	// other bearer and never hands it a claim.
+	fallback http.Handler
+}
+
+func (c *claimTokenRoute) orElse(h http.Handler) *claimTokenRoute {
+	c.fallback = h
+	return c
 }
 
 // safety: the handler writes only through a store function that takes commit and
@@ -76,6 +85,10 @@ func pathClaimBinding(r *http.Request) (string, string) {
 // checked here rather than where the token is authenticated.
 func (c *claimTokenRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tok, ok := claimTokenFromContext(r.Context())
+	if !ok && c.fallback != nil {
+		c.fallback.ServeHTTP(w, r)
+		return
+	}
 	if !ok {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
 			Code:    "claim_token_required",
