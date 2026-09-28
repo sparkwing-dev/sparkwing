@@ -218,3 +218,71 @@ func TestOneStaleSampleDoesNotReplaceDaemon(t *testing.T) {
 		}
 	})
 }
+
+func TestFirstFailureAfterLongHealthMeasuresStalenessFromLastSuccess(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		child := newSupervisorTestChild()
+		probes := 0
+		err := Loop(t.Context(), Config{
+			ProbeInterval: time.Second, ProbeTimeout: time.Second,
+			FailureLimit: 3, TermGrace: time.Second, StartupTimeout: time.Second,
+			HeartbeatStale: 5 * time.Second, FailureCeiling: time.Minute,
+			RestartBackoff: time.Second, MaxRestartBackoff: time.Second,
+		}, Deps{
+			Start: func() (Child, error) { return child, nil },
+			Probe: func(context.Context) error {
+				probes++
+				if probes == 110 {
+					if terms, _ := child.actions(); terms != 0 {
+						t.Errorf("a 4s stall after 100s of health replaced the daemon: terms %d", terms)
+					}
+					child.done <- nil
+					return nil
+				}
+				if probes > 100 && probes <= 104 {
+					return errors.New("overloaded")
+				}
+				return nil
+			},
+			Heartbeat: func() (uint64, error) { return 1, nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestWedgedDaemonWithSlowProbesStillHitsFailureCeiling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		first := newSupervisorTestChild()
+		second := newSupervisorTestChild()
+		second.done <- nil
+		var starts atomic.Int32
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Minute)
+		defer cancel()
+		err := Loop(ctx, Config{
+			ProbeInterval: time.Second, ProbeTimeout: time.Second,
+			FailureLimit: 3, TermGrace: time.Second, StartupTimeout: time.Second,
+			HeartbeatStale: 5 * time.Second, FailureCeiling: time.Minute,
+			RestartBackoff: time.Second, MaxRestartBackoff: time.Second,
+		}, Deps{
+			Start: func() (Child, error) {
+				if starts.Add(1) == 1 {
+					return first, nil
+				}
+				return second, nil
+			},
+			Probe: func(context.Context) error {
+				time.Sleep(11 * time.Second)
+				return errors.New("overloaded")
+			},
+			Heartbeat: func() (uint64, error) { return 1, nil },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if starts.Load() != 2 {
+			t.Fatalf("slow probes kept a wedged daemon past the ceiling: starts %d", starts.Load())
+		}
+	})
+}

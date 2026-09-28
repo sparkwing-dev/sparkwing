@@ -184,10 +184,10 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (replac
 			if stalled {
 				// safety: a stopped supervisor cannot judge progress made during the same machine stall.
 				lastProgress = time.Now()
-				failureSince = time.Time{}
 				staleSamples = 0
 			}
 			if err == nil {
+				lastProgress = time.Now()
 				ready = true
 				if healthySince.IsZero() {
 					healthySince = time.Now()
