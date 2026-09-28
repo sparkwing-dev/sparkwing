@@ -147,6 +147,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	// the migrated database.
 	69: {githubAppTriggerOptionCols},
 	70: nil,
+	// safety: v74 adds one defaulted node column that every other lineage
+	// already carries, so an older binary keeps writing the migrated database.
+	74: {nodeClaimTokenPrefixCols},
 }
 
 func columnSpecMaps() []map[string]string {

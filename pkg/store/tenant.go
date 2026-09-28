@@ -321,6 +321,28 @@ var operatorTables = []string{
 // team, so without this one team's listing scans the fleet's runs.
 const runsTeamIndex = `CREATE INDEX IF NOT EXISTS idx_runs_team_started ON runs(team, started_at DESC);`
 
+// safety: releases v0.61.0 through v0.63.0 numbered their node claim token
+// migration v49, so a database they migrated reads as v49 without the tenant
+// key, and v50 onward assume the teams table exists. v74 carries that claim
+// token column on this lineage.
+func bridgeMainLineageTenantKey(ctx context.Context, tx *storeTx, version int, postgres bool) error {
+	if version != 49 {
+		return nil
+	}
+	probe := `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'teams'`
+	if postgres {
+		probe = `SELECT COUNT(to_regclass('teams'))`
+	}
+	var keyed int
+	if err := tx.QueryRowContext(ctx, probe).Scan(&keyed); err != nil || keyed > 0 {
+		return err
+	}
+	if postgres {
+		return applyTenantKeyMigrationPostgres(ctx, tx)
+	}
+	return applyTenantKeyMigrationSQLite(ctx, tx)
+}
+
 func applyTenantKeyMigrationSQLite(ctx context.Context, tx *storeTx) error {
 	if _, err := tx.ExecContext(ctx, teamsTableSQLite); err != nil {
 		return err

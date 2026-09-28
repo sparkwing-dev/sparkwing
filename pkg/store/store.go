@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 73
+const expectedSchemaVersion = 74
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1689,6 +1689,9 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		if err := bridgeLegacyFleetSQLite(ctx, tx, current, listed); err != nil {
 			return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
 		}
+		if err := bridgeMainLineageTenantKey(ctx, tx, current, false); err != nil {
+			return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration inspection: %w", err)
@@ -1791,6 +1794,9 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 	}
 	if err := bridgeLegacyFleetPostgres(ctx, tx, current, listed); err != nil {
 		return fmt.Errorf("repair unpublished Fleet schema lineage: %w", err)
+	}
+	if err := bridgeMainLineageTenantKey(ctx, tx, current, true); err != nil {
+		return fmt.Errorf("add tenant key to main-lineage schema v49: %w", err)
 	}
 	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
 		if err := insertRequirements(ctx, tx, backfill); err != nil {
@@ -2074,6 +2080,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyStorageCommitReceiptsMigration(ctx, tx, false)
 	case 73:
 		return applyTriggerCreditCursorMigration(ctx, tx)
+	case 74:
+		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2500,6 +2508,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyStorageCommitReceiptsMigration(ctx, tx, true)
 	case 73:
 		return applyTriggerCreditCursorMigration(ctx, tx)
+	case 74:
+		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2936,6 +2946,11 @@ var triggerRepoInheritedCols = map[string]string{
 var triggerSubmissionCols = map[string]string{
 	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
 	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+}
+
+// #nosec G101 -- column names, not credentials
+var nodeClaimTokenPrefixCols = map[string]string{
+	"claim_token_prefix": "TEXT NOT NULL DEFAULT ''",
 }
 
 // #nosec G101 -- column names, not credentials
