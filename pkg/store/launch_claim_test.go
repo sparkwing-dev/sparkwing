@@ -267,3 +267,32 @@ func TestClaimLaunch_ExpiryFollowsTheNodesTimeout(t *testing.T) {
 		}
 	}
 }
+
+// The launch award takes its run's row lock before the node's, the order
+// settle and plan accept take, so it waits behind a holder of the run row
+// rather than taking the node out from under it.
+func TestClaimLaunch_WaitsForTheRunRowLock(t *testing.T) {
+	f := newDispatchRun(t, "run-lock")
+	if f.s.Dialect() != store.DialectPostgres {
+		t.Skip("row locks are Postgres's; SQLite serializes every writer")
+	}
+	holder, err := f.s.DB().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback() }()
+	if _, err := holder.Exec(`SELECT id FROM runs WHERE id = $1 FOR NO KEY UPDATE`, f.run); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if claim, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err == nil {
+		t.Fatalf("the launch claim took %+v while another transaction held its run row", claim)
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if claim, err := f.s.ClaimLaunch(context.Background(), launcherIdentity, launchRequest(), time.Now()); err != nil || claim == nil {
+		t.Fatalf("after the holder released the run: %+v %v", claim, err)
+	}
+}

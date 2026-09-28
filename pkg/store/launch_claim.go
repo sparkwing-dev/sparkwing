@@ -133,6 +133,12 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
+	// safety: the run row is locked before the award touches its node, which is
+	// the store's order (eligibility, trigger, run, node, free tier, ledger)
+	// that settle and plan accept take on the same run.
+	if err := lockDispatchRunTx(ctx, tx, c.Team, c.RunID); err != nil {
+		return nil, err
+	}
 	candidate := claimCandidate{runID: c.RunID, nodeID: c.NodeID, decision: placementDecision{reason: PlacementNone}}
 	n, err := s.awardScannedNodeTx(ctx, tx, candidate, launcher, req.HolderID, coordinatorID,
 		clampNodeLease(req.Lease), ClaimPlacement{}, ` AND ready_at IS NOT NULL`, oneTeam(c.Team), now)
