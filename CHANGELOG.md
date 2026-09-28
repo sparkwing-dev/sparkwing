@@ -914,6 +914,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** A local trigger whose dispatch fails records the dispatch error on
+  its failed run again, instead of a failed run with no error.
+
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
   the claim and fail the run; a ledger error refuses renewal. Runners stop on
