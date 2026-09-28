@@ -2,6 +2,7 @@ package localws
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,6 +52,16 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 	}
 	if !secrets.IsBound(sec.Value) || strings.Contains(sec.Value, "abc123") {
 		t.Fatalf("stored value %q is not a sealed envelope", sec.Value)
+	}
+
+	got, err := http.Get("http://" + addr + "/api/v1/secrets/TOKEN")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(got.Body)
+	_ = got.Body.Close()
+	if got.StatusCode == http.StatusOK || strings.Contains(string(body), "abc123") {
+		t.Fatalf("GET /api/v1/secrets/TOKEN = %d %q, want the value route unmounted", got.StatusCode, body)
 	}
 }
 

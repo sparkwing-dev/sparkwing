@@ -901,7 +901,7 @@ Laptop mode trusts the user account on the machine, and nothing narrower.
 
 `sparkwing serve start` serves the controller API and the dashboard from
 one process with no bearer check, so every caller that reaches the listener
-can trigger pipelines, read secrets, and delete runs. It binds
+can trigger pipelines, overwrite secrets, and delete runs. It binds
 `127.0.0.1:4343` and refuses a non-loopback `--addr` unless you pass
 `--allow-remote`; a browser request whose `Origin` is neither loopback nor
 named in `--allow-origin` is refused too. Those checks are the whole

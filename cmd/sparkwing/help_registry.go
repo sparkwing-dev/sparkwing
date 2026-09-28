@@ -1810,12 +1810,12 @@ The listener accepts loopback Host headers and rejects a browser Origin
 that is neither a loopback origin on the served port or the dashboard's
 dev-server port 3100, the --addr host, nor listed in --allow-origin. A
 browser write with a body must send application/json. --allow-remote
-widens the Host check only, and exposes this machine's local secrets to
-every host that reaches the address.`,
+widens the Host check only, and lets every host that reaches the address
+list, overwrite and delete this machine's local secrets.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
-		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read, write and delete this machine's local secrets.", Group: "Bind"},
+		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},

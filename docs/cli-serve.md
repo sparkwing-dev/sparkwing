@@ -71,7 +71,7 @@ Stops the verified owned instance, then starts the invoked binary. Preserves eff
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
-| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read, write and delete this machine's local secrets. |
+| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
@@ -105,8 +105,8 @@ The listener accepts loopback Host headers and rejects a browser Origin
 that is neither a loopback origin on the served port or the dashboard's
 dev-server port 3100, the --addr host, nor listed in --allow-origin. A
 browser write with a body must send application/json. --allow-remote
-widens the Host check only, and exposes this machine's local secrets to
-every host that reaches the address.
+widens the Host check only, and lets every host that reaches the address
+list, overwrite and delete this machine's local secrets.
 
 ### Flags
 
@@ -114,7 +114,7 @@ every host that reaches the address.
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
-| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and read, write and delete this machine's local secrets. |
+| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
 | `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
