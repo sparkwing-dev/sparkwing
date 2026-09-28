@@ -268,7 +268,7 @@ func TestMeteredTriggerHeartbeatKeepsChargingAnAdmittedFrozenTeam(t *testing.T) 
 }
 
 func TestMeteredTriggerHeartbeatLedgerFailureDoesNotRenew(t *testing.T) {
-	st := storetest.Open(t)
+	st := storetest.OpenSQLite(t)
 	ctx := context.Background()
 	pool := meteredClaimant(t, st, "agent:cloud")
 	floor := triggerFloor(t, st, pool)
