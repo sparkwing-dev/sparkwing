@@ -180,7 +180,7 @@ func (s *Store) HoldTeamForDispute(
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
 		At: now, Team: team, Kind: BusinessEventTeamFrozen, SubjectID: disputeID,
-		Attrs: map[string]any{"payment_id": paymentID, "reason": truncate(reason, 500)},
+		Attrs: map[string]any{"payment_id": paymentID},
 	}); err != nil {
 		return false, err
 	}

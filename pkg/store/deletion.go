@@ -680,6 +680,9 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 		{`UPDATE github_runner_bindings SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE teams SET created_by = '' WHERE created_by = ?`, []any{accountID}},
 		{`UPDATE team_deletions SET requested_by = '' WHERE requested_by = ?`, []any{accountID}},
+		{`DELETE FROM business_events WHERE team = '' AND account = ?`, []any{accountID}},
+		{`UPDATE business_events SET account = '' WHERE account = ?`, []any{accountID}},
+		{`UPDATE business_events SET actor = '' WHERE actor IN (?, ?)`, []any{accountID, acct.Email}},
 		{`DELETE FROM accounts WHERE id = ?`, []any{accountID}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.sql, stmt.args...); err != nil {

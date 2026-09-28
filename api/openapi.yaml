@@ -3940,10 +3940,12 @@ paths:
       summary: Record a checkout session that ended unpaid.
       description: |
         The checkout service reports a session whose delayed payment failed
-        (`failed`) or that expired unpaid (`expired`). The controller records
-        a `checkout.failed` or `checkout.expired` business event for `team`
-        and stops the session's open checkout counting against the balance
-        cap. A repeat of the same session and outcome writes nothing.
+        (`failed`) or that expired unpaid (`expired`). An operator credential
+        without the route's scope is refused. The report closes the
+        open, unpaid checkout `team` holds for the session, records a
+        `checkout.failed` or `checkout.expired` business event and stops the
+        checkout counting against the balance cap. A paid or already closed
+        checkout is left as it is and answers `closed: false`.
       requestBody:
         required: true
         content:
@@ -3962,15 +3964,16 @@ paths:
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.checkoutClosedReq
+                x-sparkwing-go-type: pkg/controller.checkoutClosedJSON
                 type: object
                 properties:
                   team: {type: string}
                   session_id: {type: string}
                   outcome: {type: string}
+                  closed: {type: boolean, description: Whether this report closed the checkout.}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {description: The team is not registered.}
+        "404": {description: The team is not registered or holds no checkout for the session.}
 
   /api/v1/credits/units:
     get:

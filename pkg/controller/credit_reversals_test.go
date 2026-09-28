@@ -223,36 +223,67 @@ func TestReversalsAndFreezesFollowThePayment(t *testing.T) {
 	}
 }
 
-// The checkout service reports a session that ended unpaid, and the team it
-// names records it once however often the report is delivered.
-func TestCheckoutClosedIsRecordedOncePerSession(t *testing.T) {
+// The checkout service closes only an open, unpaid checkout its team holds
+// for the session: another team's session, a paid one and a replay change
+// nothing, and a credential without the checkout scope is refused.
+func TestCheckoutClosedClosesOnlyTheTeamsOpenUnpaidSession(t *testing.T) {
+	ctx := context.Background()
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")
+	other := f.user("x", "xena@example.com")
 	grant := f.creditsGrantToken()
-	body := map[string]any{"team": owner.team, "session_id": "cs_1", "outcome": "expired"}
-	for range 2 {
-		if code := f.call("POST", "/api/v1/credits/checkouts/closed", grant, body, nil); code != http.StatusOK {
-			t.Fatalf("closed checkout = %d, want 200", code)
-		}
-	}
-	for _, bad := range []map[string]any{
-		{"team": owner.team, "session_id": "cs_2", "outcome": "paid"},
-		{"session_id": "cs_2", "outcome": "failed"},
-	} {
-		if code := f.call("POST", "/api/v1/credits/checkouts/closed", grant, bad, nil); code != http.StatusBadRequest {
-			t.Errorf("closed checkout %v = %d, want 400", bad, code)
-		}
-	}
-	if code := f.call("POST", "/api/v1/credits/checkouts/closed", owner.auth,
-		map[string]any{"team": owner.team, "session_id": "cs_3", "outcome": "failed"}, nil); code != http.StatusForbidden {
-		t.Errorf("a team owner reporting a closed checkout = %d, want 403", code)
-	}
-	tn, err := f.store.ForTeam(context.Background(), store.Team(owner.team))
+	tn, err := f.store.ForTeam(ctx, store.Team(owner.team))
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, err := tn.BusinessEvents(context.Background(), store.BusinessEventCheckoutExpired)
-	if err != nil || len(events) != 1 || events[0].SubjectID != "cs_1" {
-		t.Fatalf("expired events = %+v, %v; want one for cs_1", events, err)
+	now := time.Now()
+	for _, session := range []string{"cs_open", "cs_paid"} {
+		id, err := tn.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tn.AttachCreditCheckout(ctx, id, session, now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := f.call("POST", "/api/v1/credits/grants", grant, map[string]any{
+		"kind": "paid", "amount_micro": 10 * store.MicroCreditsPerCredit, "reference": "pi_1",
+		"team": owner.team, "checkout": "cs_paid",
+	}, nil); code != http.StatusCreated {
+		t.Fatalf("paid grant = %d", code)
+	}
+	closeCheckout := func(auth, team, session, outcome string) (int, bool) {
+		var out struct {
+			Closed bool `json:"closed"`
+		}
+		code := f.call("POST", "/api/v1/credits/checkouts/closed", auth,
+			map[string]any{"team": team, "session_id": session, "outcome": outcome}, &out)
+		return code, out.Closed
+	}
+	if code, _ := closeCheckout(grant, other.team, "cs_open", "expired"); code != http.StatusNotFound {
+		t.Errorf("closing another team's session = %d, want 404", code)
+	}
+	if code, _ := closeCheckout("Bearer "+f.admin, owner.team, "cs_open", "expired"); code != http.StatusForbidden {
+		t.Errorf("an operator token closing a checkout = %d, want 403", code)
+	}
+	if code, _ := closeCheckout(owner.auth, owner.team, "cs_open", "failed"); code != http.StatusForbidden {
+		t.Errorf("a team owner closing a checkout = %d, want 403", code)
+	}
+	if code, _ := closeCheckout(grant, owner.team, "cs_open", "paid"); code != http.StatusBadRequest {
+		t.Errorf("an unknown outcome = %d, want 400", code)
+	}
+	for i, want := range []bool{true, false} {
+		if code, closed := closeCheckout(grant, owner.team, "cs_open", "expired"); code != http.StatusOK || closed != want {
+			t.Fatalf("close #%d = %d closed=%v, want 200 closed=%v", i+1, code, closed, want)
+		}
+	}
+	if code, closed := closeCheckout(grant, owner.team, "cs_paid", "failed"); code != http.StatusOK || closed {
+		t.Errorf("closing a paid session = %d closed=%v, want 200 and unchanged", code, closed)
+	}
+	for kind, want := range map[string]int{store.BusinessEventCheckoutExpired: 1, store.BusinessEventCheckoutFailed: 0} {
+		events, err := tn.BusinessEvents(ctx, kind)
+		if err != nil || len(events) != want {
+			t.Errorf("%s events = %+v, %v; want %d", kind, events, err, want)
+		}
 	}
 }

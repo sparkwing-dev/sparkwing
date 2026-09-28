@@ -37,9 +37,11 @@ unlock.
   One row per admission, team creation, checkout opened, paid, failed or
   expired, credit grant or reversal, dispute hold or release, and a team's
   first successful run, written in the transaction that makes it true. A
-  repeat of the same team, kind and subject writes nothing.
-  `POST /api/v1/credits/checkouts/closed` lets the checkout service
-  (`credits.grant`) record a session that failed or expired unpaid.
+  repeat of the same team, kind and subject writes nothing. Purging a team
+  deletes its events, and deleting an account deletes its admission and
+  removes its id from the rest. `POST /api/v1/credits/checkouts/closed` lets
+  the checkout service (`credits.grant`) close an open, unpaid checkout its
+  team holds for a session that failed or expired.
 
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim

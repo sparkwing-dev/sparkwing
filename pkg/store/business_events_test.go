@@ -26,21 +26,24 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	team := owner.Account.ActiveTeam
 	tn := tenant(t, st, team)
 
-	var admitted int
-	if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st,
-		`SELECT COUNT(*) FROM business_events WHERE kind = ? AND account = ?`),
-		store.BusinessEventAccountAdmitted, owner.Account.ID).Scan(&admitted); err != nil || admitted != 1 {
-		t.Fatalf("admission events = %d, %v; want 1", admitted, err)
+	if n := countWhere(t, st, "business_events", "kind = '"+store.BusinessEventAccountAdmitted+
+		"' AND account = '"+owner.Account.ID+"'"); n != 1 {
+		t.Fatalf("admission events = %d, want 1", n)
 	}
 	signIn(t, st, "ev-owner", "ev@example.com")
 
-	checkout, err := tn.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
-	if err != nil {
-		t.Fatal(err)
+	open := func(session string) string {
+		t.Helper()
+		id, err := tn.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tn.AttachCreditCheckout(ctx, id, session, now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		return id
 	}
-	if err := tn.AttachCreditCheckout(ctx, checkout, "cs_paid", now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	open("cs_paid")
 	if _, err := tn.RecordCreditGrant(ctx, store.CreditGrantRequest{
 		Kind: store.CreditGrantPaid, AmountMicro: 10 * store.MicroCreditsPerCredit,
 		Reference: "pi_1", CreatedBy: "checkout", Checkout: "cs_paid",
@@ -53,18 +56,32 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		if err := tn.CloseCreditCheckout(ctx, "cs_gone", store.BusinessEventCheckoutExpired, now); err != nil {
-			t.Fatal(err)
+	expired := open("cs_gone")
+	for i, want := range []bool{true, false} {
+		closed, err := tn.CloseCreditCheckout(ctx, "cs_gone", store.BusinessEventCheckoutExpired, "checkout", now)
+		if err != nil || closed != want {
+			t.Fatalf("close #%d = %v, %v; want %v", i+1, closed, err, want)
 		}
 	}
-	if err := tn.CloseCreditCheckout(ctx, "cs_declined", store.BusinessEventCheckoutFailed, now); err != nil {
-		t.Fatal(err)
+	if closed, err := tn.CloseCreditCheckout(ctx, "cs_paid", store.BusinessEventCheckoutFailed, "checkout", now); err != nil || closed {
+		t.Fatalf("closing a paid checkout = %v, %v; want unchanged", closed, err)
 	}
-	if err := tn.CloseCreditCheckout(ctx, "cs_x", "checkout.lost", now); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := tn.CloseCreditCheckout(ctx, "cs_nobody", store.BusinessEventCheckoutFailed, "checkout", now); !errors.Is(err, store.ErrCheckoutNotFound) {
+		t.Fatalf("closing a session with no checkout = %v, want ErrCheckoutNotFound", err)
+	}
+	stranger := signIn(t, st, "ev-stranger", "stranger@example.com")
+	if _, err := tenant(t, st, stranger.Account.ActiveTeam).CloseCreditCheckout(
+		ctx, "cs_paid", store.BusinessEventCheckoutFailed, "checkout", now); !errors.Is(err, store.ErrCheckoutNotFound) {
+		t.Fatalf("another team closing this team's session = %v, want ErrCheckoutNotFound", err)
+	}
+	if _, err := tn.CloseCreditCheckout(ctx, "cs_x", "checkout.lost", "checkout", now); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("an unknown checkout outcome = %v, want ErrInvalidInput", err)
 	}
-	if _, err := st.HoldTeamForDispute(ctx, team, "dp_1", "pi_1", "fraud", now); err != nil {
+	dropped := open("")
+	if err := tn.DropCreditCheckout(ctx, dropped); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.HoldTeamForDispute(ctx, team, "dp_1", "pi_1", "card holder says fraud", now); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := st.ReleaseCreditFreezes(ctx, team, "", now); err != nil || n != 1 {
@@ -83,7 +100,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		got[ev.Kind] = append(got[ev.Kind], ev)
 	}
 	for kind, want := range map[string]int{
-		store.BusinessEventTeamCreated: 1, store.BusinessEventCheckoutOpened: 1,
+		store.BusinessEventTeamCreated: 1, store.BusinessEventCheckoutOpened: 3,
 		store.BusinessEventCheckoutPaid: 1, store.BusinessEventCreditReversed: 1,
 		store.BusinessEventCreditGranted: 1, store.BusinessEventCheckoutExpired: 1,
 		store.BusinessEventCheckoutFailed: 1, store.BusinessEventTeamFrozen: 1,
@@ -97,8 +114,43 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 		(paid[0].Actor != "checkout" || paid[0].Attrs["session_id"] != "cs_paid") {
 		t.Errorf("paid event = %+v, want actor checkout and its session", paid[0])
 	}
-	if opened := got[store.BusinessEventCheckoutOpened]; len(opened) == 1 && opened[0].SubjectID != "cs_paid" {
-		t.Errorf("opened event = %+v, want subject cs_paid", opened[0])
+	if ev := got[store.BusinessEventCheckoutExpired]; len(ev) == 1 && (ev[0].SubjectID != expired || ev[0].Attrs["session_id"] != "cs_gone") {
+		t.Errorf("expired event = %+v, want checkout %s and session cs_gone", ev[0], expired)
+	}
+	if ev := got[store.BusinessEventCheckoutFailed]; len(ev) == 1 && ev[0].SubjectID != dropped {
+		t.Errorf("failed event = %+v, want the dropped checkout %s", ev[0], dropped)
+	}
+	if ev := got[store.BusinessEventTeamFrozen]; len(ev) == 1 && ev[0].Attrs["reason"] != nil {
+		t.Errorf("frozen event copies the free-form reason: %+v", ev[0])
+	}
+}
+
+// Deleting an account removes its admission and every trace of its id in
+// other events; purging a team removes the team's events.
+func TestBusinessEventsFollowAccountAndTeamDeletion(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	owner := signIn(t, st, "o", "owner@example.com")
+	leaver := signIn(t, st, "l", "leaver@example.com")
+	if _, err := st.CreateTeam(ctx, owner.Account.ID, "acme", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteAccount(ctx, leaver.Account.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if n := countWhere(t, st, "business_events", "account = '"+leaver.Account.ID+"' OR actor = '"+leaver.Account.ID+"'"); n != 0 {
+		t.Fatalf("events still naming the deleted account = %d", n)
+	}
+	if n := countWhere(t, st, "business_events", "account = '"+owner.Account.ID+"' AND team = ''"); n != 1 {
+		t.Fatalf("the remaining account's admission = %d, want 1", n)
+	}
+	deleteAndPurge(t, st, "acme", now)
+	if n := countWhere(t, st, "business_events", "team = 'acme'"); n != 0 {
+		t.Fatalf("events of the purged team = %d", n)
+	}
+	if n := countWhere(t, st, "business_events", "team = '"+string(owner.PersonalTeam)+"'"); n == 0 {
+		t.Fatal("the purge removed another team's events")
 	}
 }
 

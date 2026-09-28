@@ -61,11 +61,17 @@ CREATE INDEX IF NOT EXISTS idx_business_events_team_ts ON business_events(team, 
 CREATE INDEX IF NOT EXISTS idx_business_events_kind_ts ON business_events(kind, ts);`
 
 func applyBusinessEventsMigration(ctx context.Context, tx *storeTx, postgres bool) error {
-	ddl := businessEventsTableSQL
-	if postgres {
-		ddl = strings.NewReplacer("INTEGER", "BIGINT", "TEXT NOT NULL DEFAULT '{}'", "JSONB NOT NULL DEFAULT '{}'").Replace(ddl)
+	if !postgres {
+		if err := ensureColumnsSQLite(ctx, tx, "credit_checkouts", creditCheckoutCloseCols); err != nil {
+			return err
+		}
+		return execStatements(ctx, tx, businessEventsTableSQL)
 	}
-	return execStatements(ctx, tx, ddl)
+	if err := addColumnsTx(ctx, tx, "credit_checkouts", map[string]string{"closed_at": "BIGINT"}); err != nil {
+		return err
+	}
+	return execStatements(ctx, tx, strings.NewReplacer(
+		"INTEGER", "BIGINT", "TEXT NOT NULL DEFAULT '{}'", "JSONB NOT NULL DEFAULT '{}'").Replace(businessEventsTableSQL))
 }
 
 // RecordBusinessEvent writes ev inside tx, the transaction making the

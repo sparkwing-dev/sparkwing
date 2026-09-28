@@ -210,9 +210,14 @@ var checkoutOutcomeEvents = map[string]string{
 	"expired": store.BusinessEventCheckoutExpired,
 }
 
-// safety: the checkout service names the team its session was opened for, as
-// it does on a paid grant, and the record is scoped to that team.
+// safety: only the checkout service reports how its sessions ended, and a
+// report closes nothing but an open, unpaid checkout the named team holds for
+// that session, so it cannot release another team's hold or unpay a payment.
 func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
+	if p, ok := PrincipalFromContext(r.Context()); ok && !p.HasScope(ScopeCreditsGrant) {
+		writeError(w, http.StatusForbidden, fmt.Errorf("closing a checkout needs the %s scope itself", ScopeCreditsGrant))
+		return
+	}
 	var req checkoutClosedReq
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -228,12 +233,26 @@ func (s *Server) handleCheckoutClosed(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := tenant.CloseCreditCheckout(r.Context(), req.SessionID, kind, time.Now()); err != nil {
+	closed, err := tenant.CloseCreditCheckout(r.Context(), req.SessionID, kind, principalName(r), time.Now())
+	if errors.Is(err, store.ErrCheckoutNotFound) {
+		writeError(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
 		s.writeInternalError(w, r, "close checkout", err)
 		return
 	}
-	s.logger.Info("checkout closed unpaid", "team", req.Team, "session", req.SessionID, "outcome", req.Outcome)
-	writeJSON(w, http.StatusOK, req)
+	s.logger.Info("checkout closed unpaid", "team", req.Team, "outcome", req.Outcome, "closed", closed)
+	writeJSON(w, http.StatusOK, checkoutClosedJSON{
+		Team: req.Team, SessionID: req.SessionID, Outcome: req.Outcome, Closed: closed,
+	})
+}
+
+type checkoutClosedJSON struct {
+	Team      string `json:"team"`
+	SessionID string `json:"session_id"`
+	Outcome   string `json:"outcome"`
+	Closed    bool   `json:"closed"`
 }
 
 // DisputeConflictCode is the code on a 409 refusing a hold or a reversal
