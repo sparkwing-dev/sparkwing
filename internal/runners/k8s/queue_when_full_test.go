@@ -108,7 +108,7 @@ func unschedulablePodAsking(cores int64, band string) *corev1.Pod {
 			Labels:    map[string]string{"batch.kubernetes.io/job-name": queueTestJob},
 		},
 		Spec: corev1.PodSpec{
-			NodeSelector: map[string]string{cpuBandKey: band},
+			NodeSelector: map[string]string{CPUBandKey: band},
 			Containers: []corev1.Container{{
 				Name: "runner",
 				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
@@ -130,7 +130,7 @@ func unschedulablePodAsking(cores int64, band string) *corev1.Pod {
 
 func poolNode(name, band string, cores int64) *corev1.Node {
 	return &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{cpuBandKey: band}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{CPUBandKey: band}},
 		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
 			corev1.ResourceCPU:    *resource.NewQuantity(cores, resource.DecimalSI),
 			corev1.ResourceMemory: *resource.NewQuantity(store.CPUClassMemoryBytes(cores), resource.BinarySI),
@@ -171,8 +171,8 @@ func TestRunNode_FleetFullQueuesUntilAMachineFrees(t *testing.T) {
 	st, srv := queueTestStore(t, watch)
 
 	const pollsHeldInQueue = 4
-	pod := unschedulablePodAsking(8, cpuBandSmall)
-	kcli := fake.NewSimpleClientset(pendingJob(), pod, poolNode("pool-a", cpuBandSmall, 8))
+	pod := unschedulablePodAsking(8, CPUBandSmall)
+	kcli := fake.NewSimpleClientset(pendingJob(), pod, poolNode("pool-a", CPUBandSmall, 8))
 
 	var mu sync.Mutex
 	var freeOnce sync.Once
@@ -248,9 +248,9 @@ func TestRunNode_ShapeNoMachineCanHoldStillFailsAtTheGracePeriod(t *testing.T) {
 	defer cancel()
 	st, srv := queueTestStore(t, nil)
 
-	pod := unschedulablePodAsking(64, cpuBandSmall)
+	pod := unschedulablePodAsking(64, CPUBandSmall)
 	kcli := fake.NewSimpleClientset(pendingJob(), pod,
-		poolNode("pool-a", cpuBandSmall, 8), poolNode("pool-b", cpuBandSmall, 8))
+		poolNode("pool-a", CPUBandSmall, 8), poolNode("pool-b", CPUBandSmall, 8))
 
 	r := New(kcli, client.New(srv.URL, nil), Config{
 		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
@@ -282,7 +282,7 @@ func TestRunNode_ShapeNoMachineCanHoldStillFailsAtTheGracePeriod(t *testing.T) {
 // The pool running nothing is not a full pool, so a pod waiting on a machine
 // that has yet to be launched keeps the grace period rather than the queue.
 func TestFleetRunsAShapeFor(t *testing.T) {
-	pod := unschedulablePodAsking(8, cpuBandSmall)
+	pod := unschedulablePodAsking(8, CPUBandSmall)
 	for _, tc := range []struct {
 		name  string
 		nodes []runtime.Object
@@ -291,12 +291,12 @@ func TestFleetRunsAShapeFor(t *testing.T) {
 		{name: "pool runs nothing", want: false},
 		{
 			name:  "pool machine would hold it when empty",
-			nodes: []runtime.Object{poolNode("pool-a", cpuBandSmall, 8)},
+			nodes: []runtime.Object{poolNode("pool-a", CPUBandSmall, 8)},
 			want:  true,
 		},
 		{
 			name:  "every pool machine is too small",
-			nodes: []runtime.Object{poolNode("pool-a", cpuBandSmall, 4)},
+			nodes: []runtime.Object{poolNode("pool-a", CPUBandSmall, 4)},
 			want:  false,
 		},
 		{
@@ -306,7 +306,7 @@ func TestFleetRunsAShapeFor(t *testing.T) {
 		},
 		{
 			name:  "a cordoned machine does not count",
-			nodes: []runtime.Object{cordoned(poolNode("pool-a", cpuBandSmall, 8))},
+			nodes: []runtime.Object{cordoned(poolNode("pool-a", CPUBandSmall, 8))},
 			want:  false,
 		},
 	} {

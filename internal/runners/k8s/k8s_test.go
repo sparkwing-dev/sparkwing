@@ -588,7 +588,7 @@ func TestImpossibleShapeFailsBeforeJobCreation(t *testing.T) {
 func TestImpossibleShapeAllowsLargerJobPoolNodeToScale(t *testing.T) {
 	client := fake.NewSimpleClientset(&corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "small-band-node", Labels: map[string]string{cpuBandKey: cpuBandSmall},
+			Name: "small-band-node", Labels: map[string]string{CPUBandKey: CPUBandSmall},
 		},
 		Status: corev1.NodeStatus{Allocatable: corev1.ResourceList{
 			corev1.ResourceCPU: resource.MustParse("3"), corev1.ResourceMemory: resource.MustParse("12Gi"),
@@ -1389,7 +1389,7 @@ func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
 		memory string
 	}{
 		{
-			name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}},
+			name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{CPUBandKey: CPUBandSmall}},
 			cores: 2, cpu: "1500m", memory: "5529Mi",
 		},
 		{name: "4-core", cfg: Config{Image: "img"}, cores: 4, cpu: "3500m", memory: "13107Mi"},
@@ -1441,10 +1441,10 @@ func TestBuildJob_BandJobKeepsTheOperatorsCeilings(t *testing.T) {
 }
 
 func TestBuildJob_OnlyABandJobRefusesDisruption(t *testing.T) {
-	if got := classJob(t, Config{Image: "img"}, 4).Spec.Template.Annotations[karpenterDoNotDisrupt]; got != "true" {
+	if got := classJob(t, Config{Image: "img"}, 4).Spec.Template.Annotations[KarpenterDoNotDisrupt]; got != "true" {
 		t.Fatalf("band pod do-not-disrupt = %q, want true", got)
 	}
-	if _, ok := classJob(t, Config{Image: "img"}, 2).Spec.Template.Annotations[karpenterDoNotDisrupt]; ok {
+	if _, ok := classJob(t, Config{Image: "img"}, 2).Spec.Template.Annotations[KarpenterDoNotDisrupt]; ok {
 		t.Fatal("an off-band pod carries do-not-disrupt, which would pin a shared node")
 	}
 }

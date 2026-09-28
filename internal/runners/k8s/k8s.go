@@ -430,7 +430,7 @@ func unschedulableEvent(queued bool) string {
 func (r *Runner) impossibleShape(ctx context.Context, job *batchv1.Job) string {
 	pod := &corev1.Pod{Spec: job.Spec.Template.Spec}
 	// safety: a band pool can add a larger node than any one currently running.
-	if pod.Spec.NodeSelector[cpuBandKey] != "" {
+	if pod.Spec.NodeSelector[CPUBandKey] != "" {
 		return ""
 	}
 	cpu, memory := podRequestTotals(pod)
@@ -864,11 +864,11 @@ func (r *Runner) buildJob(
 		// safety: the operator's value for this key wins the selector, so the
 		// toleration follows the pool the pod selects; a toleration for another
 		// value leaves it selecting a pool whose taint it does not tolerate.
-		placed = selector[cpuBandKey]
+		placed = selector[CPUBandKey]
 	}
 	affinity := teamAntiAffinity(team)
 	var podAnnotations map[string]string
-	if selector[cpuBandKey] != "" {
+	if selector[CPUBandKey] != "" {
 		// safety: a band node holds one team from boot to release whatever the
 		// claim billed, so an unmetered claim's pod is kept to its team too.
 		if class.Cores > 0 {
@@ -880,7 +880,7 @@ func (r *Runner) buildJob(
 		affinity = oneJobPerNode()
 		// safety: Karpenter drift and consolidation evict a running pod
 		// otherwise, and a band Job is a pipeline node with no retry.
-		podAnnotations = map[string]string{karpenterDoNotDisrupt: "true"}
+		podAnnotations = map[string]string{KarpenterDoNotDisrupt: "true"}
 	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
@@ -941,8 +941,8 @@ func (r *Runner) buildJob(
 // k8s/karpenter/nodepool-sparkwing-jobs.yaml in the kikd-infra repository. A
 // Job that names neither the label nor the taint lands on no band node.
 const (
-	cpuBandKey   = "sparkwing.dev/cpu-band"
-	cpuBandSmall = "small"
+	CPUBandKey   = "sparkwing.dev/cpu-band"
+	CPUBandSmall = "small"
 )
 
 func cpuBand(cores int64) string {
@@ -952,14 +952,14 @@ func cpuBand(cores int64) string {
 	if cores <= 2 {
 		return ""
 	}
-	return cpuBandSmall
+	return CPUBandSmall
 }
 
 func bandNodeSelector(static map[string]string, band string) map[string]string {
 	if band == "" {
 		return static
 	}
-	out := map[string]string{cpuBandKey: band}
+	out := map[string]string{CPUBandKey: band}
 	// safety: the operator's own selector is the deployment's last word, so a
 	// cluster that already pins Jobs by this key keeps the value it chose.
 	maps.Copy(out, static)
@@ -973,25 +973,25 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 	for _, t := range static {
 		// safety: an operator toleration on this key already says what the
 		// deployment tolerates; a second entry would widen it behind his back.
-		if t.Key == cpuBandKey {
+		if t.Key == CPUBandKey {
 			return static
 		}
 	}
 	out := make([]corev1.Toleration, 0, len(static)+1)
 	out = append(out, static...)
 	return append(out, corev1.Toleration{
-		Key:      cpuBandKey,
+		Key:      CPUBandKey,
 		Operator: corev1.TolerationOpEqual,
 		Value:    placed,
 		Effect:   corev1.TaintEffectNoSchedule,
 	})
 }
 
-// bandCPUHeadroom is the part of a band Job's vCPU left to the kubelet and the
+// BandCPUHeadroom is the part of a band Job's vCPU left to the kubelet and the
 // node's daemonsets, so the pod fits a machine of its class's own size.
-const bandCPUHeadroom = 0.5
+const BandCPUHeadroom = 0.5
 
-const karpenterDoNotDisrupt = "karpenter.sh/do-not-disrupt"
+const KarpenterDoNotDisrupt = "karpenter.sh/do-not-disrupt"
 
 // safety: a band node is booted for one Job and billed at its class, so the pod
 // asks for what that machine leaves after the node's own overhead, which is
@@ -1007,7 +1007,7 @@ func bandClassResources(class store.CPUClass, cfg Config) corev1.ResourceRequire
 	}
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    milliCores(cappedCores(float64(class.Cores)-bandCPUHeadroom, cfg.CPUCeiling)),
+			corev1.ResourceCPU:    milliCores(cappedCores(float64(class.Cores)-BandCPUHeadroom, cfg.CPUCeiling)),
 			corev1.ResourceMemory: memory,
 		},
 		Limits: limits,
