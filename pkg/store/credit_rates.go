@@ -24,9 +24,10 @@ const (
 	// keeps the settings row small enough to read on every claim.
 	MaxCreditRateTableEntries = 32
 
-	// safety: the memory a cpu class carries for each of its cores, matching
-	// the hosted runners a customer compares against. A node asking for more
-	// takes the class whose memory covers it.
+	// safety: the memory of the machine a cpu class names, per core, matching
+	// the hosted runners a customer compares against. The Job gets that
+	// machine less the node's own overhead, not this much. A node asking for
+	// more takes the class whose machine covers it.
 	cpuClassMemoryBytesPerCore = 4 << 30
 
 	// DefaultWarmCPUClassCores is the class a warm runner pool serves when no
@@ -35,7 +36,7 @@ const (
 )
 
 // CPUClass is one rung of the billing ladder: a whole number of cores and the
-// memory that comes with them. It prices a node independently of the pod's
+// memory of the machine they name. It prices a node independently of the pod's
 // resource request.
 type CPUClass struct {
 	Cores       int64 `json:"cores"`
@@ -108,7 +109,7 @@ func (e *UnpricedCPUClassError) Unwrap() error { return ErrUnpricedCPUClass }
 
 // ClassForResource returns the class that covers both halves of a node's
 // request: the smallest class whose cores cover the cpu rounded up to a whole
-// core and whose memory, four gibibytes for each core, covers the
+// core and whose machine memory, four gibibytes for each core, covers the
 // memory asked for. It returns an [UnpricedCPUClassError] when no class is
 // large enough.
 func (t CreditRateTable) ClassForResource(res ExecutorResource) (CreditRate, error) {

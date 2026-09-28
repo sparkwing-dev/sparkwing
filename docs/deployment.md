@@ -53,10 +53,12 @@ tolerations the runner was configured with. A cluster offering those classes
 needs a node pool labeled and tainted with that key and value; on a cluster
 without one the pod never schedules and the node fails with the scheduler's
 message. A Job placed on a band, by the class or by the operator's own
-selector, asks for one whole machine of its class: CPU of the class minus half
-a core with no limit, the class's memory as request and limit, and a node of
-its own. The pool therefore needs an N-vCPU machine that holds 4 GiB per vCPU
-after the kubelet's reservation. Elsewhere, requests use the pipeline's pinned
+selector, asks for one machine of its class and a node of its own: CPU of the
+class minus half a core with no limit, and as memory request and limit the
+class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead. The
+pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
+general-purpose families, and a kubelet reservation no larger than 110 pods
+leaves. Elsewhere, requests use the pipeline's pinned
 or measured resources, and a request exceeding every matching node's
 allocatable capacity fails before the Job is created. See
 [Runner classes](auth.md#runner-classes).

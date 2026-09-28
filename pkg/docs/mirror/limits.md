@@ -14,7 +14,7 @@ what it costs the operator is storage, bandwidth and controller time.
 The credit ledger prices each claim at the smallest class that covers the
 pipeline's pinned or measured resources, with a 20-second minimum. A Job on a
 band pool then runs alone on a machine of that class, so a 0.25-core pin pays
-for, and gets, a 2-vCPU node. See [Runner classes](auth.md#runner-classes).
+for, and gets, a 2-vCPU, 8 GiB node, of which the Job can use about 5.4 GiB. See [Runner classes](auth.md#runner-classes).
 Each metered heartbeat charges elapsed work and renews the claim together. If
 the controller cannot check the token marker or charge the ledger, it refuses
 the renewal with `409` and the runner stops.

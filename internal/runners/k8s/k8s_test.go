@@ -1382,14 +1382,18 @@ func TestBuildJob_ToleratesThePoolItSelects(t *testing.T) {
 
 func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		cfg   Config
-		cores int64
-		cpu   string
+		name   string
+		cfg    Config
+		cores  int64
+		cpu    string
+		memory string
 	}{
-		{name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, cores: 2, cpu: "1500m"},
-		{name: "4-core", cfg: Config{Image: "img"}, cores: 4, cpu: "3500m"},
-		{name: "8-core", cfg: Config{Image: "img"}, cores: 8, cpu: "7500m"},
+		{
+			name: "operator band", cfg: Config{Image: "img", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}},
+			cores: 2, cpu: "1500m", memory: "5529Mi",
+		},
+		{name: "4-core", cfg: Config{Image: "img"}, cores: 4, cpu: "3500m", memory: "13107Mi"},
+		{name: "8-core", cfg: Config{Image: "img"}, cores: 8, cpu: "7500m", memory: "28262Mi"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pod := classJob(t, tc.cfg, tc.cores).Spec.Template.Spec
@@ -1400,9 +1404,9 @@ func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
 			if _, ok := rr.Limits[corev1.ResourceCPU]; ok {
 				t.Fatalf("cpu limit = %s, want none: the machine is the class", rr.Limits.Cpu())
 			}
-			want := resource.NewQuantity(store.CPUClassMemoryBytes(tc.cores), resource.BinarySI)
-			if !rr.Requests.Memory().Equal(*want) || !rr.Limits.Memory().Equal(*want) {
-				t.Fatalf("memory = %s/%s, want %s request and limit", rr.Requests.Memory(), rr.Limits.Memory(), want)
+			want := resource.MustParse(tc.memory)
+			if !rr.Requests.Memory().Equal(want) || !rr.Limits.Memory().Equal(want) {
+				t.Fatalf("memory = %s/%s, want %s request and limit", rr.Requests.Memory(), rr.Limits.Memory(), &want)
 			}
 			terms := pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
 			if len(terms) != 2 || terms[1].LabelSelector.MatchLabels["app.kubernetes.io/name"] != "sparkwing-runner" {

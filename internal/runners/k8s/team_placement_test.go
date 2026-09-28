@@ -150,3 +150,23 @@ func TestTeamLabelValue(t *testing.T) {
 		t.Error("two different teams share a label value")
 	}
 }
+
+func TestBuildJob_BandJobRefusesEveryOtherJobsNode(t *testing.T) {
+	band := classJob(t, Config{Image: "img", Team: "acme"}, 4)
+	if !teamRepels(t, band, classJob(t, Config{Image: "img", Team: "acme"}, 4).Spec.Template.Labels) {
+		t.Fatal("a band Job accepts a node running another Job of its own team, so two classes share a machine")
+	}
+	if teamRepels(t, band, map[string]string{"app": "kube-proxy"}) {
+		t.Fatal("a band Job refuses a node running a daemonset pod, so it can schedule nowhere")
+	}
+}
+
+// The negative control: with only the team term, a band Job packs beside its
+// own team's Jobs, which the test above must catch.
+func TestBandRepels_FailsWithoutTheOneJobTerm(t *testing.T) {
+	band := classJob(t, Config{Image: "img", Team: "acme"}, 4)
+	band.Spec.Template.Spec.Affinity = teamAntiAffinity("acme")
+	if teamRepels(t, band, classJob(t, Config{Image: "img", Team: "acme"}, 4).Spec.Template.Labels) {
+		t.Fatal("a band Job with only the team term still reads as refusing its own team's node")
+	}
+}

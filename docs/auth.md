@@ -294,21 +294,21 @@ two passes to engage.
 
 ## Runner classes
 
-A class is a whole number of cores with the memory that comes with it, and it
-is the unit a pipeline buys. The ladder is 2, 4, and 8 cores, and each class
-carries 4 GiB of memory for each of its cores: 8 GiB at two cores, 16 GiB at
-four, 32 GiB at eight. A node takes the smallest class that covers both halves
-of what it pinned, so a pin of three cores and 20 GB takes the 8-core class
-because the 4-core class carries only 16 GiB. The class sets the price. A node
-with a 0.25-core pin still pays for the 2-core class, including the 20-second
-minimum.
+A class is a dedicated machine, and it is the unit a pipeline buys. The ladder
+is 2, 4, and 8 cores, and an N-core class runs alone on a machine with N vCPU
+and 4N GiB: 8 GiB at two cores, 16 GiB at four, 32 GiB at eight. The Job gets
+that machine less the system's own overhead, the same way a hosted 2-core
+runner is a 2-vCPU virtual machine rather than two reserved cores. A node takes
+the smallest class whose machine covers both halves of what it pinned, so a pin
+of three cores and 20 GB takes the 8-core class because the 4-core machine has
+only 16 GiB. The class sets the price. A node with a 0.25-core pin still pays
+for the 2-core class, including the 20-second minimum.
 
-On a band pool, a class is a machine: an N-core node runs alone on a node with
-N vCPU. Its pod requests N minus half a core, which leaves room for the
-kubelet and the node's daemonsets, and has no CPU limit, so the Job can use
-every cycle of the machine. Its memory request and limit are the class's
-memory. The class does not reserve N whole cores to the pod, the same way a
-hosted 2-core runner is a 2-vCPU virtual machine.
+On a band pool the pod requests N minus half a core with no CPU limit, so the
+Job can use every cycle the machine has spare. Its memory request and limit are
+what the machine leaves after the hypervisor, the kubelet and the node's
+daemonsets: about 5.4 GiB at two cores, 12.8 GiB at four and 27.6 GiB at eight.
+A Job that needs the whole of a class's machine memory pins the next class up.
 
 The 2-core class runs on the warm pool and starts in seconds. A larger class
 starts a Kubernetes node of its own, which takes one to two minutes during the
@@ -333,7 +333,7 @@ fleet is a condition that clears. A Job whose shape no machine in the pool
 could hold fails before the Job is created, because waiting cures nothing.
 
 A claim answers with the class it billed, as `credit_cpu_class_cores` and
-`credit_cpu_class_memory_bytes`. A Job off the band uses the pipeline's
+`credit_cpu_class_memory_bytes`, the latter the class machine's memory. A Job off the band uses the pipeline's
 resource pin or measured profile for its requests, with 100m CPU and 128 MiB
 memory defaults when no usable measurement exists. Limits retain the runner's burst settings
 and operator ceilings. A claim that names a node carries `sizes_to_class` to

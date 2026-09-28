@@ -971,17 +971,26 @@ func bandTolerations(static []corev1.Toleration, placed string) []corev1.Tolerat
 	})
 }
 
-// bandCPUHeadroom is what a band Job leaves of its class's vCPU for the
-// kubelet reservation and the node's daemonsets, so the pod fits a machine of
-// exactly its class and no smaller one.
-const bandCPUHeadroom = 0.5
+// A band Job leaves part of its machine to the node: half a core, and 2 GiB
+// of memory after the 7.5 percent Karpenter discounts from an instance's
+// memory for the hypervisor. The 2 GiB covers the kubelet reservation at 110
+// pods (1465 MiB), the 100 MiB eviction threshold, the daemonsets' requests,
+// and about 360 MiB of margin. Both must fit the class's own size in a
+// general-purpose family, 4 GiB per vCPU, or Karpenter launches the next one.
+const (
+	bandCPUHeadroom            = 0.5
+	bandMemoryHypervisorFactor = 0.925
+	bandMemoryReserveBytes     = 2 << 30
+)
 
 // safety: a band node is booted for one Job and billed at its class, so the pod
-// asks for that whole machine. CPU has no limit because the machine is the
-// promise; memory is capped at the class so a runaway Job is the process the
-// kernel kills, not a daemonset with a smaller request.
+// asks for what that machine leaves after the node's own overhead. CPU has no
+// limit because the machine is the promise; memory is capped at the request so
+// a runaway Job is the process the kernel kills, not a daemonset whose smaller
+// request gives it a higher OOM score.
 func bandClassResources(class store.CPUClass) corev1.ResourceRequirements {
-	memory := *resource.NewQuantity(class.MemoryBytes, resource.BinarySI)
+	usable := int64(float64(class.MemoryBytes)*bandMemoryHypervisorFactor) - bandMemoryReserveBytes
+	memory := *resource.NewQuantity(usable&^(1<<20-1), resource.BinarySI)
 	return corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:    milliCores(float64(class.Cores) - bandCPUHeadroom),

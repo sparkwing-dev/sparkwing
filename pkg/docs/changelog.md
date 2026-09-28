@@ -701,12 +701,13 @@ unlock.
 
 ### Changed
 
-- **runner:** A Kubernetes Job on a `sparkwing.dev/cpu-band` pool now asks
-  for one whole machine of its billed class: the class's cores minus half a
-  core with no CPU limit, the class's memory as request and limit, and a node
-  no other Job shares. An N-core class runs on an N-vCPU node instead of a
-  2N-vCPU one. Band pools need a family whose N-vCPU size holds 4 GiB per vCPU
-  after kubelet reservation (memory-optimized on EC2).
+- **runner:** A Kubernetes Job on a `sparkwing.dev/cpu-band` pool now runs
+  alone on a machine of its billed class, N vCPU and 4N GiB, instead of on a
+  2N-vCPU node. It requests the class's cores minus half a core with no CPU
+  limit, and what the machine leaves after system overhead as its memory
+  request and limit: about 5.4, 12.8 and 27.6 GiB for the 2, 4 and 8-core
+  classes. A class no longer guarantees 4 GiB per core to the Job itself; a
+  Job that needs all of it pins the next class.
 
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
