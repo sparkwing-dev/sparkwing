@@ -113,6 +113,10 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	if !opts.AllowRemote && !LoopbackBind(opts.Addr) {
 		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
 	}
+	if opts.AllowRemote && !LoopbackBind(opts.Addr) {
+		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so anyone who reaches it can read, "+
+			"write and delete this machine's local secrets and runs without signing in\n", opts.Addr)
+	}
 	bundle := opts.Bundle
 	if bundle == nil {
 		if err := web.VerifyBundleEmbedded(); err != nil {
@@ -156,7 +160,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	if !useS3OnlyReader {
 		// safety: the environment keeps the key variables, because this
 		// process can start the admission daemon and runs, which need them.
-		ring, err := localsecrets.LoadKeyring(false)
+		ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
 		if err != nil {
 			return fmt.Errorf("local secrets key: %w", err)
 		}
@@ -313,10 +317,15 @@ func buildHandler(
 }
 
 func (o Options) originPolicy() originPolicy {
+	ports := []string{devServerPort}
+	if _, port, err := net.SplitHostPort(o.Addr); err == nil {
+		ports = append(ports, port)
+	}
 	return originPolicy{
-		allowRemote:  o.AllowRemote,
-		bindHost:     bindOriginHost(o.Addr),
-		allowOrigins: o.AllowOrigins,
+		allowRemote:   o.AllowRemote,
+		bindHost:      bindOriginHost(o.Addr),
+		loopbackPorts: ports,
+		allowOrigins:  o.AllowOrigins,
 	}
 }
 

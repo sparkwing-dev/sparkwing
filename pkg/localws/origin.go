@@ -1,9 +1,11 @@
 package localws
 
 import (
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -11,9 +13,16 @@ type originPolicy struct {
 	allowRemote bool
 	// safety: with a remote bind the request Host is attacker-controlled,
 	// so the operator's own bind address anchors the Origin check instead.
-	bindHost     string
-	allowOrigins []string
+	bindHost string
+	// safety: another server on this machine shares the loopback host, so a
+	// loopback origin is this dashboard's only on the port it serves or the
+	// dashboard's own dev server.
+	loopbackPorts []string
+	allowOrigins  []string
 }
+
+// hack: pnpm dev in web/ serves the dashboard on this fixed port.
+const devServerPort = "3100"
 
 func originGuard(next http.Handler, policy originPolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +36,10 @@ func originGuard(next http.Handler, policy originPolicy) http.Handler {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			if !policy.originAllowed(origin) {
 				http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+				return
+			}
+			if !jsonBodyOrNone(r) {
+				http.Error(w, "unsupported media type: a browser write must send application/json", http.StatusUnsupportedMediaType)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -43,6 +56,21 @@ func originGuard(next http.Handler, policy originPolicy) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// safety: a form or text/plain POST is a simple request a page can send
+// without a preflight, so a browser write that carries a body must name
+// JSON, which no page can send cross-origin without one.
+func jsonBodyOrNone(r *http.Request) bool {
+	if !mutatingMethod(r.Method) {
+		return true
+	}
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" && r.ContentLength == 0 {
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	return err == nil && mediaType == "application/json"
 }
 
 func mutatingMethod(method string) bool {
@@ -66,11 +94,10 @@ func (p originPolicy) originAllowed(origin string) bool {
 	if !ok {
 		return false
 	}
-	// safety: `next dev` serves the dashboard on another loopback port and
-	// forwards its own Origin, so loopback origins stay allowed regardless
-	// of port. Any origin off this machine needs an explicit opt-in.
+	// safety: `next dev` serves the dashboard on its own loopback port and
+	// forwards that Origin; any other loopback port is another program.
 	if loopbackHost(host) {
-		return true
+		return slices.Contains(p.loopbackPorts, originPort(scheme, host))
 	}
 	if p.bindHost != "" && strings.EqualFold(host, p.bindHost) {
 		return true
@@ -82,6 +109,16 @@ func (p originPolicy) originAllowed(origin string) bool {
 		}
 	}
 	return false
+}
+
+func originPort(scheme, host string) string {
+	if _, port, err := net.SplitHostPort(host); err == nil {
+		return port
+	}
+	if scheme == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 func splitOrigin(origin string) (scheme, host string, ok bool) {
