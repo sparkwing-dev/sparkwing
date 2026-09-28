@@ -78,6 +78,23 @@ func assertV49MainRowsCarried(t *testing.T, st *store.Store) {
 	}
 }
 
+// v0.63.0 wrote runner_scale_step_credits in cent credits, so a $50 step is
+// 5,000 there; v59 restates it as 1,000,000 vCPU-second credits and v75 as
+// 50,000 credits of $0.001.
+const v49MainScaleStepSQL = `INSERT INTO sparkwing_meta (key, value, updated_at)
+	VALUES ('compute_limit_runner_scale_step_credits', '5000', 1790572236000000000)`
+
+func assertV49MainCreditRestated(t *testing.T, st *store.Store) {
+	t.Helper()
+	if got := readStepSetting(t, st); got != "50000" {
+		t.Errorf("runner scale step after v59 and v75 = %q, want 50000 ($50)", got)
+	}
+	requirements, err := st.Requirements(context.Background())
+	if err != nil || !slices.Contains(requirements, "credit-value-v1") {
+		t.Errorf("requirements = %v, %v; want credit-value-v1", requirements, err)
+	}
+}
+
 func schemaShape(t *testing.T, st *store.Store) []string {
 	t.Helper()
 	q := `SELECT 'column ' || m.name || '.' || p.name FROM sqlite_master m, pragma_table_info(m.name) p
@@ -141,8 +158,8 @@ func assertMatchesFreshSchema(t *testing.T, upgraded, fresh *store.Store) {
 
 func TestSchemaV49MainLineageSQLiteGainsTenantKey(t *testing.T) {
 	for name, extra := range map[string][]string{
-		"plain":             nil,
-		"stray teams table": {`CREATE TABLE teams (name TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`},
+		"plain":             {v49MainScaleStepSQL},
+		"stray teams table": {v49MainScaleStepSQL, `CREATE TABLE teams (name TEXT PRIMARY KEY, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			upgraded, err := store.Open(sqliteV49Main(t, extra...))
@@ -152,6 +169,7 @@ func TestSchemaV49MainLineageSQLiteGainsTenantKey(t *testing.T) {
 			defer func() { _ = upgraded.Close() }()
 			assertMatchesFreshSchema(t, upgraded, storetest.OpenSQLite(t))
 			assertV49MainRowsCarried(t, upgraded)
+			assertV49MainCreditRestated(t, upgraded)
 		})
 	}
 }
@@ -226,7 +244,7 @@ func TestSchemaV49MainLineageInterruptedAtV50RefusesOlderBinary(t *testing.T) {
 
 func TestSchemaV49MainLineagePostgresGainsTenantKey(t *testing.T) {
 	dsn := storetest.NewPostgres(t).DSN()
-	loadV49MainFixture(t, "pgx", dsn, "schema_v49_v0.63.0_postgres.sql")
+	loadV49MainFixture(t, "pgx", dsn, "schema_v49_v0.63.0_postgres.sql", v49MainScaleStepSQL)
 	upgraded, err := store.OpenPostgres(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("open v0.63.0 database: %v", err)
@@ -234,6 +252,7 @@ func TestSchemaV49MainLineagePostgresGainsTenantKey(t *testing.T) {
 	defer func() { _ = upgraded.Close() }()
 	assertMatchesFreshSchema(t, upgraded, storetest.OpenPostgres(t))
 	assertV49MainRowsCarried(t, upgraded)
+	assertV49MainCreditRestated(t, upgraded)
 }
 
 func TestSchemaV73UpgradesToV74(t *testing.T) {
