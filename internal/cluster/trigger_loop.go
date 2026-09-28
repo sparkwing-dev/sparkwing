@@ -308,7 +308,11 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 	if err != nil {
 		return fmt.Errorf("create trigger home: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(childHome) }()
+	defer func() {
+		if err := os.RemoveAll(childHome); err != nil {
+			logger.Warn("trigger loop: remove trigger home", "path", childHome, "err", err)
+		}
+	}()
 	childHome, err = filepath.Abs(childHome)
 	if err != nil {
 		return fmt.Errorf("resolve trigger home: %w", err)
