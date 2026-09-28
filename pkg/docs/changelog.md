@@ -955,6 +955,13 @@ unlock.
 
 ### Fixed
 
+- **sparks:** Overlay resolution no longer appends to a `.gitignore` above the
+  project. It used to walk up to ten directories for a `.git`, so a stray
+  `.git` in an ancestor such as `/tmp` or a home dotfiles repository received
+  entries anchored to the wrong directory. The entry now goes beside
+  `.sparkwing/` when that directory is a checkout root, and into
+  `.sparkwing/.gitignore` otherwise.
+
 - **store:** A database migrated by v0.61.0 through v0.63.0 now upgrades.
   Those releases numbered the node claim token column as schema 49, so the
   upgrade stopped at schema 50 for want of the team table. Opening such a
