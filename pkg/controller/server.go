@@ -153,6 +153,7 @@ type Server struct {
 
 	githubApp *githubAppState
 	checkout  *billingCheckout
+	operators atomic.Pointer[map[string]bool]
 }
 
 // WithLocalExecution marks this server as a host's own admission daemon or
@@ -1171,6 +1172,13 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
 	mux.Handle("GET /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustShow)))
 	mux.Handle("POST /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustSet)))
+	mux.Handle("GET /api/v1/operator/session", s.requireOperator(s.handleOperatorSession))
+	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
+	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))
+	mux.Handle("POST /api/v1/operator/teams/{team}/trust", s.requireOperator(s.handleBillingTrustSet))
+	mux.Handle("POST /api/v1/operator/teams/{team}/grants", s.requireOperator(s.handleOperatorGrant))
+	mux.Handle("POST /api/v1/operator/teams/{team}/freeze", s.requireOperator(s.handleOperatorFreeze))
+	mux.Handle("POST /api/v1/operator/teams/{team}/unfreeze", s.requireOperator(s.handleOperatorUnfreeze))
 	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
 	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
 	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))

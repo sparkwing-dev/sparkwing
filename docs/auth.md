@@ -247,6 +247,31 @@ refused with `409` and `"code": "dispute_conflict"` and logged as
 `alert=dispute_conflict`. A hold takes the ledger lock a metered claim takes,
 so no claim that read the team as not held commits after the hold.
 
+## Operator console
+
+The dashboard's `/operator` page lets the operator look up a team and act on
+its billing from a browser: grant, revoke or reset trust, set or clear the
+purchase-limit override, grant free credits up to $5,000, and hold or release
+the team. Each action takes a reason and a confirmation step naming the team
+and the effect.
+
+Only the operator's own signed-in account reaches it. The controller lists
+operator accounts by account id with `--operator-accounts`
+(`SPARKWING_OPERATOR_ACCOUNTS`, comma-separated), and every route under
+`/api/v1/operator/` answers `403` to any other caller: a team owner, a
+password session and every bearer token, an admin token included. A console
+action therefore needs the operator's sign-in, not a credential that
+automation can hold. The dashboard serves the page only after the controller
+confirms the session through `GET /api/v1/operator/session`, and it forwards
+the console's writes under the same CSRF check as every other browser write.
+With no account listed, the console is off.
+
+A trust change records its business event with the operator and reason in the
+same transaction. A grant, a hold and a release record an
+`operator.credit_granted`, `operator.team_frozen` or `operator.team_unfrozen`
+event with the operator and reason once the action commits. A console hold is
+a hold like a dispute's, so it also ends the team's automatic trust.
+
 ## Retained storage
 
 Runner time stops costing when a node ends; retained bytes keep costing while

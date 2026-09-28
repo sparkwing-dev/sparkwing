@@ -136,6 +136,9 @@ type BusinessEvent struct {
 	Attrs     map[string]any
 }
 const BusinessEventBillingTrustChanged = "billing.trust_changed"
+const BusinessEventOperatorCreditGranted = "operator.credit_granted"
+const BusinessEventOperatorTeamFrozen = "operator.team_frozen"
+const BusinessEventOperatorTeamUnfrozen = "operator.team_unfrozen"
 const BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
@@ -2138,6 +2141,7 @@ func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window,
 func (s *Store) RunnerCapFor(ctx context.Context, team Team, now time.Time) (RunnerCap, error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
 func (s *Store) SchedulingSummary(ctx context.Context, runID, nodeID string) (ExecutorSchedulingSummary, error)
+func (s *Store) SearchTeams(ctx context.Context, q string) (_ []TeamMatch, err error)
 func (s *Store) SeedStorageRetention(ctx context.Context, days int64) (bool, error)
 func (s *Store) SetActiveTeam(ctx context.Context, accountID string, team Team, now time.Time) error
 func (s *Store) SetComputeLimit(ctx context.Context, name string, value int64) error
@@ -2241,6 +2245,11 @@ type TeamInfo struct {
 	CreatedBy   string
 }
 func (t TeamInfo) Label() string
+type TeamMatch struct {
+	Slug        Team
+	DisplayName string
+	Owners      []string
+}
 type TeamRetentionExpiry struct {
 	Team  Team
 	Runs  int64
@@ -2270,6 +2279,7 @@ func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now ti
 func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
 func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
+func (t *Tenant) BusinessEvents(ctx context.Context, kind string) ([]BusinessEvent, error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 func (t *Tenant) ClearCronOverride(ctx context.Context, id string, now time.Time) error
@@ -2376,6 +2386,7 @@ func (t *Tenant) RecordCreditGrant(
 	ctx context.Context, req CreditGrantRequest,
 ) (CreditGrantResult, error)
 func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRun int64) (int64, error)
+func (t *Tenant) RecordOperatorEvent(ctx context.Context, ev BusinessEvent) (err error)
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)

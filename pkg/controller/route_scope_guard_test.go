@@ -147,6 +147,10 @@ func routeScope(handler ast.Expr) (string, bool) {
 		return routeScope(call.Args[0])
 	case strings.HasPrefix(name, "newClaim"):
 		return "claim", true
+	// safety: an operator route admits only a listed account's own session,
+	// which is narrower than any scope.
+	case name == "requireOperator":
+		return "operator", true
 	case name != "requireScope":
 		return "", false
 	}

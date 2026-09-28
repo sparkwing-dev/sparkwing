@@ -281,7 +281,7 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET "+githubAppAvailablePath, githubAppAvailableHandler(opts))
 	authedMux.HandleFunc("POST /github/app/select", githubAppSelectHandler(opts))
 
-	authedMux.Handle("/", spaHandler(bundleFS, opts))
+	authedMux.Handle("/", operatorPageGate(opts, spaHandler(bundleFS, opts)))
 
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)

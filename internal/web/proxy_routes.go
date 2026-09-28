@@ -92,6 +92,18 @@ var identityProxyRoutes = []proxyRoute{
 	{"DELETE /api/v1/team/runner-tokens/{prefix}", ""},
 }
 
+// safety: the controller answers these only for a listed operator account's
+// session, and the dashboard's own bearer never reaches them.
+var operatorProxyRoutes = []proxyRoute{
+	{"GET /api/v1/operator/session", ""},
+	{"GET /api/v1/operator/teams", ""},
+	{"GET /api/v1/operator/teams/{team}", ""},
+	{"POST /api/v1/operator/teams/{team}/trust", ""},
+	{"POST /api/v1/operator/teams/{team}/grants", ""},
+	{"POST /api/v1/operator/teams/{team}/freeze", ""},
+	{"POST /api/v1/operator/teams/{team}/unfreeze", ""},
+}
+
 // safety: the dashboard reads logs on behalf of a browser session, so the logs bearer
 // never carries a delete or an append off the browser-facing listener.
 var logsProxyRoutes = []proxyRoute{
@@ -103,7 +115,7 @@ var logsProxyRoutes = []proxyRoute{
 
 func proxyAllowList(proxy http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	for _, route := range append(slices.Clone(proxyRoutes), identityProxyRoutes...) {
+	for _, route := range slices.Concat(proxyRoutes, identityProxyRoutes, operatorProxyRoutes) {
 		mux.Handle(route.pattern, requireSessionScope(route.scope, proxy))
 	}
 	mux.HandleFunc("/api/v1/", routeNotProxied)

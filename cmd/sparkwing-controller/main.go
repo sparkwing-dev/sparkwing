@@ -92,6 +92,9 @@ func run(args []string) error {
 		"base URL of the hosted checkout service that opens a Stripe Checkout Session "+
 			"when a team owner buys credits; the controller authenticates with "+
 			"SPARKWING_BILLING_TOKEN. Empty sells no credits.")
+	operatorAccounts := fs.String("operator-accounts", os.Getenv("SPARKWING_OPERATOR_ACCOUNTS"),
+		"comma-separated account ids whose signed-in dashboard sessions may use the "+
+			"operator console. No token reaches the console. Empty leaves it off.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	externalURL := fs.String("external-url", os.Getenv("SPARKWING_EXTERNAL_URL"),
@@ -478,6 +481,7 @@ func run(args []string) error {
 		WithLogsURL(*logsURL).
 		WithDashboardURL(*dashboardURL).
 		WithBillingCheckout(*billingURL, os.Getenv("SPARKWING_BILLING_TOKEN")).
+		WithOperatorAccounts(splitCSV(*operatorAccounts)).
 		WithCacheURL(*cacheURL).
 		WithExternalURL(*externalURL).
 		WithMetricsAddr(*metricsAddr).
