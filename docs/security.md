@@ -134,9 +134,12 @@ An unauthenticated caller never sees a store error verbatim. Anything
 that is not an authentication rejection answers `503` with a generic
 message and the detail goes to the controller log.
 
-Login throttling keys on the TCP peer and ignores forwarded headers until
-you name the proxy networks in `--trusted-proxy-cidrs` (chart:
-`controller.trustedProxyCIDRs`). The dashboard forwards each browser's
+Login throttling, the bearer failure budget and the audit log's `client_ip`
+use the TCP peer and ignore forwarded headers until you name the proxy
+networks in `--trusted-proxy-cidrs` (chart: `controller.trustedProxyCIDRs`).
+Behind an ingress controller, list the ingress pods' source range, or every
+audit record names the ingress pod instead of the caller. A caller outside
+the list that sends `X-Forwarded-For` is recorded under its own address. The dashboard forwards each browser's
 address to the controller, so that list must include the web pod's source
 or every dashboard login shares one client budget. Set the web pod's
 address where you pin it; where the pod IP is unknown, set the cluster pod

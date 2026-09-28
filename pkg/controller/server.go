@@ -770,8 +770,9 @@ func (s *Server) claimedPipeline(next http.Handler) http.Handler {
 }
 
 // WithTrustedProxyCIDRs names the proxy source networks allowed to
-// supply X-Forwarded-For for login throttling. Empty keys the login
-// limiter on the TCP peer and ignores forwarded headers.
+// supply X-Forwarded-For, which then names the client for login
+// throttling, the bearer failure budget and the audit log's client_ip.
+// Empty ignores forwarded headers and uses the TCP peer.
 func (s *Server) WithTrustedProxyCIDRs(prefixes []netip.Prefix) *Server {
 	s.loginLimit = newLoginLimiter(prefixes)
 	if s.auth != nil {

@@ -72,8 +72,9 @@ controller:
     name: ""
     key: token
 
-  # Proxy source CIDRs allowed to supply X-Forwarded-For for login
-  # throttling. This must include the dashboard pod's address: the web
+  # Proxy source CIDRs allowed to supply X-Forwarded-For, which names
+  # the client for login throttling and the audit log's client_ip. List
+  # the ingress controller's pod range. This must include the dashboard pod's address: the web
   # deployment forwards each browser's address to the controller, and
   # an untrusted source is ignored, which collapses every dashboard
   # login into one budget. Set the web pod's address when you pin it;
