@@ -1334,7 +1334,7 @@ func TestBuildJob_MergesTheBandWithTheOperatorsOwnPlacement(t *testing.T) {
 		}},
 	}
 	pod := classJob(t, cfg, 8).Spec.Template.Spec
-	want := map[string]string{"pool": "runners", "sparkwing.dev/cpu-band": "small", TeamNodeLabel: "default"}
+	want := map[string]string{"pool": "runners", "sparkwing.dev/cpu-band": "small"}
 	if !reflect.DeepEqual(pod.NodeSelector, want) {
 		t.Fatalf("nodeSelector = %v, want %v", pod.NodeSelector, want)
 	}

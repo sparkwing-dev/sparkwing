@@ -183,7 +183,7 @@ func selects(job *batchv1.Job, node labels.Set) bool {
 
 func TestBuildJob_BandNodeServesOnlyTheTeamThatBootedIt(t *testing.T) {
 	for _, team := range []string{"acme", "Acme Corp", ""} {
-		job := classJob(t, Config{Image: "img", Team: team}, 4)
+		job := classJob(t, Config{Image: "img", TeamNodes: true, Team: team}, 4)
 		if !selects(job, teamNode(team)) {
 			t.Fatalf("team %q: a band Job refuses a node its own team booted, so a DAG never reuses one", team)
 		}
@@ -200,7 +200,7 @@ func TestBuildJob_BandNodeServesOnlyTheTeamThatBootedIt(t *testing.T) {
 }
 
 func TestBuildJob_TeamOutranksTheOperatorOnTheTeamNodeKey(t *testing.T) {
-	cfg := Config{Image: "img", Team: "acme", NodeSelector: map[string]string{TeamNodeLabel: "beta"}}
+	cfg := Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{TeamNodeLabel: "beta"}}
 	job := classJob(t, cfg, 4)
 	if got := job.Spec.Template.Spec.NodeSelector[TeamNodeLabel]; got != "acme" {
 		t.Fatalf("team node = %q, want acme over the operator's value", got)
@@ -219,7 +219,7 @@ func TestBuildJob_OffBandJobNamesNoTeamNode(t *testing.T) {
 // The negative control: without the team key a band Job selects another
 // team's node, which the test above must catch.
 func TestBandTeamNode_FailsWithoutTheKey(t *testing.T) {
-	job := classJob(t, Config{Image: "img", Team: "acme"}, 4)
+	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme"}, 4)
 	delete(job.Spec.Template.Spec.NodeSelector, TeamNodeLabel)
 	if !selects(job, teamNode("beta")) {
 		t.Fatal("a band Job without the team key still refuses beta's node")
@@ -227,8 +227,22 @@ func TestBandTeamNode_FailsWithoutTheKey(t *testing.T) {
 }
 
 func TestBuildJob_UnbilledBandJobStillSelectsItsTeamsNode(t *testing.T) {
-	job := classJob(t, Config{Image: "img", Team: "acme", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, 0)
+	job := classJob(t, Config{Image: "img", TeamNodes: true, Team: "acme", NodeSelector: map[string]string{cpuBandKey: cpuBandSmall}}, 0)
 	if !selects(job, teamNode("acme")) || selects(job, teamNode("beta")) {
 		t.Fatalf("an unbilled band Job selects %v, want only acme's node", job.Spec.Template.Spec.NodeSelector)
+	}
+}
+
+// Off by default, so a self-hosted band of static nodes, which carry no team
+// label, keeps taking band Jobs.
+func TestBuildJob_TeamNodesIsOptIn(t *testing.T) {
+	cfg := Config{Image: "img", Team: "acme", NodeSelector: map[string]string{cpuBandKey: "house"}}
+	static := labels.Set{cpuBandKey: "house"}
+	if !selects(classJob(t, cfg, 4), static) {
+		t.Fatal("a band Job without team nodes refuses a static band node that carries no team label")
+	}
+	cfg.TeamNodes = true
+	if selects(classJob(t, cfg, 4), static) {
+		t.Fatal("a band Job with team nodes accepts a node carrying no team label")
 	}
 }

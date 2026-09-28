@@ -63,6 +63,12 @@ type Config struct {
 	// [TeamLabel] and never share a node with another team's Jobs.
 	Team string
 
+	// TeamNodes makes a band Job select [TeamNodeLabel] with its team, so a
+	// band node serves one team from boot to release. Its pool must stamp
+	// that label on the nodes it boots, as an autoscaler that copies a pod's
+	// selector does; a pool of static nodes without it takes no band Job.
+	TeamNodes bool
+
 	CPURequest    string
 	CPULimit      string
 	MemoryRequest string
@@ -868,7 +874,9 @@ func (r *Runner) buildJob(
 		if class.Cores > 0 {
 			container.Resources = bandClassResources(class, r.cfg)
 		}
-		selector = teamNodeSelector(selector, team)
+		if r.cfg.TeamNodes {
+			selector = teamNodeSelector(selector, team)
+		}
 		affinity = oneJobPerNode()
 		// safety: Karpenter drift and consolidation evict a running pod
 		// otherwise, and a band Job is a pipeline node with no retry.

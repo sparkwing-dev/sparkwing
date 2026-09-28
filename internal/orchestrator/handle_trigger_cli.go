@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
@@ -48,6 +49,20 @@ func runHandleTriggerCLI(args []string) error {
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
 	k8sTolerations := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION")))
 	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
+	teamNodesDefault := false
+	if raw := os.Getenv("SPARKWING_RUNNER_TEAM_NODES"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return fmt.Errorf("SPARKWING_RUNNER_TEAM_NODES: %w", err)
+		}
+		teamNodesDefault = v
+	}
+	// safety: the cloud sets this through the environment, which reaches a
+	// customer's compiled binary whatever SDK it pins; a flag it predates would
+	// fail the trigger.
+	k8sTeamNodes := fs.Bool("runner-team-nodes", teamNodesDefault,
+		"keep each band node to the team whose Job booted it by selecting sparkwing.dev/team-node; "+
+			"the band pool must stamp that label on its nodes (env: SPARKWING_RUNNER_TEAM_NODES)")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")
 	profileName := fs.String("profile", "",
@@ -105,6 +120,7 @@ func runHandleTriggerCLI(args []string) error {
 			Labels:                     k8sLabels,
 			NodeSelector:               nodeSelector,
 			Tolerations:                tolerations,
+			TeamNodes:                  *k8sTeamNodes,
 			DependencyProxyURL:         *dependencyProxy,
 			DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
 			ImagePullPolicy:            *imagePullPolicy,
@@ -141,6 +157,7 @@ func runHandleTriggerCLI(args []string) error {
 				Labels:                     k8sLabels,
 				NodeSelector:               nodeSelector,
 				Tolerations:                tolerations,
+				TeamNodes:                  *k8sTeamNodes,
 				DependencyProxyURL:         *dependencyProxy,
 				DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
 				ImagePullPolicy:            *imagePullPolicy,

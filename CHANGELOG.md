@@ -711,11 +711,12 @@ unlock.
   4-core class, not the 2-core), `credit_cpu_class_memory_bytes` reports it,
   and a pin above the largest class's fails the node at claim. Runner CPU and
   memory ceilings still cap a band Job, and its pod carries
-  `karpenter.sh/do-not-disrupt`. A band Job also selects
-  `sparkwing.dev/team-node: <team>` in place of the cross-team anti-affinity,
-  so a node serves only the team whose Job booted it, including back-to-back
-  reuse. A band pool needs an `Exists` requirement on that key or its Jobs no
-  longer schedule.
+  `karpenter.sh/do-not-disrupt`. It refuses a node holding any other Job in
+  place of the cross-team anti-affinity. `SPARKWING_RUNNER_TEAM_NODES=true`
+  (or `handle-trigger --runner-team-nodes`, off by default) also makes it
+  select `sparkwing.dev/team-node: <team>`, so a node serves only the team
+  whose Job booted it, including back-to-back reuse; the band pool then
+  needs an `Exists` requirement on that key.
 
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.
