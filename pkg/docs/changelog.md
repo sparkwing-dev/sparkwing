@@ -915,7 +915,9 @@ unlock.
 ### Fixed
 
 - **runner:** A local trigger whose dispatch fails records the dispatch error on
-  its failed run again, instead of a failed run with no error.
+  its failed run again, instead of a failed run with no error. If that write
+  fails, the local orphan pass fails the run once it has sat pending for five
+  lease durations under a finished trigger, as the controller's sweep does.
 
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
