@@ -1175,6 +1175,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleOperatorDeleteTeam)))
 	mux.Handle("GET /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustShow)))
 	mux.Handle("POST /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustSet)))
+	mux.Handle("PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetRepoDispatch)))
+	mux.Handle("POST /api/v1/launcher/claim", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLaunchClaim)))
 	mux.Handle("GET /api/v1/operator/session", s.requireOperator(s.handleOperatorSession))
 	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
 	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))

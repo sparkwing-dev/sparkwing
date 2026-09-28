@@ -49,16 +49,12 @@ func (f dispatchRouteFixture) claim(t *testing.T, nodeID string, kind store.Clai
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now()
-	node, err := f.st.ClaimNamedNode(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
-		"run-d", nodeID, "holder-"+nodeID, time.Minute, store.NamedClaimOptions{})
-	if err != nil {
-		t.Fatalf("claim %s: %v", nodeID, err)
+	c, err := f.st.ClaimLaunch(ctx, store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"},
+		store.LaunchClaimRequest{HolderID: "holder-" + nodeID, Lease: time.Minute, Deadline: time.Hour, RunID: "run-d", NodeID: nodeID}, now)
+	if err != nil || c == nil || c.Kind != kind {
+		t.Fatalf("claim %s as %s: %+v %v", nodeID, kind, c, err)
 	}
-	raw, err := f.st.MintClaimToken(ctx, store.DefaultTeam, "run-d", nodeID, node.ClaimGeneration, kind, now.Add(time.Hour), now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
+	return c.Token
 }
 
 func (f dispatchRouteFixture) post(t *testing.T, path, bearer, body string) (int, map[string]any) {

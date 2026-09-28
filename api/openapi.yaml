@@ -2161,6 +2161,91 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
+  /api/v1/teams/{team}/repos/{owner}/{name}/dispatch:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+      - {name: owner, in: path, required: true, schema: {type: string}, description: GitHub owner of the repository.}
+      - {name: name, in: path, required: true, schema: {type: string}, description: GitHub name of the repository.}
+    put:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Choose the path a repository's new runs take.
+      description: >-
+        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds. Runs already started keep their path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.repoDispatchReq
+              type: object
+              required: [dispatch]
+              properties:
+                dispatch: {type: string, enum: ["", controller]}
+      responses:
+        "200":
+          description: The repository's dispatch path.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                properties:
+                  team: {type: string}
+                  repo: {type: string, description: "owner/name, lowercased."}
+                  dispatch: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/launcher/claim:
+    post:
+      x-sparkwing-scope: claims.launch
+      tags: [nodes]
+      summary: Claim a ready node of a controller-dispatched run for a launcher Job.
+      description: >-
+        Claims the oldest ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. A node whose team cannot pay is passed over. The token expires after `deadline_secs`, which is also the Job's deadline.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.launchClaimReq
+              type: object
+              required: [holder_id, deadline_secs]
+              properties:
+                holder_id: {type: string}
+                lease_secs: {type: integer}
+                deadline_secs: {type: integer, description: At most 21600.}
+      responses:
+        "200":
+          description: The claim and its token.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.LaunchClaim
+                type: object
+                properties:
+                  team: {type: string}
+                  run_id: {type: string}
+                  node_id: {type: string}
+                  generation: {type: integer, format: int64}
+                  kind: {type: string, enum: [plan, work]}
+                  dispatch: {type: string, enum: [controller]}
+                  class:
+                    x-sparkwing-go-type: pkg/store.CPUClass
+                    type: object
+                    properties:
+                      cores: {type: integer, format: int64}
+                      memory_bytes: {type: integer, format: int64}
+                  token: {type: string}
+                  expires_at: {type: string, format: date-time}
+        "204": {description: No node is ready.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
   /api/v1/users:
     get:
       x-sparkwing-scope: admin

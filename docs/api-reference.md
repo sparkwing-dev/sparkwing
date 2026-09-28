@@ -70,6 +70,7 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/github-app/installations/{installation_id}` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
+| `POST` | `/api/v1/launcher/claim` | `claims.launch` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -231,6 +232,7 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/team/runner-tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
+| `PUT` | `/api/v1/teams/{team}/repos/{owner}/{name}/dispatch` | `admin` |
 | `GET` | `/api/v1/teams/{team}/trust` | `admin` |
 | `POST` | `/api/v1/teams/{team}/trust` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
