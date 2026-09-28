@@ -189,6 +189,12 @@ func refuseAbovePurchaseLimitTx(ctx context.Context, tx *storeTx, team Team, amo
 	}
 }
 
+// Business event kinds for billing trust and the purchase limit.
+const (
+	BusinessEventBillingTrustChanged  = "billing.trust_changed"
+	BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
+)
+
 // BillingTrustChange is an operator's decision on a team's trust.
 type BillingTrustChange struct {
 	// Trust is [BillingTrustGranted] or [BillingTrustRevoked].
@@ -232,9 +238,14 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	if after, err = billingStandingTx(ctx, tx, t.team, now); err != nil {
 		return before, after, err
 	}
+	subject, err := newCreditID("trust")
+	if err != nil {
+		return before, after, err
+	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Kind: "billing_trust_changed", Team: t.team, Actor: c.Actor, Reason: c.Reason, At: now,
+		Kind: BusinessEventBillingTrustChanged, Team: t.team, SubjectID: subject, Actor: c.Actor, At: now,
 		Attrs: map[string]any{
+			"reason":       c.Reason,
 			"trust_before": before.Trust, "trust_after": after.Trust,
 			"trusted_before": before.Trusted, "trusted_after": after.Trusted,
 			"limit_cents_before": before.LimitMicro / MicroCreditsPerCent,

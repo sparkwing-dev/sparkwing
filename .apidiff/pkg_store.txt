@@ -125,13 +125,17 @@ const BillingTrustRevoked = "revoked"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
 type BusinessEvent struct {
-	Kind   string
-	Team   Team
-	Actor  string
-	Reason string
-	Attrs  map[string]any
-	At     time.Time
+	ID        string
+	At        time.Time
+	Team      Team
+	Account   string
+	Kind      string
+	SubjectID string
+	Actor     string
+	Attrs     map[string]any
 }
+const BusinessEventBillingTrustChanged = "billing.trust_changed"
+const BusinessEventPurchaseLimitRefused = "checkout.purchase_limit_refused"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
 type CPUClass struct {

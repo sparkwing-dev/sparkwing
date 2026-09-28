@@ -108,7 +108,7 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 		return "", err
 	}
 	if err := refuseAbovePurchaseLimitTx(ctx, tx, t.team, amountMicro, now); err != nil {
-		return "", t.commitPurchaseRefusal(tx, err, now)
+		return "", t.commitPurchaseRefusal(tx, id, err, now)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credit_checkouts (id, team, amount_micro, opened_at, expires_at)
@@ -120,13 +120,13 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 
 // safety: a refused purchase is recorded as a business event, so the refusal
 // commits rather than rolling back with the checkout it refused.
-func (t *Tenant) commitPurchaseRefusal(tx *storeTx, refusal error, now time.Time) error {
+func (t *Tenant) commitPurchaseRefusal(tx *storeTx, checkoutID string, refusal error, now time.Time) error {
 	var limit *PurchaseLimitError
 	if !errors.As(refusal, &limit) {
 		return refusal
 	}
 	if err := RecordBusinessEvent(tx, BusinessEvent{
-		Kind: "purchase_limit_refused", Team: t.team, At: now,
+		Kind: BusinessEventPurchaseLimitRefused, Team: t.team, SubjectID: checkoutID, At: now,
 		Attrs: map[string]any{
 			"trusted": limit.Trusted, "limit_cents": limit.LimitMicro / MicroCreditsPerCent,
 			"purchased_cents": limit.PurchasedMicro / MicroCreditsPerCent,
