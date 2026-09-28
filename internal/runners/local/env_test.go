@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
+
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -174,5 +176,28 @@ func TestChildEnv_DropsTheParentRunSelectionFromNodeProcesses(t *testing.T) {
 	}
 	if got, ok := lastValue(env, "PATH"); !ok || got != "/usr/bin" {
 		t.Fatalf("PATH = %q (found %v), want unrelated environment preserved", got, ok)
+	}
+}
+
+func TestChildEnv_HandsOnOnlyTheKeyThisProcessHolds(t *testing.T) {
+	t.Cleanup(secretkeyenv.Forget)
+	base := []string{"PATH=/usr/bin", "SPARKWING_SECRETS_KEY=from-base", "SPARKWING_SECRETS_PREVIOUS_KEY=from-base"}
+	env := childEnv(context.Background(), base, testConfig(), runner.Request{RunID: "run-1", NodeID: "build"})
+	for _, name := range secretkeyenv.Names {
+		if v, ok := lastValue(env, name); ok {
+			t.Errorf("%s = %q reached the node from the base environment", name, v)
+		}
+	}
+
+	t.Setenv("SPARKWING_SECRETS_KEY", "held")
+	if err := secretkeyenv.Hold(); err != nil {
+		t.Fatal(err)
+	}
+	env = childEnv(context.Background(), base, testConfig(), runner.Request{RunID: "run-1", NodeID: "build"})
+	if v, _ := lastValue(env, "SPARKWING_SECRETS_KEY"); v != "held" {
+		t.Errorf("SPARKWING_SECRETS_KEY = %q, want the key this process held for the node", v)
+	}
+	if v, ok := lastValue(env, "SPARKWING_SECRETS_PREVIOUS_KEY"); ok {
+		t.Errorf("SPARKWING_SECRETS_PREVIOUS_KEY = %q, want it absent", v)
 	}
 }

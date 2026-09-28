@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -41,8 +42,11 @@ type WingdOptions struct {
 	// ArtifactStoreError is why no artifact store resolved. The daemon serves
 	// without artifact routes and reports the reason in its handshake.
 	ArtifactStoreError string
-	Logger             *slog.Logger
-	Logf               func(format string, args ...any)
+	// Secrets seals and opens the secrets the controller API stores. Nil
+	// loads this machine's keyring when the daemon starts.
+	Secrets *localsecrets.Keyring
+	Logger  *slog.Logger
+	Logf    func(format string, args ...any)
 }
 
 // RunWingdDaemon runs the admission daemon until ctx ends or it idles out.
@@ -62,6 +66,14 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 		admissionPolicy = *opts.AdmissionPolicy
 		admissionSource = opts.AdmissionPolicySource
 	}
+	ring := opts.Secrets
+	if ring == nil {
+		loaded, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{ClearEnv: true, Create: true})
+		if err != nil {
+			return fmt.Errorf("local secrets key: %w", err)
+		}
+		ring = loaded
+	}
 	runs, err := NewHeldRunStore(opts.Home)
 	if err != nil {
 		return err
@@ -71,7 +83,7 @@ func runWingdDaemon(ctx context.Context, opts WingdOptions, tune func(*wingd.Con
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger)
+	api := newWingdAPI(runs, opts.ArtifactStore, opts.Logger, ring)
 	cfg := wingd.Config{
 		Home:               opts.Home,
 		Version:            opts.Version,

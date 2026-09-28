@@ -277,6 +277,7 @@ type ObjectStoreBreakerResponse struct {
 
 	Thawed bool
 }
+func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
 type PoolConfig struct {
 	Client kubernetes.Interface
@@ -335,6 +336,7 @@ const ScopeTeamAdmin = "team.admin"
 const ScopeTriggersClaim = "triggers.claim"
 const ScopeTriggersRead = "triggers.read"
 func ScopesForRole(role store.Role) []string
+func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error)
 func Serve(ctx context.Context, st *store.Store, addr string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {

@@ -97,7 +97,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `doctor` | Diagnose and repair local state, including unsafe private-home permissions and records whose processes have exited |
 | `cloud` | Connect this machine to a controller: connect / status / disconnect |
 | `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
-| `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
+| `secrets` | Secrets in the local store, or controller-stored with `--profile`: set / get / list / delete / rotate |
 | `configure` | Laptop-local config: init / profiles / xrepo |
 | `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
 | `docs` | The embedded copy of this doc tree: list / read / all / search |

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -47,6 +48,10 @@ func startLoopbackController(
 	if logger == nil {
 		logger = loopbackLogger()
 	}
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("loopback controller: local secrets key: %w", err)
+	}
 	// safety: node processes write terminal state, events, and outputs, all of
 	// which the controller gates behind admin. The token's blast radius
 	// is bounded by the loopback bind and by revocation at run end
@@ -60,6 +65,7 @@ func startLoopbackController(
 
 	srvHandler := controller.New(st, logger).
 		WithArtifactStore(art).
+		WithSecretsCipher(ring.For(st)).
 		WithAuthenticator(controller.NewAuthenticator(st, loopbackAuthCacheTTL)).
 		WithLocalExecution().
 		Handler()

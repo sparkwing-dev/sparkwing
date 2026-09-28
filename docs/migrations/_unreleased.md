@@ -15,7 +15,9 @@ instead of one file per setting. Each old file becomes a section:
 | `profiles.yaml` | `profiles` (the file's `profiles:` map) |
 | `repos.yaml` | `repos` (same keys, `repos` and `fallback_paths`) |
 
-`secrets.env`, `config.env` and `version-hold` stay where they are.
+`version-hold` stays where it is. `secrets.env` and `config.env` are replaced
+by the local secret store in `state.db`; see
+[Local secrets in state.db](#local-secrets-in-statedb).
 
 **Automatic copy.** The first command that reads or writes settings copies
 each old file it finds into its section of `config.yaml`, written owner-only,
@@ -90,6 +92,66 @@ and refuses when an `agent` section already exists.
 
 **Daemon flag.** The internal `sparkwing wingd run --admission-config` flag is
 gone; the daemon reads the `admission` section.
+
+## Local secrets in state.db
+
+`sparkwing secrets` without `--profile`, local runs and the dashboard (`sparkwing serve`) keep
+this machine's secrets in the `secrets` table of `state.db` in
+`SPARKWING_HOME`, instead of `~/.config/sparkwing/secrets.env` (masked) and
+`config.env` (`--plain`). The sparkwing daemon serves them on its API socket
+and starts when a command needs it. Every value is sealed with the
+controller's cipher.
+
+**The key.** The daemon creates `~/.config/sparkwing/secrets.key`
+(or `$XDG_CONFIG_HOME/sparkwing/secrets.key`), 32 random bytes, owner-only, on
+the first stored secret; the dashboard (`sparkwing serve`) and runs never create it, so store
+the first secret with `sparkwing secrets set`. A key file that others can read
+or that is a symlink is refused.
+`SPARKWING_SECRETS_KEY` (base64 of 32 bytes, as for `sparkwing-controller`)
+overrides the file, and `SPARKWING_SECRETS_KEY_FILE` moves it. Set them where
+the daemon starts, then run `sparkwing daemon restart`. Back up `secrets.key`
+with `state.db`; losing it loses every local secret. Sparkwing refuses to
+create a new key while `state.db` holds values sealed under another one.
+
+**Automatic import.** The daemon imports both dotenv files the first time it
+opens `state.db`, and `sparkwing secrets` and local runs ask it to whenever
+the files exist. Each name becomes an unscoped secret shared with every
+pipeline; a name in both files imports once, masked. A name the store already
+holds keeps the store's value, and the import names it. Each file's import is
+recorded, so a secret deleted afterwards stays deleted. The files are not
+changed, so an older sparkwing on the machine keeps reading them. The notice
+`imported N secrets from <file>; <file> is no longer read and can be deleted`
+prints once per file; delete the file once no older sparkwing needs it. The
+automatic import will be removed in a later release; after that, the files
+are ignored.
+
+**Path overrides.** `SPARKWING_SECRETS` and `SPARKWING_CONFIG_ENV` no longer
+name a file, and the import skips both files while either is set. Add those
+values by hand:
+
+```bash
+sparkwing secrets set --name API_TOKEN --file ./token
+sparkwing secrets set --name REGION --value us-east-1 --plain
+```
+
+A command running under a `SPARKWING_HOME` of its own keeps its secrets in
+that home's `state.db`, does not import the machine's files, and refuses to
+create the machine's key; point `SPARKWING_SECRETS_KEY_FILE` inside the home.
+
+**`sparkwing serve --allow-remote`.** The dashboard now manages local secrets
+without an account, so a remote bind lets every host that reaches it read,
+write and delete them; the server warns at startup. A browser origin on
+another loopback port is refused unless it is the dev server's port 3100.
+
+**Pipeline steps.** A pipeline binary takes `SPARKWING_SECRETS_KEY` and
+`SPARKWING_SECRETS_PREVIOUS_KEY` out of its environment before any pipeline
+code runs and hands them only to the daemon and its own node processes, so a
+step and the commands it starts no longer see them.
+
+**An older daemon.** A daemon from an earlier release stores values
+unencrypted, so `sparkwing secrets set` refuses to write through it and asks
+for `sparkwing daemon restart`. A run no daemon hosts reads `state.db`
+directly with the same key.
 
 ## Schema 73: trigger credit cursor
 

@@ -12,8 +12,9 @@ import (
 // custom ciphers without depending on sparkwing's secrets package.
 //
 // The default implementation lives in internal/secrets and is used by
-// cmd/sparkwing-controller. pkg/localws configures no cipher, so a
-// laptop controller stores secret values as plaintext.
+// cmd/sparkwing-controller. The laptop's controllers (the admission
+// daemon's API and pkg/localws) use a wrapper around it that creates the
+// machine's key on the first seal.
 // External consumers building their own Server can pass nil to
 // WithSecretsCipher (cipher-backed routes accept plaintext only) or
 // supply any type whose method set matches this interface.
@@ -75,6 +76,20 @@ type secretBinding struct {
 
 func bindingForRow(team store.Team, sec *store.Secret) secretBinding {
 	return secretBinding{Team: team, Name: sec.Name, Scope: sec.Pipeline, Shared: sec.Shared, Masked: sec.Masked}
+}
+
+// SealSecretValue seals plain for the secrets row sec in team exactly as the
+// secrets routes do, so a caller writing rows around the routes, such as an
+// import, stores envelopes the routes open. sec.Value is ignored.
+func SealSecretValue(c Cipher, team store.Team, sec *store.Secret, plain string) (string, error) {
+	return sealSecret(c, bindingForRow(team, sec), plain)
+}
+
+// OpenSecretValue opens the stored value of the secrets row sec in team as
+// the secrets routes do, for a reader that holds the store and the key
+// without a controller in front of them.
+func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error) {
+	return openSecret(c, bindingForRow(team, sec), sec.Value)
 }
 
 func sealSecret(c Cipher, b secretBinding, plain string) (string, error) {

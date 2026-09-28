@@ -6,9 +6,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -42,30 +44,37 @@ func init() {
 	register("secret-reader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &secretReaderPipe{} })
 }
 
-// safety: the dotenv writers refuse a store outside the sparkwing home unless
-// the operator named the file, and a test binary's home is the test sandbox.
-func seedLocalSecret(t *testing.T, path, name, value string) string {
+func seedLocalSecret(t *testing.T, p orchestrator.Paths, name, value string) {
 	t.Helper()
-	if path == "" {
-		path = filepath.Join(t.TempDir(), "secrets.env")
+	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
+	t.Setenv(localsecrets.KeyEnv, "")
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+	if err != nil {
+		t.Fatalf("load keyring: %v", err)
 	}
-	t.Setenv(secrets.SecretsPathEnv, path)
-	if err := secrets.WriteDotenvEntry(path, name, value); err != nil {
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	row := store.Secret{Name: name, Masked: true, Shared: true}
+	sealed, err := controller.SealSecretValue(ring.For(st), store.DefaultTeam, &row, value)
+	if err != nil {
+		t.Fatalf("seal %s: %v", name, err)
+	}
+	row.Value = sealed
+	if err := st.CreateOrReplaceSecret(row, time.Now()); err != nil {
 		t.Fatalf("seed %s: %v", name, err)
 	}
-	return path
 }
 
-func TestSecret_ResolvesFromDotenvSource(t *testing.T) {
-	dir := t.TempDir()
-	dotenvPath := filepath.Join(dir, "secrets.env")
-	seedLocalSecret(t, dotenvPath, "TOKEN", "abc123")
+func TestSecret_ResolvesFromTheLocalStoreWithoutADaemon(t *testing.T) {
+	p := newPaths(t)
+	seedLocalSecret(t, p, "TOKEN", "abc123")
 
 	observedToken = ""
-	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:     "secret-reader",
-		SecretSource: secrets.NewDotenvSource(dotenvPath),
+		Pipeline: "secret-reader",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -79,15 +88,12 @@ func TestSecret_ResolvesFromDotenvSource(t *testing.T) {
 }
 
 func TestSecret_MissingNameFailsTheJob(t *testing.T) {
-	dir := t.TempDir()
-	dotenvPath := filepath.Join(dir, "secrets.env")
-	seedLocalSecret(t, dotenvPath, "OTHER", "1")
+	p := newPaths(t)
+	seedLocalSecret(t, p, "OTHER", "1")
 
 	observedToken = "before"
-	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:     "secret-reader",
-		SecretSource: secrets.NewDotenvSource(dotenvPath),
+		Pipeline: "secret-reader",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
@@ -163,16 +169,13 @@ func init() {
 }
 
 func TestSecret_MaskerRedactsResolvedValues(t *testing.T) {
-	dir := t.TempDir()
-	dotenvPath := filepath.Join(dir, "secrets.env")
-	seedLocalSecret(t, dotenvPath, "TOKEN", "supersecret")
+	p := newPaths(t)
+	seedLocalSecret(t, p, "TOKEN", "supersecret")
 
 	cap := &captureLogger{}
-	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:     "secret-leaker",
-		SecretSource: secrets.NewDotenvSource(dotenvPath),
-		Delegate:     cap,
+		Pipeline: "secret-leaker",
+		Delegate: cap,
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

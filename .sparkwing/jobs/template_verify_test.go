@@ -161,17 +161,13 @@ func TestSeedMigrations_WritesReversiblePair(t *testing.T) {
 	}
 }
 
-func TestWriteMaskedSecret_LandsInScratchDotenv(t *testing.T) {
-	home := t.TempDir()
-	if err := writeMaskedSecret(home, "DATABASE_URL", "postgres://x"); err != nil {
-		t.Fatal(err)
+func TestTemplateSecretsEnv_KeepsTheKeyInTheSharedStateHome(t *testing.T) {
+	env := templateSecretsEnv("/state", "/scratch/home")
+	if env["SPARKWING_HOME"] != "/state" || env["HOME"] != "/scratch/home" {
+		t.Fatalf("env = %v, want the state home and the scratch home", env)
 	}
-	body, err := os.ReadFile(filepath.Join(home, ".config", "sparkwing", "secrets.env"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), "DATABASE_URL=postgres://x") {
-		t.Fatalf("secret not written: %q", body)
+	if got := env["SPARKWING_SECRETS_KEY_FILE"]; got != filepath.Join("/state", "secrets.key") {
+		t.Fatalf("key file = %q, want it inside the shared state home", got)
 	}
 }
 

@@ -691,12 +691,15 @@ func provisionFixture(ctx context.Context, scratch string, m templates.Manifest,
 		return noop, nil, err
 	}
 	secretName := valueOr(m.VerifyParams["dsn-secret"], "DATABASE_URL")
-	home := filepath.Join(scratch, "home")
-	if err := writeMaskedSecret(home, secretName, dsn); err != nil {
-		cleanup()
-		return noop, nil, err
+	runEnv := templateSecretsEnv(env.StateHome, filepath.Join(scratch, "home"))
+	set := sparkwing.Exec(ctx, env.CLI, "secrets", "set", "--name", secretName, "--value", dsn)
+	for _, k := range sortedKeys(runEnv) {
+		set = set.Env(k, runEnv[k])
 	}
-	runEnv := map[string]string{"HOME": home}
+	if _, err := set.Run(); err != nil {
+		cleanup()
+		return noop, nil, fmt.Errorf("store %s: %w", secretName, err)
+	}
 	for k, v := range env.GoEnv {
 		runEnv[k] = v
 	}
@@ -772,12 +775,15 @@ func freeTCPPort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-func writeMaskedSecret(home, name, value string) error {
-	dir := filepath.Join(home, ".config", "sparkwing")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+// safety: the key file sits in the state home every template's run shares, so
+// each template's secret is sealed under one key, and a later template is not
+// refused a key for finding an earlier one's sealed rows.
+func templateSecretsEnv(stateHome, home string) map[string]string {
+	return map[string]string{
+		"HOME":                       home,
+		"SPARKWING_HOME":             stateHome,
+		"SPARKWING_SECRETS_KEY_FILE": filepath.Join(stateHome, "secrets.key"),
 	}
-	return os.WriteFile(filepath.Join(dir, "secrets.env"), []byte(name+"="+value+"\n"), 0o600)
 }
 
 func seedDocker(root string) error {

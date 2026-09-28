@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/secretkeyenv"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -27,7 +28,10 @@ func childEnv(ctx context.Context, base []string, cfg Config, req runner.Request
 	if cfg.APISocket != "" {
 		drop = append(drop, tokenEnvNames...)
 	}
-	base = withoutEnv(base, drop)
+	// safety: the node process takes the key into memory before any step
+	// runs, so only the copy this process holds is handed on, never one a
+	// caller's base environment carries.
+	base = secretkeyenv.Environ(secretkeyenv.Without(withoutEnv(base, drop)))
 	env = append(env, base...)
 
 	set := func(k, v string) {

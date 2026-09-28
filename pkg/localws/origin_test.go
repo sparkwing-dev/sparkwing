@@ -28,6 +28,7 @@ func TestOriginGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 		allowRemote  bool
 		bindHost     string
 		allowOrigins []string
+		contentType  string
 		want         int
 	}{
 		{name: "cli has no browser headers", method: http.MethodPost, host: "127.0.0.1:4343", want: http.StatusOK},
@@ -118,6 +119,33 @@ func TestOriginGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 			name: "wildcard bind anchors no origin", method: http.MethodPost, host: "10.0.0.9:4343",
 			origin: "http://10.0.0.9:4343", allowRemote: true, want: http.StatusForbidden,
 		},
+		{
+			name: "another loopback port is another program", method: http.MethodPost, host: "127.0.0.1:4343",
+			origin: "http://localhost:8080", secFetch: "same-site", want: http.StatusForbidden,
+		},
+		{
+			name: "loopback origin with no port is not this server", method: http.MethodPost, host: "127.0.0.1:4343",
+			origin: "http://localhost", secFetch: "same-site", want: http.StatusForbidden,
+		},
+		{
+			name: "browser text/plain write", method: http.MethodPost, host: "127.0.0.1:4343",
+			origin: "http://127.0.0.1:4343", secFetch: "same-origin", contentType: "text/plain",
+			want: http.StatusUnsupportedMediaType,
+		},
+		{
+			name: "browser form write", method: http.MethodDelete, host: "127.0.0.1:4343",
+			origin: "http://127.0.0.1:4343", secFetch: "same-origin", contentType: "application/x-www-form-urlencoded",
+			want: http.StatusUnsupportedMediaType,
+		},
+		{
+			name: "browser json write with charset", method: http.MethodPost, host: "127.0.0.1:4343",
+			origin: "http://127.0.0.1:4343", secFetch: "same-origin", contentType: "application/json; charset=utf-8",
+			want: http.StatusOK,
+		},
+		{
+			name: "cli text write carries no origin", method: http.MethodPost, host: "127.0.0.1:4343",
+			contentType: "text/plain", want: http.StatusOK,
+		},
 	}
 
 	for _, tc := range cases {
@@ -126,13 +154,19 @@ func TestOriginGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 			guard := originGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}), originPolicy{
-				allowRemote:  tc.allowRemote,
-				bindHost:     tc.bindHost,
-				allowOrigins: tc.allowOrigins,
+				allowRemote:   tc.allowRemote,
+				bindHost:      tc.bindHost,
+				loopbackPorts: []string{"4343", devServerPort},
+				allowOrigins:  tc.allowOrigins,
 			})
 
 			req := httptest.NewRequest(tc.method, "/api/v1/triggers", strings.NewReader("{}"))
 			req.Host = tc.host
+			contentType := tc.contentType
+			if contentType == "" {
+				contentType = "application/json"
+			}
+			req.Header.Set("Content-Type", contentType)
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
 			}

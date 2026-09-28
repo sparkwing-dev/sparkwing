@@ -47,7 +47,7 @@ Set up ~/.config/sparkwing/ and report laptop-level config status
 Idempotent setup + status command for laptop-level
 sparkwing config. Creates ~/.config/sparkwing/ if it doesn't exist,
 then reports which config files are present (config.yaml,
-secrets.env), the running CLI + Go toolchain version,
+secrets.key), the running CLI + Go toolchain version,
 and a curated list of next-step commands.
 
 Pairs with the per-project flow: use this one on a fresh laptop

@@ -5,18 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func setCoordinatedControllerProfile(t *testing.T, controllerURL string) {
@@ -33,6 +34,30 @@ profiles:
 	t.Setenv("SPARKWING_PROFILE", "remote")
 }
 
+func seedStoreSecret(t *testing.T, dbPath, name, value string) {
+	t.Helper()
+	t.Setenv(localsecrets.KeyFileEnv, filepath.Join(t.TempDir(), "secrets.key"))
+	t.Setenv(localsecrets.KeyEnv, "")
+	ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Create: true})
+	if err != nil {
+		t.Fatalf("load keyring: %v", err)
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	row := store.Secret{Name: name, Masked: true, Shared: true}
+	sealed, err := controller.SealSecretValue(ring.For(st), store.DefaultTeam, &row, value)
+	if err != nil {
+		t.Fatalf("seal %s: %v", name, err)
+	}
+	row.Value = sealed
+	if err := st.CreateOrReplaceSecret(row, time.Now()); err != nil {
+		t.Fatalf("seed %s: %v", name, err)
+	}
+}
+
 func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.T) {
 	var requests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -44,17 +69,11 @@ func TestCoordinatedChildSurfaces_LocalOnlyNeverOpensProfileBackends(t *testing.
 	t.Setenv("SPARKWING_LOCAL_ONLY", "1")
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", "")
-	secretsDir := filepath.Join(home, ".config", "sparkwing")
-	if err := os.MkdirAll(secretsDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(secretsDir, "secrets.env"), []byte("TOKEN=local-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv(wingwire.APISocketEnv, "")
+	seedStoreSecret(t, filepath.Join(home, "state.db"), "TOKEN", "local-token")
 
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
 	if err != nil {
 		t.Fatalf("coordinatedChildSurfaces: %v", err)
 	}
@@ -89,7 +108,7 @@ func TestCoordinatedChildSurfaces_ProfileBackendsRemainRemoteWithoutLocalOnly(t 
 	setCoordinatedControllerProfile(t, srv.URL)
 	t.Setenv("SPARKWING_LOCAL_ONLY", "")
 
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
 	if err != nil {
 		t.Fatalf("coordinatedChildSurfaces: %v", err)
 	}
@@ -120,7 +139,7 @@ func TestCoordinatedChildSurfaces_UnreachableProfileStillFailsWithoutLocalOnly(t
 	setCoordinatedControllerProfile(t, controllerURL)
 	t.Setenv("SPARKWING_LOCAL_ONLY", "")
 
-	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "gate")
+	source, art, logs, err := coordinatedChildSurfaces(context.Background(), "run-1", "gate")
 	if err != nil {
 		t.Fatalf("opening remote clients: %v", err)
 	}

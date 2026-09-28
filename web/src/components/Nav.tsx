@@ -8,27 +8,7 @@ import { readCSRFCookie } from "@/lib/csrfCookie";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
 import { useTeamState } from "@/lib/useTeam";
-
-type Tab = { href: string; label: string; external?: boolean };
-
-const tabs: Tab[] = [
-  { href: "/", label: "Home" },
-  { href: "/runs", label: "Runs" },
-  { href: "/queue", label: "Queue" },
-  { href: "/crons", label: "Crons" },
-  { href: "/capacity", label: "Capacity" },
-  { href: "/cluster", label: "Fleet" },
-  { href: "/analytics", label: "Analytics (preview)" },
-  { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
-];
-
-const teamTab: Tab = { href: "/team", label: "Team" };
-const cloudTabs: Tab[] = [
-  { href: "/", label: "Home" },
-  { href: "/runs", label: "Runs" },
-  { href: "/cluster", label: "Compute" },
-  { href: "/crons", label: "Crons" },
-];
+import { navTabs } from "@/lib/navTabs";
 
 const APPROVALS_POLL_MS = 10_000;
 
@@ -39,12 +19,7 @@ export default function Nav() {
   const [pending, setPending] = useState<Approval[]>([]);
   const [open, setOpen] = useState(false);
   const team = useTeamState();
-  const visibleTabs =
-    team.status === "single-team"
-      ? tabs
-      : team.status === "ready"
-        ? [...cloudTabs, teamTab]
-        : cloudTabs;
+  const visibleTabs = navTabs(team.status);
 
   useEffect(() => {
     let cancelled = false;

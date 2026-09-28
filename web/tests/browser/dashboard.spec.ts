@@ -1876,6 +1876,7 @@ test("keeps every public dashboard navigation target routable", async ({
     ["Crons", "Crons"],
     ["Capacity", "Capacity"],
     ["Fleet", "Fleet"],
+    ["Secrets", "Secrets and variables"],
     ["Analytics (preview)", "Analytics"],
   ] as const;
   await page.goto("/");
@@ -1892,6 +1893,50 @@ test("keeps every public dashboard navigation target routable", async ({
   await expect(docs).toHaveAttribute("href", "https://sparkwing.dev/docs/");
   await expect(docs).toHaveAttribute("target", "_blank");
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toHaveCount(0);
+});
+
+test("manages local secrets without an account", async ({ page }) => {
+  await installMockAPI(page);
+  const stored: Record<string, unknown>[] = [];
+  const writes: unknown[] = [];
+  await page.route("**/api/v1/secrets", async (route) => {
+    if (route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      writes.push(body);
+      stored.push({
+        name: body.name,
+        masked: body.masked,
+        shared: body.shared,
+        value: body.masked ? undefined : body.value,
+        principal: "local",
+        bound: true,
+        created_at: 1,
+        updated_at: 1,
+      });
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    await route.fulfill({ json: { secrets: stored } });
+  });
+  await page.goto("/secrets");
+  await expect(
+    page.getByRole("heading", { name: "Secrets and variables", level: 1 }),
+  ).toBeVisible();
+  await page.getByLabel("Name", { exact: true }).fill("DEPLOY_KEY");
+  await page.getByLabel("Value", { exact: true }).fill("hunter2");
+  await page.getByRole("button", { name: "Save secret" }).click();
+  await expect(page.getByText("DEPLOY_KEY", { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Every pipeline · updated/)).toBeVisible();
+
+  await page.getByRole("radio", { name: /^Variable/ }).check();
+  await page.getByLabel("Name", { exact: true }).fill("REGION");
+  await page.getByLabel("Value", { exact: true }).fill("us-west-2");
+  await page.getByRole("button", { name: "Save variable" }).click();
+  await expect(page.getByText("us-west-2", { exact: true })).toBeVisible();
+  expect(writes).toEqual([
+    { name: "DEPLOY_KEY", value: "hunter2", masked: true, shared: true },
+    { name: "REGION", value: "us-west-2", masked: false, shared: true },
+  ]);
 });
 
 test("Overview and Compute do not request or show service probes", async ({ page }) => {

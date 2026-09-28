@@ -720,9 +720,6 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, fmt.Errorf("ensure sparkwing root: %w", err)
 	}
-	if opts.LocalOnly || opts.SecretSource == nil {
-		opts.SecretSource = secrets.NewDotenvSource("")
-	}
 	if opts.DefaultStateDB == "" {
 		opts.DefaultStateDB = paths.StateDB()
 	}
@@ -814,6 +811,9 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (res *Result, err 
 	}
 	if opts.RunID == "" {
 		opts.RunID = newRunID()
+	}
+	if opts.LocalOnly || opts.SecretSource == nil {
+		opts.SecretSource = localRunSecrets(ctx, paths, opts, hosted, selection)
 	}
 	if err := paths.EnsureRunDir(opts.RunID); err != nil {
 		return nil, fmt.Errorf("ensure run dir: %w", err)

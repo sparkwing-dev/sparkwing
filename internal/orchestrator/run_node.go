@@ -118,7 +118,7 @@ func RunNodeOnce(
 		// safety: rebuild local surfaces; a laptop run's secrets and artifact
 		// store do not belong to the pod's controller-backed profile.
 		var profileLogs LogBackend
-		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, run.Pipeline)
+		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, runID, run.Pipeline)
 		if err != nil {
 			return runner.Result{}, err
 		}

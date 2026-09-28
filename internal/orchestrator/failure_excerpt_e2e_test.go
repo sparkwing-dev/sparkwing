@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -59,11 +58,10 @@ func init() {
 
 func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	p := newPaths(t)
-	dotenv := seedLocalSecret(t, "", "DEPLOY_TOKEN", excerptSecretValue)
+	seedLocalSecret(t, p, "DEPLOY_TOKEN", excerptSecretValue)
 
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:     "excerpt-fail",
-		SecretSource: secrets.NewDotenvSource(dotenv),
+		Pipeline: "excerpt-fail",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)

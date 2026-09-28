@@ -397,8 +397,8 @@ the team runs.
 ## Forcing local mode for a single run
 
 `sparkwing run <pipeline> --sw-local-only` ignores the shared surfaces in any
-resolved profile and pins secrets, state, cache, and logs to the local dotenv,
-SQLite, and filesystem layout. Useful for ad-hoc work that shouldn't appear in
+resolved profile and pins secrets, state, cache, and logs to the local secret
+store, SQLite, and filesystem layout. Useful for ad-hoc work that shouldn't appear in
 the team dashboard, or for reproducing an issue against known-clean local
 state.
 
