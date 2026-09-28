@@ -177,6 +177,8 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 	if err != nil {
 		return nil, err
 	}
+	var alternates []Executor
+	alternatesLoaded := false
 	cursor := s.loadExecutorPrepareCursor(executorName, runID)
 	page, err := s.loadExecutorPrepareCandidates(ctx, runID, executorName, now, cursor, scope)
 	if err != nil {
@@ -246,7 +248,13 @@ func (s *Store) prepareNextExecutorClaim(ctx context.Context, claimant ClaimIden
 		}
 		if item.avoidUntil.Valid && time.Unix(0, item.avoidUntil.Int64).After(now) &&
 			item.avoidCoordinatorID == coordinatorID && item.avoidExecutorKind == executor.Kind && item.avoidExecutorID == executor.id {
-			if hasAlternateEligibleExecutorSnapshot(executors, usage, executor.Name, summary, activeAfter, coordinatorID) {
+			if !alternatesLoaded {
+				if alternates, err = s.teamExecutors(ctx, executors, scope.team); err != nil {
+					return nil, err
+				}
+				alternatesLoaded = true
+			}
+			if hasAlternateEligibleExecutorSnapshot(alternates, usage, executor.Name, summary, activeAfter, coordinatorID) {
 				continue
 			}
 		}
@@ -1344,4 +1352,90 @@ func (s *Store) finalizeExecutorClaimRoundAt(ctx context.Context, runID, nodeID 
 		return ExecutorClaimRoundResult{}, err
 	}
 	return ExecutorClaimRoundResult{Revoked: changed == 1}, nil
+}
+
+// offerRoundIdleTx reports whether nothing but the coordinator could take
+// the node: no queue runner of the run's team satisfies it and no GitHub
+// Actions job of the run's commit holds a live credential. The caller has
+// already found no eligible executor of the team.
+func (s *Store) offerRoundIdleTx(ctx context.Context, tx *storeTx, runID string, summary ExecutorSchedulingSummary,
+	class int64, now time.Time,
+) (bool, error) {
+	live, _ := ctx.Value(queueRunnersKey{}).([]RunnerPresence)
+	if len(live) == 0 || summary.RequiredCoordinatorID != "" || summary.RequiredLocation != "" {
+		return false, nil
+	}
+	team, _, err := runOwnerTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	warmCores, err := creditSettingTx(ctx, tx, metaKeyWarmCPUClass, DefaultWarmCPUClassCores)
+	if err != nil {
+		return false, err
+	}
+	metered, err := meteredRunnerTokensTx(ctx, tx, team, live)
+	if err != nil {
+		return false, err
+	}
+	for _, runner := range live {
+		isMetered, sameTeam := metered[runner.TokenPrefix]
+		if !sameTeam || !labelsSatisfied(summary.HardCapabilities, newClaimLabels(runner.Labels).hard) {
+			continue
+		}
+		// safety: mirrors warmClassFilter, which refuses a metered runner a class above the warm one.
+		if isMetered && class != 0 && class > warmCores {
+			continue
+		}
+		return false, nil
+	}
+	// safety: a GitHub Actions job claims only its own push's runs and may
+	// still be starting, so a live credential for the commit keeps the window.
+	busy, err := rowPresentTx(ctx, tx, `SELECT 1 FROM github_runner_credentials c
+  JOIN tokens t ON t.team = ? AND t.prefix = c.prefix
+  JOIN triggers tr ON tr.team = ? AND tr.id = ?
+ WHERE c.team = ? AND c.sha = tr.git_sha AND c.expires_at > ?
+   AND (t.revoked_at IS NULL OR t.revoked_at > ?)
+   AND LOWER(t.principal) LIKE '%:' || LOWER(tr.github_owner) || '/' || LOWER(tr.github_repo) LIMIT 1`,
+		string(team), string(team), runID, string(team), now.Unix(), now.Unix())
+	return !busy, err
+}
+
+// meteredRunnerTokensTx maps each live runner credential of team to whether it
+// is metered. A credential of another team is absent.
+func meteredRunnerTokensTx(ctx context.Context, tx *storeTx, team Team, live []RunnerPresence) (_ map[string]bool, err error) {
+	metered := map[string]bool{}
+	// safety: an unauthenticated runner is the local path, which belongs to DefaultTeam.
+	if team == DefaultTeam {
+		metered[""] = false
+	}
+	args := []any{string(team)}
+	for _, runner := range live {
+		args = append(args, runner.TokenPrefix)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT prefix, metered FROM tokens WHERE team = ? AND prefix IN (`+
+		strings.TrimSuffix(strings.Repeat("?,", len(live)), ",")+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	for rows.Next() {
+		var prefix string
+		var flag int64
+		if err := rows.Scan(&prefix, &flag); err != nil {
+			return nil, err
+		}
+		metered[prefix] = flag != 0
+	}
+	return metered, rows.Err()
+}
+
+// safety: another team's executor can never take team's node, so it is no
+// alternate. A single-team install keeps every executor, because claimScope
+// gives that team the credentials no token row backs as well.
+func (s *Store) teamExecutors(ctx context.Context, executors []Executor, team Team) ([]Executor, error) {
+	teams, err := s.AsOperator().ListTeams(ctx)
+	if err != nil || len(teams) <= 1 {
+		return executors, err
+	}
+	return s.listExecutors(ctx, team, true)
 }

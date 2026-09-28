@@ -2170,7 +2170,11 @@ func (s *Server) handlePrepareNodeClaim(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
-	if err := s.store.MarkNodeReady(r.Context(), runID, nodeID); err != nil {
+	ctx := r.Context()
+	if s.placement.liveness > 0 {
+		ctx = store.WithQueueRunners(ctx, s.runnerPresence.live(time.Now(), s.placement.liveness, presenceKey{}))
+	}
+	if err := s.store.MarkNodeReady(ctx, runID, nodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
 			return

@@ -701,6 +701,13 @@ unlock.
 
 ### Changed
 
+- **controller + runner:** A node skips the five-second agent offer window
+  when nothing but its coordinator could claim it: no live eligible executor
+  of the run's team, no live queue runner of that team whose labels and CPU
+  class fit the node, and no live GitHub Actions credential for the run's
+  repository and commit. The warm pool then falls back on its first poll. A
+  controller that has heard from no runner, or runs without placement
+  liveness, keeps the window.
 - **cli + runner (Breaking):** Machine settings move into one file,
   `~/.config/sparkwing/config.yaml`, with `admission`, `agent`, `fleet`,
   `profiles` and `repos` sections replacing `admission.yaml`, `budget`,
@@ -950,6 +957,8 @@ unlock.
 - **controller:** An executor offer round now sets its priority target from the
   node's own team's executors. Another team's higher-priority executor no
   longer holds this team's best offer until the five-second deadline.
+  Retry avoidance also stops counting another team's executor as an
+  alternate, so the team's only executor can retake the node it lost.
 - **controller + runner (Breaking):** Metered trigger heartbeats now charge elapsed
   coordinator time beyond the 20-second reservation. Exhausted credits close
   the claim and fail the run; a ledger error refuses renewal. Runners stop on

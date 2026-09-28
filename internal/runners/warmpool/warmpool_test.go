@@ -654,3 +654,39 @@ func TestRunnerKeepsAnUnmatchableNodeInsideItsGrace(t *testing.T) {
 		t.Fatalf("result = %+v, want cancelled", result)
 	}
 }
+
+// A controller that has heard only from runners that cannot take the node
+// opens the round already due, so the fallback starts on the first poll
+// instead of after the offer window.
+func TestRunnerFallsBackAtOnceWhenNoLiveRunnerCanClaim(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending", NeedsLabels: []string{"gpu"}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, quietTestLogger()).
+		WithLocalFirstPlacement(nil, 0, time.Minute).Handler())
+	defer srv.Close()
+	ctrl := client.New(srv.URL, nil)
+	if n, err := ctrl.ClaimNode(ctx, "cpu-only", nil, time.Minute, nil); n != nil || (err != nil && !errors.Is(err, store.ErrNotFound)) {
+		t.Fatalf("idle claim poll = %+v, %v; want nothing to claim", n, err)
+	}
+	fallback := &fallbackRunner{labels: []string{"gpu"}}
+	r := New(ctrl, fallback, Config{PollInterval: 5 * time.Millisecond, ClaimWaitTimeout: 5 * time.Second}, quietTestLogger())
+
+	start := time.Now()
+	result := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if result.Outcome != sparkwing.Success || result.Err != nil || fallback.calls.Load() != 1 {
+		t.Fatalf("result = %+v, fallback calls = %d", result, fallback.calls.Load())
+	}
+	if waited := time.Since(start); waited >= 5*time.Second {
+		t.Fatalf("fallback waited %s, want it before the %s window", waited, 5*time.Second)
+	}
+}

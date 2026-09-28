@@ -645,35 +645,35 @@ func (s *Store) HighestActiveExecutorPriority(ctx context.Context, summary Execu
 		return 0, err
 	}
 	defer rollbackOrLog(tx)
-	return s.highestActiveExecutorPriorityTx(ctx, tx, summary, activeAfter, time.Now())
+	highest, _, err := s.highestActiveExecutorPriorityTx(ctx, tx, summary, activeAfter, time.Now())
+	return highest, err
 }
 
-func (s *Store) highestActiveExecutorPriorityTx(ctx context.Context, tx *storeTx, summary ExecutorSchedulingSummary, activeAfter, now time.Time) (int, error) {
+func (s *Store) highestActiveExecutorPriorityTx(ctx context.Context, tx *storeTx, summary ExecutorSchedulingSummary, activeAfter, now time.Time) (highest int, eligible bool, err error) {
 	team, _, err := runOwnerTx(ctx, tx, summary.RunID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	executors, err := loadExecutorsForSchedulingTx(ctx, tx, activeAfter, team)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	usage, err := loadExecutorUsageTx(ctx, tx, now)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	coordinatorID, err := coordinatorIDTx(ctx, tx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	highest := 0
 	for _, e := range executors {
 		used := usage.ByExecutor[e.Name]
 		reason := executorExclusionReason(e, summary, used.Active, used.Cores, used.MemoryBytes, activeAfter, coordinatorID)
 		if reason == "" {
-			highest = max(highest, executorEffectivePriority(e, summary))
+			highest, eligible = max(highest, executorEffectivePriority(e, summary)), true
 		}
 	}
-	return highest, nil
+	return highest, eligible, nil
 }
 
 type executorUsage struct {
