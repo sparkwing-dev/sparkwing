@@ -43,9 +43,19 @@ export default function Tooltip({ content, children }: TooltipProps) {
     timerRef.current = setTimeout(() => setShow(true), 500);
   };
 
-  const handleMouseLeave = () => {
+  const hide = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setShow(false);
+  };
+
+  // A tap focuses the trigger and then moves the mouse back to where it last
+  // was, so the pointer leaving must not close a tooltip that focus opened.
+  const handleMouseLeave = () => {
+    if (ref.current?.contains(document.activeElement)) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+    hide();
   };
 
   const xTransform =
@@ -70,7 +80,7 @@ export default function Tooltip({ content, children }: TooltipProps) {
       <span
         ref={ref}
         onFocus={() => setShow(true)}
-        onBlur={handleMouseLeave}
+        onBlur={hide}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
