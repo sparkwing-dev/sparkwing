@@ -43,8 +43,9 @@ func TestLogSealRunnerChild(t *testing.T) {
 		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: fmt.Sprintf("step %d", i)})
 	}
 	if mode == "killed" {
-		// Emit returns once the service has stored the line, so the parent
-		// can kill this process the moment it reads the marker.
+		if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+			t.Fatal(err)
+		}
 		fmt.Println(sealChildReady)
 		select {}
 	}

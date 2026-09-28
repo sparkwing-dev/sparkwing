@@ -204,6 +204,9 @@ func TestHTTPNodeLogMarshalFailureDropsOneLine(t *testing.T) {
 	}
 
 	nlog.Log("info", "the next line still ships")
+	if err := nlog.(interface{ FlushExecutionAttempt() error }).FlushExecutionAttempt(); err != nil {
+		t.Fatal(err)
+	}
 	mu.Lock()
 	got := appends
 	mu.Unlock()
