@@ -279,16 +279,48 @@ func TestWebhookGitHub_UnknownEventIgnored(t *testing.T) {
 }
 
 func prWebhookBody(action string, number int) []byte {
+	return prWebhookBodyFrom(action, number, `{"id": 7, "full_name": "acme/sample-app"}`)
+}
+
+func prWebhookBodyFrom(action string, number int, headRepo string) []byte {
 	return []byte(fmt.Sprintf(`{
 		"action": %q,
 		"number": %d,
 		"pull_request": {
-			"head": {"ref": "feature/login", "sha": "1111111111111111111111111111111111111111"},
-			"base": {"ref": "main", "sha": "2222222222222222222222222222222222222222"},
+			"head": {"ref": "feature/login", "sha": "1111111111111111111111111111111111111111", "repo": %s},
+			"base": {"ref": "main", "sha": "2222222222222222222222222222222222222222", "repo": {"id": 7, "full_name": "acme/sample-app"}},
 			"user": {"login": "bob"}
 		},
 		"repository": {"full_name": "acme/sample-app"}
-	}`, action, number))
+	}`, action, number, headRepo))
+}
+
+func TestWebhookGitHub_ForkPullRequestStartsNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.9s of real work; the fast class runs under -short")
+	}
+	for name, headRepo := range map[string]string{
+		"fork":         `{"id": 8, "full_name": "mallory/sample-app"}`,
+		"same name":    `{"id": 8, "full_name": "acme/sample-app"}`,
+		"deleted head": `null`,
+		"no id":        `{"full_name": "acme/sample-app"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts, st := newWebhookServer(t, testWebhookSecret)
+			body := prWebhookBodyFrom("opened", 42, headRepo)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/pr-gate", "pull_request", body, signWebhook(testWebhookSecret, body))
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusAccepted {
+				t.Fatalf("status=%d want 202", resp.StatusCode)
+			}
+			var decoded map[string]string
+			_ = json.NewDecoder(resp.Body).Decode(&decoded)
+			if decoded["status"] != "ignored" || !strings.Contains(decoded["reason"], "fork") {
+				t.Errorf("response = %v, want ignored as a fork", decoded)
+			}
+			expectNoTrigger(t, st)
+		})
+	}
 }
 
 func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {

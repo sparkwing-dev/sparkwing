@@ -159,7 +159,10 @@ pipelines:
 ```
 
 A `pull_request` trigger fires on the `opened`, `synchronize`, and
-`reopened` actions -- the ones that change the diff. Other actions
+`reopened` actions -- the ones that change the diff. A pull request whose
+head repository is not its base repository, or whose head repository was
+deleted, starts nothing: the controller acknowledges it as ignored, because
+a fork's code would run with the team's runner token and secrets in reach. Other actions
 (`labeled`, `closed`, `edited`, ...) are acknowledged and ignored, so a
 gate does not re-run every time someone relabels the PR. This default
 action set is applied by the controller; a configured `actions` field

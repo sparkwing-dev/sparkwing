@@ -856,8 +856,8 @@ func TestGitHubCommitStatusDispatchPanicReleasesReservation(t *testing.T) {
 		"action":"opened",
 		"number":42,
 		"pull_request":{
-			"head":{"ref":"feature","sha":"abc123"},
-			"base":{"ref":"main","sha":"def456"},
+			"head":{"ref":"feature","sha":"abc123","repo":{"id":7}},
+			"base":{"ref":"main","sha":"def456","repo":{"id":7}},
 			"user":{"login":"bob"}
 		},
 		"repository":{"full_name":"acme/sample-app"}
@@ -920,8 +920,8 @@ func TestGitHubCommitStatusesFollowWebhookRunLifecycle(t *testing.T) {
 		"action":"opened",
 		"number":42,
 		"pull_request":{
-			"head":{"ref":"feature/login","sha":"1111111111111111111111111111111111111111"},
-			"base":{"ref":"main","sha":"2222222222222222222222222222222222222222"},
+			"head":{"ref":"feature/login","sha":"1111111111111111111111111111111111111111","repo":{"id":7}},
+			"base":{"ref":"main","sha":"2222222222222222222222222222222222222222","repo":{"id":7}},
 			"user":{"login":"bob"}
 		},
 		"repository":{"full_name":"acme/sample-app"}
@@ -1012,8 +1012,8 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 		"action":"opened",
 		"number":7,
 		"pull_request":{
-			"head":{"ref":"feature","sha":"abc123"},
-			"base":{"ref":"main","sha":"def456"},
+			"head":{"ref":"feature","sha":"abc123","repo":{"id":7}},
+			"base":{"ref":"main","sha":"def456","repo":{"id":7}},
 			"user":{"login":"bob"}
 		},
 		"repository":{"full_name":"acme/sample-app"}
@@ -1265,8 +1265,8 @@ func TestGitHubCommitStatus_ATeamBindingPostsNoStatus(t *testing.T) {
 	deliver := func(repo, secret, delivery string) string {
 		t.Helper()
 		body := []byte(`{"action":"opened","number":1,` +
-			`"pull_request":{"head":{"ref":"f","sha":"1111111111111111111111111111111111111111"},` +
-			`"base":{"ref":"main","sha":"2222222222222222222222222222222222222222"},"user":{"login":"x"}},` +
+			`"pull_request":{"head":{"ref":"f","sha":"1111111111111111111111111111111111111111","repo":{"id":7}},` +
+			`"base":{"ref":"main","sha":"2222222222222222222222222222222222222222","repo":{"id":7}},"user":{"login":"x"}},` +
 			`"repository":{"full_name":"` + repo + `"}}`)
 		req, err := http.NewRequest(http.MethodPost, controller.URL+"/webhooks/github/pr-gate", bytes.NewReader(body))
 		if err != nil {

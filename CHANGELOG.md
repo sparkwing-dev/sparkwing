@@ -1498,6 +1498,13 @@ unlock.
 
 ### Security
 
+- **controller:** `POST /webhooks/github/{pipeline}` no longer runs a pull
+  request from a fork. A `pull_request` delivery whose head repository is not
+  its base repository, or whose head repository was deleted, answers `202`
+  with `"status": "ignored"` and starts nothing, as the GitHub App path already
+  did. A fork's code no longer runs with the team's runner token, secrets or
+  OIDC identity.
+
 - **controller + runner:** A metered node stops when its heartbeat cannot read
   the token marker or charge credits. The failed renewal preserves the prior
   lease and ledger state.

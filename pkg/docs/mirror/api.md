@@ -74,7 +74,8 @@ legacy cache binaries when direct uploads are active. See
 `POST /webhooks/github/{pipeline}` ingests GitHub deliveries. It is
 verified by HMAC (`X-Hub-Signature-256`) rather than a bearer token,
 since GitHub can't carry one; the handler acts on `push` and
-`pull_request` (opened/synchronize/reopened) and answers `ping`. An accepted
+`pull_request` (opened/synchronize/reopened) and answers `ping`. A pull
+request from a fork is acknowledged as ignored and starts nothing. An accepted
 delivery stores its pending run with the trigger, so its claimed runner can
 fetch a signed binary before starting the pipeline. A run-limit refusal
 answers `429` without consuming the delivery, so GitHub can retry it. A
