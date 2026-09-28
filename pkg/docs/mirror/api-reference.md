@@ -223,6 +223,8 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/team/runner-tokens/{prefix}/git-credentials` | `team.admin` |
 | `POST` | `/api/v1/teams` | `authenticated` |
 | `DELETE` | `/api/v1/teams/{team}` | `admin` |
+| `GET` | `/api/v1/teams/{team}/trust` | `admin` |
+| `POST` | `/api/v1/teams/{team}/trust` | `admin` |
 | `GET` | `/api/v1/tokens` | `admin` |
 | `POST` | `/api/v1/tokens` | `admin` |
 | `DELETE` | `/api/v1/tokens/{prefix}` | `admin` |

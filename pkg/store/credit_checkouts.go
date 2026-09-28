@@ -65,8 +65,10 @@ func applyCreditCheckoutMigrationPostgres(ctx context.Context, tx *storeTx) erro
 // hold from now, and returns its id. It refuses with a
 // [CreditBalanceCapError] when the team's balance, plus every checkout of the
 // team still open, plus this one would pass [MaxTeamBalanceMicro], so a
-// verified payment never meets a cap it cannot pass. Checkouts already
-// expired are removed.
+// verified payment never meets a cap it cannot pass, and with a
+// [PurchaseLimitError] when what the team bought over [PurchaseLimitWindow],
+// plus its open checkouts, plus this one would pass its purchase limit.
+// Checkouts already expired are removed.
 func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now time.Time, hold time.Duration) (_ string, err error) {
 	if amountMicro <= 0 {
 		return "", errors.New("credits: a checkout amount must be positive")
@@ -105,6 +107,9 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	if err := refuseAboveBalanceCapTx(ctx, tx, t.team, amountMicro, nowNS); err != nil {
 		return "", err
 	}
+	if err := refuseAbovePurchaseLimitTx(ctx, tx, t.team, amountMicro, now); err != nil {
+		return "", t.commitPurchaseRefusal(tx, err, now)
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO credit_checkouts (id, team, amount_micro, opened_at, expires_at)
 		VALUES (?, ?, ?, ?, ?)`, id, string(t.team), amountMicro, nowNS, now.Add(hold).UnixNano()); err != nil {
@@ -113,10 +118,33 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	return id, tx.Commit()
 }
 
+// safety: a refused purchase is recorded as a business event, so the refusal
+// commits rather than rolling back with the checkout it refused.
+func (t *Tenant) commitPurchaseRefusal(tx *storeTx, refusal error, now time.Time) error {
+	var limit *PurchaseLimitError
+	if !errors.As(refusal, &limit) {
+		return refusal
+	}
+	if err := RecordBusinessEvent(tx, BusinessEvent{
+		Kind: "purchase_limit_refused", Team: t.team, At: now,
+		Attrs: map[string]any{
+			"trusted": limit.Trusted, "limit_cents": limit.LimitMicro / MicroCreditsPerCent,
+			"purchased_cents": limit.PurchasedMicro / MicroCreditsPerCent,
+			"amount_cents":    limit.AmountMicro / MicroCreditsPerCent,
+		},
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return refusal
+}
+
 // openCheckoutMicroTx is what the team's checkouts still open may add.
-func openCheckoutMicroTx(ctx context.Context, tx *storeTx, team Team, nowNS int64) (int64, error) {
+func openCheckoutMicroTx(ctx context.Context, q rowQuerier, team Team, nowNS int64) (int64, error) {
 	var open sql.NullInt64
-	err := tx.QueryRowContext(ctx,
+	err := q.QueryRowContext(ctx,
 		`SELECT SUM(amount_micro) FROM credit_checkouts WHERE team = ? AND paid_at IS NULL AND expires_at > ?`,
 		string(team), nowNS).Scan(&open)
 	return open.Int64, err

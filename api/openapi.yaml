@@ -2110,6 +2110,51 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
 
+  /api/v1/teams/{team}/trust:
+    parameters:
+      - {name: team, in: path, required: true, schema: {type: string}}
+    get:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Read a team's billing trust and 30-day purchase limit.
+      responses:
+        "200":
+          description: The team's billing trust.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BillingTrust"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      x-sparkwing-scope: admin
+      tags: [teams]
+      summary: Grant or revoke a team's billing trust on the operator's word.
+      description: >-
+        A granted team buys up to $500 over 30 days, or `limit_cents` when given, whatever the automatic rule says. A revoked team is held to the new-team $50 even when the rule would trust it. The change records the operator and the reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.billingTrustReq
+              type: object
+              required: [trust, reason]
+              properties:
+                trust: {type: string, enum: [granted, revoked]}
+                reason: {type: string}
+                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
+      responses:
+        "200":
+          description: The team's billing trust after the change.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BillingTrust"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
   /api/v1/users:
     get:
       x-sparkwing-scope: admin
@@ -6500,7 +6545,7 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.teamBillingJSON
                 type: object
-                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, checkout_enabled, can_purchase, usage, grants]
+                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, trusted, purchase_limit_cents, purchased_30d_cents, checkout_enabled, can_purchase, usage, grants]
                 properties:
                   team: {type: string}
                   balance_micro: {type: integer, format: int64}
@@ -6523,6 +6568,9 @@ paths:
                   storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Zero when retained storage is not billed."}
                   storage_free_allowance_bytes: {type: integer, format: int64}
                   storage_charged_micro: {type: integer, format: int64}
+                  trusted: {type: boolean, description: "True once the team earned billing trust or an operator granted it; a trusted team buys up to $500 at once."}
+                  purchase_limit_cents: {type: integer, format: int64, description: "What the team may buy over 30 days: $50 until trusted, $500 once trusted, or an operator's override."}
+                  purchased_30d_cents: {type: integer, format: int64, description: "What the team paid over the last 30 days, less refunds of those payments, plus its checkouts still open."}
                   checkout_enabled: {type: boolean}
                   can_purchase: {type: boolean}
                   usage:
@@ -6557,7 +6605,7 @@ paths:
       tags: [teams]
       summary: Open a Stripe Checkout page to buy credits for the active team.
       description: >-
-        An owner of the active team buys between `purchase_min_cents`, the $10 minimum purchase, and `purchase_max_cents`; any other amount answers `400`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
+        An owner of the active team buys between `purchase_min_cents`, the $10 minimum purchase, and `purchase_max_cents`; any other amount answers `400`. The team is the caller's active team and the body cannot name one. The controller asks its checkout service to open the session and answers with the page to send the owner to; the credits land when Stripe confirms the payment. A purchase is refused before any session opens when the balance, plus the team's checkouts still open, plus this purchase would pass `balance_cap_micro`, or when `purchased_30d_cents` plus this purchase would pass `purchase_limit_cents`; an opened checkout counts until it is paid or its session expires. Purchases are final and credits never expire.
       requestBody:
         required: true
         content:
@@ -6584,20 +6632,31 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
           description: >-
-            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`, the body below). A team whose deletion has begun also answers 409, with only `error`.
+            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`) or pass the team's 30-day purchase limit (`purchase_limit`). A team whose deletion has begun also answers 409, with only `error`.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
-                type: object
-                required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
-                properties:
-                  error: {type: string}
-                  code: {type: string, enum: [balance_cap]}
-                  balance_micro: {type: integer, format: int64}
-                  open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
-                  cap_micro: {type: integer, format: int64}
-                  amount_micro: {type: integer, format: int64}
+                oneOf:
+                  - x-sparkwing-go-type: pkg/controller.balanceCapRefusalJSON
+                    type: object
+                    required: [error, code, balance_micro, open_micro, cap_micro, amount_micro]
+                    properties:
+                      error: {type: string}
+                      code: {type: string, enum: [balance_cap]}
+                      balance_micro: {type: integer, format: int64}
+                      open_micro: {type: integer, format: int64, description: What the team's open checkouts may still add.}
+                      cap_micro: {type: integer, format: int64}
+                      amount_micro: {type: integer, format: int64}
+                  - x-sparkwing-go-type: pkg/controller.purchaseLimitRefusalJSON
+                    type: object
+                    required: [error, code, trusted, limit_cents, purchased_cents, amount_cents]
+                    properties:
+                      error: {type: string}
+                      code: {type: string, enum: [purchase_limit]}
+                      trusted: {type: boolean}
+                      limit_cents: {type: integer, format: int64}
+                      purchased_cents: {type: integer, format: int64, description: What the team paid over 30 days plus its open checkouts.}
+                      amount_cents: {type: integer, format: int64}
         "502": {description: The checkout service or Stripe did not open a session.}
         "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
 
@@ -7713,6 +7772,20 @@ components:
         max_charge_seconds: {type: integer, format: int64, description: The most seconds any one charge may bill; from one second past the longest node heartbeat cadence to one day.}
         storage_rate_micro_per_gb_day: {type: integer, format: int64, description: "Price of one gibibyte kept for one day; 0 to 1000000000000, and 0 bills no storage."}
         storage_free_allowance_bytes: {type: integer, format: int64, description: "Retained bytes every team keeps without being billed for them; zero or more."}
+    BillingTrust:
+      x-sparkwing-go-type: pkg/controller.billingTrustJSON
+      type: object
+      required: [team, trust, trusted, purchase_limit_cents, purchased_30d_cents]
+      properties:
+        team: {type: string}
+        trust: {type: string, enum: ["", granted, revoked], description: "The operator's decision; empty leaves the team to the automatic rule."}
+        trusted: {type: boolean}
+        trust_by: {type: string}
+        trust_at: {type: integer, format: int64, description: Unix seconds.}
+        trust_reason: {type: string}
+        limit_override_cents: {type: integer, format: int64}
+        purchase_limit_cents: {type: integer, format: int64}
+        purchased_30d_cents: {type: integer, format: int64}
     CreditGrant:
       x-sparkwing-go-type: pkg/controller.creditGrantJSON
       type: object

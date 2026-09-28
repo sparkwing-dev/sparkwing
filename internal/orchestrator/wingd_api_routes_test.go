@@ -166,6 +166,8 @@ var apiWriteRoutes = []string{
 	"DELETE /api/v1/team",
 	"DELETE /api/v1/accounts/{account}",
 	"DELETE /api/v1/teams/{team}",
+	"GET /api/v1/teams/{team}/trust",
+	"POST /api/v1/teams/{team}/trust",
 	"GET /api/v1/team/invitations",
 	"POST /api/v1/team/invitations",
 	"DELETE /api/v1/team/invitations/{id}",

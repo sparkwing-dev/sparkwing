@@ -229,6 +229,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 	want := []string{
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
+		"billing-trust-v1",
 		"credit-value-v1",
 		"cron-schedule-names-v1",
 		"declared-run-repo",
@@ -284,6 +285,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		t.Fatalf("read-only schema = %d, %v; want unchanged v29", got, err)
 	}
 	wantListed := []string{
+		"billing-trust-v1",
 		"credit-value-v1",
 		"declared-run-repo",
 		"github-app-cron-identity-v1",

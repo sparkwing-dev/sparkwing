@@ -22,6 +22,16 @@ unlock.
 
 ### Added
 
+- **controller + store:** A team buys at most $50 of credit over 30 days, and
+  at most $50 at once, until it is trusted; a trusted team buys up to $500.
+  A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
+  `GET /api/v1/team/billing` gains `trusted`, `purchase_limit_cents` and
+  `purchased_30d_cents`. A team earns trust when its oldest unrefunded payment
+  is 30 days old, it has spent $50 and it has never been held over a dispute.
+  The operator grants or revokes trust through `GET` and `POST
+  /api/v1/teams/{team}/trust`. Schema 80 adds the trust columns to `teams`
+  and a requirement, so a controller older than schema 80 refuses the
+  migrated database.
 - **controller + store:** Schema 76 adds `claim_tokens`, the store for
   claim-scoped `swc_` tokens. A token is bound to one team, run, node and claim
   generation, expires with its claim's lease and at a hard deadline of at most

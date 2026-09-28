@@ -99,8 +99,39 @@ type AttemptReport struct {
 	Failure          json.RawMessage
 	ArtifactManifest string
 }
+const AutoTrustPaymentAge = 30 * 24 * time.Hour
+type BillingStanding struct {
+	Trust              string
+	TrustBy            string
+	TrustAt            time.Time
+	TrustReason        string
+	LimitOverrideCents int64
+
+	Trusted    bool
+	LimitMicro int64
+
+	PurchasedMicro int64
+}
+func (b BillingStanding) PurchaseMaxCents() int64
+type BillingTrustChange struct {
+	Trust  string
+	Actor  string
+	Reason string
+
+	LimitCents int64
+}
+const BillingTrustGranted = "granted"
+const BillingTrustRevoked = "revoked"
 const BounceBounced = "bounced"
 const BounceMissed = "missed"
+type BusinessEvent struct {
+	Kind   string
+	Team   Team
+	Actor  string
+	Reason string
+	Attrs  map[string]any
+	At     time.Time
+}
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 const CLITokenLifetime = 90 * 24 * time.Hour
 type CPUClass struct {
@@ -678,6 +709,7 @@ var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progr
 var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
 var ErrPlanInvalid = errors.New("store: plan refused")
 var ErrProviderAlreadyLinked = errors.New("store: this account already has a sign-in from that provider")
+var ErrPurchaseLimit = errors.New("credits: the 30-day purchase limit refuses this amount")
 var ErrReversalExceedsPayment = errors.New("credits: the reversal exceeds what the payment paid")
 var ErrRoleAboveOwn = errors.New("store: cannot grant or change a role above your own")
 var ErrRunNotLive = errors.New("run is not live")
@@ -1099,6 +1131,7 @@ const MaxNodeRetries = 10
 const MaxOpenInvitations = 50
 const MaxPlanBytes = MaxNodeDispatchEnvelope
 const MaxPlanNodes = 1000
+const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 const MaxRetryBackoff = 5 * time.Minute
 const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 10
@@ -1137,6 +1170,8 @@ type NamedClaimOptions struct {
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 func NewClaimResultCommit(tok ClaimToken, digest string) ClaimResultCommit
+const NewPurchaseLimitCents = 5_000
+const NewPurchaseMaxCents = 5_000
 type Node struct {
 	RunID      string
 	NodeID     string
@@ -1406,12 +1441,22 @@ type ProfileSample struct {
 }
 const ProviderGitHub = "github"
 const ProviderGoogle = "google"
+type PurchaseLimitError struct {
+	Trusted        bool
+	LimitMicro     int64
+	PurchasedMicro int64
+	AmountMicro    int64
+}
+func (e *PurchaseLimitError) Error() string
+func (e *PurchaseLimitError) Unwrap() error
+const PurchaseLimitWindow = RunnerScaleWindow
 const QueueStateApprovalPending = "approval_pending"
 const QueueStateClaimed = "claimed"
 const QueueStateReady = "ready"
 const QueueStateRunning = "running"
 const QueueStateWaiting = "waiting"
 func QueueStates() []string
+func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error
 func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
 func RedactedRun(run *Run) *Run
@@ -2217,6 +2262,7 @@ func (t *Tenant) AddGitHubRunnerBinding(ctx context.Context, b GitHubRunnerBindi
 func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]string, err error)
 func (t *Tenant) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (stored CronSchedule, created bool, err error)
 func (t *Tenant) AttachCreditCheckout(ctx context.Context, id, sessionID string, expiresAt time.Time) error
+func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingStanding, error)
 func (t *Tenant) BindGitHubAppInstallation(ctx context.Context, in GitHubAppInstallation, now time.Time) (GitHubAppInstallation, error)
 func (t *Tenant) CLITokens(ctx context.Context, accountID string, now time.Time) ([]Token, error)
 func (t *Tenant) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
@@ -2344,6 +2390,7 @@ func (t *Tenant) RevokeCLIToken(ctx context.Context, prefix, accountID string, n
 func (t *Tenant) RevokeRunnerToken(ctx context.Context, prefix string, now time.Time) error
 func (t *Tenant) RunnerToken(ctx context.Context, prefix string) (Token, error)
 func (t *Tenant) RunnerTokens(ctx context.Context, now time.Time) ([]Token, error)
+func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now time.Time) (before, after BillingStanding, err error)
 func (t *Tenant) SetCronOverride(ctx context.Context, id string, o CronOverride, now time.Time) error
 func (t *Tenant) SetCronScheduleDeclared(ctx context.Context, id string, declared bool, now time.Time) error
 func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLock, now time.Time) error
@@ -2454,6 +2501,7 @@ const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
 func TriggerNamesGitHubRepo(tr *Trigger, repo GitHubRepo) bool
 const TriggerWebhookDeliveryIndexName = "idx_triggers_webhook_delivery"
 const TriggerWebhookReplayKeyIndexName = "idx_triggers_webhook_replay_key"
+const TrustedPurchaseLimitCents = 50_000
 func UnknownRequirements(listed []string) []string
 type UnpricedCPUClassError struct {
 	RunID    string

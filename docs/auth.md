@@ -201,6 +201,19 @@ the cap only by a payment settled after its session expired. A `paid` grant is
 at most one purchase, $500. The grant route still refuses an operator's `free`
 grant that, with the checkouts still open, would pass the cap. A replay of a grant already written is answered as usual.
 
+A team also buys at most a set amount over 30 days, because a prepaid team
+cannot spend more than it bought and a stolen card should buy little. A new
+team buys up to $50 over 30 days and at most $50 at once; a trusted team buys
+up to $500. The controller counts the team's payments of the last 30 days,
+less refunds of them, plus its open checkouts, and refuses a purchase past the
+limit with `409` and `"code": "purchase_limit"`. A team earns trust when its
+oldest unrefunded payment is at least 30 days old, it has spent at least $50,
+and it has never been held over a dispute. The operator grants or revokes
+trust, with a reason, through `POST /api/v1/teams/{team}/trust`; a grant may
+raise the limit to $5,000, and a revocation holds the team to the new-team
+limits even when it would earn trust. Team -> Billing shows the limit and what
+remains of it.
+
 Purchases are final, so a refund is the operator's decision and is made by
 hand. The private `sparkwing-ops` refund command takes back what the
 purchase still has on the ledger, in the team it funded, through
