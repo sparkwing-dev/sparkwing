@@ -20,6 +20,16 @@ unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **admission:** A bounded daemon event journal and offline `daemon events` and
+  `daemon explain` commands show why runs queued, started, or stopped, including
+  node slots and child attaches. The journal omits individual health probes,
+  records peer PIDs and snake_case decision fields, and renders plain-language
+  explanations. Event lists show 50 records by default, with offset and limit
+  flags for older or larger results. Supervisor replacement records include
+  probe evidence and a goroutine dump path.
+
 ### Fixed
 
 - **admission:** An overloaded or swapping machine no longer gets its

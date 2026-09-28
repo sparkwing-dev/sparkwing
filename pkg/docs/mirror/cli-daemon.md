@@ -14,11 +14,14 @@ build, using the same drain, durable lease, and reattachment path as automatic
 version takeover; a stopped daemon stays stopped. Stop drains an answering
 daemon and launches no successor. The supervisor keeps a daemon whose heartbeat
 counter advances during failed health probes. A whole-machine pause restarts the
-stale window when the supervisor resumes.
+stale window when the supervisor resumes. See [Diagnosing admission](diagnosing-admission.md)
+for event records and dump paths.
 
 ### Subcommands
 
 - `status` -- Report whether wingd is running and which build it serves
+- `events` -- Read retained admission events without starting the daemon
+- `explain` -- Explain one run's admission history from retained events
 - `restart` -- Refresh an answering wingd to this installed build
 - `stop` -- Drain an answering wingd and leave it stopped
 - `recover-state` -- Preserve unreadable daemon state after its holders stop
@@ -34,6 +37,53 @@ sparkwing daemon restart
 
 # Stop it and leave it stopped
 sparkwing daemon stop
+```
+
+## `sparkwing daemon events`
+
+Read retained admission events without starting the daemon
+
+Reads the size-capped journal in the daemon directory. Lists the newest 50 matching records and reports how to fetch older ones. Human output names the directory when no events are retained. JSON output is one record per line.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home DIR` | Sparkwing home to inspect |
+| `--run ID` | Filter by run ID |
+| `--since DURATION` | Lookback duration |
+| `--kind KIND` | Record kind (repeatable) |
+| `--incarnation N` | Daemon incarnation |
+| `--limit N` | Maximum records (default 50; 0 for all) |
+| `--offset N` | Matching records to skip from newest |
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
+
+### Examples
+
+```sh
+# Events for one run
+sparkwing daemon events --run abc -o json
+```
+
+## `sparkwing daemon explain`
+
+Explain one run's admission history from retained events
+
+Explains a run's admission history in sentences, including its node slots and attached children, without starting the daemon. JSON output retains the structured records.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home DIR` | Sparkwing home to inspect |
+| `--run ID` | Run ID to explain (required) |
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
+
+### Examples
+
+```sh
+# Explain a run
+sparkwing daemon explain --run abc
 ```
 
 ## `sparkwing daemon recover-state`

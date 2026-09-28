@@ -4,6 +4,8 @@ Sparkwing's admission daemon decides when work may consume CPU and memory on one
 machine. It does not assess job risk. Risk declarations and approvals remain
 deterministic pipeline contracts and are unaffected by admission mode.
 
+For a run that waited, was refused, or lost its daemon, see [Diagnosing admission](diagnosing-admission.md).
+
 The daemon advances a heartbeat counter about once a second after passing through
 its admission state lock. On Unix it stores the counter in a shared mapping, so
 each tick avoids filesystem calls. The supervisor reads the counter when health probes
