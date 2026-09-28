@@ -707,7 +707,11 @@ unlock.
   limit, and what the machine leaves after system overhead as its memory
   request and limit: about 5.4, 12.8 and 27.6 GiB for the 2, 4 and 8-core
   classes. A class no longer guarantees 4 GiB per core to the Job itself; a
-  Job that needs all of it pins the next class.
+  Job that needs all of it pins the next class. A band Job also selects
+  `sparkwing.dev/team-node: <team>` in place of the cross-team anti-affinity,
+  so a node serves only the team whose Job booted it, including back-to-back
+  reuse. A band pool needs an `Exists` requirement on that key or its Jobs no
+  longer schedule.
 
 - **logs + orchestrator (Breaking):** Runner log writes batch up to 256 lines
   and target 64 KiB per HTTP append, keeping a longer single line intact.

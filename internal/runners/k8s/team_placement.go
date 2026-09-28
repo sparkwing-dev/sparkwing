@@ -3,6 +3,7 @@ package k8s
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -17,6 +18,14 @@ import (
 // node also hosts ambient state, such as a shared Docker daemon, that team code
 // can reach.
 const TeamLabel = "sparkwing.dev/team"
+
+// TeamNodeLabel is the node label a band pool stamps with the team of the Job
+// that booted the node. A band Job selects its own team's value, so a node
+// serves one team from boot to release, including back-to-back Jobs that
+// reuse it after a predecessor finished, which anti-affinity never sees. The
+// pool must carry an Exists requirement on this key, which is how Karpenter
+// copies the pod's value onto the node it launches.
+const TeamNodeLabel = "sparkwing.dev/team-node"
 
 var teamLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -64,4 +73,15 @@ func teamAntiAffinity(value string) *corev1.Affinity {
 			}},
 		},
 	}
+}
+
+// safety: the team outranks the operator's selector on this key, because a
+// value the operator chose would let two teams select one node.
+func teamNodeSelector(selector map[string]string, team string) map[string]string {
+	out := maps.Clone(selector)
+	if out == nil {
+		out = map[string]string{}
+	}
+	out[TeamNodeLabel] = team
+	return out
 }

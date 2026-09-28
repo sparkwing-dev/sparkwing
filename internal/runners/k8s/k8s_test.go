@@ -1334,7 +1334,7 @@ func TestBuildJob_MergesTheBandWithTheOperatorsOwnPlacement(t *testing.T) {
 		}},
 	}
 	pod := classJob(t, cfg, 8).Spec.Template.Spec
-	want := map[string]string{"pool": "runners", "sparkwing.dev/cpu-band": "small"}
+	want := map[string]string{"pool": "runners", "sparkwing.dev/cpu-band": "small", TeamNodeLabel: "default"}
 	if !reflect.DeepEqual(pod.NodeSelector, want) {
 		t.Fatalf("nodeSelector = %v, want %v", pod.NodeSelector, want)
 	}
@@ -1409,8 +1409,8 @@ func TestBuildJob_SizesABandJobToOneMachineOfItsClass(t *testing.T) {
 				t.Fatalf("memory = %s/%s, want %s request and limit", rr.Requests.Memory(), rr.Limits.Memory(), &want)
 			}
 			terms := pod.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution
-			if len(terms) != 2 || terms[1].LabelSelector.MatchLabels["app.kubernetes.io/name"] != "sparkwing-runner" {
-				t.Fatalf("anti-affinity = %#v, want the team term and one Job per node", terms)
+			if len(terms) != 1 || terms[0].LabelSelector.MatchLabels["app.kubernetes.io/name"] != "sparkwing-runner" {
+				t.Fatalf("anti-affinity = %#v, want only one Job per node: the team node label separates teams", terms)
 			}
 		})
 	}

@@ -863,8 +863,8 @@ func (r *Runner) buildJob(
 	affinity := teamAntiAffinity(team)
 	if selector[cpuBandKey] != "" && class.Cores > 0 {
 		container.Resources = bandClassResources(class)
-		affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
-			affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, oneJobPerNode())
+		selector = teamNodeSelector(selector, team)
+		affinity = oneJobPerNode()
 	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
@@ -1002,14 +1002,16 @@ func bandClassResources(class store.CPUClass) corev1.ResourceRequirements {
 
 // safety: requests alone let the scheduler pack two classes onto one larger
 // machine at the same price, which breaks the one-machine-per-Job promise.
-func oneJobPerNode() corev1.PodAffinityTerm {
-	return corev1.PodAffinityTerm{
-		LabelSelector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{"app.kubernetes.io/name": "sparkwing-runner"},
-		},
-		NamespaceSelector: &metav1.LabelSelector{},
-		TopologyKey:       corev1.LabelHostname,
-	}
+func oneJobPerNode() *corev1.Affinity {
+	return &corev1.Affinity{PodAntiAffinity: &corev1.PodAntiAffinity{
+		RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"app.kubernetes.io/name": "sparkwing-runner"},
+			},
+			NamespaceSelector: &metav1.LabelSelector{},
+			TopologyKey:       corev1.LabelHostname,
+		}},
+	}}
 }
 
 func claimFenceEnv(fence store.NodeClaimFence) []corev1.EnvVar {

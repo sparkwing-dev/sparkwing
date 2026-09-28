@@ -58,7 +58,10 @@ class minus half a core with no limit, and as memory request and limit the
 class's 4 GiB per core less 7.5 percent and 2 GiB for the node's overhead. The
 pool therefore needs N-vCPU machines with 4 GiB per vCPU, such as EC2's
 general-purpose families, and a kubelet reservation no larger than 110 pods
-leaves. Elsewhere, requests use the pipeline's pinned
+leaves. The Job also selects `sparkwing.dev/team-node` with its run's team, so
+the pool needs an `Exists` requirement on that key: Karpenter then labels each
+node it boots with the team that asked, and only that team's Jobs reuse it.
+Without the requirement no band Job schedules. Elsewhere, requests use the pipeline's pinned
 or measured resources, and a request exceeding every matching node's
 allocatable capacity fails before the Job is created. See
 [Runner classes](auth.md#runner-classes).
