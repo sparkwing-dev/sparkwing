@@ -22,49 +22,37 @@ unlock.
 
 ### Added
 
-- **admission:** A bounded daemon event journal and offline `daemon events` and
-  `daemon explain` commands show why runs queued, started, or stopped, including
-  node slots and child attaches. The journal omits individual health probes,
-  records peer PIDs and snake_case decision fields, and renders plain-language
-  explanations. Event lists show 50 records by default, with offset and limit
-  flags for older or larger results. Supervisor replacement records include
-  probe evidence and a goroutine dump path.
+- **admission + cli:** `sparkwing daemon events` and `sparkwing daemon explain` show why runs queued, started or stopped
+  The admission daemon keeps a size-capped journal of its decisions in its own
+  directory: requests, what blocked a queued run, grants with the headroom and
+  external load behind them, node slots, child attaches, cancels with the
+  requesting process, releases and reattaches. `daemon explain --run <id>`
+  tells one run's admission story in plain sentences, including its nodes and
+  child runs; `daemon events` filters the raw records, with `-o json` for
+  tools. Both read the journal directly, so they work while the daemon is
+  down. Before replacing a daemon, the supervisor records why and saves a
+  goroutine dump. See [diagnosing admission](docs/diagnosing-admission.md).
 
 ### Fixed
 
-- **admission:** Journal counter and record corruption no longer prevent daemon
-  startup or event inspection. Journal shutdown has a short drain bound, and
-  supervisor dumps retain the ten most recently modified files. `daemon events`
-  and `daemon explain` report skipped records on stderr; explanations include
-  descendant runs. Policy endpoint records omit URL credentials and query parameters.
-- **admission:** Batched grants read held capacity without repeatedly sorting the
-  ledger. Supervisor records retain their enqueue time and daemon identity and
-  drain on shutdown. Daemon identity advances after clock changes; interrupted
-  counter temp files are removed. Replacements before readiness skip stack dumps,
-  and journal endpoint records omit URL fragments.
-- **admission:** Child attach records show the requested and resolved parent.
-  Rejected attaches name the blocking ancestor or failed parent resolution, and
-  cancellation records include live affected runs and blocked descendants.
-- **local admission:** Cancelling a child run cancels its descendants while
-  its parent and siblings keep running. Cancelling the lease root still
-  cancels every attached run, including after daemon restart. Nested inline
-  runs attach to their immediate parent; children launched after a parent
-  exits attach under its nearest live ancestor while a live descendant retains
-  lineage. Otherwise they attach under the lease root, and the daemon logs the
-  requested and resolved parents.
-- **admission:** An overloaded or swapping machine no longer gets its
-  admission daemon replaced while it is still working. The supervisor replaces
-  the daemon only when health probes fail and its heartbeat has not moved for a
-  minute, or after five minutes with no answer; time the whole machine spent
-  frozen does not count against it.
-- **admission:** Runs survive a daemon replacement. A running or queued run
-  keeps reconnecting for up to 12 minutes, and the replacement holds each run's
-  lease for two minutes. A lease released during that recovery can stay
-  reserved until the two minutes pass. A missing daemon binary fails at once,
-  and a daemon that exits before serving gets three tries.
+- **admission:** A busy or swapping machine no longer gets its admission daemon replaced while it is still working
+  The supervisor replaces the daemon only when health probes fail and its
+  heartbeat has not moved for a minute, or after five minutes with no answer.
+  Time the whole machine spent frozen does not count against it.
+- **admission:** Runs survive an admission daemon replacement
+  A running or queued run keeps reconnecting for up to 12 minutes, and the
+  replacement holds each run's lease for two minutes. A lease released during
+  that recovery can stay reserved until the two minutes pass. A missing daemon
+  binary fails at once, and a daemon that exits before serving gets three tries.
+- **admission:** Cancelling a child run no longer cancels its parent and siblings
+  `sparkwing runs cancel` on a child cancels that run and its descendants;
+  cancelling the root run still cancels everything attached to it, including
+  after a daemon restart. A child whose parent has already exited attaches
+  under the nearest live ancestor.
+
 ### Docs
 
-- **cli:** Document the selected pipeline commit exposed as `SPARKWING_PIPELINE_REV`
+- **cli:** Document `SPARKWING_PIPELINE_REV`, the pipeline commit a run compiled from
 
 ## [v0.63.0] - 2026-09-27
 ### Changed
