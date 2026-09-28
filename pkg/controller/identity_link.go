@@ -34,9 +34,7 @@ type identityJSON struct {
 
 type identitiesResp struct {
 	Identities []identityJSON `json:"identities"`
-	// Providers are the sign-in providers this controller offers, which are
-	// the ones an account can link.
-	Providers []string `json:"providers"`
+	Providers  []string       `json:"providers"`
 }
 
 func identityOut(id store.Identity) identityJSON {
@@ -101,9 +99,6 @@ func (s *Server) linkAttemptAllowed(w http.ResponseWriter, p *Principal, provide
 	return false
 }
 
-// handleIdentityLinkStart begins adding a provider's sign-in to the caller's
-// account. The flow runs like sign-in, with a state this controller signs and
-// binds to the account and the session that asked.
 func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request) {
 	p, ok := accountPrincipal(w, r)
 	if !ok {
@@ -171,8 +166,6 @@ type identityLinkCompleteReq struct {
 	RedirectURI string `json:"redirect_uri"`
 }
 
-// openLinkState reports why a state cannot finish a link for p, or "" when it
-// can.
 func openLinkState(key []byte, raw, verifier, provider string, p *Principal, now time.Time) (identityLinkState, string) {
 	var st identityLinkState
 	switch {
@@ -190,10 +183,6 @@ func openLinkState(key []byte, raw, verifier, provider string, p *Principal, now
 	return st, ""
 }
 
-// handleIdentityLinkComplete finishes a link: it redeems the provider's code
-// and attaches the provider account to the caller's account, keyed by the
-// provider's stable subject. A provider account attached to any account is
-// refused and nothing changes.
 func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Request) {
 	p, ok := accountPrincipal(w, r)
 	if !ok {
@@ -287,8 +276,6 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusCreated, identityOut(linked))
 }
 
-// handleIdentityUnlink removes one of the caller's sign-in methods. The
-// account keeps at least one, and every other session it holds ends.
 func (s *Server) handleIdentityUnlink(w http.ResponseWriter, r *http.Request) {
 	p, ok := accountPrincipal(w, r)
 	if !ok {

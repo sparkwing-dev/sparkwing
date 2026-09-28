@@ -38,8 +38,6 @@ var (
 // so lets its sign-ins set the account's email, until this binary runs again.
 var identityLinkedCols = map[string]string{"linked": "INTEGER NOT NULL DEFAULT 0"}
 
-// identity_unlinks remembers which account let go of which provider account,
-// so the email rule does not attach it straight back.
 const identityLinkTablesSQLite = `
 CREATE TABLE IF NOT EXISTS identity_link_states (
     nonce      TEXT PRIMARY KEY,
@@ -234,8 +232,6 @@ func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSes
 	return id, ended, tx.Commit()
 }
 
-// lockAccountTx serializes changes to an account's sign-in methods and the
-// sessions opened through them. SQLite takes its write lock at the same point.
 func lockAccountTx(ctx context.Context, tx *storeTx, accountID string) error {
 	if tx.dialect == DialectSQLite {
 		res, err := tx.ExecContext(ctx, `UPDATE accounts SET id = id WHERE id = ?`, accountID)

@@ -89,7 +89,6 @@ func TestSealedStreamWithEveryLineReadsComplete(t *testing.T) {
 		t.Fatalf("sealed complete stream = %+v", got)
 	}
 
-	// Negative control: the same stream without its seal is cut off.
 	for seq := int64(1); seq <= 3; seq++ {
 		f.appendLine(t, "Bearer a", "run-b", "build", "s1", seq)
 	}
@@ -295,8 +294,6 @@ func TestSealedStreamWithAGapReadsIncomplete(t *testing.T) {
 		t.Fatalf("gapped stream = %+v %q", got, got.SyntheticLine())
 	}
 
-	// Negative control: the late line fills its gap, and a retried
-	// duplicate changes nothing.
 	for _, seq := range []int64{1, 2, 4, 5, 3, 3, 6} {
 		f.appendLine(t, "Bearer a", "run-b", "build", "s1", seq)
 	}
@@ -321,7 +318,6 @@ func TestRunnerReportedDropsReadIncomplete(t *testing.T) {
 		t.Fatalf("dropping stream = %+v", got)
 	}
 
-	// Negative control: a seal that reports no drops reads complete.
 	for seq := int64(1); seq <= 3; seq++ {
 		f.appendLine(t, "Bearer a", "run-b", "build", "s1", seq)
 	}
@@ -341,7 +337,6 @@ func TestMissingSealReadsCutOffOnlyAfterTheGrace(t *testing.T) {
 	}
 	r := f.report(t, "Bearer a", "run-a", "build")
 
-	// Negative controls: running, and finished inside the grace.
 	running := NodeProgress{Started: true}
 	if got := r.Assess(running, late); got.State != StateStreaming || got.Message != "" {
 		t.Fatalf("running node = %+v", got)
@@ -369,8 +364,6 @@ func TestWriterWithoutSealSupportReadsUnconfirmed(t *testing.T) {
 		t.Fatalf("old writer = %+v", got)
 	}
 
-	// Negative control: a writer that numbers its lines and never seals
-	// is cut off, not unconfirmed.
 	f.appendLine(t, "Bearer a", "run-b", "build", "s1", 1)
 	if got := f.report(t, "Bearer a", "run-b", "build").Assess(done, late); got.State != StateCutOff {
 		t.Fatalf("numbering writer = %+v", got)
@@ -389,7 +382,6 @@ func TestSealForAnotherTeamsRunIsRefused(t *testing.T) {
 	if code, _ := f.send(t, http.MethodGet, "/api/v1/logs/run-a/build/seal", "Bearer b", "", nil); code != http.StatusNotFound {
 		t.Fatalf("team B read team A's seals: %d", code)
 	}
-	// Negative control: the owning team's seal lands.
 	if code := f.seal(t, "Bearer a", "run-a", "build", Seal{Stream: "s1", FinalSeq: 1, Lines: 1}); code != http.StatusNoContent {
 		t.Fatalf("team A seal = %d", code)
 	}
@@ -422,7 +414,6 @@ func TestSealSurvivesTheArchive(t *testing.T) {
 	if got := r.Assess(done, late); got.State != StateIncomplete || got.MissingLines != 1 {
 		t.Fatalf("restored verdict = %+v", got)
 	}
-	// The seal file is metadata: the node's log and the run read hold only log lines.
 	if _, body := f.do(t, http.MethodGet, "/api/v1/logs/run-a/build", "Bearer a", ""); body != "line 1\nline 2\nline 3\n" {
 		t.Fatalf("node log = %q", body)
 	}
@@ -481,7 +472,6 @@ func (f *archiveFixture) sealAttempt(t *testing.T, run, node string, ordinal int
 
 func TestVerdictJudgesTheLatestAttempt(t *testing.T) {
 	f := newArchiveFixture(t, 0)
-	// Attempt 1 is cut off; its retry seals cleanly.
 	f.appendAttempt(t, "run-a", "build", 1, "first", 1)
 	f.appendAttempt(t, "run-a", "build", 1, "first", 2)
 	f.appendAttempt(t, "run-a", "build", 2, "retry", 1)
@@ -491,7 +481,6 @@ func TestVerdictJudgesTheLatestAttempt(t *testing.T) {
 		t.Fatalf("clean retry after a cut-off attempt = %+v, want complete", got)
 	}
 
-	// Negative control: a clean first attempt does not excuse a cut-off retry.
 	f.appendAttempt(t, "run-b", "build", 1, "first", 1)
 	f.sealAttempt(t, "run-b", "build", 1, Seal{Stream: "first", FinalSeq: 1, Lines: 1})
 	f.appendAttempt(t, "run-b", "build", 2, "retry", 1)

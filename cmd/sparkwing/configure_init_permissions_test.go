@@ -118,7 +118,6 @@ func TestConfigureInitDryRunWritesNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("--dry-run wrote config.yaml: %v", err)
 	}
-	// Control: without --dry-run the same survey copies profiles.yaml in.
 	if _, err := gatherConfigureInit(false); err != nil {
 		t.Fatalf("gatherConfigureInit: %v", err)
 	}

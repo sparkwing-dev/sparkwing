@@ -90,8 +90,6 @@ func (f *ghFixture) credential(job githuboidctest.Job, team string) string {
 	return "Bearer " + cred.Token
 }
 
-// work writes a pending trigger, its run and a ready node for slug into team,
-// the way a push webhook records a push of main at the default commit.
 func (f *ghFixture) work(team, runID, slug string) {
 	f.t.Helper()
 	f.workAt(team, runID, slug, "main", githuboidctest.DefaultSHA)

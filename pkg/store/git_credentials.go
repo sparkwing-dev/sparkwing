@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-// A team git credential is a write-only secret bound to one host: an SSH
-// deploy key with the host key its owner confirmed, or an HTTPS token. The
-// controller releases it only at fetch time, to a runner holding a live claim
-// on a run of the team whose source is on that host, and records every
-// release.
 const gitCredentialsTableSQLite = `CREATE TABLE IF NOT EXISTS git_credentials (
     id           TEXT PRIMARY KEY,
     team         TEXT NOT NULL,
@@ -312,9 +307,8 @@ func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitC
 	return c, tx.Commit()
 }
 
-// lockLiveRunClaimTx proves claimant holds a live claim on one of runID's
-// nodes or on its trigger, in t's team, and holds that row's lock until tx
-// ends, so the claim cannot be renewed away or reassigned under the release.
+// safety: the claim row stays locked until tx ends, so the claim cannot be renewed away or
+// reassigned under the release.
 func (t *Tenant) lockLiveRunClaimTx(ctx context.Context, tx *storeTx, runID string, claimant ClaimIdentity, now time.Time) error {
 	if !claimant.bound() || runID == "" {
 		return ErrClaimNotLive

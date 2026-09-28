@@ -61,9 +61,6 @@ func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, t
 	return nil
 }
 
-// completenessLine is what a reader prints after a node's log when the log
-// is not known to be whole. It is the reader's line, never part of the log,
-// and a store that cannot answer leaves the log as it is.
 func completenessLine(ctx context.Context, b backend.Backend, runID string, n *store.Node) string {
 	c, err := backend.NodeLogCompleteness(ctx, b, runID, n, time.Now())
 	if err != nil {

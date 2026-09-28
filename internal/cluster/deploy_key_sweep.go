@@ -6,9 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-// sweepLeftoverDeployKeys removes the deploy keys a crashed runner of this
-// user left in its key directories, so a crash mid-fetch does not leave a
-// team's key behind for longer than the next start.
 func sweepLeftoverDeployKeys(logger *slog.Logger) {
 	n, err := bincache.SweepSSHKeyDirs()
 	if n > 0 {

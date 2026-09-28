@@ -149,9 +149,6 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 	return out, nil
 }
 
-// teamFundedTx reports whether team stores and runs as a funded team: it holds
-// credits and no dispute hold. The tier lookup and every admission read this
-// one predicate, so none of them lets a team through that another refuses.
 func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
 	balance, err := creditBalanceTx(ctx, tx, team)
 	if err != nil || balance <= 0 {
@@ -177,10 +174,8 @@ func lockFreeTierTx(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// takeFreeSlotTx gives team a slot if it has none and one is free, and
-// reports whether it holds one afterwards. The slot starts from the event
-// bytes the team already retains, so a team whose credits ran out is held to
-// what it stored while funded. The caller holds the free-tier lock.
+// safety: the caller holds the free-tier lock. The slot starts from the event bytes the team already
+// retains, so a team whose credits ran out is held to what it stored while funded.
 func takeFreeSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) (bool, error) {
 	limit, err := creditSettingTx(ctx, tx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
 	if err != nil {
@@ -202,9 +197,6 @@ func freeStoragePaused(team Team) error {
 	return fmt.Errorf("%w: team %s has no credits and every free-tier slot is taken", ErrFreeStoragePaused, team)
 }
 
-// admitFreeTeamRunTx refuses a new run of a team without credits that
-// holds no slot and cannot take one, or that already started
-// [MaxFreeRunsPerDay] runs in the last 24 hours.
 func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
 	if creditMeteringDisabled(ctx) {
 		return nil
@@ -238,10 +230,8 @@ func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Ti
 	return nil
 }
 
-// admitFreeEventsTx holds a team without credits to its event share. A team
-// with no slot takes one here, because a run can outlive the credits it
-// started with. The slot row is locked until the caller's transaction ends,
-// so two appends cannot both count the same room.
+// safety: a team with no slot takes one here, because a run can outlive the credits it started with.
+// The slot row stays locked until the caller's transaction ends, so two appends cannot count the same room.
 func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal string, bytes int64, now time.Time) error {
 	if creditMeteringDisabled(ctx) {
 		return nil

@@ -79,7 +79,6 @@ func TestNodeLogCompleteness_ReportsTheVerdictTheDashboardDraws(t *testing.T) {
 	}
 	get("nope", http.StatusNotFound)
 
-	// Negative control: a local store that keeps no seals says so.
 	mux = http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{node}/completeness",
 		nodeLogCompletenessHandler(backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)))

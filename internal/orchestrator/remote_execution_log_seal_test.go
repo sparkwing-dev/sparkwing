@@ -62,7 +62,6 @@ func TestBrokerSealCountsLinesTheChildGaveUp(t *testing.T) {
 		return r.Streams[0]
 	}
 
-	// Negative control: a refused line the child retries arrives, so nothing is lost.
 	retried := run(t, "run-retried", []string{"one\n", "two\n", "two\n", "three\n"}, map[int]bool{1: true})
 	if retried.Seal.Dropped != 0 || retried.Seal.FinalSeq != 3 || retried.Missing != 0 {
 		t.Fatalf("retried stream = %+v seal %+v", retried, retried.Seal)

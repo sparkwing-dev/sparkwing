@@ -49,10 +49,6 @@ func cacheEgressPrincipal(r *http.Request) string {
 	return BearerPrincipal
 }
 
-// metered counts what next sends and refuses it with 429 once the
-// process-wide daily cap is spent. A GET by a team's grant is also charged
-// to the team's UTC day in the controller before its first byte, and
-// refused with 429 past the team's cap.
 func metered(class egress.Class, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if egressMeter == nil || egress.Bodyless(r) {

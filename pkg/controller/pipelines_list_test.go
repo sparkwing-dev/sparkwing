@@ -50,8 +50,6 @@ func TestControllerPipelines_ListIsTheCallersTeamOnly(t *testing.T) {
 		t.Errorf("own-build latest = %+v, want run-own success", body.Pipelines[0])
 	}
 
-	// Negative control: team B's pipeline is there for team B's own reader,
-	// so the default team's list omits it by scope.
 	f.call(http.MethodGet, "/api/v1/pipelines", readerB, nil, http.StatusOK, &body)
 	if names := listedNames(body); len(names) != 1 || names[0] != "b-deploy" {
 		t.Fatalf("team B lists %v, want [b-deploy]", names)

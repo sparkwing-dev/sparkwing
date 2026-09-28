@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// pushedAndLocalCommits makes a checkout whose origin holds one commit and
-// whose HEAD is a second commit never pushed.
 func pushedAndLocalCommits(t *testing.T) (work, pushed, local string) {
 	t.Helper()
 	origin := filepath.Join(t.TempDir(), "origin.git")

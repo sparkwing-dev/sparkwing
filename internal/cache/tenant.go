@@ -16,13 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
-// teamsDir holds one blob-store tree per team that reached the cache with a
-// controller-signed grant.
 var teamsDir = "/data/teams"
 
-// cacheCaller is who a request authenticated as. An empty team is the operator
-// token (or an open cache), which keeps the unscoped trees; a grant's team
-// confines the request to that team's trees.
 type cacheCaller struct {
 	team string
 	run  string
@@ -35,14 +30,10 @@ func callerFrom(r *http.Request) cacheCaller {
 	return c
 }
 
-// grantKey verifies cache grants; empty accepts none.
 var grantKey string
 
-// requireCaller admits the operator token or a grant the controller signed with
-// the grant key. It fronts the blob stores and the clone routes a runner needs; seeding,
-// refresh, archives, uploads and the admin routes stay behind requireToken,
+// safety: seeding, refresh, archives, uploads and admin routes stay behind requireToken,
 // because the mirrors are shared and a seed lands one team's source in them.
-// Registration answers another team's grant with 403 itself.
 func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 	token, key := apiToken, grantKey
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -65,14 +56,11 @@ func requireCaller(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// blobDirs are the trees one request may read and write.
 type blobDirs struct {
 	artifacts string
 	bins      string
 	cache     string
-	// tenant marks a team's trees, whose bin writes count toward the store
-	// ceiling; the operator's bins predate the ceiling and stay outside it.
-	tenant bool
+	tenant    bool
 }
 
 func dirsFor(r *http.Request) (blobDirs, error) {
@@ -137,11 +125,8 @@ func (c cacheCaller) mayReadMirror(name string) bool {
 	return ok && grantMayUseMirror(name, repoURL)
 }
 
-// handleDeleteTeamTree removes every blob a team's grants wrote, for the
-// controller deleting that team: its tree on the volume and, with a blob
-// store, its whole teams/<team>/ namespace in the bucket. Deleting a tree
-// that is already gone succeeds, so the controller can retry a deletion
-// that stopped part-way.
+// safety: deleting a tree that is already gone succeeds, so the controller can retry
+// a deletion that stopped part-way.
 func handleDeleteTeamTree(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "DELETE only", http.StatusMethodNotAllowed)

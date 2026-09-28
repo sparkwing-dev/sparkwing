@@ -148,9 +148,7 @@ type inviteReq struct {
 type inviteResp struct {
 	ID        string `json:"id"`
 	AcceptURL string `json:"accept_url"`
-	// EmailSent reports whether the controller mailed the invitation; when
-	// it did not, the owner hands the accept URL on.
-	EmailSent bool `json:"email_sent"`
+	EmailSent bool   `json:"email_sent"`
 }
 
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
@@ -275,14 +273,10 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 }
 
 type runnerTokenReq struct {
-	Name string `json:"name"`
-	// Repos are the repositories the machine may build, as host/path patterns
-	// such as github.com/acme/*. They go into the advertised command, since the
-	// allowlist is the machine owner's and lives on the machine.
+	Name  string   `json:"name"`
 	Repos []string `json:"repos"`
 }
 
-// maxRunnerRepos bounds the patterns one advertised command carries.
 const maxRunnerRepos = 32
 
 type runnerTokenResp struct {
@@ -292,15 +286,13 @@ type runnerTokenResp struct {
 }
 
 type runnerTokenJSON struct {
-	Prefix     string `json:"prefix"`
-	Name       string `json:"name"`
-	CreatedBy  string `json:"created_by"`
-	CreatedAt  int64  `json:"created_at"`
-	ExpiresAt  *int64 `json:"expires_at"`
-	LastUsedAt *int64 `json:"last_used_at"`
-	// GitCredentials reports that a team owner opted this machine in to
-	// receiving the team's git credentials.
-	GitCredentials bool `json:"git_credentials"`
+	Prefix         string `json:"prefix"`
+	Name           string `json:"name"`
+	CreatedBy      string `json:"created_by"`
+	CreatedAt      int64  `json:"created_at"`
+	ExpiresAt      *int64 `json:"expires_at"`
+	LastUsedAt     *int64 `json:"last_used_at"`
+	GitCredentials bool   `json:"git_credentials"`
 }
 
 func validRunnerName(name string) bool {
@@ -361,17 +353,9 @@ func (s *Server) handleCreateRunnerToken(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// runnerConnectArgs is the command that turns a machine into one of the team's
-// runners: it claims triggered runs as well as their nodes, serves no metrics
-// listener (a second runner on the machine would collide on its port, and
-// nothing scrapes a laptop), fetches each run's
-// source itself with the machine's own git credentials (there is no --gitcache,
-// since the git cache is the operator's), builds only the repositories allow
-// names, ships logs to the logs service the controller announces, and keeps
-// claiming until stopped. The controller serves no logs route, so with no logs
-// service announced the flag is left out and the runner keeps logs on the
-// machine. Each pattern is single-quoted because '*' is a shell glob; the
-// pattern grammar admits no quote.
+// hack: --metrics-addr= because a second runner on a machine would collide on its port; no
+// --gitcache since the git cache is the operator's; --logs only when announced, since the
+// controller serves no logs route. Patterns are single-quoted because '*' is a shell glob.
 func runnerConnectArgs(controllerURL, logsURL, name string, allow sourceurl.RepoAllowlist) string {
 	cmd := "sparkwing-runner runner --controller " + controllerURL
 	if logsURL != "" {

@@ -14,16 +14,9 @@ func queryRunID(r *http.Request) string { return r.URL.Query().Get("run_id") }
 
 type runAccessKey struct{ credential, runID string }
 
-// readableRun lets a request through only when the controller says the caller
-// may read the run's logs. The logs service holds every team's logs under
-// bare run ids and knows nothing of teams, so the controller, which 404s
-// another team's run, decides. Only a yes is cached, for the whoami TTL, so a
-// run the caller loses access to stops being readable within that window.
-//
-// Admin is not exempt from reads, because the dashboard's own credential must
-// not become a way around a user's team. Admin and logs.delete are exempt
-// from DELETE, which is the operator's retention path and the controller's
-// team-deletion path over every team's runs.
+// safety: the logs service holds runs under bare ids and knows no teams, so the controller decides
+// and only a yes is cached, for the whoami TTL. Admin is not exempt from reads, so the dashboard's
+// credential cannot bypass a user's team.
 func (s *Server) readableRun(runID func(*http.Request) string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())

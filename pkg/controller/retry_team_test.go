@@ -71,9 +71,7 @@ func TestTeamBoundary_AttemptsNeverFollowAPointerIntoAnotherTeam(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		// up: team B's run names team A's run as its source.
 		seedRetry(f.teamB, "b-retries-a", f.runA)
-		// down: team A's run names team B's run as its source.
 		seedRun(t, f.teamB, "b-root", "p")
 		seedRetry(f.teamA, "a-retries-b", "b-root")
 

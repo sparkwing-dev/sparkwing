@@ -90,7 +90,6 @@ func TestLinkGitHubWithAnotherEmailToAGoogleAccount(t *testing.T) {
 		!slices.Equal(ids.Providers, []string{"google", "github"}) {
 		t.Fatalf("identities = %+v", ids)
 	}
-	// Control: a GitHub account nobody linked gets an account of its own.
 	if stranger := f.signInGitHub(ghPerson(502, "stranger", "stranger@elsewhere.org")); stranger.User.ID == owner.id {
 		t.Fatal("an unlinked GitHub sign-in reached the Google account")
 	}
@@ -148,7 +147,6 @@ func TestLinkRefusesAStateFromAnotherAccountSessionOrAReplay(t *testing.T) {
 	if status := f.linkComplete(owner.auth, "google", start, code(), &refused); status != http.StatusForbidden || refused.Code != "link_state_invalid" {
 		t.Fatalf("the flow finished for another provider = %d %+v, want 403 link_state_invalid", status, refused)
 	}
-	// Control: the account and session that started the flow finish it.
 	if status := f.linkComplete(owner.auth, "github", start, code(), nil); status != http.StatusCreated {
 		t.Fatalf("finishing the flow = %d", status)
 	}
@@ -173,7 +171,6 @@ func TestUnlinkRefusesTheLastSignInMethod(t *testing.T) {
 	if code := f.linkGitHub(owner.auth, ghPerson(801, "octo", "octo@example.com"), nil); code != http.StatusCreated {
 		t.Fatalf("link = %d", code)
 	}
-	// Control: with GitHub beside it, Google unlinks.
 	if code := f.call("DELETE", "/api/v1/me/identities/google", owner.auth, nil, nil); code != http.StatusNoContent {
 		t.Fatalf("unlink google beside github = %d, want 204", code)
 	}

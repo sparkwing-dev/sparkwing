@@ -9,12 +9,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
-// triggerChildEnv is the whole environment a claimed trigger's pipeline binary
-// starts with. That binary is the team's own code, so it inherits only the
-// runtime a Go program and its tools need and Sparkwing settings that are not
-// credentials; the launcher's own credentials stay behind, and the run gets
-// its own: the runner token it claims and heartbeats with, and the run's cache
-// grant.
+// safety: the pipeline binary is the team's own code, so it inherits no launcher
+// credentials, only the runtime, non-credential settings, its runner token and grant.
 func triggerChildEnv(ctx context.Context, base []string, opts TriggerLoopOptions, cacheGrant string) []string {
 	out := make([]string, 0, len(base)+6)
 	for _, item := range base {
@@ -47,8 +43,7 @@ func triggerChildEnv(ctx context.Context, base []string, opts TriggerLoopOptions
 	return out
 }
 
-// triggerChildSets are the names triggerChildEnv writes itself, so a stale
-// launcher value never shadows the run's own.
+// safety: a stale launcher value must never shadow the run's own.
 var triggerChildSets = map[string]bool{
 	"SPARKWING_CONTROLLER_URL": true,
 	"SPARKWING_LOGS_URL":       true,

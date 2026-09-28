@@ -14,15 +14,12 @@ import (
 
 var widgets = store.GitHubRepo{Owner: "Acme", Name: "Widgets"}
 
-// mainPush is the push githubWork records work for.
 var mainPush = store.GitHubRunnerPush{Branch: "main", SHA: "0123456789abcdef0123456789abcdef01234567"}
 
 func widgetsScope() store.GitHubRunnerScope {
 	return store.GitHubRunnerScope{Team: "acme", Repo: widgets, Push: mainPush}
 }
 
-// githubWork writes a trigger, its run and one ready node for repo into
-// tenant's team, spelled the way a push webhook records it.
 func githubWork(t *testing.T, s *store.Store, tenant *store.Tenant, runID, slug string, env map[string]string) {
 	t.Helper()
 	ctx := context.Background()
@@ -199,7 +196,6 @@ func TestGitHubRunnerScopeClaimsOnlyItsRepositorysNodes(t *testing.T) {
 	if n, err := st.ClaimNextReadyNode(ctx, id, "gh-2", time.Minute, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("second claim = %+v, %v; want nothing: the rest is another repository's or team's", n, err)
 	}
-	// Control: the same queue without the scope hands out the other work.
 	if n, err := st.ClaimNextReadyNode(context.Background(), id, "local", time.Minute, nil); err != nil || n.RunID == "run-widgets" {
 		t.Fatalf("unscoped claim = %+v, %v", n, err)
 	}
@@ -261,8 +257,6 @@ func TestTriggerNamesGitHubRepoAcceptsEverySpellingOfTheRepository(t *testing.T)
 	}
 }
 
-// githubClaimant mints the runner credential a GitHub Actions job claims
-// with, because a claim takes its team off the token row its prefix names.
 func githubClaimant(t *testing.T, team *store.Tenant, principal string) store.ClaimIdentity {
 	t.Helper()
 	_, tok, err := team.CreateToken(context.Background(), principal, store.TokenKindRunner, []string{"nodes.claim"}, time.Hour, time.Now())

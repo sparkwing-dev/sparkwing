@@ -15,11 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A GitHub Actions job can run a team's work on the job's own minutes. GitHub's
-// terms allow Actions to be used for the production, testing, deployment or
-// publication of the software project in the repository the workflow runs in,
-// so a job's credential reaches only runs of that one repository, and the
-// controller enforces that on every request the credential makes.
+// safety: GitHub's terms allow Actions only for the software project in the repository the
+// workflow runs in, so a job's credential reaches only runs of that one repository.
 
 // GitHubActionsLabel is the runner label a GitHub Actions job advertises. It
 // is not the local label, so the placement hold keeps a team's own machines
@@ -31,14 +28,10 @@ const GitHubActionsLabel = "github-actions"
 // matches it.
 const githubRunnerCredentialTTL = time.Hour
 
-// githubRunnerEvents are the workflow events whose job runs code the
-// repository's owners pushed. pull_request runs a contributor's code, and
-// pull_request_target and workflow_run hand the base repository's
-// privileges to input a fork controls, so those jobs get no credential.
+// safety: pull_request runs a contributor's code, and pull_request_target and workflow_run hand
+// the base repository's privileges to input a fork controls, so those jobs get no credential.
 var githubRunnerEvents = map[string]bool{"push": true, "workflow_dispatch": true, "schedule": true}
 
-// githubCommit reports whether sha is a full commit id: 40 hex digits, or 64
-// in a SHA-256 repository.
 func githubCommit(sha string) bool {
 	if len(sha) != 40 && len(sha) != 64 {
 		return false
@@ -191,9 +184,6 @@ func (s *Server) handleGitHubRunnerExchange(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// githubRunnerScope reports whether p is a GitHub Actions job's credential
-// and, when it is, the only work it may reach. ok is false for a credential
-// whose principal does not parse, which the fence refuses outright.
 func githubRunnerScope(p *Principal) (scope store.GitHubRunnerScope, isGitHub, ok bool) {
 	if p == nil || !strings.HasPrefix(p.Name, store.GitHubRunnerPrincipalPrefix) {
 		return store.GitHubRunnerScope{}, false, false
@@ -210,10 +200,8 @@ func githubRunnerScope(p *Principal) (scope store.GitHubRunnerScope, isGitHub, o
 	return store.GitHubRunnerScope{Team: p.Team, Repo: repo}, true, true
 }
 
-// githubRunnerFence holds a GitHub Actions job's credential to its own
-// repository's work. Every route the credential may use is listed; any
-// other answers 403, so a route added later is closed to it until someone
-// decides how it is confined.
+// safety: routes are allowlisted, so a route added later answers 403 to a GitHub job's
+// credential until someone decides how it is confined.
 func (s *Server) githubRunnerFence(next http.Handler) http.Handler {
 	fence := s.githubFenceMux(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -340,9 +328,7 @@ type githubBindingJSON struct {
 
 type githubBindingsResp struct {
 	Bindings []githubBindingJSON `json:"bindings"`
-	// Workflow is the file to commit as .github/workflows/sparkwing.yaml in
-	// a bound repository.
-	Workflow string `json:"workflow"`
+	Workflow string              `json:"workflow"`
 }
 
 func githubBindingOut(b store.GitHubRunnerBinding) githubBindingJSON {

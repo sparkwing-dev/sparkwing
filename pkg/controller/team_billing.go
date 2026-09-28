@@ -9,12 +9,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// teamBillingHistoryLimit is how many runs and grants the billing page lists.
 const teamBillingHistoryLimit = 50
 
-// checkoutOpenHold is how long an opened checkout counts against the balance
-// cap when the checkout service names no expiry, and the longest it counts
-// when it does. Stripe keeps a session open 31 minutes from its creation.
+// safety: Stripe keeps a session open 31 minutes from its creation.
 const checkoutOpenHold = 35 * time.Minute
 
 type teamBillingUsageJSON struct {
@@ -33,33 +30,28 @@ type teamBillingGrantJSON struct {
 }
 
 type teamBillingJSON struct {
-	Team                      string           `json:"team"`
-	BalanceMicro              int64            `json:"balance_micro"`
-	BalanceCapMicro           int64            `json:"balance_cap_micro"`
-	MicroPerCredit            int64            `json:"micro_per_credit"`
-	CreditsPerDollar          int64            `json:"credits_per_dollar"`
-	MinBillableSeconds        int64            `json:"min_billable_seconds"`
-	PurchaseMinCents          int64            `json:"purchase_min_cents"`
-	PurchaseMaxCents          int64            `json:"purchase_max_cents"`
-	RateTable                 []creditRateJSON `json:"rate_table"`
-	StorageRateMicroPerGBDay  int64            `json:"storage_rate_micro_per_gb_day"`
-	StorageFreeAllowanceBytes int64            `json:"storage_free_allowance_bytes"`
-	StorageChargedMicro       int64            `json:"storage_charged_micro"`
-	// Frozen is set while the team's cloud usage is held over an open
-	// payment dispute; its metered claims are refused until it is released.
-	Frozen             bool                   `json:"frozen"`
-	Trusted            bool                   `json:"trusted"`
-	PurchaseLimitCents int64                  `json:"purchase_limit_cents"`
-	Purchased30dCents  int64                  `json:"purchased_30d_cents"`
-	CheckoutEnabled    bool                   `json:"checkout_enabled"`
-	CanPurchase        bool                   `json:"can_purchase"`
-	Usage              []teamBillingUsageJSON `json:"usage"`
-	Grants             []teamBillingGrantJSON `json:"grants"`
+	Team                      string                 `json:"team"`
+	BalanceMicro              int64                  `json:"balance_micro"`
+	BalanceCapMicro           int64                  `json:"balance_cap_micro"`
+	MicroPerCredit            int64                  `json:"micro_per_credit"`
+	CreditsPerDollar          int64                  `json:"credits_per_dollar"`
+	MinBillableSeconds        int64                  `json:"min_billable_seconds"`
+	PurchaseMinCents          int64                  `json:"purchase_min_cents"`
+	PurchaseMaxCents          int64                  `json:"purchase_max_cents"`
+	RateTable                 []creditRateJSON       `json:"rate_table"`
+	StorageRateMicroPerGBDay  int64                  `json:"storage_rate_micro_per_gb_day"`
+	StorageFreeAllowanceBytes int64                  `json:"storage_free_allowance_bytes"`
+	StorageChargedMicro       int64                  `json:"storage_charged_micro"`
+	Frozen                    bool                   `json:"frozen"`
+	Trusted                   bool                   `json:"trusted"`
+	PurchaseLimitCents        int64                  `json:"purchase_limit_cents"`
+	Purchased30dCents         int64                  `json:"purchased_30d_cents"`
+	CheckoutEnabled           bool                   `json:"checkout_enabled"`
+	CanPurchase               bool                   `json:"can_purchase"`
+	Usage                     []teamBillingUsageJSON `json:"usage"`
+	Grants                    []teamBillingGrantJSON `json:"grants"`
 }
 
-// handleTeamBilling is the active team's billing page: its balance, the
-// prices it pays, recent runner usage by run, and the grants that funded it.
-// Any member reads it; only an owner may buy.
 func (s *Server) handleTeamBilling(w http.ResponseWriter, r *http.Request) {
 	p, t, ok := s.teamMember(w, r, store.RoleReader)
 	if !ok {
@@ -167,9 +159,6 @@ type codedErrorJSON struct {
 	Code  string `json:"code"`
 }
 
-// handleTeamBillingCheckout opens a Stripe Checkout Session for the active
-// team through the checkout service and answers with the page to send the
-// owner to. The team comes from the owner's session, never from the body.
 func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Request) {
 	_, t, ok := s.teamMember(w, r, store.RoleOwner)
 	if !ok {
@@ -249,8 +238,6 @@ func (s *Server) handleTeamBillingCheckout(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, teamCheckoutJSON{URL: session.URL})
 }
 
-// writeBalanceCapRefusal answers a grant or purchase the team balance cap
-// refused with 409 and the figures on both sides.
 func (s *Server) writeBalanceCapRefusal(w http.ResponseWriter, err error) bool {
 	var capErr *store.CreditBalanceCapError
 	if !errors.As(err, &capErr) {

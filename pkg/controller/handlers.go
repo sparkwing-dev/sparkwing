@@ -818,8 +818,6 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	return cleaned
 }
 
-// submitterName is the authenticated principal a trigger is attributed
-// to, or empty on a controller that runs without authentication.
 func submitterName(r *http.Request) string {
 	if p, ok := PrincipalFromContext(r.Context()); ok {
 		return p.Name
@@ -1378,14 +1376,12 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type claimTriggerReq struct {
-	Pipelines      []string `json:"pipelines,omitempty"`
-	TriggerSources []string `json:"trigger_sources,omitempty"`
-	// NodeRunner is how the claimant runs the trigger's nodes: inprocess,
-	// k8s or warm. Empty means inprocess.
-	NodeRunner string          `json:"node_runner,omitempty"`
-	AllowRepos []string        `json:"allow_repos,omitempty"`
-	Platform   *claimPlatform  `json:"platform,omitempty"`
-	Resources  *claimResources `json:"resources,omitempty"`
+	Pipelines      []string        `json:"pipelines,omitempty"`
+	TriggerSources []string        `json:"trigger_sources,omitempty"`
+	NodeRunner     string          `json:"node_runner,omitempty"`
+	AllowRepos     []string        `json:"allow_repos,omitempty"`
+	Platform       *claimPlatform  `json:"platform,omitempty"`
+	Resources      *claimResources `json:"resources,omitempty"`
 }
 
 type claimPlatform struct {

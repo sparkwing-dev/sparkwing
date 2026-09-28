@@ -311,7 +311,6 @@ func TestIdentityTeamCreationIsCapped(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	u := signIn(t, st, "s", "busy@example.com")
-	// The personal team is the first of three.
 	for i := 2; i <= 3; i++ {
 		if _, err := st.CreateTeam(ctx, u.Account.ID, store.Team(fmt.Sprintf("busy-team-%d", i)), "", time.Now()); err != nil {
 			t.Fatalf("team %d: %v", i, err)

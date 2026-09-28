@@ -24,14 +24,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// The pipeline child learns its mode from a file in HOME, because the
-// supervisor passes it only an allowlisted environment.
+// hack: the mode travels in a file in HOME because the supervisor passes the child
+// only an allowlisted environment.
 const pipelineChildModeFile = "pipeline-child-mode"
 
-// runPipelineChildForTest stands in for a team's pipeline binary under
-// run-node. "released" writes the way every released SDK does, one
-// unnumbered append per line, then exits 0; "killed" does the same and dies
-// by a signal; "sealing" numbers its lines and seals them itself.
 func runPipelineChildForTest(runID, nodeID string) int {
 	mode, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), pipelineChildModeFile))
 	if err != nil {
@@ -82,7 +78,6 @@ func TestPooledNode_AgentSealsTheLogOfAPipelineChild(t *testing.T) {
 	for _, tc := range []struct{ mode, want string }{
 		{"released", logs.StateComplete},
 		{"sealing", logs.StateComplete},
-		// Negative control: a child killed mid-node leaves no seal.
 		{"killed", logs.StateCutOff},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {

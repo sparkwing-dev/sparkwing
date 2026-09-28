@@ -405,7 +405,6 @@ func TestChargedWriteAccumulatesUnderTheLimit(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set quota: %v", err)
 	}
-	// Each write is 16 bytes: a one-byte kind and a 15-byte payload.
 	payload := make([]byte, 15)
 	for i := range 2 {
 		if _, err := st.AppendEventCharged(ctx, "alice", "r1", "n1", "k", payload); err != nil {

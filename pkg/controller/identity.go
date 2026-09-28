@@ -105,10 +105,7 @@ type capabilitiesGitHubApp struct {
 	SourceTokens bool   `json:"source_tokens"`
 }
 
-// capabilitiesClaims tells a runner which claim fields this controller reads,
-// so a newer runner sends only what an older controller accepts.
 type capabilitiesClaims struct {
-	// AllowRepos reports that trigger and node claims take allow_repos.
 	AllowRepos bool `json:"allow_repos"`
 	Profile    bool `json:"profile"`
 }

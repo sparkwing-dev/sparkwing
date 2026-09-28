@@ -688,8 +688,6 @@ func offerTriggerSource(_ *profile.Profile, repoDir, _, sha string) error {
 	return nil
 }
 
-// commitOnOrigin reports whether a remote-tracking branch of origin contains
-// sha, which is what this checkout knows of what has been pushed.
 func commitOnOrigin(repoDir, sha string) bool {
 	if sha == "" {
 		return false

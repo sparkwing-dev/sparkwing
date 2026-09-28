@@ -18,8 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
-// testGrantKey is the grant key newBudgetedServer gives a cache whose
-// operator token is token.
 func testGrantKey(token string) string { return token + "-grant-key" }
 
 func grantFor(t *testing.T, token, team string) string {
@@ -75,7 +73,6 @@ func TestGrantsKeepEachTeamsBlobsApart(t *testing.T) {
 		if code, body := send(t, srv, http.MethodGet, w.read, token, ""); strings.Contains(body, "team-a secret") {
 			t.Errorf("the operator's unscoped tree served team A's %s: %d", w.read, code)
 		}
-		// Team B writing the same key lands in its own tree and leaves A's bytes alone.
 		if code, body := send(t, srv, w.method, w.write, teamB, "team-b poison"); code/100 != 2 {
 			t.Fatalf("%s %s as team B = %d: %s", w.method, w.write, code, body)
 		}
@@ -164,7 +161,6 @@ func TestOnlyOperatorGrantsReadPrivateMirrors(t *testing.T) {
 		repoNames = saved
 		repoNamesMu.Unlock()
 	})
-	// The mirror exists, so only the grant check stands between the grant and it.
 	if out, err := exec.Command("git", "init", "--bare", filepath.Join(repoDir, repoHash(private)+".git")).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}

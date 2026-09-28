@@ -147,10 +147,6 @@ func newGitHubCommitStatusReporterWithCapacity(token, dashboardURL, apiBaseURL s
 	return r
 }
 
-// reportGitHubRunState reports runStatus for runID to GitHub: as a check run
-// when the App started the run, else as a commit status when the operator's
-// token is configured. runStatus is a run status, "pending" for a run not yet
-// started, or "timed_out" for one no runner claimed in time.
 func (s *Server) reportGitHubRunState(ctx context.Context, runID, runStatus string) {
 	if s.githubCommitStatuses == nil && s.githubApp == nil {
 		return
@@ -184,7 +180,6 @@ func (s *Server) reserveGitHubCommitStatus(ctx context.Context, runID, runStatus
 	return reporter.reserve(s.logger, status)
 }
 
-// githubCommitStatus answers the operator's commit status for runID.
 func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string) (*githubCommitStatusReporter, githubCommitStatus, bool) {
 	reporter := s.githubCommitStatuses
 	if reporter == nil {

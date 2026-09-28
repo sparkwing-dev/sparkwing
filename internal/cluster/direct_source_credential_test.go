@@ -234,9 +234,6 @@ func main() {
 	return git(work, "rev-parse", "HEAD")
 }
 
-// stubSSH puts an ssh stand-in first on PATH. It records the key file it is
-// handed (-i), that file's body and its own environment under record, then
-// serves the repository under root the way sshd would run git-upload-pack.
 func stubSSH(t *testing.T, root, record string) {
 	t.Helper()
 	bin := t.TempDir()

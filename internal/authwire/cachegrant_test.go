@@ -26,7 +26,6 @@ func TestCacheGrantVerifiesOnlyWhatTheTokenSigned(t *testing.T) {
 		t.Error("an expired grant verified")
 	}
 
-	// Rewriting the team in the payload must break the signature.
 	other, err := authwire.MintCacheGrant("operator-token", "team-b", "run-1", now, time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -49,9 +48,8 @@ func TestCacheGrantRefusesATeamThatCouldLeaveItsDirectory(t *testing.T) {
 }
 
 func TestCacheGrantWireFormatIsStable(t *testing.T) {
-	// The controller mints and the cache verifies, and the two can run
-	// different builds, so the MAC key derivation and payload encoding are a
-	// wire contract.
+	// safety: the controller mints and the cache verifies on possibly different builds,
+	// so the MAC key derivation and payload encoding are a wire contract.
 	raw, err := authwire.MintCacheGrant("k", "team-a", "r", time.Unix(1_800_000_000, 0), time.Hour)
 	if err != nil {
 		t.Fatal(err)

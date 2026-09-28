@@ -24,7 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// importMark is the store metadata key whose presence means the import ran.
 const importMark = "legacy_dotenv_import"
 
 // ImportPrincipal is recorded as the writer of every imported row.

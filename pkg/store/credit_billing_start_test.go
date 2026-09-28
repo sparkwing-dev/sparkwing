@@ -11,12 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// Billing runs from the moment the machine that executes a node starts work
-// on it to the node's finish, so fetch and compile are billed. A runner that
-// claims its own work starts at the claim; a dispatcher claims before the pod
-// exists, so its node starts at the pod's first claim renewal or execution
-// start, whichever comes first, and provisioning is never billed.
-
 func billingFrom(t *testing.T, s *store.Store, runID, nodeID string) int64 {
 	t.Helper()
 	var from int64

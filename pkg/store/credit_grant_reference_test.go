@@ -19,7 +19,6 @@ func TestCreditGrantReferencesAreKeyedPerTeam(t *testing.T) {
 		if _, err := team.GrantCredits(ctx, store.CreditGrantFree, 5*store.MicroCreditsPerCent, "welcome", "operator"); err != nil {
 			t.Fatalf("welcome grant: %v", err)
 		}
-		// A retry of the same grant stays one grant.
 		if _, err := team.GrantCredits(ctx, store.CreditGrantFree, 5*store.MicroCreditsPerCent, "welcome", "operator"); err != nil {
 			t.Fatalf("welcome grant retry: %v", err)
 		}
@@ -30,8 +29,6 @@ func TestCreditGrantReferencesAreKeyedPerTeam(t *testing.T) {
 			t.Fatalf("balance = %d, %v; want one welcome grant", balance, err)
 		}
 	}
-	// A payment id is the deployment's: one seen under a second team is
-	// still refused rather than paid twice.
 	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, store.MicroCreditsPerCent, "pay_1", "billing"); err != nil {
 		t.Fatal(err)
 	}

@@ -136,10 +136,8 @@ func runNodeRemote(
 	return runNodeChild(ctx, binary.path, filepath.Dir(sparkwingDir), controllerURL, logsURL, token, binaryCacheURL, cacheGrant, runID, nodeID, logger)
 }
 
-// supervisorArtifactStore is the store a node's brokered artifacts go to: the
-// one the environment names, else the cache this node's grant opens. A pooled
-// agent serves many runs from one process, so the grant is the node's, never
-// one read from the process environment.
+// safety: a pooled agent serves many runs from one process, so the cache grant is the node's,
+// never one read from the process environment.
 func supervisorArtifactStore(ctx context.Context, controllerURL, runID, cacheURL, cacheGrant string) (storage.ArtifactStore, error) {
 	if ResolveDevEnvURL(ArtifactStoreEnvVar) != "" {
 		return resolveArtifactStoreFromEnv(ctx)
@@ -205,11 +203,8 @@ func runNodeIsolated(
 
 var runNodeIsolatedFn = runNodeIsolated
 
-// runNodeChild runs one node in the pipeline binary. The child is the team's
-// own code: of the credentials this process holds it receives only the run's
-// cache grant, and reaches the controller through the broker. cacheURL, when
-// set, is the cache the grant opens, which holds the node's artifacts unless
-// the environment names another store.
+// safety: the child is the team's own code, so of this process's credentials it receives only
+// the run's cache grant and reaches the controller through the broker.
 func runNodeChild(
 	ctx context.Context,
 	binary, dir, controllerURL, logsURL, token, cacheURL, cacheGrant, runID, nodeID string,

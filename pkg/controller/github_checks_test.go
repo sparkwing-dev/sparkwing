@@ -39,7 +39,6 @@ func startedRunIDs(t *testing.T, out map[string]any) []string {
 	return ids
 }
 
-// pushRun delivers a push of sha and returns the one run it started.
 func (f *appFixture) pushRun(sha string) string {
 	f.t.Helper()
 	code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", sha), "")
@@ -50,14 +49,11 @@ func (f *appFixture) pushRun(sha string) string {
 	return ids[0]
 }
 
-// claimedRun is a runner holding a claim on a run's trigger.
 type claimedRun struct {
 	auth       string
 	generation int64
 }
 
-// startRun claims runID's trigger with a runner of owner's team and records
-// the run as running, the way a runner does.
 func (f *appFixture) startRun(owner signedIn, runID string) claimedRun {
 	f.t.Helper()
 	var m mintedRunner

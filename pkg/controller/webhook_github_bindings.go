@@ -231,10 +231,6 @@ type githubWebhookResolution struct {
 	scoped     bool
 }
 
-// githubWebhookCandidate is a secret that may have signed a delivery and the
-// team a delivery it verifies runs in. Bound means it is a stored binding for
-// this pipeline and repository, which allows a delivery it verifies whatever
-// the document says.
 type githubWebhookCandidate struct {
 	secret string
 	team   store.Team
@@ -275,11 +271,8 @@ func (s *Server) resolveGitHubWebhook(ctx context.Context, pipeline, repo string
 	return res
 }
 
-// verifiedGitHubCandidate reports the secret that signed the delivery, which
-// names the team it runs in. The signature is the only credential a delivery
-// carries, so it is what picks the team; a signature two teams' secrets both
-// verify names no one team and is refused rather than handed to whichever was
-// read first.
+// safety: the signature is a delivery's only credential, so it picks the team; one that two teams'
+// secrets both verify is refused rather than handed to whichever was read first.
 func (s *Server) verifiedGitHubCandidate(res githubWebhookResolution, signature string, body []byte, pipeline string) (githubWebhookCandidate, bool) {
 	var found githubWebhookCandidate
 	verified := false

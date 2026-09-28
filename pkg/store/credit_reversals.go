@@ -214,8 +214,6 @@ func (s *Store) holdTeam(
 	return true, tx.Commit()
 }
 
-// refuseBoundDisputeTx reports whether disputeID already has a hold, and
-// refuses one held for another payment or team with [ErrDisputeConflict].
 func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, team Team, paymentID string) (bool, error) {
 	heldTeam, heldPayment, found, err := disputeHoldTx(ctx, tx, disputeID)
 	if err != nil || !found {
@@ -228,7 +226,6 @@ func refuseBoundDisputeTx(ctx context.Context, tx *storeTx, disputeID string, te
 	return true, nil
 }
 
-// disputeHoldTx finds the team and payment a dispute's hold names.
 func disputeHoldTx(ctx context.Context, tx *storeTx, disputeID string) (Team, string, bool, error) {
 	var team, payment string
 	err := tx.QueryRowContext(ctx, `SELECT team, payment_id FROM credit_freezes WHERE dispute_id = ?`,

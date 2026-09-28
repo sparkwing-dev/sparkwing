@@ -6,8 +6,6 @@ import (
 	"net/http"
 )
 
-// flowPage is the small page a redirect flow shows between its steps, or
-// when it stops.
 type flowPage struct {
 	Title       string
 	Message     string

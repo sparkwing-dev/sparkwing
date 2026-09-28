@@ -22,7 +22,6 @@ func operatorTeam(team string) bool { return storagequota.Exempt(team) }
 
 var errBeyondShare = errors.New("the upload passed the room the team's free share left it; add credits to store more")
 
-// shareReader fails a body once it passes the bytes a reservation granted.
 type shareReader struct {
 	r    io.Reader
 	left int64
@@ -76,11 +75,6 @@ func (b *blobReservation) finish(ctx context.Context) {
 	}
 }
 
-// reserveBlobWrite holds room for a team's upload before one byte of it is
-// read. A known length is admitted whole or refused with 413; an unknown one
-// gets the room left, up to limit, and its body fails past it, which aborts
-// the upload before anything is readable. The caller calls finish once the
-// write is done, whatever it did.
 func reserveBlobWrite(w http.ResponseWriter, r *http.Request, team string, size, limit int64) (*blobReservation, io.Reader, bool) {
 	if counter == nil || operatorTeam(team) {
 		return &blobReservation{}, r.Body, true

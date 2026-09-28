@@ -312,8 +312,7 @@ func TestEditorRevokesOnlyTheirOwnRunnerTokens(t *testing.T) {
 	if len(list) != 1 || list[0].Name != "eddie-box" || list[0].CreatedBy != editor.id {
 		t.Fatalf("list = %+v", list)
 	}
-	// Authenticating first puts the token in the auth cache, which the
-	// revocation has to clear.
+	// safety: authenticating first caches the token, which the revocation has to clear.
 	if code := f.call("GET", "/api/v1/auth/whoami", "Bearer "+mine.Token, nil, nil); code != http.StatusOK {
 		t.Fatalf("live token = %d, want 200", code)
 	}

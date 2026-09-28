@@ -10,8 +10,6 @@ import (
 )
 
 type runnerHeadroom struct {
-	// Team is the team whose credential advertised the headroom; the queue
-	// view shows a caller only its own team's runners.
 	Team        store.Team
 	Cores       float64
 	MemoryBytes int64

@@ -42,7 +42,6 @@ func TestMeteredTriggerClaimNeedsTheMinimumReservation(t *testing.T) {
 		t.Fatalf("trigger = %+v, %v; want it left pending", tr, err)
 	}
 
-	// Control: an unmetered credential on the same empty balance claims it.
 	local := unmeteredClaimant(t, st, "agent:laptop")
 	pendingTrigger(t, st, "run-2")
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-2", local, 0); err != nil {
@@ -68,8 +67,6 @@ func unmeteredClaimant(t *testing.T, s *store.Store, principal string) store.Cla
 	return store.ClaimIdentity{Principal: principal, TokenPrefix: tok.Prefix}
 }
 
-// triggerFloor is the minimum a metered trigger claim reserves, read off the
-// refusal an empty balance answers with.
 func triggerFloor(t *testing.T, st *store.Store, pool store.ClaimIdentity) int64 {
 	t.Helper()
 	pendingTrigger(t, st, "run-floor")
@@ -93,10 +90,6 @@ func balance(t *testing.T, st *store.Store) int64 {
 	return b
 }
 
-// backdateTriggerClaim moves a claim's reservation, and its lease when lease
-// is non-zero, into the past, standing in for a step that ran that long.
-// pastTriggerMinimum is a reservation instant that leaves a claim extra past
-// the minimum its reservation paid for.
 func pastTriggerMinimum(extra time.Duration) time.Time {
 	return time.Now().Add(-store.MinBillableSeconds*time.Second - extra)
 }
@@ -139,7 +132,6 @@ func TestMeteredTriggerClaimReservesItsMinute(t *testing.T) {
 		t.Fatalf("refused trigger = %+v, %v; want it left pending", tr, err)
 	}
 
-	// Control: an unmetered credential takes the same trigger on the spent balance.
 	if _, err := st.ClaimSpecificTriggerFor(ctx, "run-b", unmeteredClaimant(t, st, "agent:laptop"), 0); err != nil {
 		t.Fatalf("unmetered claim: %v", err)
 	}

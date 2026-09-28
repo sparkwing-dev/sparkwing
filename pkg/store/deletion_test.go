@@ -21,9 +21,6 @@ func countWhere(t *testing.T, st *store.Store, table, where string) int {
 	return n
 }
 
-// seedTeam writes a pending run with its trigger, a secret, an open
-// invitation and a runner token into team, so a purge has rows in several
-// tables to find.
 func seedTeam(t *testing.T, st *store.Store, tn *store.Tenant, ownerID, runID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -123,7 +120,6 @@ func TestTeamDeletionClosesTheTeamAtOnceAndThePurgeLeavesNoRow(t *testing.T) {
 	if err != nil || sess.Team != member.PersonalTeam {
 		t.Fatalf("member session = %+v, %v; want moved to %s", sess, err, member.PersonalTeam)
 	}
-	// Control: the other team's token, run and member rows are untouched.
 	if n := countWhere(t, st, "tokens", fmt.Sprintf("prefix = '%s' AND revoked_at IS NULL", keepToken)); n != 1 {
 		t.Fatal("deleting acme revoked another team's token")
 	}
@@ -280,7 +276,6 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if _, err := st.ForTeam(ctx, leaver.PersonalTeam); !errors.Is(err, store.ErrUnknownTeam) {
 		t.Fatalf("the deleted account's own space = %v, want it closed", err)
 	}
-	// Control: the owner and their team are untouched.
 	if role, err := shared.MemberRole(ctx, owner.Account.ID); err != nil || role != store.RoleOwner {
 		t.Fatalf("owner after another account's deletion = %s, %v", role, err)
 	}
@@ -317,8 +312,6 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 	if claimed != store.MaxInvitationEmailsPerDay {
 		t.Fatalf("claimed %d emails to one address, want %d", claimed, store.MaxInvitationEmailsPerDay)
 	}
-	// Control: another address has its own allowance, and a day later the
-	// first one does too.
 	owner := signIn(t, st, "x", "other-owner@example.com")
 	other, err := tenant(t, st, owner.PersonalTeam).CreateInvitation(ctx, owner.Account.ID, "someone@example.com", store.RoleReader, now)
 	if err != nil {

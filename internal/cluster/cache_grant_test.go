@@ -23,9 +23,6 @@ const (
 	cacheGrantKey      = "cache-grant-key"
 )
 
-// newGrantingController stands in for the controller's cache-grant route: it
-// resolves the runner token to its team and signs with the grant key, which
-// only the controller and the cache hold.
 func newGrantingController(t *testing.T, teams map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

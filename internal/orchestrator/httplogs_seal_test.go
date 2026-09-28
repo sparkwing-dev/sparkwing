@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// sealFixture is a real logs service behind a switch that can fail
-// appends, so the runner's retries and drop accounting run for real.
 func sealFixture(t *testing.T) (*logs.Client, *atomic.Bool, string) {
 	t.Helper()
 	srv, err := logs.New(t.TempDir(), nil)
@@ -57,8 +55,6 @@ func TestHTTPLogs_CloseSealsTheStream(t *testing.T) {
 		nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "hello"})
 	}
 
-	// Negative control: before Close the stream is open, so a finished
-	// node reads as cut off.
 	if got := verdict(t, client, "run", "node"); got.State != logs.StateCutOff {
 		t.Fatalf("before close = %+v, want cut_off", got)
 	}
@@ -208,7 +204,6 @@ func TestHTTPLogs_SkippedSealWarnsWithTheReason(t *testing.T) {
 		t.Fatalf("skipped seal logged %q", out.String())
 	}
 
-	// Negative control: a writer that seals logs nothing.
 	out.Reset()
 	nlog, err = orchestrator.NewHTTPLogs(url, nil, logger).OpenNodeLog(context.Background(), "run", "other", nil)
 	if err != nil {

@@ -358,8 +358,8 @@ func executorKind(source string) string {
 	return "runner"
 }
 
-// defaultRunnerMetricsAddr is loopback-only because a runner on a laptop would
-// otherwise serve /metrics on every interface; the chart passes its own port.
+// safety: loopback-only so a runner on a laptop does not serve /metrics on every
+// interface; the chart passes its own port.
 const defaultRunnerMetricsAddr = "127.0.0.1:9090"
 
 func runRunnerCLI(args []string, version string) error {
@@ -700,12 +700,6 @@ func executePooledNode(
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
 }
 
-// nodeCacheURL is the cache a claimed node reads source, the binary cache and
-// artifacts from. With the run's grant, the cache the controller announces
-// replaces the controller's own gitcache proxy, or no cache at all, so an
-// off-cluster agent reaches the cache directly and the controller carries no
-// data. A cache named directly, such as an in-cluster Service, is kept, and
-// without a grant nothing changes: the announced cache takes only a grant.
 func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
 	if grant == "" || announced == "" {
 		return gitcacheURL
@@ -716,18 +710,12 @@ func nodeCacheURL(gitcacheURL, controllerURL, announced, grant string) string {
 	return gitcacheURL
 }
 
-// runPooledNodeOnce is the node execution a pooled claim runs; tests
-// replace it to inject a setup failure.
 var runPooledNodeOnce = orchestrator.RunNodeOnce
 
-// poolSetupFinishTimeout bounds the finish a setup failure sends.
 const poolSetupFinishTimeout = 10 * time.Second
 
-// failPooledNodeSetup finishes a claimed node as failed with the setup
-// error, under the node's claim fence, so the run reports the real cause at
-// once instead of waiting out the claim lease. A runner shutting down leaves
-// the node alone, because its lease lapsing is what hands the node to
-// another runner.
+// safety: a runner shutting down leaves the node alone, because its lease lapsing is
+// what hands the node to another runner.
 func failPooledNodeSetup(ctx context.Context, ctrl *client.Client, n *store.Node, holderID string, setupErr error, source string, logger *slog.Logger) {
 	if ctx.Err() != nil {
 		return

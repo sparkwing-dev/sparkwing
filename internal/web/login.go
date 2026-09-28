@@ -280,8 +280,6 @@ type sessionResp struct {
 	UserID    string   `json:"user_id,omitempty"`
 }
 
-// accountBound reports a session a signed-up account holds, or one acting for
-// any team but the operator's.
 func (s *sessionResp) accountBound() bool {
 	return s.UserID != "" || (s.Team != "" && s.Team != "default")
 }
@@ -293,9 +291,6 @@ func accountSessionsServed(opts HandlerOptions) bool {
 	return opts.ControllerURL != ""
 }
 
-// resolveDashboardSession is [controllerResolveSession] for a session this
-// dashboard will serve: an account session on a dashboard that does not
-// forward reads as the session reads as invalid.
 func resolveDashboardSession(ctx context.Context, opts HandlerOptions, sessionID string) (*sessionResp, error) {
 	sess, err := controllerResolveSession(ctx, authControllerURL(opts), sessionID)
 	if err != nil {

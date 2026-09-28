@@ -52,8 +52,6 @@ func triggerRunRepository(t *Trigger, envJSON []byte) match.Repository {
 	}
 }
 
-// runRepositoryOf reads the repository fields of runID's trigger within
-// scope's team. A run with no trigger names none.
 func (s *Store) runRepositoryOf(ctx context.Context, scope teamScope, runID string, seen map[string]match.Repository) (match.Repository, error) {
 	if repo, ok := seen[runID]; ok {
 		return repo, nil

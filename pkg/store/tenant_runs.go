@@ -153,7 +153,7 @@ func (t *Tenant) ListRunRetryTree(ctx context.Context, runID string) ([]*Run, er
 	if runID == "" {
 		return nil, nil
 	}
-	// A corrupted retry_of cycle would otherwise spin the upward walk forever.
+	// safety: a corrupted retry_of cycle would otherwise spin the upward walk forever.
 	const maxDepth = 256
 	rootID := ""
 	next := runID

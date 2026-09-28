@@ -33,8 +33,6 @@ func githubCheckPhaseFor(runStatus string) githubCheckPhase {
 	}
 }
 
-// githubCheckConclusion maps a finished run's status onto GitHub's check
-// run conclusions.
 func githubCheckConclusion(runStatus string) string {
 	switch runStatus {
 	case "success":
@@ -48,7 +46,6 @@ func githubCheckConclusion(runStatus string) string {
 	}
 }
 
-// githubCheckUpdate is the state one run of an App trigger reports.
 type githubCheckUpdate struct {
 	installation int64
 	owner        string
@@ -78,10 +75,8 @@ const (
 	githubStatusRunLimit = 4096
 )
 
-// githubCheckReporter reports the runs the App started as GitHub check runs.
-// Updates for one run coalesce to the latest state and never move a check
-// run backwards, and a write GitHub keeps refusing is logged and dropped, so
-// no run waits on GitHub.
+// safety: updates for one run coalesce and never move a check run backwards, and a write GitHub
+// keeps refusing is logged and dropped, so no run waits on GitHub.
 type githubCheckReporter struct {
 	client       *githubapp.Client
 	store        *store.Store
@@ -96,12 +91,10 @@ type githubCheckReporter struct {
 	jobs      map[string]*githubCheckJob
 	order     []string
 	changed   chan struct{}
-	// statusRuns are the runs that began on commit statuses because their
-	// installation lacked the checks permission; they finish there too, so a
-	// commit never keeps a pending status beside a check run.
+	// safety: runs that began on commit statuses because their installation lacked the checks
+	// permission finish there too, so a commit never keeps a pending status beside a check run.
 	statusRuns map[string]bool
-	// warned holds the installations whose missing permission was logged.
-	warned map[int64]bool
+	warned     map[int64]bool
 }
 
 func newGitHubCheckReporter(client *githubapp.Client, st *store.Store, dashboardURL string) *githubCheckReporter {
@@ -207,7 +200,6 @@ func (r *githubCheckReporter) finish(runID string, sent githubCheckPhase) {
 	r.signalLocked()
 }
 
-// idle waits until no update is queued or being sent.
 func (r *githubCheckReporter) idle(ctx context.Context) error {
 	for {
 		r.mu.Lock()
@@ -245,8 +237,7 @@ func (r *githubCheckReporter) stop() {
 	r.cancel()
 }
 
-// deliver writes u to GitHub and returns the phase to count as sent, which
-// is u's own even when GitHub never took it, so a failing write is not
+// safety: returns u's own phase even when GitHub never took it, so a failing write is not
 // retried past its attempts.
 func (r *githubCheckReporter) deliver(logger *slog.Logger, u githubCheckUpdate) githubCheckPhase {
 	r.mu.Lock()
@@ -308,8 +299,6 @@ func (r *githubCheckReporter) retry(logger *slog.Logger, u githubCheckUpdate, wh
 	}
 }
 
-// githubRetryable reports whether a write GitHub failed may land if sent
-// again: GitHub answered 429 or a 5xx, or the request never got an answer.
 func githubRetryable(err error) bool {
 	var apiErr *githubapp.APIError
 	switch {
@@ -431,8 +420,7 @@ func githubCheckLinkLine(text, link string) string {
 	return text + " [Open the run in Sparkwing](" + link + ")."
 }
 
-// githubCheckSummary reports aggregate run state on GitHub; details stay on
-// the authenticated Sparkwing run page.
+// safety: GitHub sees only aggregate run state; details stay on the authenticated run page.
 func githubCheckSummary(run *store.Run, nodes []*store.Node, conclusion, link string) string {
 	var summary strings.Builder
 	summary.WriteString("**" + githubCheckTitle(conclusion) + "**")

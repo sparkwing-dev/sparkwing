@@ -46,8 +46,6 @@ func TestOperatorUsageMetrics_WeeklyTractionFromOwnTables(t *testing.T) {
 			t.Fatalf("CreateRun %s: %v", id, err)
 		}
 	}
-	// alpha: failed last week, first green 2 days after creation, then two
-	// more runs this week, one of them on a cloud runner.
 	run(alpha, "a1", "failed", lastWeek.Add(90*time.Minute))
 	run(alpha, "a2", "success", lastWeek.Add(49*time.Hour-time.Minute))
 	run(alpha, "a3", "success", thisWeek.Add(4*time.Hour))
@@ -55,13 +53,10 @@ func TestOperatorUsageMetrics_WeeklyTractionFromOwnTables(t *testing.T) {
 	if err := s.TestOnlyRecordCloudAttempt(ctx, "alpha", "a4", "build"); err != nil {
 		t.Fatalf("record cloud attempt: %v", err)
 	}
-	// bravo: green 30 minutes after creation.
 	run(bravo, "b1", "success", thisWeek.Add(89*time.Minute))
-	// operator: busy, and must not count.
 	for i := range 5 {
 		run(operator, "op"+string(rune('0'+i)), "success", thisWeek.Add(time.Duration(i+1)*time.Hour))
 	}
-	// Outside the window: before it.
 	run(alpha, "old", "failed", lastWeek.AddDate(0, 0, -7))
 
 	got, err := s.AsOperator().UsageMetrics(ctx, now, 2, []store.Team{"operator"})
@@ -98,8 +93,6 @@ func TestOperatorUsageMetrics_WeeklyTractionFromOwnTables(t *testing.T) {
 		t.Errorf("first green median = %ds, want %ds", fg.MedianSeconds, int64((30 * time.Minute).Seconds()))
 	}
 
-	// Negative control: without the exclusion the operator team's runs are
-	// there to be counted, so their absence above is the exclusion.
 	all, err := s.AsOperator().UsageMetrics(ctx, now, 2, nil)
 	if err != nil {
 		t.Fatalf("UsageMetrics unexcluded: %v", err)

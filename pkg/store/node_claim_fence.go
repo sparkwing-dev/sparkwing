@@ -235,12 +235,9 @@ func (s *Store) execNodeMutation(ctx context.Context, runID, nodeID, query strin
 	return result, fenced, nil
 }
 
-// safety: the fence reads a tenant-owned table, so it takes the team of the
-// handle that is mutating rather than matching an id across every team.
-// safety: a node, event or attempt path has no tenant handle to say which
-// team it acts in, so a trigger holder's fence is checked in the run's own
-// team; the default team there refused every trigger holder of any other
-// team, while the fence itself still binds the claim to its holder.
+// safety: the fence reads a tenant-owned table, so it takes the mutating handle's team rather than
+// matching an id across teams. A node, event or attempt path has no tenant handle, so a trigger
+// holder's fence is checked in the run's own team; the fence still binds the claim to its holder.
 func (s *Store) assertRunMutationFenceInRunsTeamTx(ctx context.Context, tx *storeTx, runID string) error {
 	team, err := creditTeamForRunTx(ctx, tx, runID)
 	if err != nil {

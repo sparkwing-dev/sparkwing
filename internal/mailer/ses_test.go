@@ -47,7 +47,6 @@ func newSESServer(t *testing.T, status int) (*httptest.Server, *capturedRequest)
 
 func newTestSES(t *testing.T, srvURL string, cfg mailer.SESConfig) *mailer.SES {
 	t.Helper()
-	// Keep the developer's AWS profile and files out of the default chain.
 	empty := filepath.Join(t.TempDir(), "empty")
 	if err := os.WriteFile(empty, nil, 0o600); err != nil {
 		t.Fatal(err)

@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 )
 
-// profileDashboard serves the operator's own store and asks the controller
-// only whether a session is live, the way --profile and --state run.
 func profileDashboard(t *testing.T, controllerURL string) http.Handler {
 	t.Helper()
 	return HandlerFromOptionsWithBundle(HandlerOptions{

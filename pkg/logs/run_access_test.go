@@ -142,8 +142,6 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 		t.Errorf("team B's delete removed team A's log: %d %s", code, body)
 	}
 
-	// The controller's log-deletion credential deletes any team's logs and
-	// reads none; a team cannot mint one.
 	if _, _, err := teamB.CreateToken(ctx, "b-deleter", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, now); err == nil {
 		t.Error("a team minted a logs.delete token")
 	}

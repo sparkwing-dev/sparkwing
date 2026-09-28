@@ -40,12 +40,8 @@ type oauthFlow struct {
 	State    string `json:"state"`
 	Verifier string `json:"verifier"`
 	Next     string `json:"next"`
-	// Mode is oauthFlowLink for a flow adding a sign-in to the signed-in
-	// account, and empty for a sign-in.
-	Mode string `json:"mode,omitempty"`
-	// Code is the provider's code, kept while a link flow moves on to a
-	// same-site request that carries the session.
-	Code string `json:"code,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Code     string `json:"code,omitempty"`
 }
 
 type oauthStartResp struct {
@@ -245,10 +241,8 @@ func absoluteHTTPURL(raw string) bool {
 }
 
 type controllerStatusError struct {
-	Path   string
-	Status int
-	// Code is the controller's machine-readable reason, when its answer
-	// carried one beside the message.
+	Path    string
+	Status  int
 	Code    string
 	Message string
 }
@@ -299,8 +293,6 @@ func postControllerJSONAs(ctx context.Context, controllerURL, path, clientIP, se
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// controllerErrorCode reads the code of an answer shaped {"error": code,
-// "message": text}. A bare {"error": text} carries a message, not a code.
 func controllerErrorCode(body []byte) string {
 	var parsed struct {
 		Message string `json:"message"`

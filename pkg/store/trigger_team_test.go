@@ -21,8 +21,6 @@ func TestTrigger_ClaimAndReadReturnTheOwningTeam(t *testing.T) {
 	if err := acme.CreateTrigger(ctx, store.Trigger{ID: "t-acme", Pipeline: "demo", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("CreateTrigger: %v", err)
 	}
-	// Control: the unauthenticated local claim is the default team's, so it
-	// leaves acme's trigger alone.
 	if tr, err := s.ClaimNextTriggerFor(ctx, store.ClaimIdentity{}, time.Minute, nil, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("default-team claim = %+v, %v; want nothing", tr, err)
 	}

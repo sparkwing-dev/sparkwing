@@ -42,7 +42,6 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	owner := signIn(t, st, "g-owner", "owner@example.com")
 	holder := signIn(t, st, "g-holder", "elsewhere@example.org")
 
-	// Control: before the link, this GitHub account is a stranger to owner.
 	stranger := resolve(t, st, gh("gh-stranger", "elsewhere@example.org"))
 	if stranger.Account.ID == owner.Account.ID {
 		t.Fatal("an unlinked GitHub sign-in reached the owner's account")
@@ -125,7 +124,6 @@ func TestUnlinkIdentityKeepsTheLastSignInMethod(t *testing.T) {
 	if _, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "gh@example.com"), time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// Control: with a second method in place, the same unlink succeeds.
 	if _, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGoogle, "", time.Now()); err != nil {
 		t.Fatalf("unlinking google beside github = %v", err)
 	}
@@ -284,8 +282,6 @@ func TestUnlinkRevokesConcurrentIdentitySessionPostgres(t *testing.T) {
 		_, _, err := st.UnlinkIdentity(ctx, owner.Account.ID, store.ProviderGitHub, "", time.Now())
 		unlinkDone <- err
 	}()
-	// With the account lock, unlink waits for the session transaction. Without
-	// it, unlink can finish while session insertion is held at the trigger.
 	unlinked := false
 	for !unlinked {
 		select {
@@ -587,7 +583,6 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	if n := countWhere(t, st, "identity_unlinks", "account_id = '"+leaver.Account.ID+"'"); n != 0 {
 		t.Fatal("the deleted account's unlink records survived it")
 	}
-	// The linked sign-in is free again once its account is gone.
 	if again := resolve(t, st, gh("gh-1", "holder@example.com")); again.Account.ID != holder.Account.ID {
 		t.Fatalf("GitHub sign-in after the deletion = %+v, want it to join holder by the email rule", again)
 	}

@@ -67,7 +67,6 @@ func TestLogs_StaleNodeClaimCannotAppendAfterRetryAward(t *testing.T) {
 	if err := logClient.Append(staleCtx, "source", "build", []byte("before\n")); err != nil {
 		t.Fatal(err)
 	}
-	// The claim holder can seal a stream while its claim is current.
 	if err := logClient.Seal(staleCtx, "source", "build", logs.Seal{Stream: "holder", FinalSeq: 0}); err != nil {
 		t.Fatalf("holder seal = %v", err)
 	}

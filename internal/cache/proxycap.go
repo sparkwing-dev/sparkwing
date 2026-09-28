@@ -116,8 +116,7 @@ func noteProxyStored(n int64) {
 	}
 }
 
-// touchEntry records a read of a proxy entry as its meta file's
-// modification time, which the cap's eviction order reads.
+// safety: the meta file's modification time is the cap's eviction order.
 func touchEntry(path string) {
 	now := time.Now()
 	// #nosec G703 -- callers pass a path built from a pattern-validated key

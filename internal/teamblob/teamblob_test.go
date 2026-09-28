@@ -28,16 +28,12 @@ import (
 
 const bucket = "teamblob-test"
 
-// counting wraps a client and counts each call by operation, which is
-// what the object store bills.
 type counting struct {
 	teamblob.Client
-	mu     sync.Mutex
-	calls  map[string]int
-	failOn map[string]error
-	// keepKey makes a batch delete report the matching keys as failed.
-	keepKey func(key string) bool
-	// afterList runs once a listing has answered, before the caller sees it.
+	mu        sync.Mutex
+	calls     map[string]int
+	failOn    map[string]error
+	keepKey   func(key string) bool
 	afterList func(in *s3.ListObjectsV2Input)
 }
 
@@ -336,8 +332,6 @@ func TestDeletePrefixCostsOneListAndOneDeletePerThousand(t *testing.T) {
 	}
 }
 
-// failAfter yields n bytes and then an error, as a client that hangs up
-// mid-upload does.
 type failAfter struct {
 	n   int
 	err error
@@ -480,7 +474,6 @@ func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
 	if got := f.client.count("PutObject") + f.client.count("ListObjectsV2"); got != 1 {
 		t.Fatalf("a denied bucket was sent %d PUT and LIST requests, want 1", got)
 	}
-	// A paused write spends nothing, not even the HEAD an overwrite check sends.
 	f.client.reset()
 	if _, err := f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1}); !errors.Is(err, teamblob.ErrSuspended) {
 		t.Fatalf("put during the pause = %v", err)
@@ -498,7 +491,6 @@ func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
 		t.Fatalf("a delete during the pause = %v", err)
 	}
 
-	// The pause ends: one probe, still denied, pauses twice as long.
 	advance(time.Minute)
 	f.client.reset()
 	for range 5 {
@@ -510,7 +502,6 @@ func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
 	if st := f.store.Breaker(); st.Until.Sub(clock()) != 2*time.Minute {
 		t.Fatalf("second pause = %s", st.Until.Sub(clock()))
 	}
-	// The pause is capped at five minutes however long the deny lasts.
 	for range 6 {
 		advance(10 * time.Minute)
 		_, _ = f.store.Put(ctx, "team-a", "bins/x", strings.NewReader("x"), teamblob.PutOptions{Size: 1, Fresh: true})
@@ -519,7 +510,6 @@ func TestAccessDeniedPausesWritesAndListingsWithoutRetrying(t *testing.T) {
 		t.Fatalf("capped pause = %s", st.Until.Sub(clock()))
 	}
 
-	// The deny lifts: the next probe succeeds and closes the breaker.
 	delete(f.client.failOn, "PutObject")
 	delete(f.client.failOn, "ListObjectsV2")
 	advance(5 * time.Minute)

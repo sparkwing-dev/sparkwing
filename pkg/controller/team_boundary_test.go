@@ -18,10 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// tenancyFixture is a controller serving three teams: default, which holds
-// the victim run an install had before teams, and two signed-up teams, A and
-// B, each with its own owner session and bearer tokens. Team A also has a
-// reader and an editor.
 type tenancyFixture struct {
 	t     *testing.T
 	url   string
@@ -31,8 +27,7 @@ type tenancyFixture struct {
 
 	ownerA, ownerB   string
 	readerA, editorA string
-	// everyScopeB is a team B bearer carrying every scope a team's token may
-	// hold, so a refusal it gets is the team boundary's and not a missing scope.
+	// safety: carries every scope, so a refusal it gets is the team boundary's and not a missing scope.
 	everyScopeB string
 	runnerB     string
 
@@ -141,8 +136,6 @@ func session(t *testing.T, st *store.Store, acct store.Account, team store.Team)
 	return "Session " + raw
 }
 
-// member signs name up and seats them in team A at role through an
-// invitation from owner, which is how a member joins.
 func (f *tenancyFixture) member(owner store.Account, name string, role store.Role) string {
 	f.t.Helper()
 	ctx := context.Background()
@@ -336,8 +329,6 @@ func TestTeamBoundary_ARunnerCreatesItsRunInItsOwnTeam(t *testing.T) {
 	})
 }
 
-// runRoutePath fills a run-scoped pattern with team A's run, so every route is
-// asked about a row that exists and belongs to someone else.
 func runRoutePath(pattern, runID string) (method, path string) {
 	method, path, _ = strings.Cut(pattern, " ")
 	path = strings.NewReplacer("{id}", runID, "{nodeID}", "n1", "{path...}", "info/refs").Replace(path)
@@ -429,7 +420,7 @@ func TestTeamBoundary_ListsNeverIncludeAnotherTeam(t *testing.T) {
 	tenancyDialects(t, func(t *testing.T, f *tenancyFixture) {
 		lists := []struct {
 			path    string
-			ownerAs bool // team A's own read shows the run
+			ownerAs bool
 		}{
 			{"/api/v1/runs", true},
 			{"/api/v1/triggers", true},
@@ -526,9 +517,6 @@ func TestTeamBoundary_RolesStayInsideTheirGrant(t *testing.T) {
 	})
 }
 
-// No membership reaches a route gated on admin, the deployment operator's
-// scope. The admin routes are read from server.go and asked about team A's own
-// run, so the refusal is the scope's and not the team boundary's.
 // safety: these admin routes also admit team.admin because each acts only on
 // the caller's own team's secrets.
 var ownerAlsoAdmitted = map[string]bool{
@@ -539,8 +527,6 @@ var ownerAlsoAdmitted = map[string]bool{
 
 func TestTeamBoundary_NoMemberReachesAnAdminRoute(t *testing.T) {
 	for _, role := range []store.Role{store.RoleReader, store.RoleEditor, store.RoleOwner} {
-		// A membership is a human's; the machine scopes belong to runner
-		// credentials, and secrets.read is what a run reads its secrets with.
 		for _, s := range controller.ScopesForRole(role) {
 			switch s {
 			case controller.ScopeAdmin, controller.ScopeSecretsRead, controller.ScopeNodesClaim,

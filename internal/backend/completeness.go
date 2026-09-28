@@ -9,13 +9,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// sealReader is the capability a log store has when it records the seals
-// runners send; only the logs service does.
 type sealReader interface {
 	ReadSeals(ctx context.Context, runID, nodeID string) (logs.SealReport, error)
 }
 
-// logStoreHolder is every backend that reads logs through a [storage.LogStore].
 type logStoreHolder interface {
 	nodeLogStore() storage.LogStore
 }

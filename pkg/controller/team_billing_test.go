@@ -13,9 +13,6 @@ import (
 
 const checkoutToken = "checkout-secret"
 
-// fakeCheckout stands in for the hosted checkout service: it records what
-// the controller asked for and answers with a Stripe-shaped page, or with
-// whatever status and url a test sets.
 type fakeCheckout struct {
 	mu       sync.Mutex
 	requests []checkoutCall
