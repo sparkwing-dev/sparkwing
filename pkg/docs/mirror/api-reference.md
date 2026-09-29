@@ -28,15 +28,15 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `runs.state` |
+| `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
+| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/holder` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/notify` | `runs.read` |
-| `POST` | `/api/v1/concurrency/{key}/release` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/holder` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/notify` | `claim` or `runs.read` |
+| `POST` | `/api/v1/concurrency/{key}/release` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
 | `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |

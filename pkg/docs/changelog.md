@@ -60,9 +60,11 @@ unlock.
   an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
   refused. A work node writes its own node's durable log to the logs
   service with its claim token, which the service checks against the
-  controller on every append and seal and answers on no other route. On this
-  path a node cannot mint OIDC tokens, hold concurrency slots, or start a
-  child of another repository.
+  controller on every append and seal and answers on no other route. A work
+  node takes, renews, observes and releases concurrency slots with its claim
+  token, for its own run in its own team; a new acquire is refused once the
+  run is being cancelled, a release is not. On this path a node cannot mint
+  OIDC tokens or start a child of another repository.
 
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with

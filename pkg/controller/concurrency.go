@@ -30,6 +30,18 @@ func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Ha
 		if !ok {
 			return
 		}
+		// safety: a claim token moves slots only for its own run, in its own
+		// team, which requestTenant takes from the claim.
+		if tok, claim := claimTokenFromContext(ctx); claim {
+			if runID != tok.RunID {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{
+					Code: "claim_mismatch", Message: "this claim token is bound to another run",
+				})
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		held, err := s.ownsRun(ctx, runID, claimIdentity(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)

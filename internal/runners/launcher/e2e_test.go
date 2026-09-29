@@ -94,7 +94,7 @@ func (E2E) Secrets() any { return &E2ESecrets{} }
 func (p *E2E) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	fmt.Println("plan-time stdout must not reach the plan document")
 	plan.Checkout(sparkwing.Checkout{Depth: 5, Tags: true})
-	b := sparkwing.Job(plan, "build", &Build{})
+	b := sparkwing.Job(plan, "build", &Build{}).Concurrency(sparkwing.NewConcurrencyGroup("e2e-build", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	sparkwing.Job(plan, "check", &Check{Build: sparkwing.RefTo[Out](b)}).Needs(b)
 	return nil
 }
@@ -356,6 +356,13 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	}
 	if _, err := f.st.GetNode(ctx, childID, store.PlanNodeID); err != nil {
 		t.Fatalf("the child was not planned by the controller: %v", err)
+	}
+	var slotEvents int
+	if err := f.st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM concurrency_holders WHERE key LIKE '%e2e-build%'`).Scan(&slotEvents); err != nil {
+		t.Fatal(err)
+	}
+	if slotEvents != 0 {
+		t.Errorf("build left %d concurrency holders; it takes and releases one", slotEvents)
 	}
 	var durable strings.Builder
 	if err := filepath.WalkDir(filepath.Join(logRoot), func(path string, d fs.DirEntry, err error) error {

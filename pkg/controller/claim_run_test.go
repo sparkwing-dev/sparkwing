@@ -3,6 +3,7 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -216,5 +217,60 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	}
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("a secret read after cancel = %d, want 403", code)
+	}
+}
+
+// A work claim takes and returns concurrency slots for its own run in its
+// own team; another run's slot, a planning claim and a cancelled run's new
+// acquire are refused, while a release after cancel still frees the slot.
+func TestClaimRun_ConcurrencySlotsStayInTheClaimsRunAndTeam(t *testing.T) {
+	ctx := context.Background()
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-slot", "acme", "widgets")
+	f.launchedRun(olga, "run-stranger", "acme", "widgets")
+	acquire := func(run string) map[string]any {
+		return map[string]any{"holder_id": "h-" + run, "run_id": run, "node_id": "a", "max": 1}
+	}
+	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", plan, acquire("run-slot"), nil); code != http.StatusForbidden {
+		t.Fatalf("a planning claim's acquire = %d, want 403", code)
+	}
+	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}}}
+	if code := f.call("POST", "/api/v1/runs/run-slot/plan", plan, doc, nil); code != http.StatusOK {
+		t.Fatalf("accept plan = %d", code)
+	}
+	work := "Bearer " + f.launchNode("run-slot", "a")
+	var got map[string]any
+	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", work, acquire("run-slot"), &got); code != http.StatusOK || got["granted"] != true {
+		t.Fatalf("own run's acquire = %d %v", code, got)
+	}
+	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", work, acquire("run-stranger"), nil); code != http.StatusForbidden {
+		t.Fatalf("another run's acquire = %d, want 403", code)
+	}
+	for team, want := range map[store.Team]int{store.Team(olga.team): 1, store.DefaultTeam: 0} {
+		tn, err := f.store.ForTeam(ctx, team)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := tn.GetConcurrencyState(ctx, "deploy")
+		held := 0
+		if err == nil {
+			held = len(st.Holders)
+		} else if !errors.Is(err, store.ErrNotFound) {
+			t.Fatal(err)
+		}
+		if held != want {
+			t.Fatalf("team %s holds %d slots of deploy, want %d", team, held, want)
+		}
+	}
+	if err := f.store.RequestCancel(ctx, "run-slot"); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("POST", "/api/v1/concurrency/other/acquire", work, acquire("run-slot"), nil); code != http.StatusForbidden {
+		t.Fatalf("an acquire after cancel = %d, want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/concurrency/deploy/release", work, map[string]any{"holder_id": "h-run-slot", "outcome": "cancelled"}, nil); code != http.StatusNoContent {
+		t.Fatalf("a release after cancel = %d, want 204", code)
 	}
 }
