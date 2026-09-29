@@ -746,3 +746,32 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 		}
 	}
 }
+
+// Log reads are never counted against the download cap: a team already at
+// its cap is refused a binary URL yet still gets log URLs, which add nothing.
+func TestATeamAtItsDownloadCapCanStillSignLogURLs(t *testing.T) {
+	s, grant, _ := logDownloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, _, err := team.CreateToken(t.Context(), "logs-reader", store.TokenKindUser, []string{ScopeLogsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 5, Now: time.Now(), FreeCapBytes: 5, FundedCapBytes: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if capped, _ := callDownload(t, s, grant, "bins/abc", false); capped.Code != http.StatusTooManyRequests {
+		t.Fatalf("a binary URL at the cap = %d, want 429", capped.Code)
+	}
+	for i := range 3 {
+		if got := callLogDownload(t, s, reader); got.Code != http.StatusOK {
+			t.Fatalf("log URL %d at the cap = %d: %s", i, got.Code, got.Body.String())
+		}
+	}
+	day, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 0, Now: time.Now(), FreeCapBytes: 0, FundedCapBytes: 0})
+	if err != nil || day.DayBytes != 5 {
+		t.Fatalf("the team's day after log reads = %+v, %v; want the 5 bytes charged before them", day, err)
+	}
+}
