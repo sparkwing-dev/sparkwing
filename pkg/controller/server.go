@@ -1432,7 +1432,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), controllerShutdownBudget)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controllerShutdownBudget)
 		defer cancel()
 		for _, l := range servers {
 			if err := l.Shutdown(shutdownCtx); err != nil {

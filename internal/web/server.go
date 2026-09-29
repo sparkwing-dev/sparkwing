@@ -191,32 +191,35 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	if err := opts.Paths.EnsureRoot(); err != nil {
 		return err
 	}
-	handler := HandlerFromOptions(opts)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      handler,
+		Handler:      HandlerFromOptions(opts),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 	trusted := &http.Server{
 		Addr:         opts.TrustedProxyAddr,
-		Handler:      ratelimit.TrustedListener(handler),
+		Handler:      ratelimit.TrustedListener(srv.Handler),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-		_ = trusted.Shutdown(shutdownCtx)
+		if err := trusted.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "sparkwing web: trusted listener shutdown incomplete: %v\n", err)
+		}
 	}()
 	trustedErr := make(chan error, 1)
 	if opts.TrustedProxyAddr != "" {
 		go func() {
 			fmt.Fprintf(os.Stderr, "sparkwing web: serving trusted proxy traffic on http://%s\n", opts.TrustedProxyAddr)
 			trustedErr <- trusted.ListenAndServe()
-			_ = srv.Close()
+			if err := srv.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "sparkwing web: close after the trusted listener stopped: %v\n", err)
+			}
 		}()
 	}
 	lis := opts.Listener
