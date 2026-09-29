@@ -16,6 +16,9 @@ const DirectUploadMaxSize int64 = 500 << 20
 // DirectUploadTTL matches the bucket's pending/ lifecycle window.
 const DirectUploadTTL = 24 * time.Hour
 
+// DirectUploadMaxPending bounds a team's uncommitted, unexpired uploads.
+const DirectUploadMaxPending = 100
+
 // safety: a source stays readable through a queued or active run, then one
 // day after it finishes; an unused upload starts its day at commit.
 const sourceBundleRetention = 24 * time.Hour
@@ -91,6 +94,10 @@ type Upload struct {
 // ErrObjectExists means an immutable destination is already published.
 var ErrObjectExists = errors.New("object already committed")
 
+// ErrTooManyPendingUploads refuses a reservation while the team already
+// holds [DirectUploadMaxPending] uncommitted uploads.
+var ErrTooManyPendingUploads = fmt.Errorf("a team holds at most %d uncommitted uploads; commit them or wait for them to expire", DirectUploadMaxPending)
+
 // ErrSourceAlreadyBound requires a new source upload for another run.
 var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
 
@@ -138,7 +145,7 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	sourceDigest, validSource := SourceKeyDigest(req.Key)
 	if (!source && req.RunID == "") ||
 		(source && (!validSource || req.RunID != "" || sourceDigest != req.SHA256 || req.Kind != StorageCache || req.Provenance != "local" || req.ClaimPrefix == "")) ||
-		!validUploadKey(req.Key) || !validSHA256(req.SHA256) || req.Size < 0 || req.Size > DirectUploadMaxSize ||
+		!validUploadKey(req.Key) || !validSHA256(req.SHA256) || req.Size <= 0 || req.Size > DirectUploadMaxSize ||
 		req.Principal == "" || (req.Provenance != "local" && req.Provenance != "cloud") {
 		return Upload{}, fmt.Errorf("%w: invalid direct upload declaration", ErrInvalidInput)
 	}
@@ -172,6 +179,16 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	})
 	if err != nil {
 		return Upload{}, err
+	}
+	// safety: reserveStorageTx holds the team's storage row, so concurrent
+	// reservations count one after another.
+	var pending int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM uploads WHERE team = ? AND committed_at = 0 AND expires_at > ?`,
+		string(req.Team), req.Now.UnixNano()).Scan(&pending); err != nil {
+		return Upload{}, err
+	}
+	if pending >= DirectUploadMaxPending {
+		return Upload{}, ErrTooManyPendingUploads
 	}
 	u := Upload{
 		ID: res.ID, Team: req.Team, RunID: req.RunID, Kind: req.Kind, Key: req.Key, Size: req.Size,

@@ -1552,6 +1552,14 @@ unlock.
 
 ### Security
 
+- **controller + store:** `POST /api/v1/data/upload` refuses a zero-byte
+  declaration with 400, and a team holds at most 100 uncommitted, unexpired
+  uploads; the next reservation answers 429 until one commits or its 24-hour
+  window ends. A zero-byte upload reserved no quota, so it let any account
+  keep an unbounded number of rows. The runner no longer uploads or fetches an
+  empty artifact blob, whose content its key already names, so empty
+  artifacts keep working.
+
 - **store:** Schema v82 adds a unique index that holds one unrevoked runner
   token per agent name in a team, so two concurrent mints of one name can no
   longer both succeed. A rotation still overlaps its predecessor until the
