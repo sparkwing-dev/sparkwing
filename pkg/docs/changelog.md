@@ -1552,6 +1552,12 @@ unlock.
 
 ### Security
 
+- **logs:** `DELETE /api/v1/logs/{runID}` takes `logs.delete` or `admin` and
+  no longer accepts `logs.write`, so a runner token an editor mints can no
+  longer erase its team's run logs. The controller's log-deletion credential,
+  `sparkwing runs prune` under an operator token, and `--retention` keep
+  deleting as before.
+
 - **controller + store + dashboard (Breaking):** A Google or GitHub sign-in no
   longer joins an existing account because both report the same verified
   email. See [migration guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The first sign-in by a provider account whose address an existing
