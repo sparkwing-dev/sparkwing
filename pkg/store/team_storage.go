@@ -252,7 +252,17 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, err
 	}
 	if standing.Tier == TeamTierNone {
-		return StorageReservation{}, freeStoragePaused(team)
+		if err := lockFreeTierTx(ctx, tx); err != nil {
+			return StorageReservation{}, err
+		}
+		slotted, err := takeFreeSlotTx(ctx, tx, team, now)
+		if err != nil {
+			return StorageReservation{}, err
+		}
+		if !slotted {
+			return StorageReservation{}, freeStoragePaused(team)
+		}
+		standing.Tier = TeamTierFree
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {

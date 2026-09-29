@@ -98,13 +98,18 @@ logs service under `team`.
 ## Free-team slots
 
 The free tier is bounded by counting teams. A team without credits takes one
-of `--free-team-slots` (default 200) the first time it starts a run, in the
-transaction that writes the trigger, and keeps it until the team is deleted.
-The free bytes a deployment holds are therefore at most slots times the
-allowance at every instant, without measuring anything. A team with a slot
+of `--free-team-slots` (default 200) the first time it stores anything, in
+the transaction that reserves the bytes, and keeps it until the team is
+deleted. The free bytes a deployment holds are therefore at most slots times
+the allowance at every instant, without measuring anything. A team with a slot
 keeps writing inside its shares after the slots run out; a team with neither a
-slot nor credits is refused its runs with `402`:
+slot nor credits is refused its cache, log and event writes with `402`:
 `free storage is paused; buy credits or join the waitlist`.
+
+Runs are never refused for billing. A team without credits, with no slot or
+held over a disputed payment still starts runs, which its own machines
+execute. A metered claim on cloud capacity needs credits and is refused while
+the team is held.
 
 Sparkwing Cloud operators admit a team through the private `sparkwing-ops`
 tool. To oversubscribe, raise `--free-team-slots`. A sign-up gate reads the tier as
@@ -152,7 +157,6 @@ bounds it. The last column is where the bound is enforced or defaulted.
 |---|---|---|
 | Teams per user | three created over the account's life, the personal team included | `pkg/store/identity.go` |
 | Free teams | `--free-team-slots`, 200 by default, released only when a team is deleted | `pkg/store/free_tier.go` |
-| Runs | 200 started in any 24 hours | `pkg/store/free_tier.go` |
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
 | Logs, live and archived | the log share, 192 MiB by default | `pkg/store/team_storage.go`, `pkg/logs/log_quota.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
@@ -192,7 +196,7 @@ These are rows, not stored bytes, and each grows only as fast as the limits
 above let a team act.
 
 - **Run rows.** Retention removes a run's events and releases its bytes, but
-  the run and its nodes stay, so run history grows at up to 200 runs a day per
-  free team.
+  the run and its nodes stay, so run history grows with every run a team
+  starts; the per-principal hourly run budget on a limits profile bounds it.
 - **Monthly storage totals and the credit ledger.** One row per team per month
   and one row per charge, kept for billing.

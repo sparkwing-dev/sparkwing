@@ -154,11 +154,6 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 		return Upload{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if source {
-		if err := admitFreeTeamRunTx(ctx, tx, req.Team, req.Now); err != nil {
-			return Upload{}, err
-		}
-	}
 	var exists int
 	err = tx.QueryRowContext(ctx, `SELECT 1 FROM data_objects WHERE team = ? AND key = ? AND provenance = ?`, string(req.Team), req.Key, req.Provenance).Scan(&exists)
 	if err == nil {

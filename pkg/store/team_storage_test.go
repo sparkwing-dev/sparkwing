@@ -15,8 +15,8 @@ import (
 func freeTeam(t *testing.T, st *store.Store, team store.Team) *store.Tenant {
 	t.Helper()
 	tenant := teamHandle(t, st, team)
-	if err := startRun(tenant, "t-"+string(team)); err != nil {
-		t.Fatalf("%s's first run: %v", team, err)
+	if err := st.GrantFreeSlot(context.Background(), team, time.Now()); err != nil {
+		t.Fatalf("%s's free slot: %v", team, err)
 	}
 	return tenant
 }

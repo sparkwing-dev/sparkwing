@@ -306,11 +306,13 @@ unlock.
   [Log completeness](docs/observability.md#log-completeness).
 
 - **controller:** a free tier bounded by counting teams. A team without
-  credits takes one of `--free-team-slots` (200) the first time it starts a
-  run, in the trigger's transaction, and keeps it until the team is deleted,
-  so free storage never passes slots times the allowance. A team with neither
-  a slot nor credits is refused its runs with `402` "free storage is paused;
-  buy credits or join the waitlist". `PUT /api/v1/storage/teams/{team}/free-slot`
+  credits takes one of `--free-team-slots` (200) the first time it stores
+  anything, in that write's transaction, and keeps it until the team is
+  deleted, so free storage never passes slots times the allowance. A team with
+  neither a slot nor credits is refused its storage writes with `402` "free
+  storage is paused; buy credits or join the waitlist". Runs are never refused
+  for billing: its own machines run them, and a metered claim still needs
+  credits and is refused while the team is held over a disputed payment. `PUT /api/v1/storage/teams/{team}/free-slot`
   (`admin`) grants a slot past the cap, and `Server.SignUpFreeTier` reports the
   tier closed once every slot is taken. Schema v56 adds `free_slots`. See
   [Tenant limits](docs/limits.md).
@@ -343,8 +345,7 @@ unlock.
   plus what was committed while it listed. A store whose listing fails keeps
   its counts, and `/api/v1/health` reports the failed pass.
 
-- **controller:** a team without credits starts at most 200 runs in any 24
-  hours (`429`), a team binds at most 20 repositories to GitHub runners
+- **controller:** a team binds at most 20 repositories to GitHub runners
   (`403`), and a signed-up team holds at most 100 secrets of 128 KiB each
   (`413`).
 

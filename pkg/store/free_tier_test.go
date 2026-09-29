@@ -43,9 +43,14 @@ func standing(t *testing.T, st *store.Store, team store.Team) store.StorageStand
 	return got
 }
 
+func storeBytes(st *store.Store, team store.Team) error {
+	_, err := reserve(st, team, store.StorageLogs, 1, time.Now())
+	return err
+}
+
 // The free tier is full the instant its last slot is taken: no sample, no
-// pass, no ceiling on bytes. A team that holds a slot keeps running, a funded
-// team needs none, and only deleting a team gives its slot back.
+// pass, no ceiling on bytes. A team takes a slot with its first stored byte,
+// a funded team needs none, and only deleting a team gives its slot back.
 func TestFreeSlotsBoundTheFreeTierAtEveryInstant(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -54,20 +59,22 @@ func TestFreeSlotsBoundTheFreeTierAtEveryInstant(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b, c := teamHandle(t, st, "team-a"), teamHandle(t, st, "team-b"), teamHandle(t, st, "team-c")
-	if got := standing(t, st, "team-a"); got.Tier != store.TeamTierNone {
-		t.Fatalf("a team that never ran = %+v, want no slot yet", got)
-	}
-	for _, tenant := range []*store.Tenant{a, b} {
+	for _, tenant := range []*store.Tenant{a, b, c} {
 		if err := startRun(tenant, "t-"+string(tenant.Team())); err != nil {
-			t.Fatalf("%s's first run: %v", tenant.Team(), err)
+			t.Fatalf("%s's run: %v", tenant.Team(), err)
 		}
 	}
-	err := startRun(c, "t-c")
+	if got := standing(t, st, "team-a"); got.Tier != store.TeamTierNone {
+		t.Fatalf("a team that ran but stored nothing = %+v, want no slot yet", got)
+	}
+	for _, team := range []store.Team{"team-a", "team-b"} {
+		if err := storeBytes(st, team); err != nil {
+			t.Fatalf("%s's first stored byte: %v", team, err)
+		}
+	}
+	err := storeBytes(st, "team-c")
 	if !errors.Is(err, store.ErrFreeStoragePaused) || !strings.Contains(err.Error(), "buy credits or join the waitlist") {
 		t.Fatalf("a third team with two slots = %v, want free storage paused", err)
-	}
-	if err := startRun(a, "t-a-2"); err != nil {
-		t.Fatalf("a slotted team's next run: %v", err)
 	}
 	if got := standing(t, st, "team-a"); got.Tier != store.TeamTierFree || got.AllowanceBytes != store.DefaultFreeAllowanceBytes {
 		t.Fatalf("team-a = %+v, want free with the default allowance", got)
@@ -78,16 +85,16 @@ func TestFreeSlotsBoundTheFreeTierAtEveryInstant(t *testing.T) {
 
 	d := teamHandle(t, st, "team-d")
 	fund(t, d)
-	if err := startRun(d, "t-d"); err != nil {
-		t.Fatalf("a funded team's run: %v", err)
+	if err := storeBytes(st, "team-d"); err != nil {
+		t.Fatalf("a funded team's write: %v", err)
 	}
 	if taken, limit, err := st.FreeSlots(ctx); err != nil || taken != 2 || limit != 2 {
 		t.Fatalf("slots = %d of %d, %v; want the funded team to take none", taken, limit, err)
 	}
 
 	deleteAndPurge(t, st, "team-b", now)
-	if err := startRun(c, "t-c-2"); err != nil {
-		t.Fatalf("a run after a slotted team was deleted: %v", err)
+	if err := storeBytes(st, "team-c"); err != nil {
+		t.Fatalf("a write after a slotted team was deleted: %v", err)
 	}
 	if err := st.GrantFreeSlot(ctx, "team-d", now); err != nil {
 		t.Fatalf("the operator grants past the cap: %v", err)
@@ -106,14 +113,14 @@ func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	const racers = 6
-	tenants := make([]*store.Tenant, racers)
-	for i := range tenants {
-		tenants[i] = teamHandle(t, st, store.Team(fmt.Sprintf("racer-%d", i)))
+	teams := make([]store.Team, racers)
+	for i := range teams {
+		teams[i] = teamHandle(t, st, store.Team(fmt.Sprintf("racer-%d", i))).Team()
 	}
 	var wg sync.WaitGroup
 	errs := make([]error, racers)
-	for i, tenant := range tenants {
-		wg.Go(func() { errs[i] = startRun(tenant, fmt.Sprintf("t-%d", i)) })
+	for i, team := range teams {
+		wg.Go(func() { errs[i] = storeBytes(st, team) })
 	}
 	wg.Wait()
 	admitted := 0
@@ -130,28 +137,31 @@ func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 	}
 }
 
-func TestATeamWithoutCreditsStartsAtMostTwoHundredRunsADay(t *testing.T) {
+// A run is never refused for billing: a team without credits or a slot, one
+// past any daily count, and one held over a disputed payment all start runs,
+// which their own machines execute.
+func TestTriggersAreNeverRefusedForBilling(t *testing.T) {
 	st := storetest.Open(t)
-	acme := teamHandle(t, st, "acme")
-	for i := range store.MaxFreeRunsPerDay {
-		if err := startRun(acme, fmt.Sprintf("t-%d", i)); err != nil {
-			t.Fatalf("run %d: %v", i, err)
-		}
-	}
-	err := startRun(acme, "t-over")
-	if !errors.Is(err, store.ErrFreeRunLimit) || !strings.Contains(err.Error(), "add credits") {
-		t.Fatalf("run past the daily cap = %v, want ErrFreeRunLimit naming the remedy", err)
-	}
-	if _, err := st.DB().Exec(storetest.Rebind(st, `UPDATE triggers SET created_at = ? WHERE id = 't-0'`),
-		time.Now().Add(-25*time.Hour).UnixNano()); err != nil {
+	ctx := context.Background()
+	if err := st.SetFreeTeamSlots(ctx, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := startRun(acme, "t-next-day"); err != nil {
-		t.Fatalf("a run once one aged out of the day: %v", err)
+	acme := teamHandle(t, st, "acme")
+	for i := range 201 {
+		if err := startRun(acme, fmt.Sprintf("t-%d", i)); err != nil {
+			t.Fatalf("run %d of a team with no credits and no slot: %v", i, err)
+		}
 	}
-	fund(t, acme)
-	if err := startRun(acme, "t-funded"); err != nil {
-		t.Fatalf("a funded team's run past the cap: %v", err)
+	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 0 {
+		t.Fatalf("slots taken = %d, %v; want a run to take none", taken, err)
+	}
+	held := teamHandle(t, st, "held")
+	fund(t, held)
+	if _, err := st.HoldTeamForDispute(ctx, "held", "dp_1", "pay-held", "dispute", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := startRun(held, "t-held"); err != nil {
+		t.Fatalf("a run of a team held over a dispute: %v", err)
 	}
 }
 

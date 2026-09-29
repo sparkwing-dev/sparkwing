@@ -169,11 +169,6 @@ type computeLimitRefusalJSON struct {
 // often a caller should ask again.
 const ComputeLimitRetryAfterSeconds = 5
 
-// FreeRunLimitRetryAfterSeconds is the Retry-After a refusal past a free
-// team's daily run cap carries: the oldest run in the window ages out within
-// a day, so an hour is a fair time to ask again.
-const FreeRunLimitRetryAfterSeconds = 3600
-
 // safety: a refusal with no run of its own reaches the operator through the
 // log, because there is no run to record it against.
 func (s *Server) writeComputeLimitRefusal(
@@ -182,10 +177,6 @@ func (s *Server) writeComputeLimitRefusal(
 	switch {
 	case errors.Is(err, store.ErrFreeStoragePaused):
 		writeError(w, http.StatusPaymentRequired, err)
-		return true
-	case errors.Is(err, store.ErrFreeRunLimit):
-		w.Header().Set("Retry-After", strconv.Itoa(FreeRunLimitRetryAfterSeconds))
-		writeError(w, http.StatusTooManyRequests, err)
 		return true
 	}
 	var refused *store.ComputeLimitError

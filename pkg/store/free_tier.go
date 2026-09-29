@@ -11,18 +11,16 @@ import (
 
 // The free tier is bounded by counting teams rather than sampling bytes. A
 // team without credits takes one of [DefaultFreeTeamSlots] slots the first
-// time it starts a run, and a slot is released only when its team is
+// time it stores anything, and a slot is released only when its team is
 // deleted, so the free bytes a deployment holds never pass slots times the
 // allowance. Each store holds a slotted team to its own share of that
-// allowance where it writes; the controller's share is the run events.
-const (
-	// DefaultFreeTeamSlots is how many teams without credits may hold a
-	// free-tier slot when the operator has set no other number.
-	DefaultFreeTeamSlots = 200
-	// MaxFreeRunsPerDay bounds the runs a team without credits starts in
-	// any 24 hours.
-	MaxFreeRunsPerDay = 200
-)
+// allowance where it writes; the controller's share is the run events. Runs
+// themselves are never refused here: a team without credits runs on its own
+// machines, and a metered claim refuses it for want of credits.
+//
+// DefaultFreeTeamSlots is how many teams without credits may hold a free-tier
+// slot when the operator has set no other number.
+const DefaultFreeTeamSlots = 200
 
 // DefaultFreeAllowanceBytes is a free team's allowance across every store
 // when the operator has not written storage_free_allowance_bytes.
@@ -54,10 +52,6 @@ const metaKeyFreeTeamSlots = "free_team_slots"
 // ErrFreeStoragePaused refuses a team with neither credits nor a free-tier
 // slot, because every slot is taken.
 var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
-
-// ErrFreeRunLimit refuses a run past [MaxFreeRunsPerDay] for a team without
-// credits.
-var ErrFreeRunLimit = errors.New("free run limit reached")
 
 // StorageStanding is what a team may store and what its run events hold.
 type StorageStanding struct {
@@ -163,9 +157,9 @@ func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
 	return !freeze.Frozen, nil
 }
 
-// safety: Postgres runs concurrent triggers in their own transactions, so
-// the slot count and the per-day run count serialize on one lock; SQLite
-// allows one writer and is already serial.
+// safety: Postgres runs concurrent writers in their own transactions, so
+// the slot count serializes on one lock; SQLite allows one writer and is
+// already serial.
 func lockFreeTierTx(ctx context.Context, tx *storeTx) error {
 	if tx.dialect != DialectPostgres {
 		return nil
@@ -197,40 +191,7 @@ func freeStoragePaused(team Team) error {
 	return fmt.Errorf("%w: team %s has no credits and every free-tier slot is taken", ErrFreeStoragePaused, team)
 }
 
-func admitFreeTeamRunTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
-	if creditMeteringDisabled(ctx) {
-		return nil
-	}
-	if !holdsFreeAllowance(team) {
-		return nil
-	}
-	funded, err := teamFundedTx(ctx, tx, team)
-	if err != nil || funded {
-		return err
-	}
-	if err := lockFreeTierTx(ctx, tx); err != nil {
-		return err
-	}
-	slotted, err := takeFreeSlotTx(ctx, tx, team, now)
-	if err != nil {
-		return err
-	}
-	if !slotted {
-		return freeStoragePaused(team)
-	}
-	var today int64
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM triggers WHERE team = ? AND created_at > ?`,
-		string(team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
-		return err
-	}
-	if today >= MaxFreeRunsPerDay {
-		return fmt.Errorf("%w: team %s has no credits and started %d runs in the last 24 hours, the most it may; "+
-			"add credits to start more", ErrFreeRunLimit, team, today)
-	}
-	return nil
-}
-
-// safety: a team with no slot takes one here, because a run can outlive the credits it started with.
+// safety: a team with no slot takes one here, at its first stored byte.
 // The slot row stays locked until the caller's transaction ends, so two appends cannot count the same room.
 func admitFreeEventsTx(ctx context.Context, tx *storeTx, team Team, principal string, bytes int64, now time.Time) error {
 	if creditMeteringDisabled(ctx) {
