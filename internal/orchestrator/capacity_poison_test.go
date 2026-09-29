@@ -34,6 +34,9 @@ func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, runID, "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	recordRunProfile(ctx, localState{st: st}, key, runID, nil, "B", charge, true, start, start.Add(time.Second))
 }
 

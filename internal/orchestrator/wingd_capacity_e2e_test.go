@@ -31,7 +31,7 @@ func registerWingdCapacityE2EPipelines() {
 	})
 }
 
-func TestWingd_CommandOnlyRunDoesNotLearnResourceProfile(t *testing.T) {
+func TestWingd_UnownedCommandRunDoesNotLearnResourceProfile(t *testing.T) {
 	t.Cleanup(nodemetrics.SetIntervalForTest(time.Hour))
 	registerWingdCapacityE2EPipelines()
 	home := wingdTestHome(t)
@@ -51,10 +51,19 @@ func TestWingd_CommandOnlyRunDoesNotLearnResourceProfile(t *testing.T) {
 	if err != nil || len(samples) == 0 {
 		t.Fatalf("command evidence missing: %+v, %v", samples, err)
 	}
+	command, unknown := false, false
 	for _, sample := range samples {
-		if sample.Kind != store.MetricCommand {
-			t.Fatalf("fixture contains non-command evidence: %+v", sample)
+		switch sample.Kind {
+		case store.MetricCommand:
+			command = true
+		case store.MetricUnknown:
+			unknown = true
+		default:
+			t.Fatalf("unowned execution contains interval evidence: %+v", sample)
 		}
+	}
+	if !command || !unknown {
+		t.Fatalf("command=%v unknown=%v, want both command usage and unknown attribution", command, unknown)
 	}
 	for _, node := range []string{"", "command"} {
 		prof, err := st.GetPipelineProfile(t.Context(), currentProfileKey("wingd-e2e-command-only"), node)
