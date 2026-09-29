@@ -17,16 +17,20 @@ import {
   type ActionKind,
   type OperatorTeam,
   type TeamMatch,
+  type WaitlistPage,
   actionEffect,
   actionLabels,
   actionProblem,
   actionRequest,
+  approveWaitlisted,
   availableActions,
   balanceCents,
   getOperatorTeam,
+  getWaitlist,
   needsAmount,
   performAction,
   searchTeams,
+  waitlistPageSize,
 } from "@/lib/operator";
 import { unixSecondsISO } from "@/lib/teams";
 import { fmtDateTime } from "@/lib/timeFormat";
@@ -43,13 +47,194 @@ const labelClass =
   "block text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] mb-1";
 
 function OperatorConsole() {
-  const team = useSearchParams().get("team") ?? "";
+  const params = useSearchParams();
+  const team = params.get("team") ?? "";
+  const waitlist = params.get("view") === "waitlist";
+  const [waiting, setWaiting] = useState<number | null>(null);
+  useEffect(() => {
+    getWaitlist(0, 1).then(
+      (p) => setWaiting(p.total),
+      () => setWaiting(null),
+    );
+  }, []);
+  const tab = (active: boolean) =>
+    `px-3 py-1.5 rounded-[var(--radius-control)] ${active ? "bg-[var(--surface-raised)] font-bold" : "text-[var(--muted)] hover:text-[var(--foreground)]"}`;
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
-      <h1 className="text-xl font-bold mb-6">Operator console</h1>
-      <TeamSearch />
-      {team ? <TeamView key={team} slug={team} /> : null}
+      <h1 className="text-xl font-bold mb-4">Operator console</h1>
+      <nav aria-label="Operator console" className="flex gap-2 mb-6 text-sm">
+        <Link className={tab(!waitlist)} href="/operator">
+          Teams
+        </Link>
+        <Link className={tab(waitlist)} href="/operator?view=waitlist">
+          Waitlist{waiting === null ? "" : ` (${waiting})`}
+        </Link>
+      </nav>
+      {waitlist ? (
+        <WaitlistView onTotal={setWaiting} />
+      ) : (
+        <>
+          <TeamSearch />
+          {team ? <TeamView key={team} slug={team} /> : null}
+        </>
+      )}
     </div>
+  );
+}
+
+function WaitlistView({ onTotal }: { onTotal: (n: number) => void }) {
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState<WaitlistPage | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(() => {
+    getWaitlist(offset).then(
+      (p) => {
+        // Approving the last rows of a later page leaves it empty.
+        if (p.accounts.length === 0 && offset > 0) {
+          setOffset(Math.max(offset - waitlistPageSize, 0));
+          return;
+        }
+        setPage(p);
+        onTotal(p.total);
+      },
+      (err) => setError(errorText(err)),
+    );
+  }, [offset, onTotal]);
+  useEffect(load, [load]);
+
+  const approve = async (ids: string[]) => {
+    setBusy(true);
+    setError("");
+    try {
+      const emails = await approveWaitlisted(ids);
+      toast(
+        emails.length === 1
+          ? `Approved ${emails[0]}.`
+          : `Approved ${emails.length} accounts.`,
+      );
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!page) return error ? <Notice>{error}</Notice> : <Notice>Loading…</Notice>;
+  const rows = page.accounts;
+  const allOnPage = rows.length > 0 && rows.every((a) => selected.has(a.id));
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  return (
+    <Panel
+      title="Waitlist"
+      hint="Newest first. Approving gives each person their own space and sends the approval notice."
+      action={
+        <button
+          className={buttonClass}
+          disabled={busy || selected.size === 0}
+          onClick={() => approve([...selected])}
+        >
+          Approve selected ({selected.size})
+        </button>
+      }
+    >
+      {error ? (
+        <p role="alert" className="px-4 pt-3 text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="p-4 text-sm text-[var(--muted)]">Nobody is waiting.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[10px] font-bold uppercase tracking-wider text-[var(--muted)] text-left">
+              <th className="px-4 py-2 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select every account on this page"
+                  checked={allOnPage}
+                  onChange={() =>
+                    setSelected((cur) => {
+                      const next = new Set(cur);
+                      for (const a of rows) {
+                        if (allOnPage) next.delete(a.id);
+                        else next.add(a.id);
+                      }
+                      return next;
+                    })
+                  }
+                />
+              </th>
+              <th className="px-2 py-2">Email</th>
+              <th className="px-2 py-2">Name</th>
+              <th className="px-2 py-2">Provider</th>
+              <th className="px-2 py-2">Waitlisted</th>
+              <th className="px-4 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((a) => (
+              <tr key={a.id} className="border-t border-[var(--border)]">
+                <td className="px-4 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${a.email}`}
+                    checked={selected.has(a.id)}
+                    onChange={() => toggle(a.id)}
+                  />
+                </td>
+                <td className="px-2 py-2">{a.email}</td>
+                <td className="px-2 py-2">{a.name}</td>
+                <td className="px-2 py-2">{a.provider || "unknown"}</td>
+                <td className="px-2 py-2 text-[var(--muted)] whitespace-nowrap">
+                  {fmtDateTime(unixSecondsISO(a.waitlisted_at))}
+                </td>
+                <td className="px-4 py-2 text-right">
+                  <button
+                    className={quietButtonClass}
+                    disabled={busy}
+                    aria-label={`Approve ${a.email}`}
+                    onClick={() => approve([a.id])}
+                  >
+                    Approve
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {page.total > waitlistPageSize ? (
+        <div className="px-4 py-3 flex items-center gap-3 border-t border-[var(--border)] text-sm">
+          <button
+            className={quietButtonClass}
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(offset - waitlistPageSize, 0))}
+          >
+            Newer
+          </button>
+          <span className="text-[var(--muted)]">
+            {offset + 1}–{offset + rows.length} of {page.total}
+          </span>
+          <button
+            className={quietButtonClass}
+            disabled={offset + rows.length >= page.total}
+            onClick={() => setOffset(offset + waitlistPageSize)}
+          >
+            Older
+          </button>
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 
