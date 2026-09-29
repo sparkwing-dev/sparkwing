@@ -953,6 +953,20 @@ unlock.
 
 ### Changed
 
+- **controller + store (Breaking):** Job outputs are objects, not database
+  rows. A node reserves its output with `output-upload`, puts the bytes to the
+  URL it gets, commits them with `output-commit`, and its finish or attempt
+  report names the committed object; inline output bytes are refused. A read
+  of `GET .../nodes/{nodeID}/output` returns a one-minute URL and the SHA-256
+  the bytes must match. An output is at most 64 MiB, one run's outputs at most
+  1 GiB, both counted toward the team's cache share, and outputs expire 30
+  days after their run finishes, except each pipeline's newest successful
+  run. A claim token reads only its own node's transitive dependencies, and a
+  coalesce follower, a cache hit and a cross-pipeline ref read through
+  `resolved-output`. `sparkwing-controller migrate-outputs` moves stored
+  outputs before the upgrade, and a laptop database moves its own on first
+  open. See the
+  [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).
 - **controller:** The `cloud` limits profile allows a signed-up team 3600
   requests a minute, up from 2000. A team's tokens share that budget, and a
   two-slot runner spends about 300 a minute, so a pool of ten runners no longer

@@ -29,7 +29,7 @@ before it writes:
 
 | Store | Share | Counted by | Checked |
 |---|---|---|---|
-| Cache: compiled binaries, dependency archives, artifacts, source bundles | 3/4, 768 MiB | the controller's `team_storage` row for the cache | before the upload's body is read |
+| Cache: compiled binaries, dependency archives, artifacts, source bundles, job outputs | 3/4, 768 MiB | the controller's `team_storage` row for the cache | before the upload's body is read |
 | Logs: live runs on the volume and the archive | 3/16, 192 MiB | the controller's `team_storage` row for logs | after the node and run caps cut the append, before it is written |
 | Run events | 1/16, 64 MiB | the controller's per-team event bytes | in the transaction that appends the event |
 
@@ -94,6 +94,35 @@ in the database. A pass that cannot list a bucket leaves that store's counts
 as they were, and `GET /api/v1/health` reports `storage_pass.ok: false` with a
 `problems` entry until a pass succeeds.
 
+## Job outputs
+
+A job's return value is stored as an object, not in the controller's
+database. The node reserves the output's exact size with
+`POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload`, puts the bytes to the
+URL it gets back, and commits them with `output-commit`; its finish or
+attempt report then names the committed object. Outputs count toward the
+cache share, so a free team whose cache is full has its node fail with the
+storage refusal as the reason.
+
+| Limit | Bound | Where |
+|---|---|---|
+| One output | 64 MiB, refused at reservation with `413` | `pkg/store/node_output.go` |
+| One run's outputs | 1 GiB across every node and attempt, refused at reservation with `413` | `pkg/store/node_output.go` |
+| Retention | 30 days after the run finishes; each pipeline's newest successful run keeps its outputs | `pkg/controller/node_output.go` |
+
+A reader gets a one-minute URL and the SHA-256 the bytes must match. A
+claim token reads only the outputs of its own node's transitive dependencies
+in its own run, and the outputs of child runs it started. A coalesce
+follower, a cache hit and a cross-pipeline ref ask
+`GET /api/v1/runs/{id}/nodes/{nodeID}/resolved-output`, and the controller
+picks the source itself. An output whose run passed retention reads as
+absent: a cross-pipeline ref reports no value, and a cache entry that pointed
+at it is dropped, so the next run misses the cache and runs the node.
+
+A controller without `--cache-blob-store` keeps outputs in `outputs/` under
+its data directory and serves them through URLs it signs itself, which only
+that replica can honor.
+
 `GET /api/v1/storage` shows a signed-up caller its team's tier, allowance,
 the three shares, its event bytes, and what it holds in the cache and the
 logs service under `team`.
@@ -132,6 +161,7 @@ second run over the same data removes nothing more.
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
 | Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive | logs service | `--retention` on `sparkwing-logs`; 30 days with `--archive-store` unless set, off otherwise |
 | Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
+| Job outputs | 30 days after the run finished, except each pipeline's newest successful run | controller, hourly storage pass, or hourly on a controller without one | none |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (`SPARKWING_CACHE_PROXY_MAX_BYTES`, 2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
@@ -159,6 +189,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
 | Logs, live and archived | the log share, 192 MiB by default | `pkg/store/team_storage.go`, `pkg/logs/log_quota.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
+| Job outputs | the cache share, 64 MiB per output and 1 GiB per run, refused at reservation; 30 days after the run finished | `pkg/store/node_output.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
 | Annotations per run | 64 KiB per annotation, 1,000 per run, and 4 MiB per run JSON-encoded, node and step annotations together; past a bound the append answers `413` for size or `429` for count and stores nothing | `pkg/store/store.go` |
 | Metric samples per node | 10,000, about five and a half hours of two-second samples; a later sample answers `429`, and the runner stops sampling that node and records one `metrics_stopped` event on it. Reads come in pages of 1,000 by default and 10,000 at most | `pkg/store/metrics.go` |

@@ -277,3 +277,37 @@ func TestEscapeProbe_ATooTightPolicyFailsTheGate(t *testing.T) {
 		t.Fatalf("no internet at all: %+v, want HTTPS closed", r)
 	}
 }
+
+// A claim is refused another node's output and another run's; a pod that
+// reads either, or cannot settle the question, fails the gate.
+func TestEscapeProbe_OutputProbesFenceNonAncestorsAndOtherRuns(t *testing.T) {
+	var bearers []string
+	p := fencedProber(&bearers)
+	p.args.OtherRun = "run-earlier"
+	for _, r := range p.outputProbes() {
+		if r.verdict != denied {
+			t.Errorf("fenced: %s: %s, want denied", r.name, r.verdict)
+		}
+	}
+	for _, b := range bearers {
+		if b != "Bearer "+secretValue {
+			t.Errorf("an output probe sent %q, want the pod's own claim token", b)
+		}
+	}
+	open := p
+	open.httpClient = cluster(http.StatusOK, "", nil, &bearers)
+	for _, r := range open.outputProbes() {
+		if r.verdict != reached || !r.verdict.failsGate() {
+			t.Errorf("open: %s: %s, want REACHED", r.name, r.verdict)
+		}
+	}
+	pending := p
+	pending.httpClient = cluster(http.StatusConflict, "", nil, &bearers)
+	if r := byName(pending.outputProbes())["controller non-ancestor output"]; !r.verdict.failsGate() {
+		t.Errorf("a sibling that never finished: %s, want the gate to fail", r.verdict)
+	}
+	missing := fencedProber(&bearers)
+	if r := byName(missing.outputProbes())["controller other run output"]; r.verdict != inconclusive {
+		t.Errorf("no --other-run: %s, want INCONCLUSIVE", r.verdict)
+	}
+}
