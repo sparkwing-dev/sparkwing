@@ -1,6 +1,7 @@
 package nodemetrics
 
 import (
+	"math"
 	"runtime"
 	"testing"
 	"time"
@@ -21,5 +22,11 @@ func TestIntervalMillicores_ClampsReapBurstToHostCores(t *testing.T) {
 	}
 	if got := intervalMillicores(-time.Second, 2*time.Second); got != 0 {
 		t.Errorf("negative cpu = %d, want 0", got)
+	}
+}
+
+func TestIntervalMillicoresClampsBeforeIntegerConversion(t *testing.T) {
+	if got, want := intervalMillicores(time.Duration(math.MaxInt64), time.Nanosecond), int64(runtime.NumCPU())*1000; got != want {
+		t.Fatalf("extreme rate = %d, want host limit %d", got, want)
 	}
 }

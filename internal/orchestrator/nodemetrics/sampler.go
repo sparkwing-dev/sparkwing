@@ -10,6 +10,7 @@ import (
 )
 
 type Sample struct {
+	Valid         bool
 	TS            time.Time
 	CPUMillicores int64
 	MemoryBytes   int64
@@ -37,13 +38,8 @@ func Interval() time.Duration {
 
 var (
 	cpuReader = readCPUTime
-	rssReader = readMemoryBytes
+	rssReader = processRSS
 )
-
-func CPUAccountingAvailable() bool {
-	_, ok := readCPUTime()
-	return ok
-}
 
 var reportedChildCPU atomic.Int64
 
@@ -124,9 +120,10 @@ func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
 func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 	defer loopsRunning.Done()
 	prevCPU, havePrev := cpuReader()
+	havePrev = havePrev && prevCPU >= 0
 	if !havePrev {
 		blindOnce.Do(func() {
-			log.Printf("nodemetrics: CPU accounting unavailable on %s; CPU samples will be zero", runtime.GOOS)
+			log.Printf("nodemetrics: CPU accounting unavailable on %s; samples will be marked unavailable", runtime.GOOS)
 		})
 	}
 	prevWall := time.Now()
@@ -141,8 +138,10 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 			var totalCPU int64
 			cpu, ok := cpuReader()
 			now := time.Now()
+			ok = ok && cpu >= 0
+			validCPU := ok && havePrev && cpu >= prevCPU && now.After(prevWall)
 			if ok {
-				if havePrev {
+				if validCPU {
 					totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
 				}
 				prevCPU = cpu
@@ -155,12 +154,17 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 			}
 			// perf: RSS costs a subprocess on darwin, so it is read only once
 			// the tick is known to have somewhere to go.
-			totalRSS := rssReader()
+			totalRSS, validRSS := rssReader()
+			validRSS = validRSS && totalRSS >= 0
+			if !validRSS {
+				totalRSS = 0
+			}
 			// safety: the process total is clamped before it is divided, so
 			// the shares sum to a rate the host could serve rather than to a
 			// multiple of it.
 			share := int64(len(live))
 			sample := Sample{
+				Valid:         validCPU && validRSS,
 				TS:            now,
 				CPUMillicores: totalCPU / share,
 				MemoryBytes:   totalRSS / share,
@@ -176,21 +180,12 @@ func intervalMillicores(cpu, wall time.Duration) int64 {
 	if wall <= 0 {
 		return 0
 	}
-	millicores := int64(cpu.Seconds() / wall.Seconds() * 1000.0)
+	millicores := cpu.Seconds() / wall.Seconds() * 1000.0
 	if millicores < 0 {
 		return 0
 	}
-	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > hostMilli {
+	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > float64(hostMilli) {
 		return hostMilli
 	}
-	return millicores
-}
-
-func readMemoryBytes() int64 {
-	if rss, ok := processRSS(); ok {
-		return rss
-	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return int64(m.Sys)
+	return int64(millicores)
 }

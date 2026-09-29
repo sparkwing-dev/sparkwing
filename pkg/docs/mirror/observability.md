@@ -186,9 +186,11 @@ cluster metrics-server is involved.
   work; they do not measure live children. A child's CPU may arrive only
   after it exits, so its timing can differ from the interval charged.
 - **Memory**: the runner's resident bytes from `/proc/self/statm` on Linux
-  or `ps -o rss=` on macOS. These readings omit child processes. When the
-  platform read is unavailable, the sampler uses the Go runtime's system
-  reservation, which is a different quantity from resident memory.
+  or `ps -o rss=` on macOS. These readings omit child processes.
+
+A failed CPU or RSS read marks the sample unknown. Any usable reading remains
+available for diagnostics, but a series containing an unknown sample cannot
+train CPU or memory costs. A successful zero reading remains measured zero.
 
 One sampler runs per process and divides each interval equally among its
 attached nodes. A dedicated local node has one attachment. Nested jobs,

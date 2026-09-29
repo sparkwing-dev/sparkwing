@@ -61,7 +61,6 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", pipeline, "err", err)
 	}
 	dominant := cacheDominant(nodes)
-	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	bucket := nodemetrics.Interval()
 	intervals := map[int64]intervalTotal{}
 	var cpuIntegral int64
@@ -142,7 +141,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			PeakCores:       peakCores,
 			SustainedCores:  math.Min(sustainedNodeCores(samples, meanCores), peakCores),
 			PeakMemoryBytes: peakMem,
-			CPUMeasured:     cpuMeasured,
+			CPUMeasured:     true,
 			PlanHash:        planHash,
 		})
 	}
@@ -177,7 +176,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			floorMem = max(floorMem, charge.MemoryBytes)
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, "", store.ProfileObservation{
-			CPUMeasured:      cpuMeasured,
+			CPUMeasured:      true,
 			PlanHash:         planHash,
 			Contended:        true,
 			FloorCores:       floorCores,
@@ -190,7 +189,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		PeakCores:       runPeakCores,
 		SustainedCores:  runSustainedCores,
 		PeakMemoryBytes: runPeakMem,
-		CPUMeasured:     cpuMeasured,
+		CPUMeasured:     true,
 		PlanHash:        planHash,
 	})
 }

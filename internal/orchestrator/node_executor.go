@@ -125,8 +125,12 @@ type stateMetricsSink struct {
 }
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
+	kind := store.MetricUnknown
+	if sample.Valid {
+		kind = store.MetricInterval
+	}
 	return s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
-		Kind:          store.MetricInterval,
+		Kind:          kind,
 		TS:            sample.TS,
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
