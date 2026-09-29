@@ -137,13 +137,18 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 		select {
 		case <-stop:
 			return
-		case now := <-t.C:
+		case <-t.C:
 			var totalCPU int64
-			if cpu, ok := cpuReader(); ok && havePrev {
-				totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
+			cpu, ok := cpuReader()
+			now := time.Now()
+			if ok {
+				if havePrev {
+					totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
+				}
 				prevCPU = cpu
 				prevWall = now
 			}
+			havePrev = ok
 			live := s.liveSinks(stop)
 			if len(live) == 0 {
 				return

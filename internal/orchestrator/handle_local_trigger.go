@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -50,7 +49,6 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		}
 	}()
 
-	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	opts := Options{
 		standalone:        childStandalone(backends, selection),
@@ -76,10 +74,16 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 			sparkwing.CurrentRuntime().WorkDir,
 			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL,
 		),
-		Runner: r,
 	}
 
 	applyCheckoutProjectConfig(&opts, logger)
+	execution, err := setupLocalExecution(paths, &opts, backends, nodeWorkspace(), logger)
+	if err != nil {
+		return err
+	}
+	defer execution.cleanup()
+	execution.runner.SetLeaseTokenSource(leaseTokensFromContext)
+	opts.Runner = NewNodeExecutor(backends).WithSpawner(execution.runner)
 	res, err := Run(ctx, backends, opts)
 	if err != nil {
 		logger.Error(

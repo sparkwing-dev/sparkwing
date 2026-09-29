@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **accounting:** Queued local nodes retain process exit CPU, memory, and wall time. CPU sampling resumes after failed reads and timestamps observations at collection.
+
 ## [v0.64.0] - 2026-09-28
 ### Added
 
