@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -18,6 +19,16 @@ type fakeCheckout struct {
 	requests []checkoutCall
 	status   int
 	url      string
+	// internal records the card routes' calls, and chargeStatus and
+	// declineCode are what /internal/charge answers.
+	internal     []internalCall
+	chargeStatus string
+	declineCode  string
+}
+
+type internalCall struct {
+	Path string
+	Body map[string]any
 }
 
 type checkoutCall struct {
@@ -30,7 +41,11 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 	t.Helper()
 	fc := &fakeCheckout{status: http.StatusOK, url: "https://checkout.stripe.test/c/pay/cs_test_1"}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/internal/checkout" {
+		if r.Method == http.MethodPost && r.URL.Path != "/internal/checkout" {
+			fc.serveCard(w, r)
+			return
+		}
+		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}
@@ -49,6 +64,35 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 	}))
 	t.Cleanup(ts.Close)
 	return fc, ts.URL
+}
+
+func (fc *fakeCheckout) serveCard(w http.ResponseWriter, r *http.Request) {
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	fc.mu.Lock()
+	fc.internal = append(fc.internal, internalCall{Path: r.URL.Path, Body: body})
+	status, decline := fc.chargeStatus, fc.declineCode
+	fc.mu.Unlock()
+	if status == "" {
+		status = "succeeded"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"url": "https://checkout.stripe.test/c/pay/cs_card", "payment_intent": "pi_" + fmt.Sprint(body["attempt_id"]),
+		"status": status, "decline_code": decline,
+	})
+}
+
+func (fc *fakeCheckout) internalCalls(path string) []internalCall {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	var out []internalCall
+	for _, c := range fc.internal {
+		if c.Path == path {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (fc *fakeCheckout) calls() []checkoutCall {

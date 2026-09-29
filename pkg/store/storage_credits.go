@@ -157,8 +157,12 @@ ON CONFLICT (principal) DO UPDATE SET
 func refuseStorageGrowthOnEmptyBalanceTx(
 	ctx context.Context, tx *storeTx, team Team, principal string, bytes int64,
 ) error {
+	room, err := headroomTx(ctx, tx, team, time.Now())
+	if err != nil || room > 0 {
+		return err
+	}
 	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil || balance > 0 {
+	if err != nil {
 		return err
 	}
 	return fmt.Errorf(
@@ -467,6 +471,9 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 		string(c.Team), id, c.Principal, CreditChargeStorage,
 		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS); err != nil {
 		return nil, fmt.Errorf("credits: insert storage charge: %w", err)
+	}
+	if err := addSpendTx(ctx, tx, c.Team, c.NowNS, c.AmountMicro); err != nil {
+		return nil, err
 	}
 	return &CreditCharge{
 		ID: id, Team: c.Team, Principal: c.Principal, Kind: CreditChargeStorage,

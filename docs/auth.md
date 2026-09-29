@@ -217,16 +217,44 @@ raise the limit to $5,000, and a revocation holds the team to the new-team
 limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
-Purchases are final, so a refund is the operator's decision and is made by
-hand. The private `sparkwing-ops` refund command takes back what the
-purchase still has on the ledger, in the team it funded, through
-`POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
-the operator then issues the money back. The controller never moves money, and
-a refund issued in Stripe alone changes nothing on the ledger. The whole
-purchase is reversed even when its credits were spent, so the balance can go
-below zero and the team's metered claims stop until it is funded again. A
-reversal never takes back more than its payment paid, and running the refund
-twice reverses once.
+Purchases are final, so a refund is the operator's decision. The private
+`sparkwing-ops` refund command still takes back what a purchase has on the
+ledger and prints the Stripe dashboard page for the refund. A refund issued
+in Stripe also reaches the ledger: the checkout service answers
+`charge.refunded` by reversing exactly what each refund returned, under the
+refund's id, through `POST /api/v1/credits/reversals` with `amount_micro`. A
+reversal never takes back more than its payment has left, and replaying it
+reverses once. The balance can go below zero, and the team's metered claims
+then stop until it is funded again.
+
+Every team spends within limits, counted in daily buckets of gross usage at
+list price, promotional credit included. A new team may spend $50 over 30
+days and $25 in one UTC day; a trusted team $500 and $200. An owner may set a
+lower budget through `PUT /api/v1/team/billing/budget`, and owners are
+mailed at 50, 80 and 100% of it. A claim past any limit is refused with `402`
+and `"code": "spend_limit"`, and the run log's `credits_blocked` event names
+the limit. Limits stop new work; running jobs finish within about a minute.
+A refunded reservation counts against the day of its charge, so a refund
+never frees room today.
+
+A trusted team may add a card (`POST /api/v1/team/billing/card`, owners
+only), which opens a Stripe setup page that asks for 3-D Secure and shows the
+charge authorization. With a card on file the team buys no prepaid credit
+(`409`, `"code": "card_on_file"`), spends any prepaid balance first, and may
+then run up to twice its rung below zero. The controller's payment worker
+charges the card off-session when the debt reaches the rung ($100), on the
+first of the month for a smaller debt, and at once when trust is revoked.
+Each charge has one attempt in flight at a time, and the attempt id is both
+Stripe's idempotency key and the payment's `metadata.attempt_id`, so a retried
+attempt finds the payment already made. Stripe emails the receipt. A declined
+charge withdraws the card's credit, so new work waits, and is retried after
+1, 3 and 7 days; an owner can pay it at once through
+`POST /api/v1/team/billing/pay`, and a new card retries it at once. A team
+with debt or a charge open cannot be deleted.
+
+An early fraud warning holds the team under the warning's id, blocks the
+card's fingerprint for every team, and refunds the payment; the refund then
+reverses the credits as above.
 
 A chargeback holds the team. Holds are one per dispute, and a team is held
 while any of its holds stands: its metered claims are refused with `402` and

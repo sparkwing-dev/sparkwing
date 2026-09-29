@@ -1116,24 +1116,21 @@ func TestScaledRunnerCapRefusesTheClaimPastTheDerivedCap(t *testing.T) {
 	}
 }
 
-func TestAnUnreadableLedgerRefusesWithTheGuardsOwnShape(t *testing.T) {
+func TestAnUnreadableLedgerRefusesTheClaim(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	claimant := meteredClaimant(t, s, "agent:cloud")
 	readyNode(t, s, "run-a", "build")
 	scaleTo(t, s, 2, 5000)
 	grantCredits(t, s, store.CreditGrantPaid, 5000, "pay_1")
-	// safety: dropping the column only the derivation reads leaves the balance
-	// check the claim makes first intact, so the refusal under test is the one
-	// the guard raises.
 	if _, err := s.DB().Exec(`ALTER TABLE credit_grants DROP COLUMN reverses`); err != nil {
 		t.Fatalf("drop the reversal column: %v", err)
 	}
 
-	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
-	refused := limitRefusal(t, err, store.ComputeLimitConcurrentRunners)
-	if refused.Cap != 2 {
-		t.Fatalf("refusal = %+v, want the static cap of 2", refused)
+	// safety: the spend headroom derives the team's trust from the same
+	// column before the guard runs, so the claim fails closed there.
+	if n, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err == nil || n != nil {
+		t.Fatalf("claim = %v, %v; want refused while the ledger is unreadable", n, err)
 	}
 }
 

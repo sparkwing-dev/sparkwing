@@ -223,6 +223,8 @@ var tenantTables = []string{
 	"agent_loss_retry_node_sources",
 	"approvals",
 	"business_events",
+	"card_attempts",
+	"card_charges",
 	"child_invocations",
 	"claim_tokens",
 	"concurrency_cache",
@@ -270,6 +272,7 @@ var tenantTables = []string{
 	"storage_reservations",
 	"storage_run_usage",
 	"team_download_day",
+	"team_spend_days",
 	"team_storage",
 	"team_build_trust",
 	"uploads",
@@ -291,6 +294,7 @@ var keyedAtCreation = []string{
 	"claim_tokens", "child_invocations",
 	"business_events",
 	"repos",
+	"card_charges", "card_attempts", "team_spend_days",
 }
 
 // safety: executors enroll with the deployment and take work from every team; sparkwing_meta is the

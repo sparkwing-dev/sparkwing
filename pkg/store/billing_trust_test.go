@@ -24,13 +24,23 @@ func payTeam(t *testing.T, tenant *store.Tenant, ref string, dollars int64) time
 	return res.Grant.CreatedAt
 }
 
+// spend seeds a usage charge and its day's spend bucket, as the ledger's own
+// charge insert does.
 func spend(t *testing.T, s *store.Store, team, id string, cents int64) {
 	t.Helper()
+	now := time.Now().UnixNano()
+	amount := cents * store.MicroCreditsPerCent
 	if _, err := s.DB().Exec(fmt.Sprintf(
 		`INSERT INTO credit_charges (id, run_id, node_id, token_prefix, kind, seconds, amount_micro, charged_at, team)
 		 VALUES ('%s', 'run-x', 'build', 'pfx', 'usage', 60, %d, %d, '%s')`,
-		id, cents*store.MicroCreditsPerCent, time.Now().UnixNano(), team)); err != nil {
+		id, amount, now, team)); err != nil {
 		t.Fatalf("seed a charge: %v", err)
+	}
+	if _, err := s.DB().Exec(fmt.Sprintf(
+		`INSERT INTO team_spend_days (team, day, amount_micro) VALUES ('%s', %d, %d)
+		 ON CONFLICT (team, day) DO UPDATE SET amount_micro = team_spend_days.amount_micro + excluded.amount_micro`,
+		team, now/int64(24*time.Hour), amount)); err != nil {
+		t.Fatalf("seed a spend day: %v", err)
 	}
 }
 
@@ -118,7 +128,7 @@ func TestAutomaticTrustRuleBoundaries(t *testing.T) {
 	reversed := teamHandle(t, s, "reversed")
 	paidAt = payTeam(t, reversed, "pi_rev", 50)
 	spend(t, s, "reversed", "ch_rev", 5_000)
-	if _, err := s.ReversePayment(ctx, "pi_rev", "re_1", "ops"); err != nil {
+	if _, err := s.ReversePayment(ctx, "pi_rev", "re_1", "ops", 0); err != nil {
 		t.Fatal(err)
 	}
 	if billingStanding(t, reversed, paidAt.Add(store.AutoTrustPaymentAge)).Trusted {

@@ -30,6 +30,9 @@ type reversePaymentReq struct {
 	PaymentID string `json:"payment_id"`
 	// safety: A reversal reference is its idempotency key for refunds and chargebacks.
 	Reference string `json:"reference"`
+	// AmountMicro reverses only this much of the payment, as a partial
+	// refund does; zero reverses what remains.
+	AmountMicro int64 `json:"amount_micro,omitempty"`
 }
 
 type reversePaymentJSON struct {
@@ -54,8 +57,12 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("payment_id and reference are required"))
 		return
 	}
+	if req.AmountMicro < 0 {
+		writeError(w, http.StatusBadRequest, errors.New("amount_micro must not be negative"))
+		return
+	}
 	who := principalName(r)
-	res, err := s.store.ReversePayment(r.Context(), req.PaymentID, req.Reference, who)
+	res, err := s.store.ReversePayment(r.Context(), req.PaymentID, req.Reference, who, req.AmountMicro)
 	switch {
 	case errors.Is(err, store.ErrUnknownPayment):
 		writeError(w, http.StatusNotFound, err)

@@ -11,6 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
+// CardBillingPass runs one pass of the payment worker, so a test drives its
+// schedule instead of waiting on the ticker.
+func (s *Server) CardBillingPass(ctx context.Context) { s.cardBillingPass(ctx) }
+
 // TeamBoundaryExempt exposes the routes the team boundary leaves to their own
 // gate, so the external boundary test can hold every other run route to it.
 var TeamBoundaryExempt = teamBoundaryExempt

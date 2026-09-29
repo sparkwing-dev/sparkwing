@@ -22,6 +22,14 @@ unlock.
 
 ### Added
 
+- **controller + store + web:** Trusted Cloud teams can put a card on file
+  (`POST /api/v1/team/billing/card`) and are then charged automatically at
+  $100 owed or on the 1st of the month; a declined charge stops new work
+  until it is paid, retried after 1, 3 and 7 days, or paid by an owner through
+  `POST /api/v1/team/billing/pay`. Every team now spends within a 30-day
+  limit, a daily limit and an optional owner budget
+  (`PUT /api/v1/team/billing/budget`); a claim past one is refused with `402`
+  and `"code": "spend_limit"`. Schema v87.
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that

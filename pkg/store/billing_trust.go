@@ -32,8 +32,8 @@ const (
 	PurchaseLimitWindow = RunnerScaleWindow
 
 	// A team earns trust once its oldest unreversed purchase is this old,
-	// it has spent at least autoTrustMinSpentCents, and it has never been
-	// held over a dispute.
+	// it has spent at least autoTrustMinSpentCents, it has never been
+	// held over a dispute, and no card charge of it failed in this window.
 	AutoTrustPaymentAge    = 30 * 24 * time.Hour
 	autoTrustMinSpentCents = 5_000
 )
@@ -112,6 +112,25 @@ func (t *Tenant) BillingStanding(ctx context.Context, now time.Time) (BillingSta
 }
 
 func billingStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {
+	b, err := trustStandingTx(ctx, q, team, now)
+	if err != nil {
+		return b, err
+	}
+	paid, err := recentPaidGrantsMicro(ctx, q, team, now)
+	if err != nil {
+		return b, err
+	}
+	open, err := settlingCheckoutMicroTx(ctx, q, team, now)
+	if err != nil {
+		return b, err
+	}
+	b.PurchasedMicro = paid + open
+	return b, nil
+}
+
+// perf: every claim and heartbeat asks for the team's trust under the ledger
+// lock, so this reads the trust and limit without the purchase sums.
+func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {
 	var b BillingStanding
 	var atNS int64
 	err := q.QueryRowContext(ctx, `SELECT billing_trust, billing_trust_by, billing_trust_at, billing_trust_reason,
@@ -143,15 +162,6 @@ func billingStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Ti
 		limitCents = b.LimitOverrideCents
 	}
 	b.LimitMicro = limitCents * MicroCreditsPerCent
-	paid, err := recentPaidGrantsMicro(ctx, q, team, now)
-	if err != nil {
-		return b, err
-	}
-	open, err := settlingCheckoutMicroTx(ctx, q, team, now)
-	if err != nil {
-		return b, err
-	}
-	b.PurchasedMicro = paid + open
 	return b, nil
 }
 
@@ -161,14 +171,16 @@ const autoTrustSQL = `SELECT
   (SELECT MIN(p.created_at) FROM credit_grants p WHERE p.team = ? AND p.kind = ?
      AND NOT EXISTS (SELECT 1 FROM credit_grants r
                       WHERE r.team = p.team AND r.kind = ? AND p.reference != '' AND r.reverses = p.reference)),
-  (SELECT SUM(amount_micro) FROM credit_charges WHERE team = ?),
-  (SELECT COUNT(*) FROM credit_freezes WHERE team = ?)`
+  (SELECT SUM(amount_micro) FROM team_spend_days WHERE team = ?),
+  (SELECT COUNT(*) FROM credit_freezes WHERE team = ?)
+  + (SELECT COUNT(*) FROM card_attempts WHERE team = ? AND status = ? AND updated_at >= ?)`
 
 func autoTrustedTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (bool, error) {
 	var oldest, spent sql.NullInt64
 	var freezes int64
 	if err := q.QueryRowContext(ctx, autoTrustSQL, string(team), CreditGrantPaid, CreditGrantReversal,
-		string(team), string(team)).Scan(&oldest, &spent, &freezes); err != nil {
+		string(team), string(team), string(team), CardAttemptFailed, now.Add(-AutoTrustPaymentAge).UnixNano()).
+		Scan(&oldest, &spent, &freezes); err != nil {
 		return false, err
 	}
 	return oldest.Valid && oldest.Int64 <= now.Add(-AutoTrustPaymentAge).UnixNano() &&
@@ -204,9 +216,13 @@ type BillingTrustChange struct {
 	Trust  string
 	Actor  string
 	Reason string
-	// LimitCents replaces the trusted 30-day purchase limit of a granted
-	// team; zero keeps the default.
+	// LimitCents replaces the trusted 30-day purchase limit and spend
+	// ceiling of a granted team; zero keeps the default.
 	LimitCents int64
+	// DailyCapCents and RungCents replace a granted team's daily spend cap
+	// and the debt at which its card is charged; zero keeps the default.
+	DailyCapCents int64
+	RungCents     int64
 }
 
 // SetBillingTrust records an operator's trust decision on t and returns the
@@ -219,8 +235,13 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	if c.Reason == "" || c.Actor == "" {
 		return before, after, fmt.Errorf("%w: a trust change names its actor and reason", ErrInvalidInput)
 	}
-	if c.LimitCents < 0 || c.LimitCents > MaxPurchaseLimitCents || (c.LimitCents > 0 && c.Trust != BillingTrustGranted) {
-		return before, after, fmt.Errorf("%w: a limit is up to %d cents and only for a granted team", ErrInvalidInput, MaxPurchaseLimitCents)
+	for _, v := range []int64{c.LimitCents, c.DailyCapCents, c.RungCents} {
+		if v < 0 || v > MaxPurchaseLimitCents || (v > 0 && c.Trust != BillingTrustGranted) {
+			return before, after, fmt.Errorf("%w: a limit is up to %d cents and only for a granted team", ErrInvalidInput, MaxPurchaseLimitCents)
+		}
+	}
+	if c.RungCents > 0 && c.RungCents < MinCardChargeCents {
+		return before, after, fmt.Errorf("%w: a rung is at least %d cents, the smallest card charge", ErrInvalidInput, MinCardChargeCents)
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
@@ -235,12 +256,14 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	}
 	// safety: a revocation usually answers a chargeback, so only a grant that
 	// names no limit restores trust; raising a limit never does it in passing.
-	if before.Trust == BillingTrustRevoked && c.LimitCents > 0 {
+	if before.Trust == BillingTrustRevoked && c.LimitCents+c.DailyCapCents+c.RungCents > 0 {
 		return before, after, fmt.Errorf("%w: the team's trust is revoked; restore trust before setting a limit", ErrInvalidInput)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_trust = ?, billing_trust_by = ?, billing_trust_at = ?,
-	    billing_trust_reason = ?, billing_purchase_limit_cents = ? WHERE name = ?`,
-		c.Trust, c.Actor, now.UnixNano(), c.Reason, c.LimitCents, string(t.team)); err != nil {
+	    billing_trust_reason = ?, billing_purchase_limit_cents = ?, billing_daily_cap_cents = ?,
+	    billing_rung_cents = ? WHERE name = ?`,
+		c.Trust, c.Actor, now.UnixNano(), c.Reason, c.LimitCents, c.DailyCapCents, c.RungCents,
+		string(t.team)); err != nil {
 		return before, after, err
 	}
 	if after, err = billingStandingTx(ctx, tx, t.team, now); err != nil {
@@ -258,6 +281,7 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 			"trusted_before": before.Trusted, "trusted_after": after.Trusted,
 			"limit_cents_before": before.LimitMicro / MicroCreditsPerCent,
 			"limit_cents_after":  after.LimitMicro / MicroCreditsPerCent,
+			"daily_cap_cents":    c.DailyCapCents, "rung_cents": c.RungCents,
 		},
 	}); err != nil {
 		return before, after, err
