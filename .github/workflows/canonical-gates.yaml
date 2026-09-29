@@ -28,6 +28,19 @@ jobs:
         gate: [gate, pre-release]
     env:
       GOWORK: "off"
+    services:
+      postgres:
+        image: ${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout immutable release verifier
         if: inputs.release_tag != ''
@@ -169,6 +182,7 @@ jobs:
         if: matrix.gate == 'pre-release'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          SPARKWING_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
