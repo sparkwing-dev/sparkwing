@@ -91,6 +91,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
+| `GET` | `/api/v1/operator/waitlist` | `operator` |
+| `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |

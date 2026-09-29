@@ -131,6 +131,8 @@ type WaitlistedAccount struct {
 	Account
 	WaitlistedAt time.Time
 	Reason       string
+	// Provider is the sign-in provider of the account's first identity.
+	Provider string
 }
 
 // ErrWaitlisted refuses what a waitlisted account may not do yet.
@@ -341,12 +343,12 @@ func recordAdmissionTx(ctx context.Context, tx *storeTx, accountID, kind string,
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return err
 	}
-	return recordAdmissionEventTx(tx, accountID, kind, now)
+	return recordAdmissionEventTx(tx, accountID, kind, "", now)
 }
 
-func recordAdmissionEventTx(tx *storeTx, accountID, via string, now time.Time) error {
+func recordAdmissionEventTx(tx *storeTx, accountID, via, actor string, now time.Time) error {
 	return RecordBusinessEvent(tx, BusinessEvent{
-		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID,
+		At: now, Account: accountID, Kind: BusinessEventAccountAdmitted, SubjectID: accountID, Actor: actor,
 		Attrs: map[string]any{"via": via},
 	})
 }
@@ -432,13 +434,24 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 
 // WaitlistedAccounts lists the accounts waiting for admission, oldest first.
 // A limit of zero or less reads them all.
-func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) (_ []WaitlistedAccount, err error) {
-	q := `SELECT id, email, email_verified, name, active_team, created_at, waitlisted_at, waitlist_reason
-		FROM accounts WHERE waitlisted_at <> 0 ORDER BY waitlisted_at, id`
+func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error) {
+	return s.waitlisted(ctx, "", limit, 0)
+}
+
+// NewestWaitlisted lists a page of the accounts waiting for admission, newest
+// first, skipping the offset newest.
+func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error) {
+	return s.waitlisted(ctx, " DESC", limit, offset)
+}
+
+func (s *Store) waitlisted(ctx context.Context, order string, limit, offset int) (_ []WaitlistedAccount, err error) {
+	q := `SELECT id, email, email_verified, name, active_team, created_at, waitlisted_at, waitlist_reason,
+		COALESCE((SELECT provider FROM identities i WHERE i.account_id = accounts.id ORDER BY i.created_at, i.provider LIMIT 1), '')
+		FROM accounts WHERE waitlisted_at <> 0 ORDER BY waitlisted_at` + order + `, id` + order
 	args := []any{}
 	if limit > 0 {
-		q += ` LIMIT ?`
-		args = append(args, limit)
+		q += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, max(offset, 0))
 	}
 	rows, err := s.query(ctx, q, args...)
 	if err != nil {
@@ -455,7 +468,7 @@ func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) (_ []Waitlist
 		var verified int
 		var active string
 		var created, waitlisted int64
-		if err := rows.Scan(&w.ID, &w.Email, &verified, &w.Name, &active, &created, &waitlisted, &w.Reason); err != nil {
+		if err := rows.Scan(&w.ID, &w.Email, &verified, &w.Name, &active, &created, &waitlisted, &w.Reason, &w.Provider); err != nil {
 			return nil, err
 		}
 		w.EmailVerified, w.ActiveTeam = verified == 1, Team(active)
@@ -468,12 +481,13 @@ func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) (_ []Waitlist
 
 // ApproveWaitlisted admits the named accounts: each leaves the waitlist and,
 // if it belongs to no team, gets its personal space. An id that is not on the
-// waitlist is skipped, so approving twice admits once. It returns the accounts
-// it admitted.
-func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Time) ([]Account, error) {
+// waitlist is skipped, so approving twice admits once. Each admission records
+// an account.admitted business event naming actor. It returns the accounts it
+// admitted.
+func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error) {
 	out := []Account{}
 	for _, id := range ids {
-		acct, ok, err := s.approveOne(ctx, id, now)
+		acct, ok, err := s.approveOne(ctx, id, actor, now)
 		if err != nil {
 			return out, err
 		}
@@ -485,7 +499,7 @@ func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Ti
 }
 
 // ApproveOldestWaitlisted admits the n accounts that have waited longest.
-func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Time) ([]Account, error) {
+func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("%w: approve at least one account", ErrInvalidInput)
 	}
@@ -497,15 +511,15 @@ func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Tim
 	for _, w := range waiting {
 		ids = append(ids, w.ID)
 	}
-	return s.ApproveWaitlisted(ctx, ids, now)
+	return s.ApproveWaitlisted(ctx, ids, actor, now)
 }
 
 // safety: a personal slug can lose a race to a concurrent sign-in, and the
 // retry re-reads what the winner took, as a first sign-in does.
-func (s *Store) approveOne(ctx context.Context, id string, now time.Time) (Account, bool, error) {
+func (s *Store) approveOne(ctx context.Context, id, actor string, now time.Time) (Account, bool, error) {
 	var last error
 	for range 5 {
-		acct, ok, err := s.approveOneOnce(ctx, id, now)
+		acct, ok, err := s.approveOneOnce(ctx, id, actor, now)
 		if err == nil || (!isUniqueViolation(err) && !errors.Is(err, ErrSlugTaken)) {
 			return acct, ok, err
 		}
@@ -514,7 +528,7 @@ func (s *Store) approveOne(ctx context.Context, id string, now time.Time) (Accou
 	return Account{}, false, last
 }
 
-func (s *Store) approveOneOnce(ctx context.Context, id string, now time.Time) (Account, bool, error) {
+func (s *Store) approveOneOnce(ctx context.Context, id, actor string, now time.Time) (Account, bool, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return Account{}, false, err
@@ -530,7 +544,7 @@ func (s *Store) approveOneOnce(ctx context.Context, id string, now time.Time) (A
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return Account{}, false, err
 	}
-	if err := recordAdmissionEventTx(tx, id, "waitlist", now); err != nil {
+	if err := recordAdmissionEventTx(tx, id, "waitlist", actor, now); err != nil {
 		return Account{}, false, err
 	}
 	acct, err := accountTx(ctx, tx, id)

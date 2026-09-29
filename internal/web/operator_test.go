@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 )
@@ -64,5 +65,31 @@ func TestOperatorRoutesRefuseAnAdminPasswordSession(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s = %d want 403", path, rec.Code)
 		}
+	}
+}
+
+func TestOperatorWaitlistApprovalNeedsTheSessionsCSRFToken(t *testing.T) {
+	handler, reached := proxyTestDashboard(t, nil)
+	const path = "/api/v1/operator/waitlist/approve"
+	for name, strip := range map[string]func(*http.Request){
+		"no header":      func(r *http.Request) { r.Header.Del(csrfHeaderName) },
+		"a forged token": func(r *http.Request) { r.Header.Set(csrfHeaderName, "forged") },
+		"another origin": func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") },
+	} {
+		req := proxyTestRequest(http.MethodPost, path)
+		strip(req)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s = %d want 403", name, rec.Code)
+		}
+	}
+	if got := reached(); len(got) != 0 {
+		t.Fatalf("a refused approval reached the controller: %v", got)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, proxyTestRequest(http.MethodPost, path))
+	if rec.Code != http.StatusNoContent || !slices.Equal(reached(), []string{"POST " + path}) {
+		t.Errorf("with the token = %d, reached %v", rec.Code, reached())
 	}
 }

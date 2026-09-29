@@ -1938,8 +1938,8 @@ func (s *Store) AppendEventCharged(
 func (s *Store) AppendEventOnce(ctx context.Context, runID, nodeID, kind string, payload []byte) (_ bool, err error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
-func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, now time.Time) ([]Account, error)
-func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, now time.Time) ([]Account, error)
+func (s *Store) ApproveOldestWaitlisted(ctx context.Context, n int, actor string, now time.Time) ([]Account, error)
+func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor string, now time.Time) ([]Account, error)
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
@@ -2149,6 +2149,7 @@ func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
 	kind ClaimTokenKind, expiresAt, now time.Time,
 ) (string, error)
+func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
@@ -2313,7 +2314,7 @@ func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload
 func (s *Store) UpsertProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) ValidateExecutorClaimReservation(ctx context.Context, claimant ClaimIdentity, runID, nodeID, executorName, reservationID string, slot int, resourceDigest string) error
 func (s *Store) VerifyUser(name, password string, now time.Time) (*User, error)
-func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) (_ []WaitlistedAccount, err error)
+func (s *Store) WaitlistedAccounts(ctx context.Context, limit int) ([]WaitlistedAccount, error)
 func (s *Store) WarmCPUClassCores(ctx context.Context) (int64, error)
 func (s *Store) WriteNodeDispatch(ctx context.Context, d NodeDispatch) error
 func SupportsRunCursor(version string) bool
@@ -2744,6 +2745,8 @@ type WaitlistedAccount struct {
 	Account
 	WaitlistedAt time.Time
 	Reason       string
+
+	Provider string
 }
 func WithClaimPlacement(ctx context.Context, placement ClaimPlacement) context.Context
 func WithClaimProfile(ctx context.Context, profile match.Profile) context.Context
