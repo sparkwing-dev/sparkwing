@@ -178,7 +178,7 @@ func TestClaimRoute_CancelAndFinishRefuseTheVeryNextRequest(t *testing.T) {
 func TestClaimRoute_OtherControllerRoutesRefuseAClaimToken(t *testing.T) {
 	f := newClaimRouteFixture(t)
 	h := f.srv.Handler()
-	for _, path := range []string{"/api/v1/runs/run-a/receipt", "/api/v1/runs/run-a/nodes/build/logs", "/api/v1/secrets/x"} {
+	for _, path := range []string{"/api/v1/runs/run-a/receipt", "/api/v1/runs/run-a/nodes/build/logs", "/api/v1/tokens"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("Authorization", "Bearer "+f.raw)
 		rec := httptest.NewRecorder()
