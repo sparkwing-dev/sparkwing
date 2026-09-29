@@ -16,6 +16,7 @@ type billingTrustReq struct {
 	// at which the card is charged.
 	DailyCapCents int64 `json:"daily_cap_cents,omitempty"`
 	RungCents     int64 `json:"rung_cents,omitempty"`
+	RunnerCap     int64 `json:"runner_cap,omitempty"`
 }
 
 type billingTrustJSON struct {
@@ -88,7 +89,7 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request) {
 	}
 	_, after, err := t.SetBillingTrust(r.Context(), store.BillingTrustChange{
 		Trust: trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
-		DailyCapCents: req.DailyCapCents, RungCents: req.RungCents,
+		DailyCapCents: req.DailyCapCents, RungCents: req.RungCents, RunnerCap: req.RunnerCap,
 	}, time.Now())
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):

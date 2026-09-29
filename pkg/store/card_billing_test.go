@@ -326,7 +326,7 @@ func TestAWarningBeforeItsPaymentStopsTheGrant(t *testing.T) {
 	spend(t, s, "acme", "ch_1", 15_000)
 	w := dueCharge(t, s, now)
 	team, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{
-		WarningID: "issfr_1", PaymentIntent: "pi_warned", Fingerprint: "fp_other",
+		WarningID: "issfr_1", PaymentIntent: "pi_warned", Fingerprint: "fp_other", Actionable: true,
 	}, now)
 	if err != nil || team != "" {
 		t.Fatalf("warning on an unknown payment = %q, %v; want stored with no team", team, err)
@@ -355,7 +355,7 @@ func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
 	s := storetest.Open(t)
 	ctx := context.Background()
 	acme := teamHandle(t, s, "acme")
-	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_2", PaymentIntent: "pi_buy"},
+	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_2", PaymentIntent: "pi_buy", Actionable: true},
 		time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -471,15 +471,15 @@ func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	due, err := s.DueCardRefunds(ctx)
+	due, err := s.DueCardRefunds(ctx, now)
 	if err != nil || len(due) != 2 || due[0].PaymentIntent != "pi_short" || due[0].Reason != "amount_mismatch" ||
 		due[1].PaymentIntent != "pi_second" || due[1].Reason != "duplicate" {
 		t.Fatalf("queued refunds = %+v, %v; want the short and the second payment", due, err)
 	}
-	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1"); err != nil {
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
 		t.Fatal(err)
 	}
-	if due, err := s.DueCardRefunds(ctx); err != nil || len(due) != 1 {
+	if due, err := s.DueCardRefunds(ctx, now); err != nil || len(due) != 1 {
 		t.Fatalf("queued refunds after one was made = %+v, %v", due, err)
 	}
 }
@@ -506,21 +506,25 @@ func TestAnAttemptPastTheKeyLifeIsReplaced(t *testing.T) {
 	}
 }
 
-// The v87 backfill counts a refund on the day of the reservation it refunds,
-// as new writes do.
+// The v87 backfill counts a refund on the day of the reservation it refunds:
+// the node's latest reservation before it, not its first, as new writes do.
 func TestTheSpendBackfillCountsARefundOnItsReservationDay(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
 	day := int64(24 * time.Hour)
-	reserved := (time.Now().UnixNano()/day - 1) * day
+	today := time.Now().UnixNano() / day
 	for _, row := range []struct {
 		id, kind string
 		amount   int64
-		at       int64
-	}{{"c_res", "reservation", 500, reserved}, {"c_ref", "refund", -400, reserved + day}} {
+		day      int64
+	}{
+		{"c_first", "reservation", 700, today - 3},
+		{"c_second", "reservation", 500, today - 1},
+		{"c_ref", "refund", -400, today},
+	} {
 		if _, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO credit_charges (id, run_id, node_id, token_prefix,
 		    kind, seconds, amount_micro, charged_at, team) VALUES (?, 'run-b', 'build', 'pfx', ?, 60, ?, ?, 'default')`),
-			row.id, row.kind, row.amount, row.at); err != nil {
+			row.id, row.kind, row.amount, row.day*day+1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -537,15 +541,21 @@ func TestTheSpendBackfillCountsARefundOnItsReservationDay(t *testing.T) {
 		t.Fatalf("rerun v87: %v", err)
 	}
 	defer func() { _ = upgraded.Close() }()
-	var amount int64
-	if err := upgraded.DB().QueryRow(storetest.Rebind(upgraded,
-		`SELECT amount_micro FROM team_spend_days WHERE team = 'default' AND day = ?`), reserved/day).Scan(&amount); err != nil || amount != 100 {
-		t.Fatalf("reservation day = %d, %v; want the refund netted on it", amount, err)
+	got := map[int64]int64{}
+	rows, err := upgraded.DB().Query(`SELECT day, amount_micro FROM team_spend_days WHERE team = 'default'`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var today int
-	if err := upgraded.DB().QueryRow(storetest.Rebind(upgraded,
-		`SELECT COUNT(*) FROM team_spend_days WHERE team = 'default' AND day = ?`), reserved/day+1).Scan(&today); err != nil || today != 0 {
-		t.Fatalf("refund day rows = %d, %v; want none", today, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var d, amount int64
+		if err := rows.Scan(&d, &amount); err != nil {
+			t.Fatal(err)
+		}
+		got[d] = amount
+	}
+	if len(got) != 2 || got[today-3] != 700 || got[today-1] != 100 {
+		t.Fatalf("buckets = %v; want the refund netted on the second reservation's day", got)
 	}
 }
 
@@ -615,5 +625,201 @@ func TestBillingWritersShareOneLockOrder(t *testing.T) {
 	wg.Wait()
 	if len(deadlocks) > 0 {
 		t.Fatalf("%d writers deadlocked; first: %v", len(deadlocks), deadlocks[0])
+	}
+}
+
+// A non-actionable warning is recorded but stops no grant and holds no team,
+// because nothing refunds its payment.
+func TestANonActionableWarningStopsNoGrant(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if err := s.RecordAttemptIntent(ctx, w.AttemptID, "pi_quiet", now); err != nil {
+		t.Fatal(err)
+	}
+	if team, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{
+		WarningID: "issfr_quiet", PaymentIntent: "pi_quiet", Fingerprint: "fp_1",
+	}, now); err != nil || team != "" {
+		t.Fatalf("non-actionable warning = %q, %v; want recorded with no hold", team, err)
+	}
+	if created, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_quiet", AmountCents: 15_000, Fingerprint: "fp_1",
+	}, now); err != nil || !created {
+		t.Fatalf("settle = %v, %v; want the payment granted", created, err)
+	}
+	if freeze, err := acme.CreditFreeze(ctx); err != nil || freeze.Frozen {
+		t.Fatalf("freeze = %+v, %v; want none", freeze, err)
+	}
+	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_q2", PaymentIntent: "pi_buy"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, store.MicroCreditsPerCredit, "pi_buy", "billing"); err != nil {
+		t.Fatalf("a purchase with a non-actionable warning = %v; want granted", err)
+	}
+}
+
+// A warning on the card on file does not stop a pay-now payment made with
+// another card, and a warning on the card that paid does.
+func TestAWarningIsJudgedByTheCardThatPaid(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if _, _, err := s.FailCardAttempt(ctx, w.AttemptID, "pi_dead", "card_declined", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{
+		WarningID: "issfr_saved", PaymentIntent: "pi_old", Fingerprint: "fp_1", Actionable: true,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := acme.StartRecoveryAttempt(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: rec.ChargeID, AttemptID: rec.AttemptID, PaymentIntent: "pi_other_card", AmountCents: 15_000,
+		Fingerprint: "fp_other",
+	}, now); err != nil || !created {
+		t.Fatalf("pay-now with an unwarned card = %v, %v; want granted", created, err)
+	}
+	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != 0 {
+		t.Fatalf("balance = %d, %v; want the debt paid", bal, err)
+	}
+	spend(t, s, "acme", "ch_2", 15_000)
+	next := dueCharge(t, s, now.Add(time.Hour))
+	if created, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: next.ChargeID, AttemptID: next.AttemptID, PaymentIntent: "pi_saved_card", AmountCents: 15_000,
+		Fingerprint: "fp_1",
+	}, now); err != nil || created {
+		t.Fatalf("a payment by the warned card = %v, %v; want refused", created, err)
+	}
+}
+
+// A queued refund is done only when it succeeds; a failed one is made again
+// under a new key after a backoff, and a stale report of an old refund
+// changes nothing.
+func TestAFailedQueuedRefundIsRetried(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueCardRefunds(ctx, now)
+	if err != nil || len(due) != 1 || due[0].Key != "pi_short-0" {
+		t.Fatalf("due = %+v, %v", due, err)
+	}
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := s.DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
+		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
+	}
+	if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", "failed", now); err != nil || !queued {
+		t.Fatalf("report failed = %v, %v", queued, err)
+	}
+	if due, err := s.DueCardRefunds(ctx, now.Add(30*time.Minute)); err != nil || len(due) != 0 {
+		t.Fatalf("a failed refund inside its backoff = %+v, %v", due, err)
+	}
+	due, err = s.DueCardRefunds(ctx, now.Add(2*time.Hour))
+	if err != nil || len(due) != 1 || due[0].Key != "pi_short-1" {
+		t.Fatalf("a failed refund after its backoff = %+v, %v; want it due under a new key", due, err)
+	}
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_2", "succeeded", now); err != nil {
+		t.Fatal(err)
+	}
+	if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", "failed", now); err != nil || queued {
+		t.Fatalf("a stale report of the first refund = %v, %v; want ignored", queued, err)
+	}
+	if due, err := s.DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
+		t.Fatalf("a succeeded refund = %+v, %v; want done", due, err)
+	}
+}
+
+// With no guard set, a team still holds at most the default Cloud nodes, and
+// an operator can raise one granted team's cap.
+func TestTheTeamRunnerCapDefaultsAndIsRaisedPerTeam(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
+	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE teams SET billing_runner_cap = 0 WHERE name = 'acme'`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.CreateRun(ctx, store.Run{ID: "held", Pipeline: "demo", Status: "running", StartedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range store.DefaultTeamCloudNodes {
+		if err := s.CreateNode(ctx, store.Node{RunID: "held", NodeID: fmt.Sprintf("n%d", i), Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.DB().Exec(`UPDATE nodes SET credit_charged_through = 1 WHERE run_id = 'held'`); err != nil {
+		t.Fatalf("hold the seeded nodes: %v", err)
+	}
+	readyTeamNode(t, s, acme, "run-next", "build")
+	_, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil)
+	refused := limitRefusal(t, err, store.ComputeLimitConcurrentRunners)
+	if refused.Cap != store.DefaultTeamCloudNodes {
+		t.Fatalf("refusal = %+v, want the default cap", refused)
+	}
+	if _, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
+		Trust: store.BillingTrustGranted, Actor: "korey", Reason: "big build farm", RunnerCap: 200,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-2", time.Minute, nil); err != nil {
+		t.Fatalf("claim under a raised cap: %v", err)
+	}
+}
+
+// A refund debits the card that paid the reservation it refunds, even once
+// the team has moved to another card.
+func TestARefundDebitsTheCardThatPaid(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
+	readyTeamNode(t, s, acme, "run-card", "build")
+	if _, err := s.ClaimNamedNode(ctx, claimant, "run-card", "build", "pod-1", time.Minute,
+		store.NamedClaimOptions{SizesToClass: true}); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := acme.SaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_2", Fingerprint: "fp_2"}, "billing", now); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.FinalizeNodeCredits(ctx, "run-card", "build", claimant.TokenPrefix, time.Now().Add(15*time.Minute))
+	if err != nil || res.Charge == nil || res.Charge.Kind != store.CreditChargeRefund {
+		t.Fatalf("finalize = %+v, %v; want the reservation refunded", res, err)
+	}
+	var old, replacement int64
+	for fp, into := range map[string]*int64{"fp_1": &old, "fp_2": &replacement} {
+		if err := s.DB().QueryRow(storetest.Rebind(s, `SELECT COALESCE(SUM(amount_micro), 0) FROM card_spend_days
+		    WHERE fingerprint = ?`), fp).Scan(into); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if old != 0 || replacement != 0 {
+		t.Fatalf("buckets after the refund: first card %d, replacement %d; want the refund netted on the first", old, replacement)
 	}
 }

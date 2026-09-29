@@ -104,9 +104,14 @@ var cardBillingTeamCols = map[string]string{
 	"billing_rung_cents":      "INTEGER NOT NULL DEFAULT 0",
 	"billing_daily_cap_cents": "INTEGER NOT NULL DEFAULT 0",
 	"billing_budget_cents":    "INTEGER NOT NULL DEFAULT 0",
+	"billing_runner_cap":      "INTEGER NOT NULL DEFAULT 0",
 }
 
 var freezeCauseCols = map[string]string{"cause": "TEXT NOT NULL DEFAULT ''"}
+
+// safety: a charge row names the card its team paid with when it was written,
+// so a later refund debits that card's bucket even after the card is replaced.
+var chargeCardCols = map[string]string{"card_fingerprint": "TEXT NOT NULL DEFAULT ''"}
 
 // safety: one open charge per team and one live attempt per charge are
 // unique indexes, so a second worker's insert fails rather than charging the
@@ -142,11 +147,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_card_attempts_one_live ON card_attempts(ch
 CREATE INDEX IF NOT EXISTS idx_card_attempts_team ON card_attempts(team, status, updated_at);
 CREATE INDEX IF NOT EXISTS idx_card_attempts_intent ON card_attempts(payment_intent);
 CREATE TABLE IF NOT EXISTS card_refunds (
-    team           TEXT NOT NULL,
-    payment_intent TEXT NOT NULL,
-    reason         TEXT NOT NULL,
-    refund_id      TEXT NOT NULL DEFAULT '',
-    created_at     INTEGER NOT NULL,
+    team            TEXT NOT NULL,
+    payment_intent  TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    refund_id       TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'due',
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
     PRIMARY KEY (team, payment_intent)
 );
 CREATE TABLE IF NOT EXISTS team_spend_days (
@@ -165,19 +173,23 @@ CREATE TABLE IF NOT EXISTS payment_warnings (
     warning_id     TEXT PRIMARY KEY,
     payment_intent TEXT NOT NULL,
     fingerprint    TEXT NOT NULL DEFAULT '',
+    actionable     INTEGER NOT NULL DEFAULT 1,
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_payment_warnings_intent ON payment_warnings(payment_intent);
 CREATE INDEX IF NOT EXISTS idx_payment_warnings_card ON payment_warnings(fingerprint);`
 
 // safety: a refund lands on the day of the reservation it refunds, as new
-// writes do, so an old refund cannot free room on the day it was written.
+// writes do, so an old refund cannot free room on the day it was written. A
+// refund always refunded its node's latest reservation at the time, so that
+// is the reservation at or before it, not the node's first.
 // perf: one pass over the ledger; the reservation a refund names is found
 // through idx_credit_charges_node, and writes are frozen for the upgrade.
 const spendBackfillSQL = `INSERT INTO team_spend_days (team, day, amount_micro)
 SELECT c.team, COALESCE(CASE WHEN c.kind = 'refund' THEN (
-         SELECT MIN(r.charged_at) FROM credit_charges r
-          WHERE r.team = c.team AND r.run_id = c.run_id AND r.node_id = c.node_id AND r.kind = 'reservation')
+         SELECT MAX(r.charged_at) FROM credit_charges r
+          WHERE r.team = c.team AND r.run_id = c.run_id AND r.node_id = c.node_id AND r.kind = 'reservation'
+            AND r.charged_at <= c.charged_at)
        END, c.charged_at) / 86400000000000, SUM(c.amount_micro)
   FROM credit_charges c
  GROUP BY 1, 2
@@ -199,11 +211,17 @@ func applyCardBillingMigration(ctx context.Context, tx *storeTx, postgres bool) 
 		if err := addColumnsTx(ctx, tx, "credit_freezes", freezeCols); err != nil {
 			return err
 		}
+		if err := addColumnsTx(ctx, tx, "credit_charges", chargeCardCols); err != nil {
+			return err
+		}
 	} else {
 		if err := ensureColumnsSQLite(ctx, tx, "teams", teamCols); err != nil {
 			return err
 		}
 		if err := ensureColumnsSQLite(ctx, tx, "credit_freezes", freezeCols); err != nil {
+			return err
+		}
+		if err := ensureColumnsSQLite(ctx, tx, "credit_charges", chargeCardCols); err != nil {
 			return err
 		}
 	}
@@ -228,11 +246,11 @@ func bigintCols(cols map[string]string) map[string]string {
 	return out
 }
 
-// safety: a refund lands on the day of the charge it refunds, so refunding
-// yesterday's reservation cannot free room under today's cap. The team's
-// card, when it has one, is counted too, so one card cannot spend the limits
-// again through a second team.
-func addSpendTx(ctx context.Context, tx *storeTx, team Team, atNS, amount int64) error {
+// safety: a refund lands on the day and the card of the charge it refunds, so
+// refunding yesterday's reservation cannot free room under today's cap, nor
+// credit a card that paid nothing. The card is counted beside the team, so
+// one card cannot spend the limits again through a second team.
+func addSpendTx(ctx context.Context, tx *storeTx, team Team, fingerprint string, atNS, amount int64) error {
 	if amount == 0 {
 		return nil
 	}
@@ -242,18 +260,22 @@ func addSpendTx(ctx context.Context, tx *storeTx, team Team, atNS, amount int64)
 		string(team), day, amount); err != nil {
 		return err
 	}
-	var fingerprint string
-	err := tx.QueryRowContext(ctx, `SELECT card_fingerprint FROM teams WHERE name = ?`, string(team)).Scan(&fingerprint)
-	if errors.Is(err, sql.ErrNoRows) || fingerprint == "" {
+	if fingerprint == "" {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO card_spend_days (fingerprint, day, amount_micro) VALUES (?, ?, ?)
+	_, err := tx.ExecContext(ctx, `INSERT INTO card_spend_days (fingerprint, day, amount_micro) VALUES (?, ?, ?)
 		ON CONFLICT (fingerprint, day) DO UPDATE SET amount_micro = card_spend_days.amount_micro + excluded.amount_micro`,
 		fingerprint, day, amount)
 	return err
+}
+
+func teamCardTx(ctx context.Context, tx *storeTx, team Team) (string, error) {
+	var fingerprint string
+	err := tx.QueryRowContext(ctx, `SELECT card_fingerprint FROM teams WHERE name = ?`, string(team)).Scan(&fingerprint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return fingerprint, err
 }
 
 // Card is the card a team's usage is billed to.
@@ -805,6 +827,9 @@ type CardPayment struct {
 	AttemptID     string
 	PaymentIntent string
 	AmountCents   int64
+	// Fingerprint is the card that paid, which a pay-now Checkout may take
+	// from another card than the one on file.
+	Fingerprint string
 }
 
 type cardAttemptRow struct {
@@ -855,7 +880,7 @@ func (s *Store) SettleCardPayment(ctx context.Context, p CardPayment, now time.T
 	}
 	nowNS := now.UnixNano()
 	amount := p.AmountCents * MicroCreditsPerCent
-	warning, err := paymentWarningTx(ctx, tx, team, p.PaymentIntent)
+	warning, err := paymentWarningTx(ctx, tx, p.PaymentIntent, p.Fingerprint)
 	if err != nil {
 		return false, err
 	}
@@ -953,15 +978,14 @@ func queueCardRefundTx(ctx context.Context, tx *storeTx, team Team, p CardPaymen
 	})
 }
 
-// safety: the warning is looked up by the payment and by the team's card, so
-// a warning that reached the controller before its payment, or one on
-// another payment by the same card, still stops the grant.
-func paymentWarningTx(ctx context.Context, tx *storeTx, team Team, paymentIntent string) (string, error) {
+// safety: matched by payment and by the card that paid, so a warning that came
+// first, or one on the same card, stops the grant while another card's payment
+// is granted; a non-actionable warning is never refunded, so it stops nothing.
+func paymentWarningTx(ctx context.Context, tx *storeTx, paymentIntent, fingerprint string) (string, error) {
 	var id string
-	err := tx.QueryRowContext(ctx, `SELECT w.warning_id FROM payment_warnings w
-	  WHERE w.payment_intent = ?
-	     OR (w.fingerprint != '' AND w.fingerprint = (SELECT card_fingerprint FROM teams WHERE name = ?))
-	  ORDER BY w.created_at LIMIT 1`, paymentIntent, string(team)).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT warning_id FROM payment_warnings
+	  WHERE actionable = 1 AND (payment_intent = ? OR (fingerprint != '' AND fingerprint = ?))
+	  ORDER BY created_at LIMIT 1`, paymentIntent, fingerprint).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -1005,6 +1029,9 @@ type PaymentWarning struct {
 	WarningID     string
 	PaymentIntent string
 	Fingerprint   string
+	// Actionable is Stripe's word that the payment can still be refunded to
+	// head off a dispute; only such a warning stops a grant or holds a team.
+	Actionable bool
 }
 
 // RecordPaymentWarning stores an early fraud warning whether or not the
@@ -1023,10 +1050,17 @@ func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now 
 	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO payment_warnings (warning_id, payment_intent, fingerprint, created_at)
-	    VALUES (?, ?, ?, ?) ON CONFLICT (warning_id) DO NOTHING`,
-		w.WarningID, w.PaymentIntent, w.Fingerprint, now.UnixNano()); err != nil {
+	actionable := 0
+	if w.Actionable {
+		actionable = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO payment_warnings (warning_id, payment_intent, fingerprint, actionable,
+	    created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (warning_id) DO NOTHING`,
+		w.WarningID, w.PaymentIntent, w.Fingerprint, actionable, now.UnixNano()); err != nil {
 		return "", err
+	}
+	if !w.Actionable {
+		return "", tx.Commit()
 	}
 	var team string
 	err = tx.QueryRowContext(ctx, `SELECT team FROM credit_grants WHERE kind = ? AND reference = ?
@@ -1052,24 +1086,40 @@ func refuseWarnedPaymentTx(ctx context.Context, tx *storeTx, paymentIntent strin
 	if paymentIntent == "" {
 		return nil
 	}
-	warned, err := rowPresentTx(ctx, tx, `SELECT 1 FROM payment_warnings WHERE payment_intent = ?`, paymentIntent)
+	warned, err := rowPresentTx(ctx, tx, `SELECT 1 FROM payment_warnings WHERE actionable = 1 AND payment_intent = ?`,
+		paymentIntent)
 	if err != nil || !warned {
 		return err
 	}
 	return ErrPaymentWarned
 }
 
-// CardRefundWork is a payment the worker must refund in full.
+// Queued refund states. A refund is done only once Stripe reports it
+// succeeded; one that failed or was canceled is due again after a backoff.
+const (
+	CardRefundDue       = "due"
+	CardRefundPending   = "pending"
+	CardRefundSucceeded = "succeeded"
+)
+
+// safety: a failed refund is retried on a widening schedule, and never
+// dropped, because until it succeeds the payer holds neither the money nor
+// credits for it.
+var cardRefundRetryAfter = []time.Duration{time.Hour, 6 * time.Hour, 24 * time.Hour}
+
+// CardRefundWork is a payment the worker must refund in full. Key is its
+// Stripe idempotency key, new for each retry after a failed refund.
 type CardRefundWork struct {
 	Team          Team
 	PaymentIntent string
 	Reason        string
+	Key           string
 }
 
-// DueCardRefunds lists the payments queued for a refund that has not been
-// made yet.
-func (s *Store) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err error) {
-	rows, err := s.query(ctx, `SELECT team, payment_intent, reason FROM card_refunds WHERE refund_id = '' ORDER BY created_at`)
+// DueCardRefunds lists the queued refunds due to be made, first or again.
+func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefundWork, err error) {
+	rows, err := s.query(ctx, `SELECT team, payment_intent, reason, attempts FROM card_refunds
+	    WHERE status = ? AND next_attempt_at <= ? ORDER BY created_at`, CardRefundDue, now.UnixNano())
 	if err != nil {
 		return nil, err
 	}
@@ -1077,20 +1127,75 @@ func (s *Store) DueCardRefunds(ctx context.Context) (_ []CardRefundWork, err err
 	var out []CardRefundWork
 	for rows.Next() {
 		var w CardRefundWork
-		if err := rows.Scan(&w.Team, &w.PaymentIntent, &w.Reason); err != nil {
+		var attempts int64
+		if err := rows.Scan(&w.Team, &w.PaymentIntent, &w.Reason, &attempts); err != nil {
 			return nil, err
 		}
+		w.Key = fmt.Sprintf("%s-%d", w.PaymentIntent, attempts)
 		out = append(out, w)
 	}
 	return out, rows.Err()
 }
 
-// MarkCardRefundMade records the refund Stripe made for a queued payment.
-// Its reversal arrives with the refund's success.
-func (s *Store) MarkCardRefundMade(ctx context.Context, team Team, paymentIntent, refundID string) error {
-	_, err := s.exec(ctx, `UPDATE card_refunds SET refund_id = ? WHERE team = ? AND payment_intent = ? AND refund_id = ''`,
-		refundID, string(team), paymentIntent)
+// MarkCardRefundMade records the refund Stripe made for a queued payment and
+// the status it reported.
+func (s *Store) MarkCardRefundMade(
+	ctx context.Context, team Team, paymentIntent, refundID, status string, now time.Time,
+) error {
+	_, err := s.setCardRefundStatus(ctx, team, paymentIntent, refundID, status, now)
 	return err
+}
+
+// ReportCardRefund applies a later status of a refund, as Stripe announces
+// it. It reports whether the refund was one the controller queued; a failed
+// or canceled one is due again.
+func (s *Store) ReportCardRefund(ctx context.Context, paymentIntent, refundID, status string, now time.Time) (bool, error) {
+	var team string
+	err := s.queryRow(ctx, `SELECT team FROM card_refunds WHERE payment_intent = ? AND refund_id = ?`,
+		paymentIntent, refundID).Scan(&team)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.setCardRefundStatus(ctx, Team(team), paymentIntent, refundID, status, now)
+}
+
+func (s *Store) setCardRefundStatus(
+	ctx context.Context, team Team, paymentIntent, refundID, status string, now time.Time,
+) (bool, error) {
+	var res sql.Result
+	var err error
+	switch status {
+	case CardRefundSucceeded:
+		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ? WHERE team = ? AND payment_intent = ?`,
+			refundID, CardRefundSucceeded, string(team), paymentIntent)
+	case "failed", "canceled":
+		// safety: a refund can fail after it succeeded; its reversal is capped
+		// at what the payment still holds, so retrying cannot take back twice.
+		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ?, attempts = attempts + 1,
+		    next_attempt_at = ? WHERE team = ? AND payment_intent = ?`,
+			refundID, CardRefundDue, now.Add(cardRefundBackoff(ctx, s, team, paymentIntent)).UnixNano(),
+			string(team), paymentIntent)
+	default:
+		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ? WHERE team = ? AND payment_intent = ?
+		    AND status = ?`, refundID, CardRefundPending, string(team), paymentIntent, CardRefundDue)
+	}
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+func cardRefundBackoff(ctx context.Context, s *Store, team Team, paymentIntent string) time.Duration {
+	var attempts int
+	if err := s.queryRow(ctx, `SELECT attempts FROM card_refunds WHERE team = ? AND payment_intent = ?`,
+		string(team), paymentIntent).Scan(&attempts); err != nil {
+		return cardRefundRetryAfter[0]
+	}
+	return cardRefundRetryAfter[min(attempts, len(cardRefundRetryAfter)-1)]
 }
 
 // FailCardAttempt records a declined or unauthenticated attempt. The charge

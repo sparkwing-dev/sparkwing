@@ -1916,14 +1916,14 @@ func settleTriggerWindowTx(
 	if reservationID == "" {
 		return errors.New("credits: active trigger has no reservation id")
 	}
-	var tokenPrefix, principal string
+	var tokenPrefix, principal, card string
 	var class, rate int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, card_fingerprint
 		  FROM credit_charges
 		 WHERE team = ? AND id = ? AND run_id = ? AND node_id = ? AND kind = ?`,
 		string(team), reservationID, triggerID, triggerCreditNodeID, CreditChargeReservation,
-	).Scan(&tokenPrefix, &principal, &class, &rate); err != nil {
+	).Scan(&tokenPrefix, &principal, &class, &rate, &card); err != nil {
 		return err
 	}
 	w := chargeWindow{
@@ -1934,7 +1934,7 @@ func settleTriggerWindowTx(
 	elapsed := (settleNS - reservedAt) / int64(time.Second)
 	switch {
 	case refundAll:
-		w.SpendAtNS = reservedAt
+		w.SpendAtNS, w.SpendCard = reservedAt, card
 		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -paidSeconds, -paidAmount); err != nil {
 			return err
 		}
@@ -2056,22 +2056,24 @@ func (s *Store) reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
-	if limits.Any() {
-		if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
-			return err
-		}
+	if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
+		return err
 	}
 	id, err := newCreditID("charge")
+	if err != nil {
+		return err
+	}
+	card, err := teamCardTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
 		string(team), id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
 		int64(MinBillableSeconds), required, class.Cores, class.MicroPerSecond,
-		now.UnixNano()); err != nil {
+		now.UnixNano(), card); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
 	}
-	if err := addSpendTx(ctx, tx, team, now.UnixNano(), required); err != nil {
+	if err := addSpendTx(ctx, tx, team, card, now.UnixNano(), required); err != nil {
 		return err
 	}
 	through := now.Add(MinBillableSeconds * time.Second).UnixNano()
@@ -2088,8 +2090,8 @@ func (s *Store) reserveNodeCreditsTx(
 
 const insertCreditChargeSQL = `
         INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
-                cpu_class, rate_micro_per_second, charged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                cpu_class, rate_micro_per_second, charged_at, card_fingerprint)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
@@ -2304,9 +2306,11 @@ type chargeWindow struct {
 	Anchor, NowNS                         int64
 	Rate, Class, MaxCharge                int64
 	Final                                 bool
-	// safety: a refund counts on the day of the charge it refunds, so it
-	// frees no room today; zero counts the row on NowNS's day.
+	// safety: a refund counts on the day and card of the charge it refunds,
+	// so it frees no room today and none on a card that did not pay; zero
+	// counts the row on NowNS's day and the team's current card.
 	SpendAtNS int64
+	SpendCard string
 }
 
 // safety: the refund carries the reservation's terms, and the claim is
@@ -2315,15 +2319,15 @@ type chargeWindow struct {
 func refundClaimTx(
 	ctx context.Context, tx *storeTx, team Team, runID, nodeID string, nowNS int64,
 ) (*CreditCharge, error) {
-	var tokenPrefix, principal string
+	var tokenPrefix, principal, card string
 	var class, rate, reservedAt int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at, card_fingerprint
 		  FROM credit_charges
 		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
 		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
 		string(team), runID, nodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &class, &rate, &reservedAt)
+		&tokenPrefix, &principal, &class, &rate, &reservedAt, &card)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2342,7 +2346,7 @@ func refundClaimTx(
 	}
 	return insertCreditChargeTx(ctx, tx, chargeWindow{
 		Team: team, RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-		NowNS: nowNS, Rate: rate, Class: class, SpendAtNS: reservedAt,
+		NowNS: nowNS, Rate: rate, Class: class, SpendAtNS: reservedAt, SpendCard: card,
 	}, CreditChargeRefund, -seconds.Int64, -amount.Int64)
 }
 
@@ -2404,16 +2408,18 @@ func insertCreditChargeTx(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
-		string(w.Team), id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
-		w.Class, w.Rate, w.NowNS); err != nil {
-		return nil, fmt.Errorf("credits: insert charge: %w", err)
-	}
-	spendAt := w.NowNS
+	spendAt, card := w.NowNS, w.SpendCard
 	if w.SpendAtNS != 0 {
 		spendAt = w.SpendAtNS
+	} else if card, err = teamCardTx(ctx, tx, w.Team); err != nil {
+		return nil, err
 	}
-	if err := addSpendTx(ctx, tx, w.Team, spendAt, amount); err != nil {
+	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
+		string(w.Team), id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
+		w.Class, w.Rate, w.NowNS, card); err != nil {
+		return nil, fmt.Errorf("credits: insert charge: %w", err)
+	}
+	if err := addSpendTx(ctx, tx, w.Team, card, spendAt, amount); err != nil {
 		return nil, err
 	}
 	return &CreditCharge{

@@ -249,7 +249,8 @@ such claim still open. No database migration is required.
 ## Schema 87: card billing and a team-wide runner count
 
 `max_concurrent_runners` now counts a team's cloud runners across every token
-of the team, and schema 87 deletes the `runner_scale_base`,
+of the team, and applies even when unset: zero or unset means 100 per team,
+and `runner_cap` on the trust route raises one granted team. Schema 87 deletes the `runner_scale_base`,
 `runner_scale_step_credits` and `runner_scale_ceiling` settings.
 `Store.RunnerCapFor` is gone, and `GET /api/v1/compute-limits` no longer
 reports `usage.derived_runner_cap` or `usage.recent_paid_micro`. Schema 87 also

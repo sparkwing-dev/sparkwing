@@ -54,6 +54,30 @@ const (
 	ComputeLimitCronSeconds = "min_cron_interval_seconds"
 )
 
+// DefaultTeamCloudNodes is the Cloud nodes a team holds at once when neither
+// max_concurrent_runners nor the team's own cap says otherwise.
+const DefaultTeamCloudNodes = 100
+
+// safety: a per-team cap past this is a typo, not a decision.
+const maxTeamRunnerCap = 10_000
+
+// safety: an operator's per-team cap wins, so one team can be raised past the
+// fleet-wide guard without raising every team.
+func teamRunnerCapTx(ctx context.Context, tx *storeTx, team Team, limits ComputeLimits) (int64, error) {
+	var own int64
+	if err := tx.QueryRowContext(ctx, `SELECT billing_runner_cap FROM teams WHERE name = ?`, string(team)).
+		Scan(&own); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+	switch {
+	case own > 0:
+		return own, nil
+	case limits.ConcurrentRunners > 0:
+		return limits.ConcurrentRunners, nil
+	}
+	return DefaultTeamCloudNodes, nil
+}
+
 // safety: the runner counts read every node with an open charge window and the
 // hourly count reads one principal's recent runs, so both get an index rather
 // than a table scan inside the claim transaction.
@@ -371,18 +395,21 @@ func (s *Store) enforceClaimComputeLimitsTx(
 		}
 	}
 	// safety: the count is the team's across every token, so minting more
-	// tokens cannot multiply the concurrency a team's spend limits assume.
-	if limits.ConcurrentRunners > 0 {
-		var held int64
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM nodes WHERE team = ? AND credit_charged_through > 0`, team).Scan(&held); err != nil {
-			return err
-		}
-		if held >= limits.ConcurrentRunners {
-			return &ComputeLimitError{
-				Limit: ComputeLimitConcurrentRunners, Cap: limits.ConcurrentRunners,
-				Observed: held, Scope: "team " + string(team), Principal: claimant.Principal,
-			}
+	// tokens cannot multiply the concurrency a team's spend limits assume, and
+	// it always applies: an unset guard is the default, never unlimited.
+	teamCap, err := teamRunnerCapTx(ctx, tx, team, limits)
+	if err != nil {
+		return err
+	}
+	var held int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM nodes WHERE team = ? AND credit_charged_through > 0`, team).Scan(&held); err != nil {
+		return err
+	}
+	if held >= teamCap {
+		return &ComputeLimitError{
+			Limit: ComputeLimitConcurrentRunners, Cap: teamCap,
+			Observed: held, Scope: "team " + string(team), Principal: claimant.Principal,
 		}
 	}
 	if limits.RunSeconds > 0 {

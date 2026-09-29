@@ -230,6 +230,10 @@ type BillingTrustChange struct {
 	// and the debt at which its card is charged; zero keeps the default.
 	DailyCapCents int64
 	RungCents     int64
+	// RunnerCap replaces the Cloud nodes a granted team holds at once; zero
+	// keeps max_concurrent_runners, or DefaultTeamCloudNodes when that is
+	// unset.
+	RunnerCap int64
 }
 
 // SetBillingTrust records an operator's trust decision on t and returns the
@@ -266,13 +270,17 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 	}
 	// safety: a revocation usually answers a chargeback, so only a grant that
 	// names no limit restores trust; raising a limit never does it in passing.
-	if before.Trust == BillingTrustRevoked && c.LimitCents+c.DailyCapCents+c.RungCents > 0 {
+	if c.RunnerCap < 0 || c.RunnerCap > maxTeamRunnerCap || (c.RunnerCap > 0 && c.Trust != BillingTrustGranted) {
+		return before, after, fmt.Errorf("%w: a runner cap is up to %d nodes and only for a granted team", ErrInvalidInput,
+			maxTeamRunnerCap)
+	}
+	if before.Trust == BillingTrustRevoked && c.LimitCents+c.DailyCapCents+c.RungCents+c.RunnerCap > 0 {
 		return before, after, fmt.Errorf("%w: the team's trust is revoked; restore trust before setting a limit", ErrInvalidInput)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE teams SET billing_trust = ?, billing_trust_by = ?, billing_trust_at = ?,
 	    billing_trust_reason = ?, billing_purchase_limit_cents = ?, billing_daily_cap_cents = ?,
-	    billing_rung_cents = ? WHERE name = ?`,
-		c.Trust, c.Actor, now.UnixNano(), c.Reason, c.LimitCents, c.DailyCapCents, c.RungCents,
+	    billing_rung_cents = ?, billing_runner_cap = ? WHERE name = ?`,
+		c.Trust, c.Actor, now.UnixNano(), c.Reason, c.LimitCents, c.DailyCapCents, c.RungCents, c.RunnerCap,
 		string(t.team)); err != nil {
 		return before, after, err
 	}
@@ -291,7 +299,7 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 			"trusted_before": before.Trusted, "trusted_after": after.Trusted,
 			"limit_cents_before": before.LimitMicro / MicroCreditsPerCent,
 			"limit_cents_after":  after.LimitMicro / MicroCreditsPerCent,
-			"daily_cap_cents":    c.DailyCapCents, "rung_cents": c.RungCents,
+			"daily_cap_cents":    c.DailyCapCents, "rung_cents": c.RungCents, "runner_cap": c.RunnerCap,
 		},
 	}); err != nil {
 		return before, after, err

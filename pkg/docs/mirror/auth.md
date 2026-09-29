@@ -478,7 +478,10 @@ already finished still occupies the budget until it ages out of the hour.
 
 `max_concurrent_runners` counts every cloud runner a team holds, whichever of
 its tokens claimed it, so minting more runner tokens gives a team no more
-concurrency than its spend limits assume. Schema v87 replaced the
+concurrency than its spend limits assume. It always applies: unset or zero
+means 100 per team, never unlimited. An operator raises one granted team
+past it with `runner_cap` on `POST /api/v1/teams/{team}/trust`
+(`sparkwing-ops teams trust --runners N`), up to 10,000. Schema v87 replaced the
 per-principal cap that scaled with recent payments, and deleted its
 `runner_scale_*` settings. Only an operator sees the controller-wide runner
 count, per-principal counts and `runner_alarm` state; team readers receive

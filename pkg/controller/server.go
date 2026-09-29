@@ -1164,6 +1164,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/credits/cards", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
 	mux.Handle("POST /api/v1/credits/card-payments", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
 	mux.Handle("POST /api/v1/credits/warnings", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
+	mux.Handle("POST /api/v1/credits/card-refunds", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
 	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))

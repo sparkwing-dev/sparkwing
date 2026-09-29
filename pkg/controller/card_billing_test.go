@@ -241,3 +241,64 @@ func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.
 		t.Fatalf("units = %d %+v", code, units)
 	}
 }
+
+// The worker settles with the card that paid, so a charge on a card that drew
+// an actionable warning is not granted; a queued refund's failure reported by
+// the checkout service puts it back in the queue.
+func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
+	f, fc := billingFixture(t)
+	fc.twoStep, fc.fingerprint = true, "fp_warned"
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("save card = %d", code)
+	}
+	var warned struct {
+		Held bool `json:"held"`
+	}
+	if code := f.call("POST", "/api/v1/credits/warnings", "Bearer "+f.admin, map[string]any{
+		"payment_intent": "pi_elsewhere", "warning_id": "issfr_1", "fingerprint": "fp_warned", "actionable": true,
+	}, &warned); code != http.StatusOK || warned.Held {
+		t.Fatalf("warning = %d %+v", code, warned)
+	}
+	f.owe(owner.team, 15_000)
+	f.srv.CardBillingPass(context.Background())
+	if b := f.billing(owner); b.BalanceMicro >= 0 || b.OpenCharge == nil {
+		t.Fatalf("after a charge on the warned card = %+v; want nothing granted", b)
+	}
+
+	g, gc := billingFixture(t)
+	gc.twoStep = true
+	other, _, _ := teamOf(g)
+	g.trust(other.team, 0)
+	if code := g.call("POST", "/api/v1/credits/cards", "Bearer "+g.admin, map[string]any{
+		"team": other.team, "customer": "cus_2", "payment_method": "pm_2", "fingerprint": "fp_2",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("save card = %d", code)
+	}
+	g.owe(other.team, 15_000)
+	g.srv.CardBillingPass(context.Background())
+	charges := gc.internalCalls("/internal/charge")
+	if code := g.call("POST", "/api/v1/credits/card-payments", "Bearer "+g.admin, map[string]any{
+		"team": other.team, "charge_id": charges[0].Body["charge_id"], "attempt_id": charges[0].Body["attempt_id"],
+		"payment_intent": "pi_second", "amount_cents": 15_000, "status": "succeeded",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("second payment = %d", code)
+	}
+	g.srv.CardBillingPass(context.Background())
+	var report struct {
+		Queued bool `json:"queued"`
+	}
+	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
+		"payment_intent": "pi_second", "refund_id": "re_pi_second", "status": "failed",
+	}, &report); code != http.StatusOK || !report.Queued {
+		t.Fatalf("failed refund report = %d %+v; want it queued again", code, report)
+	}
+	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
+		"payment_intent": "pi_other", "refund_id": "re_other", "status": "failed",
+	}, &report); code != http.StatusOK || report.Queued {
+		t.Fatalf("an unqueued refund's report = %d %+v; want not queued", code, report)
+	}
+}

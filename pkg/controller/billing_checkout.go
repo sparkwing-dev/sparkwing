@@ -124,6 +124,7 @@ type cardChargeResult struct {
 	PaymentIntent string `json:"payment_intent"`
 	Status        string `json:"status"`
 	DeclineCode   string `json:"decline_code"`
+	Fingerprint   string `json:"fingerprint"`
 }
 
 func (c *billingCheckout) charge(ctx context.Context, w store.CardChargeWork) (cardChargeResult, error) {
@@ -136,15 +137,16 @@ func (c *billingCheckout) charge(ctx context.Context, w store.CardChargeWork) (c
 	return out, err
 }
 
-func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason string) (string, error) {
+func (c *billingCheckout) refund(ctx context.Context, paymentIntent, key, reason string) (string, string, error) {
 	var out struct {
 		Refund string `json:"refund"`
+		Status string `json:"status"`
 	}
 	err := c.post(ctx, "/internal/refund", map[string]any{
-		"payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+		"payment_intent": paymentIntent, "key": key, "reason": reason,
 	}, &out)
-	if err == nil && out.Refund == "" {
-		err = fmt.Errorf("%w: it named no refund", errCheckoutRefused)
+	if err == nil && (out.Refund == "" || out.Status == "") {
+		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)
 	}
-	return out.Refund, err
+	return out.Refund, out.Status, err
 }

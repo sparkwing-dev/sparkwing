@@ -464,15 +464,19 @@ func insertStorageChargeTx(ctx context.Context, tx *storeTx, c storageCharge) (*
 	if err != nil {
 		return nil, err
 	}
+	card, err := teamCardTx(ctx, tx, c.Team)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, `
         INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind,
-                seconds, amount_micro, storage_bytes, charged_at)
-        VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, ?)`,
+                seconds, amount_micro, storage_bytes, charged_at, card_fingerprint)
+        VALUES (?, ?, '', '', '', ?, ?, ?, ?, ?, ?, ?)`,
 		string(c.Team), id, c.Principal, CreditChargeStorage,
-		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS); err != nil {
+		c.Seconds, c.AmountMicro, c.Bytes, c.NowNS, card); err != nil {
 		return nil, fmt.Errorf("credits: insert storage charge: %w", err)
 	}
-	if err := addSpendTx(ctx, tx, c.Team, c.NowNS, c.AmountMicro); err != nil {
+	if err := addSpendTx(ctx, tx, c.Team, card, c.NowNS, c.AmountMicro); err != nil {
 		return nil, err
 	}
 	return &CreditCharge{

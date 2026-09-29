@@ -27,7 +27,9 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
 	"(*Store).RecordPaymentWarning": "a warning names only its payment, so the team is what the payment's " +
 		"grant or attempt row says",
-	"(*Store).DueCardRefunds":                "the payment worker lists every team's queued refunds in one pass",
+	"(*Store).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
+	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
+		"the queued row says",
 	"globalRunnerRefusal":                    "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":               "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun":      "the run ID is global, and the query matches its exact claimant and generation",
