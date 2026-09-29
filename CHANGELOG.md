@@ -22,6 +22,8 @@ unlock.
 
 ### Changed
 
+- **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/_unreleased.md#profile-observations).
+
 - **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
 
 ### Fixed

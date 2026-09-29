@@ -176,12 +176,13 @@ func TestApplyCeiling(t *testing.T) {
 
 func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
+		CPUMeasured:     true,
 		P50Duration:     30 * time.Second,
 		PeakCores:       6,
 		PeakMemoryBytes: 4 << 30,
 		SampleCount:     MinSamples,
 	}
-	thin := &store.PipelineProfile{PeakCores: 6, SampleCount: MinSamples - 1}
+	thin := &store.PipelineProfile{CPUMeasured: true, PeakCores: 6, SampleCount: MinSamples - 1}
 
 	cases := []struct {
 		name       string
@@ -330,7 +331,7 @@ func TestFloorPoisoned_Gating(t *testing.T) {
 
 func TestCheckDrift_Gating(t *testing.T) {
 	measured := func(cores float64, samples int) *store.PipelineProfile {
-		return &store.PipelineProfile{PeakCores: cores, SampleCount: samples}
+		return &store.PipelineProfile{CPUMeasured: true, PeakCores: cores, SampleCount: samples}
 	}
 
 	cases := []struct {
@@ -412,6 +413,7 @@ func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 
 func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 	spiky := &store.PipelineProfile{
+		CPUMeasured:    true,
 		PeakCores:      8,
 		SustainedCores: 2.6,
 		SampleCount:    12,
@@ -429,7 +431,7 @@ func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 }
 
 func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
-	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 8, SampleCount: 12})
+	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{CPUMeasured: true, PeakCores: 8, SampleCount: 12})
 	if d == nil || d.MeasuredCores != 8 {
 		t.Fatalf("drift = %+v, want under-pinned against the 8.0 peak", d)
 	}
@@ -437,6 +439,7 @@ func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
 
 func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 	changed := &store.PipelineProfile{
+		CPUMeasured:        true,
 		PlanHash:           "old",
 		PrevPeakCores:      8,
 		PrevSustainedCores: 2,
@@ -452,14 +455,14 @@ func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 }
 
 func TestResolve_WarmStartFallsBackToPrevPeak(t *testing.T) {
-	changed := &store.PipelineProfile{PlanHash: "old", PrevPeakCores: 8, SampleCount: 1}
+	changed := &store.PipelineProfile{CPUMeasured: true, PlanHash: "old", PrevPeakCores: 8, SampleCount: 1}
 	if got := Resolve(nil, changed, 8, "new"); got.Cores != 8 {
 		t.Errorf("Cores = %v, want the carried 8.0 peak", got.Cores)
 	}
 }
 
 func TestCheckDrift_MessageCarriesExactFix(t *testing.T) {
-	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 9.1, SampleCount: 12})
+	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{CPUMeasured: true, PeakCores: 9.1, SampleCount: 12})
 	if d == nil {
 		t.Fatal("expected drift")
 	}

@@ -102,7 +102,7 @@ func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get healthy: %v", err)
 	}
-	if !healthy.CPUMeasured {
+	if healthy == nil || !healthy.CPUMeasured {
 		t.Error("healthy sampler observation did not persist cpu_measured=true")
 	}
 
@@ -115,7 +115,7 @@ func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get blind: %v", err)
 	}
-	if blind.CPUMeasured {
-		t.Error("blind sampler observation persisted cpu_measured=true")
+	if blind != nil {
+		t.Errorf("unavailable observation created a profile: %+v", blind)
 	}
 }

@@ -32,7 +32,19 @@ protects direct database access, not mixed-version HTTP readers.
 
 The database migration labels historical positive-CPU-time points as command
 reports. Historical zero-CPU-time points remain unknown because their kind
-cannot be recovered. Learned profile format 8 discards incompatible learned
+cannot be recovered. Learned profile format 9 discards incompatible learned
 estimates on access or update while preserving explicit pins and wait
 statistics. New observations rebuild estimates; leave resource pins in place
 until their replacement estimates have been verified for the workload.
+
+## Profile observations
+
+Profile observation callers must set `CPUMeasured: true` (HTTP
+`"cpu_measured": true`) only when CPU was measured. An omitted or false flag
+leaves existing profiles unchanged after input validation, including memory
+and duration values. Measured zero CPU remains valid.
+
+Host and worker admission require that flag before using learned CPU or
+memory values, including demand floors and previous-version costs. Explicit
+pins retain precedence. Duration estimates displayed for existing profiles
+are separate from resource admission.

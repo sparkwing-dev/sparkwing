@@ -1389,11 +1389,11 @@ func executorNodeChargeFromSnapshot(plan []byte, nodeID string, profile *Pipelin
 	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin
 	}
-	if profile != nil {
-		if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
-			return ExecutorResource{Cores: profile.PinnedCores, MemoryBytes: profile.PinnedMemoryBytes}
-		}
-		if profile.SampleCount >= 3 && (profile.PeakCores > 0 || profile.CPUMeasured) {
+	if profile != nil && (profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0) {
+		return ExecutorResource{Cores: profile.PinnedCores, MemoryBytes: profile.PinnedMemoryBytes}
+	}
+	if profile != nil && profile.CPUMeasured {
+		if profile.SampleCount >= 3 {
 			cores := profile.SustainedCores
 			if cores <= 0 {
 				cores = profile.PeakCores

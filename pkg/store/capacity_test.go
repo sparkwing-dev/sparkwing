@@ -14,9 +14,9 @@ func TestPipelineProfile_RoundTripsPercentilesAndPeaks(t *testing.T) {
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
-		{Duration: 10 * time.Second, PeakCores: 2.0, PeakMemoryBytes: 1 << 30},
-		{Duration: 20 * time.Second, PeakCores: 4.0, PeakMemoryBytes: 2 << 30},
-		{Duration: 30 * time.Second, PeakCores: 8.0, PeakMemoryBytes: 3 << 30},
+		{CPUMeasured: true, Duration: 10 * time.Second, PeakCores: 2.0, PeakMemoryBytes: 1 << 30},
+		{CPUMeasured: true, Duration: 20 * time.Second, PeakCores: 4.0, PeakMemoryBytes: 2 << 30},
+		{CPUMeasured: true, Duration: 30 * time.Second, PeakCores: 8.0, PeakMemoryBytes: 3 << 30},
 	} {
 		if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 			t.Fatalf("RecordProfileObservation: %v", err)
@@ -67,8 +67,9 @@ func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
 
 	for i := 0; i < 80; i++ {
 		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-			Duration:  time.Duration(i) * time.Second,
-			PeakCores: float64(i),
+			CPUMeasured: true,
+			Duration:    time.Duration(i) * time.Second,
+			PeakCores:   float64(i),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -89,7 +90,7 @@ func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 
-	obs := store.ProfileObservation{Duration: time.Second, PeakCores: 1}
+	obs := store.ProfileObservation{CPUMeasured: true, Duration: time.Second, PeakCores: 1}
 	if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 		t.Fatal(err)
 	}
