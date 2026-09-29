@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
 - **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
 
 - **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
