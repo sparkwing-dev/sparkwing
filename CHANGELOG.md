@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **tests:** Start Kubernetes runner deadlines after database setup.
+
 - **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
 
 - **tests:** Measure pause timeout over the recorded pause rather than the entire run.
