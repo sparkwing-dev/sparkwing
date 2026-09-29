@@ -77,7 +77,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	}
 
 	applyCheckoutProjectConfig(&opts, logger)
-	execution, err := setupLocalExecution(paths, &opts, backends, nodeWorkspace(), logger)
+	execution, err := setupLocalExecution(ctx, paths, &opts, backends, nodeWorkspace(), logger)
 	if err != nil {
 		return err
 	}
