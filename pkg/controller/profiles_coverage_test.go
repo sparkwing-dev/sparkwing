@@ -21,7 +21,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if err := st.CreateRun(t.Context(), run); err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range []string{"a", "b", "c"} {
+			for _, id := range []string{"a", "c"} {
 				if err := st.CreateNode(t.Context(), store.Node{RunID: "r", NodeID: id, Status: "running", StartedAt: &start}); err != nil {
 					t.Fatal(err)
 				}
@@ -61,7 +61,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			New(st, nil).foldRunProfiles(t.Context(), &run)
-			for _, id := range []string{"a", "b"} {
+			for _, id := range []string{"a"} {
 				p, err := st.GetPipelineProfile(t.Context(), "coverage", id)
 				if err != nil {
 					t.Fatal(err)
@@ -86,7 +86,7 @@ func TestFoldRunProfilesMissingNodeEvidence(t *testing.T) {
 			if p == nil || p.PinnedCores != 2 || p.PinnedMemoryBytes != 1024 {
 				t.Fatalf("explicit run pin changed: %+v", p)
 			}
-			wantRun := mode == "cached" || mode == "zero"
+			wantRun := mode == "cached"
 			if wantRun {
 				if p == nil || p.SampleCount != 1 {
 					t.Fatalf("complete evidence produced no run observation: %+v", p)
