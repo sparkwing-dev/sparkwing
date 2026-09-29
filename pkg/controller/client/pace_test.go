@@ -76,6 +76,15 @@ func TestPacer_NeverWaitsLessThanTheLoopsCadence(t *testing.T) {
 	}
 }
 
+func TestPacer_AFloorAboveTheCapIsClamped(t *testing.T) {
+	p := NewPacer(10 * time.Minute)
+	for i := range 5 {
+		if pace := p.Failure(errors.New("controller 500: boom")); pace.Wait > FailureBackoffCap {
+			t.Fatalf("failure %d waited %s, above the %s cap", i, pace.Wait, FailureBackoffCap)
+		}
+	}
+}
+
 func TestPacer_RateLimitHonoursRetryAfter(t *testing.T) {
 	p := NewPacer(0)
 	pace := p.Failure(&RateLimitedError{RetryAfter: 20 * time.Second, Err: errors.New("controller 429")})

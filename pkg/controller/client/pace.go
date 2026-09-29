@@ -99,9 +99,10 @@ type Pacer struct {
 }
 
 // NewPacer returns a Pacer that never waits less than floor, the loop's own
-// poll cadence.
+// poll cadence. A floor above [FailureBackoffCap] is clamped to it, so a
+// failure never waits longer than the cap unless the controller asks.
 func NewPacer(floor time.Duration) *Pacer {
-	return &Pacer{floor: floor}
+	return &Pacer{floor: min(floor, FailureBackoffCap)}
 }
 
 // Success records an answered request and resets the backoff. It reports
