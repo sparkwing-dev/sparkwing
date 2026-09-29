@@ -33,6 +33,7 @@ unlock.
 - **daemon:** Record each run profile once through the host orchestrator.
   Clients using the daemon completion API must submit profile observations
   separately.
+- **daemon:** Wait for connection cleanup before final persistence and journal closure.
 
 - **controller:** Preserve terminal run outcomes across completion retries
   Only the first terminal transition attempts profile folding; failed folds are
