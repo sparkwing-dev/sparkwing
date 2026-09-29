@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,7 +178,8 @@ const (
 
 func (p prober) run() []probeResult {
 	out := p.fileProbes()
-	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.publicHTTPSProbe(), p.publicPortProbe())
+	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.gitCredentialProbe(),
+		p.publicHTTPSProbe(), p.publicPortProbe())
 	for name, addr := range tcpTargets {
 		out = append(out, p.tcpProbe("tcp "+name, addr))
 	}
@@ -350,6 +352,22 @@ func (p prober) adminRouteProbe() probeResult {
 	return probeResult{
 		name: "controller admin route", verdict: httpVerdict(code, err),
 		detail: "lists tokens with the pod's own claim token",
+	}
+}
+
+// safety: a claim's source and modules come through the controller, which
+// holds the credential, so the route that hands a runner its run's git
+// credential must refuse the pod's claim token for its own run.
+func (p prober) gitCredentialProbe() probeResult {
+	base, run := p.getenv("SPARKWING_CONTROLLER_URL"), p.getenv("SPARKWING_RUN_ID")
+	if base == "" || run == "" {
+		return missingTarget("controller git credential", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")
+	}
+	code, err := p.status(http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/runs/"+url.PathEscape(run)+"/git-credential",
+		p.getenv(ownTokenEnv), []byte("{}"), nil)
+	return probeResult{
+		name: "controller git credential", verdict: httpVerdict(code, err),
+		detail: "asks for its own run's git credential with the pod's claim token",
 	}
 }
 

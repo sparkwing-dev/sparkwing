@@ -57,7 +57,7 @@ func routeFile(path string) ([]byte, error) {
 func fencedProber(bearers *[]string) prober {
 	return prober{
 		args:       EscapeProbeArgs{RDS: "db:5432", APIHosts: "10.0.36.1"},
-		env:        []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller"},
+		env:        []string{"PATH=/usr/bin", "HOME=/tmp", "SPARKWING_AGENT_TOKEN=" + secretValue, "SPARKWING_CONTROLLER_URL=http://controller", "SPARKWING_RUN_ID=run-probe"},
 		readFile:   routeFile,
 		dial:       openInternet(func(string) error { return refused }),
 		httpClient: cluster(http.StatusForbidden, "", nil, bearers),
@@ -117,7 +117,7 @@ func TestEscapeProbe_AnOpenPodFailsAndLeaksNoValue(t *testing.T) {
 	p.httpClient = cluster(http.StatusCreated, `{"status":{"resourceRules":[{"resources":["secrets"]}]}}`, nil, &bearers)
 	results := byName(p.run())
 	for _, name := range []string{
-		"env credential", "read token", "imds", "controller admin route", "tcp rds", "tcp dind", "tcp loki",
+		"env credential", "read token", "imds", "controller admin route", "controller git credential", "tcp rds", "tcp dind", "tcp loki",
 		"kube-api kubernetes.default.svc:443 rules", "kube-api 10.0.36.1:443 dry-run job",
 		"kube-api 10.0.36.1:443 secrets", "kubelet 169.254.1.1",
 	} {
