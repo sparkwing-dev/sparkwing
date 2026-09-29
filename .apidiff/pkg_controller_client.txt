@@ -61,7 +61,7 @@ func (c *Client) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID
 func (c *Client) BaseURL() string
 func (c *Client) CancelRun(ctx context.Context, runID string) error
 func (c *Client) CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
-func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, error)
+func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, []byte, error)
 func (c *Client) ClaimLaunch(ctx context.Context, holderID string, lease, deadline time.Duration) (*store.LaunchClaim, error)
 func (c *Client) ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom) (*store.Node, error)
 func (c *Client) ClaimNodeAs(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *Headroom, executor store.ExecutorIdentity) (*store.Node, error)
@@ -213,6 +213,7 @@ func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (c *Client) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
 func (c *Client) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
 func (c *Client) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (c *Client) UploadNodeOutput(ctx context.Context, runID, nodeID string, data []byte) (*store.OutputRef, error)
 func (c *Client) WithAllowRepos(patterns []string) *Client
 func (c *Client) WithClaimResources(fn func() *ClaimResources) *Client
 func (c *Client) WithRunnerIdentity(id string) *Client
