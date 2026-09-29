@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -320,5 +321,34 @@ func TestSync_ReportsAFullPoolAndLeavesTheNodeQueued(t *testing.T) {
 	}
 	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
 		t.Fatalf("launch with room: %v %v", launched, err)
+	}
+}
+
+// A finished Job keeps its pod, and with it the pod's log, until the Job's
+// TTL removes it, even once its claim has ended.
+func TestSync_LeavesAFinishedJobForItsTTL(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-done")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	job, err := f.kube.BatchV1().Jobs("sparkwing-jobs").Get(ctx, f.jobNames(t)[0], metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	if _, err := f.kube.BatchV1().Jobs("sparkwing-jobs").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.RequestCancel(ctx, "run-done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if names := f.jobNames(t); len(names) != 1 {
+		t.Fatalf("the finished Job was deleted: %v", names)
 	}
 }

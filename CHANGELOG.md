@@ -31,7 +31,8 @@ unlock.
   planning node runs the pipeline binary's new `plan --json`, which plans the
   run and writes the document `POST /api/v1/runs/{id}/plan` accepts, each
   node carrying its spec hash; a node's pod plans again and refuses a node
-  whose hash differs (`plan-drift`). The new `Plan.Checkout` sets the depth,
+  whose hash differs (`plan-drift`); planning reads secret arguments as
+  `***`. The new `Plan.Checkout` sets the depth,
   tags, submodules and LFS a run's checkout gets. A claim token now reads its
   own run, trigger and nodes, beats its claim (answered with `cancel` when the
   run is being cancelled), records node, step and live-log progress, and
@@ -41,8 +42,9 @@ unlock.
   child per call however often it is retried, and reads it through
   `GET /api/v1/runs/{id}/children/{childID}`; a child of an opted-in
   repository is planned by the controller as well. The launcher reconciles its
-  Jobs through `POST /api/v1/launcher/sync` every 5 seconds: it deletes the Job
-  of a claim that ended or whose run is being cancelled, and hands back the
+  Jobs through `POST /api/v1/launcher/sync` every 5 seconds: it deletes the
+  running Job of a claim that ended or whose run is being cancelled, leaves a
+  finished Job and its pod log to the Job's TTL, and hands back the
   claim of a Job that waited 4 minutes for a machine, so its node returns to
   the queue unbilled with no attempt spent. While any Job has waited 2 minutes,
   or `--node-pool` names a Karpenter NodePool with under 4 cores left under its

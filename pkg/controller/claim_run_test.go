@@ -13,6 +13,14 @@ import (
 
 const specA = "sha256:" + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func (f *appFixture) secretArg(runID string) {
+	f.t.Helper()
+	if _, err := f.store.DB().Exec(`UPDATE runs SET args_json = ?, invocation_json = ? WHERE id = ?`,
+		`{"token":"s3cret"}`, `{"secret_args":["token"]}`, runID); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *appFixture) launchNode(runID, nodeID string) string {
 	f.t.Helper()
 	c, err := f.store.ClaimLaunch(store.WithoutCreditMetering(context.Background()),
@@ -35,9 +43,11 @@ func TestClaimRun_PodRoutesServeOnlyTheirOwnClaim(t *testing.T) {
 	plan := "Bearer " + f.launchedRun(olga, "run-pod", "acme", "widgets")
 	f.launchedRun(olga, "run-next", "acme", "widgets")
 
+	f.secretArg("run-pod")
 	var run store.Run
-	if code := f.call("GET", "/api/v1/runs/run-pod?include=secret_values", plan, nil, &run); code != http.StatusOK || run.Pipeline != "build" {
-		t.Fatalf("own run = %d %+v", code, run)
+	if code := f.call("GET", "/api/v1/runs/run-pod?include=secret_values", plan, nil, &run); code != http.StatusOK ||
+		run.Pipeline != "build" || run.Args["token"] == "s3cret" {
+		t.Fatalf("own run with a planning claim = %d %+v, want the secret argument redacted", code, run)
 	}
 	for _, path := range []string{"/api/v1/runs/run-next", "/api/v1/runs/run-next/nodes/plan/heartbeat", "/api/v1/runs/run-pod/nodes/other/heartbeat"} {
 		method := "POST"
@@ -91,6 +101,11 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("accept plan = %d", code)
 	}
 	work := "Bearer " + f.launchNode("run-parent", "a")
+	f.secretArg("run-parent")
+	var own store.Run
+	if code := f.call("GET", "/api/v1/runs/run-parent?include=secret_values", work, nil, &own); code != http.StatusOK || own.Args["token"] != "s3cret" {
+		t.Fatalf("own run with a work claim = %d %+v, want the secret argument", code, own.Args)
+	}
 	var out struct {
 		RunID string `json:"run_id"`
 	}

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -57,7 +58,9 @@ func (l *Launcher) Sync(ctx context.Context) (string, error) {
 	names := map[store.LaunchJob]string{}
 	for _, j := range jobs.Items {
 		gen, err := strconv.ParseInt(j.Annotations[GenerationAnnotation], 10, 64)
-		if err != nil || j.Annotations[RunAnnotation] == "" {
+		// safety: a finished Job's pod holds its log until the Job's TTL
+		// removes it, so only a Job still running is ever deleted here.
+		if err != nil || j.Annotations[RunAnnotation] == "" || jobFinished(j) {
 			continue
 		}
 		waited := unplaced[j.Name]
@@ -94,6 +97,15 @@ func (l *Launcher) Sync(ctx context.Context) (string, error) {
 		l.Logger.Info("launcher: job deleted", "job", name, "run_id", key.RunID, "node_id", key.NodeID)
 	}
 	return reason, errors.Join(errs...)
+}
+
+func jobFinished(j batchv1.Job) bool {
+	for _, c := range j.Status.Conditions {
+		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func unschedulableSince(p corev1.Pod) (time.Time, bool) {
