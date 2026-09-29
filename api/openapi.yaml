@@ -6452,12 +6452,13 @@ paths:
                     items:
                       x-sparkwing-go-type: pkg/controller.waitlistedJSON
                       type: object
-                      required: [id, email, name, reason, created_at, waitlisted_at]
+                      required: [id, email, name, reason, provider, created_at, waitlisted_at]
                       properties:
                         id: {type: string}
                         email: {type: string}
                         name: {type: string}
                         reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
                         created_at: {type: integer, format: int64, description: Unix seconds.}
                         waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -6470,7 +6471,7 @@ paths:
       tags: [users]
       summary: Admit waitlisted users by id, or the oldest n.
       description: >-
-        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. The controller runs the deployment's approval notifier for each admission.
+        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. Each admission and its account.admitted business event, naming the caller, commit together. The controller runs the deployment's approval notifier for each admission.
       requestBody:
         required: true
         content:
@@ -7256,6 +7257,91 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/waitlist:
+    get:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: List a page of waitlisted users, newest first, with the waitlist's size.
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}, description: At most this many; defaults to 50.}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}, description: Skip this many of the newest.}
+      responses:
+        "200":
+          description: The page and the number of users waiting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [accounts, total]
+                properties:
+                  total: {type: integer}
+                  accounts:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.waitlistedJSON
+                      type: object
+                      required: [id, email, name, reason, provider, created_at, waitlisted_at]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        name: {type: string}
+                        reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+                        waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/operator/waitlist/approve:
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Admit waitlisted users from the operator console.
+      description: >-
+        Takes the body and answers the shape of POST /api/v1/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.approveWaitlistReq
+              type: object
+              description: Name exactly one of `account_ids` and `oldest`, at most 1000.
+              properties:
+                account_ids:
+                  type: array
+                  items: {type: string}
+                oldest: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: The users admitted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [approved]
+                properties:
+                  approved:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.approvedJSON
+                      type: object
+                      required: [id, email, active_team]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        active_team: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/runs/{id}/source-credential:
     parameters:

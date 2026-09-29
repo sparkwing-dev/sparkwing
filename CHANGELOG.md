@@ -84,6 +84,16 @@ unlock.
   it, through their own signed-in session; no token does, an admin token
   included. A limit override on a revoked team is refused until trust is
   restored.
+- **dashboard + controller:** The operator console gains a Waitlist view,
+  with its size in the console's nav. It lists waiting accounts newest first,
+  50 to a page, with email, name, sign-in provider and when each joined the
+  list, and approves one row or the selected rows. It reads
+  `GET /api/v1/operator/waitlist`, which pages with `limit` and `offset` and
+  returns `total`, and approves through
+  `POST /api/v1/operator/waitlist/approve`, which takes the body of
+  `POST /api/v1/signups/waitlist/approve`. Every approval, from either route,
+  commits with an `account.admitted` business event naming the approver.
+  `GET /api/v1/signups/waitlist` gains `provider`.
 - **controller + store:** A team buys at most $50 of credit over 30 days, and
   at most $50 at once, until it is trusted; a trusted team buys up to $500.
   A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
