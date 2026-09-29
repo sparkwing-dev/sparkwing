@@ -104,8 +104,8 @@ func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEn
 		bytesGoal = 0
 		entriesGoal = count
 	}
-	if bytesGoal == 0 && entriesGoal == 0 && !status.DiscoveryExhausted {
-		return PruneResult{GoalSatisfied: true}, nil
+	if bytesGoal == 0 && entriesGoal == 0 {
+		return PruneResult{GoalSatisfied: !status.DiscoveryExhausted, WorkBoundExhausted: status.DiscoveryExhausted}, nil
 	}
 	result, err := pruneForLimits(ctx, PruneOptions{
 		Root:           root,

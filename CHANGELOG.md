@@ -34,6 +34,7 @@ unlock.
   Clients using the daemon completion API must submit profile observations
   separately.
 - **daemon:** Wait for connection cleanup before final persistence and journal closure.
+- **pipeline cache:** Avoid an invalid pruning request when bounded discovery has found no excess entries or bytes.
 
 - **controller:** Preserve terminal run outcomes across completion retries
   Only the first terminal transition attempts profile folding; failed folds are
