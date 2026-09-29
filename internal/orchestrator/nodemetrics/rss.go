@@ -1,6 +1,7 @@
 package nodemetrics
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -12,7 +13,7 @@ func parseProcessRSSKB(out string) (int64, bool) {
 			continue
 		}
 		kb, err := strconv.ParseInt(field, 10, 64)
-		if err != nil || kb <= 0 {
+		if err != nil || kb <= 0 || kb > math.MaxInt64/1024 {
 			return 0, false
 		}
 		return kb * 1024, true

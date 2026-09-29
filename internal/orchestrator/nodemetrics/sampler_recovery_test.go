@@ -25,7 +25,7 @@ func TestAttach_CPUReaderRecoversWithAFreshBaseline(t *testing.T) {
 				read++
 				return time.Duration(i) * 5 * time.Millisecond, tc.available[min(i, len(tc.available)-1)]
 			}
-			rssReader = func() int64 { return 1024 }
+			rssReader = func() (int64, bool) { return 1024, true }
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			sink := &captureSink{sampleReady: make(chan struct{}, 16)}
@@ -60,7 +60,7 @@ func TestAttach_TimestampsCompletedCPURead(t *testing.T) {
 		}
 		return 0, true
 	}
-	rssReader = func() int64 { return 1024 }
+	rssReader = func() (int64, bool) { return 1024, true }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	sink := &captureSink{sampleReady: make(chan struct{}, 16)}

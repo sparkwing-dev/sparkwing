@@ -15,7 +15,8 @@ func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int6
 		t.Fatal("a shared sampler loop is already running; stub before attaching")
 	}
 	prevCPU, prevRSS := cpuReader, rssReader
-	cpuReader, rssReader = cpu, rss
+	cpuReader = cpu
+	rssReader = func() (int64, bool) { return rss(), true }
 	t.Cleanup(func() {
 		waitForSamplerStop(t)
 		cpuReader, rssReader = prevCPU, prevRSS

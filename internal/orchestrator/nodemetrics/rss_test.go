@@ -15,6 +15,8 @@ func TestParseProcessRSSKB(t *testing.T) {
 		{name: "blank lines only", out: "\n  \n", ok: false},
 		{name: "garbage", out: "not-a-number\n", ok: false},
 		{name: "zero", out: "0\n", ok: false},
+		{name: "overflow", out: "9007199254740992", ok: false},
+		{name: "largest KB", out: "9007199254740991", want: 9223372036854774784, ok: true},
 		{name: "negative", out: "-4\n", ok: false},
 	}
 	for _, tc := range cases {
