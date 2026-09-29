@@ -22,6 +22,7 @@ unlock.
 
 ### Fixed
 
+- **accounting:** Queued local nodes retain process exit CPU, memory, and wall time. CPU sampling resumes after failed reads and timestamps observations at collection.
 - **store:** Retain concurrent profile updates, preserve integer percentiles, and reject invalid resource observations
 - **orchestrator:** Stop charging command lifetime CPU to its completion interval
 - **scaffold:** Use the published v0.64.0 SDK when the CLI build has no version stamp.

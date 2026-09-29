@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -79,7 +80,7 @@ func TestSetupLocalExecution_S3StateNoLongerFallsBackInProcess(t *testing.T) {
 	backends := S3Backends(nil, state, art)
 	opts := &Options{State: state, ArtifactStore: art, RunID: "run-s3-setup"}
 
-	exec, err := setupLocalExecution(newInternalPaths(t), opts, backends, t.TempDir(), quietTestLogger())
+	exec, err := setupLocalExecution(t.Context(), newInternalPaths(t), opts, backends, t.TempDir(), quietTestLogger())
 	if err != nil {
 		t.Fatalf("setupLocalExecution: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestSetupLocalExecution_S3LoopbackServesTheRunsState(t *testing.T) {
 	}
 
 	backends := S3Backends(nil, state, art)
-	loopback, err := startRunLoopback(&Options{State: state, ArtifactStore: art, RunID: runID}, backends, quietTestLogger())
+	loopback, err := startRunLoopback(t.Context(), &Options{State: state, ArtifactStore: art, RunID: runID}, backends, quietTestLogger())
 	if err != nil {
 		t.Fatalf("startRunLoopback: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestStartRunLoopback_SQLiteStillGetsTheRealController(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 
 	backends := LocalBackends(paths, st, nil)
-	loopback, err := startRunLoopback(&Options{State: st, RunID: "run-sqlite"}, backends, quietTestLogger())
+	loopback, err := startRunLoopback(t.Context(), &Options{State: st, RunID: "run-sqlite"}, backends, quietTestLogger())
 	if err != nil {
 		t.Fatalf("startRunLoopback: %v", err)
 	}
@@ -180,4 +181,30 @@ func newInternalPaths(t *testing.T) Paths {
 
 func quietTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+func TestSetupLocalExecution_CanceledContextDoesNotMintToken(t *testing.T) {
+	paths := newInternalPaths(t)
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	execution, err := setupLocalExecution(ctx, paths, &Options{State: st, RunID: "canceled"}, LocalBackends(paths, st, nil), t.TempDir(), quietTestLogger())
+	if execution != nil {
+		execution.cleanup()
+		t.Fatal("canceled setup returned an execution")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("setup error = %v; want context cancellation", err)
+	}
+	tokens, err := st.ListTokens("", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("canceled setup persisted %d tokens", len(tokens))
+	}
 }

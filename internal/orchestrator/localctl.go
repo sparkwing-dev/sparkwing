@@ -39,6 +39,7 @@ func loopbackLogger() *slog.Logger {
 }
 
 func startLoopbackController(
+	ctx context.Context,
 	st *store.Store,
 	art storage.ArtifactStore,
 	runID string,
@@ -51,9 +52,10 @@ func startLoopbackController(
 	// which the controller gates behind admin. The token's blast radius
 	// is bounded by the loopback bind and by revocation at run end
 	// rather than by a narrower scope set.
-	raw, tok, err := st.CreateToken(
+	raw, tok, err := st.CreateTokenWith(
+		ctx,
 		"local-run:"+runID, store.TokenKindService,
-		[]string{controller.ScopeAdmin}, loopbackTokenTTL, time.Now().UTC())
+		[]string{controller.ScopeAdmin}, loopbackTokenTTL, time.Now().UTC(), store.TokenOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("loopback controller: mint run token: %w", err)
 	}
