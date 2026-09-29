@@ -144,7 +144,8 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	source := strings.HasPrefix(req.Key, "sources/")
 	sourceDigest, validSource := SourceKeyDigest(req.Key)
 	if (!source && req.RunID == "") ||
-		(source && (!validSource || req.RunID != "" || sourceDigest != req.SHA256 || req.Kind != StorageCache || req.Provenance != "local" || req.ClaimPrefix == "")) ||
+		req.Kind != StorageCache ||
+		(source && (!validSource || req.RunID != "" || sourceDigest != req.SHA256 || req.Provenance != "local" || req.ClaimPrefix == "")) ||
 		!validUploadKey(req.Key) || !validSHA256(req.SHA256) || req.Size <= 0 || req.Size > DirectUploadMaxSize ||
 		req.Principal == "" || (req.Provenance != "local" && req.Provenance != "cloud") {
 		return Upload{}, fmt.Errorf("%w: invalid direct upload declaration", ErrInvalidInput)
@@ -180,10 +181,13 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	if err != nil {
 		return Upload{}, err
 	}
-	// safety: reserveStorageTx holds the team's storage row, so concurrent
-	// reservations count one after another.
+	// safety: reserveStorageTx holds the team's cache storage row, and every
+	// upload is cache, so concurrent reservations count one after another.
 	var pending int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM uploads WHERE team = ? AND committed_at = 0 AND expires_at > ?`,
+	// safety: a released reservation, such as one whose presign failed, frees
+	// its slot even though its upload row stays until expiry.
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM uploads u WHERE u.team = ? AND u.committed_at = 0 AND u.expires_at > ?
+        AND EXISTS (SELECT 1 FROM storage_reservations r WHERE r.id = u.id)`,
 		string(req.Team), req.Now.UnixNano()).Scan(&pending); err != nil {
 		return Upload{}, err
 	}
