@@ -113,7 +113,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}/request` | `admin` |
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
-| `POST` | `/api/v1/runs/{id}/cache-grant` | `nodes.claim` or `triggers.claim` |
+| `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
 | `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
@@ -124,6 +124,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/gitcache/git/register` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/gitcache/git/{path...}` | `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/goproxy/{path...}` | `claim` |
 | `POST` | `/api/v1/runs/{id}/heartbeat` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
@@ -174,6 +175,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/plan` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/receipt` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/retry` | `runs.control` |
+| `GET` | `/api/v1/runs/{id}/source` | `claim` |
 | `POST` | `/api/v1/runs/{id}/source-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/steps` | `runs.read` |
 | `GET` | `/api/v1/secrets` | `runs.read` or `team.admin` |

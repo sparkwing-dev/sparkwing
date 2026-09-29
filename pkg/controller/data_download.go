@@ -89,6 +89,18 @@ func (s *Server) verifyLiveDataGrant(ctx context.Context, grant authwire.CacheGr
 	if grant.Claim == nil {
 		return false, errors.New("cache grant has no claim")
 	}
+	if c := grant.Claim; c.Kind == authwire.CacheClaimToken {
+		tok, err := s.store.CheckClaimSensitive(ctx, store.ClaimToken{
+			Team: store.Team(grant.Team), RunID: grant.Run,
+			NodeID: c.NodeID, Generation: c.Generation,
+		}, time.Now())
+		if err != nil || tok.Prefix != c.TokenPrefix {
+			return false, errors.New("cache grant claim is not live")
+		}
+		// safety: a plan claim uploads only the binary it compiled, as a
+		// trigger holder does before dispatch.
+		return tok.Kind == store.ClaimTokenPlan, nil
+	}
 	team, err := s.store.ForTeam(ctx, store.Team(grant.Team))
 	if err != nil {
 		return false, err

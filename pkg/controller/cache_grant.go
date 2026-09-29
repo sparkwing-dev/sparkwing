@@ -76,7 +76,14 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 		}
 		var claim *authwire.CacheClaim
 		node, trigger := claimIdentityShape(r)
-		if node && trigger {
+		if tok, ok := claimTokenFromContext(r.Context()); ok {
+			// safety: the grant carries the claim, which every controller use
+			// of it re-checks, and expires with the claim token.
+			claim = &authwire.CacheClaim{
+				Kind: authwire.CacheClaimToken, NodeID: tok.NodeID, Generation: tok.Generation,
+				Principal: p.Name, TokenPrefix: tok.Prefix,
+			}
+		} else if node && trigger {
 			writeError(w, http.StatusConflict, store.ErrLockHeld)
 			return
 		}

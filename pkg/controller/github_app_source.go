@@ -164,7 +164,8 @@ func (s *Server) runAppToken(r *http.Request, src claimedRunSource, repo store.G
 	}
 	id := claimIdentity(r)
 	key := runID + "\x00" + id.Principal + "\x00" + id.TokenPrefix + "\x00" + strings.ToLower(strings.Join(slugs, ","))
-	cached, refused := s.githubApp.reuseSourceToken(key, time.Now())
+	_, internal := claimTokenFromContext(r.Context())
+	cached, refused := s.githubApp.reuseSourceToken(key, time.Now(), !internal)
 	if refused {
 		return SourceTokenResponse{}, &sourceFailure{
 			status: http.StatusTooManyRequests, retryAfter: time.Minute,
@@ -208,7 +209,7 @@ type sourceTokenEntry struct {
 	calls  int
 }
 
-func (a *githubAppState) reuseSourceToken(key string, now time.Time) (cached *SourceTokenResponse, refused bool) {
+func (a *githubAppState) reuseSourceToken(key string, now time.Time, countReuse bool) (cached *SourceTokenResponse, refused bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for k, e := range a.sources {
@@ -225,11 +226,17 @@ func (a *githubAppState) reuseSourceToken(key string, now time.Time) (cached *So
 	if now.Sub(e.window) > time.Minute {
 		e.window, e.calls = now, 0
 	}
+	live := e.token != nil && time.Unix(e.token.ExpiresAt, 0).Sub(now) > sourceTokenReuseMargin
+	// safety: a claim token's token never leaves the controller, whose module
+	// proxy asks once per file, so for it only a mint counts.
+	if live && !countReuse {
+		return e.token, false
+	}
 	e.calls++
 	if e.calls > sourceTokenCallsPerMin {
 		return nil, true
 	}
-	if e.token != nil && time.Unix(e.token.ExpiresAt, 0).Sub(now) > sourceTokenReuseMargin {
+	if live {
 		return e.token, false
 	}
 	return nil, false

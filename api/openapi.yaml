@@ -2206,7 +2206,7 @@ paths:
       tags: [nodes]
       summary: Claim a ready node of a controller-dispatched run for a launcher Job.
       description: >-
-        Claims a ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
+        Claims a ready node of any team's controller-dispatched run whose runner selector the Cloud runner image satisfies (its declared tools, the cloud class and location), reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
       requestBody:
         required: true
         content:
@@ -5066,7 +5066,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
+      x-sparkwing-scope: claim or nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -7238,6 +7238,56 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/goproxy/{path}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: path
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Serve a claim's private Go modules.
+      description: >-
+        The GOPROXY protocol (`<module>/@v/list`, `.info`, `.mod`, `.zip`) for modules in a repository a team owner listed for the run's repository (Team > GitHub), fetched by the controller with the team's GitHub App token and built as the go command builds a module zip. It answers only a live, uncancelled plan or work claim token. Every other module, and `@latest`, is 404, so the go command moves on to the next proxy in GOPROXY.
+      responses:
+        "200": {description: The module file.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/source:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Check out a claim's run for its pod.
+      description: >-
+        Answers only a claim token (plan or work) whose claim is live and whose run has no cancel request. The controller fetches the run's recorded repository at its recorded commit with the team's credential (the GitHub App token for the repository, or the team's stored git credential for its host) and answers a gzipped tar of the checkout, `.git` included: origin names the remote with no credential, and HEAD is the run's branch at the commit. The credential never leaves the controller. The claim is checked again once the fetch is done, and a claim lost or cancelled meanwhile gets no tree. Submodules must be on the credential's host; LFS objects are fetched only through the GitHub App.
+      parameters:
+        - {in: query, name: depth, schema: {type: integer, minimum: 0, default: 1}, description: Commits of history to fetch; 0 fetches all of it.}
+        - {in: query, name: tags, schema: {type: string, enum: ["1"]}, description: Fetch the repository's tags.}
+        - {in: query, name: submodules, schema: {type: string, enum: ["1"]}, description: Check out submodules.}
+        - {in: query, name: lfs, schema: {type: string, enum: ["1"]}, description: Fetch LFS objects.}
+      responses:
+        "200":
+          description: The checkout.
+          content:
+            application/gzip:
+              schema: {type: string, format: binary}
+        "400": {description: A malformed option.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The run records no commit.}
+        "502": {description: The fetch failed.}
 
 components:
   securitySchemes:
