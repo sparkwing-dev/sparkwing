@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **metrics:** Exclude unavailable CPU and RSS readings from learned costs; reject RSS conversion overflow and clamp CPU rates before integer conversion.
+
 - **tests:** Start Kubernetes runner deadlines after database setup.
 - **checks:** Parse only changed Go files when checking comments in a staged or branch diff.
 
