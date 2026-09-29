@@ -46,13 +46,16 @@ func TestLogs_AClaimTokenWritesOnlyItsOwnNodesLog(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv.WithControllerAuth(f.url, time.Minute).Handler())
 	t.Cleanup(ts.Close)
-	call := func(method, path, token string) int {
+	call := func(method, path, token string, headers ...string) int {
 		t.Helper()
 		req, err := http.NewRequest(method, ts.URL+path, strings.NewReader("{\"msg\":\"line\"}\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
+		for i := 0; i+1 < len(headers); i += 2 {
+			req.Header.Set(headers[i], headers[i+1])
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -62,6 +65,17 @@ func TestLogs_AClaimTokenWritesOnlyItsOwnNodesLog(t *testing.T) {
 	}
 	if code := call("POST", "/api/v1/logs/run-logs/a", a); code != http.StatusNoContent {
 		t.Fatalf("own node's append = %d, want 204", code)
+	}
+	for name, attempt := range map[string][]string{
+		"another attempt": {
+			store.ClaimHolderHeader, "h", store.ClaimMembershipHeader, "m", store.ClaimReservationHeader, "r",
+			store.ClaimGenerationHeader, "9", store.AttemptOrdinalHeader, "2",
+		},
+		"a trigger stream": {store.TriggerGenerationHeader, "4"},
+	} {
+		if code := call("POST", "/api/v1/logs/run-logs/a", a, attempt...); code != http.StatusForbidden {
+			t.Errorf("own node's append naming %s = %d, want 403", name, code)
+		}
 	}
 	for _, c := range []struct {
 		method, path, token, what string

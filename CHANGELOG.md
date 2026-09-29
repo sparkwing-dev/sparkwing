@@ -60,7 +60,9 @@ unlock.
   an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
   refused. A work node writes its own node's durable log to the logs
   service with its claim token, which the service checks against the
-  controller on every append and seal and answers on no other route. A work
+  controller on every append and seal, never from a cache, and answers on no
+  other route; a write naming another attempt or trigger stream is refused,
+  and a write the controller names no team for is answered `502`. A work
   node takes, renews, observes and releases concurrency slots with its claim
   token, for its own run and node in its own team, and only with the key,
   policy, capacity and cost its accepted plan declares for the node; a slot's

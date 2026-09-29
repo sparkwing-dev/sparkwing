@@ -3491,13 +3491,15 @@ paths:
         itself may already have finished, because a node writes its closing
         lines after closing the attempt. Trusted controller-internal calls
         bypass claim validation. A controller-dispatched node's work claim
-        token needs no headers: it validates only its own run and node while
-        its claim has not ended, and the answer names the claim's team in
-        `X-Sparkwing-Claim-Team`.
+        token is its own attempt and names none: it validates only its own
+        run and node while its claim has not ended, the answer names the
+        claim's team in `X-Sparkwing-Claim-Team`, and a request carrying any
+        claim, trigger or attempt header is refused `403` `attempt_unbound`.
       responses:
         "204": {description: The claim that opened the attempt is live. Empty body.}
         "400": {description: Node and trigger identities were combined.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "A claim token named an attempt (`attempt_unbound`), or its claim is not live."}
         "409": {description: "Missing, malformed, stale, or expired identity."}
         "500": {$ref: "#/components/responses/InternalError"}
 

@@ -833,7 +833,10 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	if err != nil {
 		return nil, http.StatusUnauthorized, err
 	}
+	// safety: a claim token is checked on every write, so its revocation
+	// takes effect at once and every write carries the team it is counted to.
 	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
+	cacheable = cacheable && (p == nil || p.Kind != "claim")
 	if cacheable && s.claims.valid(key, time.Now()) {
 		return nil, 0, nil
 	}
@@ -858,7 +861,9 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 		// safety: a claim's run is labeled with the team the controller
 		// bound the claim to, never one the pod names.
 		if p != nil && p.Kind == "claim" {
-			p.Team = resp.Header.Get(store.ClaimTeamHeader)
+			if p.Team = resp.Header.Get(store.ClaimTeamHeader); p.Team == "" {
+				return nil, http.StatusBadGateway, errors.New("validate log claim: the controller named no team")
+			}
 		}
 		if cacheable && s.claimCacheTTL() > 0 {
 			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))

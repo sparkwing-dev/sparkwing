@@ -232,9 +232,17 @@ func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: the logs service asks this with the pod's own claim token, so the
-// answer binds a durable log write to the claim's run, node and team.
+// answer binds a durable log write to the claim's run, node and team. A claim
+// token is its attempt, so a write naming any other attempt is refused.
 func handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
 	tok, _ := claimTokenFromContext(r.Context())
+	if node, trigger := claimIdentityShape(r); node || trigger || r.Header.Get(store.AttemptOrdinalHeader) != "" {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code:    "attempt_unbound",
+			Message: "a claim token writes only its own attempt's log and names no other",
+		})
+		return
+	}
 	w.Header().Set(store.ClaimTeamHeader, string(tok.Team))
 	w.WriteHeader(http.StatusNoContent)
 }
