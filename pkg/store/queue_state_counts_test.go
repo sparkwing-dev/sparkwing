@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"sync/atomic"
@@ -169,18 +168,25 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 
 	churn, stop := context.WithTimeout(ctx, 10*time.Second)
 	var landed atomic.Int64
+	finish := make(chan struct{})
 	done := make(chan struct{})
 	var workerErr error
 	t.Cleanup(func() {
-		stop()
+		close(finish)
 		<-done
-		if workerErr != nil && !errors.Is(workerErr, context.Canceled) {
+		stop()
+		if workerErr != nil {
 			t.Errorf("claim worker: %v", workerErr)
 		}
 	})
 	go func() {
 		defer close(done)
 		for i := 0; churn.Err() == nil; i++ {
+			select {
+			case <-finish:
+				return
+			default:
+			}
 			node := "node-" + strconv.Itoa(i)
 			if err := s.CreateNode(churn, store.Node{
 				RunID: "run-conc", NodeID: node, Status: "pending",
