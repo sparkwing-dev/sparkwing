@@ -42,6 +42,26 @@ unlock.
   through claim tokens. Schema v84 adds the `repos` table, `runs.dispatch`
   and `nodes.timeout_ms`.
 
+- **controller + store + runner:** A controller-dispatched pod fetches its
+  source and private Go modules through its claim token alone.
+  `GET /api/v1/runs/{id}/source` answers a gzipped tar of the run's recorded
+  commit as a real repository, `.git` included, fetched by the controller with
+  the team's GitHub App token or stored git credential, which never reaches the
+  pod. The query asks for `depth` (default 1, `0` for all history), `tags`,
+  `submodules` (on the credential's host only) and `lfs` (GitHub App only).
+  `GET /api/v1/runs/{id}/goproxy/` speaks the GOPROXY protocol for modules in
+  the repositories a team owner listed for the run's repository and answers
+  404 for every other module. Both answer only a live claim whose run has no
+  cancel request, and the source route checks again once its fetch is done.
+  A claim token also gets a cache grant bound to its claim, which stops
+  working when the claim ends or its run is cancelled; a plan claim's grant
+  uploads only a binary. A credential released for a claim token is fenced
+  inside the transaction that records it. The launcher now claims a node
+  whose runner selector the Cloud runner image satisfies (`tool:git`,
+  `tool:go`) instead of only unlabelled ones, and hands each Job the cache,
+  git cache and dependency proxy URLs a runner Job gets (`--cache`,
+  `--gitcache`, `--dependency-proxy`). A launcher-owned node that outwaits its
+  claim wait fails with a reason naming the Cloud image or the team's credits.
 - **dashboard + controller:** An operator console at `/operator` finds a team
   by slug, name or owner email, shows its balance, 30-day purchases against
   its limit, trust, holds and recent business events, and grants, revokes or
