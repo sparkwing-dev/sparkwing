@@ -167,12 +167,10 @@ func (s *Server) drawLocked(ctx context.Context, b *logBlock, auth string, n int
 		return nil, err
 	}
 	b.adopt(next)
-	if b.take(n) {
-		return &logDraw{block: b, n: n}, nil
+	if !b.take(n) {
+		return nil, fmt.Errorf("%w: the controller granted %d bytes for an append of %d", storagequota.ErrUnavailable, next.Granted, n)
 	}
-	return nil, &storagequota.QuotaError{Message: fmt.Sprintf(
-		"free storage allowance exceeded: team %s has %d bytes of its log share left and this append stores %d; "+
-			"add credits to store more", b.key.team, b.left, n)}
+	return &logDraw{block: b, n: n}, nil
 }
 
 // safety: a run that drew nothing since the last settle, or every run when
@@ -262,8 +260,6 @@ func (s *Server) writeQuotaRefusal(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &quota) && quota.Paused:
 		http.Error(w, err.Error(), http.StatusPaymentRequired)
-	case errors.As(err, &quota):
-		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 	case errors.Is(err, storagequota.ErrUnavailable):
 		s.logger.Error("logs storage count", "err", err)
 		w.Header().Set("Retry-After", "30")
