@@ -565,11 +565,32 @@ func TestDirectUploadRefusesEmptyAndCapsPendingReservations(t *testing.T) {
 	}
 }
 
+type failFirstDelete struct {
+	base   s3.HTTPClient
+	mu     sync.Mutex
+	failed bool
+}
+
+func (f *failFirstDelete) Do(r *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	fail := r.Method == http.MethodDelete && !f.failed
+	f.failed = f.failed || fail
+	f.mu.Unlock()
+	if fail {
+		return &http.Response{StatusCode: http.StatusInternalServerError, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	}
+	return f.base.Do(r)
+}
+
 // A free team that reserved an upload while a slot was open, and finds every
-// slot taken when it commits, is refused with 402 and the object its commit
-// copied into place is deleted, so the bucket holds nothing it is not counted for.
+// slot taken when it commits, is refused with 402 and loses the object its
+// upload copied into place. A cleanup the object store refused is finished
+// by the retry, which finds the copy already there.
 func TestADirectCommitWithoutAFreeSlotIsRefusedAndItsObjectDeleted(t *testing.T) {
-	client, objects := directS3(t)
+	raw, objects := directS3(t)
+	client := s3.New(raw.Options(), func(o *s3.Options) {
+		o.HTTPClient, o.Retryer = &failFirstDelete{base: o.HTTPClient}, aws.NopRetryer{}
+	})
 	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
 		return s.WithDirectUploads(client, "bucket", "cache")
 	})
@@ -592,7 +613,7 @@ func TestADirectCommitWithoutAFreeSlotIsRefusedAndItsObjectDeleted(t *testing.T)
 	}, &answer); code != http.StatusOK {
 		t.Fatalf("reserve = %d", code)
 	}
-	if _, err := client.PutObject(context.Background(), &s3.PutObjectInput{
+	if _, err := raw.PutObject(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String("bucket"), Key: aws.String("pending/" + answer.UploadID), Body: bytes.NewReader(body),
 		ChecksumSHA256: aws.String(answer.Headers["x-amz-checksum-sha256"]),
 	}); err != nil {
@@ -601,12 +622,20 @@ func TestADirectCommitWithoutAFreeSlotIsRefusedAndItsObjectDeleted(t *testing.T)
 	if err := f.store.GrantFreeSlot(t.Context(), store.Team(f.ghUser(522, "pat").team), time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	final := "cache/teams/" + olga.team + "/cloud/" + key
 	var ignored map[string]any
-	if code := f.call("POST", "/api/v1/data/commit", runner, map[string]any{"upload_id": answer.UploadID, "run_id": "run-bytes"}, &ignored); code != http.StatusPaymentRequired {
+	commit := map[string]any{"upload_id": answer.UploadID, "run_id": "run-bytes"}
+	if code := f.call("POST", "/api/v1/data/commit", runner, commit, &ignored); code != http.StatusPaymentRequired {
 		t.Fatalf("commit without a slot = %d, want 402; logs: %s", code, f.logs.String())
 	}
-	if _, ok := objects()["cache/teams/"+olga.team+"/cloud/"+key]; ok {
-		t.Fatal("the refused upload's object stayed in the bucket")
+	if _, ok := objects()[final]; !ok {
+		t.Fatal("the object store refused the cleanup, yet the object is gone")
+	}
+	if code := f.call("POST", "/api/v1/data/commit", runner, commit, &ignored); code != http.StatusPaymentRequired {
+		t.Fatalf("retried commit without a slot = %d, want 402; logs: %s", code, f.logs.String())
+	}
+	if _, ok := objects()[final]; ok {
+		t.Fatal("the retry left the refused upload's object in the bucket")
 	}
 	if _, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key); err == nil {
 		t.Fatal("the refused upload was recorded")
