@@ -24,8 +24,8 @@ func payTeam(t *testing.T, tenant *store.Tenant, ref string, dollars int64) time
 	return res.Grant.CreatedAt
 }
 
-// spend seeds a usage charge and its day's spend bucket, as the ledger's own
-// charge insert does.
+// safety: the day's spend bucket is seeded with the charge, as the ledger's own
+// insert does, because the trust rule reads lifetime spend from the buckets.
 func spend(t *testing.T, s *store.Store, team, id string, cents int64) {
 	t.Helper()
 	now := time.Now().UnixNano()

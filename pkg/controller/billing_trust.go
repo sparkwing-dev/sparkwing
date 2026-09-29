@@ -12,8 +12,8 @@ type billingTrustReq struct {
 	Trust      string `json:"trust"`
 	Reason     string `json:"reason"`
 	LimitCents int64  `json:"limit_cents,omitempty"`
-	// DailyCapCents and RungCents override a granted team's daily spend
-	// cap and the debt at which its card is charged.
+	// safety: zero keeps the level's default daily cap and rung, the debt
+	// at which the card is charged.
 	DailyCapCents int64 `json:"daily_cap_cents,omitempty"`
 	RungCents     int64 `json:"rung_cents,omitempty"`
 }

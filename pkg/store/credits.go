@@ -2304,8 +2304,8 @@ type chargeWindow struct {
 	Anchor, NowNS                         int64
 	Rate, Class, MaxCharge                int64
 	Final                                 bool
-	// SpendAtNS is the day a refund is counted against, the day of the
-	// charge it refunds; zero counts the row on NowNS's day.
+	// safety: a refund counts on the day of the charge it refunds, so it
+	// frees no room today; zero counts the row on NowNS's day.
 	SpendAtNS int64
 }
 

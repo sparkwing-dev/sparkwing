@@ -15,12 +15,10 @@ import (
 const checkoutToken = "checkout-secret"
 
 type fakeCheckout struct {
-	mu       sync.Mutex
-	requests []checkoutCall
-	status   int
-	url      string
-	// internal records the card routes' calls, and chargeStatus and
-	// declineCode are what /internal/charge answers.
+	mu           sync.Mutex
+	requests     []checkoutCall
+	status       int
+	url          string
 	internal     []internalCall
 	chargeStatus string
 	declineCode  string

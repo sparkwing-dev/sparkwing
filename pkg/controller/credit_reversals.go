@@ -39,8 +39,8 @@ type reversePaymentReq struct {
 	PaymentID string `json:"payment_id"`
 	// safety: A reversal reference is its idempotency key for refunds and chargebacks.
 	Reference string `json:"reference"`
-	// AmountMicro reverses only this much of the payment, as a partial
-	// refund does; zero reverses what remains.
+	// safety: zero reverses what remains, which is how a lost dispute takes
+	// back the whole payment; a refund names exactly its own amount.
 	AmountMicro int64 `json:"amount_micro,omitempty"`
 }
 
