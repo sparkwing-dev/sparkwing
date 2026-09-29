@@ -63,8 +63,9 @@ unlock.
   controller on every append and seal and answers on no other route. A work
   node takes, renews, observes and releases concurrency slots with its claim
   token, for its own run in its own team; a new acquire is refused once the
-  run is being cancelled, a release is not. On this path a node cannot mint
-  OIDC tokens or start a child of another repository.
+  run is being cancelled, a release is not. On this path a node cannot start
+  a child of another repository, and its OIDC token request is answered `422`
+  naming the gap until Sparkwing Cloud OIDC is enabled for it.
 
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with

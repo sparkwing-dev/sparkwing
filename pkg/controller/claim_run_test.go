@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -188,6 +189,11 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	var sec struct{ Value string }
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, &sec); code != http.StatusOK || sec.Value != "v-DEPLOY_TOKEN" {
 		t.Fatalf("declared secret = %d %+v", code, sec)
+	}
+	var oidc map[string]any
+	if code := f.call("POST", "/api/v1/runs/run-sec/oidc-token", work, map[string]string{"audience": "sts.amazonaws.com"}, &oidc); code != http.StatusUnprocessableEntity ||
+		!strings.Contains(fmt.Sprint(oidc["error"]), "not yet issued to controller-dispatched nodes") {
+		t.Fatalf("an OIDC token for a work claim = %d %v, want 422 naming the gap", code, oidc)
 	}
 	var refused map[string]any
 	if code := f.call("GET", "/api/v1/secrets/UNDECLARED?run=run-sec", work, nil, &refused); code != http.StatusForbidden || refused["error"] != "secret_undeclared" {

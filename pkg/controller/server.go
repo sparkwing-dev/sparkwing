@@ -949,7 +949,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
 	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/git-credential", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunGitCredential), ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/oidc-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/oidc-token", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(handleClaimOIDCToken)).orElse(requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
 	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, s.meteredBytes(egress.ClassGit, http.HandlerFunc(s.handleGitcacheGit))))

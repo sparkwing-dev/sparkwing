@@ -238,3 +238,10 @@ func handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(store.ClaimTeamHeader, string(tok.Team))
 	w.WriteHeader(http.StatusNoContent)
 }
+
+var errClaimOIDCUnavailable = errors.New(
+	"OIDC tokens are not yet issued to controller-dispatched nodes; they arrive with Sparkwing Cloud OIDC")
+
+func handleClaimOIDCToken(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, http.StatusUnprocessableEntity, errClaimOIDCUnavailable)
+}
