@@ -29,6 +29,7 @@ func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
+		Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 		TS: start, CPUMillicores: int64(peakCores * 1000), MemoryBytes: peakMemory,
 	}); err != nil {
 		t.Fatal(err)
@@ -53,32 +54,35 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	const grantable = 7.5
+	const grantable = 1.8
 	charge := func() float64 {
 		prof, err := st.GetPipelineProfile(ctx, "ci", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		res := capacity.Resolve(nil, prof, 8, "B")
-		res, _ = capacity.ApplyHostCeiling(res, "ci", 8, grantable, 30<<30)
+		res := capacity.Resolve(nil, prof, 2, "B")
+		res, _ = capacity.ApplyHostCeiling(res, "ci", 2, grantable, 30<<30)
 		return res.Cores
 	}
 
+	if got := charge(); got != 1 {
+		t.Fatalf("initial charge=%v, want 1", got)
+	}
 	for i := range 4 {
 		c := charge()
 		contendedRun(t, st, ctx, "ci", fmt.Sprintf("hot%d", i), c, runCharge{Cores: c})
 	}
-	if c := charge(); c < grantable {
+	if c := charge(); c != grantable {
 		t.Fatalf("charge = %v cores, want the ratchet to reach the grantable ceiling %v first", c, grantable)
 	}
 
 	for i := range 6 {
-		contendedRun(t, st, ctx, "ci", fmt.Sprintf("calm%d", i), 1.0, runCharge{Cores: charge()})
+		contendedRun(t, st, ctx, "ci", fmt.Sprintf("calm%d", i), 0.1, runCharge{Cores: charge()})
 	}
 
-	if c := charge(); c > capacity.SafetyMultiple*1.0 {
-		t.Errorf("charge = %v cores after six 1-core contended runs, want <= %v (floor decays toward evidence instead of poisoning the profile)",
-			c, capacity.SafetyMultiple*1.0)
+	if c := charge(); c != 0.2 {
+		t.Errorf("charge = %v cores after six 0.1-core contended runs, want %v (floor decays toward evidence instead of poisoning the profile)",
+			c, 0.2)
 	}
 }
 
@@ -162,7 +166,7 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	const grantable = 7.5
+	const grantable = 1.8
 
 	resolve := func() capacity.Resolution {
 		t.Helper()
@@ -171,8 +175,8 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		res := capacity.Resolve(nil, prof, 8, "B")
-		res, _ = capacity.ApplyHostCeiling(res, key, 8, grantable, 30<<30)
+		res := capacity.Resolve(nil, prof, 2, "B")
+		res, _ = capacity.ApplyHostCeiling(res, key, 2, grantable, 30<<30)
 		return res
 	}
 
@@ -181,11 +185,14 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	alpha := gitRepoDir(t, "alpha")
 	sparkwing.SetWorkDir(alpha)
 	t.Chdir(alpha)
+	if got := resolve().Cores; got != 1 {
+		t.Fatalf("initial charge=%v, want 1", got)
+	}
 	for i := range 4 {
 		c := resolve().Cores
 		contendedRun(t, st, ctx, currentProfileKey("ci"), fmt.Sprintf("alpha%d", i), c, runCharge{Cores: c})
 	}
-	if res := resolve(); res.Source != store.CostSourceFloor || res.Cores < grantable {
+	if res := resolve(); res.Source != store.CostSourceFloor || res.Cores != grantable {
 		t.Fatalf("alpha priced %v cores from %q, want the contended floor ratcheted to the grantable ceiling %v first",
 			res.Cores, res.Source, grantable)
 	}
@@ -198,7 +205,7 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 		t.Errorf("beta priced %v cores from %q, want the cold-start default: alpha's contention poisoned an unmeasured pipeline in another repo",
 			res.Cores, res.Source)
 	}
-	if res.Cores != 4 {
-		t.Errorf("beta charged %v cores, want the 4-core cold-start half of an 8-core machine", res.Cores)
+	if res.Cores != 1 {
+		t.Errorf("beta charged %v cores, want the 1-core cold-start half of a 2-core machine", res.Cores)
 	}
 }

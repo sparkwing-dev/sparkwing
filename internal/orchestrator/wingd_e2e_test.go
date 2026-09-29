@@ -771,7 +771,7 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
+		Duration: 20 * time.Second, PeakCores: 1.5, SustainedCores: new(1.5), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}, 3)
 
 	gate := newWingdGate()
@@ -792,7 +792,7 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 		t.Errorf("CostSource = %q, want measured", h.CostSource)
 	}
 	if h.Resources.Cores != 1.5 {
-		t.Errorf("admitted cores = %v, want the measured peak 1.5", h.Resources.Cores)
+		t.Errorf("admitted cores = %v, want the measured sustained CPU 1.5", h.Resources.Cores)
 	}
 	if h.ExpectedDurationMS != (20 * time.Second).Milliseconds() {
 		t.Errorf("ExpectedDurationMS = %d, want 20000", h.ExpectedDurationMS)
@@ -818,7 +818,7 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 	startWingd(t, home, 2)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: 5 * time.Second, PeakCores: 0, PeakMemoryBytes: 64 << 20, CPUMeasured: true,
+		Duration: 5 * time.Second, PeakCores: 0, SustainedCores: new(0.0), PeakMemoryBytes: 64 << 20, CPUMeasured: true,
 	}, capacity.MinSamples)
 
 	gate := newWingdGate()
@@ -878,7 +878,7 @@ func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedProfile(t, st, "wingd-e2e-hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
+		Duration: 10 * time.Second, PeakCores: 9, SustainedCores: new(9.0), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}, 4)
 
 	gate := newWingdGate()

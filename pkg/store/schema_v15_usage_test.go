@@ -269,11 +269,13 @@ func TestNodeMetricSample_CPUTimeRoundTrips(t *testing.T) {
 	}
 	base := time.Now()
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		Kind: store.MetricCommand, CPUAvailable: true, MemoryAvailable: true,
 		TS: base, CPUMillicores: 2000, MemoryBytes: 1 << 30, CPUTime: 800 * time.Millisecond,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 		TS: base.Add(time.Second), CPUMillicores: 500, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
@@ -283,10 +285,10 @@ func TestNodeMetricSample_CPUTimeRoundTrips(t *testing.T) {
 	if err != nil || len(samples) != 2 {
 		t.Fatalf("ListNodeMetrics = %d samples, %v", len(samples), err)
 	}
-	if !samples[0].OneShot() || samples[0].CPUTime != 800*time.Millisecond {
+	if !samples[0].OneShot() || !samples[0].CPUAvailable || !samples[0].MemoryAvailable || samples[0].CPUTime != 800*time.Millisecond {
 		t.Errorf("first sample = %+v, want a one-shot carrying 800ms of CPU", samples[0])
 	}
-	if samples[1].OneShot() {
+	if samples[1].OneShot() || samples[1].Kind != store.MetricInterval || !samples[1].CPUAvailable || !samples[1].MemoryAvailable {
 		t.Errorf("second sample = %+v, want a sampler tick (no CPU duration)", samples[1])
 	}
 }

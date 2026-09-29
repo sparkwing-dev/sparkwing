@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ type wingdBurnerPipe struct{ sparkwing.Base }
 
 func (wingdBurnerPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "burn", func(ctx context.Context) error {
-		const script = "for i in 0 1 2 3 4 5 6 7; do awk 'BEGIN{s=0;for(i=0;i<20000000;i++)s+=i}' & done; wait"
+		const script = "for i in 0 1; do awk 'BEGIN{s=0;for(i=0;i<20000000;i++)s+=i}' & done; wait"
 		_, err := sparkwing.Exec(ctx, "sh", "-c", script).Run()
 		return err
 	})
@@ -32,7 +31,7 @@ func registerWingdCapacityE2EPipelines() {
 	})
 }
 
-func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
+func TestWingd_EmbeddedBurnerRetainsCommandUsageWithoutLearning(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 1.5s of real work; the fast class runs under -short")
 	}
@@ -51,16 +50,29 @@ func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
 	}
 
 	prof, err := st.GetPipelineProfile(context.Background(), currentProfileKey("wingd-e2e-burner"), "")
-	if err != nil || prof == nil {
-		t.Fatalf("burner profile missing: %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	host := float64(runtime.NumCPU())
-	if prof.PeakCores <= 0 {
-		t.Fatalf("profile peak = %v, want a positive measured peak from the burst", prof.PeakCores)
+	if prof != nil && (prof.SampleCount != 0 || prof.CPUMeasured) {
+		t.Fatalf("embedded estimates qualified as measured profile: %+v", prof)
 	}
-	if prof.PeakCores > host {
-		t.Fatalf("profile peak = %v exceeds host %v; the reap-burst overshoot was not clamped", prof.PeakCores, host)
+	samples, err := st.ListNodeMetrics(t.Context(), "burner-run", "burn")
+	if err != nil {
+		t.Fatal(err)
 	}
+	var commands int
+	for _, sample := range samples {
+		if sample.Kind == store.MetricInterval {
+			t.Fatalf("embedded execution reported exclusive interval: %+v", sample)
+		}
+		if sample.Kind == store.MetricCommand && sample.CPUAvailable && sample.CPUTime > 0 {
+			commands++
+		}
+	}
+	if commands == 0 {
+		t.Fatal("busy subprocess has no retained command CPU measurement")
+	}
+
 }
 
 func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
@@ -72,15 +84,22 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 18.9, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: 10 * time.Second, PeakCores: 18.9, SustainedCores: new(18.9), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}, capacity.MinSamples)
 
 	gate := newWingdGate()
 	wingdE2EGate.Store(gate)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	var runs sync.WaitGroup
+	var released sync.Once
+	release := func() { released.Do(func() { close(gate.release) }) }
+	t.Cleanup(func() { cancel(); release(); runs.Wait(); wingdE2EGate.Store(nil) })
 	runA := make(chan *Result, 1)
+	runs.Add(1)
 	go func() {
-		res, _ := Run(context.Background(), backends, Options{
+		defer runs.Done()
+		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-unpinned",
 			RunID:     "oversized-a",
 			Admission: testWingdAdmission(home, nil),
@@ -98,8 +117,10 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	}
 
 	runB := make(chan *Result, 1)
+	runs.Add(1)
 	go func() {
-		res, _ := Run(context.Background(), backends, Options{
+		defer runs.Done()
+		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-unpinned",
 			RunID:     "oversized-b",
 			Admission: testWingdAdmission(home, nil),
@@ -108,7 +129,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	}()
 	awaitWaiter(t, home, nodeHostRunID("oversized-b", "hold"))
 
-	close(gate.release)
+	release()
 	for _, ch := range []chan *Result{runA, runB} {
 		select {
 		case res := <-ch:

@@ -29,7 +29,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	for i, cpu := range []int64{500, 2000, 1500} {
+	for i, cpu := range []int64{250, 1000, 750} {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 			Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 			TS:            start.Add(time.Duration(i) * 2 * time.Second),
@@ -47,8 +47,8 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 2.0 {
-		t.Errorf("rollup PeakCores = %v, want 2.0 (max sample 2000 millicores)", rollup.PeakCores)
+	if rollup.PeakCores != 1.0 {
+		t.Errorf("rollup PeakCores = %v, want 1.0 (max sample 1000 millicores)", rollup.PeakCores)
 	}
 	if rollup.SampleCount != 1 {
 		t.Errorf("rollup SampleCount = %d, want 1", rollup.SampleCount)
@@ -83,19 +83,19 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
-		TS: start, CPUMillicores: 4000, MemoryBytes: 1 << 30,
+		TS: start, CPUMillicores: 900, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 4}, true, start, start.Add(time.Second))
+	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "A", runCharge{Cores: 1}, true, start, start.Add(time.Second))
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.FloorCores != 4 {
-		t.Errorf("FloorCores = %v, want 4 (ceiling hit escalates the floor to the charge)", rollup.FloorCores)
+	if rollup.FloorCores != 1 {
+		t.Errorf("FloorCores = %v, want 1 (ceiling hit escalates the floor to the charge)", rollup.FloorCores)
 	}
 	if rollup.SampleCount != 0 {
 		t.Errorf("SampleCount = %d, want 0 (contended run does not graduate)", rollup.SampleCount)
@@ -466,7 +466,7 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
-		TS: start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
+		TS: start, CPUMillicores: 1000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -483,8 +483,8 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing for a below-threshold mixed run: %v", err)
 	}
-	if rollup.SampleCount != 1 || rollup.PeakCores != 2.0 {
-		t.Errorf("rollup = samples %d peak %v, want 1 sample and 2.0 peak from the executed node",
+	if rollup.SampleCount != 1 || rollup.PeakCores != 1.0 {
+		t.Errorf("rollup = samples %d peak %v, want 1 sample and 1.0 peak from the executed node",
 			rollup.SampleCount, rollup.PeakCores)
 	}
 }

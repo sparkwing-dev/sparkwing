@@ -233,6 +233,8 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"declared-run-repo",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
+		"metric-kind-and-availability",
+		"nullable-sustained-cpu",
 		"pipeline-scoped-secrets",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
@@ -261,6 +263,8 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"cron-schedule-names-v1",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
+		"metric-kind-and-availability",
+		"nullable-sustained-cpu",
 	}
 	if !reflect.DeepEqual(wouldAdd, want) {
 		t.Fatalf("RequirementsWritingWouldAdd = %v, want %v", wouldAdd, want)

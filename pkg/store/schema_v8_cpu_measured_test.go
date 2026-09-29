@@ -9,7 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
+func TestSchemaV8_UpgradePreservesRowsAndInvalidatesIncompatibleLearning(t *testing.T) {
 	target := storetest.New(t)
 
 	st, err := target.TryOpen()
@@ -66,23 +66,12 @@ func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 	if len(all) != 3 {
 		t.Fatalf("profiles after upgrade = %d, want all 3 seeded rows to survive", len(all))
 	}
-	legacy, err := up.GetPipelineProfile(ctx, "legacy", "")
-	if err != nil || legacy == nil {
-		t.Fatalf("legacy rollup missing after upgrade: %v", err)
+	for _, profile := range all {
+		if profile.PeakCores != 0 || profile.PeakMemoryBytes != 0 || profile.SampleCount != 0 || profile.CPUMeasured || profile.SustainedCores != nil {
+			t.Errorf("incompatible learning survived upgrade: %+v", profile)
+		}
 	}
-	if legacy.PeakCores <= 0 || legacy.SampleCount != 1 {
-		t.Errorf("legacy rollup lost data: %+v", legacy)
-	}
-	if !legacy.CPUMeasured {
-		t.Error("legacy rollup with positive peak should qualify as cpu_measured after upgrade")
-	}
-	zero, err := up.GetPipelineProfile(ctx, "zero-peak", "")
-	if err != nil || zero == nil {
-		t.Fatalf("zero-peak rollup missing after upgrade: %v", err)
-	}
-	if zero.CPUMeasured {
-		t.Error("zero-peak row must stay conservatively unmeasured after upgrade")
-	}
+
 }
 
 func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {

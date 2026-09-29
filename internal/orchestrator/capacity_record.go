@@ -80,6 +80,11 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			}
 			key := sample.TS.Truncate(bucket).UnixNano()
 			total := intervals[key]
+			if sample.CPUMillicores < 0 || sample.MemoryBytes < 0 ||
+				sample.CPUMillicores > math.MaxInt64-total.CPUMillicores || sample.MemoryBytes > math.MaxInt64-total.MemoryBytes {
+				runEligible = false
+				continue
+			}
 			total.Kind = store.MetricInterval
 			total.CPUAvailable = true
 			total.MemoryAvailable = true
