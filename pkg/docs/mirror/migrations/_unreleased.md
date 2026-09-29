@@ -229,6 +229,16 @@ upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
 `store.ErrAccountExists`, detects the refusal. No database migration is
 required.
 
+## Node metric reads are paged
+
+`GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` answers at most 1,000 samples
+unless the request asks for up to `limit=10000`, and sets `next_cursor` while
+more follow. A client that read the whole list in one request passes
+`limit=10000`, which covers every sample a node can hold, or passes each
+`next_cursor` back as `cursor` until the answer carries none. An older
+`sparkwing` binary reading a node with more than 1,000 samples sees only the
+first page. No database migration is required.
+
 ## 60-second minimum billable duration
 
 Drain metered node and trigger claims before deploying the controller that

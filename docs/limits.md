@@ -157,6 +157,9 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Logs, live and archived | the log share, 192 MiB by default | `pkg/store/team_storage.go`, `pkg/logs/log_quota.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
+| Annotations per run | 64 KiB per annotation, 1,000 per run, and 4 MiB per run JSON-encoded, node and step annotations together; past a bound the append answers `413` for size or `429` for count and stores nothing | `pkg/store/store.go` |
+| Metric samples per node | 10,000, about five and a half hours of two-second samples; a later sample answers `429`. Reads come in pages of 1,000 by default and 10,000 at most | `pkg/store/metrics.go` |
+| Pending direct uploads | 100 uncommitted uploads per team, each at least one byte and pending for at most 24 hours; the next reservation answers `429` | `pkg/store/direct_upload.go` |
 | Logs per run | 64 MiB per node and 1 GiB per run on the logs service | `pkg/logs/limits.go` |
 | Log files | the logs service's `--retention`, 30 days with an archive | `cmd/sparkwing-logs/main.go` |
 | Run events past retention | removed with their bytes 30 days after the run finished on a multi-team controller | `pkg/controller/team_storage.go`, `pkg/store/storage_retention.go` |

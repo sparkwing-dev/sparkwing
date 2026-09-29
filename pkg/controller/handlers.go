@@ -2351,6 +2351,10 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.store.AppendNodeAnnotation(r.Context(), runID, nodeID, body.Message); err != nil {
+		if status := runLimitStatus(err); status != 0 {
+			writeError(w, status, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -2483,6 +2487,10 @@ func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.store.AppendStepAnnotation(r.Context(), runID, nodeID, body.StepID, body.Message); err != nil {
+		if status := runLimitStatus(err); status != 0 {
+			writeError(w, status, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}

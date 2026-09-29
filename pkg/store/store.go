@@ -3168,7 +3168,31 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 	return out, nil
 }
 
+// Annotation bounds. Every node and step annotation is also appended to its
+// run's list, so that list is where the per-run bounds hold.
+const (
+	MaxAnnotationBytes    = 64 << 10
+	MaxRunAnnotations     = 1000
+	MaxRunAnnotationBytes = 4 << 20
+)
+
+var (
+	// ErrAnnotationTooLarge refuses one annotation over [MaxAnnotationBytes].
+	ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 KiB")
+	// ErrRunAnnotationLimit refuses an annotation past [MaxRunAnnotations].
+	ErrRunAnnotationLimit = errors.New("store: a run holds at most 1000 annotations")
+	// ErrRunAnnotationBytes refuses an annotation that would take the run's
+	// JSON-encoded annotation list past [MaxRunAnnotationBytes].
+	ErrRunAnnotationBytes = errors.New("store: a run's annotations total at most 4 MiB")
+)
+
+// perf: every append rereads and rewrites the run's whole list, and the
+// node's or step's, so a run's annotations cost O(n^2) bytes written; the
+// bounds above cap that at about 1000 rewrites of at most 4 MiB each.
 func appendRunAnnotation(tx *storeTx, runID, msg string) error {
+	if len(msg) > MaxAnnotationBytes {
+		return ErrAnnotationTooLarge
+	}
 	var blob []byte
 	err := tx.QueryRow(
 		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
@@ -3179,10 +3203,16 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	if len(blob) > 0 {
 		_ = json.Unmarshal(blob, &list)
 	}
+	if len(list) >= MaxRunAnnotations {
+		return ErrRunAnnotationLimit
+	}
 	list = append(list, msg)
 	next, err := json.Marshal(list)
 	if err != nil {
 		return err
+	}
+	if len(next) > MaxRunAnnotationBytes {
+		return ErrRunAnnotationBytes
 	}
 	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
 	return err

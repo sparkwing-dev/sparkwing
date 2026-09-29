@@ -1552,6 +1552,17 @@ unlock.
 
 ### Security
 
+- **controller + store (Breaking):** Annotations and node metric samples are
+  bounded, and node metric reads are paged. See [migration guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An
+  annotation holds at most 64 KiB, and a run at most 1,000 annotations and
+  4 MiB of them JSON-encoded, node and step annotations together; past a bound
+  the append answers `413` for size or `429` for count and stores nothing. A
+  node holds at most 10,000 metric samples, and a later sample answers `429`.
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` now answers one page of
+  samples, 1,000 by default and up to `limit=10000`, with `next_cursor` to
+  pass as `cursor` while more follow; the Go client and the dashboard follow
+  every page.
+
 - **logs:** `DELETE /api/v1/logs/{runID}` takes `logs.delete` or `admin` and
   no longer accepts `logs.write`, so a runner token an editor mints can no
   longer erase its team's run logs. The controller's log-deletion credential,
