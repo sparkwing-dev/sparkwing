@@ -325,6 +325,7 @@ type waitlistedJSON struct {
 	Email        string `json:"email"`
 	Name         string `json:"name"`
 	Reason       string `json:"reason"`
+	Provider     string `json:"provider"`
 	CreatedAt    int64  `json:"created_at"`
 	WaitlistedAt int64  `json:"waitlisted_at"`
 }
@@ -347,14 +348,18 @@ func (s *Server) handleListWaitlist(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "waitlist", err)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": waitlistBody(waiting)})
+}
+
+func waitlistBody(waiting []store.WaitlistedAccount) []waitlistedJSON {
 	out := make([]waitlistedJSON, 0, len(waiting))
 	for _, a := range waiting {
 		out = append(out, waitlistedJSON{
-			ID: a.ID, Email: a.Email, Name: a.Name, Reason: a.Reason,
+			ID: a.ID, Email: a.Email, Name: a.Name, Reason: a.Reason, Provider: a.Provider,
 			CreatedAt: a.CreatedAt.Unix(), WaitlistedAt: a.WaitlistedAt.Unix(),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
+	return out
 }
 
 type approveWaitlistReq struct {
@@ -383,14 +388,14 @@ func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, now := r.Context(), time.Now().UTC()
+	p, _ := PrincipalFromContext(ctx)
 	var approved []store.Account
 	var err error
 	if req.Oldest > 0 {
-		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, now)
+		approved, err = s.store.ApproveOldestWaitlisted(ctx, req.Oldest, p.Name, now)
 	} else {
-		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, now)
+		approved, err = s.store.ApproveWaitlisted(ctx, req.AccountIDs, p.Name, now)
 	}
-	p, _ := PrincipalFromContext(ctx)
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
 		s.logger.Info("signup.approved", "account", a.ID, "by", p.label(), "team", string(a.ActiveTeam))
