@@ -210,8 +210,11 @@ func (s *Store) declaredNode(ctx context.Context, team Team, runID, nodeID strin
 	var doc struct {
 		Nodes []declaredPlanNode `json:"nodes"`
 	}
-	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
+	if len(plan) == 0 {
 		return declaredPlanNode{}, false, nil
+	}
+	if err := json.Unmarshal(plan, &doc); err != nil {
+		return declaredPlanNode{}, false, fmt.Errorf("read run %s's plan: %w", runID, err)
 	}
 	for _, n := range doc.Nodes {
 		if n.ID == nodeID {
