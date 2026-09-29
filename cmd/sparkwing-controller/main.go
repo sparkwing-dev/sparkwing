@@ -156,8 +156,8 @@ func run(args []string) error {
 			"the reason. The budget lives in controller memory, so a restart "+
 			"refills every principal. Zero is unlimited.")
 	shedQueueDepth := fs.Int("shed-queue-depth", 0,
-		"pending-trigger depth past which a new webhook delivery or API "+
-			"submission is shed with 503 and a Retry-After rather than queued. "+
+		"pending-trigger depth of one team past which that team's new webhook "+
+			"deliveries and API submissions are shed with 503 and a Retry-After rather than queued. "+
 			"Zero never sheds.")
 	triggerDedupeWindow := fs.Duration("trigger-dedupe-window", 0,
 		"how long a content-identical API submission answers with the run the "+

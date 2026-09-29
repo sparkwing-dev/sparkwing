@@ -833,7 +833,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		// safety: each run spends one of the team's budget, so a repository
 		// with many subscriptions, or a team with many repositories, cannot
 		// multiply what one delivery or one hour creates.
-		if refusal := s.triggerFloodRefusal(ctx, githubAppFloodKey(in.Team), "github app "+event); refusal != nil {
+		if refusal := s.triggerFloodRefusal(ctx, tenant, githubAppFloodKey(in.Team), "github app "+event); refusal != nil {
 			if !githubAppStartedAny(resp.Runs) {
 				refusal.write(w)
 				return

@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
@@ -156,6 +157,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	res := r.resolveResources(ctx, req)
 	fence, class, refused := r.claimNode(ctx, req, name)
 	if refused != nil {
+		if ctx.Err() != nil {
+			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+		}
 		return r.refuseUnclaimedJob(ctx, req, refused)
 	}
 	// safety: the dispatcher reached here holding the run's trigger claim,
@@ -530,17 +534,46 @@ const MaxDeclaredJobActiveDeadline = 24 * time.Hour
 
 // safety: every refusal is returned, including a controller that does not
 // serve the named-claim route, because the claim is where the credit check
-// lives and an unfenced Job would run on compute nobody paid for.
+// lives and an unfenced Job would run on compute nobody paid for. A 429 or 503
+// with a Retry-After is backpressure rather than a refusal, so the claim waits
+// it out and asks again instead of failing the node.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
 ) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
-	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true, r.cfg.Labels)
-	// safety: only the operator's metered pool may claim it sizes a node to its
-	// cpu class, so an unmetered installation claims the node plainly and gets
-	// the pod shape it always had.
-	if errors.Is(err, store.ErrLockHeld) {
-		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false, r.cfg.Labels)
+	shed := client.NewShedLog(client.ShedWarnInterval)
+	bound := claimRetryBound(req)
+	deadline := time.Now().Add(bound)
+	var n *store.Node
+	var err error
+	for {
+		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true, r.cfg.Labels)
+		// safety: only the operator's metered pool may claim it sizes a node to its
+		// cpu class, so an unmetered installation claims the node plainly and gets
+		// the pod shape it always had.
+		if errors.Is(err, store.ErrLockHeld) {
+			n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false, r.cfg.Labels)
+		}
+		wait, backpressure := client.UnavailableBackoff(err, r.cfg.PollInterval)
+		if !backpressure {
+			break
+		}
+		if time.Now().Add(wait).After(deadline) {
+			err = fmt.Errorf("%w: the controller shed this node's claim for longer than its %s claim wait: %w",
+				errClaimWaitExceeded, bound, err)
+			break
+		}
+		if shed.Due() {
+			r.logger.Warn("k8s: the controller is shedding this node's claim; waiting to claim again",
+				"run_id", req.RunID, "node_id", req.NodeID, "retry_after", wait, "err", err)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return store.NodeClaimFence{}, store.CPUClass{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
@@ -555,14 +588,35 @@ func (r *Runner) claimNode(
 
 const eventClaimRefused = "job_claim_refused"
 
+var errClaimWaitExceeded = errors.New("claim wait exceeded")
+
+// safety: a shed claim waits no longer than the node may wait to be claimed at
+// all, and no longer than its declared timeout, so backpressure that never
+// lifts fails the node rather than holding its run open for a day.
+func claimRetryBound(req runner.Request) time.Duration {
+	bound := req.ClaimWait
+	if bound <= 0 {
+		bound = match.DefaultClaimWait
+	}
+	if req.Node != nil {
+		if timeout := req.Node.TimeoutDuration(); timeout > 0 {
+			bound = min(bound, timeout)
+		}
+	}
+	return bound
+}
+
 // safety: a node another holder took is that holder's to finish, so only the
 // other refusals fail it here; the dispatcher still learns this Job never ran.
 func (r *Runner) refuseUnclaimedJob(ctx context.Context, req runner.Request, refused error) runner.Result {
 	msg := fmt.Sprintf("K8sRunner: the controller refused this node's claim, so no Job was created: %v", refused)
 	if !errors.Is(refused, store.ErrLockHeld) {
 		reason := store.FailureUnknown
-		if errors.Is(refused, store.ErrInsufficientCredits) {
+		switch {
+		case errors.Is(refused, store.ErrInsufficientCredits):
 			reason = store.FailureCreditsExhausted
+		case errors.Is(refused, errClaimWaitExceeded):
+			reason = store.FailureQueueTimeout
 		}
 		r.failNode(ctx, req, msg, reason, eventClaimRefused)
 	}
