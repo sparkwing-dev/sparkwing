@@ -184,9 +184,7 @@ type profileSample struct {
 	S float64 `json:"s,omitempty"`
 }
 
-const profileSchemaCurrent = 4
-
-const profileSchemaOldest = 3
+const profileSchemaCurrent = 5
 
 type profileWindowDoc struct {
 	Schema  int             `json:"schema"`
@@ -349,9 +347,11 @@ func loadProfileMutState(ctx context.Context, tx *storeTx, pipeline, nodeID stri
 		return profileMutState{}, err
 	}
 	st.cpuMeasured = measured != 0
-	if samples, ok := decodeProfileWindow(raw); ok {
-		st.window = samples
+	samples, ok := decodeProfileWindow(raw)
+	if !ok {
+		return profileMutState{}, nil
 	}
+	st.window = samples
 	return st, nil
 }
 
@@ -752,7 +752,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		return nil, err
 	}
 	samples, samplesCurrent := decodeProfileWindow(samplesRaw)
-	if count > 0 && !samplesCurrent {
+	if !samplesCurrent {
 		p50 = 0
 		p99 = 0
 		cores = 0
@@ -765,6 +765,7 @@ func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, er
 		prevPeakMem = 0
 		sustainedCores = 0
 		prevSustained = 0
+		planHash = ""
 	}
 	prof := &PipelineProfile{
 		P50Duration:         time.Duration(p50) * time.Millisecond,
@@ -797,14 +798,8 @@ func decodeProfileWindow(raw []byte) ([]profileSample, bool) {
 		return nil, false
 	}
 	var doc profileWindowDoc
-	if err := json.Unmarshal(raw, &doc); err != nil || len(doc.Samples) == 0 ||
-		doc.Schema < profileSchemaOldest || doc.Schema > profileSchemaCurrent {
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Schema != profileSchemaCurrent {
 		return nil, false
-	}
-	if doc.Schema < profileSchemaCurrent {
-		for i := range doc.Samples {
-			doc.Samples[i].S = doc.Samples[i].C
-		}
 	}
 	return doc.Samples, true
 }
