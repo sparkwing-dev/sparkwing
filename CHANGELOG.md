@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** Return node completion-write errors instead of reporting success
+
 - **metrics:** Reject conflicting readings at the same node timestamp; identical retries remain accepted.
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
