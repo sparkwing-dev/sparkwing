@@ -34,8 +34,10 @@ func TestSpendSourceCredential_IssuesOnePerClaimBeforeItsAttempt(t *testing.T) {
 		t.Fatalf("second ask: err = %v, want ErrSourceCredentialSpent", err)
 	}
 
-	f.mustAccept(t, `{"pipeline":"demo","source":{"depth":0,"tags":true,"submodules":true},"nodes":[`+
-		`{"id":"a","deps":[],"spec_hash":"`+hashA+`"},{"id":"b","deps":[],"spec_hash":"`+hashA+`"}]}`)
+	if _, err := f.accept(plan, `{"pipeline":"demo","source":{"depth":0,"tags":true,"submodules":true},"nodes":[`+
+		`{"id":"a","deps":[],"spec_hash":"`+hashA+`"},{"id":"b","deps":[],"spec_hash":"`+hashA+`"}]}`); err != nil {
+		t.Fatal(err)
+	}
 	a, err := f.authorize(t, f.claimRaw(t, "a", store.ClaimTokenWork), store.ClaimSensitive)
 	if err != nil {
 		t.Fatal(err)
