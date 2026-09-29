@@ -1389,28 +1389,29 @@ func executorNodeChargeFromSnapshot(plan []byte, nodeID string, profile *Pipelin
 	if pin := snapshotNodeResource(plan, nodeID); pin.Cores > 0 || pin.MemoryBytes > 0 {
 		return pin
 	}
+	charge := ExecutorResource{Cores: 1}
 	if profile != nil {
 		if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
 			return ExecutorResource{Cores: profile.PinnedCores, MemoryBytes: profile.PinnedMemoryBytes}
 		}
-		if profile.SampleCount >= 3 && (profile.PeakCores > 0 || profile.CPUMeasured) {
-			cores := profile.SustainedCores
-			if cores <= 0 {
-				cores = profile.PeakCores
-			}
+		if profile.SampleCount >= 3 && profile.SustainedCores != nil && (profile.PeakCores > 0 || profile.CPUMeasured) {
+			cores := *profile.SustainedCores
 			return ExecutorResource{Cores: math.Max(cores, 0.1), MemoryBytes: profile.PeakMemoryBytes}
 		}
-		cores := profile.PrevSustainedCores
-		if cores <= 0 {
-			cores = profile.PrevPeakCores
+		var cores float64
+		if profile.PrevSustainedCores != nil {
+			cores = *profile.PrevSustainedCores
 		}
 		cores = math.Max(cores, 2*profile.FloorCores)
-		memory := max(profile.PrevPeakMemoryBytes, 2*profile.FloorMemoryBytes)
-		if cores > 0 || memory > 0 {
-			return ExecutorResource{Cores: cores, MemoryBytes: memory}
+		charge.MemoryBytes = max(profile.PrevPeakMemoryBytes, 2*profile.FloorMemoryBytes)
+		if profile.PrevSustainedCores != nil || cores > 0 {
+			charge.Cores = math.Max(cores, 0.1)
+		}
+		if profile.SampleCount >= 3 {
+			charge.MemoryBytes = max(profile.PeakMemoryBytes, 2*profile.FloorMemoryBytes)
 		}
 	}
-	return ExecutorResource{Cores: 1}
+	return charge
 }
 
 func snapshotNodeResource(raw []byte, nodeID string) ExecutorResource {

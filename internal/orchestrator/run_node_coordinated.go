@@ -17,14 +17,15 @@ import (
 )
 
 type runNodeConfig struct {
-	coordinated    bool
-	claimed        bool
-	brokeredChild  bool
-	brokerArtifact bool
-	claimFence     store.NodeClaimFence
-	gitcacheURL    string
-	gitcacheToken  string
-	apiSocket      string
+	dedicatedProcess bool
+	coordinated      bool
+	claimed          bool
+	brokeredChild    bool
+	brokerArtifact   bool
+	claimFence       store.NodeClaimFence
+	gitcacheURL      string
+	gitcacheToken    string
+	apiSocket        string
 }
 
 func brokeredExecutionChild(artifact bool) RunNodeOption {

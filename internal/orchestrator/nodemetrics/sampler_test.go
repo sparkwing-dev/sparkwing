@@ -2,6 +2,8 @@ package nodemetrics
 
 import (
 	"context"
+	"flag"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -39,46 +41,11 @@ func (s *captureSink) peakCPU() int64 {
 	defer s.mu.Unlock()
 	var peak int64
 	for _, sm := range s.samples {
-		if sm.CPUMillicores > peak {
+		if sm.CPUAvailable && sm.CPUMillicores > peak {
 			peak = sm.CPUMillicores
 		}
 	}
 	return peak
-}
-
-func (s *captureSink) hasSampleAfter(boundary time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, sample := range s.samples {
-		if sample.TS.After(boundary) {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *captureSink) waitForSampleAfter(ctx context.Context, boundary time.Time) error {
-	for !s.hasSampleAfter(boundary) {
-		select {
-		case <-s.sampleReady:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
-}
-
-const cpuAccountingBurnerEnv = "SPARKWING_NODEMETRICS_CPU_BURNER"
-
-func TestCPUAccountingBurnerProcess(t *testing.T) {
-	if os.Getenv(cpuAccountingBurnerEnv) != "1" {
-		return
-	}
-	var value uint64 = 1
-	for i := 0; i < 25_000_000; i++ {
-		value = value*1664525 + 1013904223
-	}
-	runtime.KeepAlive(value)
 }
 
 func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
@@ -89,7 +56,7 @@ func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 	sink := &captureSink{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	detach := Attach(ctx, sink)
+	detach := Attach(ctx, sink, false)
 
 	burnUntil := time.Now().Add(600 * time.Millisecond)
 	x := 0
@@ -105,71 +72,58 @@ func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 	}
 }
 
-func TestAttach_CountsRawExecChildrenCPU(t *testing.T) {
-	if _, ok := readCPUTime(); !ok {
-		t.Skip("no CPU accounting on this platform")
+func TestSampledChildProcess(t *testing.T) {
+	if flag.Lookup("test.run").Value.String() != "^TestSampledChildProcess$" {
+		t.Skip("subprocess entry point")
+	}
+	done := make(chan struct{})
+	go func() { _, _ = io.Copy(io.Discard, os.Stdin); close(done) }()
+	var value uint64 = 1
+	for {
+		select {
+		case <-done:
+			runtime.KeepAlive(value)
+			return
+		default:
+			value = value*1664525 + 1013904223
+		}
+	}
+}
+
+func TestAttach_CountsLiveRawExecChildCPU(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("native process-tree reader unavailable")
 	}
 	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	sink := &captureSink{sampleReady: make(chan struct{}, 1)}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	detach := Attach(ctx, sink)
-	t.Cleanup(func() {
-		detach()
-		cancel()
-		waitForSamplerStop(t)
-	})
-
+	defer cancel()
+	detach := Attach(ctx, sink, true)
+	defer func() { detach(); waitForSamplerStop(t) }()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSampledChildProcess$")
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = input.Close(); _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	for sink.peakCPU() <= 300 {
-		burnAndReap(t)
-		reapedAt := time.Now()
-		if err := sink.waitForSampleAfter(ctx, reapedAt); err != nil {
-			t.Fatalf("wait for CPU sample after reaping child: %v", err)
+		select {
+		case <-sink.sampleReady:
+		case <-ctx.Done():
+			t.Fatalf("live child CPU peak=%d: %v", sink.peakCPU(), ctx.Err())
 		}
 	}
-	detach()
-	waitForSamplerStop(t)
-
+	if err := input.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
 	if peak := sink.peakCPU(); peak <= 300 {
-		t.Fatalf("peak CPU millicores = %d, want > 300 from raw-exec child burn", peak)
-	}
-}
-
-func burnAndReap(t *testing.T) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCPUAccountingBurnerProcess$")
-	cmd.Env = append(os.Environ(), cpuAccountingBurnerEnv+"=1")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("run CPU burner: %v", err)
-	}
-}
-
-func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
-	base, ok := readCPUTime()
-	if !ok {
-		t.Skip("no CPU accounting on this platform")
-	}
-
-	const (
-		wantChildCPU = 100 * time.Millisecond
-		burnDeadline = 5 * time.Second
-	)
-	var withChild, childCPU time.Duration
-	giveUp := time.Now().Add(burnDeadline)
-	for childCPU < wantChildCPU && time.Now().Before(giveUp) {
-		burnAndReap(t)
-		withChild, _ = readCPUTime()
-		childCPU = withChild - base
-	}
-	if childCPU < wantChildCPU {
-		t.Fatalf("reaped children raised reading by %s over %s, want at least %s via RUSAGE_CHILDREN", childCPU, burnDeadline, wantChildCPU)
-	}
-
-	AddReportedChildCPU(childCPU)
-	reconciled, _ := readCPUTime()
-	if reconciled >= withChild-childCPU/2 {
-		t.Fatalf("reading after reporting = %s, want the child's %s subtracted back out", reconciled, childCPU)
+		t.Fatalf("valid live child CPU peak=%d millicores, want >300", peak)
 	}
 }
 
@@ -178,7 +132,7 @@ func TestAttach_ReportsMemory(t *testing.T) {
 	memoryReady := make(chan struct{})
 	sink := &captureSink{memoryReady: memoryReady}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	detach := Attach(ctx, sink)
+	detach := Attach(ctx, sink, false)
 	t.Cleanup(func() {
 		detach()
 		cancel()

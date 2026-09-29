@@ -194,11 +194,10 @@ func fmtCPUCells(p store.PipelineProfile) string {
 }
 
 func fmtCPUChargeCell(p store.PipelineProfile) string {
-	charge := p.SustainedCores
-	if charge == 0 {
-		charge = p.PeakCores
+	if p.SustainedCores == nil {
+		return "unknown"
 	}
-	return fmt.Sprintf("%.1f", charge)
+	return fmt.Sprintf("%.1f", *p.SustainedCores)
 }
 
 func fmtMemCells(p store.PipelineProfile) string {

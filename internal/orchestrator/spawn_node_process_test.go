@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	goruntime "runtime"
 	"strings"
@@ -245,8 +246,8 @@ func TestNodeSpawnHandler_CancelledParentClosesTheChildRow(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "cancelled before terminal") {
-			t.Fatalf("Spawn error = %v, want the cancelled-before-terminal shape", err)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Spawn error = %v, want context cancellation", err)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Spawn did not return after cancellation")

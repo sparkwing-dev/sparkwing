@@ -60,7 +60,7 @@ func RunNodeCommand(args []string) error {
 	defer stop()
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
-	var runOpts []RunNodeOption
+	runOpts := []RunNodeOption{func(c *runNodeConfig) { c.dedicatedProcess = true }}
 	if apiSocket != "" {
 		runOpts = append(runOpts, OverAPISocket(apiSocket))
 		token = ""

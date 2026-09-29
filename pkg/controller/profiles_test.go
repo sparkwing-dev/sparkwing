@@ -43,6 +43,7 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	base := time.Now()
 	for i := range 3 {
 		if err := st.AddNodeMetricSample(ctx, "run-1", "node-1", store.MetricSample{
+			Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
 		}); err != nil {
 			t.Fatal(err)
@@ -106,6 +107,7 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	base := time.Now()
 	for i := range 2 {
 		_ = st.AddNodeMetricSample(ctx, "run-2", "node-1", store.MetricSample{
+			Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 2000, MemoryBytes: 2 << 30,
 		})
 	}
@@ -160,5 +162,63 @@ func TestGetPipelineProfile_RoundTripsThroughController(t *testing.T) {
 	}
 	if got.PeakCores != 3 || got.PinnedCores != 3 {
 		t.Errorf("profile round trip lost data: %+v", got)
+	}
+}
+
+func TestFinishRun_RequiresUsableIntervalEvidence(t *testing.T) {
+	good := store.MetricSample{Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true, CPUMillicores: 500, MemoryBytes: 4096}
+	for _, tc := range []struct {
+		name     string
+		middle   store.MetricSample
+		eligible bool
+	}{
+		{"valid", good, true},
+		{"command", store.MetricSample{Kind: store.MetricCommand, CPUAvailable: true, MemoryAvailable: true, CPUTime: 120 * time.Second, CPUMillicores: 60000, MemoryBytes: 1 << 30}, true},
+		{"unknown", store.MetricSample{CPUMillicores: 2000, MemoryBytes: 8192}, false},
+		{"estimate", store.MetricSample{Kind: store.MetricEstimate, CPUAvailable: true, MemoryAvailable: true, CPUMillicores: 2000, MemoryBytes: 8192}, false},
+		{"CPU gap", store.MetricSample{Kind: store.MetricInterval, MemoryAvailable: true, MemoryBytes: 4096}, false},
+		{"memory gap", store.MetricSample{Kind: store.MetricInterval, CPUAvailable: true, CPUMillicores: 500}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			ctx := context.Background()
+			start := time.Now().Add(-time.Minute)
+			if err := st.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: start}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.CreateNode(ctx, store.Node{RunID: "r", NodeID: "n", Status: "running"}); err != nil {
+				t.Fatal(err)
+			}
+			for i, sample := range []store.MetricSample{good, tc.middle, good} {
+				sample.TS = start.Add(time.Duration(i) * 2 * time.Second)
+				if err := st.AddNodeMetricSample(ctx, "r", "n", sample); err != nil {
+					t.Fatal(err)
+				}
+			}
+			srv := httptest.NewServer(controller.New(st, nil).Handler())
+			defer srv.Close()
+			if err := client.New(srv.URL, nil).FinishRun(ctx, "r", "success", ""); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"n", ""} {
+				profile, err := st.GetPipelineProfile(ctx, "p", id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !tc.eligible {
+					if profile != nil {
+						t.Errorf("%q incomplete evidence qualified: %+v", id, profile)
+					}
+					continue
+				}
+				if profile == nil || profile.SampleCount != 1 || !profile.CPUMeasured || profile.PeakCores != 0.5 || profile.PeakMemoryBytes != 4096 || profile.SustainedCores != nil {
+					t.Errorf("%q peak policy changed: %+v", id, profile)
+				}
+			}
+		})
 	}
 }

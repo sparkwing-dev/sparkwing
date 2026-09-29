@@ -282,6 +282,9 @@ func RunNodeOnce(
 	}
 
 	r := NewNodeExecutor(backends)
+	if cfg.dedicatedProcess {
+		r.processOwnerRunID, r.processOwnerNodeID = runID, nodeID
+	}
 	// safety: this process is the only thing that can serve a SpawnNode
 	// call in the node it is about to run. The dispatcher's handler
 	// splices the child into a live plan object that exists only in the
@@ -359,7 +362,7 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
-	var runOpts []RunNodeOption
+	runOpts := []RunNodeOption{func(c *runNodeConfig) { c.dedicatedProcess = true }}
 	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
 	if brokeredChild {
 		capability, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))

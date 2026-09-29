@@ -70,10 +70,6 @@ func seedSecret(t *testing.T, st *store.Store, name, value, pipeline string, sha
 	}
 }
 
-// The whole controller conversation a trigger-handling runner has, in
-// order. Every step runs on the documented runner scope set, so a route
-// that regains an `admin` requirement fails this test rather than the
-// operator's first pipeline.
 func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -185,9 +181,6 @@ func TestRunnerScopes_DocumentedSetCompletesARunWithoutAdmin(t *testing.T) {
 	}
 }
 
-// Warm dispatch opens and closes the executor offer round from the process
-// holding the run's trigger claim, so the three readiness routes answer that
-// claim and refuse every other bearer of the same scope set.
 func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -237,10 +230,6 @@ func TestRunnerScopes_TriggerHolderRunsTheOfferRound(t *testing.T) {
 	}
 }
 
-// A pipeline that declares a concurrency group or a memoized node moves its
-// slot from the process holding the run's claim, on the documented runner scope
-// set. Another bearer of the same scopes reaches none of it, and the two
-// cross-run routes stay admin.
 func TestRunnerScopes_ConcurrencySlotFollowsTheRunClaim(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
@@ -1068,7 +1057,7 @@ func TestRunnerScopes_CoordinationRoutesRunOnATriggerClaim(t *testing.T) {
 		}},
 		{"fold the run's measurement into the profile", func() error {
 			return c.RecordProfileObservation(ctx, "deploy", "", store.ProfileObservation{
-				Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+				Duration: time.Minute, PeakCores: 2, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 			})
 		}},
 		{"record that the run was contended", func() error { return c.RecordContention(ctx, "deploy") }},

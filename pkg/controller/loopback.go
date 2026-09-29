@@ -644,6 +644,7 @@ func (l *Loopback) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		CPUMillicores: body.CPUMillicores,
 		MemoryBytes:   body.MemoryBytes,
 		CPUTime:       time.Duration(body.CPUTimeNanos),
+		Kind:          body.Kind, CPUAvailable: body.CPUAvailable, MemoryAvailable: body.MemoryAvailable,
 	}); err != nil {
 		writeStateError(w, err)
 		return
@@ -1327,6 +1328,7 @@ func (l *Loopback) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) 
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
+			Kind:          s.Kind, CPUAvailable: s.CPUAvailable, MemoryAvailable: s.MemoryAvailable,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"points": points})

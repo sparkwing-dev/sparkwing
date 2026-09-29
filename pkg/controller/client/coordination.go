@@ -77,15 +77,15 @@ func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 }
 
 type profileObservationBody struct {
-	DurationNanos    int64   `json:"duration_nanos,omitempty"`
-	PeakCores        float64 `json:"peak_cores,omitempty"`
-	PeakMemoryBytes  int64   `json:"peak_memory_bytes,omitempty"`
-	SustainedCores   float64 `json:"sustained_cores,omitempty"`
-	CPUMeasured      bool    `json:"cpu_measured,omitempty"`
-	PlanHash         string  `json:"plan_hash,omitempty"`
-	Contended        bool    `json:"contended,omitempty"`
-	FloorCores       float64 `json:"floor_cores,omitempty"`
-	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
+	DurationNanos    int64    `json:"duration_nanos,omitempty"`
+	PeakCores        float64  `json:"peak_cores,omitempty"`
+	PeakMemoryBytes  int64    `json:"peak_memory_bytes,omitempty"`
+	SustainedCores   *float64 `json:"sustained_cores,omitempty"`
+	CPUMeasured      bool     `json:"cpu_measured,omitempty"`
+	PlanHash         string   `json:"plan_hash,omitempty"`
+	Contended        bool     `json:"contended,omitempty"`
+	FloorCores       float64  `json:"floor_cores,omitempty"`
+	FloorMemoryBytes int64    `json:"floor_memory_bytes,omitempty"`
 }
 
 // RecordContention marks that a run of this pipeline was throttled by host
@@ -137,10 +137,13 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	var body struct {
 		Points []struct {
-			TS            string `json:"ts"`
-			CPUMillicores int64  `json:"cpu_millicores"`
-			MemoryBytes   int64  `json:"memory_bytes"`
-			CPUTimeNanos  int64  `json:"cpu_time_nanos"`
+			TS              string           `json:"ts"`
+			CPUMillicores   int64            `json:"cpu_millicores"`
+			MemoryBytes     int64            `json:"memory_bytes"`
+			CPUTimeNanos    int64            `json:"cpu_time_nanos"`
+			Kind            store.MetricKind `json:"kind"`
+			CPUAvailable    bool             `json:"cpu_available"`
+			MemoryAvailable bool             `json:"memory_available"`
 		} `json:"points"`
 	}
 	if err := c.getJSON(ctx, u, &body); err != nil {
@@ -157,6 +160,7 @@ func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]s
 			CPUMillicores: p.CPUMillicores,
 			MemoryBytes:   p.MemoryBytes,
 			CPUTime:       time.Duration(p.CPUTimeNanos),
+			Kind:          p.Kind, CPUAvailable: p.CPUAvailable, MemoryAvailable: p.MemoryAvailable,
 		})
 	}
 	return out, nil

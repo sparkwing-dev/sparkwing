@@ -102,6 +102,14 @@ func TestResetPipelineProfile_KeepsPin(t *testing.T) {
 	if prof.SampleCount != 0 || prof.PeakCores != 0 {
 		t.Errorf("learned data should be cleared: samples=%d peak=%v", prof.SampleCount, prof.PeakCores)
 	}
+	var absent int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_profiles
+ WHERE pipeline='pinned' AND sustained_cores IS NULL AND prev_sustained_cores IS NULL`).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if absent != 1 {
+		t.Fatal("reset retained a sustained measurement in storage")
+	}
 }
 
 func TestResetAllProfiles_ClearsEverythingKeepingPins(t *testing.T) {

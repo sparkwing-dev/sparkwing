@@ -11,7 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
+func TestProfileUpgrade_DiscardsLegacyDerivedCosts(t *testing.T) {
 	target := storetest.New(t)
 
 	st, err := target.TryOpen()
@@ -29,12 +29,18 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed legacy node row: %v", err)
 	}
+	for _, node := range []string{"", "node-a"} {
+		if err := st.SetProfilePin(ctx, "legacy", node, 7, 8192); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := st.DB().Exec(`ALTER TABLE pipeline_profiles DROP COLUMN sustained_cores`); err != nil {
 		t.Fatalf("drop sustained_cores: %v", err)
 	}
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
 		t.Fatalf("reset version to 13: %v", err)
 	}
+
 	deleteFleetRequirements(t, st.DB())
 	if v := readSchemaVersion(t, st.DB()); v != 13 {
 		t.Fatalf("seeded version = %d, want 13", v)
@@ -56,24 +62,21 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	if !hasColumn(t, up, "pipeline_profiles", "sustained_cores") {
 		t.Fatal("sustained_cores should be present after upgrade")
 	}
-	for _, tc := range []struct {
-		node string
-		want float64
-	}{{"", 3}, {"node-a", 2}} {
-		prof, err := up.GetPipelineProfile(ctx, "legacy", tc.node)
+	for _, node := range []string{"", "node-a"} {
+		prof, err := up.GetPipelineProfile(ctx, "legacy", node)
 		if err != nil || prof == nil {
-			t.Fatalf("legacy row %q missing after upgrade: %v", tc.node, err)
+			t.Fatalf("legacy row %q missing: %v", node, err)
 		}
-		if prof.SustainedCores != tc.want {
-			t.Errorf("row %q SustainedCores = %v, want its own peak %v", tc.node, prof.SustainedCores, tc.want)
+		if prof.PinnedCores != 7 || prof.PinnedMemoryBytes != 8192 {
+			t.Fatalf("legacy row %q lost its explicit pin: %+v", node, prof)
 		}
-		if prof.PeakCores != tc.want {
-			t.Errorf("row %q PeakCores = %v, want %v unchanged by the upgrade", tc.node, prof.PeakCores, tc.want)
+		if prof.SustainedCores != nil || prof.PeakCores != 0 || prof.SampleCount != 0 {
+			t.Fatalf("legacy row %q retained unverified costs: %+v", node, prof)
 		}
 	}
 }
 
-func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
+func TestProfileWindow_DiscardsSchemaThreeSamples(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -104,7 +107,7 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	}
 
 	if err := st.RecordProfileObservation(ctx, "legacy", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: time.Second, PeakCores: 1, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("fold fresh observation: %v", err)
 	}
@@ -112,15 +115,15 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SampleCount != 4 {
-		t.Fatalf("SampleCount = %d, want the 3 carried samples plus the fresh one", prof.SampleCount)
+	if prof.SampleCount != 1 {
+		t.Fatalf("SampleCount = %d, want only the fresh observation", prof.SampleCount)
 	}
-	if prof.SustainedCores != 4 {
-		t.Errorf("SustainedCores = %v, want 4 (carried samples priced at their peaks)", prof.SustainedCores)
+	if prof.SustainedCores == nil || *prof.SustainedCores != 1 {
+		t.Errorf("SustainedCores = %v, want the fresh observed one core", prof.SustainedCores)
 	}
 }
 
-func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
+func TestProfileWindow_MissingSustainedRemainsUnknown(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -129,7 +132,7 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 	ctx := context.Background()
 
 	if err := st.RecordProfileObservation(ctx, "cluster", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 2, SustainedCores: 2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: time.Second, PeakCores: 2, SustainedCores: new(float64(2)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("seed carried sample: %v", err)
 	}
@@ -145,15 +148,15 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SustainedCores != 10 {
-		t.Errorf("SustainedCores = %v, want 10 (a sustained-less writer stores its peak)", prof.SustainedCores)
+	if prof.SustainedCores != nil {
+		t.Errorf("SustainedCores = %v, want unknown for a window with missing sustained observations", prof.SustainedCores)
 	}
 	if prof.PeakCores != 10 {
 		t.Errorf("PeakCores = %v, want 10", prof.PeakCores)
 	}
 }
 
-func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) {
+func TestProfileUpgrade_DiscardsLegacyWindowAndCarry(t *testing.T) {
 	target := storetest.New(t)
 	st, err := target.TryOpen()
 	if err != nil {
@@ -189,6 +192,7 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
 		t.Fatalf("reset version to 13: %v", err)
 	}
+
 	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
@@ -202,15 +206,12 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil || prof == nil {
 		t.Fatalf("legacy row missing after upgrade: %v", err)
 	}
-	if prof.SustainedCores != 6 {
-		t.Errorf("SustainedCores = %v, want the carried 6.0 peak", prof.SustainedCores)
-	}
-	if prof.PrevSustainedCores != 4 {
-		t.Errorf("PrevSustainedCores = %v, want the carried 4.0 prev peak", prof.PrevSustainedCores)
+	if prof.SustainedCores != nil || prof.PrevSustainedCores != nil || prof.SampleCount != 0 {
+		t.Fatalf("legacy measurements acquired trusted presence: %+v", prof)
 	}
 
 	if err := up.RecordProfileObservation(ctx, "legacy", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 6, SustainedCores: 1, PeakMemoryBytes: 1 << 30,
+		Duration: time.Second, PeakCores: 6, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 30,
 		CPUMeasured: true, PlanHash: "A",
 	}); err != nil {
 		t.Fatalf("fold after upgrade: %v", err)
@@ -219,12 +220,12 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil || after == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if after.SustainedCores != 6 {
-		t.Errorf("SustainedCores = %v, want 6 (carried samples still priced at their peaks)", after.SustainedCores)
+	if after.SustainedCores == nil || *after.SustainedCores != 1 || after.SampleCount != 1 {
+		t.Fatalf("fresh observation mixed with legacy history: %+v", after)
 	}
 }
 
-func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
+func TestProfileUpgrade_ReopenPreservesCurrentSustained(t *testing.T) {
 	target := storetest.New(t)
 	st, err := target.TryOpen()
 	if err != nil {
@@ -232,14 +233,10 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	}
 	ctx := context.Background()
 	if err := st.RecordProfileObservation(ctx, "measured", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 6, SustainedCores: 2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: time.Second, PeakCores: 6, SustainedCores: new(float64(2)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("seed measured row: %v", err)
 	}
-	if _, err := st.DB().Exec(`DELETE FROM sparkwing_schema_version WHERE version >= 14`); err != nil {
-		t.Fatalf("rewind version stamp: %v", err)
-	}
-	deleteFleetRequirements(t, st.DB())
 	_ = st.Close()
 
 	up, err := target.TryOpen()
@@ -252,8 +249,8 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SustainedCores != 2 {
-		t.Errorf("SustainedCores = %v, want the measured 2.0 preserved across a replayed backfill", prof.SustainedCores)
+	if *prof.SustainedCores != 2 {
+		t.Errorf("SustainedCores = %v, want the measured 2.0 preserved across reopening", prof.SustainedCores)
 	}
 }
 
@@ -267,14 +264,14 @@ func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-			Duration: time.Second, PeakCores: 8, SustainedCores: 2,
+			Duration: time.Second, PeakCores: 8, SustainedCores: new(float64(2)),
 			PeakMemoryBytes: 1 << 30, CPUMeasured: true, PlanHash: "A",
 		}); err != nil {
 			t.Fatalf("seed observation %d: %v", i, err)
 		}
 	}
 	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 1, SustainedCores: 1,
+		Duration: time.Second, PeakCores: 1, SustainedCores: new(float64(1)),
 		PeakMemoryBytes: 1 << 30, CPUMeasured: true, PlanHash: "B",
 	}); err != nil {
 		t.Fatalf("fold structural change: %v", err)
@@ -284,7 +281,7 @@ func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.PrevSustainedCores != 2 {
+	if *prof.PrevSustainedCores != 2 {
 		t.Errorf("PrevSustainedCores = %v, want the predecessor's 2.0 charge", prof.PrevSustainedCores)
 	}
 	if prof.PrevPeakCores != 8 {
@@ -302,13 +299,13 @@ func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testin
 
 	for i := 0; i < 19; i++ {
 		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-			Duration: time.Second, PeakCores: 6, SustainedCores: 2, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+			Duration: time.Second, PeakCores: 6, SustainedCores: new(float64(2)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 		}); err != nil {
 			t.Fatalf("seed observation %d: %v", i, err)
 		}
 	}
 	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 40, SustainedCores: 30, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: time.Second, PeakCores: 40, SustainedCores: new(float64(30)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("seed freak run: %v", err)
 	}
@@ -317,7 +314,7 @@ func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testin
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SustainedCores != 2 {
+	if *prof.SustainedCores != 2 {
 		t.Errorf("SustainedCores = %v, want 2 (p95 across runs drops the freak run)", prof.SustainedCores)
 	}
 	if prof.PeakCores != 6 {
@@ -335,7 +332,7 @@ func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
 
 	for i, sustained := range []float64{1, 5, 3} {
 		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-			Duration: time.Second, PeakCores: 9, SustainedCores: sustained,
+			Duration: time.Second, PeakCores: 9, SustainedCores: new(sustained),
 			PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 		}); err != nil {
 			t.Fatalf("seed observation %d: %v", i, err)
@@ -345,7 +342,7 @@ func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SustainedCores != 5 {
+	if *prof.SustainedCores != 5 {
 		t.Errorf("SustainedCores = %v, want 5 (p95 of 1, 5, 3)", prof.SustainedCores)
 	}
 	if prof.PeakCores != 9 {

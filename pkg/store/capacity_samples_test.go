@@ -14,9 +14,9 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 	ctx := context.Background()
 
 	for _, obs := range []store.ProfileObservation{
-		{Duration: 10 * time.Second, PeakCores: 2.0, SustainedCores: 1.0, PeakMemoryBytes: 1 << 30},
-		{Duration: 20 * time.Second, PeakCores: 4.0, SustainedCores: 3.0, PeakMemoryBytes: 2 << 30},
-		{Duration: 30 * time.Second, PeakCores: 8.0, SustainedCores: 5.0, PeakMemoryBytes: 3 << 30},
+		{Duration: 10 * time.Second, PeakCores: 2.0, SustainedCores: new(float64(1.0)), PeakMemoryBytes: 1 << 30},
+		{Duration: 20 * time.Second, PeakCores: 4.0, SustainedCores: new(float64(3.0)), PeakMemoryBytes: 2 << 30},
+		{Duration: 30 * time.Second, PeakCores: 8.0, SustainedCores: new(float64(5.0)), PeakMemoryBytes: 3 << 30},
 	} {
 		if err := st.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 			t.Fatalf("RecordProfileObservation: %v", err)
@@ -33,7 +33,7 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 	if samples[0].Duration != 10*time.Second || samples[2].Duration != 30*time.Second {
 		t.Fatalf("window is not oldest-first: %+v", samples)
 	}
-	if samples[2].SustainedCores != 5.0 || samples[2].PeakCores != 8.0 {
+	if *samples[2].SustainedCores != 5.0 || samples[2].PeakCores != 8.0 {
 		t.Errorf("newest sample = %+v, want peak 8 sustained 5", samples[2])
 	}
 	if samples[1].PeakMemoryBytes != 2<<30 {
@@ -49,7 +49,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 		if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
 			Duration:        time.Duration(i) * time.Second,
 			PeakCores:       float64(i),
-			SustainedCores:  float64(i) / 2,
+			SustainedCores:  new(float64(i) / 2),
 			PeakMemoryBytes: int64(i) << 20,
 		}); err != nil {
 			t.Fatal(err)
@@ -68,10 +68,10 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 	sustained := make([]float64, len(samples))
 	mems := make([]float64, len(samples))
 	for i, s := range samples {
-		sustained[i] = s.SustainedCores
+		sustained[i] = *s.SustainedCores
 		mems[i] = float64(s.PeakMemoryBytes)
 	}
-	if got := store.NearestRankPercentile(sustained, 0.95); got != prof.SustainedCores {
+	if got := store.NearestRankPercentile(sustained, 0.95); got != *prof.SustainedCores {
 		t.Errorf("recomputed sustained p95 = %v, stored SustainedCores = %v", got, prof.SustainedCores)
 	}
 	if got := int64(store.NearestRankPercentile(mems, 0.95)); got != prof.PeakMemoryBytes {
@@ -82,7 +82,7 @@ func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 	if idx < 0 || idx >= len(samples) {
 		t.Fatalf("NearestRankIndex = %d, out of range for %d samples", idx, len(samples))
 	}
-	if samples[idx].SustainedCores != prof.SustainedCores {
+	if *samples[idx].SustainedCores != *prof.SustainedCores {
 		t.Errorf("selected sample %d has sustained %v, charge is %v",
 			idx, samples[idx].SustainedCores, prof.SustainedCores)
 	}

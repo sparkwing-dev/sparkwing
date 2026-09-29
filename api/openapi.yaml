@@ -2767,7 +2767,7 @@ paths:
                 duration_nanos: {type: integer, format: int64}
                 peak_cores: {type: number}
                 peak_memory_bytes: {type: integer, format: int64}
-                sustained_cores: {type: number}
+                sustained_cores: {type: number, nullable: true, description: "Omitted or null means unknown; zero is an observed zero."}
                 cpu_measured: {type: boolean}
                 plan_hash: {type: string}
                 contended: {type: boolean}
@@ -4449,10 +4449,15 @@ components:
       x-sparkwing-go-type: pkg/controller.metricSample
       type: object
       description: |
-        One resource reading for a node. A zero `cpu_time_nanos` is a
-        sampler tick; a nonzero one is a single command's measurement.
+        A node interval, command exit report, or shared-process estimate.
+        An omitted kind denotes unknown historical evidence. Availability is
+        independent for CPU and memory; unavailable values are not measured zero.
+        Command CPU time may be zero and does not identify interval samples.
       properties:
         ts: {type: string, format: date-time}
+        kind: {type: string, enum: [interval, command, estimate]}
+        cpu_available: {type: boolean, default: false}
+        memory_available: {type: boolean, default: false}
         cpu_millicores: {type: integer, format: int64}
         memory_bytes: {type: integer, format: int64}
         cpu_time_nanos: {type: integer, format: int64}

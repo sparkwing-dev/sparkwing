@@ -59,8 +59,10 @@ var localExecutorHost = sync.OnceValue(func() string {
 })
 
 type NodeExecutor struct {
-	backends Backends
-	labels   []string
+	processOwnerRunID  string
+	processOwnerNodeID string
+	backends           Backends
+	labels             []string
 
 	spawn runner.Runner
 }
@@ -125,8 +127,13 @@ type stateMetricsSink struct {
 }
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
+	kind := store.MetricInterval
+	if sample.Estimated {
+		kind = store.MetricEstimate
+	}
 	return s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
-		TS:            sample.TS,
+		TS:   sample.TS,
+		Kind: kind, CPUAvailable: sample.CPUAvailable, MemoryAvailable: sample.MemoryAvailable,
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
 	})
@@ -264,7 +271,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 		backend: r.backends.State,
 		runID:   runID,
 		nodeID:  node.ID(),
-	})
+	}, r.processOwnerRunID == runID && r.processOwnerNodeID == node.ID())
 	defer func() {
 		detachSampler()
 		stopSampler()
@@ -282,12 +289,12 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
 	nodeCtx = sparkwing.WithToolSlotProvider(nodeCtx, r.toolSlotProvider(runID, node.ID(), delegate))
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
-		nodemetrics.AddReportedChildCPU(s.CPUTime)
 		_ = r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
 			TS:            time.Now(),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTime:       s.CPUTime,
+			Kind:          store.MetricCommand, CPUAvailable: true, MemoryAvailable: true,
 		})
 	})
 

@@ -729,14 +729,21 @@ const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MeteringFree
 const MeteringPaid
 const MeteringUnknown NodeMetering = iota
+const MetricCommand MetricKind = "command"
+const MetricEstimate MetricKind = "estimate"
+const MetricInterval MetricKind = "interval"
+type MetricKind string
 type MetricSample struct {
-	TS            time.Time
-	CPUMillicores int64
-	MemoryBytes   int64
-
-	CPUTime time.Duration
+	TS              time.Time
+	Kind            MetricKind
+	CPUAvailable    bool
+	MemoryAvailable bool
+	CPUMillicores   int64
+	MemoryBytes     int64
+	CPUTime         time.Duration
 }
 func (m MetricSample) OneShot() bool
+func (m MetricSample) Validate() error
 const MicroCreditsPerCredit = 1_000_000
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32
@@ -910,7 +917,7 @@ type PipelineProfile struct {
 	PeakCores       float64
 	PeakMemoryBytes int64
 
-	SustainedCores float64
+	SustainedCores *float64
 	SampleCount    int
 
 	CPUP50 float64
@@ -939,8 +946,7 @@ type PipelineProfile struct {
 
 	PrevPeakCores       float64
 	PrevPeakMemoryBytes int64
-
-	PrevSustainedCores float64
+	PrevSustainedCores  *float64
 }
 const PlacementFallback = "fallback"
 const PlacementNone = "none"
@@ -952,7 +958,7 @@ type ProfileObservation struct {
 	PeakCores       float64
 	PeakMemoryBytes int64
 
-	SustainedCores float64
+	SustainedCores *float64
 
 	CPUMeasured bool
 
@@ -973,7 +979,7 @@ type ProfileResetSummary struct {
 type ProfileSample struct {
 	Duration        time.Duration
 	PeakCores       float64
-	SustainedCores  float64
+	SustainedCores  *float64
 	PeakMemoryBytes int64
 }
 const QueueStateApprovalPending = "approval_pending"

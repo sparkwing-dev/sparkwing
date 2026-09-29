@@ -1064,7 +1064,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 49
+const expectedSchemaVersion = 51
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1726,6 +1726,13 @@ func (s *Store) applyVersionSQLite(ctx context.Context, version int) error {
 		return fmt.Errorf("begin migration v%d: %w", version, err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var applied int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sparkwing_schema_version WHERE version = ?`, version).Scan(&applied); err != nil {
+		return fmt.Errorf("inspect migration v%d: %w", version, err)
+	}
+	if applied != 0 {
+		return nil
+	}
 	if err := applyMigrationSQLite(ctx, tx, version); err != nil {
 		return fmt.Errorf("apply migration v%d: %w", version, err)
 	}
@@ -1837,6 +1844,8 @@ var migrationRequirements = map[int][]string{
 	33: {cronScheduleNameRequirement},
 	34: {cronScheduleNameRequirement},
 	48: {pipelineScopedSecretsRequirement, declaredRunRepoRequirement},
+	50: {"nullable-sustained-cpu"},
+	51: {"metric-kind-and-availability"},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -1988,6 +1997,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyRepoGrantsNothingMigrationSQLite(ctx, tx)
 	case 49:
 		return ensureColumnsSQLite(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
+	case 50:
+		return migrateNullableSustainedCPU(ctx, tx)
+	case 51:
+		return ensureColumnsSQLite(ctx, tx, "node_metrics", metricAvailabilityColumns)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2342,6 +2355,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyRepoGrantsNothingMigrationPostgres(ctx, tx)
 	case 49:
 		return addColumnsTx(ctx, tx, "nodes", nodeClaimTokenPrefixCols)
+	case 50:
+		return migrateNullableSustainedCPU(ctx, tx)
+	case 51:
+		return addColumnsTx(ctx, tx, "node_metrics", metricAvailabilityColumns)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -4182,10 +4199,9 @@ type Node struct {
 	// span that process existed for, spawn to reap. They are written by
 	// a runner that supervised a process of its own, and stay zero for a
 	// node executed anywhere else -- a Kubernetes pod, a node run inside
-	// the dispatcher; zero means absent, not measured-as-nothing. Exact
-	// where the per-interval sampler is not: a node shorter than one
-	// sampling interval has no metric samples at all and still reports
-	// what it cost here.
+	// the dispatcher. These fields do not distinguish absent measurements
+	// from measured zero. Kernel exit RSS is separate from sampled concurrent
+	// process-tree RSS.
 	//
 	// ProcessWallNanos is the denominator CPUNanos belongs over. It is
 	// wider than FinishedAt.Sub(StartedAt), which the node stamps from
@@ -4463,10 +4479,9 @@ func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, mani
 	return fencedRows(res, fenced)
 }
 
-// NodeUsage is the kernel's exit accounting for one process that
-// executed a node: CPUTime is user plus system time across that process
-// tree, MaxRSSBytes its peak resident set size, and Wall the span it
-// existed for, spawn to reap.
+// NodeUsage holds kernel exit accounting for a process that executed a node.
+// CPUTime is kernel-reported user plus system time. MaxRSSBytes is the kernel's
+// maximum RSS, not simultaneous summed tree memory. Wall spans spawn to reap.
 type NodeUsage struct {
 	CPUTime     time.Duration
 	MaxRSSBytes int64
@@ -4485,12 +4500,15 @@ type NodeUsage struct {
 // once: an auto-retry runs a fresh process per attempt, and the machine
 // paid for every one of them, so CPU and wall accumulate. Peak RSS takes
 // the high-water instead, since the attempts did not hold their peaks at
-// the same time. A non-positive figure contributes nothing, and zero
-// stays the value every reader treats as absent.
+// the same time. Negative figures are rejected. Zero remains indistinguishable
+// from unavailable usage in these columns.
 func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error {
-	cpuNanos := max(int64(u.CPUTime), 0)
-	wallNanos := max(int64(u.Wall), 0)
-	maxRSSBytes := max(u.MaxRSSBytes, 0)
+	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
+		return fmt.Errorf("node usage requires nonnegative CPU time, wall time and peak RSS")
+	}
+	cpuNanos := int64(u.CPUTime)
+	wallNanos := int64(u.Wall)
+	maxRSSBytes := u.MaxRSSBytes
 	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
 UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,

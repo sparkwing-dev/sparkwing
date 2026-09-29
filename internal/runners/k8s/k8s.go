@@ -721,7 +721,7 @@ func (r *Runner) resolveResources(ctx context.Context, req runner.Request) capac
 			_ = r.ctrl.SetPipelinePin(ctx, pipeline, req.NodeID, pin.Cores, pin.MemoryBytes)
 		}
 	}
-	res := capacity.Resolve(pin, profile, podDefaultRefCPU, "")
+	res := capacity.ResolvePeak(pin, profile, podDefaultRefCPU, "")
 	if w := ceilingWarning(res, r.cfg.CPUCeiling, r.cfg.MemoryCeiling); w != "" {
 		r.logger.Warn("resource ceiling clamped the pod",
 			"pipeline", pipeline, "node", req.NodeID, "detail", w)
@@ -1024,7 +1024,7 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 		}
 	}
 
-	if measured && res.MemoryBytes > 0 {
+	if res.MemoryBytes > 0 {
 		req[corev1.ResourceMemory] = *resource.NewQuantity(res.MemoryBytes, resource.BinarySI)
 		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
 		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)

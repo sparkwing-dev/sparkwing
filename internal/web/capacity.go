@@ -47,15 +47,15 @@ type capacityProfile struct {
 	Display  string         `json:"display"`
 	Charge   capacityCharge `json:"charge"`
 
-	SampleCount     int     `json:"sample_count"`
-	PeakCores       float64 `json:"peak_cores"`
-	SustainedCores  float64 `json:"sustained_cores"`
-	PeakMemoryBytes int64   `json:"peak_memory_bytes"`
-	CPUP50          float64 `json:"cpu_p50"`
-	CPUP95          float64 `json:"cpu_p95"`
-	MemoryP50Bytes  int64   `json:"memory_p50_bytes"`
-	MemoryP95Bytes  int64   `json:"memory_p95_bytes"`
-	CPUMeasured     bool    `json:"cpu_measured"`
+	SampleCount     int      `json:"sample_count"`
+	PeakCores       float64  `json:"peak_cores"`
+	SustainedCores  *float64 `json:"sustained_cores"`
+	PeakMemoryBytes int64    `json:"peak_memory_bytes"`
+	CPUP50          float64  `json:"cpu_p50"`
+	CPUP95          float64  `json:"cpu_p95"`
+	MemoryP50Bytes  int64    `json:"memory_p50_bytes"`
+	MemoryP95Bytes  int64    `json:"memory_p95_bytes"`
+	CPUMeasured     bool     `json:"cpu_measured"`
 
 	P50DurationMS int64 `json:"p50_duration_ms"`
 	P99DurationMS int64 `json:"p99_duration_ms"`
@@ -77,13 +77,13 @@ type capacityProfile struct {
 }
 
 type capacityNode struct {
-	NodeID          string  `json:"node_id"`
-	SampleCount     int     `json:"sample_count"`
-	PeakCores       float64 `json:"peak_cores"`
-	SustainedCores  float64 `json:"sustained_cores"`
-	PeakMemoryBytes int64   `json:"peak_memory_bytes"`
-	P50DurationMS   int64   `json:"p50_duration_ms"`
-	P99DurationMS   int64   `json:"p99_duration_ms"`
+	NodeID          string   `json:"node_id"`
+	SampleCount     int      `json:"sample_count"`
+	PeakCores       float64  `json:"peak_cores"`
+	SustainedCores  *float64 `json:"sustained_cores"`
+	PeakMemoryBytes int64    `json:"peak_memory_bytes"`
+	P50DurationMS   int64    `json:"p50_duration_ms"`
+	P99DurationMS   int64    `json:"p99_duration_ms"`
 }
 
 type chargeStep struct {
@@ -111,11 +111,11 @@ type rankSelection struct {
 }
 
 type capacitySample struct {
-	Index           int     `json:"index"`
-	DurationMS      int64   `json:"duration_ms"`
-	PeakCores       float64 `json:"peak_cores"`
-	SustainedCores  float64 `json:"sustained_cores"`
-	PeakMemoryBytes int64   `json:"peak_memory_bytes"`
+	Index           int      `json:"index"`
+	DurationMS      int64    `json:"duration_ms"`
+	PeakCores       float64  `json:"peak_cores"`
+	SustainedCores  *float64 `json:"sustained_cores"`
+	PeakMemoryBytes int64    `json:"peak_memory_bytes"`
 }
 
 type capacityProfilesPayload struct {
@@ -326,7 +326,7 @@ func chargeOf(res capacity.Resolution, rollup store.PipelineProfile) capacityCha
 		Source:       string(res.Source),
 		Rationale:    wingwire.CostRationale(wingwire.CostSource(res.Source), rollup.SampleCount),
 		CoresBasis:   basis,
-		FloorApplied: raw > 0 && res.Cores > raw,
+		FloorApplied: res.Cores > raw && res.Source != store.CostSourceDefault && res.Source != store.CostSourcePin,
 	}
 }
 
@@ -335,10 +335,10 @@ func coresBasis(source store.CostSource, rollup store.PipelineProfile) (string, 
 	case store.CostSourcePin:
 		return "pin", rollup.PinnedCores
 	case store.CostSourceMeasured:
-		if rollup.SustainedCores > 0 {
-			return "sustained_p95", rollup.SustainedCores
+		if rollup.SustainedCores != nil {
+			return "sustained_p95", *rollup.SustainedCores
 		}
-		return "peak_p95", rollup.PeakCores
+		return "unknown", 0
 	case store.CostSourceFloor:
 		return "floor", capacity.SafetyMultiple * rollup.FloorCores
 	case store.CostSourceMeasuring:
@@ -349,10 +349,10 @@ func coresBasis(source store.CostSource, rollup store.PipelineProfile) (string, 
 }
 
 func carriedCores(rollup store.PipelineProfile) float64 {
-	if rollup.PrevSustainedCores > 0 {
-		return rollup.PrevSustainedCores
+	if rollup.PrevSustainedCores != nil {
+		return *rollup.PrevSustainedCores
 	}
-	return rollup.PrevPeakCores
+	return 0
 }
 
 func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
@@ -360,11 +360,11 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
 	source := res.Source
 
-	measuredCores := rollup.SustainedCores
-	measuredBasis := "sustained p95 across the window"
-	if measuredCores == 0 {
-		measuredCores = rollup.PeakCores
-		measuredBasis = "peak p95; this profile predates sustained figures"
+	var measuredCores float64
+	measuredBasis := "sustained CPU unavailable"
+	if rollup.SustainedCores != nil {
+		measuredCores = *rollup.SustainedCores
+		measuredBasis = "sustained p95 across the window"
 	}
 	carried := carriedCores(rollup)
 
@@ -383,7 +383,7 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Label:       "Measured profile",
 			Cores:       measuredCores,
 			MemoryBytes: rollup.PeakMemoryBytes,
-			Eligible:    rollup.SampleCount >= capacity.MinSamples && (rollup.PeakCores > 0 || rollup.CPUMeasured),
+			Eligible:    rollup.SampleCount >= capacity.MinSamples && rollup.SustainedCores != nil && (rollup.PeakCores > 0 || rollup.CPUMeasured),
 			Applied:     source == store.CostSourceMeasured,
 			Detail:      measuredBasis + "; memory charges the p95 of the per-run peaks.",
 		},
@@ -392,7 +392,7 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Label:       "Warm start from the previous version",
 			Cores:       capacity.WarmStartMultiple * carried,
 			MemoryBytes: int64(capacity.WarmStartMultiple * float64(rollup.PrevPeakMemoryBytes)),
-			Eligible:    carried > 0,
+			Eligible:    rollup.PrevSustainedCores != nil,
 			Applied:     source == store.CostSourceMeasuring,
 			Detail:      "Charged while a structurally changed version re-measures its own samples.",
 		},
@@ -403,7 +403,7 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			MemoryBytes: int64(capacity.SafetyMultiple * float64(rollup.FloorMemoryBytes)),
 			Eligible:    rollup.FloorCores > 0,
 			Applied:     source == store.CostSourceFloor,
-			Detail:      "A contended run measured its allocation, not its demand, so it only raises this lower bound.",
+			Detail:      "Contended runs update this lower bound from observed demand.",
 		},
 		{
 			Step:     "cold_start",
@@ -414,14 +414,14 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Detail:   "Half the machine, so two unknown pipelines cannot hold capacity at once.",
 		},
 	}
-	if basis, raw := coresBasis(source, rollup); raw > 0 && res.Cores > raw {
+	if charge := chargeOf(res, rollup); charge.FloorApplied {
 		steps = append(steps, chargeStep{
 			Step:     "measured_floor",
 			Label:    "Raised to the minimum measured charge",
 			Cores:    res.Cores,
 			Eligible: true,
 			Applied:  true,
-			Detail:   "The " + basis + " figure is below the floor a measured pipeline is still accounted for at.",
+			Detail:   "The " + charge.CoresBasis + " figure is below the floor a measured pipeline is still accounted for at.",
 		})
 	}
 	return steps
@@ -458,23 +458,23 @@ func sampleRows(samples []store.ProfileSample) []capacitySample {
 }
 
 func selectionsFor(rollup store.PipelineProfile, samples []store.ProfileSample) capacitySelection {
-	sustained := make([]float64, len(samples))
-	peaks := make([]float64, len(samples))
+	sustained := make([]float64, 0, len(samples))
 	mems := make([]float64, len(samples))
 	durations := make([]float64, len(samples))
 	for i, s := range samples {
-		sustained[i] = s.SustainedCores
-		peaks[i] = s.PeakCores
+		if s.SustainedCores != nil {
+			sustained = append(sustained, *s.SustainedCores)
+		}
 		mems[i] = float64(s.PeakMemoryBytes)
 		durations[i] = float64(s.Duration)
 	}
 
-	coresField, coresValues, coresStored := "sustained_cores", sustained, rollup.SustainedCores
-	if rollup.SustainedCores == 0 && rollup.PeakCores > 0 {
-		coresField, coresValues, coresStored = "peak_cores", peaks, rollup.PeakCores
+	cores := rankSelection{Field: "sustained_cores", Percentile: chargePercentile, Index: -1, Unmeasured: true}
+	if rollup.SustainedCores != nil {
+		cores = selectionAt("sustained_cores", sustained, chargePercentile, *rollup.SustainedCores)
 	}
 	return capacitySelection{
-		Cores:  selectionAt(coresField, coresValues, chargePercentile, coresStored),
+		Cores:  cores,
 		Memory: selectionAt("peak_memory_bytes", mems, chargePercentile, float64(rollup.PeakMemoryBytes)),
 
 		DurationP50: selectionAtMS("duration", durations, 0.50, float64(rollup.P50Duration)),

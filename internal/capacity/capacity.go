@@ -56,6 +56,27 @@ type Resolution struct {
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var current, previous *float64
+	if profile != nil {
+		current, previous = profile.SustainedCores, profile.PrevSustainedCores
+	}
+	return resolve(pin, profile, numCPU, planHash, current, previous)
+}
+
+func ResolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var current, previous *float64
+	if profile != nil {
+		if profile.CPUMeasured || profile.PeakCores > 0 {
+			current = &profile.PeakCores
+		}
+		if profile.PrevPeakCores > 0 {
+			previous = &profile.PrevPeakCores
+		}
+	}
+	return resolve(pin, profile, numCPU, planHash, current, previous)
+}
+
+func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string, current, previous *float64) Resolution {
 	res := Resolution{}
 	if profile != nil {
 		res.ExpectedDuration = profile.P50Duration
@@ -72,48 +93,45 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 		return res
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
-	if !versionChanged && measurementQualifies(profile) {
-		res.Cores = math.Max(chargedCores(profile), MeasuredCoreFloor)
+	if !versionChanged && measurementQualifies(profile, current) {
+		res.Cores = math.Max(*current, MeasuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
 	}
-	return measuringResolution(res, profile, numCPU, versionChanged)
+	res = measuringResolution(res, profile, numCPU, versionChanged, current, previous)
+	if !versionChanged && profile.SampleCount >= MinSamples {
+		res.MemoryBytes = max(profile.PeakMemoryBytes, int64(SafetyMultiple*float64(profile.FloorMemoryBytes)))
+	}
+	return res
 }
 
 func chargedCores(profile *store.PipelineProfile) float64 {
-	if profile.SustainedCores > 0 {
-		return profile.SustainedCores
+	if profile.SustainedCores != nil {
+		return *profile.SustainedCores
 	}
-	return profile.PeakCores
+	return 0
 }
 
-func carriedCores(profile *store.PipelineProfile) float64 {
-	if profile.PrevSustainedCores > 0 {
-		return profile.PrevSustainedCores
-	}
-	return profile.PrevPeakCores
-}
-
-func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool) Resolution {
-	var prevCores float64
-	var prevMem int64
+func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool, current, previous *float64) Resolution {
+	prevCores, prevMem := previous, profile.PrevPeakMemoryBytes
 	var floorCores float64
 	var floorMem int64
 	if versionChanged {
-		prevCores, prevMem = chargedCores(profile), profile.PeakMemoryBytes
-		if prevCores == 0 {
-			prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
+		if current != nil {
+			prevCores = current
+		}
+		if profile.SampleCount > 0 || current != nil {
+			prevMem = profile.PeakMemoryBytes
 		}
 	} else {
-		prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
 		floorCores, floorMem = profile.FloorCores, profile.FloorMemoryBytes
 	}
 
 	cores := coldStartCores(numCPU)
 	res.Source = store.CostSourceDefault
-	if prevCores > 0 {
-		cores = WarmStartMultiple * prevCores
+	if prevCores != nil {
+		cores = WarmStartMultiple * *prevCores
 		res.Source = store.CostSourceMeasuring
 	}
 	if floorCores > 0 {
@@ -169,8 +187,9 @@ func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64
 	return res
 }
 
-func measurementQualifies(profile *store.PipelineProfile) bool {
-	return profile != nil && profile.SampleCount >= MinSamples &&
+func measurementQualifies(profile *store.PipelineProfile, cores *float64) bool {
+	// bug: positive CPU and sample count admit profiles without complete CPU or memory evidence.
+	return profile != nil && profile.SampleCount >= MinSamples && cores != nil &&
 		(profile.PeakCores > 0 || profile.CPUMeasured)
 }
 
@@ -181,7 +200,7 @@ func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool 
 	if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
 		return false
 	}
-	if measurementQualifies(profile) {
+	if measurementQualifies(profile, profile.SustainedCores) {
 		return false
 	}
 	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
@@ -209,11 +228,25 @@ type Drift struct {
 }
 
 func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
+	if profile == nil {
+		return nil
+	}
+	return checkDrift(pin, profile, chargedCores(profile), "sustained p95")
+}
+
+func CheckPeakDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
+	if profile == nil {
+		return nil
+	}
+	return checkDrift(pin, profile, profile.PeakCores, "peak p95")
+}
+
+func checkDrift(pin *Pin, profile *store.PipelineProfile, charged float64, statistic string) *Drift {
 	if pin.Empty() || profile == nil || profile.SampleCount < MinSamples {
 		return nil
 	}
-	if charged := chargedCores(profile); pin.Cores > 0 && charged > 0 {
-		return coreDrift(pin.Cores, charged, profile.SampleCount)
+	if pin.Cores > 0 && charged > 0 {
+		return coreDrift(pin.Cores, charged, profile.SampleCount, statistic)
 	}
 	if pin.MemoryBytes > 0 && profile.PeakMemoryBytes > 0 {
 		return memoryDrift(pin.MemoryBytes, profile.PeakMemoryBytes, profile.SampleCount)
@@ -221,7 +254,7 @@ func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
 	return nil
 }
 
-func coreDrift(pinCores, measuredCores float64, samples int) *Drift {
+func coreDrift(pinCores, measuredCores float64, samples int, statistic string) *Drift {
 	ratio := pinCores / measuredCores
 	class, diverged := classify(ratio)
 	if !diverged {
@@ -233,8 +266,8 @@ func coreDrift(pinCores, measuredCores float64, samples int) *Drift {
 		MeasuredCores: measuredCores,
 		SampleCount:   samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s cores; measured sustained p95 %s cores over %d runs - update or remove the pin",
-			trimFloat(pinCores), trimFloat(measuredCores), samples),
+			"resource pin: %s cores; measured %s %s cores over %d runs - update or remove the pin",
+			trimFloat(pinCores), statistic, trimFloat(measuredCores), samples),
 	}
 }
 

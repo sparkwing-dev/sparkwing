@@ -192,17 +192,26 @@ func TestAddNodeUsage_RejectsNegativeFigures(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeUsage(ctx, "r1", "build", store.NodeUsage{
-		CPUTime: -time.Second, MaxRSSBytes: -1, Wall: -time.Second,
+		CPUTime: 2 * time.Second, MaxRSSBytes: 3 << 20, Wall: 4 * time.Second,
 	}); err != nil {
-		t.Fatalf("AddNodeUsage: %v", err)
-	}
-	n, err := st.GetNode(ctx, "r1", "build")
-	if err != nil {
 		t.Fatal(err)
 	}
-	if n.CPUNanos != 0 || n.MaxRSSBytes != 0 || n.ProcessWallNanos != 0 {
-		t.Errorf("usage = %d/%d/%d, want every figure clamped to zero",
-			n.CPUNanos, n.MaxRSSBytes, n.ProcessWallNanos)
+	for _, invalid := range []store.NodeUsage{
+		{CPUTime: -time.Second, MaxRSSBytes: 8 << 20, Wall: time.Second},
+		{CPUTime: time.Second, MaxRSSBytes: -1, Wall: time.Second},
+		{CPUTime: time.Second, MaxRSSBytes: 8 << 20, Wall: -time.Second},
+	} {
+		if err := st.AddNodeUsage(ctx, "r1", "build", invalid); err == nil {
+			t.Errorf("accepted invalid usage: %+v", invalid)
+		}
+		n, err := st.GetNode(ctx, "r1", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n.CPUNanos != int64(2*time.Second) || n.MaxRSSBytes != 3<<20 || n.ProcessWallNanos != int64(4*time.Second) {
+			t.Errorf("invalid usage changed stored totals: CPU=%d memory=%d wall=%d",
+				n.CPUNanos, n.MaxRSSBytes, n.ProcessWallNanos)
+		}
 	}
 }
 

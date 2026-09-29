@@ -2,17 +2,22 @@ package nodemetrics
 
 import (
 	"context"
-	"log"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procusage"
 )
 
 type Sample struct {
-	TS            time.Time
-	CPUMillicores int64
-	MemoryBytes   int64
+	TS              time.Time
+	CPUMillicores   int64
+	MemoryBytes     int64
+	CPUAvailable    bool
+	MemoryAvailable bool
+	Estimated       bool
 }
 
 type Sink interface {
@@ -35,29 +40,12 @@ func Interval() time.Duration {
 	return defaultInterval
 }
 
-var (
-	cpuReader = readCPUTime
-	rssReader = readMemoryBytes
-)
-
-func CPUAccountingAvailable() bool {
-	_, ok := readCPUTime()
-	return ok
-}
-
-var reportedChildCPU atomic.Int64
-
-func AddReportedChildCPU(d time.Duration) {
-	if d > 0 {
-		reportedChildCPU.Add(int64(d))
-	}
-}
-
-var blindOnce sync.Once
+var snapshotReader = (*procusage.Tree).Read
 
 type attachment struct {
-	ctx  context.Context
-	sink Sink
+	exclusive bool
+	ctx       context.Context
+	sink      Sink
 }
 
 type sharedSampler struct {
@@ -70,8 +58,8 @@ var shared = &sharedSampler{sinks: make(map[*attachment]struct{})}
 
 var loopsRunning sync.WaitGroup
 
-func Attach(ctx context.Context, sink Sink) (detach func()) {
-	a := &attachment{ctx: ctx, sink: sink}
+func Attach(ctx context.Context, sink Sink, exclusive bool) (detach func()) {
+	a := &attachment{ctx: ctx, sink: sink, exclusive: exclusive}
 	shared.add(a)
 	return func() { shared.remove(a) }
 }
@@ -123,13 +111,8 @@ func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
 
 func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 	defer loopsRunning.Done()
-	prevCPU, havePrev := cpuReader()
-	if !havePrev {
-		blindOnce.Do(func() {
-			log.Printf("nodemetrics: CPU accounting unavailable on %s; CPU samples will be zero", runtime.GOOS)
-		})
-	}
-	prevWall := time.Now()
+	tree := procusage.Tree{PID: os.Getpid()}
+	tree.Observe(snapshotReader(&tree))
 
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -137,55 +120,27 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 		select {
 		case <-stop:
 			return
-		case now := <-t.C:
-			var totalCPU int64
-			if cpu, ok := cpuReader(); ok && havePrev {
-				totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
-				prevCPU = cpu
-				prevWall = now
-			}
+		case <-t.C:
+			reading := tree.Observe(snapshotReader(&tree))
 			live := s.liveSinks(stop)
 			if len(live) == 0 {
 				return
 			}
-			// perf: RSS costs a subprocess on darwin, so it is read only once
-			// the tick is known to have somewhere to go.
-			totalRSS := rssReader()
-			// safety: the process total is clamped before it is divided, so
-			// the shares sum to a rate the host could serve rather than to a
-			// multiple of it.
-			share := int64(len(live))
-			sample := Sample{
-				TS:            now,
-				CPUMillicores: totalCPU / share,
-				MemoryBytes:   totalRSS / share,
-			}
 			for _, a := range live {
+				share := int64(1)
+				if !a.exclusive {
+					share = int64(len(live))
+				}
+				sample := Sample{
+					TS:              reading.End,
+					CPUMillicores:   min(reading.CPUMillicores, int64(runtime.NumCPU())*1000) / share,
+					MemoryBytes:     reading.RSSBytes / share,
+					CPUAvailable:    reading.CPUQuality == "sampled",
+					MemoryAvailable: reading.MemoryQuality == "sampled",
+					Estimated:       !a.exclusive,
+				}
 				_ = a.sink.Push(a.ctx, sample)
 			}
 		}
 	}
-}
-
-func intervalMillicores(cpu, wall time.Duration) int64 {
-	if wall <= 0 {
-		return 0
-	}
-	millicores := int64(cpu.Seconds() / wall.Seconds() * 1000.0)
-	if millicores < 0 {
-		return 0
-	}
-	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > hostMilli {
-		return hostMilli
-	}
-	return millicores
-}
-
-func readMemoryBytes() int64 {
-	if rss, ok := processRSS(); ok {
-		return rss
-	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return int64(m.Sys)
 }

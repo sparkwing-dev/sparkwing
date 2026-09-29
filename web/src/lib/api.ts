@@ -1043,7 +1043,7 @@ export interface CapacityProfile {
   charge: CapacityCharge;
   sample_count: number;
   peak_cores: number;
-  sustained_cores: number;
+  sustained_cores: number | null;
   peak_memory_bytes: number;
   cpu_p50: number;
   cpu_p95: number;
@@ -1102,7 +1102,7 @@ export interface CapacitySample {
   index: number;
   duration_ms: number;
   peak_cores: number;
-  sustained_cores: number;
+  sustained_cores: number | null;
   peak_memory_bytes: number;
 }
 
@@ -1110,7 +1110,7 @@ export interface CapacityNode {
   node_id: string;
   sample_count: number;
   peak_cores: number;
-  sustained_cores: number;
+  sustained_cores: number | null;
   peak_memory_bytes: number;
   p50_duration_ms: number;
   p99_duration_ms: number;

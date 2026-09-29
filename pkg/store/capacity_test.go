@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -117,5 +119,49 @@ func TestPipelineProfile_ListReturnsRollupAndNodeRows(t *testing.T) {
 	}
 	if len(all) != 3 {
 		t.Fatalf("all profiles = %d, want 3", len(all))
+	}
+}
+
+func TestProfileObservation_DistinguishesOmittedAndZeroSustainedCPU(t *testing.T) {
+	var omitted, measuredZero store.ProfileObservation
+	if err := json.Unmarshal([]byte(`{"PeakCores":6,"CPUMeasured":true}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(`{"PeakCores":6,"SustainedCores":0,"CPUMeasured":true}`), &measuredZero); err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(omitted, measuredZero) {
+		t.Fatal("profile input loses whether sustained CPU was omitted or measured as zero")
+	}
+}
+
+func TestPipelineProfile_PreservesSustainedPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		sustained *float64
+	}{
+		{"omitted", nil}, {"measured zero", new(float64(0))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := storetest.Open(t)
+			for range 3 {
+				if err := st.RecordProfileObservation(t.Context(), "parcels", "sort", store.ProfileObservation{
+					Duration: time.Second, PeakCores: 6, SustainedCores: tc.sustained,
+					PeakMemoryBytes: 4096, CPUMeasured: true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			profile, err := st.GetPipelineProfile(t.Context(), "parcels", "sort")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile == nil {
+				t.Fatal("missing profile")
+			}
+			if !reflect.DeepEqual(profile.SustainedCores, tc.sustained) || profile.PeakCores != 6 {
+				t.Fatalf("sustained presence changed: got=%v want=%v peak=%v", profile.SustainedCores, tc.sustained, profile.PeakCores)
+			}
+		})
 	}
 }

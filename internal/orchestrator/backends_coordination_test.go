@@ -90,7 +90,7 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 		t.Fatalf("FinishTrigger: %v", err)
 	}
 
-	obs := store.ProfileObservation{Duration: 5 * time.Second, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true}
+	obs := store.ProfileObservation{Duration: 5 * time.Second, PeakCores: 2, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 30, CPUMeasured: true}
 	if err := state.RecordProfileObservation(ctx, "demo", "", obs); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestMirrorStateBackendKeepsCapacityWritesOnTheCanonical(t *testing.T) {
 
 	m := newMirrorStateBackend(localState{st: canonical}, mirror, quietTestLogger())
 	if err := m.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 1, SustainedCores: 1, PeakMemoryBytes: 1 << 20, CPUMeasured: true,
+		Duration: time.Second, PeakCores: 1, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 20, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestLoopbackScopesProfileWritesToItsRunsPipeline(t *testing.T) {
 	own := store.JoinProfileKey("github.com/acme/web", "demo")
 	other := store.JoinProfileKey("github.com/acme/web", "release")
 	measurement := store.ProfileObservation{
-		Duration: time.Minute, PeakCores: 2, SustainedCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
+		Duration: time.Minute, PeakCores: 2, SustainedCores: new(float64(1)), PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}
 
 	if err := c.RecordProfileObservation(ctx, own, "", measurement); err != nil {

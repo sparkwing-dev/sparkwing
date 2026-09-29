@@ -20,6 +20,24 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **store + controller (Breaking):** Resource measurements distinguish unavailable values, measured zero and estimates
+  Sustained CPU is nullable. Metric records carry explicit kinds and independent
+  CPU and memory availability. The migration discards incompatible learned costs
+  while preserving pins and requires upgraded binaries. See the
+  [migration guide](docs/migrations/_unreleased.md#explicit-resource-measurements).
+
+### Fixed
+
+- **orchestrator:** Sample descendant CPU and RSS for dedicated node processes
+  Command lifetime CPU no longer creates a spike in its completion interval.
+  Known sampling gaps and shared-process estimates cannot qualify as measured
+  profile observations. Summed RSS remains a sampled quantity.
+- **store:** Retain concurrent profile observations and exact integer percentiles
+- **admission + runner:** Preserve measured zero CPU and independently available memory charges
+- **orchestrator + sdk:** Retain queued node resource usage and join spawned work after cancellation or generator failure
+
 ## [v0.64.0] - 2026-09-28
 ### Added
 

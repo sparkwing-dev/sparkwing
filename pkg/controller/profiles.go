@@ -79,13 +79,23 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	var runPeakCores float64
 	var runPeakMem int64
 	measured := false
+	runEligible := true
 	for _, n := range nodes {
+		if n.Outcome == "cached" {
+			continue
+		}
 		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
+			runEligible = false
+			continue
+		}
+		resources := capacity.SummarizeIntervals(samples)
+		if resources.PeakCores == nil || resources.PeakMemoryBytes == nil {
+			runEligible = false
 			continue
 		}
 		measured = true
-		peakCores, peakMem := samplePeaks(samples)
+		peakCores, peakMem := *resources.PeakCores, *resources.PeakMemoryBytes
 		_ = s.store.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeMetricSpan(samples),
 			PeakCores:       peakCores,
@@ -98,7 +108,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 			runPeakMem = peakMem
 		}
 	}
-	if !measured {
+	if !measured || !runEligible {
 		return
 	}
 	_ = s.store.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
@@ -116,7 +126,7 @@ func (s *Server) emitNodeDrift(ctx context.Context, run *store.Run, nodeID strin
 		return
 	}
 	pin := &capacity.Pin{Cores: prof.PinnedCores, MemoryBytes: prof.PinnedMemoryBytes}
-	drift := capacity.CheckDrift(pin, prof)
+	drift := capacity.CheckPeakDrift(pin, prof)
 	if drift == nil {
 		return
 	}
@@ -125,18 +135,6 @@ func (s *Server) emitNodeDrift(ctx context.Context, run *store.Run, nodeID strin
 		return
 	}
 	_, _ = s.store.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload)
-}
-
-func samplePeaks(samples []store.MetricSample) (float64, int64) {
-	var cores float64
-	var mem int64
-	for _, s := range samples {
-		cores = maxF(cores, float64(s.CPUMillicores)/1000.0)
-		if s.MemoryBytes > mem {
-			mem = s.MemoryBytes
-		}
-	}
-	return cores, mem
 }
 
 func nodeMetricSpan(samples []store.MetricSample) (d time.Duration) {
@@ -165,15 +163,15 @@ func maxF(a, b float64) float64 {
 }
 
 type profileObservationReq struct {
-	DurationNanos    int64   `json:"duration_nanos,omitempty"`
-	PeakCores        float64 `json:"peak_cores,omitempty"`
-	PeakMemoryBytes  int64   `json:"peak_memory_bytes,omitempty"`
-	SustainedCores   float64 `json:"sustained_cores,omitempty"`
-	CPUMeasured      bool    `json:"cpu_measured,omitempty"`
-	PlanHash         string  `json:"plan_hash,omitempty"`
-	Contended        bool    `json:"contended,omitempty"`
-	FloorCores       float64 `json:"floor_cores,omitempty"`
-	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
+	DurationNanos    int64    `json:"duration_nanos,omitempty"`
+	PeakCores        float64  `json:"peak_cores,omitempty"`
+	PeakMemoryBytes  int64    `json:"peak_memory_bytes,omitempty"`
+	SustainedCores   *float64 `json:"sustained_cores,omitempty"`
+	CPUMeasured      bool     `json:"cpu_measured,omitempty"`
+	PlanHash         string   `json:"plan_hash,omitempty"`
+	Contended        bool     `json:"contended,omitempty"`
+	FloorCores       float64  `json:"floor_cores,omitempty"`
+	FloorMemoryBytes int64    `json:"floor_memory_bytes,omitempty"`
 }
 
 // safety: these figures become the price of every later run of the pipeline,
@@ -185,6 +183,11 @@ const (
 )
 
 func (b profileObservationReq) validate() error {
+	if b.SustainedCores != nil {
+		if err := boundedProfileValue("sustained_cores", *b.SustainedCores, maxProfileCores); err != nil {
+			return err
+		}
+	}
 	for _, f := range []struct {
 		name  string
 		value float64
@@ -193,7 +196,6 @@ func (b profileObservationReq) validate() error {
 		{"duration_nanos", float64(b.DurationNanos), float64(maxProfileDuration)},
 		{"peak_cores", b.PeakCores, maxProfileCores},
 		{"peak_memory_bytes", float64(b.PeakMemoryBytes), maxProfileBytes},
-		{"sustained_cores", b.SustainedCores, maxProfileCores},
 		{"floor_cores", b.FloorCores, maxProfileCores},
 		{"floor_memory_bytes", float64(b.FloorMemoryBytes), maxProfileBytes},
 	} {

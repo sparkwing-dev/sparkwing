@@ -10,11 +10,13 @@ import (
 )
 
 type metricSample struct {
-	TS            string `json:"ts"`
-	CPUMillicores int64  `json:"cpu_millicores"`
-	MemoryBytes   int64  `json:"memory_bytes"`
-	// safety: zero is a sampler tick; nonzero is a per-command measurement.
-	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
+	TS              string           `json:"ts"`
+	CPUMillicores   int64            `json:"cpu_millicores"`
+	MemoryBytes     int64            `json:"memory_bytes"`
+	Kind            store.MetricKind `json:"kind,omitempty"`
+	CPUAvailable    bool             `json:"cpu_available,omitempty"`
+	MemoryAvailable bool             `json:"memory_available,omitempty"`
+	CPUTimeNanos    int64            `json:"cpu_time_nanos,omitempty"`
 }
 
 func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +38,7 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		CPUMillicores: body.CPUMillicores,
 		MemoryBytes:   body.MemoryBytes,
 		CPUTime:       time.Duration(body.CPUTimeNanos),
+		Kind:          body.Kind, CPUAvailable: body.CPUAvailable, MemoryAvailable: body.MemoryAvailable,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -62,6 +65,7 @@ func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
 			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
+			Kind:          s.Kind, CPUAvailable: s.CPUAvailable, MemoryAvailable: s.MemoryAvailable,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

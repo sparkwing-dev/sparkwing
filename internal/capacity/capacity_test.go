@@ -178,10 +178,12 @@ func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
 		P50Duration:     30 * time.Second,
 		PeakCores:       6,
+		SustainedCores:  new(float64(3)),
+		CPUMeasured:     true,
 		PeakMemoryBytes: 4 << 30,
 		SampleCount:     MinSamples,
 	}
-	thin := &store.PipelineProfile{PeakCores: 6, SampleCount: MinSamples - 1}
+	thin := &store.PipelineProfile{PeakCores: 6, SustainedCores: new(float64(3)), SampleCount: MinSamples - 1}
 
 	cases := []struct {
 		name       string
@@ -198,7 +200,7 @@ func TestResolve_Order(t *testing.T) {
 		},
 		{
 			name: "measured used when enough samples", pin: nil, profile: measured, numCPU: 8,
-			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
+			wantCores: 3, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
 		},
 		{
 			name: "below threshold falls to default", pin: nil, profile: thin, numCPU: 8,
@@ -210,7 +212,7 @@ func TestResolve_Order(t *testing.T) {
 		},
 		{
 			name: "empty pin ignored", pin: &Pin{}, profile: measured, numCPU: 8,
-			wantCores: 6, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
+			wantCores: 3, wantSource: store.CostSourceMeasured, wantDur: 30 * time.Second,
 		},
 	}
 	for _, tc := range cases {
@@ -233,6 +235,7 @@ func TestResolve_ZeroCPUProfileQualifiesOnHealthySampler(t *testing.T) {
 	sleepHeavy := &store.PipelineProfile{
 		P50Duration:     10 * time.Second,
 		PeakCores:       0,
+		SustainedCores:  new(float64(0)),
 		PeakMemoryBytes: 256 << 20,
 		SampleCount:     MinSamples,
 		CPUMeasured:     true,
@@ -266,11 +269,12 @@ func TestResolve_ZeroCPUProfileStaysConservativeOnBlindSampler(t *testing.T) {
 	}
 }
 
-func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
+func TestResolve_MeasuredSustainedBelowFloorLiftsToFloor(t *testing.T) {
 	tiny := &store.PipelineProfile{
-		PeakCores:   0.05,
-		SampleCount: MinSamples,
-		CPUMeasured: true,
+		PeakCores:      0.05,
+		SustainedCores: new(float64(0.02)),
+		SampleCount:    MinSamples,
+		CPUMeasured:    true,
 	}
 	if got := Resolve(nil, tiny, 8, ""); got.Cores != MeasuredCoreFloor {
 		t.Errorf("Cores = %v, want the %v floor", got.Cores, MeasuredCoreFloor)
@@ -310,7 +314,7 @@ func TestFloorPoisoned_Gating(t *testing.T) {
 		{name: "no floor never flags", profile: &store.PipelineProfile{SampleCount: 1}, grantable: 8},
 		{
 			name:      "graduated measured price overrides the floor",
-			profile:   &store.PipelineProfile{FloorCores: 4, PeakCores: 1, SampleCount: MinSamples, CPUMeasured: true},
+			profile:   &store.PipelineProfile{FloorCores: 4, PeakCores: 1, SustainedCores: new(float64(0.5)), SampleCount: MinSamples, CPUMeasured: true},
 			grantable: 8,
 		},
 		{
@@ -330,7 +334,7 @@ func TestFloorPoisoned_Gating(t *testing.T) {
 
 func TestCheckDrift_Gating(t *testing.T) {
 	measured := func(cores float64, samples int) *store.PipelineProfile {
-		return &store.PipelineProfile{PeakCores: cores, SampleCount: samples}
+		return &store.PipelineProfile{PeakCores: 2 * cores, SustainedCores: &cores, CPUMeasured: true, SampleCount: samples}
 	}
 
 	cases := []struct {
@@ -369,7 +373,7 @@ func TestCheckDrift_Gating(t *testing.T) {
 func TestResolve_MeasuredChargesSustainedCores(t *testing.T) {
 	profile := &store.PipelineProfile{
 		PeakCores:       6,
-		SustainedCores:  1.5,
+		SustainedCores:  new(float64(1.5)),
 		PeakMemoryBytes: 4 << 30,
 		SampleCount:     MinSamples,
 		CPUMeasured:     true,
@@ -386,22 +390,22 @@ func TestResolve_MeasuredChargesSustainedCores(t *testing.T) {
 	}
 }
 
-func TestResolve_ProfileWithoutSustainedFallsBackToPeak(t *testing.T) {
+func TestResolve_ProfileWithoutSustainedCannotQualify(t *testing.T) {
 	profile := &store.PipelineProfile{
 		PeakCores:       6,
 		PeakMemoryBytes: 4 << 30,
 		SampleCount:     MinSamples,
 		CPUMeasured:     true,
 	}
-	if got := Resolve(nil, profile, 8, ""); got.Cores != 6 {
-		t.Errorf("Cores = %v, want the 6.0 peak while no sustained figure exists", got.Cores)
+	if got := Resolve(nil, profile, 8, ""); got.Source == store.CostSourceMeasured {
+		t.Errorf("missing sustained CPU qualified as measured: %+v", got)
 	}
 }
 
 func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 	tiny := &store.PipelineProfile{
 		PeakCores:      6,
-		SustainedCores: 0.02,
+		SustainedCores: new(float64(0.02)),
 		SampleCount:    MinSamples,
 		CPUMeasured:    true,
 	}
@@ -413,7 +417,7 @@ func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
 func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 	spiky := &store.PipelineProfile{
 		PeakCores:      8,
-		SustainedCores: 2.6,
+		SustainedCores: new(float64(2.6)),
 		SampleCount:    12,
 	}
 	if d := CheckDrift(&Pin{Cores: 3}, spiky); d != nil {
@@ -428,10 +432,10 @@ func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
 	}
 }
 
-func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
+func TestCheckDrift_MissingSustainedCannotEstablishDrift(t *testing.T) {
 	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 8, SampleCount: 12})
-	if d == nil || d.MeasuredCores != 8 {
-		t.Fatalf("drift = %+v, want under-pinned against the 8.0 peak", d)
+	if d != nil {
+		t.Fatalf("missing sustained CPU established drift: %+v", d)
 	}
 }
 
@@ -439,7 +443,7 @@ func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 	changed := &store.PipelineProfile{
 		PlanHash:           "old",
 		PrevPeakCores:      8,
-		PrevSustainedCores: 2,
+		PrevSustainedCores: new(float64(2)),
 		SampleCount:        1,
 	}
 	got := Resolve(nil, changed, 8, "new")
@@ -451,20 +455,42 @@ func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
 	}
 }
 
-func TestResolve_WarmStartFallsBackToPrevPeak(t *testing.T) {
+func TestResolve_MissingPreviousSustainedCannotSupplyWarmStart(t *testing.T) {
 	changed := &store.PipelineProfile{PlanHash: "old", PrevPeakCores: 8, SampleCount: 1}
-	if got := Resolve(nil, changed, 8, "new"); got.Cores != 8 {
-		t.Errorf("Cores = %v, want the carried 8.0 peak", got.Cores)
+	if got := Resolve(nil, changed, 8, "new"); got.Source == store.CostSourceMeasuring {
+		t.Errorf("missing previous sustained CPU supplied a warm start: %+v", got)
 	}
 }
 
 func TestCheckDrift_MessageCarriesExactFix(t *testing.T) {
-	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 9.1, SampleCount: 12})
+	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 12, SustainedCores: new(9.1), CPUMeasured: true, SampleCount: 12})
 	if d == nil {
 		t.Fatal("expected drift")
 	}
 	want := "resource pin: 2 cores; measured sustained p95 9.1 cores over 12 runs - update or remove the pin"
 	if d.Message != want {
 		t.Errorf("Message = %q, want %q", d.Message, want)
+	}
+}
+
+func TestResolve_SustainedPresence(t *testing.T) {
+	profile := &store.PipelineProfile{PeakCores: 6, PeakMemoryBytes: 4096, SampleCount: MinSamples, CPUMeasured: true}
+	if got := Resolve(nil, profile, 8, ""); got.Source == store.CostSourceMeasured {
+		t.Fatalf("omitted sustained CPU qualified as measured: %+v", got)
+	}
+	profile.SustainedCores = new(float64(0))
+	if got := Resolve(nil, profile, 8, ""); got.Source != store.CostSourceMeasured || got.Cores != MeasuredCoreFloor || got.MemoryBytes != 4096 {
+		t.Fatalf("measured zero did not preserve the explicit charge floor and memory: %+v", got)
+	}
+}
+
+func TestResolve_CarriesMeasuredZeroSustainedCPU(t *testing.T) {
+	profile := &store.PipelineProfile{
+		PlanHash: "old", PeakCores: 6, SustainedCores: new(float64(0)),
+		PeakMemoryBytes: 4096, PrevPeakCores: 12, PrevSustainedCores: new(float64(4)),
+	}
+	got := Resolve(nil, profile, 8, "new")
+	if got.Source != store.CostSourceMeasuring || got.Cores != MeasuredCoreFloor || got.MemoryBytes != 4096 {
+		t.Fatalf("measured zero was replaced by an older profile: %+v", got)
 	}
 }

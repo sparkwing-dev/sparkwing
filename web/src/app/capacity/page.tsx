@@ -698,7 +698,7 @@ function PricingSection({
                     : "-"}
                 </Td>
                 <Td right mono muted hideSm>
-                  {trimFloat(p.peak_cores)} / {trimFloat(p.sustained_cores)}
+                  {trimFloat(p.peak_cores)} / {p.sustained_cores == null ? "unknown" : trimFloat(p.sustained_cores)}
                 </Td>
                 <Td right mono muted hideSm>
                   {(p.floor_cores ?? 0) > 0
@@ -861,7 +861,7 @@ function ExplainSection({
                             : ""
                         }
                       >
-                        {trimFloat(s.sustained_cores)}
+                        {s.sustained_cores == null ? "unknown" : trimFloat(s.sustained_cores)}
                       </span>
                     </Td>
                     <Td right mono>
@@ -937,7 +937,7 @@ function ExplainSection({
                       {trimFloat(n.peak_cores)}
                     </Td>
                     <Td right mono muted>
-                      {trimFloat(n.sustained_cores)}
+                      {n.sustained_cores == null ? "unknown" : trimFloat(n.sustained_cores)}
                     </Td>
                     <Td right mono muted>
                       {humanBytes(n.peak_memory_bytes)}

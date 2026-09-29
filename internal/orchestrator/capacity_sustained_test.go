@@ -28,6 +28,7 @@ func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store
 	}
 	for i, cpu := range millicores {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+			Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 			TS:            start.Add(time.Duration(i) * 2 * time.Second),
 			CPUMillicores: cpu,
 			MemoryBytes:   1 << 30,
@@ -52,8 +53,8 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.SustainedCores != 1.4 {
-		t.Errorf("rollup SustainedCores = %v, want 1.4 (the mean guard: the hot tick joins the average, not the plateau rank)", rollup.SustainedCores)
+	if *rollup.SustainedCores != 1.0 {
+		t.Errorf("rollup SustainedCores = %v, want 1.0 (nine of ten intervals use one core)", rollup.SustainedCores)
 	}
 	if rollup.PeakCores != 5.0 {
 		t.Errorf("rollup PeakCores = %v, want 5.0 still recorded", rollup.PeakCores)
@@ -62,8 +63,8 @@ func TestRecordRunProfile_SustainedIsThePlateauNotTheBurst(t *testing.T) {
 	if err != nil || node == nil {
 		t.Fatalf("node profile missing: %v", err)
 	}
-	if node.SustainedCores != 1.4 {
-		t.Errorf("node SustainedCores = %v, want 1.4", node.SustainedCores)
+	if *node.SustainedCores != 1.0 {
+		t.Errorf("node SustainedCores = %v, want 1.0", node.SustainedCores)
 	}
 	if node.PeakCores != 5.0 {
 		t.Errorf("node PeakCores = %v, want 5.0", node.PeakCores)
@@ -91,15 +92,15 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 			if err != nil || rollup == nil {
 				t.Fatalf("rollup profile missing: %v", err)
 			}
-			if rollup.SustainedCores != 3.0 || rollup.PeakCores != 3.0 {
+			if *rollup.SustainedCores != 3.0 || rollup.PeakCores != 3.0 {
 				t.Errorf("rollup sustained/peak = %v/%v, want both 3.0",
-					rollup.SustainedCores, rollup.PeakCores)
+					*rollup.SustainedCores, rollup.PeakCores)
 			}
 		})
 	}
 }
 
-func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
+func TestRecordRunProfile_CommandTotalsDoNotJoinIntervals(t *testing.T) {
 	if runtime.NumCPU() < 5 {
 		t.Skip("host cannot hold a five-core reading")
 	}
@@ -120,6 +121,7 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 		}
 		for i := 0; i < 5; i++ {
 			if err := st.AddNodeMetricSample(ctx, "r1", nodeID, store.MetricSample{
+				Kind: store.MetricInterval, CPUAvailable: true, MemoryAvailable: true,
 				TS:            start.Add(time.Duration(i) * 2 * time.Second),
 				CPUMillicores: 500,
 				MemoryBytes:   1 << 30,
@@ -129,6 +131,8 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 		}
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "fan-a", store.MetricSample{
+		Kind: store.MetricCommand, CPUAvailable: true, MemoryAvailable: true,
+		CPUTime:       40 * time.Second,
 		TS:            start.Add(8*time.Second + time.Millisecond),
 		CPUMillicores: 4000,
 	}); err != nil {
@@ -141,11 +145,11 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 5.0 {
-		t.Errorf("rollup PeakCores = %v, want 5.0 (the one-shot's four cores plus the two halves beside it)", rollup.PeakCores)
+	if rollup.PeakCores != 1.0 {
+		t.Errorf("rollup PeakCores = %v, want 1.0 from two half-core interval series", rollup.PeakCores)
 	}
-	if rollup.SustainedCores != 1.8 {
-		t.Errorf("rollup SustainedCores = %v, want 1.8 (four windows at one core and one at five)", rollup.SustainedCores)
+	if *rollup.SustainedCores != 1.0 {
+		t.Errorf("rollup SustainedCores = %v, want 1.0 across all five intervals", rollup.SustainedCores)
 	}
 }
 
@@ -164,7 +168,7 @@ func TestRecordRunProfile_ContendedFloorResistsContentionDeflation(t *testing.T)
 		t.Fatalf("rollup profile missing: %v", err)
 	}
 	if rollup.FloorCores != 4.0 {
-		t.Errorf("FloorCores = %v, want 4.0 (the peak hit the ceiling; the 1.3 sustained level must not price the floor)",
+		t.Errorf("FloorCores = %v, want 4.0 (the peak hit the ceiling; the 1.0 sustained level must not price the floor)",
 			rollup.FloorCores)
 	}
 }

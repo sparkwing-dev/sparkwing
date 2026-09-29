@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -31,7 +32,7 @@ func measure(t *testing.T, st *store.Store, pipeline string, n int) {
 		if err := st.RecordProfileObservation(context.Background(), pipeline, "", store.ProfileObservation{
 			Duration:        time.Duration(i) * time.Second,
 			PeakCores:       float64(i) * 2,
-			SustainedCores:  float64(i),
+			SustainedCores:  new(float64(i)),
 			PeakMemoryBytes: int64(i) << 20,
 			CPUMeasured:     true,
 		}); err != nil {
@@ -77,7 +78,7 @@ func TestCapacityProfiles_ChargesMeasuredSustainedCores(t *testing.T) {
 	if p.Charge.CoresBasis != "sustained_p95" {
 		t.Errorf("cores_basis = %q, want sustained_p95", p.Charge.CoresBasis)
 	}
-	if p.Charge.Cores != p.SustainedCores {
+	if p.SustainedCores == nil || p.Charge.Cores != *p.SustainedCores {
 		t.Errorf("charge cores = %v, sustained = %v", p.Charge.Cores, p.SustainedCores)
 	}
 	if p.Charge.MemoryBytes != p.PeakMemoryBytes {
@@ -154,10 +155,10 @@ func TestCapacityExplain_MarksTheSampleThePriceCameFrom(t *testing.T) {
 	if sel.Index < 0 || sel.Index >= len(body.Samples) {
 		t.Fatalf("selected index %d is outside the window", sel.Index)
 	}
-	if got := body.Samples[sel.Index].SustainedCores; got != sel.Value {
+	if got := body.Samples[sel.Index].SustainedCores; got == nil || *got != sel.Value {
 		t.Errorf("marked sample has sustained %v, selection value %v", got, sel.Value)
 	}
-	if !sel.Matches || sel.Value != body.Profile.SustainedCores {
+	if !sel.Matches || body.Profile.SustainedCores == nil || sel.Value != *body.Profile.SustainedCores {
 		t.Errorf("recomputed %v does not reproduce stored %v", sel.Value, body.Profile.SustainedCores)
 	}
 	mem := body.Selections.Memory
@@ -204,7 +205,7 @@ func TestCapacityExplain_NodeRowsAccompanyTheRollup(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "demo", 4)
 	if err := st.RecordProfileObservation(context.Background(), "demo", "build", store.ProfileObservation{
-		Duration: 5 * time.Second, PeakCores: 3, SustainedCores: 2, PeakMemoryBytes: 1 << 20, CPUMeasured: true,
+		Duration: 5 * time.Second, PeakCores: 3, SustainedCores: new(float64(2)), PeakMemoryBytes: 1 << 20, CPUMeasured: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -251,5 +252,16 @@ func TestCapacityExplain_AcceptsRepoScopedKeys(t *testing.T) {
 
 	if body.Profile.Pipeline != "myrepo/ci" {
 		t.Fatalf("pipeline = %q, want the repo-scoped key", body.Profile.Pipeline)
+	}
+}
+
+func TestCapacityChargeReportsFloorForMeasuredZero(t *testing.T) {
+	got := chargeOf(capacity.Resolution{Cores: 0.1, Source: store.CostSourceMeasured}, store.PipelineProfile{SustainedCores: new(float64(0))})
+	if !got.FloorApplied || got.CoresBasis != "sustained_p95" {
+		t.Fatalf("zero measurement raised to 0.1 must report its floor: %+v", got)
+	}
+	unknown := chargeOf(capacity.Resolution{Cores: 4, Source: store.CostSourceDefault}, store.PipelineProfile{})
+	if unknown.FloorApplied {
+		t.Fatalf("cold-start allocation is not a floor applied to a measurement: %+v", unknown)
 	}
 }

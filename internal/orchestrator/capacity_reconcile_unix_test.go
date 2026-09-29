@@ -6,6 +6,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
@@ -23,7 +24,8 @@ type reconcileSink struct {
 
 func (s reconcileSink) Push(ctx context.Context, sm nodemetrics.Sample) error {
 	if err := s.st.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
-		TS:            sm.TS,
+		TS:   sm.TS,
+		Kind: store.MetricInterval, CPUAvailable: sm.CPUAvailable, MemoryAvailable: sm.MemoryAvailable,
 		CPUMillicores: sm.CPUMillicores,
 		MemoryBytes:   sm.MemoryBytes,
 	}); err != nil {
@@ -39,11 +41,11 @@ func (s reconcileSink) Push(ctx context.Context, sm nodemetrics.Sample) error {
 	return nil
 }
 
-func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
+func TestRecordRunProfile_KnownChildSamplingGapCannotQualify(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.5s of real work; the fast class runs under -short")
 	}
-	if !nodemetrics.CPUAccountingAvailable() {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("no CPU accounting on this platform")
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -64,7 +66,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	t.Cleanup(nodemetrics.SetIntervalForTest(200 * time.Millisecond))
 	sampCtx, stopSampler := context.WithCancel(ctx)
 	samples := make(chan nodemetrics.Sample, 4)
-	detachSampler := nodemetrics.Attach(sampCtx, reconcileSink{st: st, runID: "r1", nodeID: "step", samples: samples})
+	detachSampler := nodemetrics.Attach(sampCtx, reconcileSink{st: st, runID: "r1", nodeID: "step", samples: samples}, true)
 	var stopOnce sync.Once
 	stopSampling := func() {
 		stopOnce.Do(func() {
@@ -104,10 +106,10 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Skipf("burner drew only %d millicores; host too loaded to measure", trueMillicores)
 	}
 
-	nodemetrics.AddReportedChildCPU(childCPU)
 	if err := st.AddNodeMetricSample(ctx, "r1", "step", store.MetricSample{
 		TS:            time.Now(),
 		CPUMillicores: trueMillicores,
+		Kind:          store.MetricCommand, CPUAvailable: true, CPUTime: childCPU,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,17 +121,24 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	recordRunProfile(ctx, localState{st: st}, "burn", "r1", nil, "", runCharge{}, false, start, time.Now())
 
 	rollup, err := st.GetPipelineProfile(ctx, "burn", "")
-	if err != nil || rollup == nil {
-		t.Fatalf("rollup profile missing: %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	trueCores := float64(trueMillicores) / 1000.0
-	if rollup.PeakCores > trueCores*1.3 {
-		t.Errorf("peak cores = %.3f, want <= %.3f (1.3x true burn %.3f) -- child double-counted",
-			rollup.PeakCores, trueCores*1.3, trueCores)
+	if rollup != nil {
+		t.Fatalf("known child sampling gap became an admission profile: %+v", rollup)
 	}
-	if rollup.PeakCores < trueCores*0.7 {
-		t.Errorf("peak cores = %.3f, want >= %.3f -- per-command report lost, burn undercounted",
-			rollup.PeakCores, trueCores*0.7)
+	records, err := st.ListNodeMetrics(ctx, "r1", "step")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained time.Duration
+	for _, sample := range records {
+		if sample.Kind == store.MetricCommand {
+			retained += sample.CPUTime
+		}
+	}
+	if retained != childCPU {
+		t.Fatalf("command CPU=%s want kernel total %s", retained, childCPU)
 	}
 }
 

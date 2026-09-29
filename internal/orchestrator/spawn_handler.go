@@ -32,14 +32,23 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 	}
 	childID := child.ID()
 
+	childCtx, cancelChild := context.WithCancel(h.state.resolverCtx)
+	stopCancellation := context.AfterFunc(ctx, cancelChild)
+	defer stopCancellation()
+	defer cancelChild()
+	if ctx.Err() != nil {
+		cancelChild()
+	}
 	doneCh := h.state.ensureDoneCh(childID)
-	h.state.scheduleNode(child)
+	h.state.scheduleNode(childCtx, child)
 
 	resumeProgressTimeout := pauseProgressTimeout(ctx)
 	defer resumeProgressTimeout()
 	select {
 	case <-doneCh:
 	case <-ctx.Done():
+		cancelChild()
+		<-doneCh
 		return nil, spawnCancelledError(childID, ctx.Err())
 	}
 
@@ -90,7 +99,7 @@ func admitSpawnChild(a spawnAdmission, parentNodeID, spawnID string, job sparkwi
 }
 
 func spawnCancelledError(childID string, err error) error {
-	return fmt.Errorf("orchestrator: spawn child %q cancelled before terminal: %w", childID, err)
+	return fmt.Errorf("orchestrator: spawn child %q cancelled: %w", childID, err)
 }
 
 func spawnFailedError(childID string, outcome sparkwing.Outcome, msg string) error {

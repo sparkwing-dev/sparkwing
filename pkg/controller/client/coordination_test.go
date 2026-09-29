@@ -28,8 +28,6 @@ type coordinationFixture struct {
 	ctx    context.Context
 }
 
-// safety: the runner client holds only the trigger claim on run r1 of pipeline demo,
-// which is the whole standing an orchestrator process has while it drives a run.
 func newCoordinationFixture(t *testing.T) coordinationFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -135,7 +133,7 @@ func TestClientCapacityRoutesLandInTheSameRows(t *testing.T) {
 	ctx := context.Background()
 
 	obs := store.ProfileObservation{
-		Duration: 5 * time.Second, PeakCores: 2, SustainedCores: 1.25,
+		Duration: 5 * time.Second, PeakCores: 2, SustainedCores: new(float64(1.25)),
 		PeakMemoryBytes: 1 << 30, CPUMeasured: true, PlanHash: "abc",
 	}
 	if err := c.RecordProfileObservation(ctx, "demo", "", obs); err != nil {

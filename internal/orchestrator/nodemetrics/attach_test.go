@@ -2,11 +2,14 @@ package nodemetrics
 
 import (
 	"context"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/procusage"
 )
 
 func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int64) {
@@ -14,12 +17,17 @@ func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int6
 	if samplerRunning() {
 		t.Fatal("a shared sampler loop is already running; stub before attaching")
 	}
-	prevCPU, prevRSS := cpuReader, rssReader
-	cpuReader, rssReader = cpu, rss
-	t.Cleanup(func() {
-		waitForSamplerStop(t)
-		cpuReader, rssReader = prevCPU, prevRSS
-	})
+	previous := snapshotReader
+	snapshotReader = func(_ *procusage.Tree) procusage.Snapshot {
+		start := time.Now()
+		value, ok := cpu()
+		rssValue := rss()
+		pid := os.Getpid()
+		return procusage.Snapshot{Start: start, End: time.Now(), Available: true, Processes: map[int]procusage.Process{
+			pid: {Identity: procusage.Identity{PID: pid, Birth: 1}, ReadAt: start, CPU: value, RSS: rssValue, CPUAvailable: ok, RSSAvailable: rssValue >= 0, IdentityAvailable: true, AncestryAvailable: true},
+		}}
+	}
+	t.Cleanup(func() { waitForSamplerStop(t); snapshotReader = previous })
 }
 
 func clampingCPU() func() (time.Duration, bool) {
@@ -97,9 +105,9 @@ func TestAttach_SplitsIntervalAcrossAttachedNodes(t *testing.T) {
 
 	first, second := &captureSink{}, &captureSink{}
 	ctx := context.Background()
-	detachFirst := Attach(ctx, first)
+	detachFirst := Attach(ctx, first, false)
 	defer detachFirst()
-	detachSecond := Attach(ctx, second)
+	detachSecond := Attach(ctx, second, false)
 
 	a, b := awaitSharedTick(t, first, second)
 	if a.CPUMillicores != hostMilli/2 || b.CPUMillicores != hostMilli/2 {
@@ -130,7 +138,7 @@ func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
 	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
 
 	first := &captureSink{}
-	detach := Attach(context.Background(), first)
+	detach := Attach(context.Background(), first, false)
 	awaitSampleAfter(t, first, time.Time{})
 	if !samplerRunning() {
 		t.Fatal("no loop running while a node is attached")
@@ -143,7 +151,7 @@ func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
 
 	second := &captureSink{}
 	cancelCtx, cancel := context.WithCancel(context.Background())
-	detachSecond := Attach(cancelCtx, second)
+	detachSecond := Attach(cancelCtx, second, false)
 	defer detachSecond()
 	awaitSampleAfter(t, second, time.Time{})
 	if !samplerRunning() {
@@ -176,7 +184,7 @@ func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
 	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
 
 	retiring := &captureSink{}
-	detachRetiring := Attach(context.Background(), retiring)
+	detachRetiring := Attach(context.Background(), retiring, false)
 	select {
 	case <-inTick:
 	case <-time.After(2 * time.Second):
@@ -185,7 +193,7 @@ func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
 	detachRetiring()
 
 	replacement := &captureSink{}
-	detachReplacement := Attach(context.Background(), replacement)
+	detachReplacement := Attach(context.Background(), replacement, false)
 	defer detachReplacement()
 	close(release)
 
@@ -226,7 +234,7 @@ func TestAttach_ConcurrentAttachDetachWhileTicking(t *testing.T) {
 			defer wg.Done()
 			for round := 0; round < 25; round++ {
 				ctx, cancel := context.WithCancel(context.Background())
-				detach := Attach(ctx, &captureSink{})
+				detach := Attach(ctx, &captureSink{}, false)
 				time.Sleep(time.Millisecond)
 				if (worker+round)%2 == 0 {
 					cancel()

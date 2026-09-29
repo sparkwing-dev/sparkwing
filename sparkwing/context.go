@@ -157,19 +157,15 @@ const (
 	keyResourceReporter
 )
 
-// ResourceSample is one measured resource reading for a spawned command:
-// the CPU it drew, averaged over its wall-clock span, and the peak resident
-// memory of its process subtree.
+// ResourceSample holds kernel exit usage for a completed command.
 type ResourceSample struct {
 	// CPUMillicores is the command's average CPU draw over its run, in
 	// thousandths of a core (1000 == one core busy for the whole span).
 	CPUMillicores int64
-	// MemoryBytes is the peak resident set size of the command's process
-	// subtree, in bytes.
+	// MemoryBytes is the kernel-reported maximum RSS in bytes. It is not
+	// the simultaneous sum of descendant RSS.
 	MemoryBytes int64
-	// CPUTime is the raw user+system CPU the command's reaped subtree drew.
-	// The same usage lands in the process's RUSAGE_CHILDREN at reap, so the
-	// orchestrator subtracts this from the node sampler to count it once.
+	// CPUTime is the user+system CPU returned when the command is reaped.
 	CPUTime time.Duration
 }
 
