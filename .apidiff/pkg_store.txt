@@ -694,7 +694,6 @@ var ErrEmailMismatch = errors.New("store: invitation is addressed to another ema
 var ErrExecutorCredentialMismatch = errors.New("executor credential does not match enrollment")
 var ErrExecutorEnrollmentLimit = errors.New("executor enrollment limit reached: maximum 256 per controller")
 var ErrFingerprintMismatch = errors.New("store: the fingerprint is not the host key this credential pinned")
-var ErrFreeRunLimit = errors.New("free run limit reached")
 var ErrFreeStoragePaused = errors.New("free storage is paused; buy credits or join the waitlist")
 var ErrGitCredentialLimit = fmt.Errorf("store: a team stores at most %d git credentials", MaxGitCredentialsPerTeam)
 var ErrGitHubRunnerCredentialLimit = errors.New("store: this team already holds the maximum live GitHub Actions runner credentials")
@@ -1131,6 +1130,7 @@ type LegacyAgentClaim struct {
 	StartedAt   time.Time
 	LastSeen    time.Time
 }
+func LogEvictionHeadroom(share int64) int64
 const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{
@@ -1161,7 +1161,6 @@ const MaxCreditRateMicro = 1_000_000_000_000
 const MaxCreditRateTableEntries = 32
 const MaxEnrolledExecutors = 256
 const MaxEventKindBytes = 128
-const MaxFreeRunsPerDay = 200
 const MaxGitCredentialsPerTeam = 50
 const MaxGitHubAppExtraRepos = 10
 const MaxGitHubRunnerBindings = 20
@@ -1178,7 +1177,7 @@ const MaxPlanNodes = 1000
 const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 const MaxRetryBackoff = 5 * time.Minute
 const MaxRunListLimit = 1000
-const MaxRunnerTokensPerTeam = 10
+const MaxRunnerTokensPerTeam = 100
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
@@ -1841,6 +1840,8 @@ type StorageReservation struct {
 	Granted   int64
 	Unlimited bool
 	ExpiresAt time.Time
+
+	EvictBytes int64
 }
 type StorageReserve struct {
 	Team Team
@@ -2143,7 +2144,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
-func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error)
+func (s *Store) PruneExpiredCacheObjects(ctx context.Context, team Team, rels []string) (_ int64, err error)
 func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)

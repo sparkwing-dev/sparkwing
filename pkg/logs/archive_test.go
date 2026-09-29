@@ -126,8 +126,7 @@ type archiveFixture struct {
 	client *billed
 	root   string
 	calls  *controllerCalls
-	// clock is the object store's, which stamps LastModified.
-	clock gofakes3.TimeSourceAdvancer
+	clock  gofakes3.TimeSourceAdvancer
 }
 
 type controllerCalls struct {

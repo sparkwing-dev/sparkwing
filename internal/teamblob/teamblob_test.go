@@ -167,8 +167,7 @@ type fixture struct {
 	raw    *s3.Client
 	client *counting
 	store  *teamblob.Store
-	// clock stamps LastModified on what the fake store writes.
-	clock gofakes3.TimeSourceAdvancer
+	clock  gofakes3.TimeSourceAdvancer
 }
 
 func newFixture(t *testing.T, opts teamblob.Options) *fixture {

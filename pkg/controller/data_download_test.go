@@ -28,8 +28,7 @@ import (
 
 type downloadHead struct {
 	teamblob.Client
-	keys []string
-	// age is how long ago every object was last written.
+	keys   []string
 	age    time.Duration
 	copies []string
 }

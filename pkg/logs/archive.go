@@ -897,11 +897,9 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, deleted)
 }
 
-// handleEvictTeamLogs deletes a team's least recently written archived runs,
-// oldest first, until it has freed at least ?bytes=, and answers what it
-// freed. The controller calls it when it grants a team without credits a log
-// write past its share, so a full share costs the team its oldest logs rather
-// than a run's logs.
+// safety: the controller calls this when it grants a team without credits a
+// log write past its share, so a full share costs the team its oldest
+// archived runs, never a live run's logs.
 func (s *Server) handleEvictTeamLogs(w http.ResponseWriter, r *http.Request) {
 	team := r.PathValue("team")
 	want, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)

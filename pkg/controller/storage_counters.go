@@ -169,9 +169,9 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	s.writeReservation(w, r, store.Team(req.Team), next, err)
 }
 
-// LogEvictionTimeout bounds the eviction a log write past a team's share
-// waits for, inside the logs service's own wait for the reservation.
-const LogEvictionTimeout = 3 * time.Second
+// safety: the eviction runs inside the logs service's own five-second wait
+// for the reservation, so it must end well before that wait does.
+const logEvictionTimeout = 3 * time.Second
 
 // safety: the write was already granted, so an eviction that fails or runs
 // out of time leaves the team past its share only until its next write or
@@ -182,7 +182,7 @@ func (s *Server) evictTeamLogs(ctx context.Context, team store.Team, want int64)
 		s.logger.Warn("team past its log share and no logs service to evict from", "team", string(team), "bytes", want)
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, LogEvictionTimeout)
+	ctx, cancel := context.WithTimeout(ctx, logEvictionTimeout)
 	defer cancel()
 	target := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) +
 		"/logs/evict?bytes=" + strconv.FormatInt(want, 10)

@@ -443,14 +443,12 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	return nil, ErrUnknownToken
 }
 
-// TokenUseWriteEvery bounds how often a token's use is written back: a
-// fleet authenticates on every request, and last use to the hour is all
-// that is read.
-const TokenUseWriteEvery = time.Hour
+// perf: a fleet authenticates on every request, and last use to the hour
+// is all that is read.
+const tokenUseWriteEvery = time.Hour
 
-// slidesOnUse reports whether a token's expiry follows its last use: the
-// runner tokens a team mints for its machines, which [RunnerTokenLifetime]
-// expires only once they sit idle.
+// safety: only the runner tokens a team mints for its machines slide, so an
+// operator's or GitHub runner's fixed lifetime is never extended by use.
 func slidesOnUse(t *Token) bool {
 	return t.Kind == TokenKindRunner && strings.HasPrefix(t.Principal, agentPrincipalPrefix) && t.ExpiresAt != nil
 }
@@ -459,7 +457,7 @@ func slidesOnUse(t *Token) bool {
 // authenticate the same token in one hour write it once between them.
 func (s *Store) noteTokenUse(t *Token, now time.Time) {
 	now = now.UTC()
-	if t.LastUsedAt != nil && now.Sub(*t.LastUsedAt) < TokenUseWriteEvery {
+	if t.LastUsedAt != nil && now.Sub(*t.LastUsedAt) < tokenUseWriteEvery {
 		return
 	}
 	expires := t.ExpiresAt
@@ -470,7 +468,7 @@ func (s *Store) noteTokenUse(t *Token, now time.Time) {
 	res, err := s.execNoCtx(
 		`UPDATE tokens SET last_used_at = ?, expires_at = ?
 		  WHERE team = ? AND hash = ? AND (last_used_at IS NULL OR last_used_at <= ?)`,
-		now.Unix(), expiresUnix(expires), string(t.Team), t.Hash, now.Add(-TokenUseWriteEvery).Unix(),
+		now.Unix(), expiresUnix(expires), string(t.Team), t.Hash, now.Add(-tokenUseWriteEvery).Unix(),
 	)
 	if err != nil {
 		return

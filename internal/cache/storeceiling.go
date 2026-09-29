@@ -52,9 +52,8 @@ func evictableDirs() []string { return []string{artifactsDir, cacheDir, teamsDir
 
 var evictMu sync.Mutex
 
-// admitStoreWrite lets a write onto the cache volume proceed. A volume at its
-// ceiling first evicts its least recently read files, as the volume's access
-// times record them, down to seven eighths of the ceiling.
+// safety: a volume at its ceiling evicts its least recently read files, by the
+// volume's access times, down to seven eighths of the ceiling before it refuses.
 func admitStoreWrite() error {
 	if !storeCeiling.Frozen() {
 		return nil
