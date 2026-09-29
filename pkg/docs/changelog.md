@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- **SDK:** Wait for launched children to stop when a spawn generator fails.
+
 - **object-store metrics:** Reject invalid sample kinds and negative resource
   values before appending state.
 
