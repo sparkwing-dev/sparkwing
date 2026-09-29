@@ -49,7 +49,7 @@ func newCredFixture(t *testing.T) *credFixture {
 		})
 		return s.WithSecretsCipher(cipher)
 	})
-	return &credFixture{appFixture: f, hostKey: hostKey, olga: f.ghUser(501, "olga")}
+	return &credFixture{appFixture: f, hostKey: hostKey, olga: f.ghUser(501, "olga-gh")}
 }
 
 func deployKey(t *testing.T) string {

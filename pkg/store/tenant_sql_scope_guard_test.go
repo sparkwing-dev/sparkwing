@@ -189,7 +189,7 @@ var unportedSQL = []string{
 	"(*Store).ListNodeBounces",
 	"(*Store).ListNodeDispatches",
 	"(*Store).ListNodeExecutionAttempts",
-	"(*Store).ListNodeMetrics",
+	"(*Store).ListNodeMetricsPage",
 	"(*Store).ListNodeSteps",
 	"(*Store).ListNodes",
 	"(*Store).ListPendingApprovals",
