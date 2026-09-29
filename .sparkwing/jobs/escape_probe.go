@@ -178,8 +178,8 @@ const (
 
 func (p prober) run() []probeResult {
 	out := p.fileProbes()
-	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.gitCredentialProbe(),
-		p.publicHTTPSProbe(), p.publicPortProbe())
+	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.publicHTTPSProbe(), p.publicPortProbe())
+	out = append(out, p.sourceCredentialProbes()...)
 	for name, addr := range tcpTargets {
 		out = append(out, p.tcpProbe("tcp "+name, addr))
 	}
@@ -355,20 +355,26 @@ func (p prober) adminRouteProbe() probeResult {
 	}
 }
 
-// safety: a claim's source and modules come through the controller, which
-// holds the credential, so the route that hands a runner its run's git
-// credential must refuse the pod's claim token for its own run.
-func (p prober) gitCredentialProbe() probeResult {
+// safety: the pod's claim token must reach no source credential: the run's
+// git credential route refuses a claim token outright, and the init container
+// already spent the claim's one GitHub token before this container started.
+func (p prober) sourceCredentialProbes() []probeResult {
 	base, run := p.getenv("SPARKWING_CONTROLLER_URL"), p.getenv("SPARKWING_RUN_ID")
 	if base == "" || run == "" {
-		return missingTarget("controller git credential", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")
+		return []probeResult{missingTarget("controller source credentials", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")}
 	}
-	code, err := p.status(http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/runs/"+url.PathEscape(run)+"/git-credential",
-		p.getenv(ownTokenEnv), []byte("{}"), nil)
-	return probeResult{
-		name: "controller git credential", verdict: httpVerdict(code, err),
-		detail: "asks for its own run's git credential with the pod's claim token",
+	var out []probeResult
+	for name, route := range map[string]string{
+		"controller git credential": "git-credential", "controller source credential": "source-credential",
+	} {
+		code, err := p.status(http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/runs/"+url.PathEscape(run)+"/"+route,
+			p.getenv(ownTokenEnv), []byte("{}"), nil)
+		out = append(out, probeResult{
+			name: name, verdict: httpVerdict(code, err),
+			detail: "asks for its own run's " + route + " with the pod's claim token",
+		})
 	}
+	return out
 }
 
 const dryRunJob = `{"apiVersion":"batch/v1","kind":"Job","metadata":{"generateName":"escape-probe-"},
