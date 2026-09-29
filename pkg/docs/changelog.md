@@ -327,7 +327,12 @@ unlock.
   counted as it is written but never refused for it: the hourly storage pass
   deletes a free team's least recently written finished runs' archived logs,
   through the logs service with the controller's `logs.delete` credential,
-  until the team is back under its share; run
+  until the team is back under its share. It skips a run still going or one
+  no run row records, and takes off the count only the bytes the logs service
+  reports deleting (`X-Sparkwing-Archived-Bytes-Deleted`), so a refused
+  deletion frees nothing. The logs service's `DELETE /api/v1/logs/{runID}`
+  deletes any team's run for a `logs.delete` credential, as its team-logs
+  deletion already did; run
   events keep 64 MiB, checked in the append's transaction. The controller
   counts every team's cache and log bytes in its database (schema v61,
   `team_storage`): a write reserves its size with

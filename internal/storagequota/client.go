@@ -28,6 +28,11 @@ import (
 	"time"
 )
 
+// ArchivedBytesDeletedHeader names, on the logs service's answer to a run
+// deletion, the bytes of the run's archived logs it removed from the object
+// store, which is what the controller takes off the team's count.
+const ArchivedBytesDeletedHeader = "X-Sparkwing-Archived-Bytes-Deleted"
+
 // Tier is what a team may store.
 type Tier string
 

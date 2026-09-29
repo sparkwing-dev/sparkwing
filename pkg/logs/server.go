@@ -1199,9 +1199,11 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 		l := s.archive.lock(runID)
 		l.rw.Lock()
 		defer l.rw.Unlock()
-		if !s.mayDeleteArchivedRun(w, r, root, runID) {
+		deleted, ok := s.mayDeleteArchivedRun(w, r, root, runID)
+		if !ok {
 			return
 		}
+		w.Header().Set(storagequota.ArchivedBytesDeletedHeader, strconv.FormatInt(deleted, 10))
 	}
 	if err := root.RemoveAll(runID); err != nil {
 		s.storeError(w, "remove run dir", err)

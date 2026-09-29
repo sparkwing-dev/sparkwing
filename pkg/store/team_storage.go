@@ -969,14 +969,15 @@ SELECT ts.team, ts.used_bytes FROM team_storage ts JOIN free_slots f ON f.team =
 	return out, nil
 }
 
-// RunFinished reports whether team's run ended, or is no longer recorded, so
-// its logs may be pruned; a run still going is never finished.
+// RunFinished reports whether team's run ended, so its logs may be pruned. A
+// run still going, or one no longer recorded, is not finished; retention
+// removes the logs of a run nobody records.
 func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error) {
 	var status string
 	err := s.queryRow(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`,
 		string(NormalizeTeam(team)), runID).Scan(&status)
 	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
+		return false, nil
 	}
 	return err == nil && isTerminalRunStatus(status), err
 }

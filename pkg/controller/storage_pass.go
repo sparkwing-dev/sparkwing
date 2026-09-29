@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -213,9 +217,8 @@ func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t st
 		return 0, err
 	}
 	type archivedRun struct {
-		id    string
-		bytes int64
-		last  time.Time
+		id   string
+		last time.Time
 	}
 	byID := map[string]*archivedRun{}
 	for _, o := range objs {
@@ -228,7 +231,6 @@ func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t st
 			r = &archivedRun{id: id}
 			byID[id] = r
 		}
-		r.bytes += o.Size
 		if o.LastModified.After(r.last) {
 			r.last = o.LastModified
 		}
@@ -247,10 +249,38 @@ func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t st
 		if !finished {
 			continue
 		}
-		if err := deleteRemote(ctx, base+url.PathEscape(r.id), s.teamStorage.LogsToken); err != nil && !errors.Is(err, errRemoteNotFound) {
+		deleted, err := deleteRunLogs(ctx, base+url.PathEscape(r.id), s.teamStorage.LogsToken)
+		if err != nil {
 			return freed, fmt.Errorf("delete logs of run %s: %w", r.id, err)
 		}
-		freed += r.bytes
+		freed += deleted
 	}
 	return freed, nil
+}
+
+// safety: only what the logs service says it removed from the archive is
+// taken off the team's count; a refusal or an answer naming nothing frees
+// nothing, and the next pass's listing corrects any count left high.
+func deleteRunLogs(ctx context.Context, target, bearer string) (int64, error) {
+	// #nosec G704 -- the origin is operator configuration; the id is an escaped segment
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	// #nosec G704 -- the request keeps the operator-configured origin
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return 0, errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
+	}
+	deleted, err := strconv.ParseInt(resp.Header.Get(storagequota.ArchivedBytesDeletedHeader), 10, 64)
+	if err != nil || deleted < 0 {
+		return 0, nil
+	}
+	return deleted, nil
 }

@@ -69,10 +69,14 @@ confirmed every time.
 A log write is never refused for the log share, so a run always keeps its
 logs. The hourly storage pass holds a free team to the share instead: after it
 recounts the logs, it deletes the team's least recently written archived runs
-whose run has finished (or is no longer recorded), through the logs service's
+whose run has finished, through the logs service's
 `DELETE /api/v1/logs/{runID}` with the controller's `logs.delete` credential,
-until the team is back under its share, and never a run still going. A team
-can therefore sit past its log share by about an hour of log growth.
+which deletes any team's run as it deletes a whole team's logs, until the team
+is back under its share. It never prunes a run still going, or one no run row
+records; retention removes those. Only the archived bytes the logs service
+reports deleting, in `X-Sparkwing-Archived-Bytes-Deleted`, come off the
+team's count, so a refused or failed deletion frees nothing. A team can
+therefore sit past its log share by about an hour of log growth.
 
 A cache write past its share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. The cache judges a declared

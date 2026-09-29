@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -276,9 +278,24 @@ func TestAFailedStoragePassKeepsTheCounts(t *testing.T) {
 	}
 }
 
+func (b *passBuckets) archiveRun(t *testing.T, team, runID string, n int) {
+	t.Helper()
+	b.put(t, "logs/teams/"+team+"/runs/"+runID+"/build.log", n)
+	index := fmt.Sprintf(`{"team":%q,"last_write":%q,"files":[{"rel":"build.log","size":%d}]}`,
+		team, time.Now().UTC().Format(time.RFC3339), n)
+	if _, err := b.raw.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String(passBucket), Key: aws.String("logs/index/runs/" + runID + ".json"), Body: strings.NewReader(index),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b.written.Advance(time.Minute)
+}
+
 // A free team whose log writes carried it past its share is pruned back
-// under it by the hourly pass: its least recently written finished runs go
-// first through the logs service, and a run still going is never touched.
+// under it by the hourly pass, through a real logs service and the
+// controller's log-deletion credential: its least recently written finished
+// runs go first, and a run still going or one no run row records is left for
+// retention. Only the bytes the logs service confirms are taken off the count.
 func TestTheStoragePassPrunesAFreeTeamsFinishedLogsBackUnderItsShare(t *testing.T) {
 	f := freeTierFixture(t, 5)
 	b := newPassBuckets(t)
@@ -286,17 +303,14 @@ func TestTheStoragePassPrunesAFreeTeamsFinishedLogsBackUnderItsShare(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	var deleted []string
-	logsSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer "+deleter {
-			http.Error(w, "unexpected", http.StatusTeapot)
-			return
-		}
-		deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/logs/"))
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	t.Cleanup(logsSvc.Close)
-	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsSvc.URL, LogsToken: deleter})
+	logsSrv, err := logs.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv.WithControllerAuth(f.url, 0).WithArchive(logs.ArchiveOptions{Store: b.logs})
+	logsHTTP := httptest.NewServer(logsSrv.Handler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
 	allowance := int64(16 << 10)
 	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
 		t.Fatal(err)
@@ -309,20 +323,59 @@ func TestTheStoragePassPrunesAFreeTeamsFinishedLogsBackUnderItsShare(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, run := range []struct{ id, status string }{{"r-live", "running"}, {"r-old", "success"}, {"r-new", "failed"}} {
-		if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
-			t.Fatal(err)
+	for _, run := range []struct{ id, status string }{{"r-unrecorded", ""}, {"r-live", "running"}, {"r-old", "success"}, {"r-new", "failed"}} {
+		if run.status != "" {
+			if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
 		}
-		b.put(t, "logs/teams/first/runs/"+run.id+"/build.log", 1500)
-		b.written.Advance(time.Minute)
+		b.archiveRun(t, "first", run.id, 1000)
 	}
 	if _, err := f.srv.RunStoragePass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(deleted) != 1 || deleted[0] != "r-old" {
-		t.Fatalf("pruned %v, want only the oldest finished run", deleted)
+	for run, want := range map[string]bool{"r-unrecorded": true, "r-live": true, "r-old": false, "r-new": true} {
+		if got := b.has(t, "logs/teams/first/runs/"+run+"/build.log"); got != want {
+			t.Errorf("%s present = %t, want %t", run, got, want)
+		}
 	}
 	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
-		t.Fatalf("logs after the prune = %d, want the 4500 listed less the 1500 pruned", got)
+		t.Fatalf("logs after the prune = %d, want the 4000 listed less the 1000 the logs service deleted", got)
+	}
+}
+
+// A logs service that refuses the deletion frees nothing: the team keeps the
+// count the listing found, and the pass reports the refusal.
+func TestARefusedLogDeletionFreesNothing(t *testing.T) {
+	f := freeTierFixture(t, 5)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsHTTP := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
+	allowance := int64(4 << 10)
+	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+		t.Fatal(err)
+	}
+	freeTeamToken(t, f.store, "first")
+	if err := f.store.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.CreateRun(t.Context(), store.Run{ID: "r-old", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b.archiveRun(t, "first", "r-old", 3000)
+	if _, err := f.srv.RunStoragePass(t.Context()); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("pass = %v, want the logs service's 404", err)
+	}
+	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
+		t.Fatalf("logs after a refused prune = %d, want the 3000 listed", got)
 	}
 }

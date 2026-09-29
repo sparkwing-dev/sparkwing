@@ -643,24 +643,34 @@ func maxTime(a, b time.Time) time.Time {
 
 // safety: the caller holds the run exclusively. The day index entry is left for retention,
 // which drops an entry whose run is gone.
-func (s *Server) deleteArchivedRun(ctx context.Context, runID string) error {
+func (s *Server) deleteArchivedRun(ctx context.Context, runID string) (int64, error) {
 	idx, err := s.readRunIndex(ctx, runID)
 	if errors.Is(err, teamblob.ErrNotFound) {
-		return nil
+		return 0, nil
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	objs := make([]teamblob.Sized, 0, len(idx.Files))
+	var bytes int64
 	for _, f := range idx.Files {
 		if safeArchivedRel(f.Rel) {
 			objs = append(objs, teamblob.Sized{Rel: runObjectRel(runID, f.Rel), Size: f.Size})
+			bytes += f.Size
 		}
 	}
 	if err := s.archive.store.DeleteMany(ctx, idx.Team, objs); err != nil {
-		return err
+		return 0, err
 	}
-	return s.archive.store.Delete(ctx, "", indexRunRel(runID))
+	return bytes, s.archive.store.Delete(ctx, "", indexRunRel(runID))
+}
+
+// safety: the controller's logs.delete credential belongs to the operator's
+// team yet deletes any team's run, the same authority the team-deletion route
+// grants it; admin needs no exemption because principalTeam already clears it.
+func deletesAnyTeam(r *http.Request) bool {
+	p, ok := logsPrincipalFromContext(r.Context())
+	return ok && p != nil && p.hasScope(scopeLogsDelete)
 }
 
 // PruneArchive deletes archived runs whose last write is older than the
@@ -941,7 +951,7 @@ func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 }
 
 // safety: the caller holds the run exclusively.
-func (s *Server) mayDeleteArchivedRun(w http.ResponseWriter, r *http.Request, root *os.Root, runID string) bool {
+func (s *Server) mayDeleteArchivedRun(w http.ResponseWriter, r *http.Request, root *os.Root, runID string) (int64, bool) {
 	team := readRunMeta(root, runID).Team
 	if _, err := root.Stat(runID); err != nil {
 		idx, err := s.readRunIndex(r.Context(), runID)
@@ -950,22 +960,23 @@ func (s *Server) mayDeleteArchivedRun(w http.ResponseWriter, r *http.Request, ro
 		case err != nil:
 			s.logger.Error("logs archive", "op", "read run index", "run", runID, "err", err)
 			http.Error(w, "log archive unavailable", http.StatusBadGateway)
-			return false
+			return 0, false
 		default:
 			team = idx.Team
 		}
 	}
-	if !s.teamMayUse(r, team) {
+	if !s.teamMayUse(r, team) && !deletesAnyTeam(r) {
 		http.Error(w, fmt.Sprintf("run %s not found", runID), http.StatusNotFound)
-		return false
+		return 0, false
 	}
-	if err := s.deleteArchivedRun(r.Context(), runID); err != nil {
+	deleted, err := s.deleteArchivedRun(r.Context(), runID)
+	if err != nil {
 		s.logger.Error("logs archive", "op", "delete run", "run", runID, "err", err)
 		http.Error(w, "delete the run's archived logs: the object store refused; retry", http.StatusBadGateway)
-		return false
+		return 0, false
 	}
 	s.archive.noteAbsent(runID, time.Now())
-	return true
+	return deleted, true
 }
 
 // safety: the health route answers without a token, so it names the
