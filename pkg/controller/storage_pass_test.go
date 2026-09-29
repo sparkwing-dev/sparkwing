@@ -187,6 +187,9 @@ func TestTheStoragePassReconcilesAndKeepsWritesInFlight(t *testing.T) {
 			t.Fatalf("%s's run = %d", team, code)
 		}
 	}
+	if err := f.store.GrantFreeSlot(t.Context(), "alpha", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	b.put(t, "cache/teams/alpha/bins/one", 300)
 	b.put(t, "logs/teams/alpha/runs/r1/build.log", 40)
 	commitStorage(t, f.store, "beta", store.StorageCache, 999)
