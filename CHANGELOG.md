@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **admission:** Remeasure node costs when the available plan fingerprint changes; retain explicit resource pins.
+
 - **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
 
 - **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
