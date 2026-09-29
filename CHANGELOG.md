@@ -30,6 +30,7 @@ unlock.
 
 - **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
 - **tests:** Include metric sample kinds in database requirement expectations.
+- **CI:** Supply PostgreSQL 17 to the hosted pre-release check through its existing server URL.
 
 - **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
 

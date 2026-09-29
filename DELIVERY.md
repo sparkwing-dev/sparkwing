@@ -409,6 +409,12 @@ file. Other syntax and workflow checks remain active.
   thirty-minute timeout. Roughly 80 seconds on a warm cache and an idle box;
   the first run downloads the Postgres binaries.
 
+- **Hosted pre-release PostgreSQL:** the canonical pre-release job supplies a
+  PostgreSQL 17 service through `SPARKWING_TEST_PG_URL`, so `store-postgres`
+  uses that server without downloading embedded binaries. The separate
+  Postgres conformance job verifies the backup drill with a matching client
+  and rejects skipped tests.
+
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
   set to a database they cannot reach. Start one with `docker run --rm -d
