@@ -75,8 +75,10 @@ which deletes any team's run as it deletes a whole team's logs, until the team
 is back under its share. It never prunes a run still going, or one no run row
 records; retention removes those. Only the archived bytes the logs service
 reports deleting, in `X-Sparkwing-Archived-Bytes-Deleted`, come off the
-team's count, so a refused or failed deletion frees nothing. A team can
-therefore sit past its log share by about an hour of log growth.
+team's count, so a refused or failed deletion frees nothing. A team with
+neither credits nor a slot has a log share of zero, so the pass prunes the
+finished runs a refused commit left behind. A team can therefore sit past
+its log share by about an hour of log growth.
 
 A cache write past its share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. The cache judges a declared

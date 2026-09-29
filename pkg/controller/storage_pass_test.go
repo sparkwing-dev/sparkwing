@@ -227,6 +227,9 @@ func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
 	if code := f.trigger(freeTeamToken(t, f.store, "alpha")); code != 202 {
 		t.Fatal(code)
 	}
+	if err := f.store.GrantFreeSlot(t.Context(), "alpha", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	b.put(t, "cache/teams/alpha/bins/old", 300)
 	b.put(t, "cache/teams/default/bins/operator", 10)
 	b.put(t, "cache/bins/operator-root", 10)
@@ -377,5 +380,51 @@ func TestARefusedLogDeletionFreesNothing(t *testing.T) {
 	}
 	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
 		t.Fatalf("logs after a refused prune = %d, want the 3000 listed", got)
+	}
+}
+
+// A team whose log writes landed before another team took the last slot has
+// no slot and no credits, so its share is zero: the pass prunes its finished
+// runs' logs through the logs service and leaves a run still going.
+func TestTheStoragePassPrunesASlotlessTeamsFinishedLogs(t *testing.T) {
+	f := freeTierFixture(t, 1)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv, err := logs.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv.WithControllerAuth(f.url, 0).WithArchive(logs.ArchiveOptions{Store: b.logs})
+	logsHTTP := httptest.NewServer(logsSrv.Handler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
+	freeTeamToken(t, f.store, "slotted")
+	freeTeamToken(t, f.store, "slotless")
+	if err := f.store.GrantFreeSlot(t.Context(), "slotted", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "slotless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []struct{ id, status string }{{"r-done", "success"}, {"r-live", "running"}} {
+		if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		b.archiveRun(t, "slotless", run.id, 1000)
+	}
+	if _, err := f.srv.RunStoragePass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string]bool{"r-done": false, "r-live": true} {
+		if got := b.has(t, "logs/teams/slotless/runs/"+run+"/build.log"); got != want {
+			t.Errorf("%s present = %t, want %t", run, got, want)
+		}
+	}
+	if got := held(t, f.store, "slotless", store.StorageLogs); got != 1000 {
+		t.Fatalf("slotless team's logs after the prune = %d, want the running run's 1000", got)
 	}
 }

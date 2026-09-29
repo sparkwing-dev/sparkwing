@@ -935,11 +935,11 @@ type TeamOverShare struct {
 }
 
 // TeamsOverFreeLogShare reports every team without credits whose logs hold
-// more than its share of the free allowance, and by how much.
+// more than its share of the free allowance, and by how much. A team with
+// neither credits nor a slot has a share of zero.
 func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error) {
 	rows, err := s.query(ctx, `
-SELECT ts.team, ts.used_bytes FROM team_storage ts JOIN free_slots f ON f.team = ts.team
- WHERE ts.store = ? ORDER BY ts.team`, string(StorageLogs))
+SELECT team, used_bytes FROM team_storage WHERE store = ? AND used_bytes > 0 ORDER BY team`, string(StorageLogs))
 	if err != nil {
 		return nil, err
 	}
@@ -965,7 +965,15 @@ SELECT ts.team, ts.used_bytes FROM team_storage ts JOIN free_slots f ON f.team =
 		if err != nil {
 			return nil, err
 		}
-		if over := used[team] - FreeLogShare(standing.AllowanceBytes); standing.Tier == TeamTierFree && over > 0 {
+		var share int64
+		switch standing.Tier {
+		case TeamTierFree:
+			share = FreeLogShare(standing.AllowanceBytes)
+		case TeamTierNone:
+		default:
+			continue
+		}
+		if over := used[team] - share; over > 0 {
 			out = append(out, TeamOverShare{Team: team, OverBytes: over})
 		}
 	}
