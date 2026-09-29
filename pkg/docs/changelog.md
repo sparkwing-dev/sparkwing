@@ -373,8 +373,9 @@ unlock.
   until the team is back under its share. It skips a run still going or one
   no run row records, and takes off the count only the bytes the logs service
   reports deleting (`X-Sparkwing-Archived-Bytes-Deleted`), so a refused
-  deletion frees nothing. A team with neither credits nor a slot has a log
-  share of zero, so its finished runs' logs are pruned too. The logs service's `DELETE /api/v1/logs/{runID}`
+  deletion frees nothing. A team with neither credits nor a slot that never
+  held credits has a log share of zero, so its finished runs' logs are
+  pruned too; a team whose credits lapsed keeps its logs to retention. The logs service's `DELETE /api/v1/logs/{runID}`
   deletes any team's run for a `logs.delete` credential, as its team-logs
   deletion already did; run
   events keep 64 MiB, checked in the append's transaction. The controller

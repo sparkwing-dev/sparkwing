@@ -385,7 +385,8 @@ func TestARefusedLogDeletionFreesNothing(t *testing.T) {
 
 // A team whose log writes landed before another team took the last slot has
 // no slot and no credits, so its share is zero: the pass prunes its finished
-// runs' logs through the logs service and leaves a run still going.
+// runs' logs through the logs service and leaves a run still going. A team
+// whose credits lapsed keeps its logs to retention.
 func TestTheStoragePassPrunesASlotlessTeamsFinishedLogs(t *testing.T) {
 	f := freeTierFixture(t, 1)
 	b := newPassBuckets(t)
@@ -403,9 +404,27 @@ func TestTheStoragePassPrunesASlotlessTeamsFinishedLogs(t *testing.T) {
 	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
 	freeTeamToken(t, f.store, "slotted")
 	freeTeamToken(t, f.store, "slotless")
+	freeTeamToken(t, f.store, "lapsed")
 	if err := f.store.GrantFreeSlot(t.Context(), "slotted", time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	lapsed, err := f.store.ForTeam(t.Context(), "lapsed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paid, err := lapsed.GrantCredits(t.Context(), store.CreditGrantPaid, 500, "pay-1", "billing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lapsed.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
+		Kind: store.CreditGrantReversal, AmountMicro: -500, Reverses: paid.Reference, Reference: "refund-1", CreatedBy: "billing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lapsed.CreateRun(t.Context(), store.Run{ID: "r-lapsed", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b.archiveRun(t, "lapsed", "r-lapsed", 1000)
 	tenant, err := f.store.ForTeam(t.Context(), "slotless")
 	if err != nil {
 		t.Fatal(err)
@@ -426,5 +445,8 @@ func TestTheStoragePassPrunesASlotlessTeamsFinishedLogs(t *testing.T) {
 	}
 	if got := held(t, f.store, "slotless", store.StorageLogs); got != 1000 {
 		t.Fatalf("slotless team's logs after the prune = %d, want the running run's 1000", got)
+	}
+	if !b.has(t, "logs/teams/lapsed/runs/r-lapsed/build.log") || held(t, f.store, "lapsed", store.StorageLogs) != 1000 {
+		t.Fatal("the pass pruned a team whose credits lapsed")
 	}
 }
