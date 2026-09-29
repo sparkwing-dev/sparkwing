@@ -196,3 +196,48 @@ func TestCardBilling_OwnerSetsABudget(t *testing.T) {
 		t.Fatalf("an oversized budget = %d, want 400", code)
 	}
 }
+
+// The worker creates the payment, records its id, and confirms it by that
+// id; a second payment for the same charge is refunded once; and the units
+// route names the card-billing contract the checkout service requires.
+func TestCardBilling_ChargesByRecordedIntentAndRefundsASecondPayment(t *testing.T) {
+	f, fc := billingFixture(t)
+	fc.twoStep = true
+	owner, _, _ := teamOf(f)
+	f.trust(owner.team, 0)
+	if code := f.call("POST", "/api/v1/credits/cards", "Bearer "+f.admin, map[string]any{
+		"team": owner.team, "customer": "cus_1", "payment_method": "pm_1", "fingerprint": "fp_1",
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("save card = %d", code)
+	}
+	f.owe(owner.team, 15_000)
+	f.srv.CardBillingPass(context.Background())
+	charges := fc.internalCalls("/internal/charge")
+	if len(charges) != 2 || charges[0].Body["payment_intent"] != "" ||
+		charges[1].Body["payment_intent"] != "pi_"+fmt.Sprint(charges[0].Body["attempt_id"]) {
+		t.Fatalf("charges = %+v; want a create, then a confirm naming the created payment", charges)
+	}
+	if b := f.billing(owner); b.BalanceMicro != 0 || b.OpenCharge != nil {
+		t.Fatalf("after the charge = %+v", b)
+	}
+	second := map[string]any{
+		"team": owner.team, "charge_id": charges[0].Body["charge_id"], "attempt_id": charges[0].Body["attempt_id"],
+		"payment_intent": "pi_second", "amount_cents": 15_000, "status": "succeeded",
+	}
+	if code := f.call("POST", "/api/v1/credits/card-payments", "Bearer "+f.admin, second, nil); code != http.StatusNoContent {
+		t.Fatalf("second payment = %d", code)
+	}
+	f.srv.CardBillingPass(context.Background())
+	f.srv.CardBillingPass(context.Background())
+	refunds := fc.internalCalls("/internal/refund")
+	if len(refunds) != 1 || refunds[0].Body["payment_intent"] != "pi_second" {
+		t.Fatalf("refunds = %+v; want the second payment refunded once", refunds)
+	}
+	var units struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if code := f.call("GET", "/api/v1/credits/units", "Bearer "+f.admin, nil, &units); code != http.StatusOK ||
+		len(units.Capabilities) != 1 || units.Capabilities[0] != "card-billing-v1" {
+		t.Fatalf("units = %d %+v", code, units)
+	}
+}

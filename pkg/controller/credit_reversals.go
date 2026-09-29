@@ -15,7 +15,15 @@ type creditUnitsJSON struct {
 	MicroPerCredit   int64 `json:"micro_per_credit"`
 	CreditsPerDollar int64 `json:"credits_per_dollar"`
 	MicroPerCent     int64 `json:"micro_per_cent"`
+	// safety: the checkout service refuses a card-billing write to a
+	// controller that does not name its contract here, rather than have an
+	// older controller misread it.
+	Capabilities []string `json:"capabilities"`
 }
+
+// CardBillingCapability is the contract of partial reversals, saved cards,
+// card payments and payment warnings.
+const CardBillingCapability = "card-billing-v1"
 
 // safety: Checkout and ledger must agree on the micro-credit unit before converting a payment.
 func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
@@ -23,6 +31,7 @@ func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 		MicroPerCredit:   store.MicroCreditsPerCredit,
 		CreditsPerDollar: store.CreditsPerDollar,
 		MicroPerCent:     store.MicroCreditsPerCent,
+		Capabilities:     []string{CardBillingCapability},
 	})
 }
 

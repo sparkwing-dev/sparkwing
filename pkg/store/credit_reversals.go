@@ -110,9 +110,6 @@ func (s *Store) ReversePayment(
 	if err := tx.Commit(); err != nil {
 		return CreditReversal{}, err
 	}
-	if out.Created {
-		s.invalidateRunnerCap()
-	}
 	return out, nil
 }
 

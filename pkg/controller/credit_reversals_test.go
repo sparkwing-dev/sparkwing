@@ -70,6 +70,7 @@ func TestCreditsGrantScopeReachesOnlyTheGrantRoutes(t *testing.T) {
 		"GET /api/v1/credits/units":             true,
 		"POST /api/v1/credits/cards":            true,
 		"POST /api/v1/credits/card-payments":    true,
+		"POST /api/v1/credits/warnings":         true,
 		// safety: both answer any authenticated caller, the first with its own
 		// identity and the second with the service URLs.
 		"GET /api/v1/auth/whoami": true,

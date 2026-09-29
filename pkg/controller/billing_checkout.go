@@ -131,6 +131,20 @@ func (c *billingCheckout) charge(ctx context.Context, w store.CardChargeWork) (c
 	err := c.post(ctx, "/internal/charge", map[string]any{
 		"team": string(w.Team), "charge_id": w.ChargeID, "attempt_id": w.AttemptID,
 		"amount_cents": w.AmountCents, "customer": w.Customer, "payment_method": w.PaymentMethod,
+		"payment_intent": w.PaymentIntent,
 	}, &out)
 	return out, err
+}
+
+func (c *billingCheckout) refund(ctx context.Context, paymentIntent, reason string) (string, error) {
+	var out struct {
+		Refund string `json:"refund"`
+	}
+	err := c.post(ctx, "/internal/refund", map[string]any{
+		"payment_intent": paymentIntent, "key": paymentIntent, "reason": reason,
+	}, &out)
+	if err == nil && out.Refund == "" {
+		err = fmt.Errorf("%w: it named no refund", errCheckoutRefused)
+	}
+	return out.Refund, err
 }

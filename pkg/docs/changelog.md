@@ -29,7 +29,14 @@ unlock.
   `POST /api/v1/team/billing/pay`. Every team now spends within a 30-day
   limit, a daily limit and an optional owner budget
   (`PUT /api/v1/team/billing/budget`); a claim past one is refused with `402`
-  and `"code": "spend_limit"`. Schema v87.
+  and `"code": "spend_limit"`. The card a team pays with is held to the same
+  limits across every team it pays for. A declined charge holds the team back
+  at New until it is paid. A payment that drew an early fraud warning is
+  never granted, even when the warning arrives first; money that pays no open
+  charge is refunded. Schema v87.
+- **controller + store:** `max_concurrent_runners` counts a team's cloud
+  runners across all its tokens. The `runner_scale_*` settings, the scaled
+  per-principal cap and `usage.derived_runner_cap` are removed.
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that

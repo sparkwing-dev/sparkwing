@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,5 +302,318 @@ func TestABudgetAlertsOnceWithoutACard(t *testing.T) {
 	}
 	if st, err := acme.SpendStanding(ctx, now); err != nil || st.OpenCharge != nil {
 		t.Fatalf("a team without a card got a charge: %+v, %v", st.OpenCharge, err)
+	}
+}
+
+func dueCharge(t *testing.T, s *store.Store, now time.Time) store.CardChargeWork {
+	t.Helper()
+	work, _, err := s.DueCardCharges(context.Background(), now)
+	if err != nil || len(work) != 1 {
+		t.Fatalf("work = %+v, %v; want one charge", work, err)
+	}
+	return work[0]
+}
+
+// A warning that reaches the controller before its payment settles is kept,
+// and the payment is then neither granted nor counted as paid: the team is
+// held for the warning and the charge stays open.
+func TestAWarningBeforeItsPaymentStopsTheGrant(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	team, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{
+		WarningID: "issfr_1", PaymentIntent: "pi_warned", Fingerprint: "fp_other",
+	}, now)
+	if err != nil || team != "" {
+		t.Fatalf("warning on an unknown payment = %q, %v; want stored with no team", team, err)
+	}
+	created, err := s.SettleCardPayment(ctx, store.CardPayment{
+		Team: "acme", ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_warned", AmountCents: 15_000,
+	}, now)
+	if err != nil || created {
+		t.Fatalf("settling a warned payment = %v, %v; want nothing granted", created, err)
+	}
+	if bal, err := acme.CreditBalanceMicro(ctx); err != nil || bal != -15_000*store.MicroCreditsPerCent {
+		t.Fatalf("balance = %d, %v; want the debt still owed", bal, err)
+	}
+	freeze, err := acme.CreditFreeze(ctx)
+	if err != nil || !freeze.Frozen || freeze.Disputes[0] != "issfr_1" {
+		t.Fatalf("freeze = %+v, %v; want the team held for the warning", freeze, err)
+	}
+	st, err := acme.SpendStanding(ctx, now)
+	if err != nil || st.OpenCharge == nil || st.Billing.Trusted {
+		t.Fatalf("standing = %+v, %v; want the charge open and the team back at New", st, err)
+	}
+}
+
+// A prepaid purchase whose payment drew a warning is refused at the ledger.
+func TestAWarnedPurchaseIsNotGranted(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	acme := teamHandle(t, s, "acme")
+	if _, err := s.RecordPaymentWarning(ctx, store.PaymentWarning{WarningID: "issfr_2", PaymentIntent: "pi_buy"},
+		time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.GrantCredits(ctx, store.CreditGrantPaid, 10_000*store.MicroCreditsPerCredit, "pi_buy", "billing"); !errors.Is(err, store.ErrPaymentWarned) {
+		t.Fatalf("grant of a warned payment = %v, want ErrPaymentWarned", err)
+	}
+}
+
+// A decline holds the team, drops an operator's grant back to New and stops
+// every claim, prepaid balance or not; the retries still run under the hold,
+// and paying the charge lifts it.
+func TestADeclineHoldsATeamWithPrepaidBalanceAtNew(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if _, _, err := s.FailCardAttempt(ctx, w.AttemptID, "pi_declined", "card_declined", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acme.GrantCredits(ctx, store.CreditGrantFree, 400*store.MicroCreditsPerCredit*1000, "promo", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := acme.BillingStanding(ctx, now); err != nil || b.Trusted {
+		t.Fatalf("standing = %+v, %v; want the granted team back at New while held", b, err)
+	}
+	claimant := meteredTeamClaimant(t, acme, "agent:cloud")
+	readyTeamNode(t, s, acme, "run-held", "build")
+	if limit := claimLimit(t, s, claimant); limit != store.SpendLimitChargeFailed {
+		t.Fatalf("claim while held = %q, want refused as a failed charge", limit)
+	}
+	retry := dueCharge(t, s, now.Add(25*time.Hour))
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: retry.ChargeID, AttemptID: retry.AttemptID, PaymentIntent: "pi_retry", AmountCents: 15_000,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if freeze, err := acme.CreditFreeze(ctx); err != nil || freeze.Frozen {
+		t.Fatalf("freeze after paying = %+v, %v; want released", freeze, err)
+	}
+	if b, err := acme.BillingStanding(ctx, now); err != nil || !b.Trusted {
+		t.Fatalf("standing after paying = %+v, %v; want trusted again", b, err)
+	}
+}
+
+// One card's spend counts against its limits across every team it pays for:
+// a claim by one team writes the card's bucket, and the card's cap binds the
+// other team.
+func TestOneCardSpendsItsLimitsOnceAcrossTeams(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	globex := teamHandle(t, s, "globex")
+	trustWithCard(t, acme, now)
+	trustWithCard(t, globex, now)
+	readyTeamNode(t, s, acme, "run-acme", "build")
+	if _, err := s.ClaimNextReadyNode(ctx, meteredTeamClaimant(t, acme, "agent:cloud"), "pod-1", time.Minute, nil); err != nil {
+		t.Fatalf("acme's claim: %v", err)
+	}
+	st, err := globex.SpendStanding(ctx, now)
+	if err != nil || st.CardSpentTodayMicro <= 0 || st.SpentTodayMicro != 0 {
+		t.Fatalf("globex standing = %+v, %v; want acme's reservation on the shared card only", st, err)
+	}
+	if _, err := s.DB().Exec(storetest.Rebind(s, `UPDATE card_spend_days SET amount_micro = ? WHERE fingerprint = 'fp_1'`),
+		store.TrustedDailyCapCents*store.MicroCreditsPerCent); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = globex.SpendStanding(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if room, limit := st.Headroom(); room > 0 || limit != store.SpendLimitCardDailyCap {
+		t.Fatalf("globex headroom = %d %q; want the shared card's daily cap spent", room, limit)
+	}
+}
+
+// Settlement pays a charge only through its own live attempt at the frozen
+// amount. Money that arrives any other way is granted and queued for a
+// refund, and an attempt of another charge is refused.
+func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: "cardcharge-other", AttemptID: w.AttemptID, PaymentIntent: "pi_x", AmountCents: 15_000,
+	}, now); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("an attempt settling another charge = %v, want ErrInvalidInput", err)
+	}
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := acme.SpendStanding(ctx, now); err != nil || st.OpenCharge == nil {
+		t.Fatalf("standing = %+v, %v; want a short payment to leave the charge open", st, err)
+	}
+	if err := s.RecordAttemptIntent(ctx, w.AttemptID, "pi_full", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_full", AmountCents: 15_000,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_second", AmountCents: 15_000,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	due, err := s.DueCardRefunds(ctx)
+	if err != nil || len(due) != 2 || due[0].PaymentIntent != "pi_short" || due[0].Reason != "amount_mismatch" ||
+		due[1].PaymentIntent != "pi_second" || due[1].Reason != "duplicate" {
+		t.Fatalf("queued refunds = %+v, %v; want the short and the second payment", due, err)
+	}
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1"); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := s.DueCardRefunds(ctx); err != nil || len(due) != 1 {
+		t.Fatalf("queued refunds after one was made = %+v, %v", due, err)
+	}
+}
+
+// An attempt that never recorded its payment is replaced once Stripe may
+// have forgotten its key; one that recorded it keeps its id and payment.
+func TestAnAttemptPastTheKeyLifeIsReplaced(t *testing.T) {
+	s := storetest.Open(t)
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	first := dueCharge(t, s, now)
+	next := dueCharge(t, s, now.Add(24*time.Hour))
+	if next.AttemptID == first.AttemptID || next.PaymentIntent != "" {
+		t.Fatalf("attempt after a day = %+v; want a new attempt, not the old key", next)
+	}
+	if err := s.RecordAttemptIntent(context.Background(), next.AttemptID, "pi_bound", now); err != nil {
+		t.Fatal(err)
+	}
+	later := dueCharge(t, s, now.Add(72*time.Hour))
+	if later.AttemptID != next.AttemptID || later.PaymentIntent != "pi_bound" {
+		t.Fatalf("attempt with a recorded payment = %+v; want it read by that payment", later)
+	}
+}
+
+// The v87 backfill counts a refund on the day of the reservation it refunds,
+// as new writes do.
+func TestTheSpendBackfillCountsARefundOnItsReservationDay(t *testing.T) {
+	target := storetest.New(t)
+	st := target.Open(t)
+	day := int64(24 * time.Hour)
+	reserved := (time.Now().UnixNano()/day - 1) * day
+	for _, row := range []struct {
+		id, kind string
+		amount   int64
+		at       int64
+	}{{"c_res", "reservation", 500, reserved}, {"c_ref", "refund", -400, reserved + day}} {
+		if _, err := st.DB().Exec(storetest.Rebind(st, `INSERT INTO credit_charges (id, run_id, node_id, token_prefix,
+		    kind, seconds, amount_micro, charged_at, team) VALUES (?, 'run-b', 'build', 'pfx', ?, 60, ?, ?, 'default')`),
+			row.id, row.kind, row.amount, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{`DELETE FROM team_spend_days`, `DELETE FROM sparkwing_schema_version WHERE version >= 87`} {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := target.TryOpen()
+	if err != nil {
+		t.Fatalf("rerun v87: %v", err)
+	}
+	defer func() { _ = upgraded.Close() }()
+	var amount int64
+	if err := upgraded.DB().QueryRow(storetest.Rebind(upgraded,
+		`SELECT amount_micro FROM team_spend_days WHERE team = 'default' AND day = ?`), reserved/day).Scan(&amount); err != nil || amount != 100 {
+		t.Fatalf("reservation day = %d, %v; want the refund netted on it", amount, err)
+	}
+	var today int
+	if err := upgraded.DB().QueryRow(storetest.Rebind(upgraded,
+		`SELECT COUNT(*) FROM team_spend_days WHERE team = 'default' AND day = ?`), reserved/day+1).Scan(&today); err != nil || today != 0 {
+		t.Fatalf("refund day rows = %d, %v; want none", today, err)
+	}
+}
+
+// safety: checkout, card saving, trust changes, the billing pass, settlement
+// and grants all touch the ledger and the team row; on Postgres any two that
+// took them in opposite orders deadlock, which this surfaces as an error.
+func TestBillingWritersShareOneLockOrder(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	const rounds = 15
+	var mu sync.Mutex
+	var deadlocks []error
+	note := func(err error) {
+		if err != nil && strings.Contains(strings.ToLower(err.Error()), "deadlock") {
+			mu.Lock()
+			deadlocks = append(deadlocks, err)
+			mu.Unlock()
+		}
+	}
+	writers := []func(i int){
+		func(i int) {
+			_, err := acme.OpenCreditCheckout(ctx, 10*store.MicroCreditsPerCredit, now, time.Hour)
+			note(err)
+		},
+		func(i int) {
+			note(acme.SaveCard(ctx, store.Card{Customer: "cus_1", PaymentMethod: "pm_1", Fingerprint: "fp_1"}, "billing", now))
+		},
+		func(i int) {
+			_, _, err := acme.SetBillingTrust(ctx, store.BillingTrustChange{
+				Trust: store.BillingTrustGranted, Actor: "korey", Reason: "race",
+			}, now)
+			note(err)
+		},
+		func(i int) {
+			work, _, err := s.DueCardCharges(ctx, now.Add(time.Duration(i)*time.Hour))
+			note(err)
+			for _, w := range work {
+				_, err := s.SettleCardPayment(ctx, store.CardPayment{
+					ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: fmt.Sprintf("pi_race_%d", i),
+					AmountCents: w.AmountCents,
+				}, now)
+				note(err)
+			}
+		},
+		func(i int) {
+			_, err := s.DB().Exec(storetest.Rebind(s, `INSERT INTO team_spend_days (team, day, amount_micro)
+			    VALUES ('acme', ?, 1) ON CONFLICT (team, day) DO UPDATE SET amount_micro = team_spend_days.amount_micro + 1`),
+				now.UnixNano()/int64(24*time.Hour))
+			note(err)
+			_, err = acme.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, fmt.Sprintf("promo_%d", i), "admin")
+			note(err)
+		},
+	}
+	var wg sync.WaitGroup
+	for _, write := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range rounds {
+				write(i)
+			}
+		}()
+	}
+	wg.Wait()
+	if len(deadlocks) > 0 {
+		t.Fatalf("%d writers deadlocked; first: %v", len(deadlocks), deadlocks[0])
 	}
 }

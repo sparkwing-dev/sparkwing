@@ -110,9 +110,6 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
-	runnerCapMu     sync.Mutex
-	runnerCapCache  map[Team]runnerCapEntry
-	runnerCapEpoch  uint64
 	launchResumeMu  sync.Mutex
 	launchResume    *launchCursor
 }

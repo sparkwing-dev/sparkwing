@@ -29,7 +29,7 @@ const (
 	// balance cap, since no team can hold more than that anyway.
 	MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
 
-	PurchaseLimitWindow = RunnerScaleWindow
+	PurchaseLimitWindow = 30 * 24 * time.Hour
 
 	// A team earns trust once its oldest unreversed purchase is this old,
 	// it has spent at least autoTrustMinSpentCents, it has never been
@@ -145,10 +145,16 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if atNS > 0 {
 		b.TrustAt = time.Unix(0, atNS)
 	}
-	switch b.Trust {
-	case BillingTrustGranted:
+	// safety: a hold of any cause returns the team to New, even over an
+	// operator's grant, until it is released.
+	held, err := rowPresentTx(ctx, q, `SELECT 1 FROM credit_freezes WHERE team = ? AND released_at IS NULL`, string(team))
+	if err != nil {
+		return b, err
+	}
+	switch {
+	case held, b.Trust == BillingTrustRevoked:
+	case b.Trust == BillingTrustGranted:
 		b.Trusted = true
-	case BillingTrustRevoked:
 	default:
 		if b.Trusted, err = autoTrustedTx(ctx, q, team, now); err != nil {
 			return b, err
@@ -172,14 +178,15 @@ const autoTrustSQL = `SELECT
      AND NOT EXISTS (SELECT 1 FROM credit_grants r
                       WHERE r.team = p.team AND r.kind = ? AND p.reference != '' AND r.reverses = p.reference)),
   (SELECT SUM(amount_micro) FROM team_spend_days WHERE team = ?),
-  (SELECT COUNT(*) FROM credit_freezes WHERE team = ?)
+  (SELECT COUNT(*) FROM credit_freezes WHERE team = ? AND cause != ?)
   + (SELECT COUNT(*) FROM card_attempts WHERE team = ? AND status = ? AND updated_at >= ?)`
 
 func autoTrustedTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (bool, error) {
 	var oldest, spent sql.NullInt64
 	var freezes int64
 	if err := q.QueryRowContext(ctx, autoTrustSQL, string(team), CreditGrantPaid, CreditGrantReversal,
-		string(team), string(team), string(team), CardAttemptFailed, now.Add(-AutoTrustPaymentAge).UnixNano()).
+		string(team), string(team), FreezeCauseDecline, string(team), CardAttemptFailed,
+		now.Add(-AutoTrustPaymentAge).UnixNano()).
 		Scan(&oldest, &spent, &freezes); err != nil {
 		return false, err
 	}
@@ -248,6 +255,9 @@ func (t *Tenant) SetBillingTrust(ctx context.Context, c BillingTrustChange, now 
 		return before, after, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return before, after, err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return before, after, err
 	}

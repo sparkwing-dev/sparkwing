@@ -24,6 +24,9 @@ type fakeCheckout struct {
 	internal     []internalCall
 	chargeStatus string
 	declineCode  string
+	// safety: with twoStep a charge naming no payment intent answers
+	// created, as the checkout service does, so both worker calls run.
+	twoStep bool
 }
 
 type internalCall struct {
@@ -71,12 +74,19 @@ func (fc *fakeCheckout) serveCard(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	fc.mu.Lock()
 	fc.internal = append(fc.internal, internalCall{Path: r.URL.Path, Body: body})
-	status, decline := fc.chargeStatus, fc.declineCode
+	status, decline, twoStep := fc.chargeStatus, fc.declineCode, fc.twoStep
 	fc.mu.Unlock()
 	if status == "" {
 		status = "succeeded"
 	}
+	if twoStep && r.URL.Path == "/internal/charge" && body["payment_intent"] == "" {
+		status = "created"
+	}
 	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path == "/internal/refund" {
+		_ = json.NewEncoder(w).Encode(map[string]any{"refund": "re_" + fmt.Sprint(body["payment_intent"]), "status": "succeeded"})
+		return
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"url": "https://checkout.stripe.test/c/pay/cs_card", "payment_intent": "pi_" + fmt.Sprint(body["attempt_id"]),
 		"status": status, "decline_code": decline,

@@ -168,6 +168,9 @@ func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.T
 		return TeamDeletion{}, nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return TeamDeletion{}, nil, err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return TeamDeletion{}, nil, err
 	}
@@ -207,6 +210,9 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 		return TeamDeletion{}, nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return TeamDeletion{}, nil, err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return TeamDeletion{}, nil, err
 	}
@@ -634,6 +640,9 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	defer rollbackOrLog(tx)
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
+		return AccountDeletion{}, err
+	}
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return AccountDeletion{}, err
 	}
 	if err := lockOwnedTeamsTx(ctx, tx, s, accountID); err != nil {

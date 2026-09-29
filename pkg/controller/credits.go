@@ -409,6 +409,12 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
+	if errors.Is(err, store.ErrPaymentWarned) {
+		s.logger.Warn("billing alert: a warned payment was not granted", "alert", "payment_warned",
+			"team", string(tenant.Team()), "reference", req.Reference)
+		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: PaymentWarnedCode})
+		return
+	}
 	if s.writeBalanceCapRefusal(w, err) {
 		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
 			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
@@ -536,7 +542,7 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	if errors.As(err, &shortfall) {
 		refusal.BalanceMicro = shortfall.BalanceMicro
 		refusal.RequiredMicro = shortfall.RequiredMicro
-		if shortfall.Frozen {
+		if shortfall.Frozen && shortfall.Limit != store.SpendLimitChargeFailed {
 			refusal.Error, refusal.Code = shortfall.Error(), CreditsFrozenCode
 		} else if shortfall.Limit != "" && shortfall.Limit != store.SpendLimitBalance {
 			refusal.Error, refusal.Code = shortfall.Error(), SpendLimitCode

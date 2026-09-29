@@ -170,6 +170,9 @@ type InsufficientCreditsError struct {
 }
 
 func (e *InsufficientCreditsError) Error() string {
+	if e.Limit == SpendLimitChargeFailed {
+		return "spend limit: the charge to this team's card failed; an owner can pay it or update the card on the billing page"
+	}
 	if e.Frozen {
 		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
 	}
@@ -178,10 +181,12 @@ func (e *InsufficientCreditsError) Error() string {
 		return "spend limit: this team reached its 30-day spend ceiling; new work waits until older spend leaves the window"
 	case SpendLimitDailyCap:
 		return "spend limit: this team reached its daily spend cap; new work waits until the next UTC day"
+	case SpendLimitCardCeiling:
+		return "spend limit: the card this team pays with reached its 30-day spend ceiling across its teams"
+	case SpendLimitCardDailyCap:
+		return "spend limit: the card this team pays with reached its daily spend cap across its teams"
 	case SpendLimitBudget:
 		return "spend limit: this team reached the budget its owner set; an owner can raise it on the billing page"
-	case SpendLimitChargeFailed:
-		return "spend limit: the charge to this team's card failed; an owner can pay it or update the card on the billing page"
 	}
 	return fmt.Sprintf("insufficient credits: balance %s, need %s",
 		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
@@ -287,49 +292,12 @@ func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// safety: these figures belong to v59, which restated the step from the cent credit in the
-// $0.00005 vCPU-second credit and clamped it at ten million dollars of that credit, and to
-// v75, which restated it in the $0.001 credit. Today's credit constants must not move them.
-const (
-	v59StepScale          = 200
-	v59StepCeiling        = 200_000_000_000
-	vcpuSecondCreditMicro = 5_000
-	v75StepDivisor        = MicroCreditsPerCredit / vcpuSecondCreditMicro
-)
+// safety: v59 and v75 restated the per-principal runner scale step in each new
+// credit. v87 deletes that setting, so a store upgraded through them no longer
+// needs the restatement and the steps write nothing.
+func applyCreditUnitMigration(context.Context, *storeTx) error { return nil }
 
-func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
-	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
-		return min(step*v59StepScale, v59StepCeiling)
-	})
-}
-
-// safety: v75 restates runner_scale_step_credits from the vCPU-second credit in the $0.001
-// credit, twenty to one, so the step keeps its dollar value. It rounds to the nearest credit
-// and never below one, because a step of zero turns scaling off.
-func applyCreditValueMigration(ctx context.Context, tx *storeTx) error {
-	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
-		return min(max((step+v75StepDivisor/2)/v75StepDivisor, 1), RunnerScaleMaxStepCredits)
-	})
-}
-
-func rescaleRunnerScaleStep(ctx context.Context, tx *storeTx, rescale func(int64) int64) error {
-	key := computeLimitKey(ComputeLimitRunnerScaleStepCredits)
-	var raw string
-	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	// safety: a value the guard reader cannot parse reads as unset there, so
-	// it is left for the operator rather than guessed at.
-	step, parsed := wholeCreditSetting(raw)
-	if !parsed || step <= 0 {
-		return nil
-	}
-	return setCreditSettingTx(ctx, tx, key, formatCreditSetting(rescale(step)))
-}
+func applyCreditValueMigration(context.Context, *storeTx) error { return nil }
 
 func wholeCreditSetting(raw string) (int64, bool) {
 	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
@@ -853,6 +821,11 @@ func (s *Store) recordCreditGrant(
 				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
 		}
 	}
+	if req.Kind == CreditGrantPaid {
+		if err := refuseWarnedPaymentTx(ctx, tx, req.Reference); err != nil {
+			return CreditGrantResult{}, err
+		}
+	}
 	// safety: a paid grant is money that already moved, so the cap was held
 	// when its checkout opened and is not held again here; refusing it would
 	// leave a payment with no credits. Only an operator's free grant meets the
@@ -889,7 +862,6 @@ func (s *Store) recordCreditGrant(
 	if err := tx.Commit(); err != nil {
 		return CreditGrantResult{}, err
 	}
-	s.invalidateRunnerCap()
 	return CreditGrantResult{Grant: grant, Created: true}, nil
 }
 
@@ -1886,9 +1858,17 @@ func refuseFrozenTeamTx(
 	if err != nil || !freeze.Frozen {
 		return err
 	}
-	return &InsufficientCreditsError{
+	out := &InsufficientCreditsError{
 		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
 	}
+	// safety: a declined charge's hold is the owner's to lift by paying, so
+	// its refusal says so instead of pointing them at support.
+	if blocking, err := rowPresentTx(ctx, tx, blockingHoldSQL, string(team), FreezeCauseDecline); err != nil {
+		return err
+	} else if !blocking {
+		out.Limit = SpendLimitChargeFailed
+	}
+	return out
 }
 
 // safety: every path that ends a trigger claim settles here before its own write, in the same
