@@ -502,4 +502,3 @@ func TestARequestNamingAnotherPodSharesThePrincipalsDownloadSlot(t *testing.T) {
 	close(art.release)
 	<-done
 }
-
