@@ -635,9 +635,12 @@ func (l *Loopback) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 	}
 	ts := time.Now()
 	if body.TS != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, body.TS); err == nil {
-			ts = parsed
+		parsed, err := time.Parse(time.RFC3339Nano, body.TS)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
 		}
+		ts = parsed
 	}
 	if err := l.state.AddNodeMetricSample(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.MetricSample{
 		TS:            ts,

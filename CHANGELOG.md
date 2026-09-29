@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
+
+- **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
 - **accounting:** Queued local nodes retain process exit CPU, memory, and wall time. CPU sampling resumes after failed reads and timestamps observations at collection.
 - **store:** Retain concurrent profile updates, preserve integer percentiles, and reject invalid resource observations
 - **orchestrator:** Stop charging command lifetime CPU to its completion interval

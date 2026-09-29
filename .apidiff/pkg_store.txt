@@ -1207,7 +1207,7 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) ActiveExecutorActivity(ctx context.Context, now time.Time) (map[string]ExecutorActivity, error)
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
-func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error
+func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error)
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
 func (s *Store) AppendEventCharged(
 	ctx context.Context, principal, runID, nodeID, kind string, payload []byte,

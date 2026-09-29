@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -4485,22 +4486,51 @@ type NodeUsage struct {
 // once: an auto-retry runs a fresh process per attempt, and the machine
 // paid for every one of them, so CPU and wall accumulate. Peak RSS takes
 // the high-water instead, since the attempts did not hold their peaks at
-// the same time. A non-positive figure contributes nothing, and zero
-// stays the value every reader treats as absent.
-func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error {
-	cpuNanos := max(int64(u.CPUTime), 0)
-	wallNanos := max(int64(u.Wall), 0)
-	maxRSSBytes := max(u.MaxRSSBytes, 0)
-	res, fenced, err := s.execNodeMutation(ctx, runID, nodeID, `
+// the same time. Negative inputs and overflowing totals reject the entire observation.
+// Zero stays the value every reader treats as absent.
+func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) (err error) {
+	if u.CPUTime < 0 || u.Wall < 0 || u.MaxRSSBytes < 0 {
+		return errors.New("node usage requires nonnegative CPU time, wall time and peak RSS")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
+		return err
+	}
+	var cpu, wall int64
+	err = tx.QueryRowContext(ctx, `SELECT cpu_nanos, process_wall_nanos FROM nodes
+ WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&cpu, &wall)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if cpu < 0 || wall < 0 {
+		return errors.New("stored node usage has negative CPU or wall time")
+	}
+	if cpu > math.MaxInt64-int64(u.CPUTime) {
+		return errors.New("node CPU time overflow")
+	}
+	if wall > math.MaxInt64-int64(u.Wall) {
+		return errors.New("node wall time overflow")
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE nodes
    SET cpu_nanos = cpu_nanos + ?,
        process_wall_nanos = process_wall_nanos + ?,
        max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
- WHERE run_id = ? AND node_id = ?`, cpuNanos, wallNanos, maxRSSBytes, maxRSSBytes, runID, nodeID)
+ WHERE run_id = ? AND node_id = ?`, int64(u.CPUTime), int64(u.Wall), u.MaxRSSBytes, u.MaxRSSBytes, runID, nodeID)
 	if err != nil {
 		return err
 	}
-	return fencedRows(res, fenced)
+	if err := fencedRows(result, hasClaimFence(ctx)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListNodes returns the nodes for a run in insertion order, which the
