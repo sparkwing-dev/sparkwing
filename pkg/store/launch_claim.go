@@ -213,7 +213,7 @@ func (s *Store) claimLaunchCandidate(ctx context.Context, launcher ClaimIdentity
 	// safety: the launcher's scope is what marks a claim as Cloud compute; a
 	// billing flag on a token says who pays, not where the work runs.
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET executor_kind = 'kubernetes', executor_id = ?,
-       executor_location = ? WHERE team = ? AND run_id = ? AND node_id = ?`,
+       executor_location = ?, status_detail = '' WHERE team = ? AND run_id = ? AND node_id = ?`,
 		req.HolderID, executorLocationCloud, string(c.Team), c.RunID, c.NodeID); err != nil {
 		return nil, err
 	}

@@ -155,7 +155,13 @@ type CPUClass struct {
 	MemoryBytes int64
 }
 func CPUClassMemoryBytes(cores int64) int64
+const CapacityWaitDetail = "waiting for Cloud capacity"
 const CheckoutSettleWindow = 72 * time.Hour
+type ClaimBeat struct {
+	Cancel bool
+
+	Charge CreditChargeResult
+}
 const ClaimGenerationHeader = "X-Sparkwing-Claim-Generation"
 const ClaimHolderHeader = "X-Sparkwing-Claim-Holder"
 type ClaimIdentity struct {
@@ -1123,6 +1129,22 @@ type LaunchClaimRequest struct {
 	RunID, NodeID string
 }
 const LaunchDeadlineSlack = 10 * time.Minute
+type LaunchJob struct {
+	RunID      string
+	NodeID     string
+	Generation int64
+
+	Release bool
+}
+const LaunchJobDelete LaunchJobState = "delete"
+const LaunchJobKeep LaunchJobState = "keep"
+type LaunchJobResult struct {
+	RunID      string
+	NodeID     string
+	Generation int64
+	State      LaunchJobState
+}
+type LaunchJobState string
 const LaunchScope = "claims.launch"
 type LegacyAgentClaim struct {
 	RunID       string
@@ -2083,6 +2105,7 @@ func (s *Store) GrantCredits(
 	ctx context.Context, kind string, amountMicro int64, reference, createdBy string,
 ) (*CreditGrant, error)
 func (s *Store) GrantFreeSlot(ctx context.Context, team Team, now time.Time) (err error)
+func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.Duration, now time.Time) (beat ClaimBeat, err error)
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error)
 func (s *Store) HeartbeatExecutor(ctx context.Context, claimant ClaimIdentity, name string, headroom ExecutorResource, queueDepth int, now time.Time) error
 func (s *Store) HeartbeatNodeClaim(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, holderID string, lease time.Duration) error
@@ -2095,6 +2118,7 @@ func (s *Store) HoldTeamForDispute(
 func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error)
 func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error)
 func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
+func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, childID string) (bool, error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -2267,6 +2291,7 @@ func (s *Store) SignUpCounts(ctx context.Context, now time.Time) (SignUpCounts, 
 func (s *Store) SignUpGate(ctx context.Context) (SignUpGate, error)
 func (s *Store) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) SourceBoundToRun(ctx context.Context, team Team, key, runID string) (bool, error)
+func (s *Store) StartClaimExecution(ctx context.Context, tok ClaimToken, now time.Time) (specHash string, err error)
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error
 func (s *Store) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (s *Store) StorageFreeAllowanceBytes(ctx context.Context) (int64, error)
@@ -2280,6 +2305,7 @@ func (s *Store) StorageUsageFor(ctx context.Context, principal, runID, month str
 func (s *Store) SweepRetention(ctx context.Context, now time.Time) (RetentionSweep, error)
 func (s *Store) SweepStorageAllowance(ctx context.Context, now time.Time) (StorageAllowanceSweep, error)
 func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID string, from, to Team) error
+func (s *Store) SyncLaunchJobs(ctx context.Context, launcher ClaimIdentity, jobs []LaunchJob, waitReason string, now time.Time) ([]LaunchJobResult, error)
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error)
