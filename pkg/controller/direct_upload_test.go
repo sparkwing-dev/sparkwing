@@ -614,14 +614,15 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("a claim's binary reserve = %d", code)
 	}
-	var ref string
-	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT ref FROM uploads WHERE id = ?`, id).Scan(&ref); err != nil || ref != "refs/heads/main" {
-		t.Fatalf("the reservation's ref = %q %v, want refs/heads/main", ref, err)
+	var repo, ref string
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT repo, ref FROM uploads WHERE id = ?`, id).Scan(&repo, &ref); err != nil ||
+		repo != "github:701" || ref != "refs/heads/main" {
+		t.Fatalf("the reservation's scope = %q %q %v, want github:701 refs/heads/main", repo, ref, err)
 	}
 	now := time.Now().UnixNano()
 	for ref, sha := range map[string]string{"refs/heads/main": strings.Repeat("a", 64), "refs/heads/feat": strings.Repeat("e", 64)} {
 		if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO data_objects
- (team, key, store, size, sha256, principal, provenance, ref, committed_at) VALUES (?, ?, 'cache', 4, ?, 'claim', 'cloud', ?, ?)`,
+ (team, key, store, size, sha256, principal, provenance, repo, ref, committed_at) VALUES (?, ?, 'cache', 4, ?, 'claim', 'cloud', 'github:701', ?, ?)`,
 			olga.team, "bin/76543210-fedcba98/"+sha, sha, ref, now); err != nil {
 			t.Fatal(err)
 		}
@@ -637,5 +638,12 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 	}
 	if code, _ := reserve("run-refless", refless); code != http.StatusForbidden {
 		t.Fatalf("a claim whose run names no ref reserved cache: %d, want 403", code)
+	}
+	repoless := f.launchedRun(olga, "run-repoless", "acme", "widgets")
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET github_repo_id = 0 WHERE id = 'run-repoless'`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := reserve("run-repoless", repoless); code != http.StatusForbidden {
+		t.Fatalf("a claim whose run names no repository reserved a binary: %d, want 403", code)
 	}
 }

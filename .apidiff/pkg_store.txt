@@ -1991,7 +1991,7 @@ func (s *Store) ApproveWaitlisted(ctx context.Context, ids []string, actor strin
 func (s *Store) ArmCronSchedule(ctx context.Context, sched CronSchedule, now time.Time) (CronSchedule, bool, error)
 func (s *Store) AsOperator() *Operator
 func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class ClaimRouteClass, now time.Time) (ClaimToken, error)
-func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, refs []string) (Upload, error)
+func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, repo string, refs []string) (Upload, error)
 func (s *Store) CacheExcludedCounts(ctx context.Context, pipeline, cachedOutcome string, fraction float64) (map[string]int, error)
 func (s *Store) CancelNodeForComputeLimit(
 	ctx context.Context, runID, nodeID, tokenPrefix, limit string, now time.Time,
@@ -2359,6 +2359,7 @@ func (s *Store) TriggerClaimOrigin(ctx context.Context, runID string, generation
 func (s *Store) TriggerClaimant(ctx context.Context, triggerID string) (ClaimIdentity, error)
 func (s *Store) TriggerExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) TriggerExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence TriggerClaimFence, ordinal int, now time.Time) (bool, error)
+func (s *Store) TriggerRepoID(ctx context.Context, team Team, id string) (int64, error)
 func (s *Store) TrustLocalBuilds(ctx context.Context, team Team) (bool, error)
 func (s *Store) UnlinkIdentity(ctx context.Context, accountID, provider, keepSession string, now time.Time) (Identity, int64, error)
 func (s *Store) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
@@ -2707,6 +2708,7 @@ type Upload struct {
 	Principal   string
 	ClaimPrefix string
 	Provenance  string
+	Repo        string
 	Ref         string
 	ExpiresAt   time.Time
 	CommittedAt time.Time
@@ -2722,8 +2724,9 @@ type UploadRequest struct {
 	ClaimPrefix string
 	Provenance  string
 
-	Ref string
-	Now time.Time
+	Repo string
+	Ref  string
+	Now  time.Time
 }
 type UsageMetrics struct {
 	Weeks      []UsageWeek

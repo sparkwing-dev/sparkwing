@@ -322,16 +322,16 @@ func TestCloudBinaryLookupRefusesLocalProvenanceUntilTeamTrustsIt(t *testing.T) 
 	if err := st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.BinaryObject(t.Context(), "team-a", input, true, []string{""}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.BinaryObject(t.Context(), "team-a", input, true, "", []string{""}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cloud lookup of local binary = %v", err)
 	}
-	if got, err := st.BinaryObject(t.Context(), "team-a", input, false, []string{""}); err != nil || got.Provenance != "local" {
+	if got, err := st.BinaryObject(t.Context(), "team-a", input, false, "", []string{""}); err != nil || got.Provenance != "local" {
 		t.Fatalf("local lookup = %+v, %v", got, err)
 	}
 	if err := st.SetTrustLocalBuilds(t.Context(), "team-a", true); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := st.BinaryObject(t.Context(), "team-a", input, true, []string{""}); err != nil || got.Key != u.Key {
+	if got, err := st.BinaryObject(t.Context(), "team-a", input, true, "", []string{""}); err != nil || got.Key != u.Key {
 		t.Fatalf("trusted cloud lookup = %+v, %v", got, err)
 	}
 }
@@ -355,7 +355,7 @@ func TestSameBinaryCanBeCommittedByLocalAndCloudRunners(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cloud, err := st.BinaryObject(t.Context(), "team-a", input, true, []string{""})
+	cloud, err := st.BinaryObject(t.Context(), "team-a", input, true, "", []string{""})
 	if err != nil || cloud.Provenance != "cloud" {
 		t.Fatalf("cloud lookup = %+v, %v", cloud, err)
 	}
@@ -380,7 +380,7 @@ func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
 	if _, err := st.DB().Exec(insert, key, digest, "cloud", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true, []string{""}); err != nil || got.Provenance != "cloud" {
+	if got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true, "", []string{""}); err != nil || got.Provenance != "cloud" {
 		t.Fatalf("initial cloud lookup = %+v, %v", got, err)
 	}
 	done := make(chan error, 1)
@@ -411,7 +411,7 @@ func TestCloudBinaryLookupNeverReturnsLocalDuringCloudExpiry(t *testing.T) {
 			return
 		default:
 		}
-		got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true, []string{""})
+		got, err := st.BinaryObject(t.Context(), "team-a", "01234567-89abcdef", true, "", []string{""})
 		switch {
 		case err == nil && got.Provenance == "cloud":
 		case err == nil:
@@ -534,8 +534,9 @@ func TestReleasedDirectUploadFreesItsPendingSlot(t *testing.T) {
 	}
 }
 
-// A claim's binary is scoped to its run's ref: a feature branch cannot publish
-// where main reads, main and an unscoped reader never see a feature branch's
+// A claim's binary is scoped to its run's repository and ref: another
+// repository's main cannot publish where this one reads, a feature branch
+// cannot publish where main reads, main and an unscoped reader never see a feature branch's
 // binary, a feature branch still reads main's, and a ref holds one binary per
 // input, the first committed, even when two uploads race to commit.
 func TestClaimBinaryCacheIsScopedToItsRefAndImmutable(t *testing.T) {
@@ -544,31 +545,47 @@ func TestClaimBinaryCacheIsScopedToItsRefAndImmutable(t *testing.T) {
 	freeTeam(t, st, "team-a")
 	const input = "01234567-89abcdef"
 	const main, feat = "refs/heads/main", "refs/heads/feat"
-	reserve := func(ref, digest string) (store.Upload, error) {
+	const repoA = "github:1"
+	reserveIn := func(repo, ref, digest string) (store.Upload, error) {
 		return st.ReserveUpload(t.Context(), store.UploadRequest{
 			Team: "team-a", RunID: "run-" + digest[:4], Kind: store.StorageCache, Key: "bin/" + input + "/" + digest,
-			Size: 10, SHA256: digest, Principal: "claim", Provenance: "cloud", Ref: ref,
+			Size: 10, SHA256: digest, Principal: "claim", Provenance: "cloud", Repo: repo, Ref: ref,
 		})
 	}
-	publish := func(ref, digest string) error {
-		u, err := reserve(ref, digest)
+	reserve := func(ref, digest string) (store.Upload, error) { return reserveIn(repoA, ref, digest) }
+	publishIn := func(repo, ref, digest string) error {
+		u, err := reserveIn(repo, ref, digest)
 		if err != nil {
 			return err
 		}
 		return st.CommitUpload(t.Context(), "team-a", u.ID, u.Principal, time.Now())
 	}
-	read := func(refs ...string) (string, error) {
-		u, err := st.BinaryObject(t.Context(), "team-a", input, true, refs)
+	publish := func(ref, digest string) error { return publishIn(repoA, ref, digest) }
+	readIn := func(repo string, refs ...string) (string, error) {
+		u, err := st.BinaryObject(t.Context(), "team-a", input, true, repo, refs)
 		return u.SHA256, err
 	}
+	read := func(refs ...string) (string, error) { return readIn(repoA, refs...) }
 	evil, good, late := strings.Repeat("e", 64), strings.Repeat("a", 64), strings.Repeat("b", 64)
+	if err := publishIn("github:2", main, strings.Repeat("f", 64)); err != nil {
+		t.Fatalf("another repository's main binary: %v", err)
+	}
+	if got, err := read(main); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("repository A's main read repository B's binary for its input hash: %q %v", got, err)
+	}
+	if got, err := readIn("github:2", main); err != nil || got != strings.Repeat("f", 64) {
+		t.Fatalf("repository B reads %q %v, want its own", got, err)
+	}
 	if err := publish(feat, evil); err != nil {
 		t.Fatalf("the feature branch's own binary: %v", err)
 	}
-	for what, refs := range map[string][]string{"main": {main}, "an unscoped reader": {""}} {
+	for what, refs := range map[string][]string{"main": {main}, "the empty ref": {""}} {
 		if got, err := read(refs...); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("%s read the feature branch's binary: %q %v", what, got, err)
 		}
+	}
+	if got, err := readIn("", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("an unscoped reader read a claim's binary: %q %v", got, err)
 	}
 	if err := publish(main, good); err != nil {
 		t.Fatalf("main's binary: %v", err)
@@ -605,7 +622,7 @@ func TestClaimBinaryCacheIsScopedToItsRefAndImmutable(t *testing.T) {
 	other := strings.Repeat("d", 64)
 	if _, err := st.ReserveUpload(t.Context(), store.UploadRequest{
 		Team: "team-a", RunID: "run-o", Kind: store.StorageCache, Key: "bin/76543210-fedcba98/" + other,
-		Size: 10, SHA256: other, Principal: "claim", Provenance: "cloud", Ref: main,
+		Size: 10, SHA256: other, Principal: "claim", Provenance: "cloud", Repo: repoA, Ref: main,
 	}); err != nil {
 		t.Fatalf("main's binary for another input: %v", err)
 	}

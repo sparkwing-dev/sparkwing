@@ -71,13 +71,15 @@ unlock.
   ID, and only with the key, policy, capacity and cost its accepted plan
   declares for the node; a slot's lease never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
-  not. A claim token's binary cache is scoped to its run's git ref, as
+  not. A claim token's binary cache is scoped to its run's GitHub repository ID
+  and git ref, both read from the run, as
   GitHub Actions scopes caches: it writes under its own ref and reads its
   own, then its pull request's base branch, then the default branch, which
   GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
   first binary committed for an input and refuses a second, and a claim whose
-  run names no ref writes no cache. Other callers never read a claim's
-  binaries. Schema v88 adds `uploads.ref` and `data_objects.ref` and stamps
+  run names no repository or ref writes no cache. Other callers never read a
+  claim's binaries. Schema v88 adds `ref` and `repo` to `uploads` and
+  `data_objects` and stamps
   the `claim-cache-scope-v1` requirement, so an older controller refuses the
   store rather than read a claim's binaries unscoped. A work node reads another run's output only through
   `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
