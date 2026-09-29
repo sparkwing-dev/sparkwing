@@ -812,7 +812,18 @@ func (s *Server) WithPeerPrincipal(fn func(*http.Request) *Principal) *Server {
 //   - When the Authenticator is disabled, middleware + requireScope are
 //     pass-through.
 func (s *Server) Handler() http.Handler {
-	mux, router := s.routers()
+	return s.handler(s.handleFinishRun)
+}
+
+// DaemonHandler leaves profile recording to the host orchestrator. Clients
+// completing runs through this handler must submit profile observations separately.
+// Call Shutdown to drain background work before exiting.
+func (s *Server) DaemonHandler() http.Handler {
+	return s.handler(s.handleFinishDaemonRun)
+}
+
+func (s *Server) handler(finishRun http.HandlerFunc) http.Handler {
+	mux, router := s.routers(finishRun)
 	router.Handle("/", s.authenticated(s.tokenBudgeted(unsupportedRouteFallback(mux))))
 	return withStreamDeadlineControl(otelutil.WrapHandler("sparkwing-controller",
 		withRequestLog(router, s.logger, muxRouteLabeler(router, mux))))
@@ -821,7 +832,7 @@ func (s *Server) Handler() http.Handler {
 // safety: neither mux is wired to the other and no handler runs, so a caller
 // that only needs to know whether a route exists can build these from a zero
 // Server without reaching a store.
-func (s *Server) routers() (authed, public *http.ServeMux) {
+func (s *Server) routers(finishRun http.HandlerFunc) (authed, public *http.ServeMux) {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
@@ -830,7 +841,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleListNodes)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleFinishRun))))
+	mux.Handle("POST /api/v1/runs/{id}/finish", requireScope(ScopeRunsState, s.claimedRun(finishRun)))
 	mux.Handle("POST /api/v1/runs/{id}/plan", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleUpdatePlanSnapshot))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
@@ -1051,7 +1062,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 // because the caller asks before the store that server needs is open.
 func (s *Server) routeProbe() (*http.ServeMux, *http.ServeMux) {
 	s.routeProbeOnce.Do(func() {
-		s.routeProbeMux, s.routeProbePub = s.routers()
+		s.routeProbeMux, s.routeProbePub = s.routers(s.handleFinishRun)
 	})
 	return s.routeProbeMux, s.routeProbePub
 }

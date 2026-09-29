@@ -325,7 +325,7 @@ func (a *wingdAPI) controllerOn(st *store.Store, auth *controller.Authenticator)
 		WithAuthenticator(auth).
 		WithPeerPrincipal(peerPrincipal).
 		WithLocalExecution().
-		Handler()
+		DaemonHandler()
 }
 
 // safety: the daemon refuses a connection from another account before the

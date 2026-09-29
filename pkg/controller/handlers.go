@@ -185,6 +185,14 @@ type finishRunReq struct {
 const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
 
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, s.foldRunProfiles)
+}
+
+func (s *Server) handleFinishDaemonRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, nil)
+}
+
+func (s *Server) finishRun(w http.ResponseWriter, r *http.Request, recordProfile func(context.Context, *store.Run)) {
 	runID := r.PathValue("id")
 	var body finishRunReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -221,7 +229,9 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if finished {
 		observeRunFinish(refreshed.Pipeline, refreshed.Status, time.Since(refreshed.StartedAt))
-		s.foldRunProfiles(follow, refreshed)
+		if recordProfile != nil {
+			recordProfile(follow, refreshed)
+		}
 	}
 	s.reportGitHubCommitStatus(follow, runID, refreshed.Status)
 	w.WriteHeader(http.StatusNoContent)
