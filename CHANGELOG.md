@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **runs-store (Breaking):** Schema 51 requires metric sample kinds and process-tree
+  accounting support. Stop all writers before upgrading; older writers cannot
+  reopen the database. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
+
 - **metrics (Breaking):** Sample dedicated node process trees on Linux and macOS.
   Exclude incomplete executions from profile learning and prevent historical measurements
   from rebuilding incompatible profiles. See [migration guidance](docs/migrations/_unreleased.md#local-process-measurements).
