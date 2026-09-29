@@ -418,8 +418,7 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 }
 
 func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -450,6 +449,8 @@ func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
 		PollInterval:          time.Millisecond,
 		MissingJobGracePeriod: 100 * time.Millisecond,
 	}, nil)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	finishErr := make(chan error, 1)
 	go func() {
 		select {

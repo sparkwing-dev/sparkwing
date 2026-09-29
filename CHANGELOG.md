@@ -22,6 +22,9 @@ unlock.
 
 ### Fixed
 
+- **security checks:** Recognize the empty artifact content hash in the history scanner.
+- **tests:** Start Kubernetes execution deadlines after fixture setup and retain fallback outcomes.
+
 - **admission:** Remeasure node costs when the available plan fingerprint changes; retain explicit resource pins.
 
 - **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
