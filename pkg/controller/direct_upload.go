@@ -120,7 +120,8 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		return directCaller{}, false
 	}
 	provenance := "local"
-	if metered {
+	// safety: only the launcher mints claim tokens, and it runs on Cloud compute.
+	if metered || grant.Claim.Kind == authwire.CacheClaimToken {
 		provenance = "cloud"
 	}
 	return directCaller{

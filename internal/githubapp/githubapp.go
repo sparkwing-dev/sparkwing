@@ -380,11 +380,24 @@ func (c *Client) InstallationToken(ctx context.Context, installation int64, repo
 	if len(repositories) == 0 || slices.Contains(repositories, "") || len(permissions) == 0 {
 		return Token{}, errors.New("githubapp: an installation token needs its repositories and permissions")
 	}
+	return c.mintToken(ctx, installation, map[string]any{"repositories": repositories, "permissions": permissions}, permissions)
+}
+
+// InstallationTokenByIDs is [Client.InstallationToken] for repositories named
+// by their GitHub IDs, which a rename or a reused name cannot redirect.
+func (c *Client) InstallationTokenByIDs(ctx context.Context, installation int64, ids []int64, permissions map[string]string) (Token, error) {
+	if len(ids) == 0 || slices.Contains(ids, 0) || len(permissions) == 0 {
+		return Token{}, errors.New("githubapp: an installation token needs its repository ids and permissions")
+	}
+	return c.mintToken(ctx, installation, map[string]any{"repository_ids": ids, "permissions": permissions}, permissions)
+}
+
+func (c *Client) mintToken(ctx context.Context, installation int64, request map[string]any, permissions map[string]string) (Token, error) {
 	jwt, err := c.appJWT(time.Now())
 	if err != nil {
 		return Token{}, err
 	}
-	body, err := json.Marshal(map[string]any{"repositories": repositories, "permissions": permissions})
+	body, err := json.Marshal(request)
 	if err != nil {
 		return Token{}, err
 	}

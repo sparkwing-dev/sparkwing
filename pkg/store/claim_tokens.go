@@ -178,6 +178,18 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 	if !strings.HasPrefix(raw, ClaimTokenPrefix+"_") || len(raw) < PrefixLen {
 		return ClaimToken{}, ErrClaimTokenInvalid
 	}
+	return s.authorizeClaim(ctx, `c.digest = ?`, []any{claimTokenDigest(raw)}, class, now)
+}
+
+// CheckClaimSensitive applies [ClaimSensitive] to the claim tok names, for a
+// use that outlasts the request that authorized it: a fetch that ran for
+// minutes, or a signed grant presented later.
+func (s *Store) CheckClaimSensitive(ctx context.Context, tok ClaimToken, now time.Time) (ClaimToken, error) {
+	return s.authorizeClaim(ctx, `c.team = ? AND c.run_id = ? AND c.node_id = ? AND c.claim_generation = ?`,
+		[]any{string(tok.Team), tok.RunID, tok.NodeID, tok.Generation}, ClaimSensitive, now)
+}
+
+func (s *Store) authorizeClaim(ctx context.Context, where string, args []any, class ClaimRouteClass, now time.Time) (ClaimToken, error) {
 	var (
 		tok            ClaimToken
 		kind           string
@@ -191,7 +203,7 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
        n.status, n.claimed_by, n.lease_expires_at, n.claim_generation
   FROM claim_tokens c
   LEFT JOIN nodes n ON n.team = c.team AND n.run_id = c.run_id AND n.node_id = c.node_id
- WHERE c.digest = ?`, claimTokenDigest(raw)).Scan(
+ WHERE `+where, args...).Scan(
 		&tok.Prefix, &team, &tok.RunID, &tok.NodeID, &tok.Generation, &kind, &expires,
 		&status, &claimedBy, &lease, &nodeGen)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -227,6 +239,44 @@ func (s *Store) AuthorizeClaimToken(ctx context.Context, raw string, class Claim
 	default:
 		return ClaimToken{}, fmt.Errorf("unknown claim route class %d", class)
 	}
+}
+
+// safety: a sensitive route that writes calls this inside its writing transaction. The run row is locked
+// first, in the store's order (eligibility, trigger, run, node, ledger) that settle and cancel take, so a
+// cancel or a lost lease either committed before these reads or waits until the write commits.
+func fenceSensitiveClaimTx(ctx context.Context, tx *storeTx, tok ClaimToken, now time.Time) error {
+	found, err := lockTeamRunRowTx(ctx, tx, tok.Team, tok.RunID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrClaimNotLive
+	}
+	var expires int64
+	err = tx.QueryRowContext(ctx, `SELECT expires_at FROM claim_tokens
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND prefix = ?`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, tok.Prefix).Scan(&expires)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !now.Before(time.Unix(0, expires))) {
+		return ErrClaimTokenInvalid
+	}
+	if err != nil {
+		return err
+	}
+	live, err := claimLiveTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, tok.Generation, now)
+	if err != nil {
+		return err
+	}
+	if !live {
+		return ErrClaimNotLive
+	}
+	cancelled, err := claimRunCancelled(ctx, tx.QueryRowContext, tok.Team, tok.RunID)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return ErrClaimCancelRequested
+	}
+	return nil
 }
 
 // safety: the run's own row decides, and a run with no row reads as cancelled,

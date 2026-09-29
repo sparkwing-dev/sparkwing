@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -178,6 +179,7 @@ const (
 func (p prober) run() []probeResult {
 	out := p.fileProbes()
 	out = append(out, p.envProbe(), p.imdsProbe(), p.adminRouteProbe(), p.publicHTTPSProbe(), p.publicPortProbe())
+	out = append(out, p.sourceCredentialProbes()...)
 	for name, addr := range tcpTargets {
 		out = append(out, p.tcpProbe("tcp "+name, addr))
 	}
@@ -351,6 +353,28 @@ func (p prober) adminRouteProbe() probeResult {
 		name: "controller admin route", verdict: httpVerdict(code, err),
 		detail: "lists tokens with the pod's own claim token",
 	}
+}
+
+// safety: the pod's claim token must reach no source credential: the run's
+// git credential route refuses a claim token outright, and the init container
+// already spent the claim's one GitHub token before this container started.
+func (p prober) sourceCredentialProbes() []probeResult {
+	base, run := p.getenv("SPARKWING_CONTROLLER_URL"), p.getenv("SPARKWING_RUN_ID")
+	if base == "" || run == "" {
+		return []probeResult{missingTarget("controller source credentials", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")}
+	}
+	var out []probeResult
+	for name, route := range map[string]string{
+		"controller git credential": "git-credential", "controller source credential": "source-credential",
+	} {
+		code, err := p.status(http.MethodPost, strings.TrimRight(base, "/")+"/api/v1/runs/"+url.PathEscape(run)+"/"+route,
+			p.getenv(ownTokenEnv), []byte("{}"), nil)
+		out = append(out, probeResult{
+			name: name, verdict: httpVerdict(code, err),
+			detail: "asks for its own run's " + route + " with the pod's claim token",
+		})
+	}
+	return out
 }
 
 const dryRunJob = `{"apiVersion":"batch/v1","kind":"Job","metadata":{"generateName":"escape-probe-"},

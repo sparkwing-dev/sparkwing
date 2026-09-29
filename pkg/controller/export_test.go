@@ -2,9 +2,13 @@ package controller
 
 import (
 	"context"
+	"os"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 )
 
 // TeamBoundaryExempt exposes the routes the team boundary leaves to their own
@@ -29,4 +33,14 @@ func SetHostKeyScan(s *Server, scan func(ctx context.Context, host string, port 
 // GitHub or been given up on.
 func DrainGitHubChecks(ctx context.Context, s *Server) error {
 	return s.githubApp.checks.idle(ctx)
+}
+
+// VerifyLiveDataGrant exposes the check every controller use of a cache
+// grant makes, reporting whether the grant is limited to binary uploads.
+func VerifyLiveDataGrant(ctx context.Context, s *Server, raw string) (bool, error) {
+	grant, err := authwire.VerifyCacheGrant(os.Getenv(authwire.CacheGrantKeyEnv), raw, time.Now())
+	if err != nil {
+		return false, err
+	}
+	return s.verifyLiveDataGrant(ctx, grant, false)
 }

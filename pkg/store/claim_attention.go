@@ -68,7 +68,7 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, wait time.Duration) ([
 		return nil, err
 	}
 	defer rollbackOrLog(tx)
-	rows, err := tx.QueryContext(ctx, `SELECT n.run_id, n.node_id, n.attention_reason FROM nodes n JOIN runs r ON r.id = n.run_id
+	rows, err := tx.QueryContext(ctx, `SELECT n.run_id, n.node_id, n.attention_reason, n.kind FROM nodes n JOIN runs r ON r.id = n.run_id
  WHERE n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.`+nodeNotDone+`
    AND COALESCE(n.placement_hold_from, n.ready_at) + CASE WHEN r.claim_wait_ns > 0 THEN r.claim_wait_ns ELSE ? END < ?`,
 		wait.Nanoseconds(), now)
@@ -78,9 +78,17 @@ func (s *Store) failStaleQueuedNodes(ctx context.Context, wait time.Duration) ([
 	var pairs [][2]string
 	var reasons []string
 	for rows.Next() {
-		var rid, nid, reason string
-		if err := rows.Scan(&rid, &nid, &reason); err != nil {
+		var rid, nid, reason, kind string
+		if err := rows.Scan(&rid, &nid, &reason, &kind); err != nil {
 			return nil, errors.Join(err, rows.Close())
+		}
+		// safety: the launcher takes every node the Cloud image can run whose
+		// team can pay, so its node that waited out the claim wait needs a tool
+		// the image lacks or compute its team cannot pay for, and the wait is
+		// what ends a run that could otherwise never finish.
+		if reason == "" && kind != "" {
+			reason = "Sparkwing Cloud did not launch this node before its claim wait ran out: " +
+				"it needs a tool the Cloud runner image lacks, or the team could not pay for it"
 		}
 		if reason == "" {
 			reason = "no agent claimed this node before its claim wait ran out"

@@ -42,6 +42,38 @@ unlock.
   through claim tokens. Schema v84 adds the `repos` table, `runs.dispatch`
   and `nodes.timeout_ms`.
 
+- **controller + store + runner:** A controller-dispatched Job fetches its
+  run's source in the Job's own pod, and the controller never fetches a
+  customer repository. The launcher gives each Job an init container,
+  `sparkwing-runner fetch-source`, that asks
+  `POST /api/v1/runs/{id}/source-credential` with its claim token for a
+  read-only GitHub App token covering exactly the run's repository and the
+  repositories a team owner listed for it, minted by the GitHub IDs an
+  owner's approval records, so a rename or a reused name changes nothing it
+  reaches. It checks the run out into the
+  pod's scratch volume as a real repository, `.git` included, with the depth
+  (default 1, `0` for all history), tags, submodules and LFS the plan's
+  `source` asks for; every submodule URL, relative ones included, must name a
+  listed repository. When the owner listed repositories it downloads the
+  checkout's modules, fetching only those directly. The token stays in the
+  init container's processes, which fail the pod if its bytes are in any file
+  left on the shared volume, and never reaches the pipeline's container,
+  which runs with `GOFLAGS=-mod=mod`. A claim gets at most three credentials,
+  so a failed mint can be asked for again, and none once its attempt has
+  started, and each issue is recorded as a git credential release. Schema v86
+  adds `claim_tokens.source_mints` and `github_app_extra_repos.extra_repo_id`;
+  an extra repository approved before it gets no token until an owner saves
+  the list again. Cloud fetches source only through
+  the GitHub App; stored git credentials serve self-hosted runners. A Job's
+  scratch volume and its ephemeral-storage request and limit are 20Gi. A
+  claim token's cache grant is bound to its claim and lives five minutes, so
+  its pod refreshes it. The launcher now claims a node whose runner selector
+  the Cloud runner image satisfies (`tool:git`, `tool:go`) instead of only
+  unlabelled ones, and hands each Job the cache, git cache and dependency
+  proxy URLs a runner Job gets (`--cache`, `--gitcache`,
+  `--dependency-proxy`). A launcher-owned node that outwaits its claim wait
+  fails with a reason naming the Cloud image or the team's credits. The
+  runner image gains git-lfs.
 - **dashboard + controller:** An operator console at `/operator` finds a team
   by slug, name or owner email, shows its balance, 30-day purchases against
   its limit, trust, holds and recent business events, and grants, revokes or

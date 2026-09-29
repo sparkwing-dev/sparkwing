@@ -187,6 +187,7 @@ func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) e
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (c *Client) SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error)
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
@@ -241,6 +242,7 @@ type CronReposResponse struct {
 	Schedules []crons.ScheduleView
 	Withdrawn []string
 }
+var ErrControllerFailed = errors.New("the controller failed to answer")
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
 var ErrNoLiveLog = errors.New("controller holds no live log for this node")

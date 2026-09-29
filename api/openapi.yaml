@@ -2223,7 +2223,7 @@ paths:
       tags: [nodes]
       summary: Claim a ready node of a controller-dispatched run for a launcher Job.
       description: >-
-        Claims a ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
+        Claims a ready node of any team's controller-dispatched run whose runner selector the Cloud runner image satisfies (its declared tools, the cloud class and location), reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
       requestBody:
         required: true
         content:
@@ -5083,7 +5083,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
+      x-sparkwing-scope: claim or nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -7256,6 +7256,45 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/source-credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Issue a claim's one source credential to its Job's init container.
+      description: >-
+        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches, and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets at most three, so a failed or lost mint can be asked for again, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
+      responses:
+        "200":
+          description: The credential and what to check out.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.SourceCredential
+                type: object
+                properties:
+                  token: {type: string}
+                  expires_at: {type: integer, format: int64}
+                  repo_url: {type: string}
+                  sha: {type: string}
+                  branch: {type: string}
+                  repositories: {type: array, items: {type: string}}
+                  source:
+                    x-sparkwing-go-type: pkg/store.SourceSpec
+                    type: object
+                    properties:
+                      depth: {type: integer}
+                      tags: {type: boolean}
+                      submodules: {type: boolean}
+                      lfs: {type: boolean}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The run records no commit.}
 
 components:
   securitySchemes:
