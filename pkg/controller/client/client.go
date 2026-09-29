@@ -1936,6 +1936,11 @@ func classifyHTTPError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusConflict {
 		return fmt.Errorf("%w: %s", store.ErrLockHeld, bytes.TrimSpace(body))
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		if state, message, ok := tokenDeadFromBody(body); ok {
+			return &TokenDeadError{State: state, Message: message}
+		}
+	}
 	if resp.StatusCode == http.StatusForbidden {
 		var refusal struct {
 			Code string `json:"error"`

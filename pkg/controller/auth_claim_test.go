@@ -68,3 +68,30 @@ func TestNodeClaim_AuthBlocksUnauthedCaller(t *testing.T) {
 		t.Fatal("expected wrong-token claim to fail")
 	}
 }
+
+func TestNodeClaim_ARevokedTokenReachesTheClientAsDead(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Now().UTC()
+	// safety: a store holding no live token serves unauthenticated, which would hide the refusal.
+	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{"admin"}, 0, now); err != nil {
+		t.Fatalf("CreateToken admin: %v", err)
+	}
+	raw, tok, err := st.CreateToken("laptop", store.TokenKindRunner, []string{"nodes.claim"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	if err := st.RevokeToken(tok.Prefix, now); err != nil {
+		t.Fatalf("RevokeToken: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	_, err = client.NewWithToken(srv.URL, nil, raw).ClaimNode(t.Context(), "agent-1", nil, 30*time.Second, nil)
+	if dead := client.AsTokenDead(err); dead == nil || dead.State != "revoked" {
+		t.Fatalf("a claim on a revoked token returned %v, want a revoked TokenDeadError", err)
+	}
+}
