@@ -23,6 +23,8 @@ unlock.
 ### Fixed
 
 - **store:** Discard obsolete learned resource estimates before reading or updating profiles; preserve explicit pins and wait statistics.
+- **security checks:** Recognize the empty artifact content hash in the history scanner.
+- **tests:** Start Kubernetes execution deadlines after fixture setup and retain fallback outcomes.
 
 - **admission:** Remeasure node costs when the available plan fingerprint changes; retain explicit resource pins.
 
