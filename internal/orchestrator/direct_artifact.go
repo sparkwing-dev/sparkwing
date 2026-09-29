@@ -20,6 +20,10 @@ type directArtifactStore struct {
 	legacy storage.ArtifactStore
 }
 
+// safety: the controller refuses zero-byte uploads, and an empty blob's
+// content follows from its key, so it is never sent or fetched.
+const emptyArtifactBlobKey = "artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
 func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader) (err error) {
 	if !strings.HasPrefix(key, "artifacts/blobs/") && !strings.HasPrefix(key, "artifacts/manifests/") {
 		if s.legacy != nil {
@@ -44,6 +48,9 @@ func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader
 	if !strings.HasSuffix(key, "/"+digest) {
 		return errors.New("artifact key does not match its sha256")
 	}
+	if key == emptyArtifactBlobKey {
+		return nil
+	}
 	err = s.client.Upload(ctx, "artifact", key, f, n, digest)
 	if errors.Is(err, directdata.ErrExists) {
 		return nil
@@ -52,6 +59,9 @@ func (s directArtifactStore) Put(ctx context.Context, key string, body io.Reader
 }
 
 func (s directArtifactStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == emptyArtifactBlobKey {
+		return io.NopCloser(strings.NewReader("")), nil
+	}
 	rc, answer, err := s.client.Download(ctx, "artifact", key)
 	if errors.Is(err, directdata.ErrNotFound) && s.legacy != nil {
 		return s.legacy.Get(ctx, key)
@@ -83,6 +93,9 @@ func (v *verifiedArtifact) Read(p []byte) (int, error) {
 }
 
 func (s directArtifactStore) Has(ctx context.Context, key string) (bool, error) {
+	if key == emptyArtifactBlobKey {
+		return true, nil
+	}
 	rc, _, err := s.client.Download(ctx, "artifact", key)
 	if errors.Is(err, directdata.ErrNotFound) && s.legacy != nil {
 		return s.legacy.Has(ctx, key)

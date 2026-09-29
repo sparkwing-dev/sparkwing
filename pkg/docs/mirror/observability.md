@@ -777,7 +777,7 @@ controller's to measure, and what each team holds in them is counted by
 the controller ([Tenant limits](limits.md)).
 
 Neither service waits out the interval to recover. Deleting a run with
-`DELETE /api/v1/logs/{runID}`, or letting the sweeper delete it under
+`DELETE /api/v1/logs/{runID}` (which takes `logs.delete` or `admin`), or letting the sweeper delete it under
 `--retention`, starts a fresh measurement of the log store, so appends
 resume shortly after the delete answers rather than at the end of the
 interval. The cache

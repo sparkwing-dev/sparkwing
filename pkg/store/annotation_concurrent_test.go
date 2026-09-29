@@ -2,7 +2,10 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -224,5 +227,60 @@ func TestAppendStepAnnotationUpsertsAnExistingStep(t *testing.T) {
 	}
 	if steps[0].Status != store.StepRunning {
 		t.Errorf("step status = %q, want it untouched by the upsert", steps[0].Status)
+	}
+}
+
+func TestAnnotationBoundsRefuseWithoutWriting(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	seedAnnotationTarget(t, st)
+	setRunAnnotations := func(list []string) {
+		t.Helper()
+		blob, err := json.Marshal(list)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE runs SET annotations_json = ? WHERE id = 'run-1'`), blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodeAnnotations := func() int {
+		t.Helper()
+		n, err := st.GetNode(ctx, "run-1", "build")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(n.Annotations)
+	}
+
+	if err := st.AppendNodeAnnotation(ctx, "run-1", "build", strings.Repeat("x", store.MaxAnnotationBytes+1)); !errors.Is(err, store.ErrAnnotationTooLarge) {
+		t.Fatalf("an oversized annotation = %v, want ErrAnnotationTooLarge", err)
+	}
+	if err := st.AppendNodeAnnotation(ctx, "run-1", "build", strings.Repeat("x", store.MaxAnnotationBytes)); err != nil {
+		t.Fatalf("an annotation at the size bound: %v", err)
+	}
+
+	full := make([]string, store.MaxRunAnnotations)
+	for i := range full {
+		full[i] = "a"
+	}
+	setRunAnnotations(full[:store.MaxRunAnnotations-1])
+	if err := st.AppendNodeAnnotation(ctx, "run-1", "build", "last"); err != nil {
+		t.Fatalf("the last annotation under the count bound: %v", err)
+	}
+	before := nodeAnnotations()
+	if err := st.AppendNodeAnnotation(ctx, "run-1", "build", "one more"); !errors.Is(err, store.ErrRunAnnotationLimit) {
+		t.Fatalf("a node annotation past the count bound = %v, want ErrRunAnnotationLimit", err)
+	}
+	if err := st.AppendStepAnnotation(ctx, "run-1", "build", "compile", "one more"); !errors.Is(err, store.ErrRunAnnotationLimit) {
+		t.Fatalf("a step annotation past the count bound = %v, want ErrRunAnnotationLimit", err)
+	}
+	if after := nodeAnnotations(); after != before {
+		t.Fatalf("a refused annotation reached the node: %d then %d", before, after)
+	}
+
+	setRunAnnotations([]string{strings.Repeat("b", store.MaxRunAnnotationBytes-store.MaxAnnotationBytes)})
+	if err := st.AppendNodeAnnotation(ctx, "run-1", "build", strings.Repeat("c", store.MaxAnnotationBytes)); !errors.Is(err, store.ErrRunAnnotationBytes) {
+		t.Fatalf("an annotation past the run's byte bound = %v, want ErrRunAnnotationBytes", err)
 	}
 }

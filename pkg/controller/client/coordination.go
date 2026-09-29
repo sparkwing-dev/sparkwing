@@ -131,36 +131,47 @@ type nodeUsageBody struct {
 	WallNanos    int64 `json:"wall_nanos,omitempty"`
 }
 
-// ListNodeMetrics returns a node's resource samples oldest-first. Mirrors
-// store.ListNodeMetrics.
+// ListNodeMetrics returns a node's resource samples oldest-first, following
+// the route's pages to the end. Mirrors store.ListNodeMetrics.
 func (c *Client) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]store.MetricSample, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/metrics", c.baseURL,
-		url.PathEscape(runID), url.PathEscape(nodeID))
-	var body struct {
-		Points []struct {
-			TS            string `json:"ts"`
-			CPUMillicores int64  `json:"cpu_millicores"`
-			MemoryBytes   int64  `json:"memory_bytes"`
-			CPUTimeNanos  int64  `json:"cpu_time_nanos"`
-		} `json:"points"`
-	}
-	if err := c.getJSON(ctx, u, &body); err != nil {
-		return nil, err
-	}
-	out := make([]store.MetricSample, 0, len(body.Points))
-	for _, p := range body.Points {
-		ts, err := time.Parse(time.RFC3339Nano, p.TS)
-		if err != nil {
-			return nil, fmt.Errorf("metric sample ts %q: %w", p.TS, err)
+	base := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/metrics?limit=%d", c.baseURL,
+		url.PathEscape(runID), url.PathEscape(nodeID), store.MaxNodeMetricSamples)
+	var out []store.MetricSample
+	cursor := ""
+	for {
+		u := base
+		if cursor != "" {
+			u += "&cursor=" + url.QueryEscape(cursor)
 		}
-		out = append(out, store.MetricSample{
-			TS:            ts,
-			CPUMillicores: p.CPUMillicores,
-			MemoryBytes:   p.MemoryBytes,
-			CPUTime:       time.Duration(p.CPUTimeNanos),
-		})
+		var body struct {
+			Points []struct {
+				TS            string `json:"ts"`
+				CPUMillicores int64  `json:"cpu_millicores"`
+				MemoryBytes   int64  `json:"memory_bytes"`
+				CPUTimeNanos  int64  `json:"cpu_time_nanos"`
+			} `json:"points"`
+			NextCursor string `json:"next_cursor"`
+		}
+		if err := c.getJSON(ctx, u, &body); err != nil {
+			return nil, err
+		}
+		for _, p := range body.Points {
+			ts, err := time.Parse(time.RFC3339Nano, p.TS)
+			if err != nil {
+				return nil, fmt.Errorf("metric sample ts %q: %w", p.TS, err)
+			}
+			out = append(out, store.MetricSample{
+				TS:            ts,
+				CPUMillicores: p.CPUMillicores,
+				MemoryBytes:   p.MemoryBytes,
+				CPUTime:       time.Duration(p.CPUTimeNanos),
+			})
+		}
+		if body.NextCursor == "" || body.NextCursor == cursor {
+			return out, nil
+		}
+		cursor = body.NextCursor
 	}
-	return out, nil
 }
 
 // ReconcileOrphanedLocalRuns finishes runs left "running" by a process that

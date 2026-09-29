@@ -1570,6 +1570,45 @@ unlock.
 
 ### Security
 
+- **controller + store (Breaking):** Annotations and node metric samples are
+  bounded, and node metric reads are paged. See [migration guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An
+  annotation holds at most 64 KiB, and a run at most 1,000 annotations and
+  4 MiB of them JSON-encoded, node and step annotations together; past a bound
+  the append answers `413` for size or `429` for count and stores nothing. A
+  node holds at most 10,000 metric samples, and a later sample answers `429`;
+  the runner then stops sampling that node and records one `metrics_stopped`
+  event, "metric sampling stopped at 10000 samples".
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` now answers one page of
+  samples, 1,000 by default and up to `limit=10000`, with `next_cursor` to
+  pass as `cursor` while more follow; the Go client and the dashboard follow
+  every page.
+
+- **logs:** `DELETE /api/v1/logs/{runID}` takes `logs.delete` or `admin` and
+  no longer accepts `logs.write`, so a runner token an editor mints can no
+  longer erase its team's run logs. The controller's log-deletion credential,
+  `sparkwing runs prune` under an operator token, and `--retention` keep
+  deleting as before.
+
+- **controller + store + dashboard (Breaking):** A Google or GitHub sign-in no
+  longer joins an existing account because both report the same verified
+  email. See [migration guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The first sign-in by a provider account whose address an existing
+  account holds, from a provider that account does not sign in with, answers
+  `409` with "An account with this email already exists. Sign in the way you
+  did before, then link this provider from account settings.", and the
+  dashboard shows it on the sign-in page. A reassigned work address let its new holder take over the
+  previous holder's account. To add the second provider, sign in with the
+  first and link the other from **Account -> Linked sign-ins**; sign-ins
+  attached before this change keep working. `SignInResult.Linked` is removed
+  from `pkg/store`.
+
+- **controller + store:** `POST /api/v1/data/upload` refuses a zero-byte
+  declaration with 400, and a team holds at most 100 uncommitted, unexpired
+  uploads; the next reservation answers 429 until one commits or its 24-hour
+  window ends. A zero-byte upload reserved no quota, so it let any account
+  keep an unbounded number of rows. The runner no longer uploads or fetches an
+  empty artifact blob, whose content its key already names, so empty
+  artifacts keep working.
+
 - **store:** Schema v82 adds a unique index that holds one unrevoked runner
   token per agent name in a team, so two concurrent mints of one name can no
   longer both succeed. A rotation still overlaps its predecessor until the

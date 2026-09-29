@@ -626,6 +626,8 @@ paths:
                 message: {type: string}
       responses:
         "204": {description: Appended.}
+        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "429": {description: The run already holds 1000 annotations.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/summary:
     parameters:
@@ -684,23 +686,36 @@ paths:
             schema: {$ref: "#/components/schemas/MetricSample"}
       responses:
         "204": {description: Recorded.}
+        "429": {description: The node already holds 10000 samples.}
     get:
       x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
       tags: [nodes]
-      summary: List metric samples for a node.
+      summary: List one page of a node's metric samples, oldest first.
+      description: >-
+        A page holds `limit` samples, 1000 by default and at most 10000. While more follow, `next_cursor` is set; pass it as `cursor` for the next page.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, default: 1000, minimum: 1, maximum: 10000}
+        - in: query
+          name: cursor
+          description: The previous page's `next_cursor`, the last sample's `ts`.
+          schema: {type: string}
       responses:
         "200":
-          description: Sample list, oldest first.
+          description: One page of samples, oldest first.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: none
+                x-sparkwing-go-type: pkg/controller.metricsPage
                 type: object
                 required: [points]
                 properties:
                   points:
                     type: array
                     items: {$ref: "#/components/schemas/MetricSample"}
+                  next_cursor: {type: string}
+        "400": {description: limit or cursor is malformed.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/mark-ready:
     parameters:
@@ -1029,6 +1044,8 @@ paths:
                 message: {type: string}
       responses:
         "204": {description: Appended.}
+        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "429": {description: The run already holds 1000 annotations.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
     parameters:
@@ -6845,7 +6862,7 @@ paths:
               properties:
                 kind: {type: string, enum: [binary, artifact, source]}
                 key: {type: string}
-                size: {type: integer, format: int64}
+                size: {type: integer, format: int64, minimum: 1}
                 sha256: {type: string}
                 run_id: {type: string}
       responses:
@@ -6866,6 +6883,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The immutable object already exists.}
         "413": {description: The upload exceeds its size or storage allowance.}
+        "429": {description: The team already holds 100 uncommitted uploads.}
 
   /api/v1/data/commit:
     post:

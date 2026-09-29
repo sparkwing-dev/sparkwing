@@ -24,10 +24,6 @@ func (s *Server) readableRun(runID func(*http.Request) string, next http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.Method == http.MethodDelete && (p.hasScope(scopeAdmin) || p.hasScope(scopeLogsDelete)) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		id := runID(r)
 		if id == "" {
 			next.ServeHTTP(w, r)

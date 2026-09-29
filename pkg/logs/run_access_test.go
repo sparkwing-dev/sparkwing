@@ -135,11 +135,17 @@ func TestLogReadsStayInsideTheCallersTeam(t *testing.T) {
 			}
 		}
 	}
-	if code, body := call("DELETE", "/api/v1/logs/"+runA, writerB, ""); code != http.StatusNotFound {
-		t.Errorf("DELETE as team B = %d want 404: %s", code, body)
+	runnerA := mint(teamA, "agent:a-runner", controller.ScopeNodesClaim, controller.ScopeTriggersClaim,
+		controller.ScopeRunsState, controller.ScopeSecretsRead, controller.ScopeLogsWrite)
+	for _, writer := range []struct{ name, auth string }{
+		{"team B writer", writerB}, {"team A runner", runnerA}, {"team A session", sessionA},
+	} {
+		if code, body := call("DELETE", "/api/v1/logs/"+runA, writer.auth, ""); code != http.StatusForbidden {
+			t.Errorf("DELETE as %s = %d want 403: %s", writer.name, code, body)
+		}
 	}
 	if code, body := call("GET", "/api/v1/logs/"+runA+"/n1", readerA, ""); !strings.Contains(body, secret) {
-		t.Errorf("team B's delete removed team A's log: %d %s", code, body)
+		t.Errorf("a team credential's delete removed team A's log: %d %s", code, body)
 	}
 
 	if _, _, err := teamB.CreateToken(ctx, "b-deleter", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, now); err == nil {
