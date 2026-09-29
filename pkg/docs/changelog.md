@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **store:** Retain concurrent profile updates, preserve integer percentiles, and reject invalid resource observations
+- **orchestrator:** Stop charging command lifetime CPU to its completion interval
 - **scaffold:** Use the published v0.64.0 SDK when the CLI build has no version stamp.
 - **docs:** Add admission diagnostics to the navigation.
 - **security checks:** Document trusted temporary paths and intentional local pipeline execution for the source scanner.
