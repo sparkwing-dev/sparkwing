@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -30,8 +31,8 @@ type MetricSample struct {
 // OneShot reports whether this reading covers a completed command.
 func (m MetricSample) OneShot() bool { return m.Kind == MetricCommand }
 
-// AddNodeMetricSample appends; duplicates by (run, node, ts) are
-// silently ignored so retries don't trip UNIQUE.
+// AddNodeMetricSample accepts identical retries and rejects conflicting readings
+// at the same node timestamp.
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
 	if sample.Kind != MetricUnknown && sample.Kind != MetricInterval && sample.Kind != MetricCommand {
 		return errors.New("invalid node metric kind")
@@ -53,13 +54,31 @@ func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, s
 	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
 		runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
-		int64(sample.CPUTime), sample.Kind); err != nil {
+		int64(sample.CPUTime), sample.Kind)
+	if err != nil {
 		return err
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if inserted == 0 {
+		var cpu, memory, cpuTime int64
+		var kind MetricKind
+		if err := tx.QueryRowContext(ctx, `
+SELECT cpu_millicores, memory_bytes, cpu_time_nanos, kind
+  FROM node_metrics WHERE run_id = ? AND node_id = ? AND ts = ?`,
+			runID, nodeID, sample.TS.UnixNano()).Scan(&cpu, &memory, &cpuTime, &kind); err != nil {
+			return err
+		}
+		if cpu != sample.CPUMillicores || memory != sample.MemoryBytes || cpuTime != int64(sample.CPUTime) || kind != sample.Kind {
+			return fmt.Errorf("conflicting node metric for %s/%s at %s", runID, nodeID, sample.TS.Format(time.RFC3339Nano))
+		}
 	}
 	return tx.Commit()
 }
