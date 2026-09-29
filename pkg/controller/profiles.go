@@ -81,8 +81,12 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	measured := false
 	runValid := true
 	for _, n := range nodes {
+		if n.Outcome == "cached" {
+			continue
+		}
 		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
+			runValid = false
 			continue
 		}
 		peakCores, peakMem, hasCPU := samplePeaks(samples)

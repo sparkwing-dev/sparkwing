@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
+
 - **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
 
 - **tests:** Measure pause timeout over the recorded pause rather than the entire run.
