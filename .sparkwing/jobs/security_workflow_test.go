@@ -352,7 +352,7 @@ regexes = ['''^artifacts/blobs/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca
 		t.Fatal("gitleaks artifact exception must match the exact rule, path and empty-content hash")
 	}
 	body = strings.Replace(body, artifactException, "", 1)
-	if strings.Contains(body, "[[rules") {
+	if regexp.MustCompile(`(?m)^\s*\[\[\s*rules(?:\s*\]\]|\s*\.)`).MatchString(body) {
 		t.Fatal("unexpected gitleaks rule override")
 	}
 	if strings.Contains(body, "paths =") {
