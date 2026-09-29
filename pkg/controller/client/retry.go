@@ -116,14 +116,27 @@ func LoadSignal(err error) (time.Duration, bool) {
 	return 0, false
 }
 
+// maxRetryAfter bounds a parsed Retry-After above every cap a caller applies,
+// so a huge header clamps here instead of overflowing the duration.
+const maxRetryAfter = time.Hour
+
+// safety: the seconds are clamped before they are multiplied, because a
+// header near the int64 limit wraps a Duration negative or small, which a
+// caller would read as an invitation to come straight back.
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 	raw := resp.Header.Get("Retry-After")
 	if raw == "" {
 		return 0, false
 	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil || seconds < 0 {
+	seconds, err := strconv.ParseUint(raw, 10, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		return maxRetryAfter, true
+	}
+	if err != nil {
 		return 0, false
+	}
+	if seconds >= uint64(maxRetryAfter/time.Second) {
+		return maxRetryAfter, true
 	}
 	return time.Duration(seconds) * time.Second, true
 }
