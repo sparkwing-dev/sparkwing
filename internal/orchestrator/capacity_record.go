@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"runtime"
 	"time"
@@ -51,6 +52,14 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	if err != nil {
 		return
 	}
+	if pin.Empty() {
+		err = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
+	} else {
+		err = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", pipeline, "err", err)
+	}
 	dominant := cacheDominant(nodes)
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	bucket := nodemetrics.Interval()
@@ -58,6 +67,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	var cpuIntegral time.Duration
 	var exactPeakMem int64
 	measured := false
+	hasRunCPU := false
 	for _, n := range nodes {
 		if n.Outcome == string(sparkwing.Cached) {
 			continue
@@ -72,19 +82,20 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		}
 		measured = true
 		var observedCores float64
+		hasNodeCPU := false
 		var peakMem int64
 		commandMem := map[int64]int64{}
 		for _, s := range samples {
-			observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
 			key := s.TS.Truncate(bucket).UnixNano()
 			total := intervals[key]
 			if s.OneShot() {
-				total.cpuMillicores += bucketMillicores(s.CPUTime, bucket)
 				commandMem[key] = max(commandMem[key], s.MemoryBytes)
 			} else {
+				hasNodeCPU, hasRunCPU, total.hasCPU = true, true, true
+				observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
 				total.cpuMillicores += s.CPUMillicores
 				total.memoryBytes += s.MemoryBytes
 			}
@@ -105,7 +116,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		occupancy := nodeOccupancy(n, samples, exactWall)
 		meanCores := exactMeanCores(exactCPU, occupancy)
 		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, math.Max(observedCores, meanCores))
-		if contended {
+		if contended || (!hasNodeCPU && exactCPU == 0) {
 			continue
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
@@ -117,7 +128,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			PlanHash:        planHash,
 		})
 	}
-	if dominant || !measured {
+	if dominant || !measured || (!hasRunCPU && cpuIntegral == 0) {
 		return
 	}
 	runDur := execEnd.Sub(execStart)
@@ -155,27 +166,16 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		CPUMeasured:     cpuMeasured,
 		PlanHash:        planHash,
 	})
-	if pin.Empty() {
-		_ = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
-		return
-	}
-	_ = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 }
 
 type intervalTotal struct {
+	hasCPU             bool
 	cpuMillicores      int64
 	memoryBytes        int64
 	oneShotMemoryBytes int64
 }
 
 func (t intervalTotal) memory() int64 { return t.memoryBytes + t.oneShotMemoryBytes }
-
-func bucketMillicores(cpu, window time.Duration) int64 {
-	if cpu <= 0 || window <= 0 {
-		return 0
-	}
-	return int64(cpu.Seconds() / window.Seconds() * 1000.0)
-}
 
 func peakProcessReading(ctx context.Context, pipeline string, intervals map[int64]intervalTotal, meanCores float64, meanMem int64) (float64, int64) {
 	peakCores := meanCores
@@ -192,15 +192,20 @@ func peakProcessReading(ctx context.Context, pipeline string, intervals map[int6
 func sustainedProcessCores(intervals map[int64]intervalTotal, meanCores float64) float64 {
 	cores := make([]float64, 0, len(intervals))
 	for _, total := range intervals {
+		if !total.hasCPU {
+			continue
+		}
 		cores = append(cores, float64(total.cpuMillicores)/1000.0)
 	}
 	return sustainedLevel(cores, meanCores)
 }
 
 func sustainedNodeCores(samples []store.MetricSample, meanCores float64) float64 {
-	cores := make([]float64, len(samples))
-	for i, s := range samples {
-		cores[i] = float64(s.CPUMillicores) / 1000.0
+	cores := make([]float64, 0, len(samples))
+	for _, s := range samples {
+		if !s.OneShot() {
+			cores = append(cores, float64(s.CPUMillicores)/1000.0)
+		}
 	}
 	return sustainedLevel(cores, meanCores)
 }

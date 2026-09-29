@@ -196,7 +196,7 @@ func TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores(t *testing.T) {
 		t.Fatalf("seed run: %v", err)
 	}
 
-	loopback, err := startRunLoopback(&Options{State: canonical, RunID: runID}, backends, quietTestLogger())
+	loopback, err := startRunLoopback(t.Context(), &Options{State: canonical, RunID: runID}, backends, quietTestLogger())
 	if err != nil {
 		t.Fatalf("startRunLoopback: %v", err)
 	}
