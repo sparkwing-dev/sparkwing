@@ -187,6 +187,7 @@ type ClaimInputRequest struct {
 	MaxAgeMS     int64
 }
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
+func ClaimMemoKey(repo, pipeline, node, hash string) string
 type ClaimPlacement struct {
 	DefaultPrefers []string
 
@@ -196,6 +197,7 @@ type ClaimPlacement struct {
 }
 func ClaimPlacementFromContext(ctx context.Context) (ClaimPlacement, bool)
 const ClaimPollAfterHeader = "X-Sparkwing-Poll-After"
+func ClaimRepoSlug(owner, repo string) string
 const ClaimReporting
 const ClaimReservationHeader = "X-Sparkwing-Claim-Reservation"
 const ClaimResult

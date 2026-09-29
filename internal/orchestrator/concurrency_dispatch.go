@@ -168,9 +168,9 @@ func concurrencyParametersFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyG
 	}
 }
 
-func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordinationParameters {
+func memoParamsFor(key, cacheHash string, cacheTTL time.Duration) coordinationParameters {
 	return coordinationParameters{
-		key:       memoKeyFor(cacheHash),
+		key:       key,
 		capacity:  1,
 		cost:      1,
 		policy:    store.OnLimitCoalesce,
@@ -209,12 +209,21 @@ func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
 	}
 	hasMemo := cacheHash != ""
+	memoKey := memoKeyFor(cacheHash)
+	// safety: a claimed node memoizes under its own repository, pipeline and
+	// node, the only memo keys the controller lets its claim take.
+	if c, ok := r.backends.State.(*claimState); ok && hasMemo {
+		if memoKey, err = c.memoKey(ctx, cacheHash); err != nil {
+			r.markFailedIfUnfinished(ctx, req.RunID, node.ID(), err)
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
+		}
+	}
 
 	switch {
 	case hasMemo && group != nil:
-		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL), true
+		return r.runMemoizedUnderConcurrency(ctx, req, group, memoKey, cacheHash, cacheTTL), true
 	case hasMemo:
-		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL)), true
+		return r.acquireAndRun(ctx, req, memoParamsFor(memoKey, cacheHash, cacheTTL)), true
 	case group != nil:
 		return r.runUnderGroup(ctx, req, group), true
 	default:
@@ -289,9 +298,9 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, pa
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
-func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
+func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, memoKey, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
-	memoParameters := memoParamsFor(cacheHash, cacheTTL)
+	memoParameters := memoParamsFor(memoKey, cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {

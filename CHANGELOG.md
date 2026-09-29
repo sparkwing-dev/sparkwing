@@ -69,7 +69,9 @@ unlock.
   node takes, renews, observes and releases concurrency slots with its claim
   token, for its own run and node in its own team, under its node's holder
   ID, and only with the key, policy, capacity and cost its accepted plan
-  declares for the node; a slot's lease never outlives the claim token, a
+  declares for the node, a memoized node only under its own repository,
+  pipeline and node, and it moves no sibling node's holder; a slot's lease
+  never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
   not. A claim token's binary cache is scoped to its run's GitHub repository ID
   and git ref, both read from the run, as

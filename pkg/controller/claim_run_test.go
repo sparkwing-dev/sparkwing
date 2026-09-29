@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -506,5 +507,73 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	}
 	if code := f.call("GET", "/api/v1/runs/run-stranger/nodes/lead/output", tokens["c"], nil, nil); code == http.StatusOK {
 		t.Errorf("another run's output read directly = %d, want refused", code)
+	}
+}
+
+// A claim takes a memo slot only under its own repository, pipeline and node,
+// and heartbeats, observes and releases only its own node's holder, never a
+// sibling's in the same run.
+func TestClaimRun_MemoSlotsAndHoldersStayInTheClaimsNode(t *testing.T) {
+	ctx := context.Background()
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-memo", "acme", "widgets")
+	memo := map[string]any{"cache": true}
+	doc := map[string]any{"nodes": []map[string]any{
+		{"id": "a", "deps": []string{}, "spec_hash": specA, "modifiers": memo},
+		{"id": "b", "deps": []string{}, "spec_hash": specA, "modifiers": memo},
+	}}
+	if code := f.call("POST", "/api/v1/runs/run-memo/plan", plan, doc, nil); code != http.StatusOK {
+		t.Fatalf("accept plan = %d", code)
+	}
+	wk := "Bearer " + f.launchNode("run-memo", "a")
+	acquire := func(key string) int {
+		return f.call("POST", "/api/v1/concurrency/"+url.PathEscape(key)+"/acquire", wk, map[string]any{
+			"holder_id": "run-memo/a", "run_id": "run-memo", "node_id": "a", "max": 1, "cost": 1, "policy": "coalesce",
+		}, nil)
+	}
+	for what, key := range map[string]string{
+		"a bare memo key":          "memo:h1",
+		"a sibling node's key":     store.ClaimMemoKey("acme/widgets", "build", "b", "h1"),
+		"another pipeline's key":   store.ClaimMemoKey("acme/widgets", "deploy", "a", "h1"),
+		"another repository's key": store.ClaimMemoKey("acme/plans", "build", "a", "h1"),
+	} {
+		if code := acquire(key); code != http.StatusForbidden {
+			t.Errorf("acquiring %s = %d, want 403", what, code)
+		}
+	}
+	own := store.ClaimMemoKey("acme/widgets", "build", "a", "h1")
+	if code := acquire(own); code != http.StatusOK {
+		t.Fatalf("acquiring its own memo key = %d, want 200", code)
+	}
+	tn, err := f.store.ForTeam(ctx, store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling := store.ClaimMemoKey("acme/widgets", "build", "b", "h2")
+	if res, err := tn.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: sibling, HolderID: "run-memo/b", RunID: "run-memo", NodeID: "b", Capacity: 1, Policy: "coalesce",
+	}); err != nil || res.Kind != store.AcquireGranted {
+		t.Fatalf("seed the sibling's holder = %+v %v", res, err)
+	}
+	for _, c := range []struct{ method, path, key string }{
+		{"POST", "/heartbeat", sibling},
+		{"POST", "/release", sibling},
+		{"GET", "/holder?holder_id=run-memo%2Fb", sibling},
+	} {
+		var body any
+		if c.method == "POST" {
+			body = map[string]any{"holder_id": "run-memo/b", "outcome": "success"}
+		}
+		if code := f.call(c.method, "/api/v1/concurrency/"+url.PathEscape(c.key)+c.path, wk, body, nil); code != http.StatusForbidden {
+			t.Errorf("%s %s on the sibling's holder = %d, want 403", c.method, c.path, code)
+		}
+	}
+	if code := f.call("POST", "/api/v1/concurrency/"+url.PathEscape(own)+"/heartbeat", wk, map[string]any{"holder_id": "run-memo/a"}, nil); code != http.StatusOK {
+		t.Errorf("heartbeating its own holder = %d, want 200", code)
+	}
+	if st, err := tn.GetConcurrencyState(ctx, sibling); err != nil || len(st.Holders) != 1 {
+		t.Fatalf("the sibling's holder = %+v %v, want it untouched", st, err)
 	}
 }

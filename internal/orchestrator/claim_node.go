@@ -83,6 +83,14 @@ func (s *claimState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([
 	return s.GetChildNodeOutput(ctx, s.runID, runID, nodeID)
 }
 
+func (s *claimState) memoKey(ctx context.Context, hash string) (string, error) {
+	run, err := s.Client.GetRun(ctx, s.runID)
+	if err != nil {
+		return "", fmt.Errorf("read the run to name its memo key: %w", err)
+	}
+	return store.ClaimMemoKey(store.ClaimRepoSlug(run.GithubOwner, run.GithubRepo), run.Pipeline, s.nodeID, hash), nil
+}
+
 func (s *claimState) input(ctx context.Context, req store.ClaimInputRequest) ([]byte, error) {
 	in, err := s.ClaimInput(ctx, s.runID, s.nodeID, req)
 	if err != nil {
