@@ -171,6 +171,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	// safety: v84 adds a table and defaulted run and node columns an older
 	// binary never names, so an older binary keeps writing the migrated database.
 	84: {repoDispatchRunCols, launchNodeCols},
+	85: nil,
+	86: nil,
 }
 
 func columnSpecMaps() []map[string]string {
