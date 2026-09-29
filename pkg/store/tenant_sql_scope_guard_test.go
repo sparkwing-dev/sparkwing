@@ -198,7 +198,6 @@ var unportedSQL = []string{
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).LookupToken",
 	"(*Store).NodeClaimFenceIsLive",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
 	"(*Store).NodeExecutionAttemptIsLive",
@@ -341,7 +340,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 207
+const unportedSQLSize = 206
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

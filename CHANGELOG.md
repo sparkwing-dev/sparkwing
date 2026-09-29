@@ -731,7 +731,7 @@ unlock.
   active team; an editor mints and revokes their own, an owner revokes any.
   Every `/team` route acts on the session's team, and another team's id
   answers 404. Nobody grants a role above their own and the last owner stays.
-  A team holds at most 10 live runner tokens (the next mint answers 409), 50
+  A team holds at most 100 live runner tokens (the next mint answers 409), 50
   open invitations and 100 invitations created a day (429), and a withdrawn
   invitation still counts toward the day. `store.Tenant` refuses to mint a
   token carrying `admin` on every path.
@@ -1755,8 +1755,9 @@ unlock.
   removed editor's machine kept reading the team's pipeline secrets. Removing a
   member now revokes every token they minted in that team, and demoting one to
   `reader` revokes their runner tokens, in the same transaction as the role
-  change. A team runner token expires 90 days after it is minted, and
-  `GET /api/v1/team/runner-tokens` reports `expires_at`.
+  change. A team runner token expires once it goes 90 days unused, each use
+  moving `expires_at` forward, and `GET /api/v1/team/runner-tokens` reports
+  `expires_at`. A token's last use is written at most once an hour.
   `store.Tenant.RemoveMember` and `SetMemberRole` take the time and return the
   revoked prefixes. `docs/auth.md` now states that an editor can use the
   secrets the team's pipelines read.

@@ -437,15 +437,47 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		if !t.IsValid(now) {
 			return nil, ErrTokenRevoked
 		}
-		_, _ = s.execNoCtx(
-			`UPDATE tokens SET last_used_at = ? WHERE hash = ?`,
-			now.UTC().Unix(), t.Hash,
-		)
-		ts := now.UTC()
-		t.LastUsedAt = &ts
+		s.noteTokenUse(t, now)
 		return t, nil
 	}
 	return nil, ErrUnknownToken
+}
+
+// TokenUseWriteEvery bounds how often a token's use is written back: a
+// fleet authenticates on every request, and last use to the hour is all
+// that is read.
+const TokenUseWriteEvery = time.Hour
+
+// slidesOnUse reports whether a token's expiry follows its last use: the
+// runner tokens a team mints for its machines, which [RunnerTokenLifetime]
+// expires only once they sit idle.
+func slidesOnUse(t *Token) bool {
+	return t.Kind == TokenKindRunner && strings.HasPrefix(t.Principal, agentPrincipalPrefix) && t.ExpiresAt != nil
+}
+
+// safety: the write is conditional on the stored last use, so replicas that
+// authenticate the same token in one hour write it once between them.
+func (s *Store) noteTokenUse(t *Token, now time.Time) {
+	now = now.UTC()
+	if t.LastUsedAt != nil && now.Sub(*t.LastUsedAt) < TokenUseWriteEvery {
+		return
+	}
+	expires := t.ExpiresAt
+	if slidesOnUse(t) {
+		next := now.Add(RunnerTokenLifetime)
+		expires = &next
+	}
+	res, err := s.execNoCtx(
+		`UPDATE tokens SET last_used_at = ?, expires_at = ?
+		  WHERE team = ? AND hash = ? AND (last_used_at IS NULL OR last_used_at <= ?)`,
+		now.Unix(), expiresUnix(expires), string(t.Team), t.Hash, now.Add(-TokenUseWriteEvery).Unix(),
+	)
+	if err != nil {
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 1 {
+		t.LastUsedAt, t.ExpiresAt = &now, expires
+	}
 }
 
 const selectTokensByPrefixSQL = `

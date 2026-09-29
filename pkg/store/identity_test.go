@@ -534,3 +534,76 @@ func TestIdentityLeavingOrLosingEditorRevokesTheRunnerTokensAMemberMinted(t *tes
 		t.Fatal("removing a member revoked another member's runner token")
 	}
 }
+
+// A runner token expires only once it sits idle: each use, written back at
+// most once an hour, moves its expiry a full lifetime past that use.
+func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "slide@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	minted := time.Now().UTC().Truncate(time.Second)
+	raw, _, err := tn.CreateRunnerToken(ctx, "agent:box", []string{"nodes.claim"}, u.Account.ID, minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, _, err := tn.CreateRunnerToken(ctx, "agent:idle", []string{"nodes.claim"}, u.Account.ID, minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := minted.Add(store.RunnerTokenLifetime - time.Hour)
+	tok, err := st.LookupToken(raw, used)
+	if err != nil {
+		t.Fatalf("a use inside the lifetime: %v", err)
+	}
+	if want := used.Add(store.RunnerTokenLifetime); tok.ExpiresAt == nil || !tok.ExpiresAt.Equal(want) {
+		t.Fatalf("expiry after a use = %v, want %v", tok.ExpiresAt, want)
+	}
+	if _, err := st.LookupToken(raw, minted.Add(store.RunnerTokenLifetime+time.Hour)); err != nil {
+		t.Fatalf("a used token past its first lifetime: %v", err)
+	}
+	if _, err := st.LookupToken(idle, minted.Add(store.RunnerTokenLifetime)); !errors.Is(err, store.ErrTokenRevoked) {
+		t.Fatalf("a token idle for its whole lifetime = %v, want it expired", err)
+	}
+	prefix := raw[:store.PrefixLen]
+	if err := tn.RevokeRunnerToken(ctx, prefix, used.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LookupToken(raw, used.Add(2*time.Hour)); !errors.Is(err, store.ErrTokenRevoked) {
+		t.Fatalf("a revoked token = %v, want it refused at once", err)
+	}
+}
+
+// Authentication runs on every request, so a token's use is written at most
+// once an hour.
+func TestTokenUseIsWrittenAtMostHourly(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	u := signIn(t, st, "s", "hourly@example.com")
+	tn := tenant(t, st, u.PersonalTeam)
+	start := time.Now().UTC().Truncate(time.Second)
+	raw, _, err := tn.CreateRunnerToken(ctx, "agent:box", []string{"nodes.claim"}, u.Account.ID, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastUsed := func() int64 {
+		t.Helper()
+		var at int64
+		if err := st.DB().QueryRow(storetest.Rebind(st, `SELECT last_used_at FROM tokens WHERE prefix = ?`),
+			raw[:store.PrefixLen]).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	for _, step := range []struct {
+		at   time.Duration
+		want time.Duration
+	}{{0, 0}, {30 * time.Minute, 0}, {59 * time.Minute, 0}, {61 * time.Minute, 61 * time.Minute}} {
+		if _, err := st.LookupToken(raw, start.Add(step.at)); err != nil {
+			t.Fatal(err)
+		}
+		if got := lastUsed(); got != start.Add(step.want).Unix() {
+			t.Fatalf("use at +%s: last_used_at = %s, want +%s", step.at, time.Unix(got, 0).Sub(start), step.want)
+		}
+	}
+}

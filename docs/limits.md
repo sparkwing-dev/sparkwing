@@ -177,7 +177,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Cron schedules | 20 per repository and 10 declared repositories per team; withdrawn rows keep history without using a slot | `pkg/controller/crons.go` |
 | Cron fire history | 200 per schedule | `pkg/store/crons.go` |
 | Secrets | 100 per team, 128 KiB each as stored | `pkg/store/secrets.go` |
-| Runner tokens | 10 live per team, each expiring after 90 days | `pkg/store/identity.go` |
+| Runner tokens | 100 live per team, each expiring after 90 days unused | `pkg/store/identity.go` |
 | Spent tokens and invitations | deleted 30 days after they stopped admitting anyone | `pkg/store/identity_prune.go` |
 | GitHub runner bindings | 20 per team, funded or not | `pkg/store/github_runner_bindings.go` |
 | GitHub runner credentials | 20 live per team, each expiring after an hour and deleted once expired | `pkg/store/github_runner_bindings.go` |
