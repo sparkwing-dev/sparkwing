@@ -57,6 +57,10 @@ type Config struct {
 	MemoryCeiling int64
 	Deadline      time.Duration
 	ScratchLimit  string
+	// CacheURL, GitcacheURL and DependencyProxyURL are the caches a runner
+	// Job is handed. A pod opens a cache only with the grant its claim token
+	// asks the controller for, which reaches its own team's trees alone.
+	CacheURL, GitcacheURL, DependencyProxyURL string
 }
 
 // Validate refuses a Config that would let a Job run unpinned, uncapped or
@@ -110,9 +114,16 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		{Name: "GOCACHE", Value: "/tmp/go-build"},
 		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
 	}
-	if cfg.LogsURL != "" {
-		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL})
+	for _, v := range []corev1.EnvVar{
+		{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL},
+		{Name: "SPARKWING_CACHE_URL", Value: cfg.CacheURL},
+		{Name: "SPARKWING_GITCACHE_URL", Value: cfg.GitcacheURL},
+	} {
+		if v.Value != "" {
+			env = append(env, v)
+		}
 	}
+	env = append(env, k8s.DependencyProxyEnv(cfg.DependencyProxyURL)...)
 	scratch := resource.MustParse(cfg.scratchLimit())
 	// safety: the lifetime runs from the claim on the controller's clock, so the
 	// margin covers the response and the Job create, and the Job never outlives

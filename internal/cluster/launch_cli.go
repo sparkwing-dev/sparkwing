@@ -24,6 +24,9 @@ func runLaunchCLI(args []string) error {
 	var cfg launcher.Config
 	fs.StringVar(&cfg.ControllerURL, "controller", "", "controller URL the launcher and its Jobs reach")
 	fs.StringVar(&cfg.LogsURL, "logs", "", "logs service URL handed to each Job")
+	fs.StringVar(&cfg.CacheURL, "cache", "", "cache service URL handed to each Job")
+	fs.StringVar(&cfg.GitcacheURL, "gitcache", "", "git cache URL handed to each Job")
+	fs.StringVar(&cfg.DependencyProxyURL, "dependency-proxy", "", "cache URL whose go, npm and pip proxies each Job uses")
 	fs.StringVar(&cfg.Namespace, "namespace", "sparkwing-jobs", "namespace the Jobs run in")
 	fs.StringVar(&cfg.Image, "image", "", "runner image, pinned by digest")
 	cpu := fs.String("cpu-ceiling", "", "most cores one Job may request (required)")

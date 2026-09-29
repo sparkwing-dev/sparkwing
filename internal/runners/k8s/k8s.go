@@ -833,7 +833,7 @@ func (r *Runner) buildJob(
 	if grant := os.Getenv(authwire.CacheGrantEnv); grant != "" {
 		env = append(env, corev1.EnvVar{Name: authwire.CacheGrantEnv, Value: grant})
 	}
-	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
+	env = append(env, DependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 	env = append(env, claimFenceEnv(fence)...)
 
 	container := corev1.Container{
@@ -1075,7 +1075,9 @@ func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
 	return p
 }
 
-func dependencyProxyEnv(base string) []corev1.EnvVar {
+// DependencyProxyEnv points a pod's go, npm and pip at the cache's public
+// dependency proxy at base; an unusable base gives nothing.
+func DependencyProxyEnv(base string) []corev1.EnvVar {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme == "" || u.Host == "" {
