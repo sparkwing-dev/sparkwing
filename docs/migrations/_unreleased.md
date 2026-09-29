@@ -216,6 +216,19 @@ Writing the table also sets `credit_rate_micro_per_second` to the four-core
 price. The minimum purchase rises from $5 to $10, and
 `purchase_min_cents` reads 1,000.
 
+## Sign-in no longer joins accounts by email
+
+A user who signs in with Google and later with GitHub, or the reverse, under
+the same verified address no longer lands in one account. The second
+provider's first sign-in answers `409`, and the dashboard shows "An account
+with this email already exists. Sign in with Google, then link GitHub from
+account settings." The user signs in with the first provider and links the
+second from **Account -> Linked sign-ins**. Sign-ins attached before the
+upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
+`errors.As` on `*store.AccountExistsError`, or `errors.Is` on
+`store.ErrAccountExists`, detects the refusal. No database migration is
+required.
+
 ## 60-second minimum billable duration
 
 Drain metered node and trigger claims before deploying the controller that

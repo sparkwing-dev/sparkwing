@@ -17,6 +17,13 @@ type AccountDeletion struct {
 
 	RevokedPrefixes []string
 }
+type AccountExistsError struct {
+	Provider string
+
+	Existing []string
+}
+func (e *AccountExistsError) Error() string
+func (e *AccountExistsError) Unwrap() error
 const AcquireCached AcquireKind = "cached"
 const AcquireCancellingOthers AcquireKind = "cancelling_others"
 const AcquireCoalesced AcquireKind = "coalesced"
@@ -664,6 +671,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
+var ErrAccountExists = errors.New("store: an account with this email already exists")
 var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
@@ -1718,8 +1726,6 @@ type SignInResult struct {
 	Account Account
 
 	NewAccount bool
-
-	Linked bool
 
 	PersonalTeam Team
 

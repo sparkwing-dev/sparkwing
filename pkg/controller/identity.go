@@ -390,6 +390,11 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 	}
 	now := time.Now().UTC()
 	res, err := s.store.ResolveSignIn(r.Context(), profile, s.signUpConditions(r.Context()), now)
+	var exists *store.AccountExistsError
+	if errors.As(err, &exists) {
+		writeError(w, http.StatusConflict, exists)
+		return
+	}
 	if err != nil {
 		s.writeInternalError(w, r, "sign-in resolve", err)
 		return
@@ -407,7 +412,7 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	s.logger.Info("signed in", "account", acct.ID, "provider", name,
-		"new_account", res.NewAccount, "linked", res.Linked, "personal_team", string(res.PersonalTeam),
+		"new_account", res.NewAccount, "personal_team", string(res.PersonalTeam),
 		"waitlisted", acct.Waitlisted)
 	active, err := s.teamRef(r.Context(), acct.ActiveTeam, acct.ID)
 	if err != nil {

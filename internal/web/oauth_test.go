@@ -24,14 +24,15 @@ const (
 type identityController struct {
 	*httptest.Server
 
-	mu         sync.Mutex
-	teams      bool
-	account    bool
-	logouts    []string
-	starts     []map[string]string
-	exchanges  []map[string]string
-	upstream   []string
-	upstreamAZ []string
+	mu             sync.Mutex
+	teams          bool
+	account        bool
+	logouts        []string
+	starts         []map[string]string
+	exchanges      []map[string]string
+	upstream       []string
+	upstreamAZ     []string
+	refuseExchange string
 }
 
 func newIdentityController(t *testing.T, teams bool) *identityController {
@@ -75,6 +76,11 @@ func (c *identityController) serve(w http.ResponseWriter, r *http.Request) {
 		body := decode()
 		body["path"] = r.URL.Path
 		c.exchanges = append(c.exchanges, body)
+		if c.refuseExchange != "" {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": c.refuseExchange})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session_id":  "google-session",
 			"user":        map[string]string{"id": "u1", "email": "ada@example.com", "name": "Ada"},
@@ -346,6 +352,21 @@ func TestOAuthCallbackReportsAProviderRefusal(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), label+" sign-in was not completed.") {
 			t.Errorf("%s refusal does not name the provider: %s", provider, rec.Body)
 		}
+	}
+}
+
+func TestOAuthCallbackShowsTheControllersAccountExistsRefusal(t *testing.T) {
+	t.Parallel()
+	const refusal = "An account with this email already exists. Sign in with Google, then link GitHub from account settings."
+	ctrl := newIdentityController(t, true)
+	ctrl.refuseExchange = refusal
+	rec := oauthCallback(teamDashboard(t, ctrl.URL), "github",
+		"code=real-code&state="+fakeOAuthState, providerFlowCookie("github", fakeOAuthState, fakeVerifier, "/"))
+	if rec.Code != http.StatusConflict || findCookie(rec.Result().Cookies(), sessionCookieName) != nil {
+		t.Fatalf("refused exchange = %d, want 409 and no session", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), refusal) {
+		t.Errorf("the login page does not show the refusal: %s", rec.Body)
 	}
 }
 

@@ -920,8 +920,15 @@ links its sign-in.
 
 A linked sign-in never changes the account's email, at the link or at any later
 sign-in through it, and does not withdraw another account's claim on its
-address. The rule for joining by email is unchanged: a new identity still joins
-an account only when both sides hold the address verified.
+address. A provider account joins an existing account only through this link
+flow, never by its address. A first sign-in whose verified address an existing
+account holds, from a provider that account has no sign-in with, answers `409`:
+"An account with this email already exists. Sign in with Google, then link
+GitHub from account settings.", naming the account's own providers and the one
+refused. A matching address shows only who holds it now, and a reassigned work
+address would otherwise reach the previous holder's teams. A second provider
+account from a provider the account already signs in with gets an account of its
+own, as does one the account unlinked.
 
 `DELETE /api/v1/me/identities/{provider}` unlinks a sign-in while the account
 keeps at least one other (`409 last_sign_in_method` otherwise). It ends every
@@ -943,8 +950,8 @@ the account's sign-in methods and the providers it can link.
 Every new user costs a personal space, and a personal space holds a free
 storage allowance, so the sign-up gate bounds how many a burst of new provider
 accounts can take before the operator looks. It never touches a user that
-already exists: a returning user, and a new identity that links to one, sign in
-as before in every state.
+already exists: a returning user, and a sign-in the user linked, sign in as
+before in every state.
 
 A new user meets the gate at its first sign-in. The gate admits it, which
 creates its personal space, or places it on the waitlist. A waitlisted user

@@ -89,12 +89,26 @@ func TestGitHubIdentityIsKeyedOnTheNumericID(t *testing.T) {
 	}
 }
 
-func TestGitHubLinksToAGoogleUserOnTheSameVerifiedEmail(t *testing.T) {
+// A GitHub account on a Google user's verified address is refused, because
+// the address may have passed to someone else; the user links it while
+// signed in, and GitHub then signs in to that user.
+func TestGitHubOnAGoogleUsersAddressIsRefusedUntilLinked(t *testing.T) {
 	f := newIdentityFixture(t)
 	g := f.signIn(person("g-d", "dual@example.com", "Dual"))
+	var refused struct {
+		Error string `json:"error"`
+	}
+	if code := f.githubExchange(ghPerson(401, "dual", "dual@example.com"), &refused); code != http.StatusConflict ||
+		refused.Error != "An account with this email already exists. Sign in with Google, then link GitHub from account settings." {
+		t.Fatalf("github exchange on the google user's address = %d %q, want 409 with the link instructions", code, refused.Error)
+	}
+	var linked identityBody
+	if code := f.linkGitHub(sessionAuth(g.SessionID), ghPerson(401, "dual", "dual@example.com"), &linked); code != http.StatusCreated {
+		t.Fatalf("link = %d %+v", code, linked)
+	}
 	gh := f.signInGitHub(ghPerson(401, "dual", "dual@example.com"))
 	if gh.User.ID != g.User.ID || gh.ActiveTeam.Slug != g.ActiveTeam.Slug {
-		t.Fatalf("github on the same verified email did not join the google user: %s vs %s", gh.User.ID, g.User.ID)
+		t.Fatalf("linked github sign-in = %s, want the google user %s", gh.User.ID, g.User.ID)
 	}
 	other := f.signInGitHub(ghPerson(402, "dual-two", "dual@example.com"))
 	if other.User.ID == g.User.ID {

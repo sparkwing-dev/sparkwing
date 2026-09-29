@@ -78,11 +78,10 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 	if back.Account.Waitlisted || back.PersonalTeam == "" {
 		t.Fatalf("existing account with no team = %+v, want its personal space", back)
 	}
-	linked := signUpAt(t, st, store.SignInProfile{
+	if _, err := st.ResolveSignIn(ctx, store.SignInProfile{
 		Provider: store.ProviderGitHub, Subject: "99", Email: "old@example.com", EmailVerified: true,
-	}, store.SignUpConditions{}, time.Now())
-	if !linked.Linked || linked.Account.Waitlisted {
-		t.Fatalf("a new identity linking to an existing account = %+v", linked)
+	}, store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("a new identity on an existing account's address = %v, want ErrAccountExists", err)
 	}
 
 	requireWaitlisted(t, signIn(t, st, "s-new", "new@example.com"), store.WaitlistReasonOperator)

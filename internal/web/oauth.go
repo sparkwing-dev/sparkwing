@@ -124,6 +124,11 @@ func oauthCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 		}
 		exchanged, err := controllerOAuthExchange(r.Context(), controllerURL, provider.Name, code, flow.Verifier,
 			oauthRedirectURI(r, provider.Name))
+		var refused *controllerStatusError
+		if errors.As(err, &refused) && refused.Status == http.StatusConflict && refused.Message != "" {
+			refuseOAuth(w, r, opts, secure, http.StatusConflict, refused.Message)
+			return
+		}
 		if err != nil {
 			refuseOAuth(w, r, opts, secure, http.StatusBadGateway, provider.Label+" sign-in could not be completed.")
 			return

@@ -126,6 +126,8 @@ var (
 	ErrEmailMismatch    = errors.New("store: invitation is addressed to another email")
 	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
+	// ErrAccountExists is what every [*AccountExistsError] wraps.
+	ErrAccountExists    = errors.New("store: an account with this email already exists")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
 	// ErrAgentNameTaken refuses a runner token for a name another live runner
@@ -208,8 +210,6 @@ type SignInResult struct {
 	Account Account
 	// NewAccount is true when the sign-in created the human.
 	NewAccount bool
-	// Linked is true when an existing human gained this identity.
-	Linked bool
 	// PersonalTeam names the team the sign-in created, if it created one.
 	PersonalTeam Team
 	// WaitlistReason is why a new account was placed on the waitlist, or
@@ -464,22 +464,79 @@ func personalDisplayName(p SignInProfile) string {
 
 var errSignInIdentityChanged = errors.New("store: sign-in identity changed during resolution")
 
+// AccountExistsError refuses a sign-in by a provider account no account holds
+// yet whose address belongs to an existing account. Its message is written
+// for the person signing in.
+type AccountExistsError struct {
+	// Provider is the provider whose sign-in was refused.
+	Provider string
+	// Existing lists the providers the existing account signs in with.
+	Existing []string
+}
+
+func (e *AccountExistsError) Error() string {
+	with := "the provider you used before"
+	if len(e.Existing) > 0 {
+		labels := make([]string, len(e.Existing))
+		for i, p := range e.Existing {
+			labels[i] = providerLabel(p)
+		}
+		with = strings.Join(labels, " or ")
+	}
+	return "An account with this email already exists. Sign in with " + with +
+		", then link " + providerLabel(e.Provider) + " from account settings."
+}
+
+func (e *AccountExistsError) Unwrap() error { return ErrAccountExists }
+
+func providerLabel(provider string) string {
+	switch provider {
+	case ProviderGoogle:
+		return "Google"
+	case ProviderGitHub:
+		return "GitHub"
+	}
+	return provider
+}
+
+func accountExistsTx(ctx context.Context, tx *storeTx, accountID, provider string) (err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT provider FROM identities WHERE account_id = ? ORDER BY provider`, accountID)
+	if err != nil {
+		return err
+	}
+	defer closeRowsInto(rows, &err)
+	refusal := &AccountExistsError{Provider: provider}
+	for rows.Next() {
+		var p string
+		if err = rows.Scan(&p); err != nil {
+			return err
+		}
+		refusal.Existing = append(refusal.Existing, p)
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	return refusal
+}
+
 // ResolveSignIn turns an authenticated provider profile into an account and
 // makes sure the account has a team to land in.
 //
 // The rule, in full:
 //
 //  1. An identity seen before belongs to the account it already belongs to.
-//  2. Otherwise it attaches to an existing account only when the provider
-//     asserts the address verified AND that address is verified on the
-//     account, and that account holds no other identity from this provider
-//     and did not unlink this one. Both sides verified, or no link.
+//  2. Otherwise, when an existing account holds the address verified, holds
+//     no identity from this provider and did not unlink this one, the
+//     sign-in is refused with an [*AccountExistsError]. The provider account
+//     joins that account only through [Store.LinkIdentity], which a signed-in
+//     session drives.
 //  3. Otherwise it becomes a new account.
 //
-// Rule 2 is the security property. Linking on an address the provider has not
-// verified lets anyone who types a victim's address into a new provider
-// account walk into the victim's teams. This store refuses an unverified
-// address outright, because no route here can later prove one.
+// Rule 2 is the security property. A matching address proves only who holds
+// the address now: a reassigned work address, or one typed unverified into a
+// new provider account, would otherwise walk into the previous holder's
+// teams. This store refuses an unverified address outright, because no route
+// here can later prove one.
 //
 // An account left holding no membership, new or returning, gets a personal
 // space: a team whose only member is its owner. The exception is a waitlisted
@@ -575,7 +632,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		}
 		switch {
 		case err == nil:
-			res.Linked = true
+			return SignInResult{}, accountExistsTx(ctx, tx, accountID, p.Provider)
 		case errors.Is(err, sql.ErrNoRows):
 			if accountID, err = newIdentityID(); err != nil {
 				return SignInResult{}, err

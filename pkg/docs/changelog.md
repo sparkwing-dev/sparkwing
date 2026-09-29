@@ -1552,6 +1552,18 @@ unlock.
 
 ### Security
 
+- **controller + store + dashboard (Breaking):** A Google or GitHub sign-in no
+  longer joins an existing account because both report the same verified
+  email. See [migration guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The first sign-in by a provider account whose address an existing
+  account holds, from a provider that account does not sign in with, answers
+  `409` with "An account with this email already exists. Sign in with Google,
+  then link GitHub from account settings.", and the dashboard shows it on the
+  sign-in page. A reassigned work address let its new holder take over the
+  previous holder's account. To add the second provider, sign in with the
+  first and link the other from **Account -> Linked sign-ins**; sign-ins
+  attached before this change keep working. `SignInResult.Linked` is removed
+  from `pkg/store`.
+
 - **controller + store:** `POST /api/v1/data/upload` refuses a zero-byte
   declaration with 400, and a team holds at most 100 uncommitted, unexpired
   uploads; the next reservation answers 429 until one commits or its 24-hour
