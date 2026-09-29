@@ -1446,6 +1446,7 @@ func planTopologyHash(nodes []*sparkwing.JobNode) string {
 }
 
 func capacityFingerprint(plan *sparkwing.Plan) string {
+	nodes := plan.Nodes()
 	type membership struct {
 		Node     string `json:"node,omitempty"`
 		Group    string `json:"group"`
@@ -1457,7 +1458,7 @@ func capacityFingerprint(plan *sparkwing.Plan) string {
 	doc := struct {
 		Edges       []planEdge   `json:"edges"`
 		Concurrency []membership `json:"concurrency,omitempty"`
-	}{Edges: planEdges(plan.Nodes())}
+	}{Edges: planEdges(nodes)}
 	appendGroup := func(node string, g *sparkwing.ConcurrencyGroup, cost int) {
 		limit := g.Limit()
 		scope := limit.Scope
@@ -1482,7 +1483,7 @@ func capacityFingerprint(plan *sparkwing.Plan) string {
 			appendGroup("", pc.Group, pc.Cost)
 		}
 	}
-	for _, n := range plan.Nodes() {
+	for _, n := range nodes {
 		if g := n.ConcurrencyGroupRef(); g != nil {
 			appendGroup(n.ID(), g, n.ConcurrencyCost())
 		}
@@ -1694,6 +1695,7 @@ func newDispatchState(
 		s.resolverCtx = ctx
 	}
 	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, s.runID, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue(), runCharge{})
+	s.resolverCtx = withLocalAdmissionPlan(s.resolverCtx, plan)
 	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

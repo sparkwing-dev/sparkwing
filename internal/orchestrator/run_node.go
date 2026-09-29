@@ -258,6 +258,7 @@ func RunNodeOnce(
 	}
 
 	if admission != nil {
+		ctx = withLocalAdmissionPlan(ctx, plan)
 		priority := planPriorityFromSnapshot(run.PlanSnapshot)
 		if reservedCtx, ok := admission.attachReservedNode(ctx, runID, priority); ok {
 			ctx = reservedCtx

@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **admission:** Remeasure node costs when the available plan fingerprint changes; retain explicit resource pins.
+
 - **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
 - **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
 

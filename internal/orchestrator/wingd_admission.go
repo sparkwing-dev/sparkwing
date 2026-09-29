@@ -345,7 +345,12 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 			profile = p
 		}
 	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU(), "")
+	var planHash string
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if state.plan != nil && profile != nil && pin.Empty() {
+		planHash = capacityFingerprint(state.plan)
+	}
+	res := capacity.Resolve(pin, profile, runtime.NumCPU(), planHash)
 	res, overCap := la.applyHostCeiling(ctx, res, key)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
@@ -1021,6 +1026,7 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
+	plan         *sparkwing.Plan
 	la           *LocalAdmission
 	runID        string
 	token        string
@@ -1043,7 +1049,9 @@ func withLocalAdmission(
 		return ctx
 	}
 	ctx = withAdmittedCharge(ctx, charge)
+	prior, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
+		plan:         prior.plan,
 		la:           la,
 		runID:        runID,
 		token:        leaseToken,
@@ -1059,6 +1067,12 @@ func withLocalAdmission(
 		ctx = sparkwing.WithCommandEnv(ctx, env)
 	}
 	return ctx
+}
+
+func withLocalAdmissionPlan(ctx context.Context, plan *sparkwing.Plan) context.Context {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	state.plan = plan
+	return context.WithValue(ctx, localAdmissionCtxKey{}, state)
 }
 
 func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bool) {
