@@ -31,8 +31,8 @@ func isClaimToken(token string) bool {
 // started and read through the run's own claim.
 type claimState struct {
 	*client.Client
-	runID, specHash string
-	calls           atomic.Int64
+	runID, nodeID, specHash string
+	calls                   atomic.Int64
 
 	mu       sync.Mutex
 	finished bool
@@ -83,6 +83,28 @@ func (s *claimState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([
 	return s.GetChildNodeOutput(ctx, s.runID, runID, nodeID)
 }
 
+func (s *claimState) input(ctx context.Context, req store.ClaimInputRequest) ([]byte, error) {
+	in, err := s.ClaimInput(ctx, s.runID, s.nodeID, req)
+	if err != nil {
+		return nil, err
+	}
+	return in.Output, nil
+}
+
+// safety: a claim reads another pipeline's newest successful run only through
+// the reference the node's plan declares, and the controller picks the run.
+func (s *claimState) pipelineRefResolver() sparkwing.PipelineResolverFunc {
+	return func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
+		in, err := s.ClaimInput(ctx, s.runID, s.nodeID, store.ClaimInputRequest{
+			Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: nodeID, MaxAgeMS: maxAge.Milliseconds(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, absentIfNotFound(err))
+		}
+		return &sparkwing.ResolvedPipelineRef{RunID: in.RunID, Data: in.Output}, nil
+	}
+}
+
 func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -103,7 +125,7 @@ func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptRepor
 // start and renews the claim, so this process only runs the node and reports.
 func runClaimedNode(ctx context.Context, controllerURL, logsURL, runID, nodeID, token string) error {
 	c := client.NewWithToken(controllerURL, nil, token)
-	state := &claimState{Client: c, runID: runID, specHash: os.Getenv(SpecHashEnv)}
+	state := &claimState{Client: c, runID: runID, nodeID: nodeID, specHash: os.Getenv(SpecHashEnv)}
 	go renewCacheGrant(ctx, controllerURL, token, runID)
 	res, err := RunNodeOnce(ctx, controllerURL, logsURL, runID, nodeID, "claim:"+runID+"/"+nodeID, token,
 		selectLocalRenderer(), slog.Default(), nil, func(cfg *runNodeConfig) { cfg.claim = state })

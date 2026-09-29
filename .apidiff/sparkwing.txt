@@ -382,6 +382,7 @@ func (n *JobNode) OptionalDepIDs() []string
 func (n *JobNode) OutputGlobs() []string
 func (n *JobNode) OutputType() reflect.Type
 func (n *JobNode) Outputs(globs ...string) *JobNode
+func (n *JobNode) PipelineRefs() []RefTarget
 func (n *JobNode) Prefers(labels ...string) *JobNode
 func (n *JobNode) PrefersLabels() []string
 func (n *JobNode) Requires(labels ...string) *JobNode

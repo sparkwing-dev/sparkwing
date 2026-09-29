@@ -3483,6 +3483,50 @@ paths:
         "409": {description: Stale generation or node state cannot be reset.}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      x-sparkwing-scope: claim
+      tags: [nodes]
+      summary: Read a controller-dispatched node's input from another run of its team.
+      description: >-
+        A work claim token reads, for its own run and node only, the output its node takes from another run through a reference the run's accepted plan declares for the node, and the controller picks the run: `cached` reads the cache entry of the node's declared memoization, `coalesced` reads the leader the node's own coalesce waiter names or else the cache entry that leader wrote, and `last_run` reads the newest successful run of a pipeline and node the node declares in `pipeline_refs`, as `RefToLastRun` does. The request never names the run it reads. An undeclared reference is refused `403` `input_undeclared` and recorded as an audit record naming the claim.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/store.ClaimInputRequest
+              type: object
+              required: [kind]
+              properties:
+                kind: {type: string, enum: [cached, coalesced, last_run]}
+                key: {type: string}
+                cache_key_hash: {type: string}
+                pipeline: {type: string}
+                node: {type: string}
+                max_age_ms: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The finished output and the run and node it came from.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.ClaimInput
+                type: object
+                required: [run_id, node_id, output]
+                properties:
+                  run_id: {type: string}
+                  node_id: {type: string}
+                  finished_at: {type: string, format: date-time}
+                  output: {}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {description: "The token is not this node's work claim, or the plan declares no such input (`input_undeclared`)."}
+        "404": {description: No finished output matches the reference.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
   /api/v1/runs/{id}/nodes/{nodeID}/claim/validate:
     parameters:
       - in: path

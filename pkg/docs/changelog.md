@@ -71,7 +71,14 @@ unlock.
   ID, and only with the key, policy, capacity and cost its accepted plan
   declares for the node; a slot's lease never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
-  not. On this path a node cannot start a child of another repository, and
+  not. A work node reads another run's output only through
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
+  itself: the cache entry of the node's memoization, the leader its own
+  coalesce waiter names, or the newest successful run of a pipeline and node
+  its plan declares in the new per-node `pipeline_refs` field, which the SDK
+  fills from the `RefToLastRun` fields a job struct holds; an undeclared
+  reference is refused and audited, and a ref built in a step body is refused
+  on this path. On this path a node cannot start a child of another repository, and
   its OIDC token request is answered `422` naming the gap until Sparkwing
   Cloud OIDC is enabled for it.
 

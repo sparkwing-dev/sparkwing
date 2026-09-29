@@ -349,7 +349,7 @@ func storeOutcome(res runner.Result) string {
 }
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
-	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
+	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -741,7 +741,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 }
 
 func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, parameters coordinationParameters, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
-	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
+	output, err := r.fetchLeaderOutput(ctx, parameters, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -787,8 +787,22 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
+// safety: a claimed node reads another run only through the reference its
+// plan declares, so it names the cache entry and the controller picks the run.
+func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, parameters coordinationParameters, originRun, originNode string) ([]byte, error) {
+	if c, ok := r.backends.State.(*claimState); ok {
+		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
+	}
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
+}
+
+// safety: a claimed follower names only its own memoization; the controller
+// finds the leader from the follower's waiter row or the entry it wrote.
+func (r *NodeExecutor) fetchLeaderOutput(ctx context.Context, parameters coordinationParameters, leaderRun, leaderNode string) ([]byte, error) {
+	if c, ok := r.backends.State.(*claimState); ok {
+		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
+	}
+	return r.backends.State.GetNodeOutput(ctx, leaderRun, leaderNode)
 }
 
 func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {

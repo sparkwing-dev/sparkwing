@@ -3007,6 +3007,21 @@ type snapshotNode struct {
 	Work *snapshotWork `json:"work,omitempty"`
 
 	SpecHash string `json:"spec_hash,omitempty"`
+
+	PipelineRefs []snapshotPipelineRef `json:"pipeline_refs,omitempty"`
+}
+
+type snapshotPipelineRef struct {
+	Pipeline string `json:"pipeline"`
+	Node     string `json:"node"`
+}
+
+func snapshotPipelineRefs(refs []sparkwing.RefTarget) []snapshotPipelineRef {
+	var out []snapshotPipelineRef
+	for _, r := range refs {
+		out = append(out, snapshotPipelineRef{Pipeline: r.Pipeline, Node: r.NodeID})
+	}
+	return out
 }
 
 type snapshotConsume struct {
@@ -3155,6 +3170,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Consumes:     snapshotConsumeEdges(n.ConsumeEdges()),
 			Groups:       p.JobGroupNames(n.ID()),
 			Dynamic:      p.IsDynamicNode(n.ID()),
+			PipelineRefs: snapshotPipelineRefs(n.PipelineRefs()),
 		}
 		if cfg := n.ApprovalConfig(); cfg != nil {
 			sn.Approval = &snapshotApproval{
@@ -3189,6 +3205,7 @@ func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnap
 			Groups:       p.JobGroupNames(rec.ID()),
 			OnFailureOf:  n.ID(),
 			Modifiers:    nodeModifiersSnapshot(rec),
+			PipelineRefs: snapshotPipelineRefs(rec.PipelineRefs()),
 		}
 		if w := rec.Work(); w != nil {
 			work, err := walker.walk(w, rec.ResultStep())

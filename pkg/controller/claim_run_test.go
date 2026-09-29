@@ -392,3 +392,119 @@ func TestClaimRun_LogValidationBindsTheClaimsOwnAttempt(t *testing.T) {
 		}
 	}
 }
+
+// A work claim reads another run's output only through a reference its plan
+// declares, and the controller picks the run: a memoized result through its
+// cache entry, the leader its own coalesce waiter names, and the newest
+// successful run of a declared pipeline reference. An undeclared reference,
+// another node's waiter and a read naming another run are refused or find
+// nothing, and a refusal is audited.
+func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
+	ctx := context.Background()
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	accept := func(runID string, nodes ...map[string]any) {
+		t.Helper()
+		for _, n := range nodes {
+			n["deps"], n["spec_hash"] = []string{}, specA
+		}
+		plan := "Bearer " + f.launchedRun(olga, runID, "acme", "widgets")
+		if code := f.call("POST", "/api/v1/runs/"+runID+"/plan", plan, map[string]any{"nodes": nodes}, nil); code != http.StatusOK {
+			t.Fatalf("accept %s's plan = %d", runID, code)
+		}
+	}
+	memo := map[string]any{"cache": true}
+	finished := func(runID, nodeID string, modifiers map[string]any, output string) {
+		t.Helper()
+		accept(runID, map[string]any{"id": nodeID, "modifiers": modifiers})
+		work := "Bearer " + f.launchNode(runID, nodeID)
+		if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/"+nodeID+"/attempt", work,
+			map[string]any{"outcome": "success", "output": json.RawMessage(output)}, nil); code != http.StatusOK {
+			t.Fatalf("finish %s/%s = %d", runID, nodeID, code)
+		}
+	}
+	finished("run-leader", "lead", memo, `{"from":"leader"}`)
+	finished("run-stranger", "lead", memo, `{"from":"stranger"}`)
+	finished("run-origin", "memo", memo, `{"from":"cache"}`)
+	finished("run-last", "build", nil, `{"from":"last"}`)
+	accept("run-in",
+		map[string]any{"id": "m", "modifiers": memo},
+		map[string]any{"id": "c", "modifiers": memo},
+		map[string]any{"id": "r", "pipeline_refs": []map[string]string{{"pipeline": "build", "node": "build"}}})
+	now := time.Now().UnixNano()
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO concurrency_cache (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
+ VALUES (?, 'memo:h1', 'h1', '', 'run-origin', 'memo', ?, ?, ?)`, []any{olga.team, now, now + int64(time.Hour), now}},
+		{`INSERT INTO concurrency_waiters (team, key, run_id, node_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id)
+ VALUES (?, 'memo:h2', 'run-in', 'c', ?, 'coalesce', 'h2', 'run-leader', 'lead')`, []any{olga.team, now}},
+		{`INSERT INTO concurrency_waiters (team, key, run_id, node_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id)
+ VALUES (?, 'memo:h3', 'run-in', 'm', ?, 'coalesce', 'h3', 'run-stranger', 'lead')`, []any{olga.team, now}},
+		{`INSERT INTO concurrency_cache (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
+ VALUES (?, 'memo:h4', 'h4', '', 'run-stranger', 'lead', ?, ?, ?)`, []any{string(store.DefaultTeam), now, now + int64(time.Hour), now}},
+	} {
+		if _, err := f.store.DB().ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokens := map[string]string{}
+	for _, n := range []string{"m", "c", "r"} {
+		tokens[n] = "Bearer " + f.launchNode("run-in", n)
+	}
+	input := func(node string, req store.ClaimInputRequest) (int, store.ClaimInput) {
+		t.Helper()
+		var in store.ClaimInput
+		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/claim/input", tokens[node], req, &in)
+		return code, in
+	}
+	memoIn := func(kind store.ClaimInputKind, hash string) store.ClaimInputRequest {
+		return store.ClaimInputRequest{Kind: kind, Key: "memo:" + hash, CacheKeyHash: hash}
+	}
+	lastRun := store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: "build", Node: "build"}
+	for _, c := range []struct {
+		node        string
+		req         store.ClaimInputRequest
+		run, output string
+	}{
+		{"m", memoIn(store.ClaimInputCached, "h1"), "run-origin", `{"from":"cache"}`},
+		{"c", memoIn(store.ClaimInputCoalesced, "h2"), "run-leader", `{"from":"leader"}`},
+		{"c", memoIn(store.ClaimInputCoalesced, "h1"), "run-origin", `{"from":"cache"}`},
+		{"r", lastRun, "run-last", `{"from":"last"}`},
+	} {
+		if code, in := input(c.node, c.req); code != http.StatusOK || in.RunID != c.run || string(in.Output) != c.output {
+			t.Errorf("node %s's %s input %s = %d %s %s, want %s %s", c.node, c.req.Kind, c.req.Key, code, in.RunID, in.Output, c.run, c.output)
+		}
+	}
+	otherKey, otherRef := memoIn(store.ClaimInputCached, "h1"), lastRun
+	otherKey.Key = "memo:h2"
+	otherRef.Node = "lead"
+	for what, c := range map[string]struct {
+		node string
+		req  store.ClaimInputRequest
+		want int
+	}{
+		"a cache entry on a node that declares no memoization": {"r", memoIn(store.ClaimInputCached, "h1"), http.StatusForbidden},
+		"a cache entry under a key its hash does not name":     {"m", otherKey, http.StatusForbidden},
+		"an undeclared pipeline reference":                     {"r", otherRef, http.StatusForbidden},
+		"a pipeline reference on a node that declares none":    {"m", lastRun, http.StatusForbidden},
+		"another node's coalesce waiter":                       {"c", memoIn(store.ClaimInputCoalesced, "h3"), http.StatusNotFound},
+		"a key with no waiter and no cache entry":              {"m", memoIn(store.ClaimInputCoalesced, "h9"), http.StatusNotFound},
+		"another team's cache entry":                           {"m", memoIn(store.ClaimInputCached, "h4"), http.StatusNotFound},
+	} {
+		if code, in := input(c.node, c.req); code != c.want {
+			t.Errorf("%s = %d %s, want %d", what, code, in.Output, c.want)
+		}
+	}
+	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
+		t.Error("a refused input was not audited")
+	}
+	if code := f.call("POST", "/api/v1/runs/run-leader/nodes/lead/claim/input", tokens["c"], memoIn(store.ClaimInputCoalesced, "h2"), nil); code != http.StatusForbidden {
+		t.Errorf("an input read naming the leader's run in its path = %d, want 403", code)
+	}
+	if code := f.call("GET", "/api/v1/runs/run-stranger/nodes/lead/output", tokens["c"], nil, nil); code == http.StatusOK {
+		t.Errorf("another run's output read directly = %d, want refused", code)
+	}
+}

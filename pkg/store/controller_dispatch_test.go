@@ -219,6 +219,8 @@ func TestAcceptPlan_RefusesInvalidPlansAndWritesNothing(t *testing.T) {
 		"traversing secret name":    `{"secrets":[{"name":"a/../b"}],"nodes":[]}`,
 		"secret name with a space":  `{"secrets":[{"name":"DEPLOY TOKEN"}],"nodes":[]}`,
 		"too many secrets":          `{"secrets":[` + strings.Join(secrets, ",") + `],"nodes":[]}`,
+		"empty pipeline ref":        `{"nodes":[{"id":"a","deps":[],"spec_hash":"` + hashA + `","pipeline_refs":[{"pipeline":"","node":"b"}]}]}`,
+		"too many pipeline refs":    `{"nodes":[{"id":"a","deps":[],"spec_hash":"` + hashA + `","pipeline_refs":[` + strings.Repeat(`{"pipeline":"p","node":"n"},`, 32) + `{"pipeline":"p","node":"n"}]}]}`,
 		"not json":                  `{"nodes":[`,
 		"two documents":             planOf("a") + planOf("b"),
 		"cycle":                     planOf("a:c", "b:a", "c:b"),

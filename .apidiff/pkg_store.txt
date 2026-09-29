@@ -168,6 +168,24 @@ type ClaimIdentity struct {
 	Principal   string
 	TokenPrefix string
 }
+type ClaimInput struct {
+	RunID      string
+	NodeID     string
+	FinishedAt *time.Time
+	Output     json.RawMessage
+}
+const ClaimInputCached ClaimInputKind = "cached"
+const ClaimInputCoalesced ClaimInputKind = "coalesced"
+type ClaimInputKind string
+const ClaimInputLastRun ClaimInputKind = "last_run"
+type ClaimInputRequest struct {
+	Kind         ClaimInputKind
+	Key          string
+	CacheKeyHash string
+	Pipeline     string
+	Node         string
+	MaxAgeMS     int64
+}
 const ClaimMembershipHeader = "X-Sparkwing-Claim-Membership"
 type ClaimPlacement struct {
 	DefaultPrefers []string
@@ -712,6 +730,7 @@ var ErrIDOwnedByAnotherTeam = errors.New("store: id already belongs to another t
 var ErrIdentityAlreadyLinked = errors.New("store: that sign-in is already linked to this account")
 var ErrIdentityLinkedElsewhere = errors.New("store: that sign-in belongs to another account")
 var ErrIdentityUnlinked = errors.New("store: sign-in method is no longer linked to this account")
+var ErrInputUndeclared = errors.New("store: the run's accepted plan declares no such input for this node")
 var ErrInstallationBoundElsewhere = errors.New("store: this GitHub App installation is connected to another team")
 var ErrInsufficientCredits = errors.New("insufficient credits")
 var ErrInvalidComputeLimitSetting = errors.New("compute limits: invalid setting")
@@ -1498,6 +1517,10 @@ const PlacementFallback = "fallback"
 const PlacementNone = "none"
 const PlacementPreferred = "preference"
 const PlanNodeID = "plan"
+type PlanPipelineRef struct {
+	Pipeline string
+	Node     string
+}
 const PoolHeartbeatInterval = 3 * time.Second
 const PrefixLen = 12
 type ProfileObservation struct {
@@ -2250,6 +2273,7 @@ func (s *Store) ResetExecutorLiveness(ctx context.Context) error
 func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)
 func (s *Store) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*Approval, error)
+func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error)
 func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error)
 func (s *Store) ResolveCronDue(ctx context.Context, id string, cursor time.Time, next *time.Time, fire *CronFire, now time.Time) error
 func (s *Store) ResolveExecutorMembership(ctx context.Context, claimant ClaimIdentity, executorName string, summary ExecutorSchedulingSummary) (ExecutorMembershipSnapshot, error)
