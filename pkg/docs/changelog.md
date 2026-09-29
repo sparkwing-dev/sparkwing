@@ -26,6 +26,7 @@ unlock.
 
 ### Fixed
 
+- **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
 - **tests:** Include metric sample kinds in database requirement expectations.
 
 - **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.

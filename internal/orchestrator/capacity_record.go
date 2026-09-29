@@ -82,10 +82,12 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		}
 		samples, err := st.ListNodeMetrics(ctx, runID, n.NodeID)
 		if err != nil {
+			runValid = false
 			continue
 		}
 		exactCPU, exactMem, exactWall := nodeUsage(n)
 		if len(samples) == 0 && exactCPU == 0 && exactMem == 0 {
+			runValid = false
 			continue
 		}
 		measured = true
