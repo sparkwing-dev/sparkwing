@@ -244,9 +244,9 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 
 // A work claim takes and returns concurrency slots for its own run in its
 // own team, and only as its node's accepted plan declares them: another run,
-// another node, another key or policy, a planning claim and a cancelled run's
-// new acquire are refused, the lease never outlives the claim, and a release
-// after cancel still frees the slot.
+// another node, another key or policy, another run's holder ID, a planning
+// claim and a cancelled run's new acquire are refused, the lease never
+// outlives the claim, and a release after cancel still frees the slot.
 func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newAppFixture(t)
@@ -269,6 +269,8 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 	body := func(run, node, policy string, lease int) map[string]any {
 		return map[string]any{"holder_id": run + "/" + node, "run_id": run, "node_id": node, "max": 1, "cost": 1, "policy": policy, "lease_secs": lease}
 	}
+	foreignHolder := body("run-slot", "a", "queue", 0)
+	foreignHolder["holder_id"] = "run-stranger/a"
 	for _, c := range []struct {
 		key  string
 		body map[string]any
@@ -278,6 +280,7 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 		{"g:deploy", body("run-slot", "b", "queue", 0), "another node's acquire"},
 		{"g:other", body("run-slot", "a", "queue", 0), "an undeclared key"},
 		{"g:deploy", body("run-slot", "a", "cancel_others", 0), "an undeclared policy"},
+		{"g:deploy", foreignHolder, "another run's holder ID"},
 	} {
 		if code := f.call("POST", "/api/v1/concurrency/"+c.key+"/acquire", wk, c.body, nil); code != http.StatusForbidden {
 			t.Errorf("%s = %d, want 403", c.what, code)

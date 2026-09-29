@@ -647,12 +647,18 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 // safety: a claim takes only a slot its node's accepted plan declares, for its
-// own node, joins no other run's holder, and holds it no longer than its
-// claim token lives, so it cannot supersede or block another run's holder
+// own node, under its own node's holder ID, joins no other run's holder, and
+// holds it no longer than its claim token lives, which the node's timeout
+// already bounds, so it cannot supersede, renew or block another run's holder
 // beyond what the declared policy allows.
 func (s *Server) checkClaimAcquire(r *http.Request, tenant *store.Tenant, tok store.ClaimToken, key string, body *acquireSlotReq) error {
 	if body.NodeID != tok.NodeID {
 		return errors.New("a claim acquires slots for its own node only")
+	}
+	// safety: an acquire naming a live holder's ID renews that holder, so a
+	// claim names only the ID the SDK gives its own node.
+	if body.HolderID != tok.RunID+"/"+tok.NodeID {
+		return errors.New("a claim acquires under its own node's holder ID only")
 	}
 	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
 		return err

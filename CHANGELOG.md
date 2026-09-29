@@ -66,12 +66,13 @@ unlock.
   other route; a write naming another attempt or trigger stream is refused,
   and a write the controller names no team for is answered `502`. A work
   node takes, renews, observes and releases concurrency slots with its claim
-  token, for its own run and node in its own team, and only with the key,
-  policy, capacity and cost its accepted plan declares for the node; a slot's
-  lease never outlives the claim token, a new acquire is refused once the run
-  is being cancelled, and a release is not. On this path a node cannot start
-  a child of another repository, and its OIDC token request is answered `422`
-  naming the gap until Sparkwing Cloud OIDC is enabled for it.
+  token, for its own run and node in its own team, under its node's holder
+  ID, and only with the key, policy, capacity and cost its accepted plan
+  declares for the node; a slot's lease never outlives the claim token, a
+  new acquire is refused once the run is being cancelled, and a release is
+  not. On this path a node cannot start a child of another repository, and
+  its OIDC token request is answered `422` naming the gap until Sparkwing
+  Cloud OIDC is enabled for it.
 
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
