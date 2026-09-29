@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
+
 ## [v0.64.0] - 2026-09-28
 ### Added
 

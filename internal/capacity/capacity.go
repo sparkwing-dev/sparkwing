@@ -56,6 +56,23 @@ type Resolution struct {
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var cores, previous float64
+	if profile != nil {
+		cores, previous = chargedCores(profile), carriedCores(profile)
+	}
+	return resolve(pin, profile, numCPU, planHash, cores, previous)
+}
+
+// ResolvePeak uses peak CPU demand for an enforced allocation.
+func ResolvePeak(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
+	var cores, previous float64
+	if profile != nil {
+		cores, previous = profile.PeakCores, profile.PrevPeakCores
+	}
+	return resolve(pin, profile, numCPU, planHash, cores, previous)
+}
+
+func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string, cores, previous float64) Resolution {
 	res := Resolution{}
 	if profile != nil {
 		res.ExpectedDuration = profile.P50Duration
@@ -73,12 +90,12 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
 	if !versionChanged && measurementQualifies(profile) {
-		res.Cores = math.Max(chargedCores(profile), MeasuredCoreFloor)
+		res.Cores = math.Max(cores, MeasuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
 	}
-	return measuringResolution(res, profile, numCPU, versionChanged)
+	return measuringResolution(res, profile, numCPU, versionChanged, cores, previous)
 }
 
 func chargedCores(profile *store.PipelineProfile) float64 {
@@ -95,18 +112,18 @@ func carriedCores(profile *store.PipelineProfile) float64 {
 	return profile.PrevPeakCores
 }
 
-func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool) Resolution {
+func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool, current, previous float64) Resolution {
 	var prevCores float64
 	var prevMem int64
 	var floorCores float64
 	var floorMem int64
 	if versionChanged {
-		prevCores, prevMem = chargedCores(profile), profile.PeakMemoryBytes
+		prevCores, prevMem = current, profile.PeakMemoryBytes
 		if prevCores == 0 {
-			prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
+			prevCores, prevMem = previous, profile.PrevPeakMemoryBytes
 		}
 	} else {
-		prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
+		prevCores, prevMem = previous, profile.PrevPeakMemoryBytes
 		floorCores, floorMem = profile.FloorCores, profile.FloorMemoryBytes
 	}
 
