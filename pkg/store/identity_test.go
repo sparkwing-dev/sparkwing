@@ -562,7 +562,7 @@ func TestRunnerTokenExpiryFollowsItsLastUse(t *testing.T) {
 	if _, err := st.LookupToken(raw, minted.Add(store.RunnerTokenLifetime+time.Hour)); err != nil {
 		t.Fatalf("a used token past its first lifetime: %v", err)
 	}
-	if _, err := st.LookupToken(idle, minted.Add(store.RunnerTokenLifetime)); !errors.Is(err, store.ErrTokenRevoked) {
+	if _, err := st.LookupToken(idle, minted.Add(store.RunnerTokenLifetime)); !errors.Is(err, store.ErrTokenExpired) {
 		t.Fatalf("a token idle for its whole lifetime = %v, want it expired", err)
 	}
 	prefix := raw[:store.PrefixLen]
