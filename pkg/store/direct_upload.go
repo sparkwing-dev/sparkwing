@@ -61,6 +61,17 @@ func applyDirectUploadMigration(ctx context.Context, tx *storeTx) error {
 	return execStatements(ctx, tx, directUploadTablesSQL)
 }
 
+// safety: ” is every object written before v87 and by any caller that is not
+// a claim token, which a claim never reads; a claim's object carries its run's
+// git ref.
+var cacheRefCols = map[string]string{"ref": "TEXT NOT NULL DEFAULT ''"}
+
+func applyCacheRefMigration(ctx context.Context, tx *storeTx, postgres bool) error {
+	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
+		"uploads": cacheRefCols, "data_objects": cacheRefCols,
+	})
+}
+
 // UploadRequest declares an exact object before the client sends its bytes.
 type UploadRequest struct {
 	Team        Team
@@ -72,7 +83,10 @@ type UploadRequest struct {
 	Principal   string
 	ClaimPrefix string
 	Provenance  string
-	Now         time.Time
+	// Ref is the git ref a claim token's run writes under; empty for every
+	// other caller.
+	Ref string
+	Now time.Time
 }
 
 // Upload is a reservation and its immutable destination.
@@ -87,6 +101,7 @@ type Upload struct {
 	Principal   string      `json:"principal"`
 	ClaimPrefix string      `json:"claim_prefix"`
 	Provenance  string      `json:"provenance"`
+	Ref         string      `json:"ref,omitempty"`
 	ExpiresAt   time.Time   `json:"expires_at"`
 	CommittedAt time.Time   `json:"committed_at,omitzero"`
 }
@@ -175,6 +190,9 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	if !errors.Is(err, sql.ErrNoRows) {
 		return Upload{}, err
 	}
+	if err := refuseSecondRefBinaryTx(ctx, tx, req.Team, req.Ref, req.Key, req.Provenance); err != nil {
+		return Upload{}, err
+	}
 	res, err := reserveStorageTx(ctx, tx, StorageReserve{
 		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now,
 	})
@@ -197,12 +215,12 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	u := Upload{
 		ID: res.ID, Team: req.Team, RunID: req.RunID, Kind: req.Kind, Key: req.Key, Size: req.Size,
 		SHA256: req.SHA256, Principal: req.Principal, ClaimPrefix: req.ClaimPrefix,
-		Provenance: req.Provenance, ExpiresAt: res.ExpiresAt,
+		Provenance: req.Provenance, Ref: req.Ref, ExpiresAt: res.ExpiresAt,
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO uploads
-        (id, team, run_id, store, key, size, sha256, principal, claim_prefix, provenance, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, string(u.Team), u.RunID, string(u.Kind), u.Key, u.Size, u.SHA256, u.Principal, u.ClaimPrefix, u.Provenance, u.ExpiresAt.UnixNano())
+        (id, team, run_id, store, key, size, sha256, principal, claim_prefix, provenance, ref, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, string(u.Team), u.RunID, string(u.Kind), u.Key, u.Size, u.SHA256, u.Principal, u.ClaimPrefix, u.Provenance, u.Ref, u.ExpiresAt.UnixNano())
 	if err != nil {
 		return Upload{}, err
 	}
@@ -214,9 +232,9 @@ func (s *Store) UploadForTeam(ctx context.Context, team Team, id string) (Upload
 	var u Upload
 	var kind, teamRaw string
 	var expires, committed int64
-	err := s.queryRow(ctx, `SELECT id, team, run_id, store, key, size, sha256, principal, claim_prefix, provenance, expires_at, committed_at
+	err := s.queryRow(ctx, `SELECT id, team, run_id, store, key, size, sha256, principal, claim_prefix, provenance, ref, expires_at, committed_at
         FROM uploads WHERE id = ? AND team = ?`, id, string(NormalizeTeam(team))).Scan(
-		&u.ID, &teamRaw, &u.RunID, &kind, &u.Key, &u.Size, &u.SHA256, &u.Principal, &u.ClaimPrefix, &u.Provenance, &expires, &committed)
+		&u.ID, &teamRaw, &u.RunID, &kind, &u.Key, &u.Size, &u.SHA256, &u.Principal, &u.ClaimPrefix, &u.Provenance, &u.Ref, &expires, &committed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Upload{}, ErrNotFound
 	}
@@ -346,10 +364,11 @@ func (s *Store) CommittedObjectFor(ctx context.Context, team Team, key string, c
 	return u, nil
 }
 
-// BinaryObject resolves an input hash to the newest content-addressed binary
-// this team committed. Cloud readers see only cloud provenance unless trust
-// for local builds is on.
-func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool) (Upload, error) {
+// BinaryObject resolves an input hash to a content-addressed binary this team
+// committed under the first of refs that holds one, newest first within a
+// ref. A reader that is not a claim token passes the empty ref alone. Cloud
+// readers see only cloud provenance unless trust for local builds is on.
+func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud bool, refs []string) (Upload, error) {
 	if len(input) != 17 || input[8] != '-' {
 		return Upload{}, ErrInvalidInput
 	}
@@ -362,20 +381,42 @@ func (s *Store) BinaryObject(ctx context.Context, team Team, input string, cloud
 	if err != nil {
 		return Upload{}, err
 	}
-	query := `SELECT key FROM data_objects WHERE team = ? AND store = ? AND key LIKE ?`
+	query := `SELECT key FROM data_objects WHERE team = ? AND store = ? AND key LIKE ? AND ref = ?`
 	if cloud && !trust {
 		query += ` AND provenance = 'cloud'`
 	}
 	query += ` ORDER BY committed_at DESC, key DESC LIMIT 1`
-	var key string
-	err = s.queryRow(ctx, query, string(NormalizeTeam(team)), string(StorageCache), "bin/"+input+"/%").Scan(&key)
+	for _, ref := range refs {
+		var key string
+		err = s.queryRow(ctx, query, string(NormalizeTeam(team)), string(StorageCache), "bin/"+input+"/%", ref).Scan(&key)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return Upload{}, err
+		}
+		return s.CommittedObjectFor(ctx, team, key, cloud)
+	}
+	return Upload{}, ErrNotFound
+}
+
+// safety: a claim's ref holds one binary per input, the first committed, so a
+// later build under the same ref cannot replace what that ref's runs execute.
+func refuseSecondRefBinaryTx(ctx context.Context, tx *storeTx, team Team, ref, key, provenance string) error {
+	input, _, ok := strings.Cut(strings.TrimPrefix(key, "bin/"), "/")
+	if ref == "" || !strings.HasPrefix(key, "bin/") || !ok {
+		return nil
+	}
+	var exists int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM data_objects WHERE team = ? AND ref = ? AND provenance = ? AND key LIKE ? LIMIT 1`,
+		string(team), ref, provenance, "bin/"+input+"/%").Scan(&exists)
+	if err == nil {
+		return ErrObjectExists
+	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return Upload{}, ErrNotFound
+		return nil
 	}
-	if err != nil {
-		return Upload{}, err
-	}
-	return s.CommittedObjectFor(ctx, team, key, cloud)
+	return err
 }
 
 // CommitUpload publishes a verified and copied upload exactly once. The
@@ -414,10 +455,13 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 	if committed > 0 {
 		return tx.Commit()
 	}
+	if err := refuseSecondRefBinaryTx(ctx, tx, team, u.Ref, u.Key, u.Provenance); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO data_objects
-        (team, key, store, size, sha256, principal, provenance, committed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
-		string(team), u.Key, string(u.Kind), u.Size, u.SHA256, recordedUploader, u.Provenance, now.UnixNano())
+        (team, key, store, size, sha256, principal, provenance, ref, committed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
+		string(team), u.Key, string(u.Kind), u.Size, u.SHA256, recordedUploader, u.Provenance, u.Ref, now.UnixNano())
 	if err != nil {
 		return err
 	}
