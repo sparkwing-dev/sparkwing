@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -104,5 +107,44 @@ func TestFetchSource_DownloadsNothingWithoutAListedRepository(t *testing.T) {
 		func(context.Context, string, []string) error { called = true; return nil })
 	if err != nil || called {
 		t.Fatalf("err = %v, downloaded = %v", err, called)
+	}
+}
+
+type flakySourceCredentials struct {
+	errs  []error
+	calls int
+}
+
+func (f *flakySourceCredentials) SourceCredential(context.Context, string) (*store.SourceCredential, error) {
+	f.calls++
+	if f.calls <= len(f.errs) && f.errs[f.calls-1] != nil {
+		return nil, f.errs[f.calls-1]
+	}
+	return sourceCredential(), nil
+}
+
+// A mint that failed on the network or at the controller is asked for again,
+// up to the claim's allowance; a refusal is never retried.
+func TestAskSourceCredential_RetriesOnlyTransientFailures(t *testing.T) {
+	was := sourceMintBackoff
+	sourceMintBackoff = 0
+	t.Cleanup(func() { sourceMintBackoff = was })
+	netErr := &url.Error{Op: "Post", URL: "http://controller", Err: errors.New("connection reset")}
+	serverErr := fmt.Errorf("%w: controller 502: GitHub did not issue a token", client.ErrControllerFailed)
+	refused := errors.New("controller 403: source_credential_spent")
+	for name, tc := range map[string]struct {
+		errs      []error
+		calls     int
+		succeeded bool
+	}{
+		"recovers after two failures": {[]error{netErr, serverErr}, 3, true},
+		"stops at the allowance":      {[]error{serverErr, netErr, serverErr, nil}, store.MaxSourceMints, false},
+		"never retries a refusal":     {[]error{refused, nil}, 1, false},
+	} {
+		f := &flakySourceCredentials{errs: tc.errs}
+		sc, err := askSourceCredential(context.Background(), f, "run-1")
+		if f.calls != tc.calls || (err == nil) != tc.succeeded || (sc != nil) != tc.succeeded {
+			t.Fatalf("%s: %d calls, %v, %v; want %d calls and success %v", name, f.calls, sc, err, tc.calls, tc.succeeded)
+		}
 	}
 }

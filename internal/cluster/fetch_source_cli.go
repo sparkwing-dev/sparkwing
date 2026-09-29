@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
@@ -47,7 +49,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 	if dest == "" || modCache == "" {
 		return errors.New("fetch-source: SPARKWING_SOURCE_DIR and GOMODCACHE are required")
 	}
-	sc, err := ctrl.SourceCredential(ctx, runID)
+	sc, err := askSourceCredential(ctx, ctrl, runID)
 	if err != nil {
 		return fmt.Errorf("fetch-source: %w", err)
 	}
@@ -90,6 +92,28 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 	// safety: everything under the scratch volume's root was written by this
 	// container, and the pipeline's container reads all of it.
 	return tokenAbsent(sc.Token, filepath.Dir(dest))
+}
+
+// perf: short, so a flaky mint costs the pod seconds; the third ask waits twice it.
+var sourceMintBackoff = time.Second
+
+// safety: a claim may be issued store.MaxSourceMints credentials so a mint that
+// failed can be asked for again; only a network failure or a 5xx is retried,
+// since a 4xx refusal answers the same way every time.
+func askSourceCredential(ctx context.Context, ctrl sourceCredentials, runID string) (*store.SourceCredential, error) {
+	for attempt := 1; ; attempt++ {
+		sc, err := ctrl.SourceCredential(ctx, runID)
+		var transport *url.Error
+		transient := errors.Is(err, client.ErrControllerFailed) || errors.As(err, &transport)
+		if err == nil || !transient || attempt == store.MaxSourceMints {
+			return sc, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(sourceMintBackoff * time.Duration(attempt)):
+		}
+	}
 }
 
 // safety: go fetches only the listed repositories directly, with a helper that
