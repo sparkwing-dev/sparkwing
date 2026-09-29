@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
+
 - **tests:** Measure pause timeout over the recorded pause rather than the entire run.
 
 - **tests:** Finish credit-ledger worker iterations before cancelling their database context.
