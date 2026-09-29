@@ -697,7 +697,7 @@ const scratchVolumeName = "scratch"
 const (
 	podCPULimitFactor = 2.0
 
-	podMemoryLimitFactor = 1.25
+	podMemoryHeadroomDivisor = 4
 
 	podDefaultRefCPU = 1
 )
@@ -1026,7 +1026,11 @@ func podResources(res capacity.Resolution, class store.CPUClass, cfg Config) cor
 
 	if res.MemoryBytes > 0 {
 		req[corev1.ResourceMemory] = *resource.NewQuantity(res.MemoryBytes, resource.BinarySI)
-		burst := int64(float64(res.MemoryBytes) * podMemoryLimitFactor)
+		headroom := res.MemoryBytes / podMemoryHeadroomDivisor
+		burst := int64(math.MaxInt64)
+		if res.MemoryBytes <= math.MaxInt64-headroom {
+			burst = res.MemoryBytes + headroom
+		}
 		lim[corev1.ResourceMemory] = *resource.NewQuantity(cappedBytes(burst, cfg.MemoryCeiling), resource.BinarySI)
 	} else {
 		if cfg.MemoryRequest != "" {

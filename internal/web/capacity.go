@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"runtime"
 	"sort"
@@ -359,6 +360,10 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 	pin := pinOf(rollup)
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
 	source := res.Source
+	floorMemory := int64(math.MaxInt64)
+	if rollup.FloorMemoryBytes <= math.MaxInt64/2 {
+		floorMemory = 2 * rollup.FloorMemoryBytes
+	}
 
 	measuredCores := rollup.SustainedCores
 	measuredBasis := "sustained p95 across the window"
@@ -391,7 +396,7 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Step:        "prev_charge",
 			Label:       "Warm start from the previous version",
 			Cores:       capacity.WarmStartMultiple * carried,
-			MemoryBytes: int64(capacity.WarmStartMultiple * float64(rollup.PrevPeakMemoryBytes)),
+			MemoryBytes: rollup.PrevPeakMemoryBytes,
 			Eligible:    rollup.CPUMeasured && carried > 0,
 			Applied:     source == store.CostSourceMeasuring,
 			Detail:      "Charged while a structurally changed version re-measures its own samples.",
@@ -400,7 +405,7 @@ func chargeChain(rollup store.PipelineProfile, numCPU int) []chargeStep {
 			Step:        "floor",
 			Label:       "Demand floor from contended runs",
 			Cores:       capacity.SafetyMultiple * rollup.FloorCores,
-			MemoryBytes: int64(capacity.SafetyMultiple * float64(rollup.FloorMemoryBytes)),
+			MemoryBytes: floorMemory,
 			Eligible:    rollup.CPUMeasured && rollup.FloorCores > 0,
 			Applied:     source == store.CostSourceFloor,
 			Detail:      "A contended run measured its allocation, not its demand, so it only raises this lower bound.",

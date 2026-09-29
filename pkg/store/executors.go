@@ -1405,7 +1405,12 @@ func executorNodeChargeFromSnapshot(plan []byte, nodeID string, profile *Pipelin
 			cores = profile.PrevPeakCores
 		}
 		cores = math.Max(cores, 2*profile.FloorCores)
-		memory := max(profile.PrevPeakMemoryBytes, 2*profile.FloorMemoryBytes)
+		// safety: overflow must not turn a measured memory floor into the default charge.
+		floorMemory := int64(math.MaxInt64)
+		if profile.FloorMemoryBytes <= math.MaxInt64/2 {
+			floorMemory = 2 * profile.FloorMemoryBytes
+		}
+		memory := max(profile.PrevPeakMemoryBytes, floorMemory)
 		if cores > 0 || memory > 0 {
 			return ExecutorResource{Cores: cores, MemoryBytes: memory}
 		}

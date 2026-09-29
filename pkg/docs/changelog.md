@@ -28,6 +28,7 @@ unlock.
 
 ### Fixed
 
+- **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
 - Tests: verify disk-space units without relying on concurrent filesystem activity.
 
 - Tests: declare measured inputs in admission and profile migration fixtures.

@@ -141,11 +141,12 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	}
 	res.Cores = math.Max(cores, MeasuredCoreFloor)
 
-	mem := int64(WarmStartMultiple * float64(prevMem))
-	if fm := int64(SafetyMultiple * float64(floorMem)); fm > mem {
-		mem = fm
+	// safety: saturate unrepresentable demand before configured ceilings are applied.
+	floorMemory := int64(math.MaxInt64)
+	if floorMem <= math.MaxInt64/2 {
+		floorMemory = floorMem * 2
 	}
-	res.MemoryBytes = mem
+	res.MemoryBytes = max(prevMem, floorMemory)
 	return res
 }
 
