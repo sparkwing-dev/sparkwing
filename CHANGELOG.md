@@ -1188,7 +1188,9 @@ unlock.
   store.
 - **runner:** The Kubernetes Job dispatcher waits out a node claim the
   controller answered 429 or 503 with a Retry-After and claims again, instead
-  of failing the node.
+  of failing the node. It waits no longer than the node's claim wait (24 hours
+  by default) or its declared timeout, whichever is shorter, and then fails the
+  node with `queue_timeout`.
 - **controller:** A live queue runner holds a node's agent offer window only
   when its `--allow-repo` list admits the node's repository. A runner limited
   to other repositories no longer delays every run of its team by five seconds.

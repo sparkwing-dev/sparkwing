@@ -164,3 +164,76 @@ func TestRunNode_RateLimitedClaimRetriesInsteadOfFailingTheNode(t *testing.T) {
 		t.Errorf("failure reason = %q, want the answer after the 429 (%q)", node.FailureReason, store.FailureCreditsExhausted)
 	}
 }
+
+// Backpressure that never lifts fails the node once its claim wait is spent,
+// with a reason that says it waited, rather than holding the run open.
+func TestRunNode_ShedPastTheClaimWaitFailsTheNodeAsAQueueTimeout(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	controllerHandler := controller.New(st, nil).Handler()
+	var claims atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/build/claim") {
+			claims.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"request budget spent"}`))
+			return
+		}
+		controllerHandler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	r := New(fake.NewSimpleClientset(), client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+	runCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	res := r.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build", ClaimWait: 20 * time.Millisecond})
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("result = %+v, want the node failed once its claim wait was spent", res)
+	}
+	if claims.Load() < 2 {
+		t.Errorf("claim attempts = %d, want the shed claim retried inside its wait", claims.Load())
+	}
+	node, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.FailureReason != store.FailureQueueTimeout {
+		t.Errorf("failure reason = %q, want %q", node.FailureReason, store.FailureQueueTimeout)
+	}
+	if !strings.Contains(node.Error, "claim wait") {
+		t.Errorf("node error = %q, want it to name the claim wait", node.Error)
+	}
+}
+
+func TestClaimRetryBound_IsTheClaimWaitCappedByTheTimeout(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	timed := sparkwing.Job(plan, "timed", func(context.Context) error { return nil }).Timeout(10 * time.Minute)
+	for _, tc := range []struct {
+		name string
+		req  runner.Request
+		want time.Duration
+	}{
+		{"default", runner.Request{}, 24 * time.Hour},
+		{"declared claim wait", runner.Request{ClaimWait: time.Hour}, time.Hour},
+		{"timeout shorter than the wait", runner.Request{ClaimWait: time.Hour, Node: timed}, 10 * time.Minute},
+	} {
+		if got := claimRetryBound(tc.req); got != tc.want {
+			t.Errorf("%s: bound = %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}

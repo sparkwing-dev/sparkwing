@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
@@ -541,6 +542,8 @@ func (r *Runner) claimNode(
 ) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
 	shed := client.NewShedLog(client.ShedWarnInterval)
+	bound := claimRetryBound(req)
+	deadline := time.Now().Add(bound)
 	var n *store.Node
 	var err error
 	for {
@@ -553,6 +556,11 @@ func (r *Runner) claimNode(
 		}
 		wait, backpressure := client.UnavailableBackoff(err, r.cfg.PollInterval)
 		if !backpressure {
+			break
+		}
+		if time.Now().Add(wait).After(deadline) {
+			err = fmt.Errorf("%w: the controller shed this node's claim for longer than its %s claim wait: %w",
+				errClaimWaitExceeded, bound, err)
 			break
 		}
 		if shed.Due() {
@@ -580,14 +588,35 @@ func (r *Runner) claimNode(
 
 const eventClaimRefused = "job_claim_refused"
 
+var errClaimWaitExceeded = errors.New("claim wait exceeded")
+
+// safety: a shed claim waits no longer than the node may wait to be claimed at
+// all, and no longer than its declared timeout, so backpressure that never
+// lifts fails the node rather than holding its run open for a day.
+func claimRetryBound(req runner.Request) time.Duration {
+	bound := req.ClaimWait
+	if bound <= 0 {
+		bound = match.DefaultClaimWait
+	}
+	if req.Node != nil {
+		if timeout := req.Node.TimeoutDuration(); timeout > 0 {
+			bound = min(bound, timeout)
+		}
+	}
+	return bound
+}
+
 // safety: a node another holder took is that holder's to finish, so only the
 // other refusals fail it here; the dispatcher still learns this Job never ran.
 func (r *Runner) refuseUnclaimedJob(ctx context.Context, req runner.Request, refused error) runner.Result {
 	msg := fmt.Sprintf("K8sRunner: the controller refused this node's claim, so no Job was created: %v", refused)
 	if !errors.Is(refused, store.ErrLockHeld) {
 		reason := store.FailureUnknown
-		if errors.Is(refused, store.ErrInsufficientCredits) {
+		switch {
+		case errors.Is(refused, store.ErrInsufficientCredits):
 			reason = store.FailureCreditsExhausted
+		case errors.Is(refused, errClaimWaitExceeded):
+			reason = store.FailureQueueTimeout
 		}
 		r.failNode(ctx, req, msg, reason, eventClaimRefused)
 	}
