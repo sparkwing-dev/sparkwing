@@ -2210,7 +2210,7 @@ paths:
       tags: [nodes]
       summary: Reconcile a launcher's Jobs with their claims.
       description: >-
-        The launcher names the claim each of its Jobs was built for and hears `delete` for a claim that ended or whose run is being cancelled, and `keep` otherwise. A job with `release` set hands back a claim whose pod never renewed it: the node returns to the queue with no attempt spent and its reservation refunded, and is claimable again 5 minutes later. A non-empty `capacity_wait` reports that the launcher is claiming nothing for want of Cloud capacity; up to 100 queued nodes then show `waiting for Cloud capacity` and get one `capacity_wait` event each.
+        The launcher names the claim each of its Jobs was built for and hears `delete` for a claim that ended or whose run is being cancelled, and `keep` otherwise. A job with `release` set hands back a claim whose pod never renewed it: the node returns to the queue with no attempt spent and its reservation refunded, and is claimable again 5 minutes later, showing `waiting for Cloud capacity` with a `capacity_wait` event.
       requestBody:
         required: true
         content:
@@ -2224,7 +2224,6 @@ paths:
                   type: array
                   maxItems: 1000
                   items: {$ref: "#/components/schemas/LaunchJob"}
-                capacity_wait: {type: string, maxLength: 200}
       responses:
         "200":
           description: What to do with each Job.

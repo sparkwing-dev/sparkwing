@@ -414,7 +414,7 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if n, err := f.st.GetNode(ctx, "run-slow", "sleep"); err != nil || n.Outcome != "cancelled" {
 		t.Fatalf("sleep node = %+v %v, want cancelled", n, err)
 	}
-	if _, err := l.Sync(ctx); err != nil {
+	if err := l.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range f.jobNames(t) {

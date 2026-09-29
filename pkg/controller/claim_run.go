@@ -160,8 +160,7 @@ func (s *Server) handleGetChildNodeOutput(w http.ResponseWriter, r *http.Request
 const maxLauncherSyncJobs = 1000
 
 type launcherSyncReq struct {
-	Jobs         []store.LaunchJob `json:"jobs"`
-	CapacityWait string            `json:"capacity_wait,omitempty"`
+	Jobs []store.LaunchJob `json:"jobs"`
 }
 
 type launcherSyncResp struct {
@@ -174,11 +173,11 @@ func (s *Server) handleLauncherSync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if len(req.Jobs) > maxLauncherSyncJobs || len(req.CapacityWait) > 200 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d jobs and a 200-byte reason", maxLauncherSyncJobs))
+	if len(req.Jobs) > maxLauncherSyncJobs {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d jobs", maxLauncherSyncJobs))
 		return
 	}
-	jobs, err := s.store.SyncLaunchJobs(r.Context(), claimIdentity(r), req.Jobs, req.CapacityWait, time.Now())
+	jobs, err := s.store.SyncLaunchJobs(r.Context(), claimIdentity(r), req.Jobs, time.Now())
 	if err != nil {
 		s.writeInternalError(w, r, "launcher sync", err)
 		return

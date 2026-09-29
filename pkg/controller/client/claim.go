@@ -83,16 +83,15 @@ func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID 
 }
 
 // LauncherSync tells the controller the Jobs a launcher holds, and hears what
-// to do with each. A non-empty capacityWait reports that the launcher is not
-// claiming for want of Cloud capacity, which queued nodes then show.
-func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob, capacityWait string) ([]store.LaunchJobResult, error) {
+// to do with each.
+func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error) {
 	if jobs == nil {
 		jobs = []store.LaunchJob{}
 	}
 	var out struct {
 		Jobs []store.LaunchJobResult `json:"jobs"`
 	}
-	err := c.post(ctx, "/api/v1/launcher/sync", map[string]any{"jobs": jobs, "capacity_wait": capacityWait}, http.StatusOK, &out)
+	err := c.post(ctx, "/api/v1/launcher/sync", map[string]any{"jobs": jobs}, http.StatusOK, &out)
 	return out.Jobs, err
 }
 

@@ -161,7 +161,7 @@ func TestSyncLaunchJobs_ReleasesOnlyAnUnstartedClaim(t *testing.T) {
 	}
 	other := launcherIdentity
 	other.TokenPrefix = "swr_other"
-	if res, err := f.s.SyncLaunchJobs(ctx, other, []store.LaunchJob{current}, "", time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
+	if res, err := f.s.SyncLaunchJobs(ctx, other, []store.LaunchJob{current}, time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
 		t.Fatalf("another launcher's view of the claim: %+v %v, want delete", res, err)
 	}
 	if err := f.s.RequestCancel(ctx, "run-sync"); err != nil {
@@ -175,33 +175,11 @@ func TestSyncLaunchJobs_ReleasesOnlyAnUnstartedClaim(t *testing.T) {
 
 func syncOne(t *testing.T, s *store.Store, job store.LaunchJob) store.LaunchJobState {
 	t.Helper()
-	res, err := s.SyncLaunchJobs(context.Background(), launcherIdentity, []store.LaunchJob{job}, "", time.Now())
+	res, err := s.SyncLaunchJobs(context.Background(), launcherIdentity, []store.LaunchJob{job}, time.Now())
 	if err != nil || len(res) != 1 {
 		t.Fatalf("sync: %+v %v", res, err)
 	}
 	return res[0].State
-}
-
-// While the launcher has no capacity, each queued node says so once; a node
-// already claimed does not.
-func TestSyncLaunchJobs_MarksQueuedNodesWaitingOnce(t *testing.T) {
-	ctx := context.Background()
-	st := storetest.Open(t)
-	newDispatchRunOn(t, st, "run-a")
-	running := newDispatchRunOn(t, st, "run-b")
-	claim, _ := running.launch(t, time.Now())
-	queued := map[string]string{"run-a": "run-b", "run-b": "run-a"}[claim.RunID]
-	for range 2 {
-		if _, err := st.SyncLaunchJobs(ctx, launcherIdentity, nil, "the Cloud node pool is at its CPU limit", time.Now()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := capacityWaits(t, st, queued); n != 1 {
-		t.Fatalf("queued run has %d capacity_wait events, want 1", n)
-	}
-	if n := capacityWaits(t, st, claim.RunID); n != 0 {
-		t.Fatalf("claimed run has %d capacity_wait events, want 0", n)
-	}
 }
 
 // A child of an opted-in repository is planned by the controller, never
@@ -297,7 +275,7 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 		return store.LaunchJob{RunID: c.RunID, NodeID: c.NodeID, Generation: c.Generation, Release: true}
 	}
 	first := claim(time.Now())
-	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{first}, "", time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
+	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{first}, time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
 		t.Fatalf("release = %+v %v", res, err)
 	}
 	if balance, err := paying.CreditBalanceMicro(ctx); err != nil || balance != granted {
@@ -313,7 +291,7 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 		second.RunID, second.NodeID).Scan(&billingFrom); err != nil || billingFrom == 0 {
 		t.Fatalf("billing after the first beat opened at %d (%v)", billingFrom, err)
 	}
-	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{second}, "", time.Now()); err != nil || res[0].State != store.LaunchJobKeep {
+	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{second}, time.Now()); err != nil || res[0].State != store.LaunchJobKeep {
 		t.Fatalf("releasing a billed claim = %+v %v, want keep", res, err)
 	}
 }

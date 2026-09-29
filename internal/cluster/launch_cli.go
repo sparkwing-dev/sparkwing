@@ -11,7 +11,6 @@ import (
 	"time"
 
 	flag "github.com/spf13/pflag"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -35,7 +34,6 @@ func runLaunchCLI(args []string) error {
 	fs.DurationVar(&cfg.Deadline, "deadline", launcher.MaxDeadline, "a Job's life and its claim token's")
 	fs.StringVar(&cfg.ScratchLimit, "scratch", "", "size limit of a Job's scratch volume (default 20Gi)")
 	poll := fs.Duration("poll", time.Second, "how often an idle launcher asks for work")
-	nodePool := fs.String("node-pool", "", "Karpenter NodePool whose CPU limit bounds the Jobs; empty reads capacity from the Jobs alone")
 	token := fs.String("token", os.Getenv("SPARKWING_AGENT_TOKEN"),
 		"the launcher's claims.launch bearer token (env: SPARKWING_AGENT_TOKEN)")
 	if err := fs.Parse(args); err != nil {
@@ -74,13 +72,6 @@ func runLaunchCLI(args []string) error {
 	l := &launcher.Launcher{
 		Kube: kube, Ctrl: client.NewWithToken(cfg.ControllerURL, nil, *token), Config: cfg,
 		Holder: "launcher:" + holder, Poll: *poll, Logger: slog.Default(),
-	}
-	if *nodePool != "" {
-		dyn, err := dynamic.NewForConfig(rc)
-		if err != nil {
-			return fmt.Errorf("kube dynamic client: %w", err)
-		}
-		l.Capacity = launcher.NodePoolCapacity(dyn, *nodePool)
 	}
 	return l.Run(ctx)
 }

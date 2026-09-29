@@ -15,9 +15,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -236,8 +233,8 @@ func (f launchFixture) jobNames(t *testing.T) []string {
 }
 
 // A Job that has waited past the release point for a machine is deleted and
-// its node goes back to the queue unbilled, marked as waiting; the launcher
-// then reports it has no capacity. A Job that just started waiting stays.
+// its node goes back to the queue unbilled, marked as waiting, while other
+// work is still claimed. A Job that just started waiting stays.
 func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
 	ctx := context.Background()
 	f := newLaunchFixture(t)
@@ -248,8 +245,8 @@ func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
 	}
 	job := f.jobNames(t)[0]
 	f.unplacedPod(t, job, 30*time.Second)
-	if reason, err := l.Sync(ctx); err != nil || reason != "" {
-		t.Fatalf("sync of a fresh Job = %q, %v; want capacity", reason, err)
+	if err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of a fresh Job: %v", err)
 	}
 	if names := f.jobNames(t); len(names) != 1 {
 		t.Fatalf("a Job waiting 30s was deleted: %v", names)
@@ -259,8 +256,8 @@ func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
 	}
 	f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
 	f.intake(t, "run-next", "korey/probe")
-	if reason, err := l.Sync(ctx); err != nil || reason != "" {
-		t.Fatalf("sync of a stuck Job = %q, %v; one Job that cannot fit pauses nobody", reason, err)
+	if err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of a stuck Job: %v", err)
 	}
 	if names := f.jobNames(t); len(names) != 0 {
 		t.Fatalf("the stuck Job was kept: %v", names)
@@ -298,7 +295,7 @@ func TestSync_PagesPastTheControllersRequestCap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := l.Sync(ctx); err != nil {
+	if err := l.Sync(ctx); err != nil {
 		t.Fatalf("sync of 1001 Jobs: %v", err)
 	}
 	if names := f.jobNames(t); len(names) != 0 {
@@ -316,47 +313,17 @@ func TestSync_DeletesACancelledRunsJob(t *testing.T) {
 	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
 		t.Fatalf("launch: %v %v", launched, err)
 	}
-	if _, err := l.Sync(ctx); err != nil || len(f.jobNames(t)) != 1 {
+	if err := l.Sync(ctx); err != nil || len(f.jobNames(t)) != 1 {
 		t.Fatalf("sync of a live claim: %v, jobs %v", err, f.jobNames(t))
 	}
 	if err := f.st.RequestCancel(ctx, "run-cancel"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Sync(ctx); err != nil {
+	if err := l.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if names := f.jobNames(t); len(names) != 0 {
 		t.Fatalf("the cancelled run's Job survived: %v", names)
-	}
-}
-
-// With no capacity the launcher's sync says so: the node stays queued in the
-// controller, unclaimed and unbilled, and says why; with room it is claimed.
-func TestSync_ReportsAFullPoolAndLeavesTheNodeQueued(t *testing.T) {
-	f := newLaunchFixture(t)
-	f.optedInRun(t, "run-full")
-	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
-	pool := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "jobs"},
-		"spec":   map[string]any{"limits": map[string]any{"cpu": "80"}},
-		"status": map[string]any{"resources": map[string]any{"cpu": "78"}},
-	}}
-	l.Capacity = launcher.NodePoolCapacity(dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pool), "jobs")
-	ctx := context.Background()
-	if reason, err := l.Sync(ctx); err != nil || reason == "" {
-		t.Fatalf("sync with the pool full = %q, %v; want a capacity wait", reason, err)
-	}
-	n, err := f.st.GetNode(ctx, "run-full", store.PlanNodeID)
-	if err != nil || n.ClaimedBy != "" || n.StatusDetail != store.CapacityWaitDetail {
-		t.Fatalf("queued node = %+v %v", n, err)
-	}
-	pool.Object["status"] = map[string]any{"resources": map[string]any{"cpu": "72"}}
-	l.Capacity = launcher.NodePoolCapacity(dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pool), "jobs")
-	if reason, err := l.Sync(ctx); err != nil || reason != "" {
-		t.Fatalf("sync with 8 cores free = %q, %v; want capacity", reason, err)
-	}
-	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
-		t.Fatalf("launch with room: %v %v", launched, err)
 	}
 }
 
@@ -381,7 +348,7 @@ func TestSync_LeavesAFinishedJobForItsTTL(t *testing.T) {
 	if err := f.st.RequestCancel(ctx, "run-done"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Sync(ctx); err != nil {
+	if err := l.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if names := f.jobNames(t); len(names) != 1 {
