@@ -2,8 +2,20 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// MaxNodeMetricSamples bounds one node's stored resource samples: at the
+// sampler's two-second tick, about five and a half hours of a node.
+const MaxNodeMetricSamples = 10_000
+
+// ErrNodeMetricLimit refuses a sample past [MaxNodeMetricSamples].
+var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
+
+// EventKindMetricsStopped records that a node's sampler stopped at
+// [MaxNodeMetricSamples], so its resource charts end there.
+const EventKindMetricsStopped = "metrics_stopped"
 
 // MetricSample is one resource point.
 type MetricSample struct {
@@ -41,6 +53,14 @@ func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, s
 	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
+	var held int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM node_metrics WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID).Scan(&held); err != nil {
+		return err
+	}
+	if held >= MaxNodeMetricSamples {
+		return ErrNodeMetricLimit
+	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO node_metrics (team, run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos)
 VALUES (`+runTeamSQL+`, ?, ?, ?, ?, ?, ?)
@@ -52,13 +72,30 @@ ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
 	return tx.Commit()
 }
 
-// ListNodeMetrics returns samples oldest-first.
+// ListNodeMetrics returns every sample oldest-first.
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error) {
-	rows, err := s.query(ctx, `
+	return s.ListNodeMetricsPage(ctx, runID, nodeID, time.Time{}, 0)
+}
+
+// ListNodeMetricsPage returns up to limit samples oldest-first whose
+// timestamps follow after; a zero after starts at the first sample and a
+// limit of zero or less returns them all. A node holds at most one sample
+// per timestamp, so the last sample's TS continues the listing.
+func (s *Store) ListNodeMetricsPage(ctx context.Context, runID, nodeID string, after time.Time, limit int) ([]MetricSample, error) {
+	query := `
 SELECT ts, cpu_millicores, memory_bytes, cpu_time_nanos
   FROM node_metrics
- WHERE run_id = ? AND node_id = ?
- ORDER BY ts ASC`, runID, nodeID)
+ WHERE run_id = ? AND node_id = ? AND ts > ?
+ ORDER BY ts ASC`
+	args := []any{runID, nodeID, int64(-1 << 63)}
+	if !after.IsZero() {
+		args[2] = after.UnixNano()
+	}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

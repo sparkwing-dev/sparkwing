@@ -67,3 +67,58 @@ func TestFloodPolicy_ATeamsTokensShareOneCap(t *testing.T) {
 		t.Errorf("a retry past the team's cap = %d want 429", code)
 	}
 }
+
+// The shed threshold measures the submitting team's own queue, so one team's
+// backlog never refuses another team's submissions.
+func TestFloodPolicy_ShedsOnlyTheTeamWhoseQueueIsDeep(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, _, err := st.CreateToken("root", store.TokenKindUser, []string{controller.ScopeAdmin}, 0, now); err != nil {
+		t.Fatal(err)
+	}
+	srv := controller.New(st, nil).EnableAuthFromStore().WithFloodPolicy(controller.FloodPolicy{ShedQueueDepth: 2})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	auth := map[store.Team]string{}
+	for _, team := range []store.Team{"acme", "globex"} {
+		if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+		tenant, err := st.ForTeam(ctx, team)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _, err := tenant.CreateToken(ctx, "ci", store.TokenKindUser,
+			[]string{controller.ScopeRunsWrite, controller.ScopeRunsRead}, 0, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth[team] = "Bearer " + raw
+		if team == "acme" {
+			for _, id := range []string{"run-backlog-1", "run-backlog-2"} {
+				if err := tenant.CreateTrigger(ctx, store.Trigger{ID: id, Pipeline: "build", CreatedAt: now}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	f := &tenancyFixture{t: t, url: ts.URL, st: st}
+	trigger := func(team store.Team, seed int) int {
+		code, _ := f.do("POST", "/api/v1/triggers", auth[team], map[string]any{
+			"pipeline": "build", "trigger": map[string]any{"source": "api"},
+			"git": map[string]any{"branch": "main", "sha": fortyHex(seed)},
+		})
+		return code
+	}
+	if code := trigger("globex", 1); code != http.StatusAccepted {
+		t.Errorf("globex trigger beside acme's backlog = %d want 202", code)
+	}
+	if code := trigger("acme", 2); code != http.StatusServiceUnavailable {
+		t.Errorf("acme trigger past its own backlog = %d want 503", code)
+	}
+}

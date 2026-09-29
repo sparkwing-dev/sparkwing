@@ -224,3 +224,50 @@ export async function performAction(req: {
   );
   await readJSON<unknown>(res);
 }
+
+export interface WaitlistEntry {
+  id: string;
+  email: string;
+  name: string;
+  provider: string;
+  reason: string;
+  // Unix seconds.
+  waitlisted_at: number;
+}
+
+export interface WaitlistPage {
+  accounts: WaitlistEntry[];
+  total: number;
+}
+
+export const waitlistPageSize = 50;
+
+// getWaitlist reads the page of waiting accounts that starts offset accounts
+// after the newest.
+export async function getWaitlist(
+  offset: number,
+  limit = waitlistPageSize,
+): Promise<WaitlistPage> {
+  const res = await authFetch(
+    `/api/v1/operator/waitlist?limit=${limit}&offset=${offset}`,
+    {},
+    quiet,
+  );
+  return readJSON<WaitlistPage>(res);
+}
+
+// approveWaitlisted admits the accounts and returns the emails it admitted;
+// an account already admitted is skipped.
+export async function approveWaitlisted(ids: string[]): Promise<string[]> {
+  const res = await authFetch(
+    "/api/v1/operator/waitlist/approve",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_ids: ids }),
+    },
+    quiet,
+  );
+  const body = await readJSON<{ approved: { email: string }[] }>(res);
+  return body.approved.map((a) => a.email);
+}

@@ -78,11 +78,10 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 	if back.Account.Waitlisted || back.PersonalTeam == "" {
 		t.Fatalf("existing account with no team = %+v, want its personal space", back)
 	}
-	linked := signUpAt(t, st, store.SignInProfile{
+	if _, err := st.ResolveSignIn(ctx, store.SignInProfile{
 		Provider: store.ProviderGitHub, Subject: "99", Email: "old@example.com", EmailVerified: true,
-	}, store.SignUpConditions{}, time.Now())
-	if !linked.Linked || linked.Account.Waitlisted {
-		t.Fatalf("a new identity linking to an existing account = %+v", linked)
+	}, store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("a new identity on an existing account's address = %v, want ErrAccountExists", err)
 	}
 
 	requireWaitlisted(t, signIn(t, st, "s-new", "new@example.com"), store.WaitlistReasonOperator)
@@ -128,7 +127,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 		t.Fatalf("CreateTeam after accepting = %v, want ErrWaitlisted", err)
 	}
 
-	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, time.Now())
+	approved, err := st.ApproveWaitlisted(ctx, []string{acct.ID}, "", time.Now())
 	if err != nil || len(approved) != 1 || approved[0].ActiveTeam != owner.Account.ActiveTeam {
 		t.Fatalf("approve = %+v, %v", approved, err)
 	}
@@ -283,12 +282,16 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 		waiting[0].Reason != store.WaitlistReasonDeployment {
 		t.Fatalf("waitlist = %+v, %v", waiting, err)
 	}
+	page, err := st.NewestWaitlisted(ctx, 2, 1)
+	if err != nil || len(page) != 2 || page[0].ID != ids[1] || page[1].ID != ids[0] || page[0].Provider != store.ProviderGoogle {
+		t.Fatalf("newest page after one = %+v, %v", page, err)
+	}
 	counts, err := st.SignUpCounts(ctx, time.Now())
 	if err != nil || counts.Waitlisted != 3 || counts.LastHour != 3 || counts.LastDay != 3 {
 		t.Fatalf("counts = %+v, %v", counts, err)
 	}
 
-	approved, err := st.ApproveOldestWaitlisted(ctx, 2, time.Now())
+	approved, err := st.ApproveOldestWaitlisted(ctx, 2, "", time.Now())
 	if err != nil || len(approved) != 2 || approved[0].ID != ids[0] || approved[1].ID != ids[1] {
 		t.Fatalf("approve oldest = %+v, %v", approved, err)
 	}
@@ -300,7 +303,7 @@ func TestApprovingTheOldestAdmitsInArrivalOrder(t *testing.T) {
 			t.Fatalf("an approved account cannot create a team: %v", err)
 		}
 	}
-	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, time.Now())
+	again, err := st.ApproveWaitlisted(ctx, []string{ids[0], ids[2]}, "", time.Now())
 	if err != nil || len(again) != 1 || again[0].ID != ids[2] {
 		t.Fatalf("approving an admitted account again = %+v, %v", again, err)
 	}
@@ -322,7 +325,7 @@ func TestSignUpInputsAreValidated(t *testing.T) {
 	if _, err := st.SetSignUpLimits(ctx, store.SignUpLimits{HourlyLimit: -1}); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("negative limit = %v", err)
 	}
-	if _, err := st.ApproveOldestWaitlisted(ctx, 0, time.Now()); !errors.Is(err, store.ErrInvalidInput) {
+	if _, err := st.ApproveOldestWaitlisted(ctx, 0, "", time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("approve zero = %v", err)
 	}
 }

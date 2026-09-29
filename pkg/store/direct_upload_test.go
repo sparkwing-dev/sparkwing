@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -452,5 +453,83 @@ func TestExpiredDirectUploadReleasesItsReservationWithoutPublishing(t *testing.T
 	}
 	if _, err := st.CommittedObject(t.Context(), "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expired object = %v", err)
+	}
+}
+
+func TestDirectUploadRefusesEmptyAndCapsPendingPerTeam(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 1<<30)
+	freeTeam(t, st, "team-a")
+	freeTeam(t, st, "team-b")
+	now := time.Now()
+	reserve := func(team store.Team, i int, size int64, at time.Time) (store.Upload, error) {
+		digest := fmt.Sprintf("%064x", i)
+		return st.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: team, RunID: "run-" + string(team), Kind: store.StorageCache, Key: "artifacts/blobs/" + digest,
+			Size: size, SHA256: digest, Principal: "runner", Provenance: "cloud", Now: at,
+		})
+	}
+	if _, err := reserve("team-a", 0, 0, now); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("zero-byte reserve: %v", err)
+	}
+	var first store.Upload
+	for i := range store.DirectUploadMaxPending {
+		u, err := reserve("team-a", i+1, 1, now)
+		if err != nil {
+			t.Fatalf("reserve %d: %v", i, err)
+		}
+		if i == 0 {
+			first = u
+		}
+	}
+	if _, err := reserve("team-a", 1000, 1, now); !errors.Is(err, store.ErrTooManyPendingUploads) {
+		t.Fatalf("reserve past the pending cap: %v", err)
+	}
+	if _, err := reserve("team-b", 1000, 1, now); err != nil {
+		t.Fatalf("another team's reserve: %v", err)
+	}
+	if err := st.CommitUpload(t.Context(), "team-a", first.ID, first.Principal, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reserve("team-a", 1001, 1, now); err != nil {
+		t.Fatalf("reserve after a commit freed a slot: %v", err)
+	}
+	if _, err := reserve("team-a", 1002, 1, now); !errors.Is(err, store.ErrTooManyPendingUploads) {
+		t.Fatalf("reserve past the refilled cap: %v", err)
+	}
+	if _, err := reserve("team-a", 1003, 1, now.Add(store.DirectUploadTTL+time.Second)); err != nil {
+		t.Fatalf("reserve after the pending uploads expired: %v", err)
+	}
+}
+
+func TestReleasedDirectUploadFreesItsPendingSlot(t *testing.T) {
+	st := storetest.Open(t)
+	setFreeAllowance(t, st, 1<<30)
+	freeTeam(t, st, "team-a")
+	now := time.Now()
+	reserve := func(i int) (store.Upload, error) {
+		digest := fmt.Sprintf("%064x", i)
+		return st.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: "artifacts/blobs/" + digest,
+			Size: 1, SHA256: digest, Principal: "runner", Provenance: "cloud", Now: now,
+		})
+	}
+	for i := range store.DirectUploadMaxPending {
+		u, err := reserve(i + 1)
+		if err != nil {
+			t.Fatalf("reserve %d: %v", i, err)
+		}
+		if err := st.ReleaseStorage(t.Context(), u.Team, u.ID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := reserve(1000); err != nil {
+		t.Fatalf("reserve after every earlier reservation was released: %v", err)
+	}
+	if _, err := st.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: "team-a", RunID: "run-a", Kind: store.StorageLogs, Key: "artifacts/blobs/" + fmt.Sprintf("%064x", 2000),
+		Size: 1, SHA256: fmt.Sprintf("%064x", 2000), Principal: "runner", Provenance: "cloud", Now: now,
+	}); !errors.Is(err, store.ErrInvalidInput) {
+		t.Fatalf("a logs-kind upload = %v, want ErrInvalidInput", err)
 	}
 }

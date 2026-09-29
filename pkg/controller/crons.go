@@ -503,15 +503,16 @@ func (s *Server) setCronPaused(w http.ResponseWriter, r *http.Request, paused bo
 }
 
 func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request) {
-	svc, ok := s.requestCronService(w, r, "")
+	tenant, ok := s.requestTenant(w, r)
 	if !ok {
 		return
 	}
+	svc := s.cronServiceFor(tenant, "")
 	sched, ok := s.resolveCron(w, r, svc)
 	if !ok {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "cron:"+sched.ID), cronTriggerSource) {
+	if !s.admitTriggerSubmission(w, r, tenant, s.floodKey(r, "cron:"+sched.ID), cronTriggerSource) {
 		return
 	}
 	runID, err := svc.RunNow(r.Context(), sched.ID)

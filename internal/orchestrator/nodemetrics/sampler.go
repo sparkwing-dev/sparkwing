@@ -2,6 +2,7 @@ package nodemetrics
 
 import (
 	"context"
+	"errors"
 	"log"
 	"runtime"
 	"sync"
@@ -18,6 +19,9 @@ type Sample struct {
 type Sink interface {
 	Push(ctx context.Context, sample Sample) error
 }
+
+// ErrSinkFull is what a Sink returns to stop receiving samples for good.
+var ErrSinkFull = errors.New("nodemetrics: sink holds no more samples")
 
 const defaultInterval = 2 * time.Second
 
@@ -161,7 +165,9 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 				MemoryBytes:   totalRSS / share,
 			}
 			for _, a := range live {
-				_ = a.sink.Push(a.ctx, sample)
+				if err := a.sink.Push(a.ctx, sample); errors.Is(err, ErrSinkFull) {
+					s.remove(a)
+				}
 			}
 		}
 	}

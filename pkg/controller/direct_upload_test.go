@@ -530,3 +530,37 @@ func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
 		t.Fatalf("stored trust = %v, %v", trust, err)
 	}
 }
+
+func TestDirectUploadRefusesEmptyAndCapsPendingReservations(t *testing.T) {
+	client, _ := directS3(t)
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		return s.WithDirectUploads(client, "bucket", "cache")
+	})
+	olga := f.ghUser(521, "olga")
+	_, prefix := f.runWork(olga, "run-pending", "https://github.com/acme/widgets.git")
+	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
+		t.Fatal(err)
+	}
+	runner := claimedUploadGrant(t, f, olga.team, "run-pending", prefix)
+	reserve := func(i, size int) (int, string) {
+		digest := strings.Repeat("0", 56) + strconv.FormatInt(int64(0x10000000+i), 16)
+		var answer struct {
+			Error string `json:"error"`
+		}
+		code := f.call("POST", "/api/v1/data/upload", runner, map[string]any{
+			"kind": "artifact", "key": "artifacts/blobs/" + digest, "size": size, "sha256": digest, "run_id": "run-pending",
+		}, &answer)
+		return code, answer.Error
+	}
+	if code, msg := reserve(0, 0); code != http.StatusBadRequest || !strings.Contains(msg, "at least one byte") {
+		t.Fatalf("zero-byte reserve = %d %q", code, msg)
+	}
+	for i := range store.DirectUploadMaxPending {
+		if code, msg := reserve(i+1, 1); code != http.StatusOK {
+			t.Fatalf("reserve %d = %d %q", i, code, msg)
+		}
+	}
+	if code, msg := reserve(store.DirectUploadMaxPending+1, 1); code != http.StatusTooManyRequests || !strings.Contains(msg, "uncommitted uploads") {
+		t.Fatalf("reserve past the pending cap = %d %q", code, msg)
+	}
+}

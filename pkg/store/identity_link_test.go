@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -42,9 +43,8 @@ func TestLinkIdentityAttachesASignInWhateverItsEmail(t *testing.T) {
 	owner := signIn(t, st, "g-owner", "owner@example.com")
 	holder := signIn(t, st, "g-holder", "elsewhere@example.org")
 
-	stranger := resolve(t, st, gh("gh-stranger", "elsewhere@example.org"))
-	if stranger.Account.ID == owner.Account.ID {
-		t.Fatal("an unlinked GitHub sign-in reached the owner's account")
+	if _, err := st.ResolveSignIn(ctx, gh("gh-stranger", "elsewhere@example.org"), store.SignUpConditions{}, time.Now()); !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("an unlinked GitHub sign-in on holder's address = %v, want ErrAccountExists", err)
 	}
 
 	linked, err := st.LinkIdentity(ctx, owner.Account.ID, gh("gh-1", "Elsewhere@Example.org"), time.Now())
@@ -583,7 +583,42 @@ func TestDeletingAnAccountLeavesALinkedAddressAlone(t *testing.T) {
 	if n := countWhere(t, st, "identity_unlinks", "account_id = '"+leaver.Account.ID+"'"); n != 0 {
 		t.Fatal("the deleted account's unlink records survived it")
 	}
-	if again := resolve(t, st, gh("gh-1", "holder@example.com")); again.Account.ID != holder.Account.ID {
-		t.Fatalf("GitHub sign-in after the deletion = %+v, want it to join holder by the email rule", again)
+	if _, err := st.ResolveSignIn(ctx, gh("gh-1", "holder@example.com"), store.SignUpConditions{}, now); !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("GitHub sign-in after the deletion = %v, want holder's account to refuse it until holder links it", err)
+	}
+}
+
+// A provider account no account holds yet cannot reach an existing account
+// through a matching address; it joins only through LinkIdentity.
+func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	alice := signIn(t, st, "g-alice", "alice@corp.example")
+
+	_, err := st.ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{}, time.Now())
+	if !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("GitHub sign-in on Alice's address = %v, want ErrAccountExists", err)
+	}
+	if strings.Contains(err.Error(), "Google") || strings.Contains(err.Error(), "google") {
+		t.Fatalf("refusal = %q names the existing account's provider", err.Error())
+	}
+	if ids := identitiesOf(t, st, alice.Account.ID); len(ids) != 1 {
+		t.Fatalf("Alice's identities after the refusal = %+v, want only Google", ids)
+	}
+	if n := countWhere(t, st, "identities", "provider = 'github'"); n != 0 {
+		t.Fatalf("the refused sign-in left %d GitHub identities", n)
+	}
+
+	if _, err := st.LinkIdentity(ctx, alice.Account.ID, gh("gh-alice", "alice@corp.example"), time.Now()); err != nil {
+		t.Fatalf("LinkIdentity: %v", err)
+	}
+	back := resolve(t, st, gh("gh-alice", "alice@corp.example"))
+	if back.Account.ID != alice.Account.ID || back.NewAccount {
+		t.Fatalf("GitHub sign-in after linking = %+v, want Alice's account", back)
+	}
+
+	fresh := resolve(t, st, gh("gh-bob", "bob@corp.example"))
+	if !fresh.NewAccount || fresh.Account.ID == alice.Account.ID || fresh.PersonalTeam == "" {
+		t.Fatalf("a brand-new address = %+v, want a new account with its own space", fresh)
 	}
 }

@@ -92,6 +92,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/operator/teams/{team}/grants` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/trust` | `operator` |
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
+| `GET` | `/api/v1/operator/waitlist` | `operator` |
+| `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
@@ -275,7 +277,7 @@ Every route the controller and logs service register, with the scope each requir
 |---|---|---|
 | `GET` | `/api/v1/health` | `public` |
 | `GET` | `/api/v1/logs/search` | `logs.read` |
-| `DELETE` | `/api/v1/logs/{runID}` | `logs.write` or `logs.delete` |
+| `DELETE` | `/api/v1/logs/{runID}` | `logs.delete` |
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
 | `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` or `logs.claim` |

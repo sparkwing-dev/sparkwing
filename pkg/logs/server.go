@@ -182,15 +182,16 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 //     tokens are resolved via the controller's /api/v1/auth/whoami
 //     endpoint.
 //   - Per-route scope checks (logs.read for GETs, logs.write for
-//     POST/DELETE) enforce the principal's scope set. Admin is an
-//     implicit superset.
+//     POST, logs.delete for DELETE) enforce the principal's scope set.
+//     Admin is an implicit superset. No team token carries logs.delete,
+//     so a runner cannot erase the logs of a run it wrote.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
-	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun)), scopeLogsDelete))
+	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsDelete, http.HandlerFunc(s.handleDeleteRun)))
 	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))

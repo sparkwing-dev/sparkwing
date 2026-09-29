@@ -1954,6 +1954,9 @@ func classifyHTTPError(resp *http.Response) error {
 	}
 	// safety: a compute guard is a standing condition like a spent balance, so
 	// the caller tells it apart from a transport failure and keeps polling.
+	if resp.StatusCode == http.StatusTooManyRequests && strings.Contains(string(body), store.ErrNodeMetricLimit.Error()) {
+		return fmt.Errorf("%w: %s", store.ErrNodeMetricLimit, bytes.TrimSpace(body))
+	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		var refusal computeLimitRefusalWire
 		if json.Unmarshal(body, &refusal) == nil && refusal.Code == computeLimitRefusedCode {

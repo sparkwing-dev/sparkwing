@@ -254,7 +254,7 @@ func TestIdentityRecycledEmailNeverLinksIntoTheOldAccount(t *testing.T) {
 		t.Fatalf("a returning identity's address did not follow the provider: %+v", moved.Account)
 	}
 	newcomer := signIn(t, st, "s-newcomer", "alice@corp.example")
-	if newcomer.Account.ID == alice.Account.ID || newcomer.Linked {
+	if newcomer.Account.ID == alice.Account.ID || !newcomer.NewAccount {
 		t.Fatal("a new subject on Alice's old address linked into Alice's account")
 	}
 }
@@ -264,7 +264,7 @@ func TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount(t *testing.T)
 	ctx := context.Background()
 	first := signIn(t, st, "s-1", "shared@corp.example")
 	second := signIn(t, st, "s-2", "shared@corp.example")
-	if second.Account.ID == first.Account.ID || second.Linked || !second.NewAccount {
+	if second.Account.ID == first.Account.ID || !second.NewAccount {
 		t.Fatalf("second subject = %+v", second)
 	}
 	old, err := st.Account(ctx, first.Account.ID)

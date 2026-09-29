@@ -216,6 +216,28 @@ Writing the table also sets `credit_rate_micro_per_second` to the four-core
 price. The minimum purchase rises from $5 to $10, and
 `purchase_min_cents` reads 1,000.
 
+## Sign-in no longer joins accounts by email
+
+A user who signs in with Google and later with GitHub, or the reverse, under
+the same verified address no longer lands in one account. The second
+provider's first sign-in answers `409`, and the dashboard shows "An account
+with this email already exists. Sign in the way you did before, then link this
+provider from account settings." The user signs in with the first provider and
+links the second from **Account -> Linked sign-ins**. Sign-ins attached before
+the upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
+`errors.Is` on `store.ErrAccountExists` detects the refusal. No database
+migration is required.
+
+## Node metric reads are paged
+
+`GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` answers at most 1,000 samples
+unless the request asks for up to `limit=10000`, and sets `next_cursor` while
+more follow. A client that read the whole list in one request passes
+`limit=10000`, which covers every sample a node can hold, or passes each
+`next_cursor` back as `cursor` until the answer carries none. An older
+`sparkwing` binary reading a node with more than 1,000 samples sees only the
+first page. No database migration is required.
+
 ## 60-second minimum billable duration
 
 Drain metered node and trigger claims before deploying the controller that

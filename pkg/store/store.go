@@ -1066,7 +1066,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 87
+const expectedSchemaVersion = 86
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1445,6 +1445,11 @@ var nodeClaimOffersTablePostgres = strings.NewReplacer(
 const cronSchedulesUniqueIndex = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
     ON cron_schedules(repo_path, pipeline, schedule_name);`
+
+// perf: the trigger shed reads one team's pending depth on every submission
+// burst, so the count walks that team's pending rows rather than every team's.
+const triggersTeamPendingIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_team_pending
+    ON triggers(team, status) WHERE status = '` + triggerStatusPending + `'`
 
 const cronGitHubIdentityIndex = `CREATE INDEX IF NOT EXISTS idx_cron_schedules_github_identity
     ON cron_schedules(team, github_installation_id, github_repository_id);`
@@ -2118,11 +2123,10 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimAttentionMigration(ctx, tx, false)
 	case 84:
 		return applyRepoDispatchMigration(ctx, tx, false)
-	// safety: v85 and v86 belong to migrations another line of work lands; a
-	// merge takes those in place of these empty steps.
-	case 85, 86:
-		return nil
-	case 87:
+	case 85:
+		_, err := tx.ExecContext(ctx, triggersTeamPendingIndex)
+		return err
+	case 86:
 		return applySourceMintMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -2572,11 +2576,10 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimAttentionMigration(ctx, tx, true)
 	case 84:
 		return applyRepoDispatchMigration(ctx, tx, true)
-	// safety: v85 and v86 belong to migrations another line of work lands; a
-	// merge takes those in place of these empty steps.
-	case 85, 86:
-		return nil
-	case 87:
+	case 85:
+		_, err := tx.ExecContext(ctx, triggersTeamPendingIndex)
+		return err
+	case 86:
 		return applySourceMintMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -3180,7 +3183,31 @@ SELECT annotations_json FROM node_steps WHERE run_id = ? AND annotations_json IS
 	return out, nil
 }
 
+// Annotation bounds. Every node and step annotation is also appended to its
+// run's list, so that list is where the per-run bounds hold.
+const (
+	MaxAnnotationBytes    = 64 << 10
+	MaxRunAnnotations     = 1000
+	MaxRunAnnotationBytes = 4 << 20
+)
+
+var (
+	// ErrAnnotationTooLarge refuses one annotation over [MaxAnnotationBytes].
+	ErrAnnotationTooLarge = errors.New("store: an annotation holds at most 64 KiB")
+	// ErrRunAnnotationLimit refuses an annotation past [MaxRunAnnotations].
+	ErrRunAnnotationLimit = errors.New("store: a run holds at most 1000 annotations")
+	// ErrRunAnnotationBytes refuses an annotation that would take the run's
+	// JSON-encoded annotation list past [MaxRunAnnotationBytes].
+	ErrRunAnnotationBytes = errors.New("store: a run's annotations total at most 4 MiB")
+)
+
+// perf: every append rereads and rewrites the run's whole list, and the
+// node's or step's, so a run's annotations cost O(n^2) bytes written; the
+// bounds above cap that at about 1000 rewrites of at most 4 MiB each.
 func appendRunAnnotation(tx *storeTx, runID, msg string) error {
+	if len(msg) > MaxAnnotationBytes {
+		return ErrAnnotationTooLarge
+	}
 	var blob []byte
 	err := tx.QueryRow(
 		`SELECT annotations_json FROM runs WHERE id = ?`+tx.forUpdate(), runID).Scan(&blob)
@@ -3191,10 +3218,16 @@ func appendRunAnnotation(tx *storeTx, runID, msg string) error {
 	if len(blob) > 0 {
 		_ = json.Unmarshal(blob, &list)
 	}
+	if len(list) >= MaxRunAnnotations {
+		return ErrRunAnnotationLimit
+	}
 	list = append(list, msg)
 	next, err := json.Marshal(list)
 	if err != nil {
 		return err
+	}
+	if len(next) > MaxRunAnnotationBytes {
+		return ErrRunAnnotationBytes
 	}
 	_, err = tx.Exec(`UPDATE runs SET annotations_json = ? WHERE id = ?`, next, runID)
 	return err

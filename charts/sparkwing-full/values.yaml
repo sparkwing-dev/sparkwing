@@ -100,8 +100,9 @@ controller:
   # refills every principal. 0 is unlimited.
   maxRunsPerPrincipalHour: 0
 
-  # Pending-trigger depth past which a new webhook delivery or API submission is
-  # shed with 503 and a Retry-After rather than queued. 0 never sheds.
+  # Pending-trigger depth of one team past which that team's new webhook
+  # deliveries and API submissions are shed with 503 and a Retry-After rather
+  # than queued. 0 never sheds.
   shedQueueDepth: 0
 
   # How long a content-identical API submission answers with the run the first

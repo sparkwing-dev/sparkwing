@@ -125,11 +125,24 @@ type stateMetricsSink struct {
 }
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
-	return s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
+	err := s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
 		TS:            sample.TS,
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
 	})
+	if !errors.Is(err, store.ErrNodeMetricLimit) {
+		return err
+	}
+	payload, merr := json.Marshal(map[string]string{
+		"message": fmt.Sprintf("metric sampling stopped at %d samples", store.MaxNodeMetricSamples),
+	})
+	if merr != nil {
+		return errors.Join(err, merr)
+	}
+	if eerr := s.backend.AppendEvent(ctx, s.runID, s.nodeID, store.EventKindMetricsStopped, payload); eerr != nil {
+		return errors.Join(nodemetrics.ErrSinkFull, eerr)
+	}
+	return nodemetrics.ErrSinkFull
 }
 
 func (r *NodeExecutor) RunNode(ctx context.Context, req runner.Request) runner.Result {

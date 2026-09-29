@@ -170,3 +170,25 @@ describe("confirmed action", () => {
     );
   });
 });
+
+describe("waitlist", () => {
+  it("approves by id with the session's CSRF token", async () => {
+    respond = () =>
+      Response.json({
+        approved: [{ id: "a1", email: "ann@example.com", active_team: "ann" }],
+      });
+    assert.deepEqual(await lib.approveWaitlisted(["a1", "b2"]), [
+      "ann@example.com",
+    ]);
+    assert.equal(calls[0].url, "/api/v1/operator/waitlist/approve");
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].headers.get("X-CSRF-Token"), "session-csrf");
+    assert.deepEqual(JSON.parse(calls[0].body), { account_ids: ["a1", "b2"] });
+  });
+
+  it("reads a page by offset", async () => {
+    respond = () => Response.json({ accounts: [], total: 7 });
+    assert.equal((await lib.getWaitlist(50)).total, 7);
+    assert.equal(calls[0].url, "/api/v1/operator/waitlist?limit=50&offset=50");
+  });
+});
