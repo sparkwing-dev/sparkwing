@@ -742,7 +742,7 @@ var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
-var ErrSourceCredentialSpent = errors.New("store: this claim's source credential was already issued or its attempt has started")
+var ErrSourceCredentialSpent = errors.New("store: this claim's source credentials were all issued or its attempt has started")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
@@ -1182,6 +1182,7 @@ const MaxRunListLimit = 1000
 const MaxRunnerTokensPerTeam = 10
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
+const MaxSourceMints = 3
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
 type Membership struct {
@@ -1783,6 +1784,10 @@ type SourceSpec struct {
 	Tags       bool
 	Submodules bool
 	LFS        bool
+}
+type SourceSpend struct {
+	Spec   SourceSpec
+	RepoID int64
 }
 type SpawnedChild struct {
 	ParentNodeID string
@@ -2423,6 +2428,7 @@ func (t *Tenant) GitCredentialMachine(ctx context.Context, prefix string) (bool,
 func (t *Tenant) GitCredentialMachines(ctx context.Context) (_ map[string]bool, err error)
 func (t *Tenant) GitCredentialReleases(ctx context.Context, limit int) (_ []GitCredentialRelease, err error)
 func (t *Tenant) GitCredentials(ctx context.Context) (_ []GitCredential, err error)
+func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) (_ []GitHubRepo, err error)
 func (t *Tenant) GitHubAppExtraRepos(ctx context.Context, repository string) (_ []string, err error)
 func (t *Tenant) GitHubAppInstallation(ctx context.Context, installation int64) (GitHubAppInstallation, error)
 func (t *Tenant) GitHubAppInstallations(ctx context.Context) (_ []GitHubAppInstallation, err error)
@@ -2502,11 +2508,12 @@ func (t *Tenant) SetCronScheduleLock(ctx context.Context, id string, lock CronLo
 func (t *Tenant) SetCronScheduleNextDue(ctx context.Context, id string, next *time.Time, now time.Time) error
 func (t *Tenant) SetCronSchedulePaused(ctx context.Context, id string, paused bool, now time.Time) error
 func (t *Tenant) SetGitCredentialMachine(ctx context.Context, prefix string, enabled bool, by string, now time.Time) error
+func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error
 func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, extras []string, by string, now time.Time) (_ []string, err error)
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error
-func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpec, err error)
+func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpend, err error)
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error

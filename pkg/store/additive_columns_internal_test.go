@@ -173,6 +173,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	84: {repoDispatchRunCols, launchNodeCols},
 	85: nil,
 	86: nil,
+	// safety: v87 adds defaulted columns an older binary never names.
+	87: {sourceMintCols, extraRepoIDCols},
 }
 
 func columnSpecMaps() []map[string]string {

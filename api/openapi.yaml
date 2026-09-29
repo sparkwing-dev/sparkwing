@@ -7250,7 +7250,7 @@ paths:
       tags: [runs]
       summary: Issue a claim's one source credential to its Job's init container.
       description: >-
-        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets one credential, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
+        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches, and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets at most three, so a failed or lost mint can be asked for again, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
       responses:
         "200":
           description: The credential and what to check out.

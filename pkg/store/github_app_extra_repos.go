@@ -111,3 +111,41 @@ func (t *Tenant) AllGitHubAppExtraRepos(ctx context.Context) (_ map[string][]str
 	}
 	return out, rows.Err()
 }
+
+// SetGitHubAppExtraRepoIDs records the GitHub ID of each of repository's
+// extra repositories, keyed by owner/name, so a token is minted for the
+// repositories an owner approved even after one is renamed or its name reused.
+func (t *Tenant) SetGitHubAppExtraRepoIDs(ctx context.Context, repository string, ids map[string]int64) error {
+	for slug, id := range ids {
+		if _, err := t.s.exec(ctx, `UPDATE github_app_extra_repos SET extra_repo_id = ?
+ WHERE team = ? AND repository = ? AND extra_repo = ?`,
+			id, string(t.team), strings.ToLower(repository), strings.ToLower(slug)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GitHubAppExtraRepoRefs is repository's extra repositories with the GitHub
+// ID recorded for each, 0 when none was.
+func (t *Tenant) GitHubAppExtraRepoRefs(ctx context.Context, repository string) (_ []GitHubRepo, err error) {
+	rows, err := t.s.query(ctx, `SELECT extra_repo, extra_repo_id FROM github_app_extra_repos
+ WHERE team = ? AND repository = ? ORDER BY extra_repo`, string(t.team), strings.ToLower(repository))
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsOrLog(rows)
+	var out []GitHubRepo
+	for rows.Next() {
+		var slug string
+		var id int64
+		if err := rows.Scan(&slug, &id); err != nil {
+			return nil, err
+		}
+		if x, ok := ParseGitHubRepo(slug); ok {
+			x.ID = id
+			out = append(out, x)
+		}
+	}
+	return out, rows.Err()
+}

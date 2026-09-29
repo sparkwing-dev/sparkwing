@@ -10,8 +10,8 @@ import (
 )
 
 // ErrSourceCredentialSpent refuses a claim a source credential when it already
-// had its one, or when its attempt has started running the pipeline's code.
-var ErrSourceCredentialSpent = errors.New("store: this claim's source credential was already issued or its attempt has started")
+// had [MaxSourceMints], or when its attempt has started running the pipeline's code.
+var ErrSourceCredentialSpent = errors.New("store: this claim's source credentials were all issued or its attempt has started")
 
 // SourceSpec is what a pipeline's plan asks of its checkout. A plan claim, and
 // a plan that declares nothing, gets one commit and nothing else.
@@ -41,63 +41,90 @@ func (p *plannedSource) spec() SourceSpec {
 	return s
 }
 
-// SpendSourceCredential records the one source credential tok's claim may be
-// issued, as a git credential release of the team's, and answers what the
-// run's plan asks of its checkout. It refuses a claim that is not live, is
-// cancelled, already spent its credential, or whose attempt has started.
-func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpec, err error) {
+// MaxSourceMints is how many source credentials one claim may be issued, so
+// a mint that failed or whose answer was lost can be asked for again.
+const MaxSourceMints = 3
+
+// SourceSpend is what a spent source credential covers: the checkout the
+// run's plan asks for and the GitHub ID of the run's repository, 0 when the
+// run's trigger recorded none.
+type SourceSpend struct {
+	Spec   SourceSpec
+	RepoID int64
+}
+
+// SpendSourceCredential records one of the [MaxSourceMints] source credentials
+// tok's claim may be issued, as a git credential release of the team's. It
+// refuses a claim that is not live, is cancelled, spent them all, or whose
+// attempt has started.
+func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpend, err error) {
 	if tok.Team != t.team {
-		return SourceSpec{}, ErrClaimNotLive
+		return SourceSpend{}, ErrClaimNotLive
 	}
 	tx, err := t.s.beginTx(ctx)
 	if err != nil {
-		return SourceSpec{}, err
+		return SourceSpend{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
-		return SourceSpec{}, err
+		return SourceSpend{}, err
 	}
-	var created int64
 	var started sql.NullInt64
 	var plan []byte
-	if err := tx.QueryRowContext(ctx, `SELECT c.created_at, n.execution_started_at, r.plan_json FROM claim_tokens c
-  JOIN nodes n ON n.team = c.team AND n.run_id = c.run_id AND n.node_id = c.node_id
-  JOIN runs r ON r.team = c.team AND r.id = c.run_id
- WHERE c.team = ? AND c.run_id = ? AND c.node_id = ? AND c.claim_generation = ?`,
-		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&created, &started, &plan); err != nil {
-		return SourceSpec{}, err
+	var out SourceSpend
+	if err := tx.QueryRowContext(ctx, `SELECT n.execution_started_at, r.plan_json, COALESCE(tr.github_repo_id, 0) FROM nodes n
+  JOIN runs r ON r.team = n.team AND r.id = n.run_id
+  LEFT JOIN triggers tr ON tr.team = n.team AND tr.id = n.run_id
+ WHERE n.team = ? AND n.run_id = ? AND n.node_id = ?`,
+		string(tok.Team), tok.RunID, tok.NodeID).Scan(&started, &plan, &out.RepoID); err != nil {
+		return SourceSpend{}, err
 	}
 	// safety: the user container holds the same claim token as the init
-	// container that fetches, so a claim gets one credential and none once its
-	// attempt runs; the claim's own creation bounds the audit scan.
-	var spent int
-	err = tx.QueryRowContext(ctx, `SELECT 1 FROM git_credential_releases
- WHERE team = ? AND released_at >= ? AND run_id = ? AND token_prefix = ? LIMIT 1`,
-		string(tok.Team), time.Unix(0, created).Unix(), tok.RunID, tok.Prefix).Scan(&spent)
-	if err == nil || started.Valid {
-		return SourceSpec{}, ErrSourceCredentialSpent
+	// container that fetches, so a claim gets a few credentials to survive a
+	// failed mint, and none once its attempt runs.
+	if started.Valid {
+		return SourceSpend{}, ErrSourceCredentialSpent
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return SourceSpec{}, err
+	res, err := tx.ExecContext(ctx, `UPDATE claim_tokens SET source_mints = source_mints + 1
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ? AND source_mints < ?`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation, MaxSourceMints)
+	if err != nil {
+		return SourceSpend{}, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return SourceSpend{}, errors.Join(err, ErrSourceCredentialSpent)
 	}
 	id, err := newIdentityID()
 	if err != nil {
-		return SourceSpec{}, err
+		return SourceSpend{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO git_credential_releases
        (id, team, credential_id, host, run_id, runner, token_prefix, released_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, string(t.team), credentialID, host, tok.RunID, runner, tok.Prefix, now.UTC().Unix()); err != nil {
-		return SourceSpec{}, err
+		return SourceSpend{}, err
 	}
 	var doc struct {
 		Source *plannedSource `json:"source"`
 	}
 	if tok.Kind == ClaimTokenWork && len(plan) > 0 {
 		if err := json.Unmarshal(plan, &doc); err != nil {
-			return SourceSpec{}, fmt.Errorf("read the run's plan: %w", err)
+			return SourceSpend{}, fmt.Errorf("read the run's plan: %w", err)
 		}
 	}
-	return doc.Source.spec(), tx.Commit()
+	out.Spec = doc.Source.spec()
+	return out, tx.Commit()
+}
+
+var sourceMintCols = map[string]string{"source_mints": "INTEGER NOT NULL DEFAULT 0"}
+
+// safety: 0 is an extra repository listed before its ID was recorded, which
+// no source credential is minted for until an owner saves the list again.
+var extraRepoIDCols = map[string]string{"extra_repo_id": "INTEGER NOT NULL DEFAULT 0"}
+
+func applySourceMintMigration(ctx context.Context, tx *storeTx, postgres bool) error {
+	return addDispatchColumnsTx(ctx, tx, postgres, map[string]map[string]string{
+		"claim_tokens": sourceMintCols, "github_app_extra_repos": extraRepoIDCols,
+	})
 }
 
 func validPlannedSource(p *plannedSource) error {

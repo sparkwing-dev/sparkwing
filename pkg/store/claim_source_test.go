@@ -10,10 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A claim is issued one source credential: a second ask, an ask once its
-// attempt has started, an ask from another team's handle and an ask after
-// its run is cancelled are all refused, and each issue leaves an audit row.
-func TestSpendSourceCredential_IssuesOnePerClaimBeforeItsAttempt(t *testing.T) {
+// A claim is issued at most MaxSourceMints source credentials, so a failed or
+// lost mint can be asked for again: one more ask, an ask once its attempt has
+// started, an ask from another team's handle and an ask after its run is
+// cancelled are all refused, and each issue leaves an audit row.
+func TestSpendSourceCredential_IssuesAFewPerClaimBeforeItsAttempt(t *testing.T) {
 	ctx := context.Background()
 	f := newDispatchRun(t, "run-spend")
 	plan, err := f.authorize(t, f.claimRaw(t, store.PlanNodeID, store.ClaimTokenPlan), store.ClaimSensitive)
@@ -25,13 +26,16 @@ func TestSpendSourceCredential_IssuesOnePerClaimBeforeItsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	spend := func(tok store.ClaimToken) (store.SourceSpec, error) {
-		return team.SpendSourceCredential(ctx, tok, "github_app", "github.com", "claim:"+tok.NodeID, time.Now())
+		out, err := team.SpendSourceCredential(ctx, tok, "github_app", "github.com", "claim:"+tok.NodeID, time.Now())
+		return out.Spec, err
 	}
-	if spec, err := spend(plan); err != nil || spec != (store.SourceSpec{Depth: 1}) {
-		t.Fatalf("plan claim = %+v, %v; want one commit and nothing else", spec, err)
+	for i := range store.MaxSourceMints {
+		if spec, err := spend(plan); err != nil || spec != (store.SourceSpec{Depth: 1}) {
+			t.Fatalf("plan claim ask %d = %+v, %v; want one commit and nothing else", i, spec, err)
+		}
 	}
 	if _, err := spend(plan); !errors.Is(err, store.ErrSourceCredentialSpent) {
-		t.Fatalf("second ask: err = %v, want ErrSourceCredentialSpent", err)
+		t.Fatalf("ask past the limit: err = %v, want ErrSourceCredentialSpent", err)
 	}
 
 	if _, err := f.accept(plan, `{"pipeline":"demo","source":{"depth":0,"tags":true,"submodules":true},"nodes":[`+
@@ -68,8 +72,8 @@ func TestSpendSourceCredential_IssuesOnePerClaimBeforeItsAttempt(t *testing.T) {
 		t.Fatalf("check after cancel: err = %v", err)
 	}
 	rels, err := team.GitCredentialReleases(ctx, 10)
-	if err != nil || len(rels) != 2 {
-		t.Fatalf("audit rows = %d, %v; want the plan's and a's", len(rels), err)
+	if err != nil || len(rels) != store.MaxSourceMints+1 {
+		t.Fatalf("audit rows = %d, %v; want the plan's %d and a's", len(rels), err, store.MaxSourceMints)
 	}
 }
 
@@ -102,5 +106,23 @@ func TestClaimLaunch_MatchesSelectorsAgainstTheCloudImage(t *testing.T) {
 	}
 	if len(got) != 2 || !(got[0] == "go" && got[1] == "bare" || got[0] == "bare" && got[1] == "go") {
 		t.Fatalf("launched %v, want go and bare only", got)
+	}
+}
+
+// An extra repository carries the GitHub ID recorded when an owner approved
+// it, and 0 until one is.
+func TestGitHubAppExtraRepoRefs_CarryTheRecordedIDs(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	acme := teamHandle(t, st, "acme")
+	if _, err := acme.SetGitHubAppExtraRepos(ctx, "acme/app", []string{"acme/lib", "acme/proto"}, "owner", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := acme.SetGitHubAppExtraRepoIDs(ctx, "Acme/App", map[string]int64{"Acme/Lib": 42}); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := acme.GitHubAppExtraRepoRefs(ctx, "acme/app")
+	if err != nil || len(refs) != 2 || refs[0].Slug() != "acme/lib" || refs[0].ID != 42 || refs[1].ID != 0 {
+		t.Fatalf("refs = %+v, %v", refs, err)
 	}
 }

@@ -65,8 +65,11 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d extra repositories per repository", store.MaxGitHubAppExtraRepos))
 		return
 	}
+	var ids map[string]int64
 	if len(req.ExtraRepos) > 0 {
-		if status, err := s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos); err != nil {
+		var status int
+		var err error
+		if ids, status, err = s.extraReposCovered(r.Context(), t, repo, req.ExtraRepos); err != nil {
 			writeError(w, status, err)
 			return
 		}
@@ -80,50 +83,61 @@ func (s *Server) handlePutGitHubAppExtraRepos(w http.ResponseWriter, r *http.Req
 		s.writeInternalError(w, r, "put github app extra repos", err)
 		return
 	}
+	if err := t.SetGitHubAppExtraRepoIDs(r.Context(), repo.Slug(), ids); err != nil {
+		s.writeInternalError(w, r, "record github app extra repo ids", err)
+		return
+	}
 	s.logger.Info("github app extra repos written", "team", string(p.Team), "repository", repo.Slug(),
 		"extra_repos", strings.Join(saved, ","), "by", p.AccountID)
 	writeJSON(w, http.StatusOK, githubAppExtraReposJSON{Repository: strings.ToLower(repo.Slug()), ExtraRepos: saved})
 }
 
-// safety: One held installation must cover both the run repository and every extra repository.
-func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo store.GitHubRepo, extras []string) (int, error) {
+// safety: One held installation must cover both the run repository and every extra repository,
+// and each extra's GitHub ID is read from that installation's own list, so the approval binds the repository
+// itself rather than whatever later holds its name.
+func (s *Server) extraReposCovered(ctx context.Context, t *store.Tenant, repo store.GitHubRepo, extras []string) (map[string]int64, int, error) {
 	inst, found, err := s.teamInstallationFor(ctx, t, repo)
 	if err != nil {
 		s.logger.Warn("github app extra repos lookup", "repository", repo.Slug(), "err", err.Error())
-		return http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation")
+		return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to find the repository's installation")
 	}
 	if !found {
-		return http.StatusNotFound, errors.New("no installation this team holds covers " + repo.Slug())
+		return nil, http.StatusNotFound, errors.New("no installation this team holds covers " + repo.Slug())
 	}
 	for _, raw := range extras {
 		x, ok := store.ParseGitHubRepo(raw)
 		if !ok {
-			return http.StatusBadRequest, errors.New("extra repository " + raw + " is not owner/name")
+			return nil, http.StatusBadRequest, errors.New("extra repository " + raw + " is not owner/name")
 		}
 		xinst, covered, err := s.teamInstallationFor(ctx, t, x)
 		if err != nil {
 			s.logger.Warn("github app extra repos lookup", "repository", x.Slug(), "err", err.Error())
-			return http.StatusBadGateway, errors.New("GitHub could not be reached to find the installation of " + x.Slug())
+			return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to find the installation of " + x.Slug())
 		}
 		if !covered || xinst.InstallationID != inst.InstallationID {
-			return http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not cover " + x.Slug())
+			return nil, http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not cover " + x.Slug())
 		}
 	}
-	return 0, nil
+	listed, err := s.githubApp.client.InstallationRepositories(ctx, inst.InstallationID)
+	if err != nil {
+		return nil, http.StatusBadGateway, errors.New("GitHub could not be reached to list the installation's repositories")
+	}
+	ids := map[string]int64{}
+	for _, raw := range extras {
+		for _, l := range listed {
+			if strings.EqualFold(l.FullName, raw) {
+				ids[strings.ToLower(raw)] = l.ID
+			}
+		}
+		if ids[strings.ToLower(raw)] == 0 {
+			return nil, http.StatusBadRequest, errors.New("the installation covering " + repo.Slug() + " does not list " + raw)
+		}
+	}
+	return ids, 0, nil
 }
 
 func ownerExtraRepos(ctx context.Context, t *store.Tenant, repo store.GitHubRepo) ([]store.GitHubRepo, error) {
-	slugs, err := t.GitHubAppExtraRepos(ctx, repo.Slug())
-	if err != nil {
-		return nil, err
-	}
-	var out []store.GitHubRepo
-	for _, slug := range slugs {
-		if x, ok := store.ParseGitHubRepo(slug); ok {
-			out = append(out, x)
-		}
-	}
-	return out, nil
+	return t.GitHubAppExtraRepoRefs(ctx, repo.Slug())
 }
 
 func repoSlugs(repos []store.GitHubRepo) []string {

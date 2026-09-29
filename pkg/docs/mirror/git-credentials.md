@@ -7,9 +7,9 @@ claim.
 
 A repository opted into controller dispatch on Sparkwing Cloud works
 differently: each Job's init container asks
-`POST /api/v1/runs/{id}/source-credential` once, with its claim token, for a
-read-only GitHub App token covering the run's repository and its
-[extra repositories](#extra-repositories), and checks the run out before the
+`POST /api/v1/runs/{id}/source-credential` with its claim token, at most three
+times, for a read-only GitHub App token covering the run's repository and its
+[extra repositories](#extra-repositories), named by their GitHub IDs, and checks the run out before the
 pipeline's container starts. Cloud fetches source only through the GitHub
 App; a team's stored git credentials serve self-hosted runners and machines,
 never Cloud Jobs. Submodules there must name a listed repository.
