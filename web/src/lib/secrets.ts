@@ -76,7 +76,7 @@ export function splitSecrets(rows: StoredSecret[]): {
 
 const nameCharset = /^[A-Za-z0-9._/-]+$/;
 
-// Mirrors internal/secretname.Validate so the form refuses what the
+// Mirrors pkg/secretname.Validate so the form refuses what the
 // controller would; the controller stays the authority.
 export function secretNameProblem(name: string): string | null {
   if (name === "") return "Enter a name.";

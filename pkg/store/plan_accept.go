@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secretname"
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 // PlanNodeID is the node every controller-dispatched run starts with. Its
