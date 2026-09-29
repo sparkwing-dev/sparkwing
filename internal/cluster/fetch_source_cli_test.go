@@ -65,15 +65,30 @@ func TestFetchSource_ChecksOutAndDownloadsWithTheIssuedToken(t *testing.T) {
 		!slices.Contains(got.env, "GOTOOLCHAIN=local") {
 		t.Fatalf("download dirs %v env %v", got.dirs, got.env)
 	}
+}
 
-	leaky := func(_ context.Context, _, _, _, d string, _ bincache.DirectCredential, _ bincache.SourceOptions, _ []string) error {
-		return errors.Join(os.MkdirAll(filepath.Join(d, ".git"), 0o755),
-			os.WriteFile(filepath.Join(d, ".git", "config"), []byte("[credential]\n\thelper = store\n"), 0o644))
-	}
-	err := fetchSource(context.Background(), fakeSourceCredentials{sourceCredential()}, "run-1",
-		filepath.Join(t.TempDir(), "src"), cache, leaky, download)
-	if err == nil || !strings.Contains(err.Error(), "holds a git credential") {
-		t.Fatalf("a checkout left with a credential helper: err = %v", err)
+// A token left in any file on the shared volume, an LFS log or a module cache
+// entry alike, fails the pod before the pipeline's container starts.
+func TestFetchSource_FailsWhenTheTokenIsLeftOnTheVolume(t *testing.T) {
+	for name, plant := range map[string]func(dest, cache string) string{
+		"lfs log": func(dest, _ string) string { return filepath.Join(dest, ".git", "lfs", "logs", "20260929.log") },
+		"module cache": func(_, cache string) string {
+			return filepath.Join(cache, "cache", "download", "github.com", "acme", "plans", "@v", "v1.0.0.info")
+		},
+	} {
+		volume := t.TempDir()
+		dest, cache := filepath.Join(volume, "src"), filepath.Join(volume, "go-mod")
+		path := plant(dest, cache)
+		checkout := func(_ context.Context, _, _, _, d string, _ bincache.DirectCredential, _ bincache.SourceOptions, _ []string) error {
+			return errors.Join(os.MkdirAll(filepath.Join(d, ".git"), 0o755), os.MkdirAll(filepath.Dir(path), 0o755),
+				os.WriteFile(filepath.Join(d, "go.mod"), []byte("module x\n"), 0o644),
+				os.WriteFile(path, []byte(strings.Repeat("x", (1<<20)-3)+fetchTok+"\n"), 0o644))
+		}
+		err := fetchSource(context.Background(), fakeSourceCredentials{sourceCredential()}, "run-1", dest, cache,
+			checkout, func(context.Context, string, []string) error { return nil })
+		if err == nil || !strings.Contains(err.Error(), "holds the source credential") {
+			t.Fatalf("%s: err = %v, want the pod failed", name, err)
+		}
 	}
 }
 

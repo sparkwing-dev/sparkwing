@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -86,7 +87,9 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 			}
 		}
 	}
-	return credentialScrubbed(sc.Token, filepath.Join(dest, ".git"), filepath.Join(modCache, "cache", "vcs"))
+	// safety: everything under the scratch volume's root was written by this
+	// container, and the pipeline's container reads all of it.
+	return tokenAbsent(sc.Token, filepath.Dir(dest))
 }
 
 // safety: go fetches only the listed repositories directly, with a helper that
@@ -119,27 +122,36 @@ func goModDownload(ctx context.Context, dir string, env []string) error {
 	return nil
 }
 
-// safety: nothing here writes the token or a helper, so finding either in the
-// git config the pipeline's container inherits means something else did, and
-// the pod fails before that container starts.
-func credentialScrubbed(token string, roots ...string) error {
-	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			if err != nil || d.IsDir() || d.Name() != "config" {
-				return err
-			}
-			body, err := os.ReadFile(path)
-			if err == nil && (bytes.Contains(body, []byte(token)) || bytes.Contains(body, []byte("[credential"))) {
-				return fmt.Errorf("fetch-source: %s holds a git credential", path)
-			}
+// safety: the token's bytes in any file left on the shared volume, LFS logs and module cache included, fail
+// the pod before the pipeline's container starts. Files are streamed, so memory stays bounded, and the
+// volume's size limit bounds the time.
+func tokenAbsent(token, root string) error {
+	needle := []byte(token)
+	buf := make([]byte, 1<<20)
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
 			return err
-		})
+		}
+		f, err := os.Open(path)
 		if err != nil {
 			return err
 		}
-	}
-	return nil
+		defer func() { _ = f.Close() }()
+		carry := 0
+		for {
+			n, rerr := f.Read(buf[carry:])
+			if bytes.Contains(buf[:carry+n], needle) {
+				return fmt.Errorf("fetch-source: %s holds the source credential", path)
+			}
+			if rerr != nil {
+				if errors.Is(rerr, io.EOF) {
+					return nil
+				}
+				return rerr
+			}
+			keep := min(len(needle)-1, carry+n)
+			copy(buf, buf[carry+n-keep:carry+n])
+			carry = keep
+		}
+	})
 }
