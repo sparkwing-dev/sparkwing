@@ -308,7 +308,12 @@ func filterTarget(nodes []*store.Node, want, runID string) ([]*store.Node, error
 var (
 	remoteFollowFailureBudget = 60 * time.Second
 	remoteFollowPollInterval  = 300 * time.Millisecond
+	remoteFollowBackoffCap    = 5 * time.Second
 )
+
+func remoteFollowBackoff(n int) time.Duration {
+	return min(remoteFollowPollInterval<<min(n, 16), max(remoteFollowBackoffCap, remoteFollowPollInterval))
+}
 
 type remoteFollowFailures struct {
 	since time.Time
@@ -352,16 +357,22 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 
 	go func() {
 		defer close(terminal)
-		ticker := time.NewTicker(remoteFollowPollInterval)
-		defer ticker.Stop()
+		wait := remoteFollowPollInterval
+		consecutive := 0
 
 		var failures remoteFollowFailures
 		for {
+			timer := time.NewTimer(wait)
 			select {
 			case <-runCtx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				nodes, err := ctrl.ListNodes(runCtx, runID)
+				if client.IsTokenDead(err) {
+					followErr = fmt.Errorf("run %s: %w", runID, err)
+					return
+				}
 				if err == nil {
 					for _, n := range nodes {
 						if nodeFilter != "" && n.NodeID != nodeFilter {
@@ -380,6 +391,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 				run, err := ctrl.GetRun(runCtx, runID)
 				if err == nil {
 					failures.succeeded()
+					wait, consecutive = remoteFollowPollInterval, 0
 					if isTerminalStatus(run.Status) {
 						return
 					}
@@ -389,6 +401,13 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 				if runCtx.Err() != nil {
 					return
 				}
+				// safety: a dead token never reads the run again, so waiting out the budget only adds load.
+				if client.IsTokenDead(err) {
+					followErr = fmt.Errorf("run %s: %w", runID, err)
+					return
+				}
+				consecutive++
+				wait = remoteFollowBackoff(consecutive)
 				elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget)
 				if exhausted {
 					followErr = fmt.Errorf("run %s: controller status unreadable for %s: %w",
@@ -414,19 +433,22 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string,
 	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
 ) {
+	failures := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		body, err := logc.Stream(ctx, runID, nodeID)
 		if err != nil {
+			failures++
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(300 * time.Millisecond):
+			case <-time.After(remoteFollowBackoff(failures)):
 			}
 			continue
 		}
+		failures = 0
 		readSSE(ctx, body, func(line string) {
 			mu.Lock()
 			defer mu.Unlock()

@@ -29,25 +29,55 @@ type Launcher struct {
 }
 
 // Run claims and launches until ctx ends. An idle queue is polled every
-// l.Poll; a claim is followed at once by the next.
+// l.Poll; a claim is followed at once by the next. A failed claim backs off
+// exponentially, and a revoked or expired token parks the launcher, asking
+// once an hour, until a claim is answered.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.Config.Validate(); err != nil {
 		return err
 	}
+	pacer := client.NewPacer(l.Poll)
 	for ctx.Err() == nil {
 		launched, err := l.LaunchOne(ctx)
-		if err != nil && ctx.Err() == nil {
-			l.Logger.Warn("launcher: launch failed", "err", err)
+		wait := l.Poll
+		switch {
+		case ctx.Err() != nil:
+		case err != nil && !launched:
+			wait = l.claimFailed(pacer, err)
+		default:
+			if pacer.Success() {
+				l.Logger.Info("launcher: token accepted again; resuming claims")
+			}
+			if err != nil {
+				l.Logger.Warn("launcher: launch failed", "err", err)
+			}
 		}
 		if launched && err == nil {
 			continue
 		}
 		select {
 		case <-ctx.Done():
-		case <-time.After(l.Poll):
+		case <-time.After(wait):
 		}
 	}
 	return nil
+}
+
+func (l *Launcher) claimFailed(pacer *client.Pacer, err error) time.Duration {
+	pace := pacer.Failure(err)
+	token := l.Ctrl.Token()
+	switch {
+	case pace.Dead != nil:
+		l.Logger.Error("launcher: "+pace.Dead.Explain(token,
+			"Restart the launcher with a live claims.launch token (--token or SPARKWING_AGENT_TOKEN)"),
+			"token_prefix", client.TokenPrefix(token), "token_state", pace.Dead.State)
+	case pace.Parked:
+		l.Logger.Warn("launcher: token is still refused; staying parked",
+			"token_prefix", client.TokenPrefix(token), "err", err, "retry_in", pace.Wait.Round(time.Minute))
+	default:
+		l.Logger.Warn("launcher: claim failed", "err", err, "retry_in", pace.Wait.Round(time.Millisecond))
+	}
+	return pace.Wait
 }
 
 // LaunchOne claims one ready node and creates its Job. It reports whether it

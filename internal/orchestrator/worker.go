@@ -258,7 +258,7 @@ func runHeartbeat(ctx context.Context, c *client.Client, triggerID string,
 			status, err := c.HeartbeatTrigger(hbCtx, triggerID)
 			cancel()
 			if err != nil {
-				if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+				if client.IsTokenDead(err) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
 					logger.Warn("heartbeat: trigger claim ended; cancelling run",
 						"trigger_id", triggerID, "err", err)
 					cancelRun()

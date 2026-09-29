@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/agentconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/executorinfo"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
+	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 )
 
 func RunAgentCLI(args []string) error {
@@ -39,7 +41,21 @@ func runAgentCLI(args []string) error {
 		*configPath = p
 	}
 
-	raw, err := agentconfig.Load(*configPath)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	for {
+		err := runAgentOnce(ctx, *configPath, allowRepos)
+		if !errors.Is(err, ErrCredentialChanged) {
+			return err
+		}
+	}
+}
+
+// safety: the change watch starts before the read, so a rewrite racing the
+// read costs one extra reload rather than an hour parked on the old token.
+func runAgentOnce(ctx context.Context, configPath string, allowRepos []string) error {
+	changed := tokenpark.FileChanged(configPath)
+	raw, err := agentconfig.Load(configPath)
 	if err != nil {
 		return err
 	}
@@ -54,14 +70,12 @@ func runAgentCLI(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	pool.CredentialChanged = changed
 
 	logger := slog.Default()
 	logger.Info(
 		"sparkwing agent starting",
-		"config", *configPath,
+		"config", configPath,
 		"labels", cfg.Labels,
 		"max_concurrent", cfg.MaxConcurrent,
 		"spawn_policy", cfg.SpawnPolicy,
