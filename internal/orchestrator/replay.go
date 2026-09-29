@@ -142,11 +142,11 @@ func RunReplayNode(ctx context.Context, paths Paths, backends Backends, runID, n
 
 	originalRunID := run.ReplayOfRunID
 	ctx = sparkwingruntime.WithJSONResolver(ctx, func(id string) ([]byte, bool) {
-		if data, err := st.GetNode(ctx, runID, id); err == nil && len(data.Output) > 0 {
-			return data.Output, true
+		if data, err := st.GetNodeOutput(ctx, runID, id); err == nil && len(data) > 0 {
+			return data, true
 		}
-		if data, err := st.GetNode(ctx, originalRunID, id); err == nil && len(data.Output) > 0 {
-			return data.Output, true
+		if data, err := st.GetNodeOutput(ctx, originalRunID, id); err == nil && len(data) > 0 {
+			return data, true
 		}
 		return nil, false
 	})

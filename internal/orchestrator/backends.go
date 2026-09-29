@@ -461,11 +461,7 @@ func (l localState) GetLatestRun(ctx context.Context, pipeline string, statuses 
 }
 
 func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
-	n, err := l.st.GetNode(ctx, runID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	return n.Output, nil
+	return l.st.GetNodeOutput(ctx, runID, nodeID)
 }
 
 func (l localState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {

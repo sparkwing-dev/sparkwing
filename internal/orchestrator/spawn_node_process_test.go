@@ -133,8 +133,8 @@ func TestNodeSpawnHandler_WritesTheChildRowAndReturnsItsOutput(t *testing.T) {
 	if child.Outcome != string(sparkwing.Success) {
 		t.Errorf("child outcome = %q, want success", child.Outcome)
 	}
-	if string(child.Output) != `{"findings":3}` {
-		t.Errorf("child output = %s, want the marshaled typed output", child.Output)
+	if out, oerr := st.GetNodeOutput(ctx, "spawn-unit-ok", "parent/scan"); oerr != nil || string(out) != `{"findings":3}` {
+		t.Errorf("child output = %s, %v, want the marshaled typed output", out, oerr)
 	}
 }
 

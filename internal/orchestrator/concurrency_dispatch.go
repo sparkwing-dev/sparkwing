@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -349,7 +350,7 @@ func storeOutcome(res runner.Result) string {
 }
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
-	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
+	output, err := r.fetchCachedOutput(ctx, req, parameters, originRun, originNode)
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -741,7 +742,14 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 }
 
 func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, parameters coordinationParameters, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
-	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
+	var output []byte
+	var err error
+	if resolved, ok := r.backends.State.(resolvedOutputReader); ok {
+		output, _, err = resolved.GetResolvedOutput(ctx, req.RunID, req.Node.ID(),
+			client.OutputSource{Kind: "coalesce", Key: parameters.key})
+	} else {
+		output, err = r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
+	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -787,7 +795,12 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
+func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) ([]byte, error) {
+	if resolved, ok := r.backends.State.(resolvedOutputReader); ok {
+		output, _, err := resolved.GetResolvedOutput(ctx, req.RunID, req.Node.ID(),
+			client.OutputSource{Kind: "cache", Key: parameters.key, Hash: parameters.cacheHash})
+		return output, err
+	}
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 }
 

@@ -237,8 +237,8 @@ func TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores(t *testing.T) {
 		if n.Outcome != "success" {
 			t.Errorf("%s store: node outcome = %q, want success", name, n.Outcome)
 		}
-		if string(n.Output) != `{"ok":true}` {
-			t.Errorf("%s store: node output = %s", name, n.Output)
+		if out, oerr := st.GetNodeOutput(ctx, runID, "n"); oerr != nil || string(out) != `{"ok":true}` {
+			t.Errorf("%s store: node output = %s, %v", name, out, oerr)
 		}
 	}
 }

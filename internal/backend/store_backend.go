@@ -51,6 +51,11 @@ func (b *StoreBackend) ListNodes(ctx context.Context, runID string) ([]*store.No
 	return b.st.ListNodes(ctx, runID)
 }
 
+// GetNodeOutput reads a node's output from the store's output directory.
+func (b *StoreBackend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
+	return b.st.GetNodeOutput(ctx, runID, nodeID)
+}
+
 func (b *StoreBackend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
 	return b.st.ListEventsAfter(ctx, runID, afterSeq, limit)
 }

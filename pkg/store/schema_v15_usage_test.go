@@ -60,7 +60,7 @@ func TestSchemaV15_UpgradeOfARealV14ShapeAddsUsageColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNode after upgrade: %v", err)
 	}
-	if n.Outcome != "success" || string(n.Output) != `{"ok":true}` {
+	if out, oerr := up.GetNodeOutput(ctx, "r1", "build"); n.Outcome != "success" || oerr != nil || string(out) != `{"ok":true}` {
 		t.Errorf("carried node = %+v, want its outcome and output unchanged", n)
 	}
 	if n.CPUNanos != 0 || n.MaxRSSBytes != 0 {

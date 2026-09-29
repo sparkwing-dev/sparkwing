@@ -74,14 +74,6 @@ func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store
 	return &run, nil
 }
 
-// GetChildNodeOutput reads the output of nodeID in childID, a child run
-// runID started.
-func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error) {
-	var out json.RawMessage
-	err := c.getJSON(ctx, c.baseURL+childPath(runID, childID)+"/nodes/"+url.PathEscape(nodeID)+"/output", &out)
-	return out, err
-}
-
 // LauncherSync tells the controller the Jobs a launcher holds, and hears what
 // to do with each.
 func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob) ([]store.LaunchJobResult, error) {

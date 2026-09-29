@@ -210,6 +210,29 @@ func downloadKind(kind string) store.StorageKind {
 	}
 }
 
+var errSigningUnavailable = errors.New("download signing unavailable")
+
+func (s *Server) signObjectURL(r *http.Request, bucket *teamblob.Store, objectKey string) (string, time.Time, error) {
+	expires := time.Now().Add(downloadURLTTL).UTC()
+	if downloadViaIngress(r) {
+		if s.downloadCDN == nil {
+			return "", time.Time{}, fmt.Errorf("%w: CloudFront signing unavailable", errSigningUnavailable)
+		}
+		resource := (&url.URL{Scheme: "https", Host: s.downloadDomain, Path: "/" + objectKey}).String()
+		policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{DateLessThan: sign.NewAWSEpochTime(expires)}}}}
+		signed, err := s.downloadCDN.SignWithPolicy(resource, policy)
+		return signed, expires, err
+	}
+	if s.downloadS3 == nil {
+		return "", time.Time{}, fmt.Errorf("%w: S3 signing unavailable", errSigningUnavailable)
+	}
+	out, err := s.downloadS3.PresignGetObject(r.Context(), &s3.GetObjectInput{Bucket: aws.String(bucket.Bucket()), Key: aws.String(objectKey)}, func(o *s3.PresignOptions) { o.Expires = downloadURLTTL })
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return out.URL, expires, nil
+}
+
 func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 	if len(s.downloadStores) == 0 {
 		http.NotFound(w, r)
@@ -339,26 +362,10 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	expires := time.Now().Add(downloadURLTTL).UTC()
-	var signed string
-	if downloadViaIngress(r) {
-		if s.downloadCDN == nil {
-			writeError(w, http.StatusServiceUnavailable, errors.New("CloudFront signing unavailable"))
-			return
-		}
-		resource := (&url.URL{Scheme: "https", Host: s.downloadDomain, Path: "/" + objectKey}).String()
-		policy := &sign.Policy{Statements: []sign.Statement{{Resource: resource, Condition: sign.Condition{DateLessThan: sign.NewAWSEpochTime(expires)}}}}
-		signed, err = s.downloadCDN.SignWithPolicy(resource, policy)
-	} else {
-		if s.downloadS3 == nil {
-			writeError(w, http.StatusServiceUnavailable, errors.New("S3 signing unavailable"))
-			return
-		}
-		out, signErr := s.downloadS3.PresignGetObject(r.Context(), &s3.GetObjectInput{Bucket: aws.String(bucket.Bucket()), Key: aws.String(objectKey)}, func(o *s3.PresignOptions) { o.Expires = downloadURLTTL })
-		err = signErr
-		if err == nil {
-			signed = out.URL
-		}
+	signed, expires, err := s.signObjectURL(r, bucket, objectKey)
+	if errors.Is(err, errSigningUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
 	}
 	if err != nil {
 		s.writeInternalError(w, r, "sign download", err)

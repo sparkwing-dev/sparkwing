@@ -126,8 +126,12 @@ func TestWorkDispatch_TypedResultPersistedAsNodeOutput(t *testing.T) {
 		t.Fatalf("expected 1 multi node, got %+v", nodes)
 	}
 	var out workOut
-	if err := json.Unmarshal(nodes[0].Output, &out); err != nil {
-		t.Fatalf("unmarshal output: %v (%s)", err, nodes[0].Output)
+	raw, err := st.GetNodeOutput(context.Background(), res.RunID, "multi")
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal output: %v (%s)", err, raw)
 	}
 	if out.Tag != "vv" {
 		t.Fatalf("Node.Output Tag = %q, want vv -- ResultStep output should be persisted as the node's typed output", out.Tag)

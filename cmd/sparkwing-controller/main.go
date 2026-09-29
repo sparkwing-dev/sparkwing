@@ -606,6 +606,10 @@ func run(args []string) error {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
 		srv = srv.WithDirectUploads(client, bucket, prefix)
+	} else if st.OutputDir() == "" {
+		// safety: without the cache bucket, node outputs live on this
+		// replica's disk, which the filesystem output store serves alone.
+		st.SetOutputDir(p.Root)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err

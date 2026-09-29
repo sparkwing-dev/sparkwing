@@ -60,8 +60,8 @@ func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
 	if n.Error != "" {
 		t.Fatalf("error = %q, want empty", n.Error)
 	}
-	if string(n.Output) != `"ok"` {
-		t.Fatalf("output = %s, want original output", n.Output)
+	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
+		t.Fatalf("output = %s, %v, want original output", out, err)
 	}
 	if n.FailureReason != store.FailureUnknown {
 		t.Fatalf("failure_reason = %q, want original empty reason", n.FailureReason)
@@ -93,8 +93,8 @@ func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	if n.Status != "done" || n.Outcome != "success" {
 		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
 	}
-	if string(n.Output) != `"ok"` {
-		t.Fatalf("output = %s, want finalized output", n.Output)
+	if out, err := s.GetNodeOutput(ctx, "run-1", "node-a"); err != nil || string(out) != `"ok"` {
+		t.Fatalf("output = %s, %v, want finalized output", out, err)
 	}
 }
 

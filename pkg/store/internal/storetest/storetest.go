@@ -31,9 +31,10 @@ func suiteRunsOnPostgres() bool {
 // Target is a store location that survives Close, so a test can open it
 // again the way a migration test reopens a database.
 type Target struct {
-	dialect store.Dialect
-	path    string
-	dsn     string
+	dialect   store.Dialect
+	path      string
+	dsn       string
+	outputDir string
 }
 
 // New reserves a location in the suite's dialect: a file under the test's
@@ -47,7 +48,7 @@ func New(t *testing.T) *Target {
 	if strings.TrimSpace(dsn) == "" {
 		t.Fatalf("%s=postgres requires %s to name a reachable Postgres", DialectEnv, URLEnv)
 	}
-	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, dsn)}
+	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, dsn), outputDir: t.TempDir()}
 }
 
 // NewSQLite reserves a SQLite file whatever the suite's dialect is, for
@@ -67,7 +68,7 @@ func OpenSQLite(t *testing.T) *store.Store {
 // skipping the test when no server is configured and RequireEnv is unset.
 func NewPostgres(t *testing.T) *Target {
 	t.Helper()
-	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, PostgresURL(t))}
+	return &Target{dialect: store.DialectPostgres, dsn: newSchema(t, PostgresURL(t)), outputDir: t.TempDir()}
 }
 
 // PostgresURL returns the configured server URL. A suite that selected
@@ -124,7 +125,11 @@ func (tg *Target) TryOpen() (*store.Store, error) {
 
 func (tg *Target) open() (*store.Store, error) {
 	if tg.dialect == store.DialectPostgres {
-		return store.OpenPostgres(context.Background(), tg.dsn)
+		st, err := store.OpenPostgres(context.Background(), tg.dsn)
+		if err == nil {
+			st.SetOutputDir(tg.outputDir)
+		}
+		return st, err
 	}
 	return store.Open(tg.path)
 }

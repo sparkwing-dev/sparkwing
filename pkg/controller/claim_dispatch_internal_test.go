@@ -104,8 +104,9 @@ func TestPlanRoute_AcceptsReplaysAndRefuses(t *testing.T) {
 	work := f.claim(t, "a", store.ClaimTokenWork)
 	wantPost(t, f, planPath, work, body, http.StatusForbidden, "")
 	wantPost(t, f, attemptPath, work, `{"outcome":"success","extra":1}`, http.StatusBadRequest, "")
-	wantPost(t, f, attemptPath, work, `{"outcome":"success","output":{"v":1}}`, http.StatusOK, "recorded")
-	wantPost(t, f, attemptPath, work, `{"outcome":"success","output":{"v":1}}`, http.StatusOK, "replayed")
+	ref, _ := json.Marshal(f.uploadOutput(t, "run-d", "a", work, []byte(`{"v":1}`)))
+	wantPost(t, f, attemptPath, work, `{"outcome":"success","output":`+string(ref)+`}`, http.StatusOK, "recorded")
+	wantPost(t, f, attemptPath, work, `{"outcome":"success","output":`+string(ref)+`}`, http.StatusOK, "replayed")
 	wantPost(t, f, attemptPath, work, `{"outcome":"failed"}`, http.StatusConflict, "")
 	run, err := f.st.GetRun(context.Background(), "run-d")
 	if err != nil || run.Status != "success" {

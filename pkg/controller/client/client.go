@@ -309,14 +309,21 @@ func (c *Client) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg 
 	return c.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, "", nil)
 }
 
-// FinishNodeWithReason is the wire equivalent of the store method.
+// FinishNodeWithReason is the wire equivalent of the store method. Output
+// bytes are uploaded first, and the finish names the committed object.
 func (c *Client) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	ref, err := c.UploadNodeOutput(ctx, runID, nodeID, output)
+	if err != nil {
+		return fmt.Errorf("%w: %w", store.ErrOutputNotStored, err)
+	}
 	path := fmt.Sprintf("/api/v1/runs/%s/nodes/%s/finish",
 		url.PathEscape(runID), url.PathEscape(nodeID))
 	body := map[string]any{
 		"outcome": outcome,
 		"error":   errMsg,
-		"output":  output,
+	}
+	if ref != nil {
+		body["output"] = ref
 	}
 	if reason != "" {
 		body["failure_reason"] = reason
@@ -1013,31 +1020,6 @@ func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node
 			return nil, err
 		}
 		return &n, nil
-	case http.StatusNotFound:
-		return nil, notFound(resp)
-	default:
-		return nil, readHTTPError(resp)
-	}
-}
-
-// GetNodeOutput returns the raw JSON output of a finished node, or
-// ErrNotFound if the node doesn't exist. 409 if it exists but hasn't
-// finished.
-func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
-	u := fmt.Sprintf("%s/api/v1/runs/%s/nodes/%s/output",
-		c.baseURL, url.PathEscape(runID), url.PathEscape(nodeID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return io.ReadAll(resp.Body)
 	case http.StatusNotFound:
 		return nil, notFound(resp)
 	default:

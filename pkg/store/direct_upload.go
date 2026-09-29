@@ -115,7 +115,8 @@ func validUploadKey(key string) bool {
 			return false
 		}
 	}
-	return strings.HasPrefix(key, "bin/") || strings.HasPrefix(key, "artifacts/") || strings.HasPrefix(key, "sources/")
+	return strings.HasPrefix(key, "bin/") || strings.HasPrefix(key, "artifacts/") || strings.HasPrefix(key, "sources/") ||
+		strings.HasPrefix(key, "outputs/")
 }
 
 func validSHA256(raw string) bool {
@@ -142,8 +143,10 @@ func SourceKeyDigest(key string) (string, bool) {
 // in the same transaction. No object is visible through CommittedObject yet.
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error) {
 	source := strings.HasPrefix(req.Key, "sources/")
+	output := strings.HasPrefix(req.Key, "outputs/")
 	sourceDigest, validSource := SourceKeyDigest(req.Key)
 	if (!source && req.RunID == "") ||
+		(output && !strings.HasPrefix(req.Key, runOutputPrefix(req.RunID))) ||
 		req.Kind != StorageCache ||
 		(source && (!validSource || req.RunID != "" || sourceDigest != req.SHA256 || req.Provenance != "local" || req.ClaimPrefix == "")) ||
 		!validUploadKey(req.Key) || !validSHA256(req.SHA256) || req.Size <= 0 || req.Size > DirectUploadMaxSize ||
@@ -180,6 +183,11 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 	})
 	if err != nil {
 		return Upload{}, err
+	}
+	if output {
+		if err := checkRunOutputRoomTx(ctx, tx, req.Team, req.RunID, req.Size, req.Now); err != nil {
+			return Upload{}, err
+		}
 	}
 	// safety: reserveStorageTx holds the team's cache storage row, and every
 	// upload is cache, so concurrent reservations count one after another.
@@ -451,10 +459,11 @@ func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, 
 }
 
 // PruneExpiredCacheObjects removes direct cache rows only after the cache
-// bucket's successful retention listing has removed their bytes.
+// bucket's successful retention listing has removed their bytes. Outputs
+// expire with their run instead; see [Store.ExpiredOutputRuns].
 func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
 	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND committed_at <= ?`,
+	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND key NOT LIKE 'outputs/%' AND committed_at <= ?`,
 		string(StorageCache), cutoff)
 	if err != nil {
 		return 0, err

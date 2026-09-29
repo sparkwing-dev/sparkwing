@@ -118,6 +118,23 @@ func (b *S3Backend) ListNodes(ctx context.Context, runID string) ([]*store.Node,
 	return st.nodes, nil
 }
 
+// GetNodeOutput reads a node's output object beside its run's state.
+func (b *S3Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
+	st, err := b.loadState(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range st.nodes {
+		if n.NodeID == nodeID {
+			if n.OutputRef == nil {
+				return nil, nil
+			}
+			return s3state.ReadNodeOutput(ctx, b.store, runID, *n.OutputRef)
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (b *S3Backend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
 	st, err := b.loadState(ctx, runID)
 	if err != nil {

@@ -50,6 +50,10 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 		"POST /api/v1/data/upload":      true,
 		"POST /api/v1/data/commit":      true,
 		"GET /api/v1/data/capabilities": true,
+		// safety: output bytes move through URLs this controller signed for one
+		// upload or one object; the handlers check the signature and its expiry.
+		"PUT /api/v1/outputs/uploads/{id}":     true,
+		"GET /api/v1/outputs/objects/{key...}": true,
 	}
 	got := routesRegisteredOn(t, "server.go", "router")
 	if !maps.Equal(got, want) {

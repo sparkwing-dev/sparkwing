@@ -63,12 +63,18 @@ func sideloadNode(ctx context.Context, st *store.Store, c *client.Client, runID,
 	if err := st.CreateNode(ctx, *remote); err != nil {
 		return nil, fmt.Errorf("sideload node row: %w", err)
 	}
-	if remote.Status == "done" || remote.Outcome != "" || len(remote.Output) > 0 {
+	if remote.Status == "done" || remote.Outcome != "" {
 		outcome := remote.Outcome
 		if outcome == "" {
 			outcome = "success"
 		}
-		if err := st.FinishNode(ctx, runID, nodeID, outcome, remote.Error, remote.Output); err != nil {
+		var output []byte
+		if remote.OutputRef != nil {
+			if output, err = c.GetNodeOutput(ctx, runID, nodeID); err != nil {
+				return nil, fmt.Errorf("fetch remote node output: %w", err)
+			}
+		}
+		if err := st.FinishNode(ctx, runID, nodeID, outcome, remote.Error, output); err != nil {
 			return nil, fmt.Errorf("finalize sideloaded node: %w", err)
 		}
 	}

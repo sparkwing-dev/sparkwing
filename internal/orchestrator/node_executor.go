@@ -732,6 +732,18 @@ done:
 	}
 
 	if err := r.backends.State.FinishNode(writeCtx, runID, node.ID(), string(sparkwing.Success), "", outBytes); err != nil {
+		// safety: a node whose output was refused, such as one past its team's
+		// storage share, fails with that reason rather than succeeding with no
+		// output for its dependents to read.
+		if errors.Is(err, store.ErrOutputNotStored) {
+			text := boundedFailureText(ctx, runID, node.ID(), err)
+			fctx := failureWriteCtx(ctx, err)
+			if ferr := r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureUnknown, nil); ferr != nil {
+				noteLostStateWrite(fctx, "finish node", runID, ferr)
+			}
+			noteEvent(fctx, r.backends.State, runID, node.ID(), "node_failed", []byte(text))
+			return nil, err
+		}
 		noteLostStateWrite(writeCtx, "finish node", runID, err)
 	}
 	noteEvent(writeCtx, r.backends.State, runID, node.ID(), "node_succeeded", nil)

@@ -653,7 +653,7 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 	for {
 		n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
 		if err == nil && runner.NodeTerminal(n) {
-			return runner.ResultFromNode(n)
+			return runner.ResultFromNode(ctx, n, r.ctrl)
 		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			r.logger.Warn("node poll after missing job failed",
@@ -665,7 +665,7 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 				r.logger.Warn("finish node after missing job failed",
 					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
 			} else if n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID); err == nil && runner.NodeTerminal(n) {
-				return runner.ResultFromNode(n)
+				return runner.ResultFromNode(ctx, n, r.ctrl)
 			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 				r.logger.Warn("node poll after missing job finish failed",
 					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
@@ -696,7 +696,7 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 	}
 
-	res := runner.ResultFromNode(n)
+	res := runner.ResultFromNode(ctx, n, r.ctrl)
 	// safety: synthesize Failed when a crashed pod leaves no terminal state.
 	if !runner.NodeTerminal(n) {
 		res.Outcome = sparkwing.Failed

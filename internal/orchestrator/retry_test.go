@@ -127,7 +127,7 @@ func TestRun_SkipPassedOnRetry(t *testing.T) {
 	if buildNode.Outcome != "success" {
 		t.Fatalf("build outcome after retry = %q, want success", buildNode.Outcome)
 	}
-	if len(buildNode.Output) == 0 {
+	if out, err := st.GetNodeOutput(context.Background(), second.RunID, "build"); err != nil || len(out) == 0 {
 		t.Fatal("build output not rehydrated into retry run's row")
 	}
 	events, err := st.ListEventsAfter(context.Background(), second.RunID, 0, 1000)

@@ -136,6 +136,10 @@ type localStoreFleetCoordinator struct {
 	store *store.Store
 }
 
+func (c localStoreFleetCoordinator) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
+	return c.store.GetNodeOutput(ctx, runID, nodeID)
+}
+
 func (c localStoreFleetCoordinator) MarkNodeReady(ctx context.Context, runID, nodeID string) error {
 	return c.store.MarkNodeReady(executionpolicy.WithAssistedReady(ctx), runID, nodeID)
 }

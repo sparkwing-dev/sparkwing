@@ -19,6 +19,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	s3store "github.com/sparkwing-dev/sparkwing/pkg/storage/s3"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -100,8 +101,15 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 			t.Errorf("node %q outcome in the bucket = %q, want success", id, n.Outcome)
 		}
 	}
-	if produce := nodes["produce"]; produce != nil && string(produce.Output) != `{"digest":"sha-abc123"}` {
-		t.Errorf("produce output in the bucket = %s", produce.Output)
+	if produce := nodes["produce"]; produce != nil {
+		var got []byte
+		var err error
+		if produce.OutputRef != nil {
+			got, err = s3state.ReadNodeOutput(context.Background(), s3store.NewArtifactStore(bucket, "state", s3client), run.ID, *produce.OutputRef)
+		}
+		if err != nil || string(got) != `{"digest":"sha-abc123"}` {
+			t.Errorf("produce output in the bucket = %s, %v", got, err)
+		}
 	}
 
 	assertNodeLogInBucket(t, s3client, bucket, run.ID, "consume", "consumed digest=sha-abc123")

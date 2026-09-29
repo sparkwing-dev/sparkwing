@@ -142,13 +142,9 @@ func resolveApprovalTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 		return false, err
 	}
 	outcome, msg := approvalOutcome(resolution, approver, comment, onTimeout)
-	output, err := json.Marshal(map[string]string{"resolution": resolution, "approver": approver, "comment": comment})
-	if err != nil {
-		return false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?
+	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status = ?, outcome = ?, error = ?, finished_at = ?
  WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
-		nodeStatusDone, outcome, msg, output, now.UnixNano(), string(team), runID, nodeID, NodeStatusApprovalPending); err != nil {
+		nodeStatusDone, outcome, msg, now.UnixNano(), string(team), runID, nodeID, NodeStatusApprovalPending); err != nil {
 		return false, err
 	}
 	return true, settleTx(ctx, tx, team, runID, now)

@@ -286,8 +286,8 @@ func TestRunNodeOnce_SpawnRunsInsideTheNodeProcess(t *testing.T) {
 	if child.Outcome != string(sparkwing.Success) {
 		t.Errorf("child outcome = %q (err=%q), want success", child.Outcome, child.Error)
 	}
-	if got := string(child.Output); got != `{"findings":7}` {
-		t.Errorf("child output = %s, want {\"findings\":7} -- a Ref reader sees this row", got)
+	if got, err := st.GetNodeOutput(ctx, "run-pod-spawn", "parent/scan"); err != nil || string(got) != `{"findings":7}` {
+		t.Errorf("child output = %s, %v, want {\"findings\":7} -- a Ref reader sees this row", got, err)
 	}
 
 	events, err := st.ListEventsAfter(ctx, "run-pod-spawn", 0, 500)

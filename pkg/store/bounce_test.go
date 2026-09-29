@@ -202,7 +202,7 @@ func TestStartNode_CannotReopenANodeThatAlreadyFinished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNode: %v", err)
 	}
-	if n.Status != "done" || n.Outcome != "success" || string(n.Output) != `{"ok":true}` {
+	if out, oerr := st.GetNodeOutput(ctx, "run-1", "build"); n.Status != "done" || n.Outcome != "success" || oerr != nil || string(out) != `{"ok":true}` {
 		t.Fatalf("node = %+v, want its terminal row untouched", n)
 	}
 

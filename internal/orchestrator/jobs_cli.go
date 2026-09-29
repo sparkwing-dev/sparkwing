@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -536,10 +537,17 @@ func renderStatus(
 	fmt.Fprintf(out, "nodes (%d total, %d done):\n", len(nodes), countFinished(nodes))
 	renderNodesWithSteps(out, nodes, stepsByNode, includeSteps)
 
-	for _, n := range nodes {
-		if len(n.Output) > 0 {
-			pretty, ok := prettyJSON(n.Output)
-			if ok {
+	if outputs, ok := b.(runner.OutputReader); ok {
+		for _, n := range nodes {
+			if n.OutputRef == nil {
+				continue
+			}
+			data, err := outputs.GetNodeOutput(ctx, runID, n.NodeID)
+			if err != nil {
+				fmt.Fprintf(out, "\n%s output: unavailable (%v)\n", n.NodeID, err)
+				continue
+			}
+			if pretty, ok := prettyJSON(data); ok {
 				fmt.Fprintf(out, "\n%s output:\n%s\n", n.NodeID, indent(pretty, "  "))
 			}
 		}

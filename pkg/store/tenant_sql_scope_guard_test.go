@@ -37,6 +37,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).expiredDispatchRuns": "the expired-claim reaper finds every team's controller-dispatched runs " +
 		"holding a lapsed claim; each is then settled under that team's own run row",
 	"runOwnerTx": "asks which team owns an id, so an answer scoped to the asker is no answer",
+	"(*Store).RecordLocalOutput": "a laptop store records an output its own process wrote for a node it holds; " +
+		"the run ID is global and the row takes that node's team",
 	"(*Store).PaidGrantTeam": "asks which team a payment id was granted to, so a refund that names only " +
 		"the payment reverses it in that team; a payment id is unique across teams",
 	"(*Store).claimScope": "asks which team a claim credential belongs to, so an answer scoped to " +
@@ -165,7 +167,7 @@ var unportedSQL = []string{
 	"(*Store).FinishLapsedClaim",
 	"(*Store).FinishNodeExecutionAttempt",
 	"(*Store).FinishNodeStep",
-	"(*Store).FinishNodeWithReason",
+	"(*Store).FinishNodeWithOutputRef",
 	"(*Store).FinishRunAtGeneration",
 	"(*Store).FinishRunsIfActive",
 	"(*Store).FinishTrigger",

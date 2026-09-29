@@ -1851,8 +1851,16 @@ func (s *dispatchState) copyRetryNode(ctx context.Context, priorRunID string, pr
 			return fmt.Errorf("copy source node %s artifact: %w", prior.NodeID, err)
 		}
 	}
+	var output []byte
+	if prior.OutputRef != nil {
+		data, err := s.backends.State.GetNodeOutput(ctx, priorRunID, prior.NodeID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("read source node %s output: %w", prior.NodeID, err)
+		}
+		output = data
+	}
 	if err := s.backends.State.FinishNodeWithReason(ctx, s.runID, prior.NodeID,
-		prior.Outcome, prior.Error, prior.Output, prior.FailureReason, prior.ExitCode); err != nil {
+		prior.Outcome, prior.Error, output, prior.FailureReason, prior.ExitCode); err != nil {
 		return fmt.Errorf("copy source node %s outcome: %w", prior.NodeID, err)
 	}
 	payload, _ := json.Marshal(map[string]any{"prior_run_id": priorRunID})
@@ -1861,7 +1869,7 @@ func (s *dispatchState) copyRetryNode(ctx context.Context, priorRunID string, pr
 		return fmt.Errorf("record source node %s rehydration: %w", prior.NodeID, err)
 	}
 	s.mu.Lock()
-	s.outputsJS[prior.NodeID] = prior.Output
+	s.outputsJS[prior.NodeID] = output
 	s.outcomes[prior.NodeID] = sparkwing.Outcome(prior.Outcome)
 	if prior.Error != "" {
 		s.errors[prior.NodeID] = prior.Error

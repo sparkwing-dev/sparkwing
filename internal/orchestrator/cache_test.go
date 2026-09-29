@@ -209,7 +209,11 @@ func TestCacheKey_SecondRunReplaysOutput(t *testing.T) {
 	}
 
 	var out cachedBuildOut
-	if err := json.Unmarshal(nodes[0].Output, &out); err != nil {
+	raw, err := st.GetNodeOutput(context.Background(), res2.RunID, nodes[0].NodeID)
+	if err != nil {
+		t.Fatalf("read cached output: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("unmarshal cached output: %v", err)
 	}
 	if out.Tag != "v-cached" {

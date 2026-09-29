@@ -175,8 +175,9 @@ func TestS3StateBackend_FinishNode_PersistsEnvelope(t *testing.T) {
 	if n.Status != "done" || n.Outcome != "success" {
 		t.Errorf("node = %+v, want done/success", n)
 	}
-	if !bytes.Equal(n.Output, out) {
-		t.Errorf("output = %q, want %q", n.Output, out)
+	got, err := b2.GetNodeOutput(ctx, "r", "n")
+	if err != nil || !bytes.Equal(got, out) {
+		t.Errorf("output = %q, %v, want %q", got, err, out)
 	}
 }
 

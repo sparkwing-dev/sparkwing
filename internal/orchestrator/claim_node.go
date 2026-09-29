@@ -43,11 +43,18 @@ func (s *claimState) FinishNode(ctx context.Context, runID, nodeID, outcome, err
 	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, "", nil)
 }
 
-func (s *claimState) FinishNodeWithReason(_ context.Context, _, _, outcome, errMsg string, output []byte, reason string, _ *int) error {
+// safety: the output is uploaded while the claim is live and the report
+// names only the committed object; an upload that fails records nothing, so
+// the node executor's failed finish becomes the attempt's report.
+func (s *claimState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, _ *int) error {
+	ref, err := s.UploadNodeOutput(ctx, runID, nodeID, output)
+	if err != nil {
+		return fmt.Errorf("%w: %w", store.ErrOutputNotStored, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.finished = true
-	s.report = store.AttemptReport{Outcome: outcome, Error: errMsg, FailureReason: reason, Output: output}
+	s.report = store.AttemptReport{Outcome: outcome, Error: errMsg, FailureReason: reason, Output: ref}
 	return nil
 }
 

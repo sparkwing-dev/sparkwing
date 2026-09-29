@@ -94,6 +94,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/operator/teams/{team}/unfreeze` | `operator` |
 | `GET` | `/api/v1/operator/waitlist` | `operator` |
 | `POST` | `/api/v1/operator/waitlist/approve` | `operator` |
+| `GET` | `/api/v1/outputs/objects/{key...}` | `public` |
+| `PUT` | `/api/v1/outputs/uploads/{id}` | `public` |
 | `GET` | `/api/v1/pipelines` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |
 | `GET` | `/api/v1/pipelines/{name}/profile` | `nodes.claim` |
@@ -162,7 +164,10 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `claim` or `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-commit` | `claim` or `runs.state` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/resolved-output` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
