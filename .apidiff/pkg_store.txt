@@ -186,6 +186,7 @@ type ClaimResultCommit struct {
 func (c ClaimResultCommit) Token() ClaimToken
 type ClaimRouteClass int
 const ClaimSensitive ClaimRouteClass = iota + 1
+const ClaimTeamHeader = "X-Sparkwing-Claim-Team"
 type ClaimToken struct {
 	Prefix     string
 	Team       Team

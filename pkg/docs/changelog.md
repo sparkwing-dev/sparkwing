@@ -58,9 +58,11 @@ unlock.
   `GET /api/v1/secrets/{name}?run=` with its claim token, each read recorded
   as a `secret_released` event on the node; a planning node reads none, and
   an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
-  refused. On this path a node cannot mint OIDC tokens, hold concurrency
-  slots, write the durable log store (its live log reaches the dashboard), or
-  start a child of another repository.
+  refused. A work node writes its own node's durable log to the logs
+  service with its claim token, which the service checks against the
+  controller on every append and seal and answers on no other route. On this
+  path a node cannot mint OIDC tokens, hold concurrency slots, or start a
+  child of another repository.
 
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with

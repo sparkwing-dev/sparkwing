@@ -75,14 +75,14 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("ensure root: %w", err)
 	}
 	var logsBackend LogBackend
-	if cfg.claim != nil {
-		// safety: the logs service answers no claim token, so a claimed pod
-		// keeps its log on its own volume and streams it to the live view.
+	if cfg.claim != nil && logsURL == "" {
 		fsLogs, err := fs.NewLogStore(paths.Root)
 		if err != nil {
 			return runner.Result{}, fmt.Errorf("pod log store: %w", err)
 		}
 		logsBackend = NewLogStoreBackend(fsLogs, logger).WithLiveSink(stateClient)
+	} else if cfg.claim != nil {
+		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger).WithLiveSink(stateClient)
 	} else if logsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
 	} else {
@@ -394,7 +394,7 @@ func runNodeCLI(args []string) error {
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	if isClaimToken(token) && apiSocket == "" {
-		return runClaimedNode(ctx, *controllerURL, runID, nodeID, token)
+		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
 	}
 	var runOpts []RunNodeOption
 	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"

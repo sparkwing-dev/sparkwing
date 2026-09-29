@@ -142,7 +142,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `logs.write` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `claim` or `logs.write` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
@@ -278,9 +278,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/logs/{runID}` | `logs.write` or `logs.delete` |
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |
+| `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` or `logs.claim` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` |
+| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` or `logs.claim` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
 | `DELETE` | `/api/v1/teams/{team}/logs` | `admin` or `logs.delete` |
 | `GET` | `/metrics` | `public` |

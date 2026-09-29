@@ -1038,7 +1038,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(handleValidateClaimLog)).orElse(requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))

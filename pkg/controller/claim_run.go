@@ -223,3 +223,11 @@ func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: sec.CreatedAt.Unix(), UpdatedAt: sec.UpdatedAt.Unix(),
 	})
 }
+
+// safety: the logs service asks this with the pod's own claim token, so the
+// answer binds a durable log write to the claim's run, node and team.
+func handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
+	tok, _ := claimTokenFromContext(r.Context())
+	w.Header().Set(store.ClaimTeamHeader, string(tok.Team))
+	w.WriteHeader(http.StatusNoContent)
+}

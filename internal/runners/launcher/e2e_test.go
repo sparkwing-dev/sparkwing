@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -221,11 +226,19 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	}
 	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
 	l.Config.ControllerURL = f.url
+	logRoot := t.TempDir()
+	logSrv, err := logs.New(logRoot, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logTS := httptest.NewServer(logSrv.WithControllerAuth(f.url, time.Minute).Handler())
+	t.Cleanup(logTS.Close)
+	l.Config.LogsURL = logTS.URL
 	home := t.TempDir()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	logs := map[string]*bytes.Buffer{}
+	podLogs := map[string]*bytes.Buffer{}
 	started := map[string]bool{}
 	pod := func(c corev1.Container, job string) {
 		defer wg.Done()
@@ -249,7 +262,7 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 			out.WriteString("\nexit: " + err.Error())
 		}
 		mu.Lock()
-		logs[job] = &out
+		podLogs[job] = &out
 		mu.Unlock()
 		signal()
 	}
@@ -298,7 +311,7 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	dump := func() {
-		for job, out := range logs {
+		for job, out := range podLogs {
 			t.Logf("--- %s ---\n%s", job, out)
 		}
 	}
@@ -344,7 +357,20 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if _, err := f.st.GetNode(ctx, childID, store.PlanNodeID); err != nil {
 		t.Fatalf("the child was not planned by the controller: %v", err)
 	}
-	for job, out := range logs {
+	var durable strings.Builder
+	if err := filepath.WalkDir(filepath.Join(logRoot), func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.Contains(path, "check") {
+			raw, _ := os.ReadFile(path)
+			durable.Write(raw)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(durable.String(), "token=***") || strings.Contains(durable.String(), "tok-e2e-value") {
+		t.Errorf("check's durable log = %q, want its masked token line", durable.String())
+	}
+	for job, out := range podLogs {
 		if strings.Contains(out.String(), "tok-e2e-value") {
 			t.Errorf("%s logged the secret's value", job)
 		}

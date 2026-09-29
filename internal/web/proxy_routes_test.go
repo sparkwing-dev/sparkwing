@@ -264,6 +264,7 @@ func logsRouteScopes(t *testing.T) map[string][]string {
 		"scopeLogsWrite":  controller.ScopeLogsWrite,
 		"scopeAdmin":      controller.ScopeAdmin,
 		"scopeLogsDelete": controller.ScopeLogsDelete,
+		"scopeLogsClaim":  "logs.claim",
 	})
 }
 

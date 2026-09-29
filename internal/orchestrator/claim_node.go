@@ -101,11 +101,11 @@ func (s *claimState) attempt(res runner.Result, runErr error) store.AttemptRepor
 
 // safety: the launcher Job's trusted process already recorded the execution
 // start and renews the claim, so this process only runs the node and reports.
-func runClaimedNode(ctx context.Context, controllerURL, runID, nodeID, token string) error {
+func runClaimedNode(ctx context.Context, controllerURL, logsURL, runID, nodeID, token string) error {
 	c := client.NewWithToken(controllerURL, nil, token)
 	state := &claimState{Client: c, runID: runID, specHash: os.Getenv(SpecHashEnv)}
 	go renewCacheGrant(ctx, controllerURL, token, runID)
-	res, err := RunNodeOnce(ctx, controllerURL, "", runID, nodeID, "claim:"+runID+"/"+nodeID, token,
+	res, err := RunNodeOnce(ctx, controllerURL, logsURL, runID, nodeID, "claim:"+runID+"/"+nodeID, token,
 		selectLocalRenderer(), slog.Default(), nil, func(cfg *runNodeConfig) { cfg.claim = state })
 	report := state.attempt(res, err)
 	if rerr := c.ReportAttempt(context.WithoutCancel(ctx), runID, nodeID, report); rerr != nil {

@@ -3478,7 +3478,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: logs.write
+      x-sparkwing-scope: claim or logs.write
       tags: [nodes]
       summary: Validate a log writer's exact execution attempt.
       description: |
@@ -3490,7 +3490,10 @@ paths:
         must still hold the claim that opened the named attempt; the attempt
         itself may already have finished, because a node writes its closing
         lines after closing the attempt. Trusted controller-internal calls
-        bypass claim validation.
+        bypass claim validation. A controller-dispatched node's work claim
+        token needs no headers: it validates only its own run and node while
+        its claim has not ended, and the answer names the claim's team in
+        `X-Sparkwing-Claim-Team`.
       responses:
         "204": {description: The claim that opened the attempt is live. Empty body.}
         "400": {description: Node and trigger identities were combined.}

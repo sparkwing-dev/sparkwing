@@ -187,11 +187,11 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsWrite, s.readableRun(pathRunID, http.HandlerFunc(s.handleDeleteRun)), scopeLogsDelete))
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
@@ -209,8 +209,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 const (
-	scopeLogsRead   = "logs.read"
-	scopeLogsWrite  = "logs.write"
+	scopeLogsRead  = "logs.read"
+	scopeLogsWrite = "logs.write"
+	// safety: held only by a claim token, which the controller binds to one
+	// run and node on every append and seal; no other route answers it.
+	scopeLogsClaim  = "logs.claim"
 	scopeAdmin      = "admin"
 	scopeLogsDelete = "logs.delete"
 )
@@ -267,6 +270,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				Error:   "unauthenticated",
 				Message: err.Error(),
 			})
+			return
+		}
+		if strings.HasPrefix(raw, "Bearer "+store.ClaimTokenPrefix+"_") {
+			p := &logsPrincipal{Name: "claim", Kind: "claim", Scopes: []string{scopeLogsClaim}, credential: raw}
+			next.ServeHTTP(w, r.WithContext(contextWithLogsPrincipal(r.Context(), p)))
 			return
 		}
 		p, err := s.authenticate(r.Context(), raw)
@@ -847,6 +855,11 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		// safety: a claim's run is labeled with the team the controller
+		// bound the claim to, never one the pod names.
+		if p != nil && p.Kind == "claim" {
+			p.Team = resp.Header.Get(store.ClaimTeamHeader)
+		}
 		if cacheable && s.claimCacheTTL() > 0 {
 			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
 		}
