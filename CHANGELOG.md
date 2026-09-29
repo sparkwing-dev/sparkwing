@@ -32,6 +32,9 @@ unlock.
   Only the first terminal transition attempts profile folding; failed folds are
   not retried. GitHub status retries use the stored outcome. Completion requests
   require `success`, `failed`, or `cancelled`.
+- **object-store metrics:** Reject invalid sample kinds and negative resource
+  values before appending state.
+
 - **orchestrator:** Return node completion-write errors instead of reporting success
 
 - **metrics:** Reject conflicting readings at the same node timestamp; identical retries remain accepted.
