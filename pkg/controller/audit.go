@@ -174,6 +174,14 @@ func auditPathAttrs(route, path string) []any {
 		if name == "id" && i == 3 && (pattern[2] == "runs" || pattern[2] == "triggers") {
 			key = "run_id"
 		}
+		// safety: a repository is named only under repos/{owner}/{name}; a
+		// {name} anywhere else can name a secret.
+		if name == "owner" && pattern[i-1] == "repos" {
+			key = "repo_owner"
+		}
+		if name == "name" && i > 1 && pattern[i-2] == "repos" && pattern[i-1] == "{owner}" {
+			key = "repo_name"
+		}
 		if key == "" {
 			continue
 		}
