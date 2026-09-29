@@ -7796,6 +7796,10 @@ components:
         error: {type: string}
         missing_scope: {type: string}
         principal: {type: string}
+        token_state:
+          type: string
+          enum: [revoked, expired]
+          description: "Set on a 401 when the bearer matched a credential that will never authenticate again. The response also carries `Retry-After: 3600`."
         message: {type: string}
     Run:
       x-sparkwing-go-type: pkg/store.Run

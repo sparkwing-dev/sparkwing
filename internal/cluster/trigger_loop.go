@@ -111,7 +111,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	sem := make(chan struct{}, opts.MaxConcurrent)
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	shed := client.NewShedLog(client.ShedWarnInterval)
+	pacing := newClaimPacing(logger, "trigger loop: ", opts.Token, opts.Poll, nil)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -136,20 +136,10 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			if errors.Is(err, store.ErrMeteredInProcessNodes) {
 				return fmt.Errorf("trigger loop: this credential is metered, so it claims triggers only with --trigger-runner=k8s or warm: %w", err)
 			}
-			if wait, ok := client.UnavailableBackoff(err, opts.Poll); ok {
-				logger.Debug("trigger loop: claim shed by the controller; backing off",
-					"err", err, "retry_after", wait)
-				if shed.Due() {
-					logger.Warn("trigger loop: controller is shedding claims; polling more slowly",
-						"err", err, "retry_after", wait)
-				}
-				sleepOrCancel(ctx, wait)
-				continue
-			}
-			logger.Error("trigger loop: claim failed", "err", err)
-			sleepOrCancel(ctx, opts.Poll)
+			pacing.failed(ctx, err, nil)
 			continue
 		}
+		pacing.succeeded()
 		if trigger == nil {
 			<-sem
 			sleepOrCancel(ctx, client.AdvisedPoll(opts.Poll, cli))
@@ -649,7 +639,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 			if errors.Is(err, context.Canceled) {
 				return triggerClaimCtxDone
 			}
-			if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
+			if client.IsTokenDead(err) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrLockHeld) {
 				logger.Error("trigger loop: trigger claim ended; killing child",
 					"trigger_id", triggerID, "err", err)
 				killChild()

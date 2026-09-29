@@ -57,6 +57,11 @@ type PoolLoopConfig struct {
 
 	SourceName string
 
+	// CredentialChanged reports whether the configuration the token came
+	// from was rewritten. A loop parked on a dead token checks it and ends
+	// with [ErrCredentialChanged] when it does. Nil parks for the hour.
+	CredentialChanged func() bool
+
 	LocalAdmission bool
 
 	LocalReserve string
@@ -239,7 +244,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	// safety: a compute guard holds for as long as the work above it runs, so
 	// the log says so once rather than on every poll.
 	limitLogged := false
-	shed := client.NewShedLog(client.ShedWarnInterval)
+	pacing := newClaimPacing(logger.With("source", cfg.SourceName), "", cfg.Token, cfg.PollInterval, cfg.CredentialChanged)
 	idleSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
@@ -293,6 +298,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			}
 			if errors.Is(err, store.ErrComputeLimit) {
 				observeClaimOutcome("compute-limit")
+				pacing.succeeded()
 				if !limitLogged {
 					limitLogged = true
 					logger.Error("claim withheld; a compute guard is holding this runner back",
@@ -303,6 +309,7 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 			}
 			if errors.Is(err, store.ErrInsufficientCredits) {
 				observeClaimOutcome("insufficient-credits")
+				pacing.succeeded()
 				if !creditsLogged {
 					creditsLogged = true
 					logger.Error("claim withheld; the controller's credit balance is spent",
@@ -311,22 +318,13 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 				sleepOrCancel(ctx, cfg.PollInterval)
 				continue
 			}
-			if wait, ok := client.UnavailableBackoff(err, cfg.PollInterval); ok {
-				observeClaimOutcome("unavailable")
-				logger.Debug("claim shed by the controller; backing off",
-					"err", err, "retry_after", wait, "source", cfg.SourceName)
-				if shed.Due() {
-					logger.Warn("controller is shedding claims; polling more slowly",
-						"err", err, "retry_after", wait, "source", cfg.SourceName)
-				}
-				sleepOrCancel(ctx, wait)
-				continue
+			if pacing.failed(ctx, err, observeClaimPace) {
+				logger.Info(cfg.SourceName + " configuration changed while parked; reloading it")
+				return ErrCredentialChanged
 			}
-			observeClaimOutcome("error")
-			logger.Error("claim failed", "err", err, "source", cfg.SourceName)
-			sleepOrCancel(ctx, cfg.PollInterval)
 			continue
 		}
+		pacing.succeeded()
 		if n == nil {
 			<-sem
 			if sharedSlots != nil {
@@ -648,6 +646,17 @@ func runRunnerCLI(args []string, version string) error {
 	}, slog.Default())
 }
 
+func observeClaimPace(pace client.Pace) {
+	switch {
+	case pace.Parked:
+		observeClaimOutcome("token-dead")
+	case pace.Shed:
+		observeClaimOutcome("unavailable")
+	default:
+		observeClaimOutcome("error")
+	}
+}
+
 func currentCapacity(ctx context.Context, provider headroomProvider) capacityReport {
 	if provider == nil {
 		return capacityReport{}
@@ -787,6 +796,14 @@ func runPoolHeartbeat(
 			if errors.Is(err, store.ErrLockHeld) {
 				logger.Error(source+" heartbeat: claim reaped by controller; cancelling node",
 					"run_id", runID, "node_id", nodeID)
+				killNode()
+				return
+			}
+			// safety: a dead token can neither renew the claim nor report the
+			// node's result, so beating on until the silence window only adds load.
+			if client.IsTokenDead(err) {
+				logger.Error(source+" heartbeat: the controller refuses this runner's token; cancelling node",
+					"run_id", runID, "node_id", nodeID, "err", err)
 				killNode()
 				return
 			}

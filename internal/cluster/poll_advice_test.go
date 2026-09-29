@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -119,37 +120,36 @@ func (c *rateLimitedClaimer) gaps() []time.Duration {
 }
 
 func TestRunPoolLoop_BacksOffOnARateLimitedClaim(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.3s of real work; the fast class runs under -short")
-	}
-	const retryAfter = 60 * time.Millisecond
-	claimer := &rateLimitedClaimer{retryAfter: retryAfter, shed: 3}
+	synctest.Test(t, func(t *testing.T) {
+		const retryAfter = 20 * time.Second
+		claimer := &rateLimitedClaimer{retryAfter: retryAfter, shed: 3}
 
-	cfg := normalizePoolLoopConfig(PoolLoopConfig{
-		ControllerURL: "http://stub",
-		HolderPrefix:  "test",
-		MaxConcurrent: 1,
-		PollInterval:  time.Millisecond,
-		SourceName:    "test runner",
-	})
+		cfg := normalizePoolLoopConfig(PoolLoopConfig{
+			ControllerURL: "http://stub",
+			HolderPrefix:  "test",
+			MaxConcurrent: 1,
+			PollInterval:  time.Millisecond,
+			SourceName:    "test runner",
+		})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	exec := func(ctx context.Context, n *store.Node, holderID string) {}
-	if err := runPoolLoop(ctx, cfg, claimer, exec, nil, discardLogger()); err != nil {
-		t.Fatalf("a shed claim stopped the loop: %v", err)
-	}
-
-	gaps := claimer.gaps()
-	if len(gaps) < 2 {
-		t.Fatalf("loop polled %d times; it cannot show a backoff", len(gaps)+1)
-	}
-	for i, gap := range gaps[:2] {
-		if gap < retryAfter {
-			t.Errorf("poll %d came %s after a 429 naming %s; the loop ignored the backpressure",
-				i+1, gap, retryAfter)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		defer cancel()
+		exec := func(ctx context.Context, n *store.Node, holderID string) {}
+		if err := runPoolLoop(ctx, cfg, claimer, exec, nil, discardLogger()); err != nil {
+			t.Fatalf("a shed claim stopped the loop: %v", err)
 		}
-	}
+
+		gaps := claimer.gaps()
+		if len(gaps) < 3 {
+			t.Fatalf("loop polled %d times; it cannot show a backoff", len(gaps)+1)
+		}
+		for i, gap := range gaps[:3] {
+			if gap < retryAfter {
+				t.Errorf("poll %d came %s after a 429 naming %s; the loop ignored the backpressure",
+					i+1, gap, retryAfter)
+			}
+		}
+	})
 }
 
 func TestRunPoolLoop_AStableIdentityLetsTheBudgetBite(t *testing.T) {
