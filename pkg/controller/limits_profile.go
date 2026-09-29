@@ -72,10 +72,11 @@ const (
 
 // safety: a runner spends more than claims. A two-slot runner honoring its
 // cadences spends roughly 300 requests a minute: 120 empty-queue claim polls,
-// 40 node heartbeats at one every three seconds, and its state writes. The free
-// tier carries one such runner and the paid tier several under one token.
+// 40 node heartbeats at one every three seconds, and its state writes. A
+// signed-up team's tokens share one budget, so the free tier carries one such
+// runner and the paid tier a pool of ten with a fifth to spare.
 const (
-	cloudRequestsPerTokenMinute     = 2000
+	cloudRequestsPerTokenMinute     = 3600
 	cloudFreeRequestsPerTokenMinute = 600
 )
 
@@ -85,8 +86,8 @@ const (
 const cloudRequestRateAlarm = 5000
 
 // safety: a principal's run cap is the guard a pending trigger nobody claims
-// is written against, and the shed depth is the fleet's backstop behind it,
-// sized so one controller's queue scan stays a fraction of a second.
+// is written against, and the shed depth is each team's backstop behind it,
+// sized so one team's queue scan stays a fraction of a second.
 const (
 	cloudRunsPerPrincipalHour     = 600
 	cloudFreeRunsPerPrincipalHour = 60

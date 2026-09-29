@@ -41,7 +41,13 @@ func TestBuildJob_OnlyTheClaimsIDsTokenAndClassVary(t *testing.T) {
 	ja, jb := BuildJob(cfg, a), BuildJob(cfg, b)
 	pa, pb := ja.Spec.Template.Spec, jb.Spec.Template.Spec
 	ca, cb := pa.Containers[0], pb.Containers[0]
+	ia, ib := pa.InitContainers[0], pb.InitContainers[0]
 	pa.Containers, pb.Containers, pa.NodeSelector, pb.NodeSelector = nil, nil, nil, nil
+	pa.InitContainers, pb.InitContainers = nil, nil
+	if ia.Image != ib.Image || !reflect.DeepEqual(ia.Command, ib.Command) || !reflect.DeepEqual(ia.SecurityContext, ib.SecurityContext) ||
+		!reflect.DeepEqual(ia.Args, []string{"fetch-source", "run-1", "build"}) {
+		t.Fatalf("init containers differ beyond the claim:\n%+v\n%+v", ia, ib)
+	}
 	if !reflect.DeepEqual(pa, pb) || !reflect.DeepEqual(ja.Spec.ActiveDeadlineSeconds, jb.Spec.ActiveDeadlineSeconds) {
 		t.Fatalf("pod specs differ beyond the claim:\n%+v\n%+v", pa, pb)
 	}
@@ -122,5 +128,72 @@ func TestConfigValidate_RefusesAnUnpinnedOrUncappedLauncher(t *testing.T) {
 		if cfg.Validate() == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// A launcher Job is pointed at the same caches a runner Job is, and carries
+// no cache credential: its pod asks for a grant with its claim token.
+func TestBuildJob_HandsTheCachesButNoCacheCredential(t *testing.T) {
+	cfg := testConfig()
+	env := func(cfg Config) map[string]string {
+		out := map[string]string{}
+		for _, e := range BuildJob(cfg, testClaim()).Spec.Template.Spec.Containers[0].Env {
+			out[e.Name] = e.Value
+		}
+		return out
+	}
+	bare := env(cfg)
+	for _, name := range []string{"SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL", "GOPROXY"} {
+		if _, ok := bare[name]; ok {
+			t.Fatalf("%s set with no cache configured", name)
+		}
+	}
+	cfg.CacheURL, cfg.GitcacheURL, cfg.DependencyProxyURL = "http://cache", "http://gitcache", "http://cache"
+	got := env(cfg)
+	if got["SPARKWING_CACHE_URL"] != "http://cache" || got["SPARKWING_GITCACHE_URL"] != "http://gitcache" ||
+		!strings.HasPrefix(got["GOPROXY"], "http://cache/proxy/golang") {
+		t.Fatalf("cache env = %v", got)
+	}
+	if _, ok := got["SPARKWING_CACHE_GRANT"]; ok {
+		t.Fatal("a launcher Job carries a cache grant")
+	}
+}
+
+// The source is fetched by an init container the launcher fixes, into the
+// scratch volume the node's container reads, and the pod's disk is bounded
+// by that volume and an equal ephemeral-storage request and limit.
+func TestBuildJob_FetchesSourceInAFixedInitContainer(t *testing.T) {
+	pod := BuildJob(testConfig(), testClaim()).Spec.Template.Spec
+	if len(pod.InitContainers) != 1 {
+		t.Fatalf("init containers = %d, want 1", len(pod.InitContainers))
+	}
+	init, node := pod.InitContainers[0], pod.Containers[0]
+	if !reflect.DeepEqual(init.Command, []string{k8s.JobBinary}) || !reflect.DeepEqual(init.VolumeMounts, node.VolumeMounts) ||
+		*init.SecurityContext.AllowPrivilegeEscalation || !*init.SecurityContext.ReadOnlyRootFilesystem {
+		t.Fatalf("init container = %+v", init)
+	}
+	env := func(c corev1.Container) map[string]string {
+		out := map[string]string{}
+		for _, e := range c.Env {
+			out[e.Name] = e.Value
+		}
+		return out
+	}
+	ie, ne := env(init), env(node)
+	if ie["SPARKWING_SOURCE_DIR"] != "/tmp/src" || ne["SPARKWING_SOURCE_DIR"] != "/tmp/src" || ne["GOFLAGS"] != "-mod=mod" {
+		t.Fatalf("init env %v node env %v", ie, ne)
+	}
+	if _, ok := ie["GOFLAGS"]; ok {
+		t.Fatal("the init container inherits the node's module mode")
+	}
+	want := resource.MustParse("20Gi")
+	for _, c := range []corev1.Container{init, node} {
+		r, l := c.Resources.Requests[corev1.ResourceEphemeralStorage], c.Resources.Limits[corev1.ResourceEphemeralStorage]
+		if r.Cmp(want) != 0 || l.Cmp(want) != 0 {
+			t.Fatalf("%s ephemeral storage %s/%s, want 20Gi", c.Name, r.String(), l.String())
+		}
+	}
+	if got := pod.Volumes[0].EmptyDir.SizeLimit; got.Cmp(want) != 0 {
+		t.Fatalf("scratch size limit %s, want 20Gi", got.String())
 	}
 }

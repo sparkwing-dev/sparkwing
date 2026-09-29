@@ -42,6 +42,38 @@ unlock.
   through claim tokens. Schema v84 adds the `repos` table, `runs.dispatch`
   and `nodes.timeout_ms`.
 
+- **controller + store + runner:** A controller-dispatched Job fetches its
+  run's source in the Job's own pod, and the controller never fetches a
+  customer repository. The launcher gives each Job an init container,
+  `sparkwing-runner fetch-source`, that asks
+  `POST /api/v1/runs/{id}/source-credential` with its claim token for a
+  read-only GitHub App token covering exactly the run's repository and the
+  repositories a team owner listed for it, minted by the GitHub IDs an
+  owner's approval records, so a rename or a reused name changes nothing it
+  reaches. It checks the run out into the
+  pod's scratch volume as a real repository, `.git` included, with the depth
+  (default 1, `0` for all history), tags, submodules and LFS the plan's
+  `source` asks for; every submodule URL, relative ones included, must name a
+  listed repository. When the owner listed repositories it downloads the
+  checkout's modules, fetching only those directly. The token stays in the
+  init container's processes, which fail the pod if its bytes are in any file
+  left on the shared volume, and never reaches the pipeline's container,
+  which runs with `GOFLAGS=-mod=mod`. A claim gets at most three credentials,
+  so a failed mint can be asked for again, and none once its attempt has
+  started, and each issue is recorded as a git credential release. Schema v86
+  adds `claim_tokens.source_mints` and `github_app_extra_repos.extra_repo_id`;
+  an extra repository approved before it gets no token until an owner saves
+  the list again. Cloud fetches source only through
+  the GitHub App; stored git credentials serve self-hosted runners. A Job's
+  scratch volume and its ephemeral-storage request and limit are 20Gi. A
+  claim token's cache grant is bound to its claim and lives five minutes, so
+  its pod refreshes it. The launcher now claims a node whose runner selector
+  the Cloud runner image satisfies (`tool:git`, `tool:go`) instead of only
+  unlabelled ones, and hands each Job the cache, git cache and dependency
+  proxy URLs a runner Job gets (`--cache`, `--gitcache`,
+  `--dependency-proxy`). A launcher-owned node that outwaits its claim wait
+  fails with a reason naming the Cloud image or the team's credits. The
+  runner image gains git-lfs.
 - **dashboard + controller:** An operator console at `/operator` finds a team
   by slug, name or owner email, shows its balance, 30-day purchases against
   its limit, trust, holds and recent business events, and grants, revokes or
@@ -52,6 +84,16 @@ unlock.
   it, through their own signed-in session; no token does, an admin token
   included. A limit override on a revoked team is refused until trust is
   restored.
+- **dashboard + controller:** The operator console gains a Waitlist view,
+  with its size in the console's nav. It lists waiting accounts newest first,
+  50 to a page, with email, name, sign-in provider and when each joined the
+  list, and approves one row or the selected rows. It reads
+  `GET /api/v1/operator/waitlist`, which pages with `limit` and `offset` and
+  returns `total`, and approves through
+  `POST /api/v1/operator/waitlist/approve`, which takes the body of
+  `POST /api/v1/signups/waitlist/approve`. Every approval, from either route,
+  commits with an `account.admitted` business event naming the approver.
+  `GET /api/v1/signups/waitlist` gains `provider`.
 - **controller + store:** A team buys at most $50 of credit over 30 days, and
   at most $50 at once, until it is trusted; a trusted team buys up to $500.
   A checkout past the limit answers `409` with `"code": "purchase_limit"`, and
@@ -872,6 +914,10 @@ unlock.
 
 ### Changed
 
+- **controller:** The `cloud` limits profile allows a signed-up team 3600
+  requests a minute, up from 2000. A team's tokens share that budget, and a
+  two-slot runner spends about 300 a minute, so a pool of ten runners no longer
+  runs into it.
 - **controller + sdk:** A ready node no agent claims now waits up to its claim
   wait, 24 hours by default or what `Plan.ClaimWait` sets, instead of the
   15-minute queue deadline, and then fails with `queue_timeout` and an error
@@ -1191,6 +1237,20 @@ unlock.
 
 ### Fixed
 
+- **controller:** `--shed-queue-depth` measures the submitting team's pending
+  triggers rather than every team's, so one team's backlog no longer answers
+  503 to another team's webhooks and submissions. Schema v85 adds the partial
+  index `idx_triggers_team_pending` that count reads, and a burst of
+  submissions shares one count. An older binary still reads and writes a v85
+  store.
+- **runner:** The Kubernetes Job dispatcher waits out a node claim the
+  controller answered 429 or 503 with a Retry-After and claims again, instead
+  of failing the node. It waits no longer than the node's claim wait (24 hours
+  by default) or its declared timeout, whichever is shorter, and then fails the
+  node with `queue_timeout`.
+- **client:** A `Retry-After` too large to be a duration clamps to one hour
+  instead of overflowing, which could read as a negative or near-zero wait and
+  send a claim loop straight back.
 - **controller:** A live queue runner holds a node's agent offer window only
   when its `--allow-repo` list admits the node's repository. A runner limited
   to other repositories no longer delays every run of its team by five seconds.
@@ -1561,6 +1621,45 @@ unlock.
   did.
 
 ### Security
+
+- **controller + store (Breaking):** Annotations and node metric samples are
+  bounded, and node metric reads are paged. See [migration guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An
+  annotation holds at most 64 KiB, and a run at most 1,000 annotations and
+  4 MiB of them JSON-encoded, node and step annotations together; past a bound
+  the append answers `413` for size or `429` for count and stores nothing. A
+  node holds at most 10,000 metric samples, and a later sample answers `429`;
+  the runner then stops sampling that node and records one `metrics_stopped`
+  event, "metric sampling stopped at 10000 samples".
+  `GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` now answers one page of
+  samples, 1,000 by default and up to `limit=10000`, with `next_cursor` to
+  pass as `cursor` while more follow; the Go client and the dashboard follow
+  every page.
+
+- **logs:** `DELETE /api/v1/logs/{runID}` takes `logs.delete` or `admin` and
+  no longer accepts `logs.write`, so a runner token an editor mints can no
+  longer erase its team's run logs. The controller's log-deletion credential,
+  `sparkwing runs prune` under an operator token, and `--retention` keep
+  deleting as before.
+
+- **controller + store + dashboard (Breaking):** A Google or GitHub sign-in no
+  longer joins an existing account because both report the same verified
+  email. See [migration guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The first sign-in by a provider account whose address an existing
+  account holds, from a provider that account does not sign in with, answers
+  `409` with "An account with this email already exists. Sign in the way you
+  did before, then link this provider from account settings.", and the
+  dashboard shows it on the sign-in page. A reassigned work address let its new holder take over the
+  previous holder's account. To add the second provider, sign in with the
+  first and link the other from **Account -> Linked sign-ins**; sign-ins
+  attached before this change keep working. `SignInResult.Linked` is removed
+  from `pkg/store`.
+
+- **controller + store:** `POST /api/v1/data/upload` refuses a zero-byte
+  declaration with 400, and a team holds at most 100 uncommitted, unexpired
+  uploads; the next reservation answers 429 until one commits or its 24-hour
+  window ends. A zero-byte upload reserved no quota, so it let any account
+  keep an unbounded number of rows. The runner no longer uploads or fetches an
+  empty artifact blob, whose content its key already names, so empty
+  artifacts keep working.
 
 - **store:** Schema v82 adds a unique index that holds one unrevoked runner
   token per agent name in a team, so two concurrent mints of one name can no

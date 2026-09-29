@@ -46,6 +46,7 @@ type submittedPlan struct {
 	Nodes     []submittedNode   `json:"nodes"`
 	PlanConc  *json.RawMessage  `json:"plan_concurrency"`
 	PlanConcs []json.RawMessage `json:"plan_concurrency_groups"`
+	Source    *plannedSource    `json:"source"`
 }
 
 type submittedNode struct {
@@ -272,6 +273,9 @@ func validatePlan(body []byte) ([]plannedNode, error) {
 	}
 	if dec.More() {
 		return nil, planRefused("the plan holds more than one JSON document")
+	}
+	if err := validPlannedSource(plan.Source); err != nil {
+		return nil, planRefused("%v", err)
 	}
 	if plan.PlanConc != nil || len(plan.PlanConcs) > 0 {
 		return nil, planRefused("plan-level concurrency groups are not supported; declare concurrency on nodes")

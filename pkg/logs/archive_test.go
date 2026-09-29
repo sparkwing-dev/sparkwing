@@ -770,7 +770,7 @@ func TestAFreeTeamsArchivedLogsExpireBeforeAFundedTeams(t *testing.T) {
 
 // The controller's log-deletion credential, which belongs to the operator's
 // team, deletes another team's archived run and says how many archived bytes
-// went; a team's own bearer cannot delete a run of another team.
+// went; a team bearer, which carries no logs.delete, cannot delete a run.
 func TestTheDeletionCredentialDeletesAnyTeamsArchivedRun(t *testing.T) {
 	f := newArchiveFixture(t, 0)
 	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", "0123456789\n"); code != http.StatusNoContent {
@@ -780,8 +780,8 @@ func TestTheDeletionCredentialDeletesAnyTeamsArchivedRun(t *testing.T) {
 	if n, err := f.srv.ArchiveOnce(context.Background(), time.Now()); err != nil || n != 1 {
 		t.Fatalf("archive = %d, %v", n, err)
 	}
-	if code, _ := f.do(t, http.MethodDelete, "/api/v1/logs/run-a", "Bearer b", ""); code != http.StatusNotFound {
-		t.Fatalf("another team's bearer deleting = %d, want 404", code)
+	if code, _ := f.do(t, http.MethodDelete, "/api/v1/logs/run-a", "Bearer b", ""); code != http.StatusForbidden {
+		t.Fatalf("a team bearer deleting = %d, want 403", code)
 	}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, f.http.URL+"/api/v1/logs/run-a", nil)
 	if err != nil {

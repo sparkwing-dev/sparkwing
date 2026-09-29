@@ -626,6 +626,8 @@ paths:
                 message: {type: string}
       responses:
         "204": {description: Appended.}
+        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "429": {description: The run already holds 1000 annotations.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/summary:
     parameters:
@@ -684,23 +686,36 @@ paths:
             schema: {$ref: "#/components/schemas/MetricSample"}
       responses:
         "204": {description: Recorded.}
+        "429": {description: The node already holds 10000 samples.}
     get:
       x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
       tags: [nodes]
-      summary: List metric samples for a node.
+      summary: List one page of a node's metric samples, oldest first.
+      description: >-
+        A page holds `limit` samples, 1000 by default and at most 10000. While more follow, `next_cursor` is set; pass it as `cursor` for the next page.
+      parameters:
+        - in: query
+          name: limit
+          schema: {type: integer, default: 1000, minimum: 1, maximum: 10000}
+        - in: query
+          name: cursor
+          description: The previous page's `next_cursor`, the last sample's `ts`.
+          schema: {type: string}
       responses:
         "200":
-          description: Sample list, oldest first.
+          description: One page of samples, oldest first.
           content:
             application/json:
               schema:
-                x-sparkwing-go-type: none
+                x-sparkwing-go-type: pkg/controller.metricsPage
                 type: object
                 required: [points]
                 properties:
                   points:
                     type: array
                     items: {$ref: "#/components/schemas/MetricSample"}
+                  next_cursor: {type: string}
+        "400": {description: limit or cursor is malformed.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/mark-ready:
     parameters:
@@ -1029,6 +1044,8 @@ paths:
                 message: {type: string}
       responses:
         "204": {description: Appended.}
+        "413": {description: "The annotation exceeds 64 KiB, or the run's annotations would exceed 4 MiB JSON-encoded."}
+        "429": {description: The run already holds 1000 annotations.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/steps/summary:
     parameters:
@@ -2206,7 +2223,7 @@ paths:
       tags: [nodes]
       summary: Claim a ready node of a controller-dispatched run for a launcher Job.
       description: >-
-        Claims a ready node of any team's controller-dispatched run that requires no executor labels, reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
+        Claims a ready node of any team's controller-dispatched run whose runner selector the Cloud runner image satisfies (its declared tools, the cloud class and location), reserves its credits, and mints the claim token the node's Job carries, in one transaction. Each call reads a bounded number of candidates in ready order, passing over nodes whose team cannot pay, and a call that finds none resumes the next call where it stopped, wrapping at the end of the queue; so the node claimed is not always the oldest ready one. The token lives `lifetime_secs` from the claim: `deadline_secs`, or less when the node declares a shorter timeout.
       requestBody:
         required: true
         content:
@@ -5066,7 +5083,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
+      x-sparkwing-scope: claim or nodes.claim or triggers.claim
       summary: Registered route awaiting a description.
       description: Seeded by internal/apispec from the route table. Replace this text with what the route does, what it accepts, and what it answers.
       responses:
@@ -6435,12 +6452,13 @@ paths:
                     items:
                       x-sparkwing-go-type: pkg/controller.waitlistedJSON
                       type: object
-                      required: [id, email, name, reason, created_at, waitlisted_at]
+                      required: [id, email, name, reason, provider, created_at, waitlisted_at]
                       properties:
                         id: {type: string}
                         email: {type: string}
                         name: {type: string}
                         reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
                         created_at: {type: integer, format: int64, description: Unix seconds.}
                         waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
         "400": {$ref: "#/components/responses/BadRequest"}
@@ -6453,7 +6471,7 @@ paths:
       tags: [users]
       summary: Admit waitlisted users by id, or the oldest n.
       description: >-
-        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. The controller runs the deployment's approval notifier for each admission.
+        Each admitted user without a team gets its personal space, and its open session moves into it on the next `GET /api/v1/me`. An id not on the waitlist is skipped. Each admission and its account.admitted business event, naming the caller, commit together. The controller runs the deployment's approval notifier for each admission.
       requestBody:
         required: true
         content:
@@ -6845,7 +6863,7 @@ paths:
               properties:
                 kind: {type: string, enum: [binary, artifact, source]}
                 key: {type: string}
-                size: {type: integer, format: int64}
+                size: {type: integer, format: int64, minimum: 1}
                 sha256: {type: string}
                 run_id: {type: string}
       responses:
@@ -6866,6 +6884,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: The immutable object already exists.}
         "413": {description: The upload exceeds its size or storage allowance.}
+        "429": {description: The team already holds 100 uncommitted uploads.}
 
   /api/v1/data/commit:
     post:
@@ -7238,6 +7257,130 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/operator/waitlist:
+    get:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: List a page of waitlisted users, newest first, with the waitlist's size.
+      parameters:
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}, description: At most this many; defaults to 50.}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0}, description: Skip this many of the newest.}
+      responses:
+        "200":
+          description: The page and the number of users waiting.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [accounts, total]
+                properties:
+                  total: {type: integer}
+                  accounts:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.waitlistedJSON
+                      type: object
+                      required: [id, email, name, reason, provider, created_at, waitlisted_at]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        name: {type: string}
+                        reason: {type: string, enum: [deployment, operator, hourly_signups, daily_signups, free_tier_closed, github_account_age]}
+                        provider: {type: string, description: "The sign-in provider of the user's first identity, such as google or github."}
+                        created_at: {type: integer, format: int64, description: Unix seconds.}
+                        waitlisted_at: {type: integer, format: int64, description: Unix seconds.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/operator/waitlist/approve:
+    post:
+      x-sparkwing-scope: operator
+      security:
+        - sessionAuth: []
+      tags: [operator]
+      summary: Admit waitlisted users from the operator console.
+      description: >-
+        Takes the body and answers the shape of POST /api/v1/signups/waitlist/approve. Each admission and its account.admitted business event, naming the operator, commit together.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.approveWaitlistReq
+              type: object
+              description: Name exactly one of `account_ids` and `oldest`, at most 1000.
+              properties:
+                account_ids:
+                  type: array
+                  items: {type: string}
+                oldest: {type: integer, minimum: 1}
+      responses:
+        "200":
+          description: The users admitted.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: none
+                type: object
+                required: [approved]
+                properties:
+                  approved:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/controller.approvedJSON
+                      type: object
+                      required: [id, email, active_team]
+                      properties:
+                        id: {type: string}
+                        email: {type: string}
+                        active_team: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/runs/{id}/source-credential:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Issue a claim's one source credential to its Job's init container.
+      description: >-
+        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), named by their GitHub IDs so a rename or a reused name changes nothing it reaches, and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets at most three, so a failed or lost mint can be asked for again, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
+      responses:
+        "200":
+          description: The credential and what to check out.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.SourceCredential
+                type: object
+                properties:
+                  token: {type: string}
+                  expires_at: {type: integer, format: int64}
+                  repo_url: {type: string}
+                  sha: {type: string}
+                  branch: {type: string}
+                  repositories: {type: array, items: {type: string}}
+                  source:
+                    x-sparkwing-go-type: pkg/store.SourceSpec
+                    type: object
+                    properties:
+                      depth: {type: integer}
+                      tags: {type: boolean}
+                      submodules: {type: boolean}
+                      lfs: {type: boolean}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The run records no commit.}
 
 components:
   securitySchemes:

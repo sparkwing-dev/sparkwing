@@ -1121,6 +1121,10 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeStateError(w http.ResponseWriter, err error) {
+	if status := runLimitStatus(err); status != 0 {
+		writeError(w, status, err)
+		return
+	}
 	switch {
 	case errors.Is(err, store.ErrSecretInputHash), errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
@@ -1318,19 +1322,20 @@ func (l *Loopback) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	after, limit, err := metricsPageRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	samples, err := c.ListNodeMetrics(r.Context(), r.PathValue("id"), r.PathValue("nodeID"))
 	if err != nil {
 		writeStateError(w, err)
 		return
 	}
-	points := make([]metricSample, 0, len(samples))
-	for _, s := range samples {
-		points = append(points, metricSample{
-			TS:            s.TS.UTC().Format(time.RFC3339Nano),
-			CPUMillicores: s.CPUMillicores,
-			MemoryBytes:   s.MemoryBytes,
-			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
-		})
+	from := 0
+	for from < len(samples) && !after.IsZero() && !samples[from].TS.After(after) {
+		from++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"points": points})
+	samples = samples[from:]
+	writeJSON(w, http.StatusOK, newMetricsPage(samples[:min(len(samples), limit+1)], limit))
 }

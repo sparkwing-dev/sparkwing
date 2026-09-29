@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -28,6 +29,8 @@ func operatorRoutes(team string) [][2]string {
 		{"POST", base + "/grants"},
 		{"POST", base + "/freeze"},
 		{"POST", base + "/unfreeze"},
+		{"GET", "/api/v1/operator/waitlist"},
+		{"POST", "/api/v1/operator/waitlist/approve"},
 	}
 }
 
@@ -197,5 +200,104 @@ func TestOperatorConsole_KeepsARevocationAndDisputeHolds(t *testing.T) {
 	if code := f.call("POST", base+"/unfreeze", operator.auth, map[string]any{"reason": "done"}, &team); code != http.StatusOK ||
 		!team.Frozen || !slices.Equal(team.Holds, []string{"dp_1"}) {
 		t.Errorf("unfreeze = %d %+v, want only the dispute hold left", code, team)
+	}
+}
+
+type operatorWaitlist struct {
+	Total    int `json:"total"`
+	Accounts []struct {
+		ID       string `json:"id"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Provider string `json:"provider"`
+	} `json:"accounts"`
+}
+
+func (w operatorWaitlist) emails() []string {
+	var out []string
+	for _, a := range w.Accounts {
+		out = append(out, a.Email)
+	}
+	return out
+}
+
+func TestOperatorConsole_ListsTheWaitlistNewestFirstAndApprovesByID(t *testing.T) {
+	f, operator, owner := operatorFixture(t)
+	f.setSignUp(map[string]any{"mode": "waitlist", "reason": "until launch"})
+	ids := map[string]string{}
+	for _, name := range []string{"ann", "bob", "cat"} {
+		ids[name] = f.signIn(person("w-"+name, name+"@example.com", name)).User.ID
+	}
+
+	var page operatorWaitlist
+	if code := f.call("GET", "/api/v1/operator/waitlist?limit=2", operator.auth, nil, &page); code != http.StatusOK ||
+		page.Total != 3 || !slices.Equal(page.emails(), []string{"cat@example.com", "bob@example.com"}) ||
+		page.Accounts[0].Provider != "google" || page.Accounts[0].Name != "cat Test" {
+		t.Fatalf("first page = %d %+v", code, page)
+	}
+	if code := f.call("GET", "/api/v1/operator/waitlist?limit=2&offset=2", operator.auth, nil, &page); code != http.StatusOK ||
+		!slices.Equal(page.emails(), []string{"ann@example.com"}) {
+		t.Fatalf("second page = %d %+v", code, page)
+	}
+	for _, q := range []string{"limit=0", "limit=1001", "offset=-1", "offset=x"} {
+		if code := f.call("GET", "/api/v1/operator/waitlist?"+q, operator.auth, nil, nil); code != http.StatusBadRequest {
+			t.Errorf("%s = %d want 400", q, code)
+		}
+	}
+
+	approve := map[string]any{"account_ids": []string{ids["ann"], ids["cat"]}}
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", owner.auth, approve, nil); code != http.StatusForbidden {
+		t.Fatalf("a team owner's approval = %d want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", "Bearer "+f.admin, approve, nil); code != http.StatusForbidden {
+		t.Fatalf("an admin token's approval = %d want 403", code)
+	}
+	if f.call("GET", "/api/v1/operator/waitlist", operator.auth, nil, &page); page.Total != 3 {
+		t.Fatalf("a refused approval admitted someone: %+v", page)
+	}
+
+	var approved struct {
+		Approved []struct {
+			Email      string `json:"email"`
+			ActiveTeam string `json:"active_team"`
+		} `json:"approved"`
+	}
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator.auth, approve, &approved); code != http.StatusOK ||
+		len(approved.Approved) != 2 || approved.Approved[0].ActiveTeam == "" {
+		t.Fatalf("approve = %d %+v", code, approved)
+	}
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator.auth, approve, &approved); code != http.StatusOK || len(approved.Approved) != 0 {
+		t.Errorf("approving again = %d %+v, want nobody admitted twice", code, approved)
+	}
+	if f.call("GET", "/api/v1/operator/waitlist", operator.auth, nil, &page); page.Total != 1 ||
+		!slices.Equal(page.emails(), []string{"bob@example.com"}) {
+		t.Errorf("waitlist after approving = %+v", page)
+	}
+
+	admitted := map[string]string{}
+	rows, err := f.store.DB().Query(`SELECT account, actor, attrs FROM business_events WHERE kind = ?`, store.BusinessEventAccountAdmitted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var account, actor, raw string
+		var attrs map[string]any
+		if err := rows.Scan(&account, &actor, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(raw), &attrs); err != nil {
+			t.Fatal(err)
+		}
+		admitted[account] = actor + " via " + fmt.Sprint(attrs["via"])
+	}
+	want := map[string]string{
+		ids["ann"]: "korey@example.com via waitlist",
+		ids["cat"]: "korey@example.com via waitlist",
+	}
+	for name, id := range ids {
+		if admitted[id] != want[id] {
+			t.Errorf("%s admission = %q want %q", name, admitted[id], want[id])
+		}
 	}
 }

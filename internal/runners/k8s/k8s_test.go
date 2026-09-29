@@ -121,7 +121,7 @@ func TestBuildJob_PointsPackageManagersAtTheDependencyProxy(t *testing.T) {
 }
 
 func TestDependencyProxyEnv_NamesAreValidK8sEnvNames(t *testing.T) {
-	for _, e := range dependencyProxyEnv("http://cache") {
+	for _, e := range DependencyProxyEnv("http://cache") {
 		if errs := validation.IsEnvVarName(e.Name); len(errs) > 0 {
 			t.Errorf("env name %q rejected by K8s validation: %v", e.Name, errs)
 		}
@@ -165,7 +165,7 @@ func TestDependencyProxyEnv_URLJoin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := map[string]string{}
-			for _, e := range dependencyProxyEnv(tc.base) {
+			for _, e := range DependencyProxyEnv(tc.base) {
 				got[e.Name] = e.Value
 			}
 			if got["GOPROXY"] != tc.wantGoproxy {
@@ -180,8 +180,8 @@ func TestDependencyProxyEnv_URLJoin(t *testing.T) {
 
 func TestDependencyProxyEnv_RejectsUnusableBase(t *testing.T) {
 	for _, base := range []string{"", "cache.sparkwing.svc", "http://", "://cache"} {
-		if got := dependencyProxyEnv(base); got != nil {
-			t.Errorf("dependencyProxyEnv(%q) = %#v, want nil", base, got)
+		if got := DependencyProxyEnv(base); got != nil {
+			t.Errorf("DependencyProxyEnv(%q) = %#v, want nil", base, got)
 		}
 	}
 }

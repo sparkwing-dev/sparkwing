@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -44,4 +47,35 @@ func (c *Client) ClaimLaunch(ctx context.Context, holderID string, lease, deadli
 	default:
 		return nil, readHTTPError(resp)
 	}
+}
+
+// ErrControllerFailed marks an answer of 500 or more: the controller or
+// something it called failed, and the same request may succeed again.
+var ErrControllerFailed = errors.New("the controller failed to answer")
+
+// SourceCredential asks for the one GitHub credential the calling claim's
+// init container fetches runID's source with. The controller issues it once
+// per claim, and never once the claim's attempt has started.
+func (c *Client) SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/runs/"+url.PathEscape(runID)+"/source-credential", http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return nil, fmt.Errorf("%w: %w", ErrControllerFailed, readHTTPError(resp))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, readHTTPError(resp)
+	}
+	var out store.SourceCredential
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

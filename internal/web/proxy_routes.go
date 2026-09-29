@@ -102,6 +102,8 @@ var operatorProxyRoutes = []proxyRoute{
 	{"POST /api/v1/operator/teams/{team}/grants", ""},
 	{"POST /api/v1/operator/teams/{team}/freeze", ""},
 	{"POST /api/v1/operator/teams/{team}/unfreeze", ""},
+	{"GET /api/v1/operator/waitlist", ""},
+	{"POST /api/v1/operator/waitlist/approve", ""},
 }
 
 // safety: the dashboard reads logs on behalf of a browser session, so the logs bearer

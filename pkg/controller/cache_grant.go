@@ -23,6 +23,10 @@ type CacheGrantResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+// ClaimCacheGrantTTL bounds a claim token's cache grant, and so how long the
+// cache serves a pod whose claim was lost or cancelled.
+const ClaimCacheGrantTTL = 5 * time.Minute
+
 // safety: The cache cannot resolve runner tokens, so the controller vouches for the run's owning team.
 // teamOf must name that team: the grant is the cache's only team boundary and expires with the credential.
 func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, error)) http.Handler {
@@ -76,7 +80,17 @@ func (s *Server) handleRunCacheGrant(teamOf func(*http.Request) (store.Team, err
 		}
 		var claim *authwire.CacheClaim
 		node, trigger := claimIdentityShape(r)
-		if node && trigger {
+		if tok, ok := claimTokenFromContext(r.Context()); ok {
+			// safety: the cache checks a grant's signature alone, so a claim's grant lives
+			// minutes, not hours, and its pod refreshes it through this claim-checked route.
+			ttl = min(ttl, ClaimCacheGrantTTL)
+			// safety: the grant carries the claim, which every controller use
+			// of it re-checks, and expires with the claim token.
+			claim = &authwire.CacheClaim{
+				Kind: authwire.CacheClaimToken, NodeID: tok.NodeID, Generation: tok.Generation,
+				Principal: p.Name, TokenPrefix: tok.Prefix,
+			}
+		} else if node && trigger {
 			writeError(w, http.StatusConflict, store.ErrLockHeld)
 			return
 		}

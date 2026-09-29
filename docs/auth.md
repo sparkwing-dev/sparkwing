@@ -524,8 +524,8 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `runs.control`    | POST `/runs/{id}/cancel`, `/runs/{id}/retry`, `/runs/{id}/nodes/{id}/bounce`, `/runs/{id}/nodes/{id}/release`, and the cron writes (`/crons/repos`, `pause`, `resume`, `run`, `disarm`, `override`): acting on a run or schedule somebody else started |
 | `nodes.claim`     | POST `/nodes/claim`, `heartbeat`, the per-node write routes, GET claimed node data, GET the claimed run and trigger, and read-only Git proxy routes scoped to a live claimed run |
 | `logs.read`       | GET on logs-service (`/api/v1/logs/*`, `/api/v1/logs/search`)                                      |
-| `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
-| `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it |
+| `logs.write`      | POST on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}/{nodeID}/seal`)      |
+| `logs.delete`     | DELETE of any team's run logs, or of a whole team's logs, on the logs service, and nothing else; the controller's log-deletion credential. No team token carries it, so only it and `admin` delete logs: a runner or team token with `logs.write` cannot |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`. `/triggers/{id}` alone also admits a `nodes.claim` or `triggers.claim` token holding a live claim on that run |
 | `triggers.claim`  | POST `/api/v1/triggers/claim`, `/triggers/{id}/heartbeat`, `/triggers/{id}/done`, and GET the live claimed trigger and its run. The heartbeat and the done name a trigger, and each is bound to the claimant that trigger's row records |
 | `runs.state`      | POST `/api/v1/runs`, `/runs/{id}/finish`, `/runs/{id}/plan`, `/runs/{id}/nodes`, `/runs/{id}/events`, per-node `start`, `finish`, `deps`, `status`, the offer-round routes `mark-ready`, `revoke-ready`, `finalize-ready`, `auto-retry/reset`, the slot routes `/concurrency/{key}/acquire`, `heartbeat`, `release`, `holder`, `resolve`, `cancel-waiter`, and PUT `/pipelines/{name}/profile/pin`. Every write naming a run is bound to a run the caller owns; the pin names a pipeline and is bound to a live claim on a run of it |
@@ -922,8 +922,16 @@ links its sign-in.
 
 A linked sign-in never changes the account's email, at the link or at any later
 sign-in through it, and does not withdraw another account's claim on its
-address. The rule for joining by email is unchanged: a new identity still joins
-an account only when both sides hold the address verified.
+address. A provider account joins an existing account only through this link
+flow, never by its address. A first sign-in whose verified address an existing
+account holds, from a provider that account has no sign-in with, answers `409`:
+"An account with this email already exists. Sign in the way you did before,
+then link this provider from account settings." The message names none of the
+account's providers, because the person holding the address may not be the
+account's owner. A matching address shows only who holds it now, and a reassigned work
+address would otherwise reach the previous holder's teams. A second provider
+account from a provider the account already signs in with gets an account of its
+own, as does one the account unlinked.
 
 `DELETE /api/v1/me/identities/{provider}` unlinks a sign-in while the account
 keeps at least one other (`409 last_sign_in_method` otherwise). It ends every
@@ -945,8 +953,8 @@ the account's sign-in methods and the providers it can link.
 Every new user costs a personal space, and a personal space holds a free
 storage allowance, so the sign-up gate bounds how many a burst of new provider
 accounts can take before the operator looks. It never touches a user that
-already exists: a returning user, and a new identity that links to one, sign in
-as before in every state.
+already exists: a returning user, and a sign-in the user linked, sign in as
+before in every state.
 
 A new user meets the gate at its first sign-in. The gate admits it, which
 creates its personal space, or places it on the waitlist. A waitlisted user

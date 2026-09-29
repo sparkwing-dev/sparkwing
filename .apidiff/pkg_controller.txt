@@ -58,6 +58,7 @@ type Cipher interface {
 
 	Open(envelope string) (string, error)
 }
+const ClaimCacheGrantTTL = 5 * time.Minute
 const ClaimPollInterval = 500 * time.Millisecond
 const CloudRetentionDays = 30
 func CompliantClaimPollsPerMinute() int

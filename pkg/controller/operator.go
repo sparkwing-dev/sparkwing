@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,4 +227,33 @@ func (s *Server) writeOperatorFreeze(w http.ResponseWriter, r *http.Request, t *
 	writeJSON(w, http.StatusOK, map[string]any{
 		"team": string(t.Team()), "frozen": freeze.Frozen, "holds": append([]string{}, freeze.Disputes...),
 	})
+}
+
+const operatorWaitlistPage = 50
+
+func (s *Server) handleOperatorWaitlist(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, offset := operatorWaitlistPage, 0
+	for _, v := range []struct {
+		name     string
+		dst      *int
+		min, max int
+	}{{"limit", &limit, 1, maxWaitlistPage}, {"offset", &offset, 0, math.MaxInt32}} {
+		if raw := q.Get(v.name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < v.min || n > v.max {
+				writeError(w, http.StatusBadRequest, fmt.Errorf("%s is %d to %d", v.name, v.min, v.max))
+				return
+			}
+			*v.dst = n
+		}
+	}
+	ctx := r.Context()
+	waiting, err := s.store.NewestWaitlisted(ctx, limit, offset)
+	counts, cerr := s.store.SignUpCounts(ctx, time.Now())
+	if err := errors.Join(err, cerr); err != nil {
+		s.writeInternalError(w, r, "operator waitlist", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": waitlistBody(waiting), "total": counts.Waitlisted})
 }

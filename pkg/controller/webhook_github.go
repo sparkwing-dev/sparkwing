@@ -387,7 +387,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, tenant
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github push") {
+	if !s.admitTriggerSubmission(w, r, tenant, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github push") {
 		return
 	}
 
@@ -536,7 +536,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	if s.githubDeliveryAlreadyRan(w, r, tenant, pipeline, delivery, body) {
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github pull_request") {
+	if !s.admitTriggerSubmission(w, r, tenant, githubFloodKey(tenant.Team(), pipeline, payload.Repository.FullName), "github pull_request") {
 		return
 	}
 

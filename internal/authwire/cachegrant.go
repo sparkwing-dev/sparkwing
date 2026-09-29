@@ -42,6 +42,10 @@ type CacheClaim struct {
 	TokenPrefix   string `json:"t"`
 }
 
+// CacheClaimToken is the [CacheClaim] kind of a claim token's grant, whose
+// Generation and NodeID name the claim the token was minted for.
+const CacheClaimToken = "claim"
+
 // OperatorTeam is the team the deployment operator's own runs belong to. The
 // cache lets its grants read every mirror, because only the operator
 // registers mirrors and they are the operator's own repositories; the store

@@ -737,16 +737,29 @@ export interface NodeMetrics {
   points: MetricPoint[];
 }
 
+// A node holds at most 10,000 samples, which is also the largest page, so
+// one request normally reads them all; the loop follows next_cursor anyway.
+const METRIC_PAGE = 10000;
+
 export async function getNodeMetrics(
   runID: string,
   nodeID: string,
 ): Promise<NodeMetrics> {
-  const res = await authFetch(
-    `${API_URL}/api/v1/runs/${runID}/nodes/${nodeID}/metrics`,
-    { cache: "no-store" },
-  ).catch(() => null);
-  if (!res || !res.ok) return { points: [] };
-  return res.json();
+  const points: MetricPoint[] = [];
+  let cursor = "";
+  for (;;) {
+    const qs = new URLSearchParams({ limit: String(METRIC_PAGE) });
+    if (cursor) qs.set("cursor", cursor);
+    const res = await authFetch(
+      `${API_URL}/api/v1/runs/${runID}/nodes/${nodeID}/metrics?${qs}`,
+      { cache: "no-store" },
+    ).catch(() => null);
+    if (!res || !res.ok) return { points };
+    const page: NodeMetrics & { next_cursor?: string } = await res.json();
+    points.push(...(page.points ?? []));
+    if (!page.next_cursor || page.next_cursor === cursor) return { points };
+    cursor = page.next_cursor;
+  }
 }
 
 export type JobMetrics = NodeMetrics;

@@ -27,7 +27,7 @@ func TestLimitsProfile_HostedProfilesCarryTheDocumentedValues(t *testing.T) {
 			want: controller.LimitsProfileValues{
 				ClaimsPerRunnerMinute:     480,
 				HeartbeatsPerRunnerMinute: 1200,
-				RequestsPerTokenMinute:    2000,
+				RequestsPerTokenMinute:    3600,
 				RequestsPerMinuteAlarm:    5000,
 				MaxLogStreamsPerPrincipal: 50,
 				MaxDownloadsPerPrincipal:  20,
@@ -162,5 +162,22 @@ func TestLimitsProfile_UnknownNameIsRefused(t *testing.T) {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error %q does not name the profile %q", err, name)
 		}
+	}
+}
+
+// A signed-up team's tokens share one request budget, and a two-slot runner
+// honoring its cadences spends about 300 requests a minute, so the paid tier
+// carries a pool of ten such runners with room to spare.
+func TestLimitsProfile_CloudCarriesTenRunnersPerTeam(t *testing.T) {
+	paid, err := controller.LimitsProfile(controller.LimitsProfileCloud)
+	if err != nil {
+		t.Fatalf("LimitsProfile: %v", err)
+	}
+	const runners, perRunner = 10, 300
+	if got := paid.RequestsPerTokenMinute; got <= runners*perRunner {
+		t.Errorf("cloud allows a team %d requests a minute; ten two-slot runners spend %d", got, runners*perRunner)
+	}
+	if paid.RequestsPerMinuteAlarm <= paid.RequestsPerTokenMinute {
+		t.Errorf("the alarm %d must sit above one team's budget %d", paid.RequestsPerMinuteAlarm, paid.RequestsPerTokenMinute)
 	}
 }

@@ -1,9 +1,10 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -37,16 +38,69 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		MemoryBytes:   body.MemoryBytes,
 		CPUTime:       time.Duration(body.CPUTimeNanos),
 	}); err != nil {
+		if status := runLimitStatus(err); status != 0 {
+			writeError(w, status, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
+const (
+	defaultMetricPage = 1000
+	maxMetricPage     = store.MaxNodeMetricSamples
+)
+
+type metricsPage struct {
+	Points     []metricSample `json:"points"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+}
+
+func metricsPageRequest(r *http.Request) (after time.Time, limit int, err error) {
+	limit = defaultMetricPage
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > maxMetricPage {
+			return time.Time{}, 0, fmt.Errorf("limit is an integer from 1 to %d", maxMetricPage)
+		}
+		limit = n
+	}
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		if after, err = time.Parse(time.RFC3339Nano, raw); err != nil {
+			return time.Time{}, 0, errors.New("cursor is the next_cursor of the previous page")
+		}
+	}
+	return after, limit, nil
+}
+
+// safety: callers pass up to limit+1 samples; the one past the page is what
+// sets next_cursor.
+func newMetricsPage(samples []store.MetricSample, limit int) metricsPage {
+	page := metricsPage{Points: make([]metricSample, 0, min(len(samples), limit))}
+	for i, s := range samples {
+		if i == limit {
+			page.NextCursor = page.Points[i-1].TS
+			break
+		}
+		page.Points = append(page.Points, metricSample{
+			TS:            s.TS.UTC().Format(time.RFC3339Nano),
+			CPUMillicores: s.CPUMillicores,
+			MemoryBytes:   s.MemoryBytes,
+			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
+		})
+	}
+	return page
+}
+
 func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	samples, err := s.store.ListNodeMetrics(r.Context(), runID, nodeID)
+	after, limit, err := metricsPageRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	samples, err := s.store.ListNodeMetricsPage(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), after, limit+1)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -55,17 +109,17 @@ func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	points := make([]metricSample, 0, len(samples))
-	for _, s := range samples {
-		points = append(points, metricSample{
-			TS:            s.TS.UTC().Format(time.RFC3339Nano),
-			CPUMillicores: s.CPUMillicores,
-			MemoryBytes:   s.MemoryBytes,
-			CPUTimeNanos:  s.CPUTime.Nanoseconds(),
-		})
+	writeJSON(w, http.StatusOK, newMetricsPage(samples, limit))
+}
+
+func runLimitStatus(err error) int {
+	switch {
+	case errors.Is(err, store.ErrAnnotationTooLarge), errors.Is(err, store.ErrRunAnnotationBytes):
+		return http.StatusRequestEntityTooLarge
+	case errors.Is(err, store.ErrRunAnnotationLimit), errors.Is(err, store.ErrNodeMetricLimit):
+		return http.StatusTooManyRequests
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"points": points})
+	return 0
 }
 
 type nodeUsageReq struct {

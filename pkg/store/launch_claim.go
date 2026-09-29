@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // LaunchClaimRequest is what the launcher asks of [Store.ClaimLaunch].
@@ -47,8 +49,8 @@ const launchScanBatch = 16
 // for the next one. It returns nil when
 // no node is ready.
 //
-// Only nodes that require no executor labels are the launcher's: a Job
-// advertises none.
+// A node is the launcher's only when the Cloud runner image satisfies its
+// selector, judged by the one evaluator every claim uses.
 func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req LaunchClaimRequest, now time.Time) (*LaunchClaim, error) {
 	if req.HolderID == "" || req.Deadline < MinLaunchLifetime || req.Deadline > MaxClaimTokenLifetime {
 		return nil, fmt.Errorf("%w: a launch claim needs a holder and a deadline from %s to %s",
@@ -82,6 +84,9 @@ func (s *Store) ClaimLaunch(ctx context.Context, launcher ClaimIdentity, req Lau
 			continue
 		}
 		for _, c := range page {
+			if !c.cloudRuns {
+				continue
+			}
 			claim, err := s.claimLaunchCandidate(ctx, launcher, req, coordinatorID, c.claim, now)
 			if unpaidLaunch(err) {
 				continue
@@ -120,8 +125,24 @@ type launchCursor struct {
 }
 
 type launchCandidate struct {
-	claim  LaunchClaim
-	cursor launchCursor
+	claim     LaunchClaim
+	cursor    launchCursor
+	cloudRuns bool
+}
+
+// safety: a Job runs the Cloud runner image and nothing else, so it offers
+// exactly the image's declared tools, the class and location the launcher's
+// scope grants, and no label a pipeline could assert.
+func cloudCanRun(runID, nodeID string, needsJSON []byte) bool {
+	var needs []string
+	if !decodeCandidateLabels(runID, nodeID, needsJSON, &needs) {
+		return false
+	}
+	profile := match.Profile{
+		Class: match.ClassCloud, Location: executorLocationCloud,
+		Labels: match.ToolLabels(match.CloudTools),
+	}
+	return match.Evaluate(profile, match.Demand{Selector: needs}).OK()
 }
 
 // safety: the scan pages past the candidates a claim refused, and a spent
@@ -136,10 +157,10 @@ func (s *Store) launchCandidates(ctx context.Context, req LaunchClaimRequest, af
 		where += ` AND (n.ready_at > ? OR (n.ready_at = ? AND (n.run_id > ? OR (n.run_id = ? AND n.node_id > ?))))`
 		args = append(args, after.readyAt, after.readyAt, after.runID, after.runID, after.nodeID)
 	}
-	rows, err := s.query(ctx, `SELECT n.team, n.run_id, n.node_id, n.ready_at FROM nodes n
+	rows, err := s.query(ctx, `SELECT n.team, n.run_id, n.node_id, n.ready_at, n.needs_labels FROM nodes n
   JOIN runs r ON r.team = n.team AND r.id = n.run_id
  WHERE n.kind IN ('`+nodeKindPlan+`', '`+nodeKindWork+`') AND n.ready_at IS NOT NULL AND n.ready_at <= ?
-   AND n.claimed_by IS NULL AND n.status != '`+nodeStatusDone+`' AND n.needs_labels IS NULL
+   AND n.claimed_by IS NULL AND n.status != '`+nodeStatusDone+`'
    AND r.dispatch != '' AND r.cancel_requested_at IS NULL`+where+`
  ORDER BY n.ready_at, n.run_id, n.node_id LIMIT `+fmt.Sprint(launchScanBatch), args...)
 	if err != nil {
@@ -149,9 +170,11 @@ func (s *Store) launchCandidates(ctx context.Context, req LaunchClaimRequest, af
 	var out []launchCandidate
 	for rows.Next() {
 		var c launchCandidate
-		if err := rows.Scan(&c.claim.Team, &c.claim.RunID, &c.claim.NodeID, &c.cursor.readyAt); err != nil {
+		var needs []byte
+		if err := rows.Scan(&c.claim.Team, &c.claim.RunID, &c.claim.NodeID, &c.cursor.readyAt, &needs); err != nil {
 			return nil, err
 		}
+		c.cloudRuns = cloudCanRun(c.claim.RunID, c.claim.NodeID, needs)
 		c.cursor.runID, c.cursor.nodeID = c.claim.RunID, c.claim.NodeID
 		out = append(out, c)
 	}

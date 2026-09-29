@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/directdata"
 )
 
 func TestSupervisorArtifactsPreferAnnouncedDirectUpload(t *testing.T) {
@@ -74,5 +76,33 @@ func TestSupervisorArtifactsPreferAnnouncedDirectUpload(t *testing.T) {
 	}
 	if committed.Load() != 1 || legacyWrites.Load() != 0 {
 		t.Fatalf("commits = %d; legacy writes = %d", committed.Load(), legacyWrites.Load())
+	}
+}
+
+func TestDirectArtifactEmptyBlobNeedsNoUpload(t *testing.T) {
+	var calls atomic.Int32
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "direct uploads carry at least one byte", http.StatusBadRequest)
+	}))
+	defer controller.Close()
+	s := directArtifactStore{client: directdata.New(controller.URL, "grant", "run", nil)}
+	ctx := context.Background()
+	if err := s.Put(ctx, emptyArtifactBlobKey, bytes.NewReader(nil)); err != nil {
+		t.Fatalf("Put empty blob: %v", err)
+	}
+	if ok, err := s.Has(ctx, emptyArtifactBlobKey); err != nil || !ok {
+		t.Fatalf("Has empty blob = %v, %v", ok, err)
+	}
+	rc, err := s.Get(ctx, emptyArtifactBlobKey)
+	if err != nil {
+		t.Fatalf("Get empty blob: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("empty blob read = %q, %v", got, err)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("the controller saw %d requests for an empty blob", calls.Load())
 	}
 }

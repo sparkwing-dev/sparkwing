@@ -55,9 +55,10 @@ type Installation struct {
 
 // MintedToken records one installation token the fake issued.
 type MintedToken struct {
-	Installation int64
-	Repositories []string
-	Permissions  map[string]string
+	Installation  int64
+	Repositories  []string
+	RepositoryIDs []int64
+	Permissions   map[string]string
 }
 
 // Status records one commit status the fake accepted.
@@ -539,8 +540,9 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Repositories []string          `json:"repositories"`
-		Permissions  map[string]string `json:"permissions"`
+		Repositories  []string          `json:"repositories"`
+		RepositoryIDs []int64           `json:"repository_ids"`
+		Permissions   map[string]string `json:"permissions"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"message": err.Error()})
@@ -570,14 +572,29 @@ func (g *GitHub) handleMint(w http.ResponseWriter, r *http.Request) {
 		}
 		tok.repos[strings.ToLower(owner+"/"+name)] = true
 	}
-	if len(req.Repositories) == 0 {
+	for _, id := range req.RepositoryIDs {
+		found := false
+		for _, repo := range inst.Repos {
+			if repo.ID == id {
+				found = true
+				tok.repos[strings.ToLower(repo.FullName)] = true
+			}
+		}
+		if !found {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"message": "There is at least one repository that does not exist or is not accessible to the parent installation."})
+			return
+		}
+	}
+	if len(req.Repositories) == 0 && len(req.RepositoryIDs) == 0 {
 		for _, repo := range inst.Repos {
 			tok.repos[strings.ToLower(repo.FullName)] = true
 		}
 	}
 	raw := "ghs_" + randomHex()
 	g.tokens[raw] = tok
-	g.minted = append(g.minted, MintedToken{Installation: inst.ID, Repositories: req.Repositories, Permissions: req.Permissions})
+	g.minted = append(g.minted, MintedToken{
+		Installation: inst.ID, Repositories: req.Repositories, RepositoryIDs: req.RepositoryIDs, Permissions: req.Permissions,
+	})
 	writeJSON(w, http.StatusCreated, map[string]any{"token": raw, "expires_at": tok.expires.UTC().Format(time.RFC3339)})
 }
 

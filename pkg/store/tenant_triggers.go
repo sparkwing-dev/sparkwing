@@ -147,3 +147,16 @@ func (t *Tenant) FindTriggerByWebhookReplay(ctx context.Context, replayKey, deli
 	}
 	return t.s.GetTrigger(ctx, id)
 }
+
+// CountPendingTriggers returns how many of t's triggers are waiting to be
+// claimed. Another team's backlog is not counted, so it cannot shed t's
+// submissions.
+func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error) {
+	var n int
+	if err := t.s.queryRow(ctx,
+		`SELECT COUNT(*) FROM triggers WHERE team = ? AND status = ?`,
+		string(t.team), triggerStatusPending).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}

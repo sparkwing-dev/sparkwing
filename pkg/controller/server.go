@@ -942,7 +942,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// cache credential and holds a mirror fetch open, so it is the operator's
 	// alone; the CLI's warm-up before a trigger is best-effort without it.
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRefresh)))
-	mux.Handle("POST /api/v1/runs/{id}/cache-grant", requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim))
+	mux.Handle("POST /api/v1/runs/{id}/cache-grant", newClaimSensitiveRoute(claimSourceKinds, nil, s.handleRunCacheGrant(s.runTeam)).orElse(requireScope(ScopeNodesClaim, s.handleRunCacheGrant(s.runTeam), ScopeTriggersClaim)))
+	mux.Handle("POST /api/v1/runs/{id}/source-credential", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleRunSourceCredential)))
 	mux.Handle("POST /api/v1/runs/{id}/source-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunSourceToken), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/git-credential", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleRunGitCredential), ScopeTriggersClaim))
 	mux.Handle("POST /api/v1/runs/{id}/oidc-token", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleOIDCToken), ScopeTriggersClaim))
@@ -1177,6 +1178,8 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/operator/teams/{team}/grants", s.requireOperator(s.handleOperatorGrant))
 	mux.Handle("POST /api/v1/operator/teams/{team}/freeze", s.requireOperator(s.handleOperatorFreeze))
 	mux.Handle("POST /api/v1/operator/teams/{team}/unfreeze", s.requireOperator(s.handleOperatorUnfreeze))
+	mux.Handle("GET /api/v1/operator/waitlist", s.requireOperator(s.handleOperatorWaitlist))
+	mux.Handle("POST /api/v1/operator/waitlist/approve", s.requireOperator(s.handleApproveWaitlist))
 	mux.Handle("GET /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSignUpStatus)))
 	mux.Handle("PUT /api/v1/signups", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetSignUp)))
 	mux.Handle("GET /api/v1/signups/waitlist", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListWaitlist)))

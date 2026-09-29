@@ -120,7 +120,8 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		return directCaller{}, false
 	}
 	provenance := "local"
-	if metered {
+	// safety: only the launcher mints claim tokens, and it runs on Cloud compute.
+	if metered || grant.Claim.Kind == authwire.CacheClaimToken {
 		provenance = "cloud"
 	}
 	return directCaller{
@@ -220,8 +221,12 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, errors.New("direct uploads are limited to 500 MiB"))
 		return
 	}
-	if !validDirectKey(req.Kind, req.Key, req.SHA256) || req.Size < 0 {
-		writeError(w, http.StatusBadRequest, errors.New("the upload needs a content-addressed key and a nonnegative size"))
+	if req.Size <= 0 {
+		writeError(w, http.StatusBadRequest, errors.New("direct uploads carry at least one byte; an empty object needs no upload"))
+		return
+	}
+	if !validDirectKey(req.Kind, req.Key, req.SHA256) {
+		writeError(w, http.StatusBadRequest, errors.New("the upload needs a content-addressed key"))
 		return
 	}
 	raw, err := hex.DecodeString(req.SHA256)
@@ -242,6 +247,8 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusRequestEntityTooLarge, err)
 		case errors.Is(err, store.ErrObjectExists):
 			writeError(w, http.StatusConflict, err)
+		case errors.Is(err, store.ErrTooManyPendingUploads):
+			writeError(w, http.StatusTooManyRequests, err)
 		case errors.Is(err, store.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, err)
 		default:

@@ -145,7 +145,7 @@ func TestSignedDataRoutesShareTeamRequestBudget(t *testing.T) {
 	}
 	download := `{"kind":"binary","key":"bins/abc"}`
 	digest := strings.Repeat("a", 64)
-	upload := `{"kind":"artifact","key":"artifacts/blobs/` + digest + `","size":0,"sha256":"` + digest + `","run_id":"run-1"}`
+	upload := `{"kind":"artifact","key":"artifacts/blobs/` + digest + `","size":1,"sha256":"` + digest + `","run_id":"run-1"}`
 	commit := `{"upload_id":"missing-upload","run_id":"run-1"}`
 	for _, step := range []struct {
 		path, grant, body string
