@@ -350,3 +350,54 @@ func TestDeleteUser_StoreFailureIs500WithoutDriverDetail(t *testing.T) {
 		t.Fatalf("driver detail echoed to the caller: %s", body)
 	}
 }
+
+func TestDeadTokenRefusalNamesItsStateAndAnHour(t *testing.T) {
+	f := newRevocationFixture(t)
+	now := time.Now().UTC()
+	revoked, tok, err := f.store.CreateToken("gone", store.TokenKindRunner, []string{ScopeNodesClaim}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	resp := f.do(t, http.MethodDelete, "/api/v1/tokens/"+tok.Prefix, f.admin, "")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke = %d, want 204", resp.StatusCode)
+	}
+	expired, _, err := f.store.CreateToken("lapsed", store.TokenKindRunner, []string{ScopeNodesClaim}, time.Minute, now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		token      string
+		state      string
+		retryAfter string
+	}{
+		{"revoked", revoked, "revoked", "3600"},
+		{"expired", expired, "expired", "3600"},
+		{"unknown", "swr_nosuchtk_" + strings.Repeat("x", 32), "", ""},
+		{"malformed", "garbage", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := f.do(t, http.MethodGet, "/api/v1/auth/whoami", tc.token, "")
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", resp.StatusCode)
+			}
+			var body struct {
+				TokenState string `json:"token_state"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body.TokenState != tc.state {
+				t.Fatalf("token_state = %q, want %q", body.TokenState, tc.state)
+			}
+			if got := resp.Header.Get("Retry-After"); got != tc.retryAfter {
+				t.Fatalf("Retry-After = %q, want %q", got, tc.retryAfter)
+			}
+		})
+	}
+}

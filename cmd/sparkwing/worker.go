@@ -12,6 +12,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/tokenpark"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
@@ -27,28 +29,45 @@ func runWorker(args []string) error {
 		}
 		return err
 	}
-	prof, err := resolveProfile(*on)
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate own binary: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for {
+		err := claimTriggers(ctx, self, *on, *poll, *heartbeat)
+		if !errors.Is(err, errProfileChanged) {
+			return err
+		}
+	}
+}
+
+var errProfileChanged = errors.New("the profile's config changed while its token was dead")
+
+// safety: the change watch starts before the profile is read, so a rewrite
+// racing the read costs one extra reload rather than an hour parked on the
+// old token.
+func claimTriggers(ctx context.Context, self, profileName string, poll, heartbeat time.Duration) error {
+	var changed func() bool
+	if path, err := profile.DefaultPath(); err == nil {
+		changed = tokenpark.FileChanged(path)
+	}
+	prof, err := resolveProfile(profileName)
 	if err != nil {
 		return err
 	}
 	if err := requireController(prof, "worker"); err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	self, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate own binary: %w", err)
-	}
-
 	fmt.Fprintf(os.Stderr, "sparkwing worker: profile=%s controller=%s poll=%s\n",
-		prof.Name, prof.ControllerURL(), *poll)
+		prof.Name, prof.ControllerURL(), poll)
 
-	cli := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken()).
+	token := prof.ControllerToken()
+	cli := client.NewWithToken(prof.ControllerURL(), nil, token).
 		WithRunnerIdentity(logs.ProcessIdentity("worker"))
 	shed := client.NewShedLog(client.ShedWarnInterval)
+	pacer := client.NewPacer(poll)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -58,24 +77,41 @@ func runWorker(args []string) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-			if wait, ok := client.UnavailableBackoff(err, *poll); ok {
+			pace := pacer.Failure(err)
+			switch {
+			case pace.Dead != nil:
+				fmt.Fprintf(os.Stderr, "worker: %s\n", pace.Dead.Explain(token,
+					fmt.Sprintf("Give profile %q a live token; the worker reloads config.yaml within seconds of the rewrite", prof.Name)))
+			case pace.Parked:
+				fmt.Fprintf(os.Stderr, "worker: token %s is still refused; asking again in %s\n",
+					client.TokenPrefix(token), pace.Wait.Round(time.Minute))
+			case pace.Shed:
 				if shed.Due() {
 					fmt.Fprintf(os.Stderr,
-						"worker: the controller is shedding claims; polling again in %s\n", wait)
+						"worker: the controller is shedding claims; polling again in %s\n", pace.Wait)
 				}
-				sleepOrCancel(ctx, wait)
-				continue
+			default:
+				fmt.Fprintf(os.Stderr, "worker: claim failed: %v (retrying in %s)\n", err, pace.Wait.Round(time.Millisecond))
 			}
-			fmt.Fprintf(os.Stderr, "worker: claim failed: %v (retrying)\n", err)
-			sleepOrCancel(ctx, *poll)
+			watch := changed
+			if !pace.Parked {
+				watch = nil
+			}
+			if tokenpark.Wait(ctx, pace.Wait, watch) {
+				fmt.Fprintln(os.Stderr, "worker: config.yaml changed while parked; reloading the profile")
+				return errProfileChanged
+			}
 			continue
 		}
+		if pacer.Success() {
+			fmt.Fprintln(os.Stderr, "worker: token accepted again; resuming claims")
+		}
 		if trigger == nil {
-			sleepOrCancel(ctx, client.AdvisedPoll(*poll, cli))
+			sleepOrCancel(ctx, client.AdvisedPoll(poll, cli))
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "worker: claimed %s (pipeline=%s)\n", trigger.ID, trigger.Pipeline)
-		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(), *heartbeat)
+		dispatchTrigger(ctx, self, trigger.ID, prof.ControllerURL(), prof.ControllerURL(), token, heartbeat)
 	}
 }
 

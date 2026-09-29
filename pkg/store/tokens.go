@@ -50,7 +50,8 @@ var (
 	ErrInvalidToken      = errors.New("invalid token")
 	ErrNoTokenCandidates = errors.New("unknown token")
 	ErrUnknownToken      = errors.New("unknown token")
-	ErrTokenRevoked      = errors.New("token is revoked or expired")
+	ErrTokenRevoked      = errors.New("token is revoked")
+	ErrTokenExpired      = errors.New("token is expired")
 )
 
 // Token is one row in the tokens table.
@@ -91,13 +92,20 @@ type TokenOptions struct {
 
 // IsValid reports whether the token is usable at `now`.
 func (t *Token) IsValid(now time.Time) bool {
-	if t.RevokedAt != nil && !now.Before(*t.RevokedAt) {
-		return false
+	return TokenEnded(t.RevokedAt, t.ExpiresAt, now) == nil
+}
+
+// TokenEnded reports why a credential with these end times no longer
+// authenticates at now: [ErrTokenRevoked], [ErrTokenExpired], or nil while it
+// is live. Revocation wins when both have passed.
+func TokenEnded(revokedAt, expiresAt *time.Time, now time.Time) error {
+	if revokedAt != nil && !now.Before(*revokedAt) {
+		return ErrTokenRevoked
 	}
-	if t.ExpiresAt != nil && !now.Before(*t.ExpiresAt) {
-		return false
+	if expiresAt != nil && !now.Before(*expiresAt) {
+		return ErrTokenExpired
 	}
-	return true
+	return nil
 }
 
 // HasScope reports exact-string membership.
@@ -434,8 +442,8 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 		if !ok {
 			continue
 		}
-		if !t.IsValid(now) {
-			return nil, ErrTokenRevoked
+		if err := TokenEnded(t.RevokedAt, t.ExpiresAt, now); err != nil {
+			return nil, err
 		}
 		s.noteTokenUse(t, now)
 		return t, nil
