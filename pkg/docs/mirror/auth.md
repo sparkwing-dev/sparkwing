@@ -1437,6 +1437,15 @@ A heartbeat for work already claimed stops instead: a dead token can neither
 renew the claim nor report the result, so the runner cancels the node or run
 rather than beating until the lease lapses.
 
+A dispatcher whose token dies mid-run treats it as a lost claim. The local,
+Kubernetes and warm-pool runners stop their node heartbeats and status polls,
+write no row for the node, and hand it back as cancelled. They leave running
+work alone: a local child process or a Job's pod renews its node claim with its
+own credential, so it finishes or stops by that claim. A warm-pool node is not
+handed to the fallback. `sparkwing runs logs --follow` against a controller
+stops at the first dead-token refusal, and backs off from 300ms to 5s on other
+failures.
+
 To recover, give the machine a live token:
 
 - **Runner agent** (`sparkwing cluster runners add`): run
@@ -1451,7 +1460,9 @@ To recover, give the machine a live token:
 Failures that are not a dead token back off rather than parking. A network
 error, a `5xx` or another `401` waits about a second, doubling on each
 consecutive failure up to five minutes, with up to a quarter of each wait
-taken off at random so a fleet does not retry in step. A `429` or `503`
+taken off at random so a fleet does not retry in step. A loop whose own poll
+interval is longer than five minutes still waits at most five minutes after a
+failure. A `429` or `503`
 waits at least as long as its `Retry-After`. The first answered request
 resets the backoff.
 

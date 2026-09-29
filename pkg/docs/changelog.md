@@ -1233,7 +1233,10 @@ unlock.
   from one second to five minutes, and a `429` waits out its `Retry-After`. A
   heartbeat refused for a dead token stops its node or run at once. An expired
   token's `401` message now reads `token is expired` rather than `token is
-  revoked or expired`.
+  revoked or expired`. The local, Kubernetes and warm-pool dispatchers treat a
+  dead token as a lost claim: they stop their heartbeats and node polls, write
+  no row, and leave work that holds its own claim running. `runs logs --follow`
+  stops on a dead token and backs off from 300ms to 5s on other failures.
 - **controller:** `--shed-queue-depth` measures the submitting team's pending
   triggers rather than every team's, so one team's backlog no longer answers
   503 to another team's webhooks and submissions. Schema v85 adds the partial
