@@ -28,6 +28,9 @@ unlock.
 
 ### Fixed
 
+- **object-store metrics:** Reject invalid sample kinds and negative resource
+  values before appending state.
+
 - **orchestrator:** Return node completion-write errors instead of reporting success
 
 - **metrics:** Reject conflicting readings at the same node timestamp; identical retries remain accepted.

@@ -31,9 +31,9 @@ type MetricSample struct {
 // OneShot reports whether this reading covers a completed command.
 func (m MetricSample) OneShot() bool { return m.Kind == MetricCommand }
 
-// AddNodeMetricSample accepts identical retries and rejects conflicting readings
-// at the same node timestamp.
-func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
+// ValidateResourceValues rejects invalid kinds, negative resource values,
+// and command CPU time in an interval.
+func (sample MetricSample) ValidateResourceValues() error {
 	if sample.Kind != MetricUnknown && sample.Kind != MetricInterval && sample.Kind != MetricCommand {
 		return errors.New("invalid node metric kind")
 	}
@@ -42,6 +42,15 @@ func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, s
 	}
 	if sample.CPUMillicores < 0 || sample.MemoryBytes < 0 || sample.CPUTime < 0 {
 		return errors.New("node metrics require nonnegative CPU rate, memory and CPU time")
+	}
+	return nil
+}
+
+// AddNodeMetricSample accepts identical retries and rejects conflicting readings
+// at the same node timestamp.
+func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
+	if err := sample.ValidateResourceValues(); err != nil {
+		return err
 	}
 	if !time.Unix(0, sample.TS.UnixNano()).Equal(sample.TS) {
 		return errors.New("node metric timestamp exceeds the nanosecond storage range")
