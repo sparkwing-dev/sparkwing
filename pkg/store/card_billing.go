@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1137,21 +1138,29 @@ func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefu
 	return out, rows.Err()
 }
 
-// MarkCardRefundMade binds the refund Stripe made for a queued payment and
-// the status it answered with. A refund whose outcome its webhook already
-// reported is left as that report set it.
+// MarkCardRefundMade binds the refund Stripe made for the queued attempt key
+// names and the status it answered with. A refund whose outcome its webhook
+// already reported is left as that report set it.
 func (s *Store) MarkCardRefundMade(
-	ctx context.Context, team Team, paymentIntent, refundID, status string, now time.Time,
+	ctx context.Context, team Team, key, refundID, status string, now time.Time,
 ) error {
+	paymentIntent, attempt, ok := parseRefundKey(key)
+	if !ok {
+		return fmt.Errorf("%w: refund key %q", ErrInvalidInput, key)
+	}
 	_, err := s.applyCardRefund(ctx, team, paymentIntent, refundID, status,
-		`status = 'due' AND refund_id != ?`, []any{refundID}, now)
+		`attempts = ? AND status = 'due'`, []any{attempt}, now)
 	return err
 }
 
-// ReportCardRefund applies a refund's status as Stripe announces it and
-// reports whether it changed a refund the controller queued; a failed or
+// ReportCardRefund applies a refund's status as Stripe announces it, for the
+// refund made under key, and reports whether it moved the queue; a failed or
 // canceled one is due again.
-func (s *Store) ReportCardRefund(ctx context.Context, paymentIntent, refundID, status string, now time.Time) (bool, error) {
+func (s *Store) ReportCardRefund(ctx context.Context, key, refundID, status string, now time.Time) (bool, error) {
+	paymentIntent, attempt, ok := parseRefundKey(key)
+	if !ok {
+		return false, nil
+	}
 	var team string
 	err := s.queryRow(ctx, `SELECT team FROM card_refunds WHERE payment_intent = ?`, paymentIntent).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1160,18 +1169,23 @@ func (s *Store) ReportCardRefund(ctx context.Context, paymentIntent, refundID, s
 	if err != nil {
 		return false, err
 	}
-	// safety: an outcome may arrive before the worker binds its refund, so a
-	// row still due takes it then; a repeat of an outcome already applied, or
-	// a late report of an earlier refund, matches neither and changes nothing.
+	// safety: only the current attempt's key moves the queue, even before the
+	// worker binds the refund; a failure moves it to the next attempt, so a
+	// repeat or a stale attempt matches nothing.
 	switch status {
-	case CardRefundSucceeded:
-		return s.applyCardRefund(ctx, Team(team), paymentIntent, refundID, status,
-			`(refund_id = ? OR status = 'due')`, []any{refundID}, now)
-	case "failed", "canceled":
-		return s.applyCardRefund(ctx, Team(team), paymentIntent, refundID, status,
-			`((refund_id = ? AND status != 'due') OR (refund_id != ? AND status = 'due'))`, []any{refundID, refundID}, now)
+	case CardRefundSucceeded, "failed", "canceled":
+		return s.applyCardRefund(ctx, Team(team), paymentIntent, refundID, status, `attempts = ?`, []any{attempt}, now)
 	}
 	return false, nil
+}
+
+func parseRefundKey(key string) (string, int64, bool) {
+	i := strings.LastIndexByte(key, '-')
+	if i <= 0 {
+		return "", 0, false
+	}
+	attempt, err := strconv.ParseInt(key[i+1:], 10, 64)
+	return key[:i], attempt, err == nil && attempt >= 0
 }
 
 func (s *Store) applyCardRefund(

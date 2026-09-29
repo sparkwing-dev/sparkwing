@@ -292,12 +292,12 @@ func TestCardBilling_JudgesThePayingCardAndRequeuesAFailedRefund(t *testing.T) {
 		Queued bool `json:"queued"`
 	}
 	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
-		"payment_intent": "pi_second", "refund_id": "re_pi_second", "status": "failed",
+		"payment_intent": "pi_second", "refund_id": "re_pi_second", "queue": "pi_second-0", "status": "failed",
 	}, &report); code != http.StatusOK || !report.Queued {
 		t.Fatalf("failed refund report = %d %+v; want it queued again", code, report)
 	}
 	if code := g.call("POST", "/api/v1/credits/card-refunds", "Bearer "+g.admin, map[string]any{
-		"payment_intent": "pi_other", "refund_id": "re_other", "status": "failed",
+		"payment_intent": "pi_other", "refund_id": "re_other", "queue": "pi_other-0", "status": "failed",
 	}, &report); code != http.StatusOK || report.Queued {
 		t.Fatalf("an unqueued refund's report = %d %+v; want not queued", code, report)
 	}

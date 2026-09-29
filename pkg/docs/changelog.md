@@ -36,8 +36,9 @@ unlock.
   not actionable; the paying card, not the card on file, is what a warning is
   judged against. Money that pays no open charge is refunded, and a refund that
   fails is made again after 1, 6 and then every 24 hours
-  (`POST /api/v1/credits/card-refunds` reports its status, and an outcome
-  that arrives before the refund is recorded is kept). Schema v87.
+  (`POST /api/v1/credits/card-refunds` reports its status under the refund's
+  queue key, and only that key's outcome moves the queue, even one that
+  arrives before the refund is recorded). Schema v87.
 - **controller + store:** `max_concurrent_runners` counts a team's cloud
   runners across all its tokens, and an unset guard means 100 per team, never
   unlimited; `runner_cap` on `POST /api/v1/teams/{team}/trust` raises one

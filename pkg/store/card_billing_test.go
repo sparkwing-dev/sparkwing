@@ -476,7 +476,7 @@ func TestSettlementChecksTheAttemptAndTheFrozenAmount(t *testing.T) {
 		due[1].PaymentIntent != "pi_second" || due[1].Reason != "duplicate" {
 		t.Fatalf("queued refunds = %+v, %v; want the short and the second payment", due, err)
 	}
-	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short-0", "re_1", "pending", now); err != nil {
 		t.Fatal(err)
 	}
 	if due, err := s.DueCardRefunds(ctx, now); err != nil || len(due) != 1 {
@@ -723,13 +723,13 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Key != "pi_short-0" {
 		t.Fatalf("due = %+v, %v", due, err)
 	}
-	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short-0", "re_1", "pending", now); err != nil {
 		t.Fatal(err)
 	}
 	if due, err := s.DueCardRefunds(ctx, now); err != nil || len(due) != 0 {
 		t.Fatalf("a pending refund = %+v, %v; want not due", due, err)
 	}
-	if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", "failed", now); err != nil || !queued {
+	if queued, err := s.ReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || !queued {
 		t.Fatalf("report failed = %v, %v", queued, err)
 	}
 	if due, err := s.DueCardRefunds(ctx, now.Add(30*time.Minute)); err != nil || len(due) != 0 {
@@ -739,10 +739,10 @@ func TestAFailedQueuedRefundIsRetried(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].Key != "pi_short-1" {
 		t.Fatalf("a failed refund after its backoff = %+v, %v; want it due under a new key", due, err)
 	}
-	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_2", "succeeded", now); err != nil {
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_short-1", "re_2", "succeeded", now); err != nil {
 		t.Fatal(err)
 	}
-	if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", "failed", now); err != nil || queued {
+	if queued, err := s.ReportCardRefund(ctx, "pi_short-0", "re_1", "failed", now); err != nil || queued {
 		t.Fatalf("a stale report of the first refund = %v, %v; want ignored", queued, err)
 	}
 	if due, err := s.DueCardRefunds(ctx, now.Add(48*time.Hour)); err != nil || len(due) != 0 {
@@ -845,13 +845,13 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 			}, now); err != nil {
 				t.Fatal(err)
 			}
-			if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", tc.status, now); err != nil || !queued {
+			if queued, err := s.ReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil || !queued {
 				t.Fatalf("early %s report = %v, %v; want applied", tc.status, queued, err)
 			}
-			if _, err := s.ReportCardRefund(ctx, "pi_short", "re_1", tc.status, now); err != nil {
+			if _, err := s.ReportCardRefund(ctx, "pi_short-0", "re_1", tc.status, now); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
+			if err := s.MarkCardRefundMade(ctx, "acme", "pi_short-0", "re_1", "pending", now); err != nil {
 				t.Fatal(err)
 			}
 			due, err := s.DueCardRefunds(ctx, now.Add(2*time.Hour))
@@ -864,5 +864,68 @@ func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
 				t.Fatalf("after an early success = %+v; want nothing due", due)
 			}
 		})
+	}
+}
+
+// Only a refund made under the queue's own key moves it. An operator's partial
+// refund while ours is due leaves ours to run, both are reversed, and the two
+// never take back more than the payment; a report under another attempt's key
+// leaves the retry state alone.
+func TestOnlyTheQueuesOwnRefundMovesIt(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	acme := teamHandle(t, s, "acme")
+	trustWithCard(t, acme, now)
+	spend(t, s, "acme", "ch_1", 15_000)
+	w := dueCharge(t, s, now)
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_dup", AmountCents: 1_000,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	paid := int64(1_000) * store.MicroCreditsPerCent
+	if _, err := s.ReversePayment(ctx, "pi_dup", "re_operator", "card", paid*4/10); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := s.ReportCardRefund(ctx, "", "re_operator", "succeeded", now); err != nil || moved {
+		t.Fatalf("an operator's refund without our key = %v, %v; want the queue untouched", moved, err)
+	}
+	due, err := s.DueCardRefunds(ctx, now)
+	if err != nil || len(due) != 1 || due[0].Key != "pi_dup-0" {
+		t.Fatalf("due after an operator's partial refund = %+v, %v; want ours still due", due, err)
+	}
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_dup-0", "re_ours", "pending", now); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := s.ReportCardRefund(ctx, "pi_dup-0", "re_ours", "succeeded", now); err != nil || !moved {
+		t.Fatalf("our refund's success = %v, %v", moved, err)
+	}
+	rev, err := s.ReversePayment(ctx, "pi_dup", "re_ours", "card", paid)
+	if err != nil || rev.ReversedMicro != paid {
+		t.Fatalf("reversal of ours = %+v, %v; want the two reversals to total exactly the payment", rev, err)
+	}
+
+	spend(t, s, "acme", "ch_2", 15_000)
+	w2 := dueCharge(t, s, now.Add(time.Hour))
+	if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+		ChargeID: w2.ChargeID, AttemptID: w2.AttemptID, PaymentIntent: "pi_dup2", AmountCents: 1_000,
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkCardRefundMade(ctx, "acme", "pi_dup2-0", "re_a", "pending", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReportCardRefund(ctx, "pi_dup2-0", "re_a", "failed", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, foreign := range []string{"", "pi_dup2-0", "pi_dup2-7"} {
+		if moved, err := s.ReportCardRefund(ctx, foreign, "re_foreign", "failed", now); err != nil || moved {
+			t.Fatalf("a failure under key %q = %v, %v; want the retry state unchanged", foreign, moved, err)
+		}
+	}
+	due, err = s.DueCardRefunds(ctx, now.Add(2*time.Hour))
+	if err != nil || len(due) != 1 || due[0].Key != "pi_dup2-1" {
+		t.Fatalf("due after foreign failures = %+v, %v; want only our one retry", due, err)
 	}
 }

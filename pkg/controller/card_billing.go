@@ -369,7 +369,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 				"payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
-		if err := s.store.MarkCardRefundMade(ctx, d.Team, d.PaymentIntent, refund, status, time.Now()); err != nil {
+		if err := s.store.MarkCardRefundMade(ctx, d.Team, d.Key, refund, status, time.Now()); err != nil {
 			s.logger.Error("recording a card refund failed", "payment_intent", d.PaymentIntent, "err", err)
 			continue
 		}
@@ -382,6 +382,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 type cardRefundReq struct {
 	PaymentIntent string `json:"payment_intent"`
 	RefundID      string `json:"refund_id"`
+	Queue         string `json:"queue"`
 	Status        string `json:"status"`
 }
 
@@ -398,11 +399,11 @@ func (s *Server) handleCardRefund(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.PaymentIntent == "" || req.RefundID == "" || req.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("payment_intent, refund_id and status are required"))
+	if req.PaymentIntent == "" || req.RefundID == "" || req.Queue == "" || req.Status == "" {
+		writeError(w, http.StatusBadRequest, errors.New("payment_intent, refund_id, queue and status are required"))
 		return
 	}
-	queued, err := s.store.ReportCardRefund(r.Context(), req.PaymentIntent, req.RefundID, req.Status, time.Now())
+	queued, err := s.store.ReportCardRefund(r.Context(), req.Queue, req.RefundID, req.Status, time.Now())
 	if err != nil {
 		s.writeInternalError(w, r, "card refund", err)
 		return
