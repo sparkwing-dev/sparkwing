@@ -17,7 +17,7 @@ import (
 // allowance where it writes; the controller's share is the run events. Runs
 // themselves are never refused here: a team without credits runs on its own
 // machines, and a metered claim refuses it for want of credits.
-//
+
 // DefaultFreeTeamSlots is how many teams without credits may hold a free-tier
 // slot when the operator has set no other number.
 const DefaultFreeTeamSlots = 200
