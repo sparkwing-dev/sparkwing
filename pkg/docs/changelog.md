@@ -32,14 +32,19 @@ unlock.
 
 ### Fixed
 
+- **SDK:** Wait for launched children to stop when a spawn generator fails.
+
 - **daemon:** Record each run profile once through the host orchestrator.
   Clients using the daemon completion API must submit profile observations
   separately.
+- **daemon:** Wait for connection cleanup before final persistence and journal closure.
 
 - **controller:** Preserve terminal run outcomes across completion retries
   Only the first terminal transition attempts profile folding; failed folds are
   not retried. GitHub status retries use the stored outcome. Completion requests
   require `success`, `failed`, or `cancelled`.
+- **execution:** Propagate spawn cancellation through child execution and waits, and join child cleanup before returning.
+
 - **object-store metrics:** Reject invalid sample kinds and negative resource
   values before appending state.
 

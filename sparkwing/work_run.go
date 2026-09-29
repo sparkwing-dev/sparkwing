@@ -414,13 +414,13 @@ func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, 
 		return nil, nil
 	}
 
-	type childResult struct {
-		idx int
-		err error
-	}
 	childCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan childResult, n)
+	var children sync.WaitGroup
+	defer func() {
+		cancel()
+		children.Wait()
+	}()
+	results := make(chan error, n)
 
 	for i := range n {
 		elem := rv.Index(i).Interface()
@@ -433,17 +433,19 @@ func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, 
 			return nil, fmt.Errorf("sparkwing: JobSpawnEach: fn returned empty id for item %d", i)
 		}
 		job := coerceSpawnEachJob(out[1].Interface())
+		children.Add(1)
 		go func() {
+			defer children.Done()
 			_, err := handler.Spawn(childCtx, parentNodeID, idStr, job)
-			results <- childResult{idx: i, err: err}
+			results <- err
 		}()
 	}
 
 	var firstErr error
 	for range n {
-		r := <-results
-		if r.err != nil && firstErr == nil {
-			firstErr = r.err
+		err := <-results
+		if err != nil && firstErr == nil {
+			firstErr = err
 			cancel()
 		}
 	}
