@@ -172,18 +172,17 @@ func newReservationID() (string, error) {
 }
 
 // ReserveStorage holds req.Bytes of the team's room in one store, or refuses
-// with a [*StorageQuotaError] past a free team's share and with
-// [ErrFreeStoragePaused] for a team with neither credits nor a slot. A
-// funded team is granted what it asks for and counted all the same.
+// with a [*StorageQuotaError] past a free team's cache share and with
+// [ErrFreeStoragePaused] for a team with neither credits nor a slot while
+// every slot is taken. A free team's log writes are never refused for its
+// share; the hourly storage pass prunes its oldest finished runs back under
+// it. A funded team is granted what it asks for and counted all the same.
 func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ StorageReservation, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := takeStorageSlotTx(ctx, tx, req.Team, req.Now); err != nil {
-		return StorageReservation{}, err
-	}
 	out, err := reserveStorageTx(ctx, tx, req)
 	if err != nil {
 		return StorageReservation{}, err
@@ -191,11 +190,14 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 	return out, tx.Commit()
 }
 
-// safety: the store's lock order puts the free tier before team_storage rows,
-// so a writer takes its slot before it locks a row. A team refused a slot is
-// refused by the reservation that follows.
-func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
+// safety: the lock order puts the free tier before team_storage rows, so a
+// commit takes its slot before it locks a row. A team whose commit finds every
+// slot taken keeps what it stored and is refused its next reservation.
+func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64, now time.Time) error {
 	team = NormalizeTeam(team)
+	if bytes <= 0 || !holdsFreeAllowance(team) {
+		return nil
+	}
 	standing, err := storageStandingTx(ctx, tx, team)
 	if err != nil || standing.Tier != TeamTierNone {
 		return err
@@ -224,7 +226,7 @@ func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageR
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if err := takeStorageSlotTx(ctx, tx, next.Team, next.Now); err != nil {
+	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
 		return StorageReservation{}, err
 	}
 	replayed, err := commitStorageTx(ctx, tx, c)
@@ -277,33 +279,33 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, err
 	}
 	if standing.Tier == TeamTierNone {
-		return StorageReservation{}, freeStoragePaused(team)
+		open, err := freeSlotOpenTx(ctx, tx)
+		if err != nil {
+			return StorageReservation{}, err
+		}
+		if !open {
+			return StorageReservation{}, freeStoragePaused(team)
+		}
+		standing.Tier = TeamTierFree
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {
 		return StorageReservation{}, err
 	}
 	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
-	if standing.Tier == TeamTierFree {
+	if standing.Tier == TeamTierFree && req.Kind != StorageLogs {
 		share := req.Kind.share(standing.AllowanceBytes)
 		room := share - used - reserved
 		if req.UpTo && (req.Bytes <= 0 || req.Bytes > room) {
 			out.Granted = room
 		}
 		if room <= 0 || out.Granted > room {
-			refusal := &StorageQuotaError{
+			return StorageReservation{}, &StorageQuotaError{
 				Principal: string(team), Limit: req.Kind.limitName(), Unit: "bytes",
 				Used: used + reserved, Allowed: share, Requested: max(req.Bytes, 1),
 				Remedy: "the team has no credits, so its " + string(req.Kind) +
 					" keeps at most its share of the free allowance; add credits to store more",
 			}
-			// safety: the logs service evicts the team's oldest archived runs by this
-			// much and asks again, so a full share costs old logs rather than a run's;
-			// the eighth of headroom keeps the next writes from evicting again.
-			if req.Kind == StorageLogs {
-				refusal.EvictBytes = used + reserved + refusal.Requested - share + share/8
-			}
-			return StorageReservation{}, refusal
 		}
 	} else if req.UpTo && req.Bytes <= 0 {
 		out.Unlimited = true
@@ -410,6 +412,9 @@ func (s *Store) CommitStorage(ctx context.Context, c StorageCommit) (err error) 
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, c.Team, c.Bytes, c.Now); err != nil {
+		return err
+	}
 	if _, err := commitStorageTx(ctx, tx, c); err != nil {
 		return err
 	}
@@ -733,47 +738,6 @@ UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE 
 	return tx.Commit()
 }
 
-// ReconcileTeamStorage replaces team's stored bytes in kind with what list
-// counts plus what was committed while it counted, as [Store.ReconcileStorage]
-// does for every team at once.
-func (s *Store) ReconcileTeamStorage(
-	ctx context.Context, team Team, kind StorageKind, list func(context.Context) (int64, error), now time.Time,
-) (err error) {
-	team = NormalizeTeam(team)
-	if err := checkStorageTeam(team, kind); err != nil {
-		return err
-	}
-	var mark int64
-	err = s.queryRow(ctx, `SELECT committed_bytes FROM team_storage WHERE team = ? AND store = ?`,
-		string(team), string(kind)).Scan(&mark)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	listed, err := list(ctx)
-	if err != nil {
-		return err
-	}
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	if _, _, err := lockTeamStorageTx(ctx, tx, team, kind, now); err != nil {
-		return err
-	}
-	var committed int64
-	if err := tx.QueryRowContext(ctx, `SELECT committed_bytes FROM team_storage WHERE team = ? AND store = ?`,
-		string(team), string(kind)).Scan(&committed); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE team_storage SET used_bytes = ?, reconciled_at = ?, updated_at = ? WHERE team = ? AND store = ?`,
-		max(listed+max(committed-mark, 0), 0), now.UnixNano(), now.UnixNano(), string(team), string(kind)); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 func lockCommittedTx(ctx context.Context, tx *storeTx, kind StorageKind) (_ map[Team]int64, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT team, committed_bytes FROM team_storage WHERE store = ? ORDER BY team`+tx.forUpdate(), string(kind))
 	if err != nil {
@@ -959,4 +923,60 @@ func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, err
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// TeamOverShare is a free team whose logs hold more than its share.
+type TeamOverShare struct {
+	Team      Team
+	OverBytes int64
+}
+
+// TeamsOverFreeLogShare reports every team without credits whose logs hold
+// more than its share of the free allowance, and by how much.
+func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error) {
+	rows, err := s.query(ctx, `
+SELECT ts.team, ts.used_bytes FROM team_storage ts JOIN free_slots f ON f.team = ts.team
+ WHERE ts.store = ? ORDER BY ts.team`, string(StorageLogs))
+	if err != nil {
+		return nil, err
+	}
+	used := map[Team]int64{}
+	var teams []Team
+	for rows.Next() {
+		var team string
+		var n int64
+		if err := rows.Scan(&team, &n); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		used[Team(team)] = n
+		teams = append(teams, Team(team))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	// safety: the rows are closed before each team's standing is read, because
+	// SQLite's one connection deadlocks on a query under an open cursor.
+	var out []TeamOverShare
+	for _, team := range teams {
+		standing, err := s.StorageStandingFor(ctx, team)
+		if err != nil {
+			return nil, err
+		}
+		if over := used[team] - FreeLogShare(standing.AllowanceBytes); standing.Tier == TeamTierFree && over > 0 {
+			out = append(out, TeamOverShare{Team: team, OverBytes: over})
+		}
+	}
+	return out, nil
+}
+
+// RunFinished reports whether team's run ended, or is no longer recorded, so
+// its logs may be pruned; a run still going is never finished.
+func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error) {
+	var status string
+	err := s.queryRow(ctx, `SELECT status FROM runs WHERE team = ? AND id = ?`,
+		string(NormalizeTeam(team)), runID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return err == nil && isTerminalRunStatus(status), err
 }

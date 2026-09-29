@@ -223,7 +223,6 @@ type LiveLogRead struct {
 
 	Done bool
 }
-const LogsServiceAuthHeader = "X-Sparkwing-Logs-Service"
 func LongestHonoredIdlePoll(d time.Duration) time.Duration
 type Loopback struct {
 }
@@ -324,7 +323,6 @@ const ScopeClaimsLaunch = store.LaunchScope
 const ScopeCreditsGrant = "credits.grant"
 const ScopeLogsDelete = "logs.delete"
 const ScopeLogsRead = "logs.read"
-const ScopeLogsRecount = store.LogsRecountScope
 const ScopeLogsWrite = "logs.write"
 const ScopeNodesClaim = "nodes.claim"
 const ScopeRunsControl = "runs.control"

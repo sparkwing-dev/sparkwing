@@ -187,6 +187,20 @@ SELECT ?, ?, (SELECT COALESCE(SUM(u.bytes), 0)
 	return rowPresentTx(ctx, tx, `SELECT 1 FROM free_slots WHERE team = ?`, string(team))
 }
 
+// safety: a reservation only asks whether a slot is left; the team's first
+// committed byte takes it, so an abandoned reservation spends none.
+func freeSlotOpenTx(ctx context.Context, tx *storeTx) (bool, error) {
+	limit, err := creditSettingTx(ctx, tx, metaKeyFreeTeamSlots, DefaultFreeTeamSlots)
+	if err != nil {
+		return false, err
+	}
+	var taken int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM free_slots`).Scan(&taken); err != nil {
+		return false, err
+	}
+	return taken < limit, nil
+}
+
 func freeStoragePaused(team Team) error {
 	return fmt.Errorf("%w: team %s has no credits and every free-tier slot is taken", ErrFreeStoragePaused, team)
 }

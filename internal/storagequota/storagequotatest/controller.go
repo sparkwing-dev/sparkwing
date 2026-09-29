@@ -1,8 +1,9 @@
 // Package storagequotatest is a stand-in for the controller's storage
 // counter routes, for tests of the services that call them. It keeps the
 // counts in memory under one lock with the controller's arithmetic: a free
-// team's reservation fits used plus reserved within its share, and a
-// download fits the team's day within its cap.
+// team's cache reservation fits used plus reserved within its share, its log
+// reservations are granted whatever they hold, and a download is refused once
+// the team's day reaches its cap.
 package storagequotatest
 
 import (
@@ -34,10 +35,6 @@ type Controller struct {
 	Tiers map[string]storagequota.Tier
 	// Token, when set, is the only bearer the fake answers.
 	Token string
-	// Recount, when set, is what a team's logs hold after an eviction, which
-	// a reservation that says it evicted and carries a service credential
-	// takes as the team's count.
-	Recount func(team string) int64
 
 	mu       sync.Mutex
 	down     bool
@@ -143,7 +140,6 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Store       storagequota.Kind `json:"store"`
 		Bytes       int64             `json:"bytes"`
 		UpTo        bool              `json:"up_to"`
-		Evicted     bool              `json:"evicted"`
 		Reservation string            `json:"reservation"`
 		Record      bool              `json:"record"`
 		NextBytes   int64             `json:"next_bytes"`
@@ -168,23 +164,17 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
 			return
 		case storagequota.TierFree:
-			if req.Evicted && c.Recount != nil && r.Header.Get(storagequota.ServiceAuthHeader) != "" {
-				c.used[k] = c.Recount(req.Team)
+			if req.Store == storagequota.KindLogs {
+				break
 			}
 			room := c.Share - c.used[k] - c.reserved[k]
 			if req.UpTo && (granted <= 0 || granted > room) {
 				granted = room
 			}
 			if room <= 0 || granted > room {
-				body := map[string]any{"error": fmt.Sprintf(
+				refuse(w, http.StatusRequestEntityTooLarge,
 					"storage quota exceeded: team %s holds %d of its %d bytes and this write adds %d; add credits to store more",
-					req.Team, c.used[k]+c.reserved[k], c.Share, req.Bytes)}
-				if req.Store == storagequota.KindLogs {
-					body["evict_bytes"] = max(req.Bytes, 1) - room + c.Share/8
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusRequestEntityTooLarge)
-				writeJSON(w, body)
+					req.Team, c.used[k]+c.reserved[k], c.Share, req.Bytes)
 				return
 			}
 		}

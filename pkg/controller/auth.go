@@ -109,11 +109,6 @@ const (
 	// no secret or source. Only the operator mints it; no team's token may
 	// carry it.
 	ScopeClaimsLaunch = store.LaunchScope
-	// ScopeLogsRecount is the logs service's own scope. It asks for a team's
-	// logs to be recounted from the archive after the service evicted some,
-	// and reaches nothing else. Only the operator mints it; no team's token
-	// may carry it.
-	ScopeLogsRecount = store.LogsRecountScope
 )
 
 var allScopes = []string{
@@ -133,7 +128,6 @@ var allScopes = []string{
 	ScopeLogsDelete,
 	ScopeCreditsGrant,
 	ScopeClaimsLaunch,
-	ScopeLogsRecount,
 }
 
 // safety: the table is the whole grant a membership carries, and ScopeAdmin

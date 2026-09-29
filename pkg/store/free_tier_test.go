@@ -44,8 +44,13 @@ func standing(t *testing.T, st *store.Store, team store.Team) store.StorageStand
 }
 
 func storeBytes(st *store.Store, team store.Team) error {
-	_, err := reserve(st, team, store.StorageLogs, 1, time.Now())
-	return err
+	res, err := reserve(st, team, store.StorageCache, 1, time.Now())
+	if err != nil {
+		return err
+	}
+	return st.CommitStorage(context.Background(), store.StorageCommit{
+		ID: res.ID, Team: team, Kind: store.StorageCache, Bytes: 1, Now: time.Now(),
+	})
 }
 
 // The free tier is full the instant its last slot is taken: no sample, no
@@ -105,7 +110,7 @@ func TestFreeSlotsBoundTheFreeTierAtEveryInstant(t *testing.T) {
 }
 
 // safety: two teams racing for the last slot both read one free; the lock
-// admits exactly one of them.
+// gives it to exactly one of them, and the rest are refused their next write.
 func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -123,17 +128,56 @@ func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 		wg.Go(func() { errs[i] = storeBytes(st, team) })
 	}
 	wg.Wait()
-	admitted := 0
 	for _, err := range errs {
-		switch {
-		case err == nil:
-			admitted++
-		case !errors.Is(err, store.ErrFreeStoragePaused):
+		if err != nil && !errors.Is(err, store.ErrFreeStoragePaused) {
 			t.Fatalf("unexpected refusal: %v", err)
 		}
 	}
-	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 1 || admitted != 1 {
-		t.Fatalf("admitted %d, slots taken %d, %v; want exactly one", admitted, taken, err)
+	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 1 {
+		t.Fatalf("slots taken %d, %v; want exactly one", taken, err)
+	}
+	refused := 0
+	for _, team := range teams {
+		if err := storeBytes(st, team); errors.Is(err, store.ErrFreeStoragePaused) {
+			refused++
+		}
+	}
+	if refused != racers-1 {
+		t.Fatalf("%d teams refused their next write, want every team but the slot's", refused)
+	}
+}
+
+// A slot goes with the first committed byte, so a reservation nobody commits
+// never spends one of the tier's slots.
+func TestAnAbandonedReservationTakesNoSlot(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	teamHandle(t, st, "team-a")
+	teamHandle(t, st, "team-b")
+	res, err := reserve(st, "team-a", store.StorageCache, 10, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReleaseStorage(ctx, "team-a", res.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reserve(st, "team-a", store.StorageLogs, 10, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 0 {
+		t.Fatalf("slots after reservations nobody committed = %d, %v; want none", taken, err)
+	}
+	if err := storeBytes(st, "team-b"); err != nil {
+		t.Fatalf("a team committing its first byte: %v", err)
+	}
+	if got := standing(t, st, "team-b"); got.Tier != store.TeamTierFree {
+		t.Fatalf("team-b after its first committed byte = %+v, want a slot", got)
+	}
+	if err := storeBytes(st, "team-a"); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("team-a once the only slot is taken = %v, want free storage paused", err)
 	}
 }
 

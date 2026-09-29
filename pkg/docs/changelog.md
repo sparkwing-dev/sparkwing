@@ -309,8 +309,8 @@ unlock.
   [Log completeness](docs/observability.md#log-completeness).
 
 - **controller:** a free tier bounded by counting teams. A team without
-  credits takes one of `--free-team-slots` (200) the first time it stores
-  anything, in that write's transaction, and keeps it until the team is
+  credits takes one of `--free-team-slots` (200) with the first byte it
+  commits, in that commit's transaction, and keeps it until the team is
   deleted, so free storage never passes slots times the allowance. A team with
   neither a slot nor credits is refused its storage writes with `402` "free
   storage is paused; buy credits or join the waitlist". Runs are never refused
@@ -324,14 +324,10 @@ unlock.
   (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares:
   the cache keeps 768 MiB, checked before an upload's body is read and cut at
   the room left when the length is unknown; the logs service keeps 192 MiB,
-  checked after the node and run caps and before the append is written, and a
-  refusal names `evict_bytes`, which the logs service frees by deleting the
-  team's least recently written archived runs before asking again with
-  `evicted` and its own `logs.recount` credential (`SPARKWING_LOGS_SERVICE_TOKEN`,
-  sent in `X-Sparkwing-Logs-Service`), when the controller recounts the team's
-  archive from a listing; without that credential the append is refused after
-  the eviction, and no team token may carry the scope;
-  run
+  counted as it is written but never refused for it: the hourly storage pass
+  deletes a free team's least recently written finished runs' archived logs,
+  through the logs service with the controller's `logs.delete` credential,
+  until the team is back under its share; run
   events keep 64 MiB, checked in the append's transaction. The controller
   counts every team's cache and log bytes in its database (schema v61,
   `team_storage`): a write reserves its size with

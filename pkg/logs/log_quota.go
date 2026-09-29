@@ -163,45 +163,6 @@ func (s *Server) drawLocked(ctx context.Context, b *logBlock, auth string, n int
 	} else {
 		next, err = s.counter.Reserve(ctx, auth, b.key.team, storagequota.KindLogs, want, true)
 	}
-	var quota *storagequota.QuotaError
-	if err == nil {
-		b.adopt(next)
-		if b.take(n) {
-			return &logDraw{block: b, n: n}, nil
-		}
-		quota = &storagequota.QuotaError{Message: fmt.Sprintf(
-			"free storage allowance exceeded: team %s has %d bytes of its log share left and this append stores %d; "+
-				"add credits to store more", b.key.team, b.left, n), EvictBytes: n - b.left}
-	} else if !errors.As(err, &quota) || quota.Paused {
-		return nil, err
-	}
-	return s.evictAndDraw(ctx, b, auth, n, want, quota)
-}
-
-// safety: a free team's full share costs it its least recently written
-// archived runs, never a run still in use, and nothing past the share is
-// drawn until the controller has recounted the archive after the eviction.
-func (s *Server) evictAndDraw(ctx context.Context, b *logBlock, auth string, n, want int64, quota *storagequota.QuotaError) (*logDraw, error) {
-	if s.archive == nil || quota.EvictBytes <= 0 {
-		return nil, quota
-	}
-	freed, err := s.evictTeamLogs(ctx, b.key.team, quota.EvictBytes)
-	if err != nil {
-		s.logger.Error("logs archive", "op", "evict team logs", "team", b.key.team, "freed", freed, "err", err)
-	}
-	// safety: without its own credential the service cannot ask for the
-	// recount, so the eviction frees room for the next hourly pass to count
-	// and this append is refused.
-	if freed <= 0 || !s.counter.CanRecount() {
-		return nil, quota
-	}
-	if b.held() {
-		if err := s.counter.Release(ctx, auth, b.res); err != nil {
-			return nil, err
-		}
-		b.adopt(storagequota.Reservation{})
-	}
-	next, err := s.counter.ReserveAfterEviction(ctx, auth, b.key.team, want)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +170,9 @@ func (s *Server) evictAndDraw(ctx context.Context, b *logBlock, auth string, n, 
 	if b.take(n) {
 		return &logDraw{block: b, n: n}, nil
 	}
-	return nil, quota
+	return nil, &storagequota.QuotaError{Message: fmt.Sprintf(
+		"free storage allowance exceeded: team %s has %d bytes of its log share left and this append stores %d; "+
+			"add credits to store more", b.key.team, b.left, n)}
 }
 
 // safety: a run that drew nothing since the last settle, or every run when

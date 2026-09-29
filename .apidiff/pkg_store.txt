@@ -663,7 +663,7 @@ type EgressUsage struct {
 	UpdatedAt time.Time
 }
 const EgressUsageRetentionMonths = 13
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant, claims.launch or logs.recount scope")
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant or claims.launch scope")
 var ErrAgentNameTaken = errors.New("store: another live runner token of this team carries that agent name; revoke it before minting a new one")
 var ErrAlreadyBound = errors.New("store: this repository is already bound to the team")
 var ErrAlreadyMember = errors.New("store: already a member of this team")
@@ -1131,7 +1131,6 @@ type LegacyAgentClaim struct {
 	LastSeen    time.Time
 }
 const LogsDeleteScope = "logs.delete"
-const LogsRecountScope = "logs.recount"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:           (*Store).reapExpiredTriggers,
@@ -1831,8 +1830,6 @@ type StorageQuotaError struct {
 	Requested int64
 
 	Remedy string
-
-	EvictBytes int64
 }
 func (e *StorageQuotaError) Error() string
 func (e *StorageQuotaError) Unwrap() error
@@ -2154,9 +2151,6 @@ func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBind
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error)
 func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
-func (s *Store) ReconcileTeamStorage(
-	ctx context.Context, team Team, kind StorageKind, list func(context.Context) (int64, error), now time.Time,
-) (err error)
 func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, labels []string) error
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCreditGrant(
@@ -2207,6 +2201,7 @@ func (s *Store) RotateToken(prefix string, grace, ttl time.Duration, now time.Ti
 func (s *Store) RunBucketMeasureLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunCronTickLeased(ctx context.Context, holder string, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunExceedsWallClock(ctx context.Context, runID string, now time.Time) (int64, bool, error)
+func (s *Store) RunFinished(ctx context.Context, team Team, runID string) (bool, error)
 func (s *Store) RunStoragePassLeased(ctx context.Context, holder string, window, ttl time.Duration, fn func(context.Context) error) (ran bool, err error)
 func (s *Store) RunnerCapFor(ctx context.Context, team Team, now time.Time) (RunnerCap, error)
 func (s *Store) SampleSealedSecrets(ctx context.Context, sealedPrefix string, limit int) (_ []TeamSecret, err error)
@@ -2265,6 +2260,7 @@ func (s *Store) SwitchSessionTeam(ctx context.Context, rawSession, accountID str
 func (s *Store) TeamDeletionsRequestedBy(ctx context.Context, accountID string) ([]TeamDeletion, error)
 func (s *Store) TeamInfo(ctx context.Context, team Team) (TeamInfo, error)
 func (s *Store) TeamStorage(ctx context.Context, team Team) (_ map[StorageKind]TeamStorageUsage, err error)
+func (s *Store) TeamsOverFreeLogShare(ctx context.Context) (_ []TeamOverShare, err error)
 func (s *Store) TokenMetered(ctx context.Context, prefix string) (bool, error)
 func (s *Store) TopStorageTeams(ctx context.Context, month string, limit int) (_ []StorageTeamUsage, err error)
 func (s *Store) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
@@ -2320,6 +2316,10 @@ type TeamMatch struct {
 	Slug        Team
 	DisplayName string
 	Owners      []string
+}
+type TeamOverShare struct {
+	Team      Team
+	OverBytes int64
 }
 type TeamRetentionExpiry struct {
 	Team  Team

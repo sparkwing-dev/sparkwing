@@ -60,8 +60,8 @@ func TestReserveHoldsAFreeTeamToEachShareApart(t *testing.T) {
 	if _, err := reserve(st, "team-a", store.StorageLogs, 3<<10, now); err != nil {
 		t.Fatalf("the log share with the cache share full: %v", err)
 	}
-	if _, err := reserve(st, "team-a", store.StorageLogs, 1, now); !errors.As(err, &quota) || quota.EvictBytes != 1+(3<<10)/8 {
-		t.Fatalf("one byte past the log share = %v, want a quota error naming %d bytes to evict", err, 1+(3<<10)/8)
+	if past, err := reserve(st, "team-a", store.StorageLogs, 1, now); err != nil || past.Granted != 1 {
+		t.Fatalf("one byte past the log share = %+v, %v; want it granted for the storage pass to prune", past, err)
 	}
 
 	if err := st.CommitStorage(context.Background(), store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 10 << 10, Now: now}); err != nil {
@@ -583,37 +583,37 @@ func TestEgressTotalsKeepTheLargerValue(t *testing.T) {
 // lands even when the next block does not fit.
 func TestRenewCommitsTheBlockAndReservesTheNext(t *testing.T) {
 	st := storetest.Open(t)
-	setFreeAllowance(t, st, 16<<10)
+	setFreeAllowance(t, st, 4<<10)
 	freeTeam(t, st, "team-a")
 	ctx := context.Background()
 	now := time.Now()
-	block, err := st.ReserveStorage(ctx, store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+	block, err := st.ReserveStorage(ctx, store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	if err != nil || block.Granted != 2<<10 {
 		t.Fatalf("first block = %+v, %v", block, err)
 	}
 	next, err := st.RenewStorage(ctx,
-		store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+		store.StorageCommit{ID: block.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	if err != nil || next.ID == "" || next.Granted != 1<<10 {
-		t.Fatalf("renew with 1 KiB of the 3 KiB log share left = %+v, %v; want a 1 KiB block", next, err)
+		t.Fatalf("renew with 1 KiB of the 3 KiB cache share left = %+v, %v; want a 1 KiB block", next, err)
 	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 2<<10 || got.ReservedBytes != 1<<10 {
+	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 2<<10 || got.ReservedBytes != 1<<10 {
 		t.Fatalf("after renew = %+v, want 2 KiB used and the 1 KiB block held", got)
 	}
 	_, err = st.RenewStorage(ctx,
-		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
 	var quota *store.StorageQuotaError
 	if !errors.As(err, &quota) {
 		t.Fatalf("renew with the share spent = %v, want a quota error", err)
 	}
-	if got := usageOf(t, st, "team-a", store.StorageLogs); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
+	if got := usageOf(t, st, "team-a", store.StorageCache); got.UsedBytes != 3<<10 || got.ReservedBytes != 0 {
 		t.Fatalf("after a refused renew = %+v, want the commit kept: 3 KiB used, nothing held", got)
 	}
 	_, err = st.RenewStorage(ctx,
-		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 1 << 10, Now: now},
-		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 2 << 10, UpTo: true, Now: now})
-	if !errors.As(err, &quota) || usageOf(t, st, "team-a", store.StorageLogs).UsedBytes != 3<<10 {
+		store.StorageCommit{ID: next.ID, Team: "team-a", Kind: store.StorageCache, Bytes: 1 << 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageCache, Bytes: 2 << 10, UpTo: true, Now: now})
+	if !errors.As(err, &quota) || usageOf(t, st, "team-a", store.StorageCache).UsedBytes != 3<<10 {
 		t.Fatalf("replayed refused renewal = %v; count changed", err)
 	}
 }

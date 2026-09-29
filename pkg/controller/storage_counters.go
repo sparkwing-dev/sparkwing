@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/subtle"
 	"errors"
 	"net/http"
@@ -85,11 +84,10 @@ func (c counterCaller) may(w http.ResponseWriter, team string, kind store.Storag
 }
 
 type storageReserveReq struct {
-	Team    string            `json:"team"`
-	Store   store.StorageKind `json:"store"`
-	Bytes   int64             `json:"bytes"`
-	UpTo    bool              `json:"up_to"`
-	Evicted bool              `json:"evicted"`
+	Team  string            `json:"team"`
+	Store store.StorageKind `json:"store"`
+	Bytes int64             `json:"bytes"`
+	UpTo  bool              `json:"up_to"`
 }
 
 func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
@@ -109,16 +107,9 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.StorageReservation{Tier: store.TeamTierFunded, Granted: max(req.Bytes, 0), Unlimited: true})
 		return
 	}
-	ask := store.StorageReserve{Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now()}
-	res, err := s.store.ReserveStorage(r.Context(), ask)
-	var quota *store.StorageQuotaError
-	if req.Evicted && req.Store == store.StorageLogs && errors.As(err, &quota) && s.fromLogsService(r) {
-		if rerr := s.recountTeamLogs(r.Context(), ask.Team); rerr != nil {
-			s.logger.Warn("recount a team's logs after eviction", "team", req.Team, "err", rerr)
-		} else {
-			res, err = s.store.ReserveStorage(r.Context(), ask)
-		}
-	}
+	res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
+		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now(),
+	})
 	s.writeReservation(w, r, res, err)
 }
 
@@ -176,45 +167,11 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	s.writeReservation(w, r, next, err)
 }
 
-// LogsServiceAuthHeader carries the logs service's own credential beside the
-// caller it forwards, on the reservation it retries after an eviction.
-const LogsServiceAuthHeader = "X-Sparkwing-Logs-Service"
-
-// safety: a recount forgets a team's logs not yet archived, so only the logs
-// service, which evicted before asking, may ask for one; a team's own token
-// cannot carry the scope.
-func (s *Server) fromLogsService(r *http.Request) bool {
-	scheme, raw, _ := strings.Cut(r.Header.Get(LogsServiceAuthHeader), " ")
-	raw = strings.TrimSpace(raw)
-	if !strings.EqualFold(scheme, "bearer") || raw == "" {
-		return false
-	}
-	p, err := s.authMiddleware().Authenticate(raw)
-	return err == nil && p != nil && p.HasScope(ScopeLogsRecount)
-}
-
-// safety: the count comes from the archive the logs service evicted from, never
-// from what a caller says it freed, so a team cannot talk its count down.
-func (s *Server) recountTeamLogs(ctx context.Context, team store.Team) error {
-	if s.storagePass == nil || s.storagePass.stores[store.StorageLogs] == nil {
-		return errors.New("no logs archive to count")
-	}
-	bucket := s.storagePass.stores[store.StorageLogs]
-	return s.store.ReconcileTeamStorage(ctx, team, store.StorageLogs, func(ctx context.Context) (int64, error) {
-		objs, err := bucket.List(ctx, string(team), "")
-		var total int64
-		for _, o := range objs {
-			total += o.Size
-		}
-		return total, err
-	}, time.Now())
-}
-
 func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, res store.StorageReservation, err error) {
 	var quota *store.StorageQuotaError
 	switch {
 	case errors.As(err, &quota):
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error(), "evict_bytes": quota.EvictBytes})
+		writeError(w, http.StatusRequestEntityTooLarge, err)
 	case errors.Is(err, store.ErrFreeStoragePaused):
 		writeError(w, http.StatusPaymentRequired, err)
 	case errors.Is(err, store.ErrInvalidInput):

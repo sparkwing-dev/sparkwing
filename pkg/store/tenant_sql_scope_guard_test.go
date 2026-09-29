@@ -119,6 +119,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
 		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
+	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +

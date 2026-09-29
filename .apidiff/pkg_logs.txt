@@ -166,8 +166,6 @@ type ServeOptions struct {
 	Egress *egress.Meter
 
 	Archive *ArchiveOptions
-
-	ServiceToken string
 }
 func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 func ServeWith(ctx context.Context, opts ServeOptions) error

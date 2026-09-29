@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"net/url"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -116,6 +120,11 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 				errs = append(errs, fmt.Errorf("prune expired cache object rows: %w", err))
 			}
 		}
+		if kind == store.StorageLogs {
+			if err := s.pruneLogsOverShare(ctx, bucket, now); err != nil {
+				errs = append(errs, fmt.Errorf("prune logs over a free share: %w", err))
+			}
+		}
 		s.logger.Info("storage pass", "store", string(kind), "teams", len(m.Teams),
 			"expired_objects", m.Expired.Objects, "expired_bytes", m.Expired.Bytes)
 	}
@@ -167,4 +176,81 @@ func (s *Server) storagePassHealth() (map[string]any, []string) {
 	}
 	return summary, []string{"storage pass: the last pass could not list or reconcile every store, so those counts " +
 		"stand as they were; the controller log names the error"}
+}
+
+// safety: a free team's log writes are granted past its share, so this pass is
+// what holds it there, about an hour behind: it deletes the team's least
+// recently written finished runs' logs through the logs service until the
+// team is back under, and never a run still going.
+func (s *Server) pruneLogsOverShare(ctx context.Context, bucket *teamblob.Store, now time.Time) error {
+	over, err := s.store.TeamsOverFreeLogShare(ctx)
+	if err != nil || len(over) == 0 {
+		return err
+	}
+	if s.teamStorage.LogsURL == "" {
+		return errors.New("teams are past their log share and no logs service is configured to prune them")
+	}
+	if err := s.checkLogsDeleteToken(now); err != nil {
+		return err
+	}
+	var errs []error
+	for _, t := range over {
+		freed, err := s.pruneTeamLogs(ctx, bucket, t)
+		if freed > 0 {
+			errs = append(errs, s.store.CommitStorage(ctx, store.StorageCommit{
+				Team: t.Team, Kind: store.StorageLogs, Bytes: -freed, Now: now,
+			}))
+			s.logger.Info("pruned logs over a free share", "team", string(t.Team), "freed_bytes", freed)
+		}
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Server) pruneTeamLogs(ctx context.Context, bucket *teamblob.Store, t store.TeamOverShare) (int64, error) {
+	objs, err := bucket.List(ctx, string(t.Team), "runs/")
+	if err != nil {
+		return 0, err
+	}
+	type archivedRun struct {
+		id    string
+		bytes int64
+		last  time.Time
+	}
+	byID := map[string]*archivedRun{}
+	for _, o := range objs {
+		id, _, ok := strings.Cut(strings.TrimPrefix(o.Rel, "runs/"), "/")
+		if !ok {
+			continue
+		}
+		r := byID[id]
+		if r == nil {
+			r = &archivedRun{id: id}
+			byID[id] = r
+		}
+		r.bytes += o.Size
+		if o.LastModified.After(r.last) {
+			r.last = o.LastModified
+		}
+	}
+	runs := slices.SortedFunc(maps.Values(byID), func(a, b *archivedRun) int { return a.last.Compare(b.last) })
+	base := strings.TrimRight(s.teamStorage.LogsURL, "/") + "/api/v1/logs/"
+	var freed int64
+	for _, r := range runs {
+		if freed >= t.OverBytes {
+			break
+		}
+		finished, err := s.store.RunFinished(ctx, t.Team, r.id)
+		if err != nil {
+			return freed, err
+		}
+		if !finished {
+			continue
+		}
+		if err := deleteRemote(ctx, base+url.PathEscape(r.id), s.teamStorage.LogsToken); err != nil && !errors.Is(err, errRemoteNotFound) {
+			return freed, fmt.Errorf("delete logs of run %s: %w", r.id, err)
+		}
+		freed += r.bytes
+	}
+	return freed, nil
 }

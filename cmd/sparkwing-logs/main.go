@@ -201,12 +201,6 @@ func run(args []string) error {
 		}
 		archive = &logs.ArchiveOptions{Store: store, Idle: *archiveIdle}
 	}
-	// safety: read from the environment and cleared, never a flag, so the
-	// credential stays out of the process's argument list and its children.
-	serviceToken := strings.TrimSpace(os.Getenv("SPARKWING_LOGS_SERVICE_TOKEN"))
-	if err := os.Unsetenv("SPARKWING_LOGS_SERVICE_TOKEN"); err != nil {
-		return fmt.Errorf("clear SPARKWING_LOGS_SERVICE_TOKEN from the environment: %w", err)
-	}
 	tel := otelutil.Init(ctx, otelutil.Config{ServiceName: "sparkwing-logs"})
 	defer func() { _ = tel.Shutdown(context.Background()) }()
 	return logs.ServeWith(ctx, logs.ServeOptions{
@@ -218,7 +212,6 @@ func run(args []string) error {
 		StoreCeiling:  ceiling,
 		Egress:        egress.New(egressCfg),
 		Archive:       archive,
-		ServiceToken:  serviceToken,
 	})
 }
 

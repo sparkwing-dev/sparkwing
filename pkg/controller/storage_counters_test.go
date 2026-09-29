@@ -2,7 +2,6 @@ package controller_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,10 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -308,8 +303,14 @@ func TestSignUpFreeTierClosesWithTheLastSlot(t *testing.T) {
 		t.Fatalf("with a slot free = %s, %v; want open", got, err)
 	}
 	freeTeamToken(t, f.store, "first")
-	if code, _ := f.reserve("Bearer cache-token", "first", "cache", 1); code != http.StatusOK {
-		t.Fatalf("first team's first stored byte = %d", code)
+	code, res := f.reserve("Bearer cache-token", "first", "cache", 1)
+	if code != http.StatusOK {
+		t.Fatalf("first team's reservation = %d", code)
+	}
+	if code := f.call("POST", "/internal/storage/commit", "Bearer cache-token", map[string]any{
+		"team": "first", "store": "cache", "reservation": res.ID, "bytes": 1,
+	}, nil); code != http.StatusNoContent {
+		t.Fatalf("first team's first committed byte = %d", code)
 	}
 	if got, err := f.srv.SignUpFreeTier(ctx); err != nil || got != controller.FreeTierClosed {
 		t.Fatalf("with every slot taken = %s, %v; want closed", got, err)
@@ -343,73 +344,5 @@ func TestTheServerIsItsOwnFreeTierSource(t *testing.T) {
 	}
 	if out := f.signIn(person("g-full", "full@example.com", "F")); !out.Waitlisted {
 		t.Fatal("a new account was admitted with every free slot taken")
-	}
-}
-
-// A log write past a free team's share is refused with how much to evict,
-// never granted; once the logs service evicts and asks again, the controller
-// counts the team's archive itself rather than taking the caller's word.
-func TestALogRefusalNamesAnEvictionAndTheRetryRecountsTheArchive(t *testing.T) {
-	buckets := newPassBuckets(t)
-	raw, pub := multiTeamLicense(t)
-	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
-		s.WithStoragePass(nil, buckets.logs)
-	}})
-	allowance := int64(16 << 10)
-	if _, err := f.store.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
-		StorageFreeAllowanceBytes: &allowance,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	freeTeamToken(t, f.store, "first")
-	writer := logsWriter(t, f.store, "first")
-	share := store.FreeLogShare(allowance)
-	buckets.put(t, "logs/teams/first/runs/r1/build.log", int(share))
-	code, res := f.reserve(writer, "first", "logs", share)
-	if code != http.StatusOK {
-		t.Fatalf("reserve the whole log share = %d", code)
-	}
-	if code := f.call("POST", "/internal/storage/commit", writer, map[string]any{
-		"team": "first", "store": "logs", "reservation": res.ID, "bytes": share,
-	}, nil); code != http.StatusNoContent {
-		t.Fatalf("commit = %d", code)
-	}
-	var refusal struct {
-		EvictBytes int64 `json:"evict_bytes"`
-	}
-	if code := f.call("POST", "/internal/storage/reserve", writer, map[string]any{
-		"team": "first", "store": "logs", "bytes": 100,
-	}, &refusal); code != http.StatusRequestEntityTooLarge || refusal.EvictBytes != 100+share/8 {
-		t.Fatalf("a write past the share = %d %+v, want 413 naming %d bytes to evict", code, refusal, 100+share/8)
-	}
-	service, _, err := f.store.CreateToken("logs-service", store.TokenKindService,
-		[]string{controller.ScopeLogsRecount}, 0, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	asLogs := storagequota.New(f.url, nil).WithServiceToken(service)
-	var quota *storagequota.QuotaError
-	if _, err := asLogs.ReserveAfterEviction(context.Background(), writer, "first", 100); !errors.As(err, &quota) {
-		t.Fatalf("a claimed eviction the archive does not show = %v, want 413", err)
-	}
-	if _, err := buckets.raw.DeleteObject(context.Background(), &s3.DeleteObjectInput{
-		Bucket: aws.String(passBucket), Key: aws.String("logs/teams/first/runs/r1/build.log"),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	buckets.put(t, "logs/teams/first/runs/r2/build.log", 1000)
-	asTeam := storagequota.New(f.url, nil)
-	if _, err := asTeam.ReserveAfterEviction(context.Background(), writer, "first", 100); !errors.As(err, &quota) {
-		t.Fatalf("a team's own token claiming an eviction = %v, want 413", err)
-	}
-	if held, err := f.store.TeamStorage(context.Background(), "first"); err != nil || held[store.StorageLogs].UsedBytes != share {
-		t.Fatalf("logs after a team's claim = %+v, %v; want the count unchanged at %d", held, err, share)
-	}
-	granted, err := asLogs.ReserveAfterEviction(context.Background(), writer, "first", 100)
-	if err != nil || granted.Granted != 100 {
-		t.Fatalf("the logs service's retry after the archive shrank = %+v, %v; want the write granted", granted, err)
-	}
-	if held, err := f.store.TeamStorage(context.Background(), "first"); err != nil || held[store.StorageLogs].UsedBytes != 1000 {
-		t.Fatalf("logs after the recount = %+v, %v; want the archive's 1000 bytes", held, err)
 	}
 }

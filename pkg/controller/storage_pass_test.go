@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -43,11 +44,14 @@ type passBuckets struct {
 	hook        *listHook
 	cache, logs *teamblob.Store
 	now         time.Time
+	written     gofakes3.TimeSourceAdvancer
 }
 
 func newPassBuckets(t *testing.T) *passBuckets {
 	t.Helper()
-	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
+	written := gofakes3.FixedTimeSource(time.Now())
+	fake := httptest.NewServer(gofakes3.New(s3mem.New(s3mem.WithTimeSource(written)),
+		gofakes3.WithTimeSource(written), gofakes3.WithTimeSkewLimit(0)).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
@@ -56,7 +60,7 @@ func newPassBuckets(t *testing.T) *passBuckets {
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(passBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	b := &passBuckets{raw: raw, hook: &listHook{Client: raw}, now: time.Now()}
+	b := &passBuckets{raw: raw, hook: &listHook{Client: raw}, now: time.Now(), written: written}
 	open := func(prefix string, maxAge func(string) time.Duration) *teamblob.Store {
 		s, err := teamblob.New(teamblob.Options{
 			Bucket: passBucket, Prefix: prefix, Client: b.hook, TeamObjectMaxAge: maxAge,
@@ -269,5 +273,56 @@ func TestAFailedStoragePassKeepsTheCounts(t *testing.T) {
 	f.call("GET", "/api/v1/health", "", nil, &health)
 	if !strings.Contains(strings.Join(health.Problems, "\n"), "storage pass") {
 		t.Errorf("health problems = %v, want the failed storage pass", health.Problems)
+	}
+}
+
+// A free team whose log writes carried it past its share is pruned back
+// under it by the hourly pass: its least recently written finished runs go
+// first through the logs service, and a run still going is never touched.
+func TestTheStoragePassPrunesAFreeTeamsFinishedLogsBackUnderItsShare(t *testing.T) {
+	f := freeTierFixture(t, 5)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deleted []string
+	logsSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.Header.Get("Authorization") != "Bearer "+deleter {
+			http.Error(w, "unexpected", http.StatusTeapot)
+			return
+		}
+		deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/api/v1/logs/"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(logsSvc.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsSvc.URL, LogsToken: deleter})
+	allowance := int64(16 << 10)
+	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+		t.Fatal(err)
+	}
+	freeTeamToken(t, f.store, "first")
+	if err := f.store.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []struct{ id, status string }{{"r-live", "running"}, {"r-old", "success"}, {"r-new", "failed"}} {
+		if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		b.put(t, "logs/teams/first/runs/"+run.id+"/build.log", 1500)
+		b.written.Advance(time.Minute)
+	}
+	if _, err := f.srv.RunStoragePass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 1 || deleted[0] != "r-old" {
+		t.Fatalf("pruned %v, want only the oldest finished run", deleted)
+	}
+	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
+		t.Fatalf("logs after the prune = %d, want the 4500 listed less the 1500 pruned", got)
 	}
 }

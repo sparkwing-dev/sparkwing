@@ -477,9 +477,13 @@ func TestStaleGrantCannotReserveOrCommitAfterSameTokenReclaimsRun(t *testing.T) 
 
 func TestDataDownloadIngressGetsExactExpiringCloudFrontPolicy(t *testing.T) {
 	s, grant, _ := downloadFixture(t)
+	signedBy := time.Now().Add(time.Minute).Unix()
 	rec, body := callDownload(t, s, grant, "bins/abc", true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
+	}
+	if body.Expires.Unix() > signedBy+1 {
+		t.Fatalf("the CloudFront URL expires at %s, more than 60 seconds after it was minted", body.Expires)
 	}
 	u, err := url.Parse(body.URL)
 	if err != nil || u.Host != "cdn.example.test" || u.Query().Get("Key-Pair-Id") != "KPAIR" {

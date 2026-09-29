@@ -126,7 +126,6 @@ type archiveFixture struct {
 	client *billed
 	root   string
 	calls  *controllerCalls
-	clock  gofakes3.TimeSourceAdvancer
 }
 
 type controllerCalls struct {
@@ -159,8 +158,7 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 
 func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.Handler) *archiveFixture {
 	t.Helper()
-	clock := gofakes3.FixedTimeSource(time.Now())
-	fake := httptest.NewServer(gofakes3.New(s3mem.New(s3mem.WithTimeSource(clock)), gofakes3.WithTimeSource(clock)).Server())
+	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
 		Region:       "us-east-1",
@@ -218,7 +216,7 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.H
 	srv.WithArchive(ArchiveOptions{Store: store})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls, clock: clock}
+	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls}
 }
 
 func (f *archiveFixture) do(t *testing.T, method, path, bearer, body string) (int, string) {
@@ -767,105 +765,5 @@ func TestAFreeTeamsArchivedLogsExpireBeforeAFundedTeams(t *testing.T) {
 	}
 	if !keys["logs/teams/team-b/runs/funded-run/build.log"] {
 		t.Error("a funded team's run inside the retention was pruned")
-	}
-}
-
-// Evicting a team's logs deletes its least recently written archived runs
-// first, frees at least what was asked, and leaves other teams alone.
-func TestEvictingATeamsLogsTakesItsOldestRunsFirst(t *testing.T) {
-	f := newArchiveFixture(t, 0)
-	now := time.Now()
-	for i, run := range []string{"oldest", "older", "newest"} {
-		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", "Bearer a", "0123456789\n"); code != http.StatusNoContent {
-			t.Fatalf("append = %d %s", code, body)
-		}
-		f.age(t, run, now.Add(-time.Duration(3-i)*time.Hour))
-		if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
-			t.Fatalf("archive %s = %d, %v", run, n, err)
-		}
-		f.clock.Advance(time.Minute)
-	}
-	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/other/build", "Bearer b", "x\n"); code != http.StatusNoContent {
-		t.Fatalf("append = %d %s", code, body)
-	}
-	f.age(t, "other", now.Add(-5*time.Hour))
-	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
-		t.Fatalf("archive other = %d, %v", n, err)
-	}
-	if freed, err := f.srv.evictTeamLogs(context.Background(), "team-a", 11); err != nil || freed != 11 {
-		t.Fatalf("evict = %d, %v; want 11 bytes freed", freed, err)
-	}
-	keys := f.keys(t)
-	for k, want := range map[string]bool{
-		"logs/teams/team-a/runs/oldest/build.log": false,
-		"logs/index/runs/oldest.json":             false,
-		"logs/teams/team-a/runs/older/build.log":  true,
-		"logs/teams/team-a/runs/newest/build.log": true,
-		"logs/teams/team-b/runs/other/build.log":  true,
-	} {
-		if keys[k] != want {
-			t.Errorf("%s present = %t, want %t", k, keys[k], want)
-		}
-	}
-}
-
-// An append past a free team's full share evicts the team's oldest archived
-// run and is written once the controller recounts the archive. A team whose
-// only logs are live has nothing to evict and is refused, as
-// TestAFreeTeamsLogsStopAtTheirShare shows.
-func TestAnAppendPastTheShareEvictsTheOldestArchivedRun(t *testing.T) {
-	counter := storagequotatest.New(300, 0)
-	f := newArchiveFixtureWith(t, 0, counter)
-	f.srv.counter.WithServiceToken("logs-service")
-	counter.Recount = func(team string) int64 {
-		var n int64
-		for k := range f.keys(t) {
-			if strings.HasPrefix(k, "logs/teams/"+team+"/") {
-				n += 101
-			}
-		}
-		return n
-	}
-	now := time.Now()
-	for i, run := range []string{"old", "new"} {
-		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", "Bearer a", line(100)); code != http.StatusNoContent {
-			t.Fatalf("append %s = %d %s", run, code, body)
-		}
-		f.age(t, run, now.Add(-time.Duration(2-i)*time.Hour))
-		f.srv.settleLogBlocks(context.Background(), true)
-		if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
-			t.Fatalf("archive %s = %d, %v", run, n, err)
-		}
-		f.clock.Advance(time.Minute)
-	}
-	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/live/build", "Bearer a", line(150)); code != http.StatusNoContent {
-		t.Fatalf("an append past the full share = %d %s, want it written after an eviction", code, body)
-	}
-	keys := f.keys(t)
-	if keys["logs/teams/team-a/runs/old/build.log"] || !keys["logs/teams/team-a/runs/new/build.log"] {
-		t.Fatalf("archive after the eviction = %v, want only the oldest run gone", keys)
-	}
-}
-
-// A logs service holding no credential of its own still evicts a free team's
-// oldest archived run for an append past the share, but cannot ask for the
-// recount, so the append is refused and the next hourly pass counts the room.
-func TestAnAppendPastTheShareWithoutAServiceTokenEvictsAndIsRefused(t *testing.T) {
-	counter := storagequotatest.New(200, 0)
-	f := newArchiveFixtureWith(t, 0, counter)
-	counter.Recount = func(string) int64 { return 0 }
-	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/old/build", "Bearer a", line(150)); code != http.StatusNoContent {
-		t.Fatalf("append = %d %s", code, body)
-	}
-	f.age(t, "old", time.Now().Add(-time.Hour))
-	f.srv.settleLogBlocks(context.Background(), true)
-	if n, err := f.srv.ArchiveOnce(context.Background(), time.Now()); err != nil || n != 1 {
-		t.Fatalf("archive = %d, %v", n, err)
-	}
-	if code, _ := f.do(t, http.MethodPost, "/api/v1/logs/live/build", "Bearer a", line(100)); code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("an append past the share without a service token = %d, want 413", code)
-	}
-	if f.keys(t)["logs/teams/team-a/runs/old/build.log"] {
-		t.Fatal("the oldest archived run survived the eviction")
 	}
 }

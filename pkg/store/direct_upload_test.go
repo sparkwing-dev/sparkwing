@@ -137,7 +137,14 @@ func TestSourceReserveAcquiresOnlyOneFreeTeamSlotBeforeAnyRun(t *testing.T) {
 		Key: "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("1", 32), Size: 10,
 		SHA256: strings.Repeat("a", 64), Principal: "owner", ClaimPrefix: "swu_owner", Provenance: "local",
 	}
-	if _, err := st.ReserveUpload(t.Context(), request); err != nil {
+	first, err := st.ReserveUpload(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taken, _, err := st.FreeSlots(t.Context()); err != nil || taken != 0 {
+		t.Fatalf("slots after a reservation = %d, %v; want none until a byte is committed", taken, err)
+	}
+	if err := st.CommitUpload(t.Context(), "source-a", first.ID, first.Principal, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	request.Key = "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("2", 32)

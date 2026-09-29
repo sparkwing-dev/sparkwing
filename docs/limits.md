@@ -66,20 +66,16 @@ append's claim with the controller at most once every 30 seconds per run,
 node, credential and claim; an append that names no claim generation is
 confirmed every time.
 
-A write past a share is refused with `413` and a reason that names the share,
-what the team holds and what the write needs. A log write past the share
-also names `evict_bytes`: the logs service then deletes the team's least
-recently written archived runs, never a run in use or written since its
-archive, until it has freed that much, and asks again saying it evicted, with
-its own `logs.recount` credential from `SPARKWING_LOGS_SERVICE_TOKEN` in
-`X-Sparkwing-Logs-Service`. The controller then counts the team's logs from a
-listing of the archive, never from the caller's word, and grants the write
-only if the recount makes room; otherwise, when nothing could be evicted, or
-when the service has no such credential, the append is refused and the next
-hourly pass counts the room. A team's own token saying it evicted changes
-nothing. The
-recount, like the hourly pass, counts only what the archive holds, so bytes of
-a run not yet archived drop out of the count until the next pass. The cache judges a declared
+A log write is never refused for the log share, so a run always keeps its
+logs. The hourly storage pass holds a free team to the share instead: after it
+recounts the logs, it deletes the team's least recently written archived runs
+whose run has finished (or is no longer recorded), through the logs service's
+`DELETE /api/v1/logs/{runID}` with the controller's `logs.delete` credential,
+until the team is back under its share, and never a run still going. A team
+can therefore sit past its log share by about an hour of log growth.
+
+A cache write past its share is refused with `413` and a reason that names the share,
+what the team holds and what the write needs. The cache judges a declared
 `Content-Length` before it reads one byte, and stages a binary only after the
 check. An upload of unknown length gets the room the team has left, up to the
 per-object cap, and is cut past it; the cut aborts the upload, so no partial
@@ -110,10 +106,13 @@ logs service under `team`.
 ## Free-team slots
 
 The free tier is bounded by counting teams. A team without credits takes one
-of `--free-team-slots` (default 200) the first time it stores anything, in
-the transaction that reserves the bytes, and keeps it until the team is
-deleted. The free bytes a deployment holds are therefore at most slots times
-the allowance at every instant, without measuring anything. A team with a slot
+of `--free-team-slots` (default 200) with the first byte it commits, in the
+transaction that counts it, and keeps it until the team is deleted. A
+reservation takes no slot, so one nobody commits costs the tier nothing; it is
+refused only once every slot is taken. Two teams whose reservations raced for
+the last slot both keep what they committed, and the one without the slot is
+refused its next write. The free bytes a deployment holds are therefore at
+most slots times the allowance, give or take those races. A team with a slot
 keeps writing inside its shares after the slots run out; a team with neither a
 slot nor credits is refused its cache, log and event writes with `402`:
 `free storage is paused; buy credits or join the waitlist`.
@@ -170,7 +169,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Teams per user | three created over the account's life, the personal team included | `pkg/store/identity.go` |
 | Free teams | `--free-team-slots`, 200 by default, released only when a team is deleted | `pkg/store/free_tier.go` |
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
-| Logs, live and archived | the log share, 192 MiB by default, kept by evicting the team's least recently written archived runs | `pkg/store/team_storage.go`, `pkg/logs/log_quota.go` |
+| Logs, live and archived | the log share, 192 MiB by default; writes past it are kept, and the hourly storage pass deletes the team's least recently written finished runs' logs back under it | `pkg/store/team_storage.go`, `pkg/controller/storage_pass.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
 | Logs per run | 64 MiB per node and 1 GiB per run on the logs service | `pkg/logs/limits.go` |
@@ -181,7 +180,7 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Git mirrors | registered by the operator only; a team's grant cannot add one | `internal/cache/gitcache.go` |
 | Registry proxy directory | shared by every team; 2 GiB, least recently served evicted first, and 7 days per entry | `internal/cache/proxycap.go` |
 | Registry proxy churn | the proxy takes no credential, because runner pods carry none, and is served inside the cluster only: the runner-bundle chart refuses a cache Service other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which starts the cache with `--disable-proxy`. The cache's daily egress alarm reports what callers pull through it and refuses nothing | `internal/cache/cache.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml`, `cmd/sparkwing-cache/main.go` |
-| Bytes downloaded by one team | 5 GiB a UTC day for a free team (`--team-daily-download-free-bytes`), 50 GiB for a funded team (`--team-daily-download-funded-bytes`), counted per team in the controller's database across the cache, the controller's artifact and git proxy routes, and signed URLs; log reads are not counted. A download is charged the bytes it delivers, 8 MiB at a time as it streams; signing a URL charges the stored object's size. Only a team already at its cap is refused, so a download under way always finishes and the team's next request gets `429` until midnight UTC. A free team's request gets `503` while the controller cannot answer. A 60-second URL can be fetched more than once, so the counter is an abuse limit rather than an exact bandwidth meter | `pkg/store/team_storage.go`, `pkg/controller/data_download.go` |
+| Bytes downloaded by one team | 5 GiB a UTC day for a free team (`--team-daily-download-free-bytes`), 50 GiB for a funded team (`--team-daily-download-funded-bytes`), counted per team in the controller's database across the cache, the controller's artifact and git proxy routes, and signed URLs; log reads are not counted. A download is charged the bytes it delivers, 8 MiB at a time as it streams; signing a URL charges the stored object's size. Only a team already at its cap is refused, so a download under way always finishes and the team's next request gets `429` until midnight UTC. A free team's request gets `503` while the controller cannot answer. A signed URL, for S3 or CloudFront, is charged once when it is minted and expires 60 seconds later; it can be fetched more than once inside that minute, so the counter is an abuse limit rather than an exact bandwidth meter | `pkg/store/team_storage.go`, `pkg/controller/data_download.go` |
 | Bytes the cache serves | an alarm, not a refusal, at 200 GiB a day per cache pod that verifies grants unless the operator names another threshold; with `--controller` the day's and the month's totals survive a restart, without one they are per process | `cmd/sparkwing-cache/main.go`, `internal/cache/egress_day.go` |
 | Cloud runner time | only an operator-metered token claims cloud capacity, and each claim needs credits | `pkg/store/credits.go` |
 | Nodes per run | `max_global_nodes_per_run` when the operator sets it | `pkg/store/compute_limits.go` |

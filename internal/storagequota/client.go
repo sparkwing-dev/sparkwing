@@ -69,9 +69,6 @@ var ErrUnavailable = errors.New("the controller that counts team storage is unav
 type QuotaError struct {
 	Message string
 	Paused  bool
-	// EvictBytes, on a free team's log share, is how much of the team's
-	// archived logs to evict before asking again with [Client.ReserveAfterEviction].
-	EvictBytes int64
 }
 
 func (e *QuotaError) Error() string { return e.Message }
@@ -114,24 +111,7 @@ type Client struct {
 
 	mu     sync.Mutex
 	funded map[string]time.Time
-
-	serviceAuth string
 }
-
-// ServiceAuthHeader carries a service's own credential beside the caller it
-// forwards; it matches the controller's LogsServiceAuthHeader.
-const ServiceAuthHeader = "X-Sparkwing-Logs-Service"
-
-// WithServiceToken names the credential, carrying logs.recount, that
-// [Client.ReserveAfterEviction] sends so the controller recounts a team's
-// logs. Without one, a caller cannot ask for a recount.
-func (c *Client) WithServiceToken(token string) *Client {
-	c.serviceAuth = strings.TrimSpace(token)
-	return c
-}
-
-// CanRecount reports whether this client holds a service credential.
-func (c *Client) CanRecount() bool { return c.serviceAuth != "" }
 
 // New returns a client of the controller at controllerURL. A nil client
 // gets a five-second timeout.
@@ -168,26 +148,10 @@ func (c *Client) recentlyFunded(team string) bool {
 // Reserve holds bytes of team's room in kind. With upTo it holds as much of
 // bytes as the team has room for, zero or less asking for all of it.
 func (c *Client) Reserve(ctx context.Context, auth, team string, kind Kind, bytes int64, upTo bool) (Reservation, error) {
-	return c.reserve(ctx, auth, team, kind, bytes, upTo, false)
-}
-
-// ReserveAfterEviction asks again for up to bytes of team's logs after the
-// caller evicted what a [QuotaError] named, sending the service credential
-// from [Client.WithServiceToken] so the controller recounts the team's archive
-// before it answers.
-func (c *Client) ReserveAfterEviction(ctx context.Context, auth, team string, bytes int64) (Reservation, error) {
-	return c.reserve(ctx, auth, team, KindLogs, bytes, true, true)
-}
-
-func (c *Client) reserve(ctx context.Context, auth, team string, kind Kind, bytes int64, upTo, evicted bool) (Reservation, error) {
 	var out Reservation
-	var service string
-	if evicted {
-		service = c.serviceAuth
-	}
 	err := c.post(ctx, auth, "/internal/storage/reserve", map[string]any{
-		"team": team, "store": kind, "bytes": bytes, "up_to": upTo, "evicted": evicted,
-	}, &out, service)
+		"team": team, "store": kind, "bytes": bytes, "up_to": upTo,
+	}, &out)
 	if errors.Is(err, ErrUnavailable) && c.recentlyFunded(team) {
 		return Reservation{Team: team, Kind: kind, Tier: TierFunded, Granted: max(bytes, 0), Unlimited: true}, nil
 	}
@@ -207,7 +171,7 @@ func (c *Client) Commit(ctx context.Context, auth string, r Reservation, stored 
 	}
 	return c.post(ctx, auth, "/internal/storage/commit", map[string]any{
 		"team": r.Team, "store": r.Kind, "reservation": r.ID, "bytes": stored,
-	}, nil, "")
+	}, nil)
 }
 
 // Renew commits stored bytes against r and reserves up to next bytes more
@@ -221,7 +185,7 @@ func (c *Client) Renew(ctx context.Context, auth string, r Reservation, stored, 
 	var out Reservation
 	err := c.post(ctx, auth, "/internal/storage/commit", map[string]any{
 		"team": r.Team, "store": r.Kind, "reservation": r.ID, "bytes": stored, "next_bytes": next,
-	}, &out, "")
+	}, &out)
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -237,7 +201,7 @@ func (c *Client) Release(ctx context.Context, auth string, r Reservation) error 
 	}
 	return c.post(ctx, auth, "/internal/storage/release", map[string]any{
 		"team": r.Team, "reservation": r.ID,
-	}, nil, "")
+	}, nil)
 }
 
 // ChargeDownload charges bytes to team's UTC day, refusing with a
@@ -250,7 +214,7 @@ func (c *Client) ChargeDownload(ctx context.Context, auth, team string, bytes in
 	}
 	err := c.post(ctx, auth, "/internal/downloads/charge", map[string]any{
 		"team": team, "bytes": bytes, "record": record,
-	}, &out, "")
+	}, &out)
 	if errors.Is(err, ErrUnavailable) && c.recentlyFunded(team) {
 		return nil
 	}
@@ -264,16 +228,15 @@ func (c *Client) ChargeDownload(ctx context.Context, auth, team string, bytes in
 // the stored totals.
 func (c *Client) RecordEgress(ctx context.Context, auth string, t EgressTotals) (EgressTotals, error) {
 	var out EgressTotals
-	err := c.post(ctx, auth, "/internal/egress/totals", t, &out, "")
+	err := c.post(ctx, auth, "/internal/egress/totals", t, &out)
 	return out, err
 }
 
 type errorBody struct {
-	Error      string `json:"error"`
-	EvictBytes int64  `json:"evict_bytes"`
+	Error string `json:"error"`
 }
 
-func (c *Client) post(ctx context.Context, auth, path string, body, out any, serviceAuth string) error {
+func (c *Client) post(ctx context.Context, auth, path string, body, out any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -284,9 +247,6 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any, ser
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", auth)
-	if serviceAuth != "" {
-		req.Header.Set(ServiceAuthHeader, "Bearer "+serviceAuth)
-	}
 	// #nosec G704 -- the origin is operator configuration and the body names a checked team slug
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -302,10 +262,10 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any, ser
 		}
 		return nil
 	}
-	msg, evict := readError(resp)
+	msg := readError(resp)
 	switch resp.StatusCode {
 	case http.StatusRequestEntityTooLarge:
-		return &QuotaError{Message: msg, EvictBytes: evict}
+		return &QuotaError{Message: msg}
 	case http.StatusPaymentRequired:
 		return &QuotaError{Message: msg, Paused: true}
 	case http.StatusTooManyRequests:
@@ -321,14 +281,14 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any, ser
 	return fmt.Errorf("controller %s answered %d: %s", path, resp.StatusCode, msg)
 }
 
-func readError(resp *http.Response) (string, int64) {
+func readError(resp *http.Response) string {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	if err != nil {
-		return fmt.Sprintf("answered %d and the body could not be read: %v", resp.StatusCode, err), 0
+		return fmt.Sprintf("answered %d and the body could not be read: %v", resp.StatusCode, err)
 	}
 	var body errorBody
 	if json.Unmarshal(raw, &body) == nil && body.Error != "" {
-		return body.Error, body.EvictBytes
+		return body.Error
 	}
-	return strings.TrimSpace(string(raw)), 0
+	return strings.TrimSpace(string(raw))
 }
