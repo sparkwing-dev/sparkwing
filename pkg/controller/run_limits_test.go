@@ -3,7 +3,9 @@ package controller_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +106,18 @@ SELECT team, id, 'only', ?, 1, 1, 0 FROM runs WHERE id = 'run-1'`, base.Add(time
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClientNamesTheMetricCapRefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": store.ErrNodeMetricLimit.Error()})
+	}))
+	t.Cleanup(srv.Close)
+	err := client.NewWithToken(srv.URL, nil, "token").AddNodeMetricSample(context.Background(), "run-1", "only",
+		store.MetricSample{TS: time.Unix(1, 0)})
+	if !errors.Is(err, store.ErrNodeMetricLimit) {
+		t.Fatalf("a 429 at the metric cap = %v, want ErrNodeMetricLimit", err)
 	}
 }

@@ -774,6 +774,7 @@ const EventKindComputeLimitBlocked = "compute_limit_blocked"
 const EventKindCreditsBlocked = "credits_blocked"
 const EventKindCreditsExhausted = "credits_exhausted"
 const EventKindCreditsUnpriced = "credits_unpriced_class"
+const EventKindMetricsStopped = "metrics_stopped"
 type EventLimits struct {
 	MaxBytesPerEvent int64
 	MaxBytesPerRun   int64

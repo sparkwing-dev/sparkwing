@@ -1557,7 +1557,9 @@ unlock.
   annotation holds at most 64 KiB, and a run at most 1,000 annotations and
   4 MiB of them JSON-encoded, node and step annotations together; past a bound
   the append answers `413` for size or `429` for count and stores nothing. A
-  node holds at most 10,000 metric samples, and a later sample answers `429`.
+  node holds at most 10,000 metric samples, and a later sample answers `429`;
+  the runner then stops sampling that node and records one `metrics_stopped`
+  event, "metric sampling stopped at 10000 samples".
   `GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` now answers one page of
   samples, 1,000 by default and up to `limit=10000`, with `next_cursor` to
   pass as `cursor` while more follow; the Go client and the dashboard follow

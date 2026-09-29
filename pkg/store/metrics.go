@@ -13,6 +13,10 @@ const MaxNodeMetricSamples = 10_000
 // ErrNodeMetricLimit refuses a sample past [MaxNodeMetricSamples].
 var ErrNodeMetricLimit = errors.New("store: a node holds at most 10000 metric samples")
 
+// EventKindMetricsStopped records that a node's sampler stopped at
+// [MaxNodeMetricSamples], so its resource charts end there.
+const EventKindMetricsStopped = "metrics_stopped"
+
 // MetricSample is one resource point.
 type MetricSample struct {
 	TS            time.Time
