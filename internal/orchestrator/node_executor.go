@@ -706,6 +706,7 @@ done:
 
 	if err := r.backends.State.FinishNode(writeCtx, runID, node.ID(), string(sparkwing.Success), "", outBytes); err != nil {
 		noteLostStateWrite(writeCtx, "finish node", runID, err)
+		return nil, fmt.Errorf("finish node: %w", err)
 	}
 	noteEvent(writeCtx, r.backends.State, runID, node.ID(), "node_succeeded", nil)
 
