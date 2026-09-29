@@ -178,6 +178,8 @@ var apiWriteRoutes = []string{
 	"POST /api/v1/operator/teams/{team}/grants",
 	"POST /api/v1/operator/teams/{team}/freeze",
 	"POST /api/v1/operator/teams/{team}/unfreeze",
+	"GET /api/v1/operator/waitlist",
+	"POST /api/v1/operator/waitlist/approve",
 	"GET /api/v1/team/invitations",
 	"POST /api/v1/team/invitations",
 	"DELETE /api/v1/team/invitations/{id}",
