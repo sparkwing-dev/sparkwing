@@ -49,6 +49,9 @@ func TestClaimRun_PodRoutesServeOnlyTheirOwnClaim(t *testing.T) {
 		run.Pipeline != "build" || run.Args["token"] == "s3cret" {
 		t.Fatalf("own run with a planning claim = %d %+v, want the secret argument redacted", code, run)
 	}
+	if code := f.call("GET", "/api/v1/triggers/run-pod", plan, nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("the run's trigger, which holds its arguments unredacted = %d, want 401", code)
+	}
 	for _, path := range []string{"/api/v1/runs/run-next", "/api/v1/runs/run-next/nodes/plan/heartbeat", "/api/v1/runs/run-pod/nodes/other/heartbeat"} {
 		method := "POST"
 		if !strings.HasSuffix(path, "heartbeat") {

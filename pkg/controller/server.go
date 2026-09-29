@@ -940,7 +940,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
-	mux.Handle("GET /api/v1/triggers/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetTrigger)).orElse(requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim)))
+	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
 	// safety: a refresh fetches any caller-named repository with the operator's
 	// cache credential and holds a mirror fetch open, so it is the operator's
 	// alone; the CLI's warm-up before a trigger is best-effort without it.

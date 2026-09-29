@@ -93,9 +93,13 @@ func RunNodeOnce(
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
-	trigger, err := stateClient.GetTrigger(ctx, runID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
+	// safety: a claimed pod runs the pipeline it built itself, so it never
+	// needs the trigger's source, and its claim token cannot read the trigger.
+	var trigger *store.Trigger
+	if cfg.claim == nil {
+		if trigger, err = stateClient.GetTrigger(ctx, runID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return runner.Result{}, fmt.Errorf("get trigger %s: %w", runID, err)
+		}
 	}
 	otelutil.StampSpan(ctx, otelutil.SpanAttrs{Pipeline: run.Pipeline})
 
