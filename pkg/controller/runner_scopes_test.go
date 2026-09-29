@@ -617,8 +617,8 @@ func TestRunnerScopes_RunRepositoryComesFromTheTrigger(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 
-	if err := c.FinishRun(ctx, "run-web", "pending", ""); err != nil {
-		t.Fatalf("FinishRun(pending): %v", err)
+	if err := c.FinishRun(ctx, "run-web", "success", ""); err != nil {
+		t.Fatalf("FinishRun(success): %v", err)
 	}
 	if err := c.CreateRun(ctx, store.Run{
 		ID: "run-web", Pipeline: "deploy", Status: "running",

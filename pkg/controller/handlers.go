@@ -185,14 +185,22 @@ type finishRunReq struct {
 const finishRunFollowUpTimeout = controllerShutdownBudget - time.Second
 
 func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, s.foldRunProfiles)
+}
+
+func (s *Server) handleFinishDaemonRun(w http.ResponseWriter, r *http.Request) {
+	s.finishRun(w, r, nil)
+}
+
+func (s *Server) finishRun(w http.ResponseWriter, r *http.Request, recordProfile func(context.Context, *store.Run)) {
 	runID := r.PathValue("id")
 	var body finishRunReq
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if body.Status == "" {
-		writeError(w, http.StatusBadRequest, errors.New("status is required"))
+	if body.Status != "success" && body.Status != "failed" && body.Status != "cancelled" {
+		writeError(w, http.StatusBadRequest, errors.New("run completion requires a terminal status"))
 		return
 	}
 	run, runErr := s.store.GetRun(r.Context(), runID)
@@ -203,20 +211,29 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	otelutil.StampSpan(r.Context(), otelutil.SpanAttrs{
 		RunID: runID, Pipeline: pipeline, Outcome: body.Status,
 	})
-	if err := s.store.FinishRun(r.Context(), runID, body.Status, body.Error); err != nil {
+	finished, err := s.store.FinishRunIfActive(r.Context(), runID, body.Status, body.Error)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	follow, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), finishRunFollowUpTimeout)
 	defer cancel()
-	if runErr == nil && run != nil {
-		observeRunFinish(run.Pipeline, body.Status, time.Since(run.StartedAt))
-		refreshed, rerr := s.store.GetRun(follow, runID)
-		if rerr == nil {
-			s.foldRunProfiles(follow, refreshed)
+	refreshed, err := s.store.GetRun(follow, runID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if refreshed == nil {
+		writeError(w, http.StatusNotFound, store.ErrNotFound)
+		return
+	}
+	if finished {
+		observeRunFinish(refreshed.Pipeline, refreshed.Status, time.Since(refreshed.StartedAt))
+		if recordProfile != nil {
+			recordProfile(follow, refreshed)
 		}
 	}
-	s.reportGitHubCommitStatus(follow, runID, body.Status)
+	s.reportGitHubCommitStatus(follow, runID, refreshed.Status)
 	w.WriteHeader(http.StatusNoContent)
 }
 
