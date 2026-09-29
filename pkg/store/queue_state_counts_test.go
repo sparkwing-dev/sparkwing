@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -165,10 +167,17 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 		t.Fatalf("create run: %v", err)
 	}
 
-	churn, stop := context.WithCancel(ctx)
-	defer stop()
+	churn, stop := context.WithTimeout(ctx, 10*time.Second)
 	var landed atomic.Int64
 	done := make(chan struct{})
+	var workerErr error
+	t.Cleanup(func() {
+		stop()
+		<-done
+		if workerErr != nil && !errors.Is(workerErr, context.Canceled) {
+			t.Errorf("claim worker: %v", workerErr)
+		}
+	})
 	go func() {
 		defer close(done)
 		for i := 0; churn.Err() == nil; i++ {
@@ -176,15 +185,29 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 			if err := s.CreateNode(churn, store.Node{
 				RunID: "run-conc", NodeID: node, Status: "pending",
 			}); err != nil {
+				workerErr = fmt.Errorf("create %s: %w", node, err)
 				return
 			}
 			if err := s.MarkNodeReady(churn, "run-conc", node); err != nil {
+				workerErr = fmt.Errorf("ready %s: %w", node, err)
 				return
 			}
-			if _, err := s.ClaimNextReadyNode(churn, claimant, "holder-"+strconv.Itoa(i), time.Minute, nil); err != nil {
+			claimed, err := s.ClaimNextReadyNode(churn, claimant, "holder-"+strconv.Itoa(i), time.Minute, nil)
+			if err != nil {
+				workerErr = fmt.Errorf("claim %s: %w", node, err)
 				return
 			}
-			if _, err := s.FinalizeNodeCredits(churn, "run-conc", node, claimant.TokenPrefix, time.Now()); err != nil {
+			if claimed == nil || claimed.NodeID != node {
+				workerErr = fmt.Errorf("claim %s returned %+v", node, claimed)
+				return
+			}
+			settled, err := s.FinalizeNodeCredits(churn, "run-conc", node, claimant.TokenPrefix, time.Now())
+			if err != nil {
+				workerErr = fmt.Errorf("settle %s: %w", node, err)
+				return
+			}
+			if settled.Charge == nil {
+				workerErr = fmt.Errorf("settle %s wrote no charge", node)
 				return
 			}
 			landed.Add(1)
@@ -193,8 +216,13 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 
 	const samples = 200
 	high := int64(-1)
-	for range samples {
-		totals, err := s.CreditLedgerTotals(ctx)
+	for sampled := 0; sampled < samples || landed.Load() == 0; sampled++ {
+		select {
+		case <-done:
+			t.Fatalf("claim worker stopped while sampling: %v", workerErr)
+		default:
+		}
+		totals, err := s.CreditLedgerTotals(churn)
 		if err != nil {
 			t.Fatalf("CreditLedgerTotals: %v", err)
 		}
@@ -205,12 +233,6 @@ func TestCreditLedgerTotals_SettledSecondsNeverFallUnderConcurrentClaimsOnPostgr
 		if totals.SettledSeconds > high {
 			high = totals.SettledSeconds
 		}
-	}
-	stop()
-	<-done
-
-	if landed.Load() == 0 {
-		t.Error("no claim finished while the ledger was sampled, so no sample raced a write")
 	}
 }
 

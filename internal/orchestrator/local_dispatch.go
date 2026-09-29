@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,7 +18,7 @@ type localExecution struct {
 	cleanup func()
 }
 
-func setupLocalExecution(paths Paths, opts *Options, backends Backends, workDir string, logger *slog.Logger) (*localExecution, error) {
+func setupLocalExecution(ctx context.Context, paths Paths, opts *Options, backends Backends, workDir string, logger *slog.Logger) (*localExecution, error) {
 	exe, err := selfExecutable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve pipeline binary for node processes: %w", err)
@@ -47,7 +48,7 @@ func setupLocalExecution(paths Paths, opts *Options, backends Backends, workDir 
 		ctrl = c
 		cleanup = func() {}
 	} else {
-		loopback, lerr := startRunLoopback(opts, backends, logger)
+		loopback, lerr := startRunLoopback(ctx, opts, backends, logger)
 		if lerr != nil {
 			return nil, lerr
 		}
@@ -60,9 +61,9 @@ func setupLocalExecution(paths Paths, opts *Options, backends Backends, workDir 
 	return &localExecution{runner: localrunner.New(ctrl, cfg), cleanup: cleanup}, nil
 }
 
-func startRunLoopback(opts *Options, backends Backends, logger *slog.Logger) (*loopbackController, error) {
+func startRunLoopback(ctx context.Context, opts *Options, backends Backends, logger *slog.Logger) (*loopbackController, error) {
 	if local, ok := backends.State.(localState); ok {
-		return startLoopbackController(local.st, opts.ArtifactStore, opts.RunID, logger)
+		return startLoopbackController(ctx, local.st, opts.ArtifactStore, opts.RunID, logger)
 	}
 	return startLoopbackShim(backends.State, backends.Concurrency, opts.ArtifactStore, opts.RunID, logger)
 }

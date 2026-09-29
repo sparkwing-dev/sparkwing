@@ -18,11 +18,8 @@ type MetricSample struct {
 	// window the sample lands in. A sampler tick leaves it zero, because a
 	// tick's rate already covers its whole window.
 	//
-	// A reader that groups samples by window sums rates for ticks and
-	// integrals for one-shots. Summing one-shot rates instead reports
-	// concurrency that never happened when commands ran back to back: four
-	// 400ms commands at two cores inside one two-second window are 1.6
-	// cores of draw, not eight.
+	// Command CPU spans the command's lifetime and cannot be assigned to a
+	// sampling interval from its completion timestamp.
 	CPUTime time.Duration
 }
 

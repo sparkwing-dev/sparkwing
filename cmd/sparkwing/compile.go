@@ -116,6 +116,7 @@ func (r *pipelineRun) exec(args, env []string) error {
 func (r *pipelineRun) stop() {
 	r.stopSignals()
 	if r.uncachedBinary != "" {
+		// #nosec G703 -- uncachedBinary is the fixed pipeline filename inside a MkdirTemp directory.
 		if err := os.RemoveAll(filepath.Dir(r.uncachedBinary)); err != nil {
 			slog.Default().Warn("remove temporary pipeline executable", "error", err)
 		}
