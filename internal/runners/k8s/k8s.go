@@ -532,11 +532,10 @@ const jobDeadlineSlack = 10 * time.Minute
 // the timeout is the pipeline author's to choose.
 const MaxDeclaredJobActiveDeadline = 24 * time.Hour
 
-// safety: every refusal is returned, including a controller that does not
-// serve the named-claim route, because the claim is where the credit check
-// lives and an unfenced Job would run on compute nobody paid for. A 429 or 503
-// with a Retry-After is backpressure rather than a refusal, so the claim waits
-// it out and asks again instead of failing the node.
+// safety: every refusal is returned, even a controller without the named-claim
+// route, because the claim holds the credit check and an unfenced Job runs on
+// unpaid compute. A 429 or 503 with Retry-After is backpressure, not a refusal,
+// so the claim waits it out and asks again instead of failing the node.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
 ) (store.NodeClaimFence, store.CPUClass, error) {
