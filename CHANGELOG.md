@@ -860,6 +860,10 @@ unlock.
 
 ### Changed
 
+- **controller:** The `cloud` limits profile allows a signed-up team 3600
+  requests a minute, up from 2000. A team's tokens share that budget, and a
+  two-slot runner spends about 300 a minute, so a pool of ten runners no longer
+  runs into it.
 - **controller + sdk:** A ready node no agent claims now waits up to its claim
   wait, 24 hours by default or what `Plan.ClaimWait` sets, instead of the
   15-minute queue deadline, and then fails with `queue_timeout` and an error
@@ -1176,6 +1180,12 @@ unlock.
 
 ### Fixed
 
+- **controller:** `--shed-queue-depth` measures the submitting team's pending
+  triggers rather than every team's, so one team's backlog no longer answers
+  503 to another team's webhooks and submissions.
+- **runner:** The Kubernetes Job dispatcher waits out a node claim the
+  controller answered 429 or 503 with a Retry-After and claims again, instead
+  of failing the node.
 - **controller:** A live queue runner holds a node's agent offer window only
   when its `--allow-repo` list admits the node's repository. A runner limited
   to other repositories no longer delays every run of its team by five seconds.
