@@ -573,7 +573,8 @@ func (claimHead) HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Op
 }
 
 // A claim token's binary upload is reserved under its run's git ref, a claim
-// whose run names no ref cannot write cache at all, and a claim's binary
+// whose run names no ref or repository writes no binary but still writes a
+// content-addressed artifact, and a claim's binary
 // download signs its own ref's binary, never a newer one of another branch.
 func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 	client, _ := directS3(t)
@@ -637,7 +638,11 @@ func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	if code, _ := reserve("run-refless", refless); code != http.StatusForbidden {
-		t.Fatalf("a claim whose run names no ref reserved cache: %d, want 403", code)
+		t.Fatalf("a claim whose run names no ref reserved a binary: %d, want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/data/upload", grants["run-refless"],
+		map[string]any{"kind": "artifact", "key": "artifacts/blobs/" + digest, "size": 4, "sha256": digest, "run_id": "run-refless"}, nil); code != http.StatusOK {
+		t.Fatalf("a claim whose run names no ref reserving a content-addressed artifact = %d, want 200", code)
 	}
 	repoless := f.launchedRun(olga, "run-repoless", "acme", "widgets")
 	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET github_repo_id = 0 WHERE id = 'run-repoless'`); err != nil {

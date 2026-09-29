@@ -77,7 +77,7 @@ unlock.
   own, then its pull request's base branch, then the default branch, which
   GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
   first binary committed for an input and refuses a second, and a claim whose
-  run names no repository or ref writes no cache. Other callers never read a
+  run names no repository or ref writes no binary but still writes artifacts. Other callers never read a
   claim's binaries. Schema v88 adds `ref` and `repo` to `uploads` and
   `data_objects` and stamps
   the `claim-cache-scope-v1` requirement, so an older controller refuses the

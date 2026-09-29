@@ -81,6 +81,7 @@ first binary its repository holds under its own ref, then its pull request's
 base branch, then the repository's default branch, so another repository's
 binary, or a feature branch's, never reaches `main`. A repository's ref holds
 one binary per input hash: the first committed wins, and a second is refused
-`409`. A claim whose run names no repository or ref writes no cache. Every other caller
+`409`. A claim whose run names no repository or ref writes no binary, and
+still writes artifacts. Every other caller
 writes and reads only binaries no claim wrote, and a claim never reads theirs.
 Artifact keys name their content hash exactly, so they are not scoped.

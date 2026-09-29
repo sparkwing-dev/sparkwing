@@ -84,6 +84,7 @@ type directCaller struct {
 	principal      string
 	claimPrefix    string
 	provenance     string
+	claim          bool
 	repo, ref      string
 	pendingTrigger bool
 }
@@ -181,13 +182,10 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 		writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no cache scope"))
 		return directCaller{}, false
 	}
-	if grant.Claim.Kind == authwire.CacheClaimToken && (ref == "" || repo == "") {
-		writeError(w, http.StatusForbidden, errors.New("a claim's run names no repository and git ref to write cache under"))
-		return directCaller{}, false
-	}
 	return directCaller{
 		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
-		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, repo: repo, ref: ref, pendingTrigger: pendingTrigger,
+		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, pendingTrigger: pendingTrigger,
+		claim: grant.Claim.Kind == authwire.CacheClaimToken, repo: repo, ref: ref,
 	}, true
 }
 
@@ -284,6 +282,13 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Size <= 0 {
 		writeError(w, http.StatusBadRequest, errors.New("direct uploads carry at least one byte; an empty object needs no upload"))
+		return
+	}
+	// safety: an artifact key names its own content, so a claim writes one
+	// with no scope; a binary is found by its input hash, so a claim writes one
+	// only inside its run's repository and ref.
+	if caller.claim && req.Kind == "binary" && (caller.repo == "" || caller.ref == "") {
+		writeError(w, http.StatusForbidden, errors.New("a claim's run names no repository and git ref to write a binary under"))
 		return
 	}
 	if !validDirectKey(req.Kind, req.Key, req.SHA256) {
