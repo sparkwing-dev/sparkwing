@@ -1449,7 +1449,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
 // perf: the trigger shed reads one team's pending depth on every submission
 // burst, so the count walks that team's pending rows rather than every team's.
 const triggersTeamPendingIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_team_pending
-    ON triggers(team, status) WHERE status = 'pending'`
+    ON triggers(team, status) WHERE status = '` + triggerStatusPending + `'`
 
 const cronGitHubIdentityIndex = `CREATE INDEX IF NOT EXISTS idx_cron_schedules_github_identity
     ON cron_schedules(team, github_installation_id, github_repository_id);`
