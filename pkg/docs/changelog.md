@@ -21,8 +21,8 @@ unlock.
 ## [Unreleased]
 
 ### Fixed
-- Correct the secret-scan policy check for the exact empty-artifact hash exception.
 
+- **tests:** Check the exact empty-artifact hash exception in the secret-scan policy.
 - **store:** Discard obsolete learned resource estimates before reading or updating profiles; preserve explicit pins and wait statistics.
 - **security checks:** Recognize the empty artifact content hash in the history scanner.
 - **tests:** Start Kubernetes execution deadlines after fixture setup and retain fallback outcomes.
