@@ -265,7 +265,7 @@ func (s *Store) recordProfileObservation(ctx context.Context, pipeline, nodeID s
 	cpuMeasured := obs.CPUMeasured
 	if obs.Contended {
 		floorCores = foldFloor(floorCores, obs.FloorCores)
-		floorMemoryBytes = int64(foldFloor(float64(floorMemoryBytes), float64(obs.FloorMemoryBytes)))
+		floorMemoryBytes = max(obs.FloorMemoryBytes, floorMemoryBytes/2)
 		cpuMeasured = st.cpuMeasured || obs.CPUMeasured
 	} else {
 		window = append(window, profileSample{

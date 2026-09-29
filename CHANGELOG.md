@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+
 - **Kubernetes:** Size pod CPU requests and limits from peak demand, and retain measured memory when CPU uses the default estimate.
 - **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
 
