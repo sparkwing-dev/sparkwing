@@ -30,8 +30,8 @@ type FloodPolicy struct {
 	// to.
 	RunsPerPrincipalHour int
 
-	// ShedQueueDepth is the pending-trigger depth past which a new submission
-	// is shed rather than queued. Zero never sheds.
+	// ShedQueueDepth is the pending-trigger depth of one team past which that
+	// team's new submissions are shed rather than queued. Zero never sheds.
 	ShedQueueDepth int
 
 	// DedupeWindow is how long a content-identical submission answers with the
@@ -76,14 +76,14 @@ func newFloodControl(p FloodPolicy) *floodControl {
 		f.dedupe = &dedupeWindow{window: p.DedupeWindow, seen: make(map[string]dedupeEntry)}
 	}
 	if p.ShedQueueDepth > 0 {
-		f.depth = &queueDepthCache{}
+		f.depth = &queueDepthCache{teams: make(map[store.Team]queueDepth)}
 	}
 	return f
 }
 
 // safety: a refusal is written here, so a caller that gets false must return without writing its own answer.
-func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, key, source string) bool {
-	refusal := s.triggerFloodRefusal(r.Context(), key, source)
+func (s *Server) admitTriggerSubmission(w http.ResponseWriter, r *http.Request, tenant *store.Tenant, key, source string) bool {
+	refusal := s.triggerFloodRefusal(r.Context(), tenant, key, source)
 	if refusal == nil {
 		return true
 	}
@@ -105,14 +105,14 @@ func (f *floodRefusal) write(w http.ResponseWriter) {
 	writeRetryAfter(w, f.wait, f.msg)
 }
 
-func (s *Server) triggerFloodRefusal(ctx context.Context, key, source string) *floodRefusal {
+func (s *Server) triggerFloodRefusal(ctx context.Context, tenant *store.Tenant, key, source string) *floodRefusal {
 	f := s.flood
 	if f == nil {
 		return nil
 	}
 	now := time.Now()
 	if f.depth != nil {
-		depth, err := f.depth.read(ctx, s.store, now)
+		depth, err := f.depth.read(ctx, tenant, now)
 		if err != nil {
 			// safety: a depth this controller cannot read is not grounds to
 			// refuse work, so the submission proceeds and the cap still binds.
@@ -122,11 +122,12 @@ func (s *Server) triggerFloodRefusal(ctx context.Context, key, source string) *f
 			}
 		} else if depth >= f.policy.ShedQueueDepth {
 			s.logger.Warn("trigger shed",
-				"principal", key, "source", source, "reason", "queue depth above the shed threshold",
+				"principal", key, "team", tenant.Team(), "source", source,
+				"reason", "team queue depth above the shed threshold",
 				"queue_depth", depth, "threshold", f.policy.ShedQueueDepth)
 			return &floodRefusal{
 				status: http.StatusServiceUnavailable, wait: shedRetryAfter,
-				msg: "controller queue is above its shed threshold",
+				msg: "this team's queue is above its shed threshold",
 			}
 		}
 	}
@@ -230,41 +231,44 @@ func (d *dedupeWindow) evictLocked(now time.Time) {
 }
 
 // perf: a flood asks for the depth far faster than it changes, and each answer
-// is a table scan, so one read serves every submission in the same second.
+// is a scan, so one read serves every submission of a team in the same second.
 const queueDepthTTL = time.Second
 
 // safety: the count must not ride one requester's context, or a client that
 // hangs up decides what every other submission sees.
 const queueDepthTimeout = 2 * time.Second
 
+// safety: keyed by team, so one team's backlog never sheds another team's
+// submissions. The map holds one entry per team that submitted, which the
+// team count bounds.
 type queueDepthCache struct {
 	mu    sync.Mutex
+	teams map[store.Team]queueDepth
+}
+
+type queueDepth struct {
 	depth int
 	at    time.Time
 }
 
-type pendingTriggerCounter interface {
-	CountPendingTriggers(ctx context.Context) (int, error)
-}
-
-func (q *queueDepthCache) read(parent context.Context, counter pendingTriggerCounter, now time.Time) (int, error) {
+func (q *queueDepthCache) read(parent context.Context, tenant *store.Tenant, now time.Time) (int, error) {
+	team := tenant.Team()
 	q.mu.Lock()
-	fresh := !q.at.IsZero() && now.Sub(q.at) < queueDepthTTL
-	depth := q.depth
+	cached, ok := q.teams[team]
 	q.mu.Unlock()
-	if fresh {
-		return depth, nil
+	if ok && now.Sub(cached.at) < queueDepthTTL {
+		return cached.depth, nil
 	}
 	// safety: the count outlives one requester, so the caller's cancel is
 	// dropped while its values and tracing are kept.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), queueDepthTimeout)
 	defer cancel()
-	counted, err := counter.CountPendingTriggers(ctx)
+	counted, err := tenant.CountPendingTriggers(ctx)
 	if err != nil {
 		return 0, err
 	}
 	q.mu.Lock()
-	q.depth, q.at = counted, now
+	q.teams[team] = queueDepth{depth: counted, at: now}
 	q.mu.Unlock()
 	return counted, nil
 }

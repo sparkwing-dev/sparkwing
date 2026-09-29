@@ -999,7 +999,7 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, triggerResp{RunID: original, Status: "duplicate"})
 		return
 	}
-	if !s.admitTriggerSubmission(w, r, principal, body.Trigger.Source) {
+	if !s.admitTriggerSubmission(w, r, tenant, principal, body.Trigger.Source) {
 		release()
 		return
 	}

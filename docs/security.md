@@ -221,9 +221,11 @@ controller memory, so a restart or a rollout refills every principal;
 it bounds a burst, not a month.
 
 `--shed-queue-depth N` (chart `controller.shedQueueDepth`) answers `503`
-with a `Retry-After` once pending triggers reach N, which is the outer
-bound on how deep a backlog one burst can grow. The depth is read at most
-once a second, because a flood asks for it far faster than it changes.
+with a `Retry-After` once the submitting team's pending triggers reach N,
+which is the outer bound on how deep a backlog one burst can grow. Each
+team's queue is measured on its own, so one team's backlog never sheds
+another team's submissions. The depth is read at most once a second per
+team, because a flood asks for it far faster than it changes.
 
 `--trigger-dedupe-window D` (chart `controller.triggerDedupeWindow`)
 answers a content-identical `POST /api/v1/triggers` submission inside D

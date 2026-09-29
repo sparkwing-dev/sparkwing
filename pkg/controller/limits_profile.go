@@ -88,8 +88,8 @@ const (
 const cloudRequestRateAlarm = 5000
 
 // safety: a principal's run cap is the guard a pending trigger nobody claims
-// is written against, and the shed depth is the fleet's backstop behind it,
-// sized so one controller's queue scan stays a fraction of a second.
+// is written against, and the shed depth is each team's backstop behind it,
+// sized so one team's queue scan stays a fraction of a second.
 const (
 	cloudRunsPerPrincipalHour     = 600
 	cloudFreeRunsPerPrincipalHour = 60

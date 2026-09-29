@@ -58,7 +58,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.admitTriggerSubmission(w, r, s.floodKey(r, "retry:"+srcID), "retry") {
+	if !s.admitTriggerSubmission(w, r, tenant, s.floodKey(r, "retry:"+srcID), "retry") {
 		return
 	}
 	// safety: a retry creates a run, so the hourly guard measures the principal
