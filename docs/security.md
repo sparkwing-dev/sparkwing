@@ -377,7 +377,7 @@ poll, which is what it served before profiles existed.
 | --- | --- | --- |
 | `--claims-per-runner-minute` | 480 | 240 |
 | `--heartbeats-per-runner-minute` | 1200 | 600 |
-| `--requests-per-token-minute` | 2000 | 600 |
+| `--requests-per-token-minute` | 3600 | 600 |
 | `--requests-per-minute-alarm` | 5000 | 5000 |
 | `--egress-max-log-streams` | 50 | 10 |
 | `--egress-max-downloads` | 20 | 5 |
@@ -398,8 +398,8 @@ same headroom the recommendation above uses, and the free tier halves the
 paid figure. The per-token budgets carry the rest of what a runner
 spends: a two-slot runner honoring its cadences spends roughly 300
 requests a minute once its node heartbeats and state writes are counted,
-so the free tier carries one such runner and the paid tier several under
-one token. The alarm is what one controller pod is sized to serve. The
+and a signed-up team's tokens share one budget, so the free tier carries
+one such runner and the paid tier a pool of ten with a fifth to spare. The alarm is what one controller pod is sized to serve. The
 egress caps are the concurrency one team is expected to read logs and
 artifacts at.
 The run cap bounds the pending triggers one principal can queue when no
