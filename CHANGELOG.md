@@ -1182,7 +1182,10 @@ unlock.
 
 - **controller:** `--shed-queue-depth` measures the submitting team's pending
   triggers rather than every team's, so one team's backlog no longer answers
-  503 to another team's webhooks and submissions.
+  503 to another team's webhooks and submissions. Schema v85 adds the partial
+  index `idx_triggers_team_pending` that count reads, and a burst of
+  submissions shares one count. An older binary still reads and writes a v85
+  store.
 - **runner:** The Kubernetes Job dispatcher waits out a node claim the
   controller answered 429 or 503 with a Retry-After and claims again, instead
   of failing the node.

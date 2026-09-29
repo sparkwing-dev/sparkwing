@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -244,6 +246,9 @@ const queueDepthTimeout = 2 * time.Second
 type queueDepthCache struct {
 	mu    sync.Mutex
 	teams map[store.Team]queueDepth
+	// perf: a burst misses the cache together, so one count serves every
+	// submission of a team that arrives while it runs.
+	counts singleflight.Group
 }
 
 type queueDepth struct {
@@ -251,7 +256,14 @@ type queueDepth struct {
 	at    time.Time
 }
 
-func (q *queueDepthCache) read(parent context.Context, tenant *store.Tenant, now time.Time) (int, error) {
+// pendingTriggerCounter is the one team's queue a depth is read from.
+// [store.Tenant] is one.
+type pendingTriggerCounter interface {
+	Team() store.Team
+	CountPendingTriggers(ctx context.Context) (int, error)
+}
+
+func (q *queueDepthCache) read(parent context.Context, tenant pendingTriggerCounter, now time.Time) (int, error) {
 	team := tenant.Team()
 	q.mu.Lock()
 	cached, ok := q.teams[team]
@@ -259,18 +271,24 @@ func (q *queueDepthCache) read(parent context.Context, tenant *store.Tenant, now
 	if ok && now.Sub(cached.at) < queueDepthTTL {
 		return cached.depth, nil
 	}
-	// safety: the count outlives one requester, so the caller's cancel is
-	// dropped while its values and tracing are kept.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), queueDepthTimeout)
-	defer cancel()
-	counted, err := tenant.CountPendingTriggers(ctx)
+	counted, err, _ := q.counts.Do(string(team), func() (any, error) {
+		// safety: the count outlives one requester, so the caller's cancel is
+		// dropped while its values and tracing are kept.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), queueDepthTimeout)
+		defer cancel()
+		n, err := tenant.CountPendingTriggers(ctx)
+		if err != nil {
+			return 0, err
+		}
+		q.mu.Lock()
+		q.teams[team] = queueDepth{depth: n, at: now}
+		q.mu.Unlock()
+		return n, nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	q.mu.Lock()
-	q.teams[team] = queueDepth{depth: counted, at: now}
-	q.mu.Unlock()
-	return counted, nil
+	return counted.(int), nil
 }
 
 // safety: a depth that cannot be read fails on every submission of a flood,

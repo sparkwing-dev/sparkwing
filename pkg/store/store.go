@@ -1066,7 +1066,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 84
+const expectedSchemaVersion = 85
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1445,6 +1445,11 @@ var nodeClaimOffersTablePostgres = strings.NewReplacer(
 const cronSchedulesUniqueIndex = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_schedules_repo_pipeline_name
     ON cron_schedules(repo_path, pipeline, schedule_name);`
+
+// perf: the trigger shed reads one team's pending depth on every submission
+// burst, so the count walks that team's pending rows rather than every team's.
+const triggersTeamPendingIndex = `CREATE INDEX IF NOT EXISTS idx_triggers_team_pending
+    ON triggers(team, status) WHERE status = 'pending'`
 
 const cronGitHubIdentityIndex = `CREATE INDEX IF NOT EXISTS idx_cron_schedules_github_identity
     ON cron_schedules(team, github_installation_id, github_repository_id);`
@@ -2118,6 +2123,9 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applyClaimAttentionMigration(ctx, tx, false)
 	case 84:
 		return applyRepoDispatchMigration(ctx, tx, false)
+	case 85:
+		_, err := tx.ExecContext(ctx, triggersTeamPendingIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2566,6 +2574,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applyClaimAttentionMigration(ctx, tx, true)
 	case 84:
 		return applyRepoDispatchMigration(ctx, tx, true)
+	case 85:
+		_, err := tx.ExecContext(ctx, triggersTeamPendingIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
