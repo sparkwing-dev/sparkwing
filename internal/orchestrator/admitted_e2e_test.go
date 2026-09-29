@@ -149,7 +149,8 @@ func TestAdmitted_UnpinnedRunReadsTheMeasuredNodeCharge(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "admitted-probe-unpinned", "read-share", store.ProfileObservation{
-		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
+		CPUMeasured: true,
+		Duration:    20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
 	}, 3)
 
 	got := runAdmittedProbe(t, home, backends, "admitted-probe-unpinned", "admitted-unpinned")
