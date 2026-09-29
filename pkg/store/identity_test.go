@@ -398,9 +398,17 @@ func TestIdentityTeamTokensNeverCarryAdmin(t *testing.T) {
 			_, _, err := tn.CreateRunnerToken(ctx, "agent:l", []string{"nodes.claim", store.LaunchScope}, u.Account.ID, time.Now())
 			return err
 		},
+		func() error {
+			_, _, err := tn.CreateToken(ctx, "logs", store.TokenKindService, []string{store.LogsRecountScope}, 0, time.Now())
+			return err
+		},
+		func() error {
+			_, _, err := tn.CreateRunnerToken(ctx, "agent:r", []string{"logs.write", store.LogsRecountScope}, u.Account.ID, time.Now())
+			return err
+		},
 	} {
 		if err := mint(); !errors.Is(err, store.ErrAdminScopeOnTeamToken) {
-			t.Fatalf("team mint with claims.launch = %v, want ErrAdminScopeOnTeamToken", err)
+			t.Fatalf("team mint with an operator scope = %v, want ErrAdminScopeOnTeamToken", err)
 		}
 	}
 }

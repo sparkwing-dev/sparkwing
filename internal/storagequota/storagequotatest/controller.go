@@ -35,7 +35,8 @@ type Controller struct {
 	// Token, when set, is the only bearer the fake answers.
 	Token string
 	// Recount, when set, is what a team's logs hold after an eviction, which
-	// a reservation that says it evicted takes as the team's count.
+	// a reservation that says it evicted and carries a service credential
+	// takes as the team's count.
 	Recount func(team string) int64
 
 	mu       sync.Mutex
@@ -167,7 +168,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
 			return
 		case storagequota.TierFree:
-			if req.Evicted && c.Recount != nil {
+			if req.Evicted && c.Recount != nil && r.Header.Get(storagequota.ServiceAuthHeader) != "" {
 				c.used[k] = c.Recount(req.Team)
 			}
 			room := c.Share - c.used[k] - c.reserved[k]

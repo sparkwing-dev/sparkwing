@@ -70,10 +70,14 @@ A write past a share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. A log write past the share
 also names `evict_bytes`: the logs service then deletes the team's least
 recently written archived runs, never a run in use or written since its
-archive, until it has freed that much, and asks again saying it evicted. The
-controller then counts the team's logs from a listing of the archive, never
-from the caller's word, and grants the write only if the recount makes room;
-otherwise, or when nothing could be evicted, the append is refused. The
+archive, until it has freed that much, and asks again saying it evicted, with
+its own `logs.recount` credential from `SPARKWING_LOGS_SERVICE_TOKEN` in
+`X-Sparkwing-Logs-Service`. The controller then counts the team's logs from a
+listing of the archive, never from the caller's word, and grants the write
+only if the recount makes room; otherwise, when nothing could be evicted, or
+when the service has no such credential, the append is refused and the next
+hourly pass counts the room. A team's own token saying it evicted changes
+nothing. The
 recount, like the hourly pass, counts only what the archive holds, so bytes of
 a run not yet archived drop out of the count until the next pass. The cache judges a declared
 `Content-Length` before it reads one byte, and stages a binary only after the

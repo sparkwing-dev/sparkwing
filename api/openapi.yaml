@@ -6506,8 +6506,10 @@ paths:
         limit. `up_to` grants as much of `bytes` as the team has room for,
         zero or less asking for all of it. A reservation expires after an
         hour unless it is committed or released. `evicted` says the logs
-        service evicted what a refusal named; the controller then counts the
-        team's logs from a listing of its archive before it answers.
+        service evicted what a refusal named; when the request also carries
+        a `logs.recount` credential in `X-Sparkwing-Logs-Service`, the
+        controller counts the team's logs from a listing of its archive
+        before it answers, and otherwise ignores it.
       requestBody:
         required: true
         content:

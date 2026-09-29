@@ -327,7 +327,10 @@ unlock.
   checked after the node and run caps and before the append is written, and a
   refusal names `evict_bytes`, which the logs service frees by deleting the
   team's least recently written archived runs before asking again with
-  `evicted`, when the controller recounts the team's archive from a listing;
+  `evicted` and its own `logs.recount` credential (`SPARKWING_LOGS_SERVICE_TOKEN`,
+  sent in `X-Sparkwing-Logs-Service`), when the controller recounts the team's
+  archive from a listing; without that credential the append is refused after
+  the eviction, and no team token may carry the scope;
   run
   events keep 64 MiB, checked in the append's transaction. The controller
   counts every team's cache and log bytes in its database (schema v61,

@@ -114,7 +114,24 @@ type Client struct {
 
 	mu     sync.Mutex
 	funded map[string]time.Time
+
+	serviceAuth string
 }
+
+// ServiceAuthHeader carries a service's own credential beside the caller it
+// forwards; it matches the controller's LogsServiceAuthHeader.
+const ServiceAuthHeader = "X-Sparkwing-Logs-Service"
+
+// WithServiceToken names the credential, carrying logs.recount, that
+// [Client.ReserveAfterEviction] sends so the controller recounts a team's
+// logs. Without one, a caller cannot ask for a recount.
+func (c *Client) WithServiceToken(token string) *Client {
+	c.serviceAuth = strings.TrimSpace(token)
+	return c
+}
+
+// CanRecount reports whether this client holds a service credential.
+func (c *Client) CanRecount() bool { return c.serviceAuth != "" }
 
 // New returns a client of the controller at controllerURL. A nil client
 // gets a five-second timeout.
@@ -155,17 +172,22 @@ func (c *Client) Reserve(ctx context.Context, auth, team string, kind Kind, byte
 }
 
 // ReserveAfterEviction asks again for up to bytes of team's logs after the
-// caller evicted what a [QuotaError] named, so the controller recounts the
-// team's archive before it answers.
+// caller evicted what a [QuotaError] named, sending the service credential
+// from [Client.WithServiceToken] so the controller recounts the team's archive
+// before it answers.
 func (c *Client) ReserveAfterEviction(ctx context.Context, auth, team string, bytes int64) (Reservation, error) {
 	return c.reserve(ctx, auth, team, KindLogs, bytes, true, true)
 }
 
 func (c *Client) reserve(ctx context.Context, auth, team string, kind Kind, bytes int64, upTo, evicted bool) (Reservation, error) {
 	var out Reservation
+	var service string
+	if evicted {
+		service = c.serviceAuth
+	}
 	err := c.post(ctx, auth, "/internal/storage/reserve", map[string]any{
 		"team": team, "store": kind, "bytes": bytes, "up_to": upTo, "evicted": evicted,
-	}, &out)
+	}, &out, service)
 	if errors.Is(err, ErrUnavailable) && c.recentlyFunded(team) {
 		return Reservation{Team: team, Kind: kind, Tier: TierFunded, Granted: max(bytes, 0), Unlimited: true}, nil
 	}
@@ -185,7 +207,7 @@ func (c *Client) Commit(ctx context.Context, auth string, r Reservation, stored 
 	}
 	return c.post(ctx, auth, "/internal/storage/commit", map[string]any{
 		"team": r.Team, "store": r.Kind, "reservation": r.ID, "bytes": stored,
-	}, nil)
+	}, nil, "")
 }
 
 // Renew commits stored bytes against r and reserves up to next bytes more
@@ -199,7 +221,7 @@ func (c *Client) Renew(ctx context.Context, auth string, r Reservation, stored, 
 	var out Reservation
 	err := c.post(ctx, auth, "/internal/storage/commit", map[string]any{
 		"team": r.Team, "store": r.Kind, "reservation": r.ID, "bytes": stored, "next_bytes": next,
-	}, &out)
+	}, &out, "")
 	if err != nil {
 		return Reservation{}, err
 	}
@@ -215,7 +237,7 @@ func (c *Client) Release(ctx context.Context, auth string, r Reservation) error 
 	}
 	return c.post(ctx, auth, "/internal/storage/release", map[string]any{
 		"team": r.Team, "reservation": r.ID,
-	}, nil)
+	}, nil, "")
 }
 
 // ChargeDownload charges bytes to team's UTC day, refusing with a
@@ -228,7 +250,7 @@ func (c *Client) ChargeDownload(ctx context.Context, auth, team string, bytes in
 	}
 	err := c.post(ctx, auth, "/internal/downloads/charge", map[string]any{
 		"team": team, "bytes": bytes, "record": record,
-	}, &out)
+	}, &out, "")
 	if errors.Is(err, ErrUnavailable) && c.recentlyFunded(team) {
 		return nil
 	}
@@ -242,7 +264,7 @@ func (c *Client) ChargeDownload(ctx context.Context, auth, team string, bytes in
 // the stored totals.
 func (c *Client) RecordEgress(ctx context.Context, auth string, t EgressTotals) (EgressTotals, error) {
 	var out EgressTotals
-	err := c.post(ctx, auth, "/internal/egress/totals", t, &out)
+	err := c.post(ctx, auth, "/internal/egress/totals", t, &out, "")
 	return out, err
 }
 
@@ -251,7 +273,7 @@ type errorBody struct {
 	EvictBytes int64  `json:"evict_bytes"`
 }
 
-func (c *Client) post(ctx context.Context, auth, path string, body, out any) error {
+func (c *Client) post(ctx context.Context, auth, path string, body, out any, serviceAuth string) error {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -262,6 +284,9 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", auth)
+	if serviceAuth != "" {
+		req.Header.Set(ServiceAuthHeader, "Bearer "+serviceAuth)
+	}
 	// #nosec G704 -- the origin is operator configuration and the body names a checked team slug
 	resp, err := c.http.Do(req)
 	if err != nil {

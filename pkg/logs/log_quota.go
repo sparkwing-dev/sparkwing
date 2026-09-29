@@ -189,7 +189,10 @@ func (s *Server) evictAndDraw(ctx context.Context, b *logBlock, auth string, n, 
 	if err != nil {
 		s.logger.Error("logs archive", "op", "evict team logs", "team", b.key.team, "freed", freed, "err", err)
 	}
-	if freed <= 0 {
+	// safety: without its own credential the service cannot ask for the
+	// recount, so the eviction frees room for the next hourly pass to count
+	// and this append is refused.
+	if freed <= 0 || !s.counter.CanRecount() {
 		return nil, quota
 	}
 	if b.held() {

@@ -112,7 +112,7 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 	ask := store.StorageReserve{Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now()}
 	res, err := s.store.ReserveStorage(r.Context(), ask)
 	var quota *store.StorageQuotaError
-	if req.Evicted && req.Store == store.StorageLogs && errors.As(err, &quota) {
+	if req.Evicted && req.Store == store.StorageLogs && errors.As(err, &quota) && s.fromLogsService(r) {
 		if rerr := s.recountTeamLogs(r.Context(), ask.Team); rerr != nil {
 			s.logger.Warn("recount a team's logs after eviction", "team", req.Team, "err", rerr)
 		} else {
@@ -174,6 +174,23 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.NextBytes, UpTo: true, Now: commit.Now,
 	})
 	s.writeReservation(w, r, next, err)
+}
+
+// LogsServiceAuthHeader carries the logs service's own credential beside the
+// caller it forwards, on the reservation it retries after an eviction.
+const LogsServiceAuthHeader = "X-Sparkwing-Logs-Service"
+
+// safety: a recount forgets a team's logs not yet archived, so only the logs
+// service, which evicted before asking, may ask for one; a team's own token
+// cannot carry the scope.
+func (s *Server) fromLogsService(r *http.Request) bool {
+	scheme, raw, _ := strings.Cut(r.Header.Get(LogsServiceAuthHeader), " ")
+	raw = strings.TrimSpace(raw)
+	if !strings.EqualFold(scheme, "bearer") || raw == "" {
+		return false
+	}
+	p, err := s.authMiddleware().Authenticate(raw)
+	return err == nil && p != nil && p.HasScope(ScopeLogsRecount)
 }
 
 // safety: the count comes from the archive the logs service evicted from, never

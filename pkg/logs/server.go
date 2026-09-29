@@ -452,6 +452,11 @@ type ServeOptions struct {
 	// Archive moves idle runs to an object store. Nil keeps every run on
 	// the volume.
 	Archive *ArchiveOptions
+	// ServiceToken is the service's own credential, carrying logs.recount.
+	// With one, a free team's append past its share is written once the
+	// controller recounts the archive after an eviction; without one, the
+	// append is refused after the eviction.
+	ServiceToken string
 }
 
 // ServeWith starts the HTTP listener described by opts and blocks
@@ -474,6 +479,7 @@ func ServeWith(ctx context.Context, opts ServeOptions) error {
 	s.WithStoreCeiling(opts.StoreCeiling)
 	if opts.ControllerURL != "" {
 		s.WithControllerAuth(opts.ControllerURL, 60*time.Second)
+		s.counter.WithServiceToken(opts.ServiceToken)
 	}
 	if opts.Egress != nil {
 		s.WithEgressMeter(opts.Egress)

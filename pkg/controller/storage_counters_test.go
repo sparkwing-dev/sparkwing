@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -380,10 +382,15 @@ func TestALogRefusalNamesAnEvictionAndTheRetryRecountsTheArchive(t *testing.T) {
 	}, &refusal); code != http.StatusRequestEntityTooLarge || refusal.EvictBytes != 100+share/8 {
 		t.Fatalf("a write past the share = %d %+v, want 413 naming %d bytes to evict", code, refusal, 100+share/8)
 	}
-	if code := f.call("POST", "/internal/storage/reserve", writer, map[string]any{
-		"team": "first", "store": "logs", "bytes": 100, "evicted": true,
-	}, nil); code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("a claimed eviction the archive does not show = %d, want 413", code)
+	service, _, err := f.store.CreateToken("logs-service", store.TokenKindService,
+		[]string{controller.ScopeLogsRecount}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	asLogs := storagequota.New(f.url, nil).WithServiceToken(service)
+	var quota *storagequota.QuotaError
+	if _, err := asLogs.ReserveAfterEviction(context.Background(), writer, "first", 100); !errors.As(err, &quota) {
+		t.Fatalf("a claimed eviction the archive does not show = %v, want 413", err)
 	}
 	if _, err := buckets.raw.DeleteObject(context.Background(), &s3.DeleteObjectInput{
 		Bucket: aws.String(passBucket), Key: aws.String("logs/teams/first/runs/r1/build.log"),
@@ -391,11 +398,16 @@ func TestALogRefusalNamesAnEvictionAndTheRetryRecountsTheArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	buckets.put(t, "logs/teams/first/runs/r2/build.log", 1000)
-	var granted store.StorageReservation
-	if code := f.call("POST", "/internal/storage/reserve", writer, map[string]any{
-		"team": "first", "store": "logs", "bytes": 100, "evicted": true,
-	}, &granted); code != http.StatusOK || granted.Granted != 100 {
-		t.Fatalf("a retry after the archive shrank = %d %+v, want the write granted", code, granted)
+	asTeam := storagequota.New(f.url, nil)
+	if _, err := asTeam.ReserveAfterEviction(context.Background(), writer, "first", 100); !errors.As(err, &quota) {
+		t.Fatalf("a team's own token claiming an eviction = %v, want 413", err)
+	}
+	if held, err := f.store.TeamStorage(context.Background(), "first"); err != nil || held[store.StorageLogs].UsedBytes != share {
+		t.Fatalf("logs after a team's claim = %+v, %v; want the count unchanged at %d", held, err, share)
+	}
+	granted, err := asLogs.ReserveAfterEviction(context.Background(), writer, "first", 100)
+	if err != nil || granted.Granted != 100 {
+		t.Fatalf("the logs service's retry after the archive shrank = %+v, %v; want the write granted", granted, err)
 	}
 	if held, err := f.store.TeamStorage(context.Background(), "first"); err != nil || held[store.StorageLogs].UsedBytes != 1000 {
 		t.Fatalf("logs after the recount = %+v, %v; want the archive's 1000 bytes", held, err)

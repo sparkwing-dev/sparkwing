@@ -26,10 +26,16 @@ const CreditsGrantScope = "credits.grant"
 // It is the operator's, so no token minted through a [Tenant] carries it.
 const LaunchScope = "claims.launch"
 
+// LogsRecountScope is the logs service's own credential. It asks the
+// controller to recount a team's logs from the archive after the service
+// evicted some of them. It is the operator's, so no token minted through a
+// [Tenant] carries it.
+const LogsRecountScope = "logs.recount"
+
 // ErrAdminScopeOnTeamToken reports a team mint naming [OperatorScope],
-// [LogsDeleteScope], [CreditsGrantScope] or [LaunchScope], which no team's
-// token may carry.
-var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant or claims.launch scope")
+// [LogsDeleteScope], [CreditsGrantScope], [LaunchScope] or [LogsRecountScope],
+// which no team's token may carry.
+var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry the admin, logs.delete, credits.grant, claims.launch or logs.recount scope")
 
 // safety: admin and credits.grant are the deployment operator's scopes, and a membership never grants
 // them, so no path that mints into a team may either, the default team included; the operator's own
@@ -37,7 +43,8 @@ var ErrAdminScopeOnTeamToken = errors.New("store: a team's token cannot carry th
 func refuseAdminScope(scopes []string) error {
 	if slices.ContainsFunc(scopes, func(s string) bool {
 		s = strings.TrimSpace(s)
-		return s == OperatorScope || s == LogsDeleteScope || s == CreditsGrantScope || s == LaunchScope
+		return s == OperatorScope || s == LogsDeleteScope || s == CreditsGrantScope || s == LaunchScope ||
+			s == LogsRecountScope
 	}) {
 		return ErrAdminScopeOnTeamToken
 	}
