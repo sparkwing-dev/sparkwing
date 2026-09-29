@@ -32,14 +32,23 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 	}
 	childID := child.ID()
 
+	childCtx, cancelChild := context.WithCancel(h.state.resolverCtx)
+	stopCancellation := context.AfterFunc(ctx, cancelChild)
+	defer stopCancellation()
+	defer cancelChild()
+	if ctx.Err() != nil {
+		cancelChild()
+	}
 	doneCh := h.state.ensureDoneCh(childID)
-	h.state.scheduleNode(child)
+	h.state.scheduleNode(childCtx, child) //nolint:contextcheck // Inherit execution authority from resolverCtx; the caller supplies cancellation only.
 
 	resumeProgressTimeout := pauseProgressTimeout(ctx)
 	defer resumeProgressTimeout()
 	select {
 	case <-doneCh:
 	case <-ctx.Done():
+		cancelChild()
+		<-doneCh
 		return nil, spawnCancelledError(childID, ctx.Err())
 	}
 

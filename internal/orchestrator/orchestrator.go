@@ -943,7 +943,7 @@ func dispatch(
 
 	seen := make(map[string]bool, len(plan.Nodes()))
 	for _, n := range plan.Nodes() {
-		state.scheduleNode(n)
+		state.scheduleNode(state.resolverCtx, n) //nolint:contextcheck // newDispatchState derives resolverCtx from the run context.
 		seen[n.ID()] = true
 	}
 
@@ -952,7 +952,7 @@ func dispatch(
 		if rec == nil || seen[rec.ID()] {
 			continue
 		}
-		state.scheduleNode(rec)
+		state.scheduleNode(state.resolverCtx, rec) //nolint:contextcheck // Recovery nodes need the same enriched run context.
 		seen[rec.ID()] = true
 	}
 
@@ -1983,7 +1983,7 @@ func (s *dispatchState) lookupDoneCh(id string) (chan struct{}, bool) {
 	return ch, ok
 }
 
-func (s *dispatchState) scheduleNode(node *sparkwing.JobNode) {
+func (s *dispatchState) scheduleNode(ctx context.Context, node *sparkwing.JobNode) {
 	s.mu.Lock()
 	s.scheduled[node.ID()] = node
 	s.mu.Unlock()
@@ -1992,7 +1992,7 @@ func (s *dispatchState) scheduleNode(node *sparkwing.JobNode) {
 	go func() {
 		defer s.wg.Done()
 		defer close(done)
-		s.runOneNode(node)
+		s.runOneNode(ctx, node)
 	}()
 }
 
@@ -2071,7 +2071,7 @@ func (s *dispatchState) runOneExpansion(exp sparkwing.Expansion) {
 		}
 	}
 	for _, node := range expandedNodes {
-		s.scheduleNode(node)
+		s.scheduleNode(s.resolverCtx, node)
 	}
 
 	childIDs := make([]string, len(children))
@@ -2167,8 +2167,12 @@ func (s *dispatchState) invokeGenerator(exp sparkwing.Expansion) (out []*sparkwi
 	return out, nil
 }
 
-func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
+func (s *dispatchState) runOneNode(ctx context.Context, node *sparkwing.JobNode) {
 	if _, alreadyCompleted := s.getOutcome(node.ID()); alreadyCompleted {
+		return
+	}
+	if ctx.Err() != nil {
+		s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 		return
 	}
 	parentID, claimed := s.claimedParent(node.ID())
@@ -2186,8 +2190,8 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 		select {
 		case <-parentCh:
-		case <-s.resolverCtx.Done():
-			s.markCancelled(node.ID(), "ctx-cancelled")
+		case <-ctx.Done():
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 			return
 		}
 		parentOutcome, _ := s.getOutcome(parentID)
@@ -2196,7 +2200,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			return
 		}
 		s.markStarted(node.ID())
-		res := s.invokeRecoveryRunner(node, s.getFailure(parentID))
+		res := s.invokeRecoveryRunner(ctx, node, s.getFailure(parentID))
 		s.applyResult(node.ID(), res)
 		return
 	}
@@ -2205,12 +2209,12 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	for _, grp := range node.NeedsGroups() {
 		select {
 		case <-grp.Ready():
-		case <-s.resolverCtx.Done():
-			s.markCancelled(node.ID(), "ctx-cancelled")
+		case <-ctx.Done():
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 			return
 		}
 		if grp.Err() != nil {
-			s.markCancelled(node.ID(), fmt.Sprintf("expansion failed: %v", grp.Err()))
+			s.markCancelled(ctx, node.ID(), fmt.Sprintf("expansion failed: %v", grp.Err()))
 			return
 		}
 		for _, m := range grp.Members() {
@@ -2235,8 +2239,8 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		}
 		select {
 		case <-ch:
-		case <-s.resolverCtx.Done():
-			s.markCancelled(node.ID(), "ctx-cancelled")
+		case <-ctx.Done():
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 			return
 		}
 	}
@@ -2250,24 +2254,24 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		if upstream != nil && upstream.IsContinueOnError() {
 			continue
 		}
-		s.markCancelled(node.ID(), "upstream-failed")
+		s.markCancelled(ctx, node.ID(), "upstream-failed")
 		return
 	}
 
 	if s.debug.pauseBefore(node.ID()) {
-		if cancelled := s.doPause(node.ID(), store.PauseReasonBefore); cancelled {
-			s.markCancelled(node.ID(), "ctx-cancelled")
+		if cancelled := s.doPause(ctx, node.ID(), store.PauseReasonBefore); cancelled {
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
 			return
 		}
 	}
 
 	if node.IsApproval() {
-		if reason, skip := evalSkipPredicates(s.resolverCtx, node); skip {
+		if reason, skip := evalSkipPredicates(ctx, node); skip {
 			s.markSkipped(node.ID(), reason)
 			return
 		}
 		s.markStarted(node.ID())
-		res := s.runApprovalGate(node)
+		res := s.runApprovalGate(ctx, node)
 		s.applyResult(node.ID(), res)
 		return
 	}
@@ -2289,7 +2293,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	}
 
 	s.markStarted(node.ID())
-	runnerCtx := sparkwingruntime.WithSpawnHandler(s.resolverCtx, s.newSpawnHandler(node.ID()))
+	runnerCtx := sparkwingruntime.WithSpawnHandler(ctx, s.newSpawnHandler(node.ID()))
 	runnerCtx = sparkwingruntime.WithRunner(runnerCtx, runnerInfoFor(activeRunner))
 	runnerCtx = withAdmissionWaitParticipant(runnerCtx, node.ID())
 
@@ -2304,7 +2308,11 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	autoConsumed := 0
 	var res runner.Result
 	if retryCfg.Auto {
-		stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID())
+		stored, err := s.backends.State.GetNode(ctx, s.runID, node.ID())
+		if ctx.Err() != nil {
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
+			return
+		}
 		if err != nil {
 			res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("read execution attempt budget: %w", err)}
 			totalAutoAttempts = 0
@@ -2319,7 +2327,11 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	}
 	for autoAttempt := range totalAutoAttempts {
 		if retryCfg.Auto {
-			stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID())
+			stored, err := s.backends.State.GetNode(ctx, s.runID, node.ID())
+			if ctx.Err() != nil {
+				s.markCancelled(ctx, node.ID(), "ctx-cancelled")
+				return
+			}
 			if err == nil && stored.AttemptsConsumed >= retryCfg.Attempts+1 {
 				res = runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("node %s exhausted its %d execution-attempt budget", node.ID(), retryCfg.Attempts+1)}
 				break
@@ -2333,13 +2345,13 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			if wait > 0 {
 				msg = fmt.Sprintf("auto-retry dispatch %d/%d after %s", ordinal, budget, wait)
 			}
-			sparkwing.LoggerFromContext(s.resolverCtx).Log("info", msg)
+			sparkwing.LoggerFromContext(ctx).Log("info", msg)
 			noteEvent(s.ctx, s.backends.State, s.runID, node.ID(), "node_auto_retry",
 				fmt.Appendf(nil, "dispatch %d/%d", ordinal, budget))
 			if wait > 0 {
 				select {
 				case <-time.After(wait):
-				case <-s.resolverCtx.Done():
+				case <-ctx.Done():
 					s.applyResult(node.ID(), runner.Result{Outcome: sparkwing.Cancelled})
 					return
 				}
@@ -2354,7 +2366,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		if retryCfg.Auto {
 			dispatchCtx = store.WithExecutionAttemptOrdinal(dispatchCtx, autoConsumed+autoAttempt+1)
 		}
-		res = s.runWithCap(node, func(slot *workerSlot) runner.Result {
+		res = s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
 			return activeRunner.RunNode(dispatchCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
@@ -2372,17 +2384,22 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		if errors.Is(res.Err, store.ErrLockHeld) {
 			break
 		}
-		if stored, err := s.backends.State.GetNode(s.ctx, s.runID, node.ID()); err == nil && stored.FailureReason == store.FailureAgentLost {
+		stored, err := s.backends.State.GetNode(ctx, s.runID, node.ID())
+		if ctx.Err() != nil {
+			s.markCancelled(ctx, node.ID(), "ctx-cancelled")
+			return
+		}
+		if err == nil && stored.FailureReason == store.FailureAgentLost {
 			break
 		}
 		if autoAttempt < totalAutoAttempts-1 {
-			sparkwing.LoggerFromContext(s.resolverCtx).Log("warn",
+			sparkwing.LoggerFromContext(ctx).Log("warn",
 				fmt.Sprintf("node %s auto-retry dispatch %d/%d failed: %v",
 					node.ID(), autoConsumed+autoAttempt+1, retryCfg.Attempts+1, res.Err))
 		}
 	}
 
-	if res.Outcome == sparkwing.Failed && s.resolverCtx.Err() != nil && canceledByRun(res.Err) {
+	if res.Outcome == sparkwing.Failed && ctx.Err() != nil && canceledByRun(res.Err) {
 		s.markRunCancelled(node.ID())
 		return
 	}
@@ -2394,7 +2411,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 		pauseReason = store.PauseReasonOnFailure
 	}
 	if pauseReason != "" {
-		if cancelled := s.doPause(node.ID(), pauseReason); cancelled {
+		if cancelled := s.doPause(ctx, node.ID(), pauseReason); cancelled {
 			s.applyResult(node.ID(), runner.Result{Outcome: sparkwing.Cancelled})
 			return
 		}
@@ -2423,7 +2440,7 @@ func pauseTimeout() time.Duration {
 
 const debugPausePollInterval = 500 * time.Millisecond
 
-func (s *dispatchState) doPause(nodeID, reason string) bool {
+func (s *dispatchState) doPause(ctx context.Context, nodeID, reason string) bool {
 	now := time.Now()
 	timeout := pauseTimeout()
 	pause := store.DebugPause{
@@ -2434,7 +2451,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 		ExpiresAt: now.Add(timeout),
 	}
 	if err := s.backends.State.CreateDebugPause(s.ctx, pause); err != nil {
-		sparkwing.LoggerFromContext(s.resolverCtx).Log("error",
+		sparkwing.LoggerFromContext(ctx).Log("error",
 			fmt.Sprintf("debug pause %s/%s: create row: %v", nodeID, reason, err))
 		return false
 	}
@@ -2450,7 +2467,10 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 	deadline := time.NewTimer(time.Until(pause.ExpiresAt))
 	defer deadline.Stop()
 	for {
-		p, err := s.backends.State.GetActiveDebugPause(s.ctx, s.runID, nodeID)
+		p, err := s.backends.State.GetActiveDebugPause(ctx, s.runID, nodeID)
+		if ctx.Err() != nil {
+			return true
+		}
 		if err != nil {
 			break
 		}
@@ -2465,7 +2485,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 			break
 		}
 		select {
-		case <-s.resolverCtx.Done():
+		case <-ctx.Done():
 			return true
 		case <-ticker.C:
 		case <-deadline.C:
@@ -2499,7 +2519,7 @@ func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 	s.setOutcome(nodeID, res.Outcome)
 }
 
-func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
+func (s *dispatchState) runApprovalGate(ctx context.Context, node *sparkwing.JobNode) runner.Result {
 	cfg := node.ApprovalConfig()
 	if cfg == nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("approval node %q has nil config", node.ID())}
@@ -2562,7 +2582,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 	ticker := time.NewTicker(approvalPollInterval())
 	defer ticker.Stop()
 
-	resolution := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
+	resolution := s.pollApproval(ctx, node.ID(), deadline, onTimeout, ticker)
 
 	if resolution.via != "" {
 		resAttrs := map[string]any{
@@ -2620,7 +2640,7 @@ type approvalResult struct {
 	summary    string
 }
 
-func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) approvalResult {
+func (s *dispatchState) pollApproval(ctx context.Context, nodeID string, deadline time.Time, onTimeout string, ticker *time.Ticker) approvalResult {
 	wedge, err := newStoreWedgeGuardFromEnv()
 	if err != nil {
 		return approvalResult{outcome: sparkwing.Failed, errMsg: err.Error()}
@@ -2632,7 +2652,10 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 		deadlineC = deadlineTimer.C
 	}
 	for {
-		approval, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
+		approval, err := s.backends.State.GetApproval(ctx, s.runID, nodeID)
+		if ctx.Err() != nil {
+			return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
+		}
 		if err != nil {
 			if terminal := wedge.fail(fmt.Sprintf("approval poll %s/%s", s.runID, nodeID), err); terminal != nil {
 				return approvalResult{outcome: sparkwing.Failed, errMsg: terminal.Error()}
@@ -2644,10 +2667,18 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 			}
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
-			if _, err := s.backends.State.ResolveApproval(s.ctx, s.runID, nodeID,
-				store.ApprovalResolutionTimedOut, "sparkwing", "timeout"); err != nil {
-				if errors.Is(err, store.ErrLockHeld) {
-					if approval, err2 := s.backends.State.GetApproval(s.ctx, s.runID, nodeID); err2 == nil && approval.ResolvedAt != nil {
+			_, resolveErr := s.backends.State.ResolveApproval(s.ctx, s.runID, nodeID, //nolint:contextcheck // Persist resolution with the run context, then check child cancellation.
+				store.ApprovalResolutionTimedOut, "sparkwing", "timeout")
+			if ctx.Err() != nil {
+				return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
+			}
+			if resolveErr != nil {
+				if errors.Is(resolveErr, store.ErrLockHeld) {
+					approval, err2 := s.backends.State.GetApproval(ctx, s.runID, nodeID)
+					if ctx.Err() != nil {
+						return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
+					}
+					if err2 == nil && approval.ResolvedAt != nil {
 						return approvalResolutionToOutcome(approval.Resolution, approval.Approver, approval.Comment)
 					}
 				}
@@ -2657,7 +2688,7 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 		select {
 		case <-ticker.C:
 		case <-deadlineC:
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
 		}
 	}
@@ -2723,10 +2754,10 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 	return r
 }
 
-func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
-	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
+func (s *dispatchState) invokeRecoveryRunner(ctx context.Context, node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
+	ctx = sparkwing.WithFailure(ctx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
-	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
+	return s.runWithCap(ctx, node, func(slot *workerSlot) runner.Result {
 		return s.runner.RunNode(ctx, runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
@@ -2770,17 +2801,23 @@ func (w *workerSlot) reacquire() bool {
 	}
 }
 
-func (s *dispatchState) runWithCap(node *sparkwing.JobNode, fn func(slot *workerSlot) runner.Result) runner.Result {
+func (s *dispatchState) runWithCap(ctx context.Context, node *sparkwing.JobNode, fn func(slot *workerSlot) runner.Result) runner.Result {
+	if ctx.Err() != nil {
+		return runner.Result{Outcome: sparkwing.Cancelled}
+	}
 	if s.sem == nil || node.IsInline() {
 		return fn(&workerSlot{})
 	}
 	select {
 	case s.sem <- struct{}{}:
-	case <-s.resolverCtx.Done():
+	case <-ctx.Done():
 		return runner.Result{Outcome: sparkwing.Cancelled}
 	}
-	slot := &workerSlot{sem: s.sem, ctx: s.resolverCtx, held: true}
+	slot := &workerSlot{sem: s.sem, ctx: ctx, held: true}
 	defer slot.release()
+	if ctx.Err() != nil {
+		return runner.Result{Outcome: sparkwing.Cancelled}
+	}
 	return fn(slot)
 }
 
@@ -2864,10 +2901,9 @@ func (s *dispatchState) markFailed(nodeID string, reason error) {
 	s.setOutcome(nodeID, sparkwing.Failed)
 }
 
-func (s *dispatchState) markCancelled(nodeID, reason string) {
-	// safety: the common caller has just observed the run context Done, and a
-	// store write on a cancelled context never reaches the driver.
-	ctx := context.WithoutCancel(s.ctx)
+func (s *dispatchState) markCancelled(ctx context.Context, nodeID, reason string) {
+	// safety: terminal writes must outlive execution cancellation.
+	ctx = context.WithoutCancel(ctx)
 	if err := s.backends.State.FinishNode(ctx, s.runID, nodeID, string(sparkwing.Cancelled), reason, nil); err != nil {
 		noteLostStateWrite(ctx, "finish node", s.runID, err)
 	}
