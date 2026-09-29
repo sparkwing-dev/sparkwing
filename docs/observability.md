@@ -175,38 +175,49 @@ excerpts at all. The node's `error` still carries the excerpt as text.
 
 ## Resource usage metrics
 
-While a node runs, the runner samples the executing process in-process
-every 2 seconds. Samples are stored and charted in the dashboard. No
-cluster metrics-server is involved.
+A dedicated node process samples its observed process tree every 2 seconds
+and takes a final reading before execution returns. Samples are stored and
+charted in the dashboard. No cluster metrics-server is involved.
 
 ### What's measured
 
-- **CPU**: millicores from changes in `getrusage` CPU time, clamped to
-  the host's core count. The counters cover the runner and reaped child
-  work; they do not measure live children. A child's CPU may arrive only
-  after it exits, so its timing can differ from the interval charged.
-- **Memory**: the runner's resident bytes from `/proc/self/statm` on Linux
-  or `ps -o rss=` on macOS. These readings omit child processes.
+- **CPU**: millicores from the change in cumulative CPU time divided by the
+  matching elapsed interval, clamped to the host's core count. The counters
+  include observed live descendants and reaped child work.
+- **Memory**: summed resident bytes across the observed process tree, using
+  `smaps_rollup` on Linux and process resource counters on macOS. Shared
+  pages can be counted more than once. Process reads are not simultaneous.
 
-A failed CPU or RSS read marks the sample unknown. Any usable reading remains
-available for diagnostics, but a series containing an unknown sample cannot
-train CPU or memory costs. A successful zero reading remains measured zero.
+Two snapshots check process identity, parentage and counter consistency.
+Unavailable or inconsistent readings mark the sample unknown. Any usable
+reading remains available for diagnostics, but an unknown sample prevents
+a contributing uncached node's observations and the run rollup from training
+resource costs. Cached nodes are excluded from learning.
+A successful zero reading remains measured zero.
 
-One sampler runs per process and divides each interval equally among its
-attached nodes. A dedicated local node has one attachment. Nested jobs,
-embedded execution and in-process workers can share a sampler; their
-readings estimate each node's share of that process. A node joining or
-leaving between ticks can shift attribution by one interval.
+An observed process disappearing or changing identity or parentage makes
+attribution unknown, including an ordinary child reap. Descendants still
+present at final collection also make attribution unknown. Work before
+attachment, short-lived descendants absent from every snapshot and escaped
+processes cannot be fully accounted for by polling.
 
-Sampling every 2 seconds misses shorter peaks and may produce no interval
-readings for a short node. Supervised local processes also report exit CPU
-time, peak resident set and process lifetime. The local capacity fold uses
-CPU time divided by that matching lifetime as a floor under sampled CPU.
-Exit RSS is a process high-water mark, not simultaneous process-tree memory.
-Pods and embedded nodes do not provide these supervised exit figures.
+Only a node that owns its dedicated process receives interval attribution.
+Embedded execution and nested work sharing another node's process report
+unknown attribution; process readings are not divided among attached nodes.
+
+Sampling misses peaks between readings. The first interval retains the
+initial memory reading, and final collection can produce an interval even
+when a node finishes before the first timer tick. Supervised local processes
+also report exit CPU time, peak resident set and process lifetime. The local
+capacity fold uses CPU time divided by that matching lifetime as a floor
+under sampled CPU. Exit RSS is a process high-water mark, not simultaneous
+process-tree memory. Pods and embedded nodes do not provide these supervised
+exit figures.
 
 The process lifetime includes startup and teardown. Retries accumulate CPU
-and occupancy, while exit memory retains the largest reported peak.
+and occupancy, while exit memory retains the largest reported peak. Profile
+learning excludes multiple execution attempts whose combined measurement
+coverage cannot be established.
 
 Each stored point has a `kind`:
 
@@ -239,15 +250,12 @@ must be considered before using learned costs to reduce resource pins.
 
 ### Using metrics to right-size containers
 
-1. Run your pipeline a few times
-2. Open the run detail in the dashboard and expand **Resources**
-3. Compare peak usage to your pod's configured limits:
-   - If peak memory is close to the limit → increase the limit or
-     optimize memory usage
-   - If peak CPU is well below the limit → you can safely lower requests
-     to save cluster resources
-   - If CPU is consistently at the limit → the pipeline is CPU-bound;
-     increase the limit so the run is not throttled
+1. Run representative workloads, including overlapping work and retries.
+2. Open the run detail in the dashboard and expand **Resources**.
+3. Compare measured usage with configured requests and limits. Investigate
+   memory pressure and CPU throttling where usage approaches a limit.
+4. Before reducing requests or limits, verify measurement coverage and leave
+   headroom for workload variation and peaks between samples.
 
 ## Dashboard
 
