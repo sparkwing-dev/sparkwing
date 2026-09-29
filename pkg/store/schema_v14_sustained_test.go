@@ -73,7 +73,7 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	}
 }
 
-func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
+func TestProfileWindow_SchemaThreeSamplesAreDiscarded(t *testing.T) {
 	st, err := storetest.New(t).TryOpen()
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -112,11 +112,11 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if prof.SampleCount != 4 {
-		t.Fatalf("SampleCount = %d, want the 3 carried samples plus the fresh one", prof.SampleCount)
+	if prof.SampleCount != 1 {
+		t.Fatalf("SampleCount = %d, want only the fresh observation", prof.SampleCount)
 	}
-	if prof.SustainedCores != 4 {
-		t.Errorf("SustainedCores = %v, want 4 (carried samples priced at their peaks)", prof.SustainedCores)
+	if prof.SustainedCores != 1 {
+		t.Errorf("SustainedCores = %v, want 1 from the fresh observation", prof.SustainedCores)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 	}
 }
 
-func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) {
+func TestSchemaV14_UpgradeDiscardsObsoleteResourceSamples(t *testing.T) {
 	target := storetest.New(t)
 	st, err := target.TryOpen()
 	if err != nil {
@@ -202,11 +202,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil || prof == nil {
 		t.Fatalf("legacy row missing after upgrade: %v", err)
 	}
-	if prof.SustainedCores != 6 {
-		t.Errorf("SustainedCores = %v, want the carried 6.0 peak", prof.SustainedCores)
-	}
-	if prof.PrevSustainedCores != 4 {
-		t.Errorf("PrevSustainedCores = %v, want the carried 4.0 prev peak", prof.PrevSustainedCores)
+	if prof.SampleCount != 0 || prof.SustainedCores != 0 || prof.PrevSustainedCores != 0 {
+		t.Errorf("obsolete resource history survived upgrade: %+v", prof)
 	}
 
 	if err := up.RecordProfileObservation(ctx, "legacy", "", store.ProfileObservation{
@@ -219,8 +216,8 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	if err != nil || after == nil {
 		t.Fatalf("profile missing: %v", err)
 	}
-	if after.SustainedCores != 6 {
-		t.Errorf("SustainedCores = %v, want 6 (carried samples still priced at their peaks)", after.SustainedCores)
+	if after.SampleCount != 1 || after.SustainedCores != 1 {
+		t.Errorf("profile must contain only the fresh observation: %+v", after)
 	}
 }
 
