@@ -915,6 +915,12 @@ unlock.
 
 ### Changed
 
+- **cloud:** Cloud builds fetch packages from the upstream registries. The
+  Cloud cache runs with `--disable-proxy` and its runners with
+  `--dependency-proxy=off`, because the proxy takes no credential and its
+  bytes could not be charged to a team. Self-hosted deployments keep the
+  proxy.
+
 - **controller:** The `cloud` limits profile allows a signed-up team 3600
   requests a minute, up from 2000. A team's tokens share that budget, and a
   two-slot runner spends about 300 a minute, so a pool of ten runners no longer
