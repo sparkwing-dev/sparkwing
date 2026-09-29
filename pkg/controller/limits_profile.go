@@ -39,12 +39,9 @@ type LimitsProfileValues struct {
 	RunsPerPrincipalHour int
 	// ShedQueueDepth is [FloodPolicy.ShedQueueDepth].
 	ShedQueueDepth int
-	// EgressMonthlyBytesPerPrincipal is the bytes one principal may download
-	// in a UTC month.
-	EgressMonthlyBytesPerPrincipal int64
-	// EgressDailyCapBytes is the bytes the controller may send in a UTC day
-	// before it refuses every download, whoever asks.
-	EgressDailyCapBytes int64
+	// EgressDailyAlarmBytes is the bytes the controller may send in a UTC day
+	// before it raises the egress alarm. It refuses nothing.
+	EgressDailyAlarmBytes int64
 	// EnforceIdleClaimPoll refuses a claim that arrives sooner than the idle
 	// interval the controller last suggested that runner. See
 	// [Server.WithIdleClaimPollEnforced].
@@ -98,13 +95,12 @@ const (
 )
 
 // safety: egress is the bill a free account can run up without any compute, at
-// about $0.09 a GiB. The daily cap bounds a controller's month at 31 times it
-// however many accounts share it: $56 on the free tier and $560 on the paid.
+// about $0.09 a GiB. Each team's daily download cap bounds what one team costs;
+// the alarm names the day many teams together cost more than one pod is
+// planned for: $1.80 on the free tier and $18 on the paid.
 const (
-	cloudEgressMonthlyBytes      = 100 << 30
-	cloudFreeEgressMonthlyBytes  = 5 << 30
-	cloudEgressDailyCapBytes     = 200 << 30
-	cloudFreeEgressDailyCapBytes = 20 << 30
+	cloudEgressDailyAlarmBytes     = 200 << 30
+	cloudFreeEgressDailyAlarmBytes = 20 << 30
 )
 
 // safety: the free tier halves the paid heartbeat budget and takes a fifth of
@@ -122,9 +118,8 @@ var limitsProfiles = map[string]LimitsProfileValues{
 		RunsPerPrincipalHour:      cloudRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudShedQueueDepth,
 
-		EgressMonthlyBytesPerPrincipal: cloudEgressMonthlyBytes,
-		EgressDailyCapBytes:            cloudEgressDailyCapBytes,
-		EnforceIdleClaimPoll:           true,
+		EgressDailyAlarmBytes: cloudEgressDailyAlarmBytes,
+		EnforceIdleClaimPoll:  true,
 	},
 	LimitsProfileCloudFree: {
 		ClaimsPerRunnerMinute:     CompliantClaimPollsPerMinute() * cloudFreeClaimHeadroom,
@@ -136,9 +131,8 @@ var limitsProfiles = map[string]LimitsProfileValues{
 		RunsPerPrincipalHour:      cloudFreeRunsPerPrincipalHour,
 		ShedQueueDepth:            cloudFreeShedQueueDepth,
 
-		EgressMonthlyBytesPerPrincipal: cloudFreeEgressMonthlyBytes,
-		EgressDailyCapBytes:            cloudFreeEgressDailyCapBytes,
-		EnforceIdleClaimPoll:           true,
+		EgressDailyAlarmBytes: cloudFreeEgressDailyAlarmBytes,
+		EnforceIdleClaimPoll:  true,
 	},
 }
 

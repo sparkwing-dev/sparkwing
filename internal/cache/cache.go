@@ -95,15 +95,10 @@ type Config struct {
 	// ProxyMaxBytes caps the registry proxy's directory; past it the least
 	// recently served entries are evicted. Zero leaves it unbounded.
 	ProxyMaxBytes int64
-	// EgressDailyAlarmBytes raises the egress alarm, which health
-	// reports, once this pod has sent this many bytes in a UTC day. It
-	// refuses nothing. Zero is off.
+	// EgressDailyAlarmBytes raises the egress alarm, which health and
+	// the metrics report, once this pod has sent this many bytes in a UTC
+	// day. It refuses nothing. Zero is off.
 	EgressDailyAlarmBytes int64
-	// EgressDailyCapBytes refuses every metered download with 429 once
-	// this pod has sent this many bytes in a UTC day, until the day
-	// rolls. It bounds the pod's bill whoever the callers are. Zero is
-	// off.
-	EgressDailyCapBytes int64
 }
 
 func DefaultConfig() Config {
@@ -127,11 +122,10 @@ func DefaultConfig() Config {
 	}
 }
 
-// DefaultMultiTeamEgressDailyCapBytes is the daily egress cap a cache that
-// verifies grants starts with when the operator named none: what one pod may
-// send in a UTC day before every metered download is refused until the day
-// rolls.
-const DefaultMultiTeamEgressDailyCapBytes int64 = 200 << 30
+// DefaultMultiTeamEgressDailyAlarmBytes is the daily egress alarm a cache
+// that verifies grants starts with when the operator named none: what one pod
+// may send in a UTC day before it raises the alarm.
+const DefaultMultiTeamEgressDailyAlarmBytes int64 = 200 << 30
 
 const serverReadTimeout = 30 * time.Second
 
@@ -288,10 +282,7 @@ func New(cfg Config) (*Server, error) {
 			"set --public-url (or $SPARKWING_CACHE_PUBLIC_URL) to rewrite against one fixed base")
 	}
 
-	egressCfg := egress.Config{
-		GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes,
-		GlobalDailyCapBytes:   cfg.EgressDailyCapBytes,
-	}
+	egressCfg := egress.Config{GlobalDailyAlarmBytes: cfg.EgressDailyAlarmBytes}
 	setEgressMeter(egressCfg)
 	logEgressBudgets(egressCfg)
 	if counter != nil {
@@ -311,6 +302,7 @@ func New(cfg Config) (*Server, error) {
 	initGitcacheMetrics()
 	initProxyMetrics()
 	initStoreCeilingMetrics()
+	initEgressMetrics()
 	if err := setupSSH(); err != nil {
 		return nil, err
 	}

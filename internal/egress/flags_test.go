@@ -30,7 +30,6 @@ func TestBindDefaultsToUnlimited(t *testing.T) {
 
 func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	env := envOf(map[string]string{
-		egress.EnvName(egress.ServiceController, egress.EnvMonthlyBytes):    "500",
 		egress.EnvName(egress.ServiceController, egress.EnvDailyAlarmBytes): "900",
 		egress.EnvName(egress.ServiceController, egress.EnvMaxLogStreams):   "3",
 		egress.EnvName(egress.ServiceController, egress.EnvMaxDownloads):    "4",
@@ -45,7 +44,7 @@ func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
-	if cfg.PerPrincipalMonthlyBytes != 500 || cfg.GlobalDailyAlarmBytes != 900 {
+	if cfg.GlobalDailyAlarmBytes != 900 {
 		t.Fatalf("config from the environment = %+v", cfg)
 	}
 	if cfg.MaxStreamsPerPrincipal != 3 || cfg.MaxDownloadsPerPrincipal != 4 {
@@ -54,14 +53,14 @@ func TestBindReadsTheEnvironmentThenTheFlags(t *testing.T) {
 
 	fs = flag.NewFlagSet("test", flag.ContinueOnError)
 	read = egress.Bind(fs, env, egress.ServiceController, egress.ControllerSurfaces)
-	if err := fs.Parse([]string{"--egress-monthly-bytes=1", "--egress-max-log-streams=0"}); err != nil {
+	if err := fs.Parse([]string{"--egress-max-downloads=1", "--egress-max-log-streams=0"}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _, err = read()
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
-	if cfg.PerPrincipalMonthlyBytes != 1 || cfg.MaxStreamsPerPrincipal != 0 || cfg.GlobalDailyAlarmBytes != 900 {
+	if cfg.MaxDownloadsPerPrincipal != 1 || cfg.MaxStreamsPerPrincipal != 0 || cfg.GlobalDailyAlarmBytes != 900 {
 		t.Fatalf("config from the flags = %+v, want the flags to win where they were passed", cfg)
 	}
 }
@@ -96,7 +95,7 @@ func TestEachServiceReadsItsOwnVariables(t *testing.T) {
 			t.Errorf("%s daily alarm = %d, want %d", tc.svc, cfg.GlobalDailyAlarmBytes, tc.want)
 		}
 	}
-	if got := egress.EnvName(egress.ServiceController, egress.EnvMonthlyBytes); got != "SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES" {
+	if got := egress.EnvName(egress.ServiceController, egress.EnvDailyAlarmBytes); got != "SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES" {
 		t.Errorf("EnvName = %q", got)
 	}
 }
@@ -107,11 +106,11 @@ func TestACacheRegistersNoPerPrincipalBudget(t *testing.T) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(&strings.Builder{})
 	read := egress.Bind(fs, envOf(map[string]string{
-		egress.EnvName(egress.ServiceCache, egress.EnvMonthlyBytes):  "5",
+		egress.EnvName(egress.ServiceCache, egress.EnvMaxDownloads):  "5",
 		egress.EnvName(egress.ServiceCache, egress.EnvMaxLogStreams): "5",
 	}), egress.ServiceCache, egress.CacheSurfaces)
 
-	for _, arg := range []string{"--egress-monthly-bytes=2", "--egress-max-log-streams=2", "--egress-max-downloads=2"} {
+	for _, arg := range []string{"--egress-max-log-streams=2", "--egress-max-downloads=2"} {
 		if err := fs.Parse([]string{arg}); err == nil {
 			t.Errorf("a service with no per-principal budget accepted %s", arg)
 		}
@@ -123,13 +122,13 @@ func TestACacheRegistersNoPerPrincipalBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read = %v, want nil", err)
 	}
-	if cfg.PerPrincipalMonthlyBytes != 0 || cfg.MaxStreamsPerPrincipal != 0 || cfg.MaxDownloadsPerPrincipal != 0 {
+	if cfg.MaxStreamsPerPrincipal != 0 || cfg.MaxDownloadsPerPrincipal != 0 {
 		t.Fatalf("config = %+v, want only the daily alarm", cfg)
 	}
 }
 
 func TestBindRefusesAMalformedEnvironment(t *testing.T) {
-	name := egress.EnvName(egress.ServiceLogs, egress.EnvMonthlyBytes)
+	name := egress.EnvName(egress.ServiceLogs, egress.EnvMaxDownloads)
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	read := egress.Bind(fs, envOf(map[string]string{name: "a lot"}), egress.ServiceLogs, egress.LogsSurfaces)
 	if err := fs.Parse(nil); err != nil {
@@ -195,39 +194,5 @@ func TestBind_NamedReportsEitherChannel(t *testing.T) {
 				t.Errorf("named = %+v, want %+v", named, tc.want)
 			}
 		})
-	}
-}
-
-func TestBindReadsTheDailyCapOnEveryService(t *testing.T) {
-	for _, tc := range []struct {
-		svc      egress.Service
-		surfaces egress.Surfaces
-	}{
-		{egress.ServiceController, egress.ControllerSurfaces},
-		{egress.ServiceLogs, egress.LogsSurfaces},
-		{egress.ServiceCache, egress.CacheSurfaces},
-	} {
-		env := envOf(map[string]string{egress.EnvName(tc.svc, egress.EnvDailyCapBytes): "700"})
-		fs := flag.NewFlagSet("test", flag.ContinueOnError)
-		read := egress.Bind(fs, env, tc.svc, tc.surfaces)
-		if err := fs.Parse(nil); err != nil {
-			t.Fatal(err)
-		}
-		cfg, named, err := read()
-		if err != nil {
-			t.Fatalf("%s: read = %v, want nil", tc.svc, err)
-		}
-		if cfg.GlobalDailyCapBytes != 700 || !named.DailyCapBytes || !cfg.Budgeted() {
-			t.Fatalf("%s: cap from the environment = %d named %v, want 700 named", tc.svc, cfg.GlobalDailyCapBytes, named.DailyCapBytes)
-		}
-
-		fs = flag.NewFlagSet("test", flag.ContinueOnError)
-		read = egress.Bind(fs, envOf(nil), tc.svc, tc.surfaces)
-		if err := fs.Parse([]string{"--egress-daily-cap-bytes=-1"}); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := read(); err == nil || !strings.Contains(err.Error(), egress.FlagDailyCapBytes) {
-			t.Fatalf("%s: a negative cap read as %v, want a refusal naming %s", tc.svc, err, egress.FlagDailyCapBytes)
-		}
 	}
 }

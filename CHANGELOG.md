@@ -276,8 +276,11 @@ unlock.
 
 - **cache + controller:** a per-team daily download cap. Every `GET` the
   cache serves a grant (binaries, artifacts, dependency archives and git
-  mirror fetches) is charged to the grant's team for the UTC day in the
-  controller's database, through `POST /internal/downloads/charge`; past the
+  mirror fetches), and every artifact and git proxy download the controller
+  serves a team's credential, is charged to that team for the UTC day in the
+  controller's database, the cache's through
+  `POST /internal/downloads/charge`; reading a run's logs is never charged,
+  and a download under way always finishes. Past the
   controller's `--team-daily-download-free-bytes` (5 GiB) for a free team, or
   `--team-daily-download-funded-bytes` (50 GiB) for a funded one, the team's
   downloads answer `429` with a `Retry-After` naming the wait until midnight
@@ -286,8 +289,7 @@ unlock.
   start; a stream is checked for room when it starts and charged what it sent.
   While the controller cannot answer, a free team's download is refused with
   `503`, and a team answered funded within five minutes proceeds. The
-  operator's team and token are exempt. `0` turns either cap off; the
-  process-wide `--egress-daily-cap-bytes` stays the backstop. See
+  operator's team and token are exempt. `0` turns either cap off. See
   [Egress budgets](docs/observability.md#egress-budgets).
 - **logs + runner:** a node's log says whether it is whole. The runner
   numbers every line it appends (`X-Sparkwing-Log-Stream`,
@@ -659,12 +661,11 @@ unlock.
   routes, and another team's grant on registration (403). A team's bins and the git mirrors count toward the store ceiling.
   The operator token is unchanged.
 
-- **egress:** `--egress-daily-cap-bytes` on the controller, the logs service and
-  the cache refuses every download a process serves once it has sent that many
-  bytes in the UTC day, answering `429` with a `Retry-After` naming the day
-  roll. The per-principal budgets bound one caller and are multiplied by every
-  account or token a caller mints; this is the backstop that bounds the month.
-  Unlimited by default.
+- **egress:** the daily egress alarm is exported as the
+  `sparkwing_egress_daily_alarm` and `sparkwing_egress_day_bytes` gauges on
+  the controller's and the logs service's `/metrics`, and as
+  `sparkwing.cache.egress_daily_alarm` and `sparkwing.cache.egress_day_bytes`
+  on the cache's. The alarm refuses nothing.
 - **web:** Sign in with Google on a multi-team controller
   When `GET /api/v1/capabilities` reports `teams.enabled` and the `google`
   provider, the sign-in page offers Google. `GET /auth/google/start` and
@@ -1003,9 +1004,9 @@ unlock.
   store the cache and logs service keep their objects in.
 
 - **cache:** a cache that verifies grants starts with a 200 GiB daily egress
-  cap unless `--egress-daily-cap-bytes` names another value. It bounds what
-  any caller churns through the registry proxy, which takes no credential and
-  belongs inside the cluster only.
+  alarm unless `--egress-daily-alarm-bytes` names another value. It reports
+  what callers churn through the registry proxy, which takes no credential and
+  belongs inside the cluster only, and refuses nothing.
   With `--controller` the day's and the month's egress totals survive a
   restart, kept in the controller's database. `--disable-proxy`
   serves no registry proxy, and the runner bundle refuses a cache Service
@@ -1073,10 +1074,10 @@ unlock.
 
 - **controller:** the `cloud` and `cloud-free` limits profiles now also set
   `--max-runs-per-principal-hour` (600 / 60), `--shed-queue-depth`
-  (5000 / 1000), `--egress-monthly-bytes` (100 GiB / 5 GiB) and
-  `--egress-daily-cap-bytes` (200 GiB / 20 GiB). A hosted controller started
-  with a profile previously left run creation and egress bytes unlimited. A
-  flag or environment variable the operator names still wins.
+  (5000 / 1000) and `--egress-daily-alarm-bytes` (200 GiB / 20 GiB), which
+  refuses nothing. A hosted controller started with a profile previously left
+  run creation unlimited. A flag or environment variable the operator names
+  still wins.
 - **controller (Breaking):** a metered token's trigger claim names how its
   nodes run. `POST /api/v1/triggers/claim` and `/api/v1/triggers/{id}/claim`
   take `node_runner` (`k8s`, `warm` or `inprocess`, the default), and a
@@ -1458,18 +1459,13 @@ unlock.
   Postgres broke the deadlock after a second by aborting one side. The round
   now locks the run `FOR NO KEY UPDATE`.
 
-- **controller:** a restart no longer reopens the egress daily cap. Only the
-  per-principal month totals were persisted, so a controller restarted after
-  reaching `--egress-daily-cap-bytes` served the whole cap again that day. The
-  day's process total is now written on the maintenance sweep beside the
-  month totals and restored before the listener binds.
-- **egress:** the daily cap and the monthly budget are hard byte caps. They
-  were checked once before a response started, so parallel downloads begun
-  just under a cap each finished past it. Bytes are now charged as they are
-  written, a write past either budget sends only what is left, and the
-  controller, logs service and cache abort the cut response so the client
-  sees a failed transfer. The download and log-stream concurrency caps key on
-  the authenticated principal alone; they had keyed on the caller's
+- **controller:** a restart no longer resets the egress daily alarm. Only the
+  per-principal month totals were persisted, so a controller restarted
+  mid-day counted the day from zero. The day's process total is now written on
+  the maintenance sweep beside the month totals and restored before the
+  listener binds.
+- **egress:** the download and log-stream concurrency caps key on the
+  caller's team and token name; they had keyed on the caller's
   `X-Sparkwing-Runner` or claim-holder header, so a caller multiplied its
   slots by naming pods. A pool behind one bearer now shares its caps, so size
   `--egress-max-downloads` and `--egress-max-log-streams` for the pool.
@@ -1826,6 +1822,17 @@ unlock.
   January 1970.
 
 ### Removed
+
+- **controller + logs (Breaking):** `--egress-monthly-bytes` and
+  `SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES` /
+  `SPARKWING_LOGS_EGRESS_MONTHLY_BYTES` are gone, with the
+  `egress_budget_exceeded` refusal and the `monthly_bytes_per_principal` and
+  `over_budget` members of `GET /api/v1/egress`. The budget keyed on a token's
+  free-text name, so two teams whose tokens shared a name spent one budget,
+  and it refused log reads. What a team downloads is bounded by its daily
+  download cap, which never counts log reads; the logs service refuses no
+  byte. A limits profile sets the daily alarm in place of the budget. See the
+  [migration guide](docs/migrations/_unreleased.md#egress-monthly-budget-removed).
 
 - **controller + web (Breaking):** `--trusted-proxy-cidrs` and the chart's
   `controller.trustedProxyCIDRs` and `web.trustedProxyCIDRs` are gone, and

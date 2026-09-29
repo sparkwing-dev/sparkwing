@@ -5,39 +5,49 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
+	"sync"
+	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
-// WithEgressMeter bounds the bytes this service sends to clients. The
+// WithEgressMeter counts the bytes this service sends to clients. The
 // meter counts log reads and the live log stream against the principal
-// that asked for them and refuses a principal past its monthly budget
-// with 429. Call it before [Server.Handler]; it is not safe to call on a
-// serving Server. A nil meter leaves every read unmetered.
+// that asked for them, refusing no byte: log reads are never budgeted. It
+// holds a principal to its concurrency caps. Call it before
+// [Server.Handler]; it is not safe to call on a serving Server. A nil
+// meter leaves every read unmetered.
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 	if m != nil {
 		m = m.WithLogger(s.logger)
 	}
 	s.egress = m
+	publishedEgress.Store(m)
+	registerEgressMetrics.Do(func() {
+		if err := prometheus.Register(egress.NewCollector(publishedEgress.Load)); err != nil {
+			s.logger.Warn("egress metrics unavailable, so the alarm shows only on health and the log", "err", err)
+		}
+	})
 	return s
 }
 
-// EgressRefusalBody is the 429 a read over the egress budget answers
+// safety: the default registry is process-wide and a meter belongs to a
+// server, so the collector reads the one the latest server was given.
+var (
+	publishedEgress       atomic.Pointer[egress.Meter]
+	registerEgressMetrics sync.Once
+)
+
+// EgressRefusalBody is the 429 a read past a concurrency cap answers
 // with. Error carries the whole reason, because that is what a client
 // prints when a request fails.
 type EgressRefusalBody struct {
-	Error      string `json:"error"`
-	Code       string `json:"code"`
-	Principal  string `json:"principal,omitempty"`
-	LimitBytes int64  `json:"limit_bytes,omitempty"`
-	UsedBytes  int64  `json:"used_bytes,omitempty"`
-	Month      string `json:"month,omitempty"`
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	Principal string `json:"principal,omitempty"`
 }
-
-// EgressBudgetCode is the `code` member of the 429 body a read over the
-// monthly byte budget answers with.
-const EgressBudgetCode = "egress_budget_exceeded"
 
 // EgressStreamLimitCode is the `code` member of the 429 body a stream
 // past the per-principal concurrency cap answers with.
@@ -47,15 +57,15 @@ const EgressStreamLimitCode = "egress_stream_limit"
 // past the per-principal concurrency cap answers with.
 const EgressDownloadLimitCode = "egress_download_limit"
 
-// safety: the meter keys on the principal the controller resolved the
-// bearer to, so a service running with auth off counts every read in one
-// bucket rather than reporting a budget it cannot attribute.
+// safety: the meter keys on the team and the name the controller resolved
+// the bearer to, because a token's name is free text two teams may share; a
+// service running with auth off counts every read in one bucket.
 func egressPrincipal(r *http.Request) string {
 	p, ok := logsPrincipalFromContext(r.Context())
 	if !ok || p == nil || p.Name == "" {
 		return egress.AnonymousPrincipal
 	}
-	return p.Name
+	return egress.TeamPrincipal(p.Team, p.Name)
 }
 
 func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
@@ -76,12 +86,8 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 			return
 		}
 		principal := egressPrincipal(r)
-		if err := s.egress.Check(principal); err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
-		}
 		// safety: a response the server discards holds no slot and
-		// charges nothing, so a HEAD never spends either budget.
+		// counts nothing.
 		if egress.Bodyless(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -102,17 +108,10 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 }
 
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {
-	body := EgressRefusalBody{Error: err.Error(), Code: EgressBudgetCode}
-	retryAfter := time.Minute
-
-	var budget *egress.BudgetError
+	body := EgressRefusalBody{Error: err.Error(), Code: EgressDownloadLimitCode}
+	retryAfter := egress.SlotRetryAfter
 	var concurrency *egress.ConcurrencyError
-	switch {
-	case errors.As(err, &budget):
-		body.Principal, body.LimitBytes = budget.Principal, budget.LimitBytes
-		body.UsedBytes, body.Month = budget.UsedBytes, budget.Month
-		retryAfter = budget.RetryAfter
-	case errors.As(err, &concurrency):
+	if errors.As(err, &concurrency) {
 		body.Code, body.Principal = concurrencyCode(concurrency.Slot), concurrency.Principal
 		retryAfter = concurrency.RetryAfter
 	}
@@ -135,7 +134,7 @@ func (s *Server) writeEgressJSON(w http.ResponseWriter, body EgressRefusalBody) 
 	buf, err := json.Marshal(body)
 	if err != nil {
 		s.logger.Error("egress refusal body", "err", err)
-		buf = []byte(`{"error":"egress budget exceeded","code":"` + body.Code + `"}`)
+		buf = []byte(`{"error":"egress concurrency limit reached","code":"` + body.Code + `"}`)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)

@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,7 +22,7 @@ func egressServer(t *testing.T, cfg egress.Config) (*Server, *store.Store) {
 
 func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 	ctx := context.Background()
-	cfg := egress.Config{PerPrincipalMonthlyBytes: 1 << 20}
+	cfg := egress.Config{}
 	s, st := egressServer(t, cfg)
 
 	s.egress.Record("alice", egress.ClassArtifact, 400)
@@ -56,13 +55,10 @@ func TestFlushEgressUsageWritesOnlyWhatMoved(t *testing.T) {
 	if got := restarted.egress.State().GlobalMonthBytes; got != 500 {
 		t.Fatalf("a restarted controller resumed at %d bytes, want 500", got)
 	}
-	if err := restarted.egress.Check("alice"); err != nil {
-		t.Fatalf("Check under the reloaded budget = %v, want nil", err)
-	}
 }
 
 func TestFailedEgressFlushRetainsUsageForTheNextSweep(t *testing.T) {
-	cfg := egress.Config{PerPrincipalMonthlyBytes: 300}
+	cfg := egress.Config{}
 	s, st := egressServer(t, cfg)
 	s.egress.Record("alice", egress.ClassArtifact, 100)
 	s.flushEgressUsage(t.Context())
@@ -77,9 +73,6 @@ func TestFailedEgressFlushRetainsUsageForTheNextSweep(t *testing.T) {
 	restarted.loadEgressUsage(t.Context())
 	if got := restarted.egress.State().GlobalMonthBytes; got != 500 {
 		t.Fatalf("restarted usage = %d bytes, want 500", got)
-	}
-	if err := restarted.egress.Check("alice"); err == nil {
-		t.Fatal("restarted meter admitted a principal past its persisted budget")
 	}
 }
 
@@ -181,10 +174,10 @@ func TestPersistenceDoesNotDependOnBuilderOrder(t *testing.T) {
 	}
 }
 
-// safety: the daily cap is the backstop on the whole process's bill, so a
-// restart that started the day over let a crash loop spend it again.
-func TestARestartedControllerResumesTheDailyCap(t *testing.T) {
-	cfg := egress.Config{GlobalDailyCapBytes: 1000}
+// safety: the daily alarm watches the whole process's bill, so a restart
+// that started the day over would hide a crash loop's spend from it.
+func TestARestartedControllerResumesTheDailyAlarm(t *testing.T) {
+	cfg := egress.Config{GlobalDailyAlarmBytes: 1000}
 	s, st := egressServer(t, cfg)
 	s.egress.Record("alice", egress.ClassArtifact, 600)
 	s.egress.Record("bob", egress.ClassLog, 400)
@@ -195,8 +188,7 @@ func TestARestartedControllerResumesTheDailyCap(t *testing.T) {
 	if got := restarted.egress.State().GlobalDayBytes; got != 1000 {
 		t.Fatalf("a restarted controller resumed the day at %d bytes, want 1000", got)
 	}
-	var budget *egress.BudgetError
-	if err := restarted.egress.Check("carol"); !errors.As(err, &budget) || !budget.ProcessWide {
-		t.Fatalf("Check after the restart = %v, want the daily cap's refusal", err)
+	if !restarted.egress.Alarm() {
+		t.Fatal("a restarted controller forgot the day's alarm")
 	}
 }

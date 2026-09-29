@@ -50,7 +50,6 @@ func newBudgetedServer(t *testing.T, token string, cfg egress.Config) *httptest.
 	}
 	c.AllowUnauthenticated = token == ""
 	c.EgressDailyAlarmBytes = cfg.GlobalDailyAlarmBytes
-	c.EgressDailyCapBytes = cfg.GlobalDailyCapBytes
 	// safety: New replaces globals that a store measurement still running from an earlier test reads.
 	measureOnce.Wait()
 	s, err := New(c)
@@ -144,12 +143,8 @@ func TestTheCacheNeverRefusesADownload(t *testing.T) {
 func TestTheCacheCarriesNoPerPrincipalBudget(t *testing.T) {
 	newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 1})
 	cfg := egressMeter.Config()
-	if cfg.PerPrincipalMonthlyBytes != 0 || cfg.MaxDownloadsPerPrincipal != 0 || cfg.MaxStreamsPerPrincipal != 0 {
+	if cfg.MaxDownloadsPerPrincipal != 0 || cfg.MaxStreamsPerPrincipal != 0 {
 		t.Fatalf("cache meter config = %+v, want only the daily alarm", cfg)
-	}
-	state, _ := egressHealth()
-	if state["enforced"] != false {
-		t.Fatalf("health = %+v, want enforced false", state)
 	}
 }
 
@@ -258,10 +253,7 @@ func TestCacheHealthReportsTheEgressAlarm(t *testing.T) {
 	if health.Egress["alarm"] != true || health.Status != "degraded" {
 		t.Fatalf("health = %+v, want a degraded status with the alarm up", health)
 	}
-	if health.Egress["enforced"] != false {
-		t.Fatalf("health egress = %+v, want enforced false", health.Egress)
-	}
-	if len(health.Egress) != 3 || health.Egress["enabled"] != true {
+	if len(health.Egress) != 2 || health.Egress["enabled"] != true {
 		t.Fatalf("public health exposed egress usage: %+v", health.Egress)
 	}
 	if len(health.Problems) != 1 || health.Problems[0] != "egress: daily alarm threshold reached" {
@@ -286,26 +278,18 @@ func TestUnbudgetedCacheServesEveryDownload(t *testing.T) {
 	}
 }
 
-// The daily cap is the operator's backstop on this process's bill: once the
-// day's bytes reach it every download is refused until the day rolls,
-// whoever asks, because nothing else bounds what the cache sends.
-func TestTheCacheDailyCapRefusesEveryDownloadPastIt(t *testing.T) {
-	// safety: the meter stops a response at the cap rather than letting one
-	// download cross it, so the cap holds exactly the two downloads that fit.
-	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 200})
+// The daily alarm watches this process's bill and refuses nothing: past it
+// every download is served whole and the alarm stands.
+func TestTheCacheDailyAlarmRefusesNothing(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
 	seedArtifact(t, "job1", "out.tar", 100)
-	for i := range 2 {
-		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
-			t.Fatalf("download %d under the cap = %d, want 200", i, got.status)
+	for i := range 3 {
+		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK || len(got.body) == 0 {
+			t.Fatalf("download %d = %d with %d bytes, want 200 and the whole body", i, got.status, len(got.body))
 		}
 	}
-	got := get(t, srv, artifactDownloadPath, "s3cret")
-	if got.status != http.StatusTooManyRequests {
-		t.Fatalf("a download past the daily cap = %d, want 429", got.status)
-	}
-	if got.header.Get("Retry-After") == "" || !strings.Contains(string(got.body), egress.FlagDailyCapBytes) {
-		t.Fatalf("the refusal carries Retry-After %q and body %q, want both naming the reset and the flag",
-			got.header.Get("Retry-After"), got.body)
+	if !egressMeter.Alarm() {
+		t.Fatal("the alarm did not rise past its threshold")
 	}
 }
 
@@ -315,7 +299,7 @@ func TestTheCacheDailyCapRefusesEveryDownloadPastIt(t *testing.T) {
 func TestARestartMidDayKeepsTheSpentEgress(t *testing.T) {
 	var cfg Config
 	newBlobServerWith(t, "s3cret", func(c *Config, _ *s3.Client) {
-		c.EgressDailyCapBytes = 1000
+		c.EgressDailyAlarmBytes = 1000
 		cfg = *c
 	})
 	egressMeter.Record(BearerPrincipal, egress.ClassArtifact, 600)

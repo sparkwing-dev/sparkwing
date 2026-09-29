@@ -450,6 +450,8 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_auth_hashing_rejected_total` | Counter | (none) | Credential verifications the argon2id memory budget shed rather than queued, answered `503` with a `Retry-After` |
 | `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
+| `sparkwing_egress_day_bytes` | Gauge | (none) | Bytes the process has sent to clients in the current UTC day |
+| `sparkwing_egress_daily_alarm` | Gauge | (none) | 1 while the process is past `--egress-daily-alarm-bytes`; it refuses nothing |
 | `sparkwing_signups_total` | Counter | `outcome`, `reason` | New accounts: `admitted` (reason `none`, or `invitation` for a waitlisted account that joined a team by invitation) or `waitlisted` with the reason (`deployment`, `operator`, `free_tier_closed`, `free_tier_unreadable`, `hourly_signups`, `daily_signups`, `github_account_age`) |
 | `sparkwing_signup_gate_closed_total` | Counter | `reason` | Times the sign-up gate closed itself because new accounts crossed the hourly or daily limit (`hourly_signups`, `daily_signups`) |
 | `sparkwing_signup_velocity_warnings_total` | Counter | (none) | Times the last hour's new accounts crossed the sign-up warn threshold, once per crossing; it closes nothing |
@@ -807,125 +809,106 @@ terabyte a month is ninety dollars nobody authorised, and a user can
 spend it without writing a single pipeline.
 
 The controller, the logs service, and the cache each count the response
-bodies of those routes twice: once against the principal that asked for
-them, and once against the process total. Every budget below is
-unlimited until an operator sets one.
+bodies of those routes twice: once against the caller that asked for
+them, and once against the process total. The only byte limit is each
+team's daily download cap; the process total raises an alarm and refuses
+nothing. Every limit below is off until an operator sets one.
 
 | Flag | Controller | Logs | Cache | What it does |
 |------|-----------|------|-------|--------------|
-| `--egress-monthly-bytes` | yes | yes | no | Bytes one principal may download in a UTC month. Past it, its downloads answer `429` with a `Retry-After` naming the wait until the month rolls. |
+| `--team-daily-download-free-bytes` | yes | no | no | Bytes one team without credits may download in a UTC day, 5 GiB by default: artifacts and git fetches from the controller, and binaries, artifacts, dependency archives and git fetches from the cache. Log reads are not counted. Past it, the team's next download answers `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
+| `--team-daily-download-funded-bytes` | yes | no | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
 | `--egress-max-downloads` | yes | yes | no | Metered downloads one caller may hold open at once. Past it, a further one answers `429`. |
 | `--egress-max-log-streams` | yes | yes | no | Live log streams one caller may hold open at once. Past it, a further stream answers `429`. |
 | `--egress-daily-alarm-bytes` | yes | yes | yes | Bytes the process may send in a UTC day before it raises the egress alarm. It refuses nothing. |
-| `--egress-daily-cap-bytes` | yes | yes | yes | Bytes the process may send in a UTC day. Past it, every download it serves answers `429` until the day rolls, whoever asks. The per-principal budgets bound one caller; this bounds the month's bill at 31 times the cap however many principals share it. |
-| `--team-daily-download-free-bytes` | yes | no | no | Bytes the cache may serve one team without credits through its grants in a UTC day, 5 GiB by default. The controller counts the day and the cache asks it before each download; past it, that team's downloads answer `429` with a `Retry-After` naming the wait until midnight UTC. `0` turns it off. |
-| `--team-daily-download-funded-bytes` | yes | no | no | The same cap for a team with credits, 50 GiB by default. `0` turns it off. |
 
-The controller's two concurrency caps are also supplied as a set by
+The controller's alarm and concurrency caps are also supplied as a set by
 `--limits-profile`, which a hosted controller runs with instead of naming
-each guard; see [security.md](security.md#limits-profiles).
+each guard; see [security.md](security.md#limits-profiles). A cache that
+verifies grants starts with a 200 GiB alarm unless the operator names
+another.
 
 Each service reads its own environment variables:
-`SPARKWING_CONTROLLER_EGRESS_MONTHLY_BYTES`,
-`SPARKWING_LOGS_EGRESS_MONTHLY_BYTES`,
+`SPARKWING_CONTROLLER_EGRESS_DAILY_ALARM_BYTES`,
+`SPARKWING_LOGS_EGRESS_MAX_LOG_STREAMS`,
 `SPARKWING_CACHE_EGRESS_DAILY_ALARM_BYTES` and the rest, spelled
 `SPARKWING_<SERVICE>_EGRESS_<BUDGET>`. They are separate on purpose: one
-variable on a shared ConfigMap read by three processes is one cap applied
-three times, which admits three times the bytes the operator wrote down.
-**The per-team monthly cap is the controller's**, and the other services'
-budgets bound their own traffic.
+variable on a shared ConfigMap read by three processes is one threshold
+applied three times.
 
-### Refusing needs a principal the service can tell apart
+### A team's daily download cap
 
-The controller resolves a bearer to a named principal on every download
-route, and the logs service resolves one through the controller's
-whoami, so their monthly and concurrency caps fall on the caller that
-spent the bytes.
+The controller counts each team's UTC day in its database. A team is the
+one the caller's credential belongs to, never a token's name, which is free
+text two teams may share. The controller charges its own artifact and git
+proxy downloads there directly, and the cache charges every `GET` it serves
+a grant with `POST /internal/downloads/charge`.
 
-The cache tells one kind of caller apart: a cache grant names the team
-the controller minted it for. Every `GET` the cache serves a grant, from
-binaries, artifacts, dependency archives and git mirror fetches, is
-charged to that team's UTC day in the controller with
-`POST /internal/downloads/charge`, and a team past its daily cap is
-refused with `429` and a `Retry-After` naming the wait until midnight
-UTC. A response that names its length is charged that length before its
-first byte, under a row lock, so two downloads racing for a team's last
-bytes cannot both start; one that streams, such as a tar of several
-artifacts or a git fetch, is checked for room when it starts and charged
-what it sent when it ends. The cap is the controller's
-`--team-daily-download-funded-bytes` for a funded team and
-`--team-daily-download-free-bytes` otherwise. While the controller cannot
-answer, a free team's download is refused with `503`, and a team the
-controller answered funded within five minutes proceeds. The operator's
-own team and the operator token carry no per-team cap, because every
-in-cluster runner shares them; a monthly cap on them would answer `429`
-to the whole fleet at once. The per-team monthly cap belongs to the
-controller, which knows who each bearer is.
+A response that names its length is charged that length before its first
+byte, under a row lock, so two downloads racing for a team's last bytes
+cannot both start; one that streams, such as a tar of several artifacts or
+a git fetch, is checked for room when it starts and charged what it sent
+when it ends. A download that started is never cut off part way: the cap
+refuses the team's next download, not the one under way. While the
+controller cannot answer the cache, a free team's download is refused with
+`503`, and a team the controller answered funded within five minutes
+proceeds. The operator's own team and the operator token carry no cap,
+because every in-cluster runner shares them.
 
-The cache's other refusal is `--egress-daily-cap-bytes`, the process-wide
-backstop: past it every metered download answers `429` with a
-`Retry-After` naming the wait until the UTC day rolls. Its health reports
-`egress.enforced: true` while that cap is set, without usage or budget totals.
+Reading a run's logs, from the dashboard or the CLI, is never charged to
+the team, so a team past its cap can still read why its run failed. The
+logs service charges nothing.
 
 A service running with auth off resolves every request to `anonymous`,
-which is one shared budget for the same reason; that is the laptop-local
-shape, where no budget is set anyway.
+the laptop-local shape, where no limit is set anyway.
 
 ### A bearer can be a pool
 
-A runner pool shares one token, so twenty pods are one principal. Both
-the byte budget and the concurrency caps key on that principal: the bill
-is the team's, however many pods spent it, and a header naming a pod is
-the caller's to write, so a cap keyed on it let one bearer open as many
+A runner pool shares one token, so twenty pods are one caller. The
+concurrency caps key on that caller's team and name: a header naming a pod
+is the caller's to write, so a cap keyed on it let one bearer open as many
 downloads as it invented pod names. Size `--egress-max-downloads` and
 `--egress-max-log-streams` for the whole pool behind a bearer.
 
-The gitcache proxy routes take no slot at all. They
-are the checkout path every node walks, so a cap there refuses the clone
-rather than the download it was meant to bound. Those routes are still
-byte-metered, and still refused when the monthly byte budget is spent.
+The gitcache proxy routes take no slot at all. They are the checkout path
+every node walks, so a cap there refuses the clone rather than the download
+it was meant to bound. Those routes are still counted and charged to the
+team.
 
 ### The alarm
 
-The monthly budget refuses; the daily threshold only alarms. The
-distinction is deliberate: one principal's spend is that principal's
-problem to answer for, and a process's daily total is the operator's.
-The alarm appears as `egress.alarm` on each service's `/api/v1/health`
-(the cache serves it on `/health`), as a line in `problems`, and as a
-`warn`-level log line carrying `day_bytes` and `threshold_bytes`, which
-is what a deployment's alerting keys on. Point CloudWatch alarms on the
-bucket's `BytesDownloaded` metric and the instance's `NetworkOut` at the
-same page, so the bill has a second witness that does not depend on a
-Sparkwing process being up.
+The daily threshold only alarms: a process's daily total is the
+operator's to answer for, and refusing on it would stop every team at once
+for the traffic of a few. The alarm appears as `egress.alarm` on each
+service's `/api/v1/health` (the cache serves it on `/health`), as a line
+in `problems`, as a `warn`-level log line carrying `day_bytes`,
+`threshold_bytes` and the principal whose bytes crossed it, and as the
+`sparkwing_egress_daily_alarm` and `sparkwing_egress_day_bytes` gauges on
+the controller's and the logs service's `/metrics`
+(`sparkwing.cache.egress_daily_alarm` and `sparkwing.cache.egress_day_bytes`
+on the cache's). Point CloudWatch alarms on the bucket's `BytesDownloaded`
+metric and the instance's `NetworkOut` at the same page, so the bill has a
+second witness that does not depend on a Sparkwing process being up.
 
-### What is and is not charged
+### What is and is not counted
 
 A byte counts when it is written to a `2xx` response to a request whose
-method carries a body. A `HEAD` charges nothing, because net/http
-discards what the handler writes to one, and an error body charges
-nothing, because it is not the download the budget is for.
-
-A budget is checked before a response starts and again as its bytes are
-written. A write that would pass the principal's monthly budget or the
-process's daily cap sends only what is left, and the service aborts the
-response, so the client sees a failed transfer rather than a body that
-ends cleanly with bytes missing. Bytes are charged before they reach the
-connection, so parallel downloads started just under a budget cannot
-together carry the total past it.
+method carries a body. A `HEAD` counts nothing, because net/http
+discards what the handler writes to one, and an error body counts
+nothing, because it is not a download.
 
 ### Persistence and history
 
 Counting is in memory, and only the controller persists it. It writes
 each principal's month total and its own total for the UTC day to its
 store on the maintenance sweep and reloads both at startup, so a restart
-resumes the month rather than handing everyone a fresh budget and resumes
-the day rather than reopening the daily cap, and no response costs a
-store write; that sweep
+resumes the month and the day rather than hiding a crash loop's spend from
+the alarm, and no response costs a store write; that sweep
 also prunes totals older than thirteen months, once a month rather than
 on every tick. A cache with `--controller` keeps its own totals for the
 UTC day and the UTC month in the controller's database with
 `POST /internal/egress/totals`, written at most once a minute and at
-shutdown and read back at start, so a restart keeps the daily cap spent
+shutdown and read back at start, so a restart keeps the day's alarm
 and `global_month_bytes` counting. Each team's download day is the
 controller's own row and needs no saving. A cache without a controller and
 the logs service count in memory alone: their counters are per process and
@@ -938,14 +921,15 @@ token.
 ### One meter per process
 
 Like the object-store budget, an egress meter belongs to a process. Two
-controller replicas each count their own bytes, so a per-principal
-budget sized for one replica admits twice that across two.
+controller replicas each count their own bytes, so an alarm sized for one
+replica sounds late across two. A team's daily download cap is counted in
+the database and holds across any number of replicas.
 
 The persisted number is the high-water mark of any one writer, not the
 sum of them. Within a writer the total only rises, which is what makes a
 restart safe; across writers the row reflects the busier replica and the
-quieter one's bytes are not added to it. Size the budget for one
+quieter one's bytes are not added to it. Size the alarm for one
 process, and run one controller. The chart enforces that:
 `controller.replicas` above 1 fails to render, because the same second
-replica that would corrupt the local state DB would also double a
-per-principal budget and split the daily alarm below its threshold.
+replica that would corrupt the local state DB would also split the daily
+alarm below its threshold.

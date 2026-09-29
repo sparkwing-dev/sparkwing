@@ -11,12 +11,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// WithEgressMeter bounds the bytes this controller sends to clients.
+// WithEgressMeter counts the bytes this controller sends to clients.
 // The meter counts artifact downloads, log reads, the live log stream,
-// and git proxy fetches against the principal that asked for them, and
-// refuses a principal past its monthly budget with 429. A nil meter
-// leaves every download unmetered, which is what a controller started
-// without an egress budget serves.
+// and git proxy fetches against the principal that asked for them, holds
+// each principal to its concurrency caps, and raises the daily alarm; it
+// refuses no byte. A nil meter leaves every download uncounted. A team's
+// daily download cap is charged whether or not a meter is set.
 func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 	if m != nil {
 		m = m.WithLogger(s.logger)
@@ -28,6 +28,7 @@ func (s *Server) WithEgressMeter(m *egress.Meter) *Server {
 		}
 	}
 	s.egress = m
+	publishedEgress.Store(m)
 	return s
 }
 
@@ -38,17 +39,10 @@ func (s *Server) EgressMeter() *egress.Meter { return s.egress }
 // safety: the error member carries the whole reason, because that is the
 // member a client prints when a request fails.
 type egressRefusalBody struct {
-	Error      string `json:"error"`
-	Code       string `json:"code"`
-	Principal  string `json:"principal,omitempty"`
-	LimitBytes int64  `json:"limit_bytes,omitempty"`
-	UsedBytes  int64  `json:"used_bytes,omitempty"`
-	Month      string `json:"month,omitempty"`
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	Principal string `json:"principal,omitempty"`
 }
-
-// EgressBudgetCode is the `code` member of the 429 body a download over
-// the monthly byte budget answers with.
-const EgressBudgetCode = "egress_budget_exceeded"
 
 // EgressStreamLimitCode is the `code` member of the 429 body a live log
 // stream past the per-principal concurrency cap answers with.
@@ -58,15 +52,15 @@ const EgressStreamLimitCode = "egress_stream_limit"
 // download past the per-principal concurrency cap answers with.
 const EgressDownloadLimitCode = "egress_download_limit"
 
-// safety: the meter keys on the principal the bearer resolved to, so a
-// controller serving with auth off counts every download in one bucket
-// rather than reporting a budget it cannot attribute.
+// safety: the meter keys on the team and the name the bearer resolved to,
+// because a token's name is free text two teams may share; a controller
+// serving with auth off counts every download in one bucket.
 func egressPrincipal(r *http.Request) string {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p == nil || p.Name == "" {
 		return egress.AnonymousPrincipal
 	}
-	return p.Name
+	return egress.TeamPrincipal(string(p.Team), p.Name)
 }
 
 func (s *Server) metered(class egress.Class, next http.Handler) http.Handler {
@@ -88,18 +82,14 @@ func (s *Server) meteredStream(class egress.Class, next http.Handler) http.Handl
 }
 
 func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	counted := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.egress == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
 		principal := egressPrincipal(r)
-		if err := s.egress.Check(principal); err != nil {
-			s.writeEgressRefusal(w, r, class, err)
-			return
-		}
 		// safety: a response the server discards holds no slot and
-		// charges nothing, so a HEAD never spends either budget.
+		// counts nothing.
 		if egress.Bodyless(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -117,20 +107,57 @@ func (s *Server) meterOn(class egress.Class, slot egress.Slot, next http.Handler
 		}
 		s.egress.Handle(w, r, principal, class, next)
 	})
+	// safety: viewing a run's logs is never charged to its team, so a team
+	// past its download cap can still read why its run failed.
+	if class == egress.ClassLog || class == egress.ClassLogStream {
+		return counted
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.chargeTeamDownload(w, r, counted)
+	})
+}
+
+// safety: the team is the credential's, so a download is charged to the team
+// that asked for it; the operator's team and a single-team controller are
+// never capped and write no row.
+func (s *Server) chargeTeamDownload(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	p, ok := PrincipalFromContext(r.Context())
+	if !s.MultiTeam() || !ok || p == nil {
+		next.ServeHTTP(w, r)
+		return
+	}
+	team := store.NormalizeTeam(p.Team)
+	if team == "" || team == store.DefaultTeam {
+		next.ServeHTTP(w, r)
+		return
+	}
+	charge := func(ctx context.Context, n int64, record bool) error {
+		_, err := s.store.ChargeDownload(ctx, store.DownloadCharge{
+			Team: team, Bytes: n, Record: record, Now: time.Now(),
+			FreeCapBytes: s.downloadFree, FundedCapBytes: s.downloadFunded,
+		})
+		return err
+	}
+	refuse := func(w http.ResponseWriter, err error) {
+		var capErr *store.DownloadCapError
+		if errors.As(err, &capErr) {
+			s.logger.Warn("team download refused", append(requestLogAttrs(r), "team", string(team))...)
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds(capErr.RetryAfter), 10))
+			writeError(w, http.StatusTooManyRequests, err)
+			return
+		}
+		s.writeInternalError(w, r, "charge team download", err)
+	}
+	if err := egress.ChargeTeam(w, r, charge, refuse, next); err != nil {
+		s.logger.Warn("charge a streamed team download", "team", string(team), "err", err)
+	}
 }
 
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {
-	body := egressRefusalBody{Error: err.Error(), Code: EgressBudgetCode}
-	retryAfter := time.Minute
-
-	var budget *egress.BudgetError
+	body := egressRefusalBody{Error: err.Error(), Code: EgressDownloadLimitCode}
+	retryAfter := egress.SlotRetryAfter
 	var concurrency *egress.ConcurrencyError
-	switch {
-	case errors.As(err, &budget):
-		body.Principal, body.LimitBytes = budget.Principal, budget.LimitBytes
-		body.UsedBytes, body.Month = budget.UsedBytes, budget.Month
-		retryAfter = budget.RetryAfter
-	case errors.As(err, &concurrency):
+	if errors.As(err, &concurrency) {
 		body.Code, body.Principal = concurrencyCode(concurrency.Slot), concurrency.Principal
 		retryAfter = concurrency.RetryAfter
 	}

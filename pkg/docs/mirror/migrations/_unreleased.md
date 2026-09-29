@@ -604,3 +604,17 @@ passes the flag fails.
 
 Until then, login throttling, the bearer failure budget and audit `client_ip`
 key on the TCP peer, so browsers behind one proxy share its budget.
+
+## Egress monthly budget removed
+
+Remove `--egress-monthly-bytes` and `SPARKWING_<SERVICE>_EGRESS_MONTHLY_BYTES`
+from the controller and the logs service; neither reads them any more. A team's
+downloads are bounded by `--team-daily-download-free-bytes` and
+`--team-daily-download-funded-bytes` on the controller, which now charge its
+artifact and git proxy routes as well as the cache, and never count log reads.
+A client that matched the `egress_budget_exceeded` code on a `429` sees the
+team cap's refusal instead, with a `Retry-After` naming midnight UTC.
+`GET /api/v1/egress` no longer reports `monthly_bytes_per_principal`, and its
+`top` entries carry no `over_budget`. Under a limits profile the controller
+raises the daily egress alarm at 20 GiB (`cloud-free`) or 200 GiB (`cloud`);
+the alarm refuses nothing.

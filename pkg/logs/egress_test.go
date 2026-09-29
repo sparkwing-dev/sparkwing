@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,43 +64,16 @@ func readLog(t *testing.T, h http.Handler, token, path string) *httptest.Respons
 	return rec
 }
 
-func TestLogReadsCountAgainstThePrincipalsBudget(t *testing.T) {
-	// safety: the budget is exactly one read of the log, because a read
-	// that would pass it is cut and aborted rather than finished.
-	s, h := newEgressLogsServer(t, egress.Config{PerPrincipalMonthlyBytes: 31})
+func TestLogReadsAreCountedAndNeverRefused(t *testing.T) {
+	s, h := newEgressLogsServer(t, egress.Config{GlobalDailyAlarmBytes: 1})
 	appendLog(t, h, "alice", "r1", "n1", strings.Repeat("x", 30)+"\n")
-
-	first := readLog(t, h, "alice", "/api/v1/logs/r1/n1")
-	if first.Code != http.StatusOK {
-		t.Fatalf("first read = %d, body %s", first.Code, first.Body.String())
+	for i := range 3 {
+		if got := readLog(t, h, "alice", "/api/v1/logs/r1/n1"); got.Code != http.StatusOK || got.Body.Len() < 30 {
+			t.Fatalf("read %d = %d with %d bytes, want 200 and the whole log", i, got.Code, got.Body.Len())
+		}
 	}
-	if state := s.egress.State(); state.GlobalMonthBytes < 30 {
-		t.Fatalf("metered %d bytes, want at least the log body", state.GlobalMonthBytes)
-	}
-
-	refused := readLog(t, h, "alice", "/api/v1/logs/r1/n1")
-	if refused.Code != http.StatusTooManyRequests {
-		t.Fatalf("second read = %d, want 429", refused.Code)
-	}
-	retry, err := strconv.Atoi(refused.Header().Get("Retry-After"))
-	if err != nil || retry <= 0 {
-		t.Fatalf("Retry-After = %q, want a positive number of seconds", refused.Header().Get("Retry-After"))
-	}
-	var body EgressRefusalBody
-	if err := json.Unmarshal(refused.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode refusal: %v -- raw %q", err, refused.Body.String())
-	}
-	if body.Code != EgressBudgetCode || body.Principal != "alice" {
-		t.Fatalf("refusal = %+v", body)
-	}
-	if !strings.Contains(body.Error, "egress budget exceeded") {
-		t.Errorf("error member %q does not carry the reason", body.Error)
-	}
-
-	// safety: one tenant over budget must not refuse another's reads.
-	other := readLog(t, h, "bob", "/api/v1/logs/r1/n1")
-	if other.Code != http.StatusOK {
-		t.Fatalf("another principal's read = %d, want 200", other.Code)
+	if state := s.egress.State(); state.GlobalDayBytes < 90 || !state.Alarm {
+		t.Fatalf("state = %+v, want every read counted and the alarm raised", state)
 	}
 }
 
