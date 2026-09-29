@@ -2355,6 +2355,7 @@ func (t *Tenant) CloseCreditCheckout(
 ) (_ bool, err error)
 func (t *Tenant) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (t *Tenant) ConfirmGitCredential(ctx context.Context, host, fingerprint string, now time.Time) (GitCredential, error)
+func (t *Tenant) CountPendingTriggers(ctx context.Context) (int, error)
 func (t *Tenant) CountRuns(ctx context.Context, f RunFilter) (int, error)
 func (t *Tenant) CreateCLIToken(
 	ctx context.Context, principal string, scopes []string, accountID string, now time.Time,
