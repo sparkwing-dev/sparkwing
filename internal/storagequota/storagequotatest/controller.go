@@ -34,6 +34,9 @@ type Controller struct {
 	Tiers map[string]storagequota.Tier
 	// Token, when set, is the only bearer the fake answers.
 	Token string
+	// Recount, when set, is what a team's logs hold after an eviction, which
+	// a reservation that says it evicted takes as the team's count.
+	Recount func(team string) int64
 
 	mu       sync.Mutex
 	down     bool
@@ -139,6 +142,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Store       storagequota.Kind `json:"store"`
 		Bytes       int64             `json:"bytes"`
 		UpTo        bool              `json:"up_to"`
+		Evicted     bool              `json:"evicted"`
 		Reservation string            `json:"reservation"`
 		Record      bool              `json:"record"`
 		NextBytes   int64             `json:"next_bytes"`
@@ -163,14 +167,23 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusPaymentRequired, "free storage is paused; buy credits or join the waitlist")
 			return
 		case storagequota.TierFree:
+			if req.Evicted && c.Recount != nil {
+				c.used[k] = c.Recount(req.Team)
+			}
 			room := c.Share - c.used[k] - c.reserved[k]
 			if req.UpTo && (granted <= 0 || granted > room) {
 				granted = room
 			}
 			if room <= 0 || granted > room {
-				refuse(w, http.StatusRequestEntityTooLarge,
+				body := map[string]any{"error": fmt.Sprintf(
 					"storage quota exceeded: team %s holds %d of its %d bytes and this write adds %d; add credits to store more",
-					req.Team, c.used[k]+c.reserved[k], c.Share, req.Bytes)
+					req.Team, c.used[k]+c.reserved[k], c.Share, req.Bytes)}
+				if req.Store == storagequota.KindLogs {
+					body["evict_bytes"] = max(req.Bytes, 1) - room + c.Share/8
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusRequestEntityTooLarge)
+				writeJSON(w, body)
 				return
 			}
 		}
@@ -193,7 +206,7 @@ func (c *Controller) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case "/internal/downloads/charge":
 		tier := c.tier(req.Team)
-		if !req.Record && c.DownloadCap > 0 && tier != storagequota.TierFunded && c.days[req.Team]+max(req.Bytes, 1) > c.DownloadCap {
+		if !req.Record && c.DownloadCap > 0 && tier != storagequota.TierFunded && c.days[req.Team] >= c.DownloadCap {
 			w.Header().Set("Retry-After", "3600")
 			refuse(w, http.StatusTooManyRequests, "daily download cap reached: team %s downloaded %d of its %d bytes",
 				req.Team, c.days[req.Team], c.DownloadCap)

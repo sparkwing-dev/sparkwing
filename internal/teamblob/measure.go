@@ -26,10 +26,7 @@ type Measurement struct {
 	Operator Tally
 	// Expired is what the listing deleted past a team's maximum age.
 	Expired Tally
-	// ExpiredRels names each team's expired objects by the rel they were
-	// written under.
-	ExpiredRels map[string][]string
-	At          time.Time
+	At      time.Time
 }
 
 // Measure lists every namespace in the store once, one LIST per thousand
@@ -39,7 +36,7 @@ type Measurement struct {
 // left out and the error returned, so a caller never takes a partial
 // measurement for the whole.
 func (s *Store) Measure(ctx context.Context) (Measurement, error) {
-	out := Measurement{Teams: map[string]Tally{}, ExpiredRels: map[string][]string{}, At: s.now().UTC()}
+	out := Measurement{Teams: map[string]Tally{}, At: s.now().UTC()}
 	root := s.root()
 	tops, err := s.children(ctx, root)
 	if err != nil {
@@ -65,9 +62,6 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 				t, expired, err := s.measureNamespace(ctx, team, tp)
 				out.Expired.Bytes += expired.Bytes
 				out.Expired.Objects += expired.Objects
-				for _, key := range expired.Keys {
-					out.ExpiredRels[team] = append(out.ExpiredRels[team], strings.TrimPrefix(key, tp))
-				}
 				if err != nil {
 					errs = append(errs, err)
 					continue
@@ -78,9 +72,6 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 			t, expired, err := s.measureNamespace(ctx, "", top)
 			out.Expired.Bytes += expired.Bytes
 			out.Expired.Objects += expired.Objects
-			for _, key := range expired.Keys {
-				out.ExpiredRels[""] = append(out.ExpiredRels[""], strings.TrimPrefix(key, root))
-			}
 			if err != nil {
 				errs = append(errs, err)
 				continue
@@ -93,7 +84,7 @@ func (s *Store) Measure(ctx context.Context) (Measurement, error) {
 }
 
 // safety: only deletions the store confirmed leave the tally; an object it refused stays in it.
-func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tally, Deleted, error) {
+func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tally, Tally, error) {
 	var t Tally
 	var expired []sizedKey
 	var age time.Duration
@@ -112,12 +103,12 @@ func (s *Store) measureNamespace(ctx context.Context, team, prefix string) (Tall
 		}
 	})
 	if err != nil {
-		return Tally{}, Deleted{}, err
+		return Tally{}, Tally{}, err
 	}
 	d, err := s.deleteKeys(ctx, expired)
 	t.Bytes -= d.Bytes
 	t.Objects -= d.Objects
-	return t, d, err
+	return t, Tally{Bytes: d.Bytes, Objects: d.Objects}, err
 }
 
 func (s *Store) children(ctx context.Context, prefix string) ([]string, error) {

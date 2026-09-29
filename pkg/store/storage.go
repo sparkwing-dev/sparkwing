@@ -77,6 +77,9 @@ type StorageQuotaError struct {
 	Requested int64
 	// Remedy, when set, tells the caller what lifts the limit.
 	Remedy string
+	// EvictBytes, on a free team's log share, is how much of the team's
+	// archived logs the logs service evicts before it asks again.
+	EvictBytes int64 `json:"evict_bytes,omitempty"`
 }
 
 func (e *StorageQuotaError) Error() string {

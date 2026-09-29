@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -167,14 +166,11 @@ type fixture struct {
 	raw    *s3.Client
 	client *counting
 	store  *teamblob.Store
-	clock  gofakes3.TimeSourceAdvancer
 }
 
 func newFixture(t *testing.T, opts teamblob.Options) *fixture {
 	t.Helper()
-	clock := gofakes3.FixedTimeSource(time.Now())
-	srv := httptest.NewServer(gofakes3.New(s3mem.New(s3mem.WithTimeSource(clock)),
-		gofakes3.WithTimeSource(clock), gofakes3.WithTimeSkewLimit(0)).Server())
+	srv := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
 	t.Cleanup(srv.Close)
 	raw := s3.New(s3.Options{
 		Region:       "us-east-1",
@@ -195,7 +191,7 @@ func newFixture(t *testing.T, opts teamblob.Options) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{raw: raw, client: c, store: st, clock: clock}
+	return &fixture{raw: raw, client: c, store: st}
 }
 
 func put(t *testing.T, st *teamblob.Store, team, rel, body string) {
@@ -611,10 +607,6 @@ func TestMeasureExpiresOldTeamObjects(t *testing.T) {
 	if m.Expired != (teamblob.Tally{Bytes: 8, Objects: 2}) {
 		t.Fatalf("expired = %+v, want team and operator objects", m.Expired)
 	}
-	if got := m.ExpiredRels; len(got) != 2 || !slices.Equal(got["team-a"], []string{"artifacts/run-1/old.txt"}) ||
-		!slices.Equal(got[""], []string{"bins/operator"}) {
-		t.Fatalf("expired rels = %v, want each object under the rel it was written as", got)
-	}
 	if objs, err := f.store.List(ctx, "team-a", "artifacts/"); err != nil || len(objs) != 0 {
 		t.Fatalf("team-a still lists %v, %v", objs, err)
 	}
@@ -626,57 +618,5 @@ func TestMeasureExpiresOldTeamObjects(t *testing.T) {
 	}
 	if n := f.client.count("DeleteObjects"); n != 2 {
 		t.Fatalf("expiry sent %d batch deletes, want two", n)
-	}
-}
-
-// A read renews an object older than a day in place, so the listing ages it
-// from the read; its bytes, metadata and type are unchanged, and a fresh
-// object costs no request.
-func TestRenewKeepsAReadObjectFromExpiring(t *testing.T) {
-	ctx := context.Background()
-	clock := time.Now()
-	f := newFixture(t, teamblob.Options{
-		TeamObjectMaxAge: func(string) time.Duration { return 30 * 24 * time.Hour },
-		Now:              func() time.Time { return clock },
-	})
-	if _, err := f.store.Put(ctx, "team-a", "cache/read", strings.NewReader("read"), teamblob.PutOptions{
-		Size: 4, ContentType: "application/gzip", Metadata: map[string]string{"sha256": "abc"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	put(t, f.store, "team-a", "cache/unread", "gone")
-	fresh, err := f.store.Head(ctx, "team-a", "cache/read")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.client.reset()
-	if err := f.store.Renew(ctx, "team-a", fresh); err != nil || f.client.total() != 0 {
-		t.Fatalf("renewing a fresh object = %v with %d requests, want none", err, f.client.total())
-	}
-
-	f.clock.Advance(20 * 24 * time.Hour)
-	clock = clock.Add(20 * 24 * time.Hour)
-	stale, err := f.store.Head(ctx, "team-a", "cache/read")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.store.Renew(ctx, "team-a", stale); err != nil {
-		t.Fatalf("renew: %v", err)
-	}
-	clock = clock.Add(15 * 24 * time.Hour)
-	m, err := f.store.Measure(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(m.ExpiredRels["team-a"], []string{"cache/unread"}) {
-		t.Fatalf("expired = %v, want only the unread object", m.ExpiredRels)
-	}
-	body, err := f.store.ReadAll(ctx, "team-a", "cache/read")
-	if err != nil || string(body) != "read" {
-		t.Fatalf("the renewed object reads %q, %v", body, err)
-	}
-	renewed, err := f.store.Head(ctx, "team-a", "cache/read")
-	if err != nil || renewed.Metadata["sha256"] != "abc" || renewed.ContentType != "application/gzip" {
-		t.Fatalf("the renewed object = %+v, %v; want its metadata and type kept", renewed, err)
 	}
 }

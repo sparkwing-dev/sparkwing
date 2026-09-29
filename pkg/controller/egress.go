@@ -148,9 +148,7 @@ func (s *Server) chargeTeamDownload(w http.ResponseWriter, r *http.Request, next
 		}
 		s.writeInternalError(w, r, "charge team download", err)
 	}
-	if err := egress.ChargeTeam(w, r, charge, refuse, next); err != nil {
-		s.logger.Warn("charge a streamed team download", "team", string(team), "err", err)
-	}
+	egress.ChargeTeam(w, r, charge, refuse, next)
 }
 
 func (s *Server) writeEgressRefusal(w http.ResponseWriter, r *http.Request, class egress.Class, err error) {

@@ -84,13 +84,12 @@ func run(args []string) error {
 		"size cap for one stored dependency archive; a larger upload is refused with 413 naming the cap. 0 accepts an archive of any size. Falls back to $SPARKWING_CACHE_MAX_ARCHIVE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreBytes, "max-store-bytes",
 		envInt64("SPARKWING_CACHE_MAX_STORE_BYTES", cfg.MaxStoreBytes),
-		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which an "+
-			"upload first evicts the least recently read binaries, archives and artifacts down to seven eighths of it, and "+
-			"is refused with 507 naming the ceiling only when the git mirrors and uploads in flight alone hold it. 0, the "+
-			"default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
+		"stored bytes across the artifact, dependency-archive, upload, team and git mirror trees at or above which every "+
+			"upload is refused with 507 naming the ceiling, until a measurement finds the store back "+
+			"under it. 0, the default, leaves the store unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_BYTES.")
 	fs.Int64Var(&cfg.MaxStoreObjects, "max-store-objects",
 		envInt64("SPARKWING_CACHE_MAX_STORE_OBJECTS", cfg.MaxStoreObjects),
-		"stored files across those trees at or above which an upload evicts as --max-store-bytes does; 0 leaves the count unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_OBJECTS.")
+		"stored files across those trees at or above which every upload is refused with 507; 0 leaves the count unlimited. Falls back to $SPARKWING_CACHE_MAX_STORE_OBJECTS.")
 	fs.Int64Var(&cfg.WarnStoreBytes, "warn-store-bytes",
 		envInt64("SPARKWING_CACHE_WARN_STORE_BYTES", cfg.WarnStoreBytes),
 		"stored bytes at which /health reports the store as warning, which refuses nothing. Falls back to $SPARKWING_CACHE_WARN_STORE_BYTES.")

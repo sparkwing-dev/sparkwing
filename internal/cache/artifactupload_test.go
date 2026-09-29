@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -681,47 +680,4 @@ func TestMeasureRequestDuringAWalkIsNotDropped(t *testing.T) {
 	}
 
 	waitUntil(t, "the emptied store thaws", func() bool { return !storeCeiling.Frozen() })
-}
-
-// A volume at its ceiling gives up its least recently read files for a new
-// write rather than refusing it, and keeps what was read since.
-func TestAFullStoreEvictsItsLeastRecentlyReadFiles(t *testing.T) {
-	ceilingFixture(t, objectguard.CeilingConfig{Limit: objectguard.CeilingLimit{MaxBytes: 2048}})
-	oldTeams := teamsDir
-	teamsDir = t.TempDir()
-	t.Cleanup(func() { teamsDir = oldTeams })
-	now := time.Now()
-	files := map[string]time.Time{
-		filepath.Join(cacheDir, "deps-stale"):          now.Add(-72 * time.Hour),
-		filepath.Join(artifactsDir, "job1", "old.bin"): now.Add(-48 * time.Hour),
-		filepath.Join(cacheDir, "deps-read"):           now.Add(-time.Minute),
-	}
-	for path, read := range files {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, bytes.Repeat([]byte("x"), 1024), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(path, read, now.Add(-96*time.Hour)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	storeCeiling.Observe(objectguard.Usage{Bytes: 3072, Objects: 3})
-
-	w := httptest.NewRecorder()
-	handleCache(w, httptest.NewRequest(http.MethodPut, "/cache/deps-new", strings.NewReader("archive")))
-	if w.Code/100 != 2 {
-		t.Fatalf("a write at the ceiling = %d %s, want it stored", w.Code, w.Body.String())
-	}
-	for path, want := range map[string]bool{
-		filepath.Join(cacheDir, "deps-stale"):          false,
-		filepath.Join(artifactsDir, "job1", "old.bin"): false,
-		filepath.Join(cacheDir, "deps-read"):           true,
-		filepath.Join(cacheDir, "deps-new.tar.gz"):     true,
-	} {
-		if _, err := os.Stat(path); (err == nil) != want {
-			t.Errorf("%s present = %t, want %t", filepath.Base(path), err == nil, want)
-		}
-	}
 }

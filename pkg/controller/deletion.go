@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -433,26 +432,6 @@ func deleteRemote(ctx context.Context, target, bearer string) error {
 }
 
 var errRemoteNotFound = errors.New("remote answered 404")
-
-func postRemote(ctx context.Context, target, bearer string, out any) error {
-	// #nosec G704 -- the origin is operator configuration; the team is an escaped segment
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
-	// #nosec G704 -- the request keeps the operator-configured origin
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return errors.Join(fmt.Errorf("%d %s", resp.StatusCode, strings.TrimSpace(string(body))), rerr)
-	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(out)
-}
 
 // safety: the logs service lets an admin bearer delete and read every team's
 // logs, so the controller spends only a credential that carries the

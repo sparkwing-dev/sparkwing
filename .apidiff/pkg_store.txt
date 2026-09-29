@@ -1130,7 +1130,6 @@ type LegacyAgentClaim struct {
 	StartedAt   time.Time
 	LastSeen    time.Time
 }
-func LogEvictionHeadroom(share int64) int64
 const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{
@@ -1831,6 +1830,8 @@ type StorageQuotaError struct {
 	Requested int64
 
 	Remedy string
+
+	EvictBytes int64
 }
 func (e *StorageQuotaError) Error() string
 func (e *StorageQuotaError) Unwrap() error
@@ -1840,8 +1841,6 @@ type StorageReservation struct {
 	Granted   int64
 	Unlimited bool
 	ExpiresAt time.Time
-
-	EvictBytes int64
 }
 type StorageReserve struct {
 	Team Team
@@ -2144,7 +2143,7 @@ func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.D
 func (s *Store) PruneDownloadDays(ctx context.Context, day string) (int64, error)
 func (s *Store) PruneEgressTotals(ctx context.Context, month string) (int64, error)
 func (s *Store) PruneEgressUsage(ctx context.Context, before string) (int, error)
-func (s *Store) PruneExpiredCacheObjects(ctx context.Context, team Team, rels []string) (_ int64, err error)
+func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PruneSpentIdentity(ctx context.Context, now time.Time) (IdentityPrune, error)
@@ -2154,6 +2153,9 @@ func (s *Store) PutGitHubWebhookBinding(ctx context.Context, b GitHubWebhookBind
 func (s *Store) ReapExpiredNodeClaims(ctx context.Context) (out [][2]string, err error)
 func (s *Store) ReconcileFreeEventBytes(ctx context.Context) error
 func (s *Store) ReconcileStorage(ctx context.Context, kind StorageKind, listed, marks map[Team]int64, now time.Time) (err error)
+func (s *Store) ReconcileTeamStorage(
+	ctx context.Context, team Team, kind StorageKind, list func(context.Context) (int64, error), now time.Time,
+) (err error)
 func (s *Store) RecordAgentLabels(ctx context.Context, tokenPrefix string, labels []string) error
 func (s *Store) RecordContention(ctx context.Context, pipeline string) error
 func (s *Store) RecordCreditGrant(

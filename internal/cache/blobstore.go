@@ -96,12 +96,10 @@ func serveBinBlob(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.Copy(w, rc); err != nil {
 			// #nosec G706 -- the blob hash is pattern-validated
 			log.Printf("warning: bin copy %s: %v", hash, err)
-			return
 		}
-		renewRead(w, r, team, o)
 	case http.MethodPut:
 		if team != "" {
-			if err := admitStoreWrite(); err != nil {
+			if err := storeCeiling.Allow(); err != nil {
 				http.Error(w, err.Error(), http.StatusInsufficientStorage)
 				return
 			}
@@ -242,11 +240,9 @@ func serveCacheBlob(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.Copy(w, rc); err != nil {
 			// #nosec G706 -- the cache key is pattern-validated
 			log.Printf("warning: cache copy %s: %v", key, err)
-			return
 		}
-		renewRead(w, r, team, o)
 	case http.MethodPut:
-		if err := admitStoreWrite(); err != nil {
+		if err := storeCeiling.Allow(); err != nil {
 			http.Error(w, err.Error(), http.StatusInsufficientStorage)
 			return
 		}
@@ -332,7 +328,7 @@ func serveArtifactsBlob(w http.ResponseWriter, r *http.Request) {
 }
 
 func artifactUploadBlob(w http.ResponseWriter, r *http.Request, team, jobID string) {
-	if err := admitStoreWrite(); err != nil {
+	if err := storeCeiling.Allow(); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}
@@ -437,61 +433,37 @@ func artifactDownloadBlob(w http.ResponseWriter, r *http.Request, team, jobID st
 		if _, err := io.Copy(w, rc); err != nil {
 			// #nosec G706 -- the job ID is pattern-validated
 			log.Printf("warning: artifact copy for %s: %v", jobID, err)
-			return
 		}
-		renewRead(w, r, team, o)
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", attachmentDisposition(jobID+".tar"))
 	tw := tar.NewWriter(w)
-	read := make([]teamblob.Object, 0, len(matches))
 	for _, m := range matches {
-		o, err := tarBlob(r.Context(), tw, team, prefix, m)
-		if err != nil {
+		if err := tarBlob(r.Context(), tw, team, prefix, m); err != nil {
 			// #nosec G706 -- the job ID is pattern-validated
 			log.Printf("warning: tar artifacts for %s: %v", jobID, err)
 			return
 		}
-		read = append(read, o)
 	}
 	if err := tw.Close(); err != nil {
 		// #nosec G706 -- the job ID is pattern-validated
 		log.Printf("warning: tar artifacts for %s: %v", jobID, err)
-		return
 	}
-	renewRead(w, r, team, read...)
 }
 
-func tarBlob(ctx context.Context, tw *tar.Writer, team, prefix string, m teamblob.Object) (teamblob.Object, error) {
+func tarBlob(ctx context.Context, tw *tar.Writer, team, prefix string, m teamblob.Object) error {
 	rc, o, err := blobStore.Get(ctx, team, prefix+m.Rel)
 	if err != nil {
-		return teamblob.Object{}, err
+		return err
 	}
 	defer rc.Close()
 	hdr := &tar.Header{Name: m.Rel, Mode: 0o644, Size: o.Size, ModTime: m.LastModified, Typeflag: tar.TypeReg}
 	if err := tw.WriteHeader(hdr); err != nil {
-		return teamblob.Object{}, err
+		return err
 	}
 	_, err = io.Copy(tw, rc)
-	return o, err
-}
-
-// safety: the body is flushed before the renewal, so the copy never adds to
-// the download's latency; a renewal that fails leaves the object aging from
-// its last write, which is the retention it had before.
-func renewRead(w http.ResponseWriter, r *http.Request, team string, objs ...teamblob.Object) {
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-	defer cancel()
-	for _, o := range objs {
-		if err := blobStore.Renew(ctx, team, o); err != nil {
-			// #nosec G706 -- the rel is built from pattern-validated segments
-			log.Printf("warning: renew %s after a read: %v", o.Rel, err)
-		}
-	}
+	return err
 }
 
 // safety: a malformed pattern matches nothing, as the volume's walk treats it.

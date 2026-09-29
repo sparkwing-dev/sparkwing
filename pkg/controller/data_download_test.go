@@ -28,22 +28,12 @@ import (
 
 type downloadHead struct {
 	teamblob.Client
-	keys   []string
-	age    time.Duration
-	copies []string
+	keys []string
 }
 
 func (h *downloadHead) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	h.keys = append(h.keys, aws.ToString(in.Key))
-	return &s3.HeadObjectOutput{
-		ContentLength: aws.Int64(4), LastModified: aws.Time(time.Now().Add(-h.age)),
-		Metadata: map[string]string{"sha256": strings.Repeat("a", 64)},
-	}, nil
-}
-
-func (h *downloadHead) CopyObject(_ context.Context, in *s3.CopyObjectInput, _ ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
-	h.copies = append(h.copies, aws.ToString(in.Key))
-	return &s3.CopyObjectOutput{}, nil
+	return &s3.HeadObjectOutput{ContentLength: aws.Int64(4), Metadata: map[string]string{"sha256": strings.Repeat("a", 64)}}, nil
 }
 
 func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
@@ -414,9 +404,12 @@ func TestDataDownloadSignsOnlyGrantsTeamAndChargesAtSigning(t *testing.T) {
 	if body.Size != 4 || body.SHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("body=%+v", body)
 	}
-	second, _ := callDownload(t, s, grant, "bins/abc", false)
-	if second.Code != http.StatusTooManyRequests || second.Header().Get("Retry-After") == "" {
-		t.Fatalf("second=%d: %s", second.Code, second.Body.String())
+	if second, _ := callDownload(t, s, grant, "bins/abc", false); second.Code != http.StatusOK {
+		t.Fatalf("a download with 1 byte of the cap left = %d, want it signed and charged whole", second.Code)
+	}
+	third, _ := callDownload(t, s, grant, "bins/abc", false)
+	if third.Code != http.StatusTooManyRequests || third.Header().Get("Retry-After") == "" {
+		t.Fatalf("a download past the cap = %d: %s", third.Code, third.Body.String())
 	}
 }
 
@@ -439,9 +432,9 @@ func TestCommittedBinaryDownloadUsesTheSameDailyCap(t *testing.T) {
 	if first.Code != http.StatusOK || !strings.Contains(signed.URL, "/local/bin/"+input) {
 		t.Fatalf("first committed download = %d %+v", first.Code, signed)
 	}
-	second, _ := callDownload(t, s, grant, "bin/"+input, false)
-	if second.Code != http.StatusTooManyRequests {
-		t.Fatalf("second committed download = %d, want 429", second.Code)
+	callDownload(t, s, grant, "bin/"+input, false)
+	if third, _ := callDownload(t, s, grant, "bin/"+input, false); third.Code != http.StatusTooManyRequests {
+		t.Fatalf("a committed download past the cap = %d, want 429", third.Code)
 	}
 }
 
@@ -747,20 +740,5 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 		if body.DataDownloadURL != tc.want {
 			t.Fatalf("ingress=%v route=%q want %q", tc.ingress, body.DataDownloadURL, tc.want)
 		}
-	}
-}
-
-// Signing a cache download renews an object last written more than a day
-// ago, so the storage pass ages it from the read; a fresh one is left alone.
-func TestSigningACacheDownloadRenewsAStaleObject(t *testing.T) {
-	s, grant, head := downloadFixture(t)
-	s.WithTeamDownloadCaps(0, 0)
-	if response, _ := callDownload(t, s, grant, "bins/abc", false); response.Code != http.StatusOK || len(head.copies) != 0 {
-		t.Fatalf("a fresh object = %d, renewed %v; want it signed and left alone", response.Code, head.copies)
-	}
-	head.age = 2 * teamblob.RenewAfter
-	if response, _ := callDownload(t, s, grant, "bins/abc", false); response.Code != http.StatusOK ||
-		len(head.copies) != 1 || head.copies[0] != "cache/teams/team-a/bins/abc" {
-		t.Fatalf("a stale object = %d, renewed %v; want it signed and renewed in place", response.Code, head.copies)
 	}
 }

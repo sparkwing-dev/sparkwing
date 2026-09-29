@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -86,10 +85,11 @@ func (c counterCaller) may(w http.ResponseWriter, team string, kind store.Storag
 }
 
 type storageReserveReq struct {
-	Team  string            `json:"team"`
-	Store store.StorageKind `json:"store"`
-	Bytes int64             `json:"bytes"`
-	UpTo  bool              `json:"up_to"`
+	Team    string            `json:"team"`
+	Store   store.StorageKind `json:"store"`
+	Bytes   int64             `json:"bytes"`
+	UpTo    bool              `json:"up_to"`
+	Evicted bool              `json:"evicted"`
 }
 
 func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
@@ -109,10 +109,17 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.StorageReservation{Tier: store.TeamTierFunded, Granted: max(req.Bytes, 0), Unlimited: true})
 		return
 	}
-	res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
-		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now(),
-	})
-	s.writeReservation(w, r, store.Team(req.Team), res, err)
+	ask := store.StorageReserve{Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now()}
+	res, err := s.store.ReserveStorage(r.Context(), ask)
+	var quota *store.StorageQuotaError
+	if req.Evicted && req.Store == store.StorageLogs && errors.As(err, &quota) {
+		if rerr := s.recountTeamLogs(r.Context(), ask.Team); rerr != nil {
+			s.logger.Warn("recount a team's logs after eviction", "team", req.Team, "err", rerr)
+		} else {
+			res, err = s.store.ReserveStorage(r.Context(), ask)
+		}
+	}
+	s.writeReservation(w, r, res, err)
 }
 
 type storageCommitReq struct {
@@ -166,48 +173,31 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	next, err := s.store.RenewStorage(r.Context(), commit, store.StorageReserve{
 		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.NextBytes, UpTo: true, Now: commit.Now,
 	})
-	s.writeReservation(w, r, store.Team(req.Team), next, err)
+	s.writeReservation(w, r, next, err)
 }
 
-// safety: the eviction runs inside the logs service's own five-second wait
-// for the reservation, so it must end well before that wait does.
-const logEvictionTimeout = 3 * time.Second
-
-// safety: the write was already granted, so an eviction that fails or runs
-// out of time leaves the team past its share only until its next write or
-// the hourly storage pass, which also counts bytes freed after the timeout.
-func (s *Server) evictTeamLogs(ctx context.Context, team store.Team, want int64) {
-	ts := s.teamStorage
-	if ts.LogsURL == "" || ts.LogsToken == "" {
-		s.logger.Warn("team past its log share and no logs service to evict from", "team", string(team), "bytes", want)
-		return
+// safety: the count comes from the archive the logs service evicted from, never
+// from what a caller says it freed, so a team cannot talk its count down.
+func (s *Server) recountTeamLogs(ctx context.Context, team store.Team) error {
+	if s.storagePass == nil || s.storagePass.stores[store.StorageLogs] == nil {
+		return errors.New("no logs archive to count")
 	}
-	ctx, cancel := context.WithTimeout(ctx, logEvictionTimeout)
-	defer cancel()
-	target := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) +
-		"/logs/evict?bytes=" + strconv.FormatInt(want, 10)
-	var out struct {
-		Freed int64 `json:"freed_bytes"`
-	}
-	if err := postRemote(ctx, target, ts.LogsToken, &out); err != nil {
-		s.logger.Warn("evict team logs", "team", string(team), "bytes", want, "err", err)
-		return
-	}
-	if out.Freed <= 0 {
-		return
-	}
-	if err := s.store.CommitStorage(ctx, store.StorageCommit{
-		Team: team, Kind: store.StorageLogs, Bytes: -out.Freed, Now: time.Now(),
-	}); err != nil {
-		s.logger.Warn("count evicted team logs", "team", string(team), "freed", out.Freed, "err", err)
-	}
+	bucket := s.storagePass.stores[store.StorageLogs]
+	return s.store.ReconcileTeamStorage(ctx, team, store.StorageLogs, func(ctx context.Context) (int64, error) {
+		objs, err := bucket.List(ctx, string(team), "")
+		var total int64
+		for _, o := range objs {
+			total += o.Size
+		}
+		return total, err
+	}, time.Now())
 }
 
-func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, team store.Team, res store.StorageReservation, err error) {
+func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, res store.StorageReservation, err error) {
 	var quota *store.StorageQuotaError
 	switch {
 	case errors.As(err, &quota):
-		writeError(w, http.StatusRequestEntityTooLarge, err)
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error(), "evict_bytes": quota.EvictBytes})
 	case errors.Is(err, store.ErrFreeStoragePaused):
 		writeError(w, http.StatusPaymentRequired, err)
 	case errors.Is(err, store.ErrInvalidInput):
@@ -215,9 +205,6 @@ func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, team s
 	case err != nil:
 		s.writeInternalError(w, r, "reserve team storage", err)
 	default:
-		if res.EvictBytes > 0 {
-			s.evictTeamLogs(r.Context(), team, res.EvictBytes)
-		}
 		writeJSON(w, http.StatusOK, res)
 	}
 }

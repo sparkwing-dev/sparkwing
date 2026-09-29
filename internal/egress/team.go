@@ -3,52 +3,47 @@ package egress
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
-	"strconv"
 	"time"
 )
 
 // ChargeFunc charges n bytes to a team's download day. With record false it
-// refuses past the team's cap, and n zero asks only whether any room is left;
+// refuses when the team is already at its cap, and n zero asks only that;
 // with record true it charges n whatever the cap says.
 type ChargeFunc func(ctx context.Context, n int64, record bool) error
 
-// ChargeTeam runs next with a writer that charges the team's download day
-// before the response's first byte. A 2xx response that names its length is
-// charged whole; one that does not is checked for room when it starts and
-// charged what it sent once it ends. A refused response is answered by refuse
-// and never started, so no download is cut off part way. It returns the error
-// of charging a streamed response once it ended, which the caller logs.
+// ChargeChunk is how many delivered bytes a download counts at a time, so a
+// long response shows on the team's day while it streams.
+const ChargeChunk int64 = 8 << 20
+
+// ChargeTeam runs next with a writer that refuses a 2xx response before its
+// first byte when the team is already at its cap, then charges the bytes it
+// actually delivers, a [ChargeChunk] at a time and the rest when it ends. A
+// range or a resumed download is charged what it served, and a response that
+// started always finishes. A refused response is answered by refuse.
 func ChargeTeam(w http.ResponseWriter, r *http.Request, charge ChargeFunc,
 	refuse func(http.ResponseWriter, error), next http.Handler,
-) error {
+) {
 	if Bodyless(r) || r.Method != http.MethodGet {
 		next.ServeHTTP(w, r)
-		return nil
+		return
 	}
 	c := &chargedWriter{ResponseWriter: w, ctx: r.Context(), charge: charge, refuse: refuse}
 	next.ServeHTTP(c, r)
-	if !c.streaming || c.sent == 0 {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
-	defer cancel()
-	return charge(ctx, c.sent, true)
+	c.record(r.Context(), 0)
 }
 
 var errDownloadRefused = errors.New("the team's download was refused before its body")
 
-// safety: a response that names its length is charged whole before its first byte, so
-// downloads racing for a team's last bytes cannot both start.
 type chargedWriter struct {
 	http.ResponseWriter
-	ctx       context.Context
-	charge    ChargeFunc
-	refuse    func(http.ResponseWriter, error)
-	started   bool
-	refused   bool
-	streaming bool
-	sent      int64
+	ctx     context.Context
+	charge  ChargeFunc
+	refuse  func(http.ResponseWriter, error)
+	started bool
+	refused bool
+	pending int64
 }
 
 func (c *chargedWriter) WriteHeader(code int) {
@@ -61,11 +56,7 @@ func (c *chargedWriter) WriteHeader(code int) {
 		c.ResponseWriter.WriteHeader(code)
 		return
 	}
-	size, err := strconv.ParseInt(c.Header().Get("Content-Length"), 10, 64)
-	if err != nil || size < 0 {
-		c.streaming, size = true, 0
-	}
-	if err := c.charge(c.ctx, size, false); err != nil {
+	if err := c.charge(c.ctx, 0, false); err != nil {
 		c.refused = true
 		c.Header().Del("Content-Length")
 		c.refuse(c.ResponseWriter, err)
@@ -82,8 +73,24 @@ func (c *chargedWriter) Write(p []byte) (int, error) {
 		return 0, errDownloadRefused
 	}
 	n, err := c.ResponseWriter.Write(p)
-	c.sent += int64(n)
+	c.pending += int64(n)
+	c.record(c.ctx, ChargeChunk)
 	return n, err
+}
+
+// safety: the charge outlives the request, so a client that hangs up still
+// pays for what it was sent; a charge that fails is logged, never retried
+// into the response.
+func (c *chargedWriter) record(ctx context.Context, atLeast int64) {
+	if c.refused || c.pending == 0 || c.pending < atLeast {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := c.charge(ctx, c.pending, true); err != nil {
+		log.Printf("warning: charge %d delivered bytes to the team's download day: %v", c.pending, err)
+	}
+	c.pending = 0
 }
 
 func (c *chargedWriter) Flush() {

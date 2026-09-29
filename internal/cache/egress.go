@@ -66,12 +66,9 @@ func metered(class egress.Class, next http.HandlerFunc) http.HandlerFunc {
 		charge := func(ctx context.Context, n int64, record bool) error {
 			return counter.ChargeDownload(ctx, counterAuth, team, n, record)
 		}
-		if err := egress.ChargeTeam(w, r, charge, writeDownloadRefusal, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		egress.ChargeTeam(w, r, charge, writeDownloadRefusal, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			egressMeter.Handle(w, r, principal, class, next)
-		})); err != nil {
-			// #nosec G706 -- the team is a checked slug
-			log.Printf("warning: charge team %s's streamed download: %v", team, err)
-		}
+		}))
 	}
 }
 

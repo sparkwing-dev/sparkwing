@@ -639,7 +639,7 @@ working, because deleting is how a store gets back under its ceiling.
 
 | Service | What it bounds | Refusal | State on |
 |--------|------|-------------|------|
-| `sparkwing-cache` | the artifact, dependency-archive, upload, team and git mirror trees | evicts the least recently read binaries, archives and artifacts down to seven eighths of the ceiling; `507` on upload only when the git mirrors and uploads in flight alone hold it | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-cache` | the artifact, dependency-archive, upload, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
 | `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
 | `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
 
@@ -844,12 +844,13 @@ text two teams may share. The controller charges its own artifact and git
 proxy downloads there directly, and the cache charges every `GET` it serves
 a grant with `POST /internal/downloads/charge`.
 
-A response that names its length is charged that length before its first
-byte, under a row lock, so two downloads racing for a team's last bytes
-cannot both start; one that streams, such as a tar of several artifacts or
-a git fetch, is checked for room when it starts and charged what it sent
-when it ends. A download that started is never cut off part way: the cap
-refuses the team's next download, not the one under way. While the
+A download is refused before its first byte only when the team is already at
+its cap. It is then charged the bytes it actually delivers, 8 MiB at a time as
+it streams and the rest when it ends, so a range or a resumed download pays for
+what it served and a response with no length is counted as it goes. A download
+that started is never cut off part way: the cap refuses the team's next
+download, not the one under way. A signed URL is charged the object's whole
+size when it is minted and expires after 60 seconds. While the
 controller cannot answer the cache, a free team's download is refused with
 `503`, and a team the controller answered funded within five minutes
 proceeds. The operator's own team and the operator token carry no cap,

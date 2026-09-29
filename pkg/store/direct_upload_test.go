@@ -283,36 +283,25 @@ func TestSourcePruneClaimAndBinderChooseOneOwner(t *testing.T) {
 	}
 }
 
-// A direct cache row goes when the bucket listing deleted its object and
-// not before, so an object a read renewed past the window keeps its row.
-func TestPruneExpiredCacheObjectsFollowsTheListing(t *testing.T) {
+func TestPruneExpiredCacheObjectsIncludesDefaultTeam(t *testing.T) {
 	st := storetest.Open(t)
 	old := time.Now().Add(-31 * 24 * time.Hour)
-	commit := func(key string) {
-		t.Helper()
-		u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
-			Team: store.DefaultTeam, RunID: "run-operator", Kind: store.StorageCache,
-			Key: key, Size: 1, SHA256: strings.Repeat("a", 64), Principal: "operator", Provenance: "local", Now: old,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := st.CommitUpload(t.Context(), store.DefaultTeam, u.ID, u.Principal, old.Add(time.Minute)); err != nil {
-			t.Fatal(err)
-		}
+	key := "artifacts/blobs/" + strings.Repeat("a", 64)
+	u, err := st.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: store.DefaultTeam, RunID: "run-operator", Kind: store.StorageCache,
+		Key: key, Size: 1, SHA256: strings.Repeat("a", 64), Principal: "operator", Provenance: "local", Now: old,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	expired := "artifacts/blobs/" + strings.Repeat("a", 64)
-	renewed := "artifacts/blobs/" + strings.Repeat("b", 64)
-	commit(expired)
-	commit(renewed)
-	if n, err := st.PruneExpiredCacheObjects(t.Context(), store.DefaultTeam, []string{"local/" + expired, "bins/x"}); err != nil || n != 1 {
-		t.Fatalf("pruned %d rows, %v; want the one the listing deleted", n, err)
+	if err := st.CommitUpload(t.Context(), store.DefaultTeam, u.ID, u.Principal, old.Add(time.Minute)); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := st.CommittedObject(t.Context(), store.DefaultTeam, expired); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("the deleted object is still committed: %v", err)
+	if n, err := st.PruneExpiredCacheObjects(t.Context(), time.Now()); err != nil || n != 1 {
+		t.Fatalf("expired default cache rows = %d, %v, want one", n, err)
 	}
-	if _, err := st.CommittedObject(t.Context(), store.DefaultTeam, renewed); err != nil {
-		t.Fatalf("an object the listing kept lost its row: %v", err)
+	if _, err := st.CommittedObject(t.Context(), store.DefaultTeam, key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expired default cache object is still committed: %v", err)
 	}
 }
 

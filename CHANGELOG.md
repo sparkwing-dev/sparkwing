@@ -284,9 +284,10 @@ unlock.
   controller's `--team-daily-download-free-bytes` (5 GiB) for a free team, or
   `--team-daily-download-funded-bytes` (50 GiB) for a funded one, the team's
   downloads answer `429` with a `Retry-After` naming the wait until midnight
-  UTC. A download of known length is charged whole under a row lock before
-  its first byte, so two downloads racing for a team's last bytes cannot both
-  start; a stream is checked for room when it starts and charged what it sent.
+  UTC. Only a team already at its cap is refused; a download is charged the
+  bytes it delivers, 8 MiB at a time as it streams, so a range pays for what
+  it served, and a signed URL is charged the object's size when it is minted
+  and expires after 60 seconds.
   While the controller cannot answer, a free team's download is refused with
   `503`, and a team answered funded within five minutes proceeds. The
   operator's team and token are exempt. `0` turns either cap off. See
@@ -323,10 +324,11 @@ unlock.
   (`storage_free_allowance_bytes`, 1 GiB) split into fixed per-store shares:
   the cache keeps 768 MiB, checked before an upload's body is read and cut at
   the room left when the length is unknown; the logs service keeps 192 MiB,
-  and a log write past it is granted while the logs service evicts the team's
-  least recently written archived runs (`POST
-  /api/v1/teams/{team}/logs/evict`, `logs.delete`), so a run never loses its
-  logs to a full share; run
+  checked after the node and run caps and before the append is written, and a
+  refusal names `evict_bytes`, which the logs service frees by deleting the
+  team's least recently written archived runs before asking again with
+  `evicted`, when the controller recounts the team's archive from a listing;
+  run
   events keep 64 MiB, checked in the append's transaction. The controller
   counts every team's cache and log bytes in its database (schema v61,
   `team_storage`): a write reserves its size with
@@ -360,12 +362,9 @@ unlock.
   controller writes a 30-day event and node-metric retention window where the
   operator set none.
 
-- **cache:** team binaries, dependency archives and artifacts last read or
-  written more than 30 days ago are deleted in the controller's hourly storage
-  pass, in the listing that reconciles each team's count. A read through the
-  cache or a signed download renews an object older than a day in place, at
-  most ten a second per service, and a direct object's row goes only with the
-  object the listing deleted. The registry proxy directory is
+- **cache:** team binaries, dependency archives and artifacts written more
+  than 30 days ago are deleted in the controller's hourly storage pass, in the
+  listing that reconciles each team's count. The registry proxy directory is
   capped at 2 GiB (`--proxy-max-bytes`), evicting the least recently served
   entries first.
 
@@ -868,13 +867,6 @@ unlock.
 
 ### Changed
 
-- **cache:** a cache volume at its `--max-store-bytes` or `--max-store-objects`
-  ceiling evicts its least recently read binaries, dependency archives and
-  artifacts, by the volume's access times, down to seven eighths of the
-  ceiling before it takes a write, instead of answering `507`. Git mirrors and
-  uploads in flight are never evicted, so a volume they alone fill still
-  answers `507`.
-
 - **controller + sdk:** A ready node no agent claims now waits up to its claim
   wait, 24 hours by default or what `Plan.ClaimWait` sets, instead of the
   15-minute queue deadline, and then fails with `queue_timeout` and an error
@@ -1030,8 +1022,9 @@ unlock.
   to start without `--controller`, which counts what each team stores there.
 
 - **logs:** with `--archive-store`, `--retention` defaults to 90 days, and a
-  run of a team without credits when it was archived keeps its archived logs
-  30 days at most, indexed under `index/free-days/`.
+  run whose reservation reported a team without credits keeps its archived
+  logs 30 days at most, recorded with the run and indexed under
+  `index/free-days/`.
 - **credits (Breaking):** one credit is $0.001, a value that never changes;
   prices move by rate, never by redefining the credit. The ledger still stores
   micro-credits and a dollar is still 100,000,000 of them, so every balance,

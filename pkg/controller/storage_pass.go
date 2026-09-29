@@ -18,8 +18,7 @@ const StoragePassEvery = time.Hour
 const cacheObjectMaxAge = store.DirectCacheMaxAge
 
 // CacheObjectMaxAge is how long the storage pass keeps cache objects in every
-// team namespace and the operator token's root namespace after their last
-// read, which renews an object older than [teamblob.RenewAfter].
+// team namespace and the operator token's root namespace.
 func CacheObjectMaxAge(team string) time.Duration {
 	return cacheObjectMaxAge
 }
@@ -113,13 +112,8 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 			continue
 		}
 		if kind == store.StorageCache {
-			for team, rels := range m.ExpiredRels {
-				if team == "" {
-					continue
-				}
-				if _, err := s.store.PruneExpiredCacheObjects(ctx, store.Team(team), rels); err != nil {
-					errs = append(errs, fmt.Errorf("prune expired cache object rows of %s: %w", team, err))
-				}
+			if _, err := s.store.PruneExpiredCacheObjects(ctx, now); err != nil {
+				errs = append(errs, fmt.Errorf("prune expired cache object rows: %w", err))
 			}
 		}
 		s.logger.Info("storage pass", "store", string(kind), "teams", len(m.Teams),

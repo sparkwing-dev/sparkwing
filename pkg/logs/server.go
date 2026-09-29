@@ -198,7 +198,6 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
 
 	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs), scopeLogsDelete))
-	mux.Handle("POST /api/v1/teams/{team}/logs/evict", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleEvictTeamLogs), scopeLogsDelete))
 
 	authed := s.authMiddleware(mux)
 
@@ -765,6 +764,13 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		}
 		s.storeError(w, "label run", err)
 		return
+	}
+	if tier, ok := counted.tier(); ok {
+		if err := s.markRunTier(root, runID, tier == storagequota.TierFree); err != nil {
+			refuse()
+			s.storeError(w, "mark run tier", err)
+			return
+		}
 	}
 	if name != nodePath(runID, nodeID) {
 		if err := s.ensureAttemptDir(root, runID, nodeID); err != nil {

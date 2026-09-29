@@ -15,13 +15,11 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
-	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -107,6 +105,7 @@ type runLock struct {
 
 type runMeta struct {
 	Team        string           `json:"team,omitempty"`
+	Free        bool             `json:"free,omitempty"`
 	ArchivedAt  time.Time        `json:"archived_at,omitzero"`
 	Files       []archivedFile   `json:"files,omitempty"`
 	Uploaded    map[string]int64 `json:"uploaded,omitempty"`
@@ -120,6 +119,7 @@ type archivedFile struct {
 
 type runIndex struct {
 	Team      string         `json:"team,omitempty"`
+	Free      bool           `json:"free,omitempty"`
 	LastWrite time.Time      `json:"last_write"`
 	Files     []archivedFile `json:"files"`
 }
@@ -361,7 +361,7 @@ func (s *Server) restoreRun(ctx context.Context, root *os.Root, runID string, id
 		}
 		kept = append(kept, archivedFile{Rel: f.Rel, Size: int64(len(data))})
 	}
-	meta := runMeta{Team: idx.Team, ArchivedAt: time.Now(), Files: kept}
+	meta := runMeta{Team: idx.Team, Free: idx.Free, ArchivedAt: time.Now(), Files: kept}
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
@@ -568,7 +568,7 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 	if !changed {
 		return nil
 	}
-	idx := runIndex{Team: meta.Team, LastWrite: lastWrite.UTC()}
+	idx := runIndex{Team: meta.Team, Free: meta.Free, LastWrite: lastWrite.UTC()}
 	for rel, size := range sizes {
 		idx.Files = append(idx.Files, archivedFile{Rel: rel, Size: size})
 	}
@@ -590,19 +590,28 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 			return err
 		}
 	}
-	day := s.dayIndexRel(meta.Team) + lastWrite.UTC().Format(dayLayout) + "/" + runID
+	day := dayIndexRel(meta.Free) + lastWrite.UTC().Format(dayLayout) + "/" + runID
 	_, err = store.Put(ctx, "", day, bytes.NewReader(nil), teamblob.PutOptions{Size: 0})
 	return err
 }
 
-// safety: a team whose tier this process has not heard since it started is
-// kept for the longer window, so a restart never shortens a paying team's
-// retention.
-func (s *Server) dayIndexRel(team string) string {
-	if s.counter != nil && s.counter.LastTier(team) == storagequota.TierFree {
+func dayIndexRel(free bool) string {
+	if free {
 		return indexFreeDaysRel
 	}
 	return indexDaysRel
+}
+
+// safety: the tier is written beside the run's logs when a reservation for
+// them reports it, so a restart cannot reclassify a run; a run no
+// reservation classified keeps the longer window.
+func (s *Server) markRunTier(root *os.Root, runID string, free bool) error {
+	meta := readRunMeta(root, runID)
+	if meta.Free == free {
+		return nil
+	}
+	meta.Free = free
+	return s.writeRunMeta(root, runID, meta)
 }
 
 func (m runMeta) committedSizes() map[string]int64 {
@@ -895,29 +904,6 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	//nolint:contextcheck // the walk must outlive the delete that triggered it; the sweeper's context bounds it.
 	s.remeasureAfterDelete()
 	writeJSONResponse(w, http.StatusOK, deleted)
-}
-
-// safety: the controller calls this when it grants a team without credits a
-// log write past its share, so a full share costs the team its oldest
-// archived runs, never a live run's logs.
-func (s *Server) handleEvictTeamLogs(w http.ResponseWriter, r *http.Request) {
-	team := r.PathValue("team")
-	want, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
-	if !teamblob.ValidTeam(team) || err != nil || want <= 0 {
-		writeLogsErr(w, http.StatusBadRequest, "evict needs a team slug and a positive bytes=")
-		return
-	}
-	if s.archive == nil {
-		writeLogsErr(w, http.StatusNotFound, "this logs service keeps no per-team store; start it with --archive-store")
-		return
-	}
-	freed, err := s.evictTeamLogs(r.Context(), team, want)
-	if err != nil {
-		s.logger.Error("logs archive", "op", "evict team logs", "team", team, "freed", freed, "err", err)
-		writeLogsErr(w, http.StatusBadGateway, "evict the team's archived logs: the object store refused; retry")
-		return
-	}
-	writeJSONResponse(w, http.StatusOK, map[string]int64{"freed_bytes": freed})
 }
 
 // safety: a run in use, or written since its archive, is live and never

@@ -1292,7 +1292,7 @@ func serveBin(w http.ResponseWriter, r *http.Request, d blobDirs) {
 
 	case http.MethodPut:
 		if d.tenant {
-			if err := admitStoreWrite(); err != nil {
+			if err := storeCeiling.Allow(); err != nil {
 				http.Error(w, err.Error(), http.StatusInsufficientStorage)
 				return
 			}
@@ -1446,7 +1446,7 @@ func serveCache(w http.ResponseWriter, r *http.Request, d blobDirs) {
 		}
 
 	case http.MethodPut:
-		if err := admitStoreWrite(); err != nil {
+		if err := storeCeiling.Allow(); err != nil {
 			http.Error(w, err.Error(), http.StatusInsufficientStorage)
 			return
 		}
@@ -1560,7 +1560,7 @@ func serveArtifacts(w http.ResponseWriter, r *http.Request, d blobDirs) {
 }
 
 func artifactUpload(w http.ResponseWriter, r *http.Request, root, jobID string) {
-	if err := admitStoreWrite(); err != nil {
+	if err := storeCeiling.Allow(); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}
@@ -1768,7 +1768,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if err := admitStoreWrite(); err != nil {
+	if err := storeCeiling.Allow(); err != nil {
 		http.Error(w, err.Error(), http.StatusInsufficientStorage)
 		return
 	}

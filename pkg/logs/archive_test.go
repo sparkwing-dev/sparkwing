@@ -752,6 +752,9 @@ func TestAFreeTeamsArchivedLogsExpireBeforeAFundedTeams(t *testing.T) {
 		}
 		f.age(t, run, now.Add(-40*24*time.Hour))
 	}
+	// safety: a restarted service has heard no tier yet, so the run's own
+	// record is all that can keep it classified.
+	f.srv.counter = nil
 	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 2 {
 		t.Fatalf("archive = %d, %v", n, err)
 	}
@@ -789,12 +792,8 @@ func TestEvictingATeamsLogsTakesItsOldestRunsFirst(t *testing.T) {
 	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
 		t.Fatalf("archive other = %d, %v", n, err)
 	}
-	if code, _ := f.do(t, http.MethodPost, "/api/v1/teams/team-a/logs/evict?bytes=1", "Bearer a", ""); code != http.StatusForbidden {
-		t.Fatalf("a team's own bearer evicting = %d, want 403", code)
-	}
-	code, body := f.do(t, http.MethodPost, "/api/v1/teams/team-a/logs/evict?bytes=11", "Bearer deleter", "")
-	if code != http.StatusOK || !strings.Contains(body, `"freed_bytes":11`) {
-		t.Fatalf("evict = %d %s, want 11 bytes freed", code, body)
+	if freed, err := f.srv.evictTeamLogs(context.Background(), "team-a", 11); err != nil || freed != 11 {
+		t.Fatalf("evict = %d, %v; want 11 bytes freed", freed, err)
 	}
 	keys := f.keys(t)
 	for k, want := range map[string]bool{
@@ -807,5 +806,42 @@ func TestEvictingATeamsLogsTakesItsOldestRunsFirst(t *testing.T) {
 		if keys[k] != want {
 			t.Errorf("%s present = %t, want %t", k, keys[k], want)
 		}
+	}
+}
+
+// An append past a free team's full share evicts the team's oldest archived
+// run and is written once the controller recounts the archive. A team whose
+// only logs are live has nothing to evict and is refused, as
+// TestAFreeTeamsLogsStopAtTheirShare shows.
+func TestAnAppendPastTheShareEvictsTheOldestArchivedRun(t *testing.T) {
+	counter := storagequotatest.New(300, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	counter.Recount = func(team string) int64 {
+		var n int64
+		for k := range f.keys(t) {
+			if strings.HasPrefix(k, "logs/teams/"+team+"/") {
+				n += 101
+			}
+		}
+		return n
+	}
+	now := time.Now()
+	for i, run := range []string{"old", "new"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", "Bearer a", line(100)); code != http.StatusNoContent {
+			t.Fatalf("append %s = %d %s", run, code, body)
+		}
+		f.age(t, run, now.Add(-time.Duration(2-i)*time.Hour))
+		f.srv.settleLogBlocks(context.Background(), true)
+		if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
+			t.Fatalf("archive %s = %d, %v", run, n, err)
+		}
+		f.clock.Advance(time.Minute)
+	}
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/live/build", "Bearer a", line(150)); code != http.StatusNoContent {
+		t.Fatalf("an append past the full share = %d %s, want it written after an eviction", code, body)
+	}
+	keys := f.keys(t)
+	if keys["logs/teams/team-a/runs/old/build.log"] || !keys["logs/teams/team-a/runs/new/build.log"] {
+		t.Fatalf("archive after the eviction = %v, want only the oldest run gone", keys)
 	}
 }

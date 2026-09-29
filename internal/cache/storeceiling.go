@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,76 +41,6 @@ func storeDirs() []string {
 		dirs = append(dirs, teamsDir)
 	}
 	return dirs
-}
-
-// safety: the git mirrors and in-flight uploads are never evicted; every other
-// file on the volume is a binary, archive or artifact a miss rebuilds, so a full
-// volume gives those up rather than refusing the write that would fail a run.
-func evictableDirs() []string { return []string{artifactsDir, cacheDir, teamsDir} }
-
-var evictMu sync.Mutex
-
-// safety: a volume at its ceiling evicts its least recently read files, by the
-// volume's access times, down to seven eighths of the ceiling before it refuses.
-func admitStoreWrite() error {
-	if !storeCeiling.Frozen() {
-		return nil
-	}
-	evictMu.Lock()
-	if storeCeiling.Frozen() {
-		evictLeastRecentlyRead()
-	}
-	evictMu.Unlock()
-	return storeCeiling.Allow()
-}
-
-type evictable struct {
-	path string
-	size int64
-	read time.Time
-}
-
-func evictLeastRecentlyRead() {
-	state := storeCeiling.State()
-	var files []evictable
-	var bytes, objects int64 = state.Bytes, state.Objects
-	for _, dir := range evictableDirs() {
-		// #nosec G703 -- the roots come from the service's own configuration
-		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			// safety: a file another eviction or a delete removed mid-walk is skipped.
-			if info, ierr := d.Info(); ierr == nil && !d.IsDir() {
-				files = append(files, evictable{path: path, size: info.Size(), read: lastRead(info)})
-			}
-			return nil
-		})
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Printf("warning: list %s for eviction: %v", dir, err)
-		}
-	}
-	slices.SortFunc(files, func(a, b evictable) int { return a.read.Compare(b.read) })
-	under := func() bool {
-		return (state.MaxBytes <= 0 || bytes <= state.MaxBytes/8*7) &&
-			(state.MaxObjects <= 0 || objects <= state.MaxObjects/8*7)
-	}
-	evicted, freed := 0, int64(0)
-	for _, f := range files {
-		if under() {
-			break
-		}
-		// #nosec G703 -- a path the walk above found under the service's own roots
-		if err := os.Remove(f.path); err != nil {
-			continue
-		}
-		storeCeiling.Record(-f.size, -1)
-		bytes -= f.size
-		objects--
-		evicted++
-		freed += f.size
-	}
-	log.Printf("cache store: evicted %d least recently read files (%d bytes) at its ceiling", evicted, freed)
 }
 
 func measureStore(ctx context.Context) {

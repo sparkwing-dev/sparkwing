@@ -6505,7 +6505,9 @@ paths:
         every reservation still held; a funded team is counted without a
         limit. `up_to` grants as much of `bytes` as the team has room for,
         zero or less asking for all of it. A reservation expires after an
-        hour unless it is committed or released.
+        hour unless it is committed or released. `evicted` says the logs
+        service evicted what a refusal named; the controller then counts the
+        team's logs from a listing of its archive before it answers.
       requestBody:
         required: true
         content:
@@ -6519,6 +6521,7 @@ paths:
                 store: {type: string, enum: [cache, logs]}
                 bytes: {type: integer, format: int64}
                 up_to: {type: boolean}
+                evicted: {type: boolean}
       responses:
         "200":
           description: The reservation. A single-team controller answers funded with no id.
@@ -6537,7 +6540,17 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "402": {description: The team has neither credits nor a free-tier slot.}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "413": {description: The write would pass the team's free share of this store.}
+        "413":
+          description: >-
+            The write would pass the team's free share of this store. For logs the body's `evict_bytes` names how much of the team's archived logs to evict before asking again.
+          content:
+            application/json:
+              schema:
+                type: object
+                x-sparkwing-go-type: none
+                properties:
+                  error: {type: string}
+                  evict_bytes: {type: integer, format: int64}
 
   /internal/storage/commit:
     post:

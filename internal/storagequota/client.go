@@ -69,6 +69,9 @@ var ErrUnavailable = errors.New("the controller that counts team storage is unav
 type QuotaError struct {
 	Message string
 	Paused  bool
+	// EvictBytes, on a free team's log share, is how much of the team's
+	// archived logs to evict before asking again with [Client.ReserveAfterEviction].
+	EvictBytes int64
 }
 
 func (e *QuotaError) Error() string { return e.Message }
@@ -111,7 +114,6 @@ type Client struct {
 
 	mu     sync.Mutex
 	funded map[string]time.Time
-	tiers  map[string]Tier
 }
 
 // New returns a client of the controller at controllerURL. A nil client
@@ -120,7 +122,7 @@ func New(controllerURL string, client *http.Client) *Client {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	return &Client{base: strings.TrimRight(controllerURL, "/"), http: client, now: time.Now, funded: map[string]time.Time{}, tiers: map[string]Tier{}}
+	return &Client{base: strings.TrimRight(controllerURL, "/"), http: client, now: time.Now, funded: map[string]time.Time{}}
 }
 
 // WithClock replaces time.Now, for a test.
@@ -132,7 +134,6 @@ func (c *Client) WithClock(now func() time.Time) *Client {
 func (c *Client) observe(team string, tier Tier) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.tiers[team] = tier
 	if tier == TierFunded {
 		c.funded[team] = c.now()
 		return
@@ -147,20 +148,23 @@ func (c *Client) recentlyFunded(team string) bool {
 	return ok && c.now().Sub(at) < MaxFundedAge
 }
 
-// LastTier reports the tier the controller last answered for team, or ""
-// when this client has not asked about it since it started.
-func (c *Client) LastTier(team string) Tier {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.tiers[team]
-}
-
 // Reserve holds bytes of team's room in kind. With upTo it holds as much of
 // bytes as the team has room for, zero or less asking for all of it.
 func (c *Client) Reserve(ctx context.Context, auth, team string, kind Kind, bytes int64, upTo bool) (Reservation, error) {
+	return c.reserve(ctx, auth, team, kind, bytes, upTo, false)
+}
+
+// ReserveAfterEviction asks again for up to bytes of team's logs after the
+// caller evicted what a [QuotaError] named, so the controller recounts the
+// team's archive before it answers.
+func (c *Client) ReserveAfterEviction(ctx context.Context, auth, team string, bytes int64) (Reservation, error) {
+	return c.reserve(ctx, auth, team, KindLogs, bytes, true, true)
+}
+
+func (c *Client) reserve(ctx context.Context, auth, team string, kind Kind, bytes int64, upTo, evicted bool) (Reservation, error) {
 	var out Reservation
 	err := c.post(ctx, auth, "/internal/storage/reserve", map[string]any{
-		"team": team, "store": kind, "bytes": bytes, "up_to": upTo,
+		"team": team, "store": kind, "bytes": bytes, "up_to": upTo, "evicted": evicted,
 	}, &out)
 	if errors.Is(err, ErrUnavailable) && c.recentlyFunded(team) {
 		return Reservation{Team: team, Kind: kind, Tier: TierFunded, Granted: max(bytes, 0), Unlimited: true}, nil
@@ -243,7 +247,8 @@ func (c *Client) RecordEgress(ctx context.Context, auth string, t EgressTotals) 
 }
 
 type errorBody struct {
-	Error string `json:"error"`
+	Error      string `json:"error"`
+	EvictBytes int64  `json:"evict_bytes"`
 }
 
 func (c *Client) post(ctx context.Context, auth, path string, body, out any) error {
@@ -272,10 +277,10 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 		}
 		return nil
 	}
-	msg := readError(resp)
+	msg, evict := readError(resp)
 	switch resp.StatusCode {
 	case http.StatusRequestEntityTooLarge:
-		return &QuotaError{Message: msg}
+		return &QuotaError{Message: msg, EvictBytes: evict}
 	case http.StatusPaymentRequired:
 		return &QuotaError{Message: msg, Paused: true}
 	case http.StatusTooManyRequests:
@@ -291,14 +296,14 @@ func (c *Client) post(ctx context.Context, auth, path string, body, out any) err
 	return fmt.Errorf("controller %s answered %d: %s", path, resp.StatusCode, msg)
 }
 
-func readError(resp *http.Response) string {
+func readError(resp *http.Response) (string, int64) {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	if err != nil {
-		return fmt.Sprintf("answered %d and the body could not be read: %v", resp.StatusCode, err)
+		return fmt.Sprintf("answered %d and the body could not be read: %v", resp.StatusCode, err), 0
 	}
 	var body errorBody
 	if json.Unmarshal(raw, &body) == nil && body.Error != "" {
-		return body.Error
+		return body.Error, body.EvictBytes
 	}
-	return strings.TrimSpace(string(raw))
+	return strings.TrimSpace(string(raw)), 0
 }
