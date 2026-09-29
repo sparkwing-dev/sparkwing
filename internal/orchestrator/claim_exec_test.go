@@ -28,3 +28,22 @@ func TestApplyGoEnvFile_ReadsOnlyTheModuleSettings(t *testing.T) {
 		t.Fatalf("a checkout with no listed repository left no file: %v", err)
 	}
 }
+
+// A released pin too old to plan is refused before the build; a newer pin, a
+// commit pin and a local replacement are left to the plan itself.
+func TestPlanSDKGap_RefusesOnlyAReleasedPinBeforePlanJSON(t *testing.T) {
+	for pin, refused := range map[string]bool{
+		"require github.com/sparkwing-dev/sparkwing v0.64.0":                                                       true,
+		"require github.com/sparkwing-dev/sparkwing " + MinPlanSDK:                                                 false,
+		"require github.com/sparkwing-dev/sparkwing v0.64.1-0.20260929070000-2ebabeade000":                         false,
+		"require github.com/sparkwing-dev/sparkwing v0.60.0\nreplace github.com/sparkwing-dev/sparkwing => ../sdk": false,
+	} {
+		path := filepath.Join(t.TempDir(), "go.mod")
+		if err := os.WriteFile(path, []byte("module jobs\n\n"+pin+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := planSDKGap(path); (err != nil) != refused {
+			t.Errorf("%q: err = %v, want refused %v", pin, err, refused)
+		}
+	}
+}

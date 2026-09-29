@@ -14,6 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -68,6 +72,11 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 		return cause
 	}
 	src := os.Getenv("SPARKWING_SOURCE_DIR")
+	if nodeID == store.PlanNodeID {
+		if err := planSDKGap(filepath.Join(src, ".sparkwing", "go.mod")); err != nil {
+			return fail(err)
+		}
+	}
 	if err := applyGoEnvFile(filepath.Join(filepath.Dir(src), GoEnvFile)); err != nil {
 		return fail(err)
 	}
@@ -98,12 +107,47 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	case outcome.cancelCause != nil:
 		return fail(fmt.Errorf("the pipeline was stopped: %w", outcome.cancelCause))
 	case outcome.waitErr != nil && nodeID == store.PlanNodeID:
-		return fail(fmt.Errorf("the pipeline could not plan the run (controller dispatch needs a sparkwing SDK with `plan --json`): %w", outcome.waitErr))
+		return fail(fmt.Errorf("the pipeline could not plan the run (controller dispatch needs a sparkwing SDK with `plan --json`, %s or later): %w", MinPlanSDK, outcome.waitErr))
 	case outcome.waitErr != nil:
 		return fail(fmt.Errorf("the pipeline exited: %w", outcome.waitErr))
 	case nodeID == store.PlanNodeID:
 		if err := c.SubmitPlan(ctx, runID, plan.Bytes()); err != nil {
 			return fail(fmt.Errorf("submit the plan: %w", err))
+		}
+	}
+	return nil
+}
+
+// MinPlanSDK is the first sparkwing release whose pipeline binaries answer
+// `plan --json`, which a controller-dispatched run plans with.
+const MinPlanSDK = "v0.65.0"
+
+const sdkModule = "github.com/sparkwing-dev/sparkwing"
+
+// perf: a released pin too old to plan fails before the build, the longest
+// billed step. A commit or local pin is judged by the plan itself, and a
+// missing module by the build.
+func planSDKGap(goMod string) error {
+	raw, err := os.ReadFile(goMod)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	mf, err := modfile.Parse(goMod, raw, nil)
+	if err != nil {
+		return fmt.Errorf("read the pipeline's module: %w", err)
+	}
+	for _, r := range mf.Replace {
+		if r.Old.Path == sdkModule {
+			return nil
+		}
+	}
+	for _, r := range mf.Require {
+		v := r.Mod.Version
+		if r.Mod.Path == sdkModule && !module.IsPseudoVersion(v) && semver.Compare(v, MinPlanSDK) < 0 {
+			return fmt.Errorf("this repository's .sparkwing pins sparkwing %s, which lacks `plan --json`; pin %s or later to run on controller dispatch", v, MinPlanSDK)
 		}
 	}
 	return nil

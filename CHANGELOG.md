@@ -46,13 +46,15 @@ unlock.
   running Job of a claim that ended or whose run is being cancelled, leaves a
   finished Job and its pod log to the Job's TTL, and hands back the
   claim of a Job that waited 4 minutes for a machine, so its node returns to
-  the queue unbilled with no attempt spent. A launched node's billing opens
-  when its pod first renews the claim, at the start of the source fetch, not
-  at the claim. While any Job has waited 2 minutes,
-  or `--node-pool` names a Karpenter NodePool with under 4 cores left under its
-  CPU limit, it claims nothing and queued nodes show
-  `waiting for Cloud capacity` with a `capacity_wait` event. Opting a
-  repository in is accepted. On this path a node cannot read secrets, mint
+  the queue unbilled with no attempt spent and is claimable again 5 minutes
+  later. A launched node's billing opens when its pod first renews the claim,
+  at the start of the source fetch, not at the claim. While `--node-pool`
+  names a Karpenter NodePool with under 4 cores left under its CPU limit, the
+  launcher claims nothing and queued nodes show `waiting for Cloud capacity`
+  with a `capacity_wait` event. A planning node whose `.sparkwing` pins a
+  sparkwing release before v0.65.0 fails before its build, naming the pin. The
+  opt-in's audit record names the repository. Opting a repository in is
+  accepted. On this path a node cannot read secrets, mint
   OIDC tokens, hold concurrency slots, write the durable log store (its live
   log reaches the dashboard), or start a child of another repository.
 
