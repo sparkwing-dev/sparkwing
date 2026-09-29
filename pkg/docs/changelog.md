@@ -10,6 +10,8 @@ migration guide. See [Changelog style](docs/changelog-style.md) for authoring ru
 
 ## Pre-1.0 caveat
 
+- Correct the secret-scan policy check for the exact empty-artifact hash exception.
+
 sparkwing is on the `v0.x` track. Per [VERSIONING.md](VERSIONING.md), breaking changes
 are permitted in minor bumps until v1.0.0. Removed symbols are deleted outright. Each
 minor release containing a breaking change includes a migration guide. Releases at
