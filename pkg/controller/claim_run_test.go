@@ -244,9 +244,9 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 
 // A work claim takes and returns concurrency slots for its own run in its
 // own team, and only as its node's accepted plan declares them: another run,
-// another node, another key or policy, another run's holder ID, a planning
-// claim and a cancelled run's new acquire are refused, the lease never
-// outlives the claim, and a release after cancel still frees the slot.
+// another node, another key or policy, another run's holder ID or holder, a
+// planning claim and a cancelled run's new acquire are refused, neither an
+// acquire nor a heartbeat holds the lease past the claim, and a release after cancel still frees the slot.
 func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newAppFixture(t)
@@ -271,6 +271,19 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 	}
 	foreignHolder := body("run-slot", "a", "queue", 0)
 	foreignHolder["holder_id"] = "run-stranger/a"
+	ownHolderOtherNode := body("run-slot", "b", "queue", 0)
+	ownHolderOtherNode["holder_id"] = "run-slot/a"
+	tn, err := f.store.ForTeam(ctx, store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := tn.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
+		Key: "g:deploy", HolderID: "run-stranger/a", RunID: "run-stranger", NodeID: "a", Capacity: 1, Policy: "queue",
+	}); err != nil || res.Kind != store.AcquireGranted {
+		t.Fatalf("seed another run's holder = %+v %v", res, err)
+	}
+	joinStranger := body("run-slot", "a", "queue", 0)
+	joinStranger["inherited_holder_id"] = "run-stranger/a"
 	for _, c := range []struct {
 		key  string
 		body map[string]any
@@ -281,14 +294,25 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 		{"g:other", body("run-slot", "a", "queue", 0), "an undeclared key"},
 		{"g:deploy", body("run-slot", "a", "cancel_others", 0), "an undeclared policy"},
 		{"g:deploy", foreignHolder, "another run's holder ID"},
+		{"g:deploy", ownHolderOtherNode, "another node's acquire under its own holder ID"},
+		{"g:deploy", joinStranger, "joining another run's holder"},
 	} {
 		if code := f.call("POST", "/api/v1/concurrency/"+c.key+"/acquire", wk, c.body, nil); code != http.StatusForbidden {
 			t.Errorf("%s = %d, want 403", c.what, code)
 		}
 	}
+	if _, _, _, err := tn.ReleaseAndNotify(ctx, "g:deploy", "run-stranger/a", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+		t.Fatal(err)
+	}
 	var got map[string]any
 	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 30*24*3600), &got); code != http.StatusOK || got["granted"] != true {
 		t.Fatalf("the declared acquire = %d %v", code, got)
+	}
+	var beat struct {
+		LeaseExpiresAt time.Time `json:"lease_expires_at"`
+	}
+	if code := f.call("POST", "/api/v1/concurrency/g:deploy/heartbeat", wk, map[string]any{"holder_id": "run-slot/a", "lease_secs": 30 * 24 * 3600}, &beat); code != http.StatusOK || beat.LeaseExpiresAt.After(time.Now().Add(2*time.Hour)) {
+		t.Fatalf("a heartbeat asking for 30 days = %d, lease to %v, want 200 and no longer than the claim token", code, beat.LeaseExpiresAt)
 	}
 	for team, want := range map[store.Team]int{store.Team(olga.team): 1, store.DefaultTeam: 0} {
 		tn, err := f.store.ForTeam(ctx, team)
