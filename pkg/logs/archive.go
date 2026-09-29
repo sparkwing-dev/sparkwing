@@ -15,11 +15,13 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/objectguard"
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
 
@@ -38,15 +40,18 @@ import (
 // make that cheap: index/runs/<runID>.json names the run's team and its
 // files, so a restore or a delete never lists, and
 // index/days/<date>/<runID> lets retention find expired runs one day's
-// listing at a time instead of listing the whole store.
+// listing at a time instead of listing the whole store. A run of a team
+// without credits is indexed under index/free-days/ instead, which
+// retention reads with the shorter free window.
 const (
-	runMetaFile   = ".sparkwing-run"
-	rehydrateDir  = "rehydrate"
-	indexRunsRel  = "index/runs/"
-	indexDaysRel  = "index/days/"
-	dayLayout     = "2006-01-02"
-	absentTTL     = 10 * time.Minute
-	maxAbsentRuns = 10000
+	runMetaFile      = ".sparkwing-run"
+	rehydrateDir     = "rehydrate"
+	indexRunsRel     = "index/runs/"
+	indexDaysRel     = "index/days/"
+	indexFreeDaysRel = "index/free-days/"
+	dayLayout        = "2006-01-02"
+	absentTTL        = 10 * time.Minute
+	maxAbsentRuns    = 10000
 
 	// DefaultArchiveIdle is how long a run goes unwritten before it moves
 	// to the object store. Long enough that a node paused between steps
@@ -57,8 +62,12 @@ const (
 	// runs. Looking walks the volume and sends no request.
 	DefaultArchiveInterval = time.Minute
 	// DefaultArchiveRetention is the retention a logs service with an
-	// archive starts with when the operator named none.
-	DefaultArchiveRetention = 30 * 24 * time.Hour
+	// archive starts with when the operator named none. It keeps the logs
+	// of a team with credits, and of the operator's team.
+	DefaultArchiveRetention = 90 * 24 * time.Hour
+	// FreeArchiveRetention is the longest a team without credits keeps its
+	// archived logs, whatever the retention.
+	FreeArchiveRetention = 30 * 24 * time.Hour
 	// DefaultPruneInterval is how often retention lists the day index,
 	// one LIST request when nothing has expired.
 	DefaultPruneInterval = time.Hour
@@ -581,9 +590,19 @@ func (s *Server) archiveRun(ctx context.Context, root *os.Root, runID string) er
 			return err
 		}
 	}
-	day := indexDaysRel + lastWrite.UTC().Format(dayLayout) + "/" + runID
+	day := s.dayIndexRel(meta.Team) + lastWrite.UTC().Format(dayLayout) + "/" + runID
 	_, err = store.Put(ctx, "", day, bytes.NewReader(nil), teamblob.PutOptions{Size: 0})
 	return err
+}
+
+// safety: a team whose tier this process has not heard since it started is
+// kept for the longer window, so a restart never shortens a paying team's
+// retention.
+func (s *Server) dayIndexRel(team string) string {
+	if s.counter != nil && s.counter.LastTier(team) == storagequota.TierFree {
+		return indexFreeDaysRel
+	}
+	return indexDaysRel
 }
 
 func (m runMeta) committedSizes() map[string]int64 {
@@ -636,31 +655,24 @@ func (s *Server) deleteArchivedRun(ctx context.Context, runID string) error {
 }
 
 // PruneArchive deletes archived runs whose last write is older than the
-// retention. It lists the day index once and, for each day wholly past
-// the cutoff, that day's entries once; each expired run then costs one
-// read of its index, and the deletes go out a thousand keys per request.
-// It never lists a run's objects.
+// retention, or than [FreeArchiveRetention] for a run of a team without
+// credits. It lists each day index once and, for each day wholly past its
+// cutoff, that day's entries once; each expired run then costs one read of
+// its index, and the deletes go out a thousand keys per request. It never
+// lists a run's objects.
 func (s *Server) PruneArchive(ctx context.Context, now time.Time) (int, error) {
-	a := s.archive
-	if a == nil || s.limits.Retention <= 0 {
+	if s.archive == nil || s.limits.Retention <= 0 {
 		return 0, nil
 	}
-	cutoff := now.Add(-s.limits.Retention)
-	days, err := a.store.ListDirs(ctx, "", indexDaysRel)
-	if err != nil {
-		return 0, err
-	}
-	slices.Sort(days)
 	pruned := 0
-	for _, day := range days {
-		start, perr := time.Parse(dayLayout, day)
-		if perr != nil {
-			continue
-		}
-		if start.Add(24 * time.Hour).After(cutoff) {
-			break
-		}
-		n, err := s.pruneDay(ctx, day, cutoff)
+	for _, class := range []struct {
+		rel       string
+		retention time.Duration
+	}{
+		{indexDaysRel, s.limits.Retention},
+		{indexFreeDaysRel, min(s.limits.Retention, FreeArchiveRetention)},
+	} {
+		n, err := s.pruneClass(ctx, class.rel, now.Add(-class.retention))
 		pruned += n
 		if err != nil {
 			return pruned, err
@@ -674,9 +686,32 @@ func (s *Server) PruneArchive(ctx context.Context, now time.Time) (int, error) {
 	return pruned, nil
 }
 
-func (s *Server) pruneDay(ctx context.Context, day string, cutoff time.Time) (int, error) {
+func (s *Server) pruneClass(ctx context.Context, daysRel string, cutoff time.Time) (int, error) {
+	days, err := s.archive.store.ListDirs(ctx, "", daysRel)
+	if err != nil {
+		return 0, err
+	}
+	slices.Sort(days)
+	pruned := 0
+	for _, day := range days {
+		start, perr := time.Parse(dayLayout, day)
+		if perr != nil {
+			continue
+		}
+		if start.Add(24 * time.Hour).After(cutoff) {
+			break
+		}
+		n, err := s.pruneDay(ctx, daysRel+day+"/", cutoff)
+		pruned += n
+		if err != nil {
+			return pruned, err
+		}
+	}
+	return pruned, nil
+}
+
+func (s *Server) pruneDay(ctx context.Context, dayRel string, cutoff time.Time) (int, error) {
 	store := s.archive.store
-	dayRel := indexDaysRel + day + "/"
 	entries, err := store.List(ctx, "", dayRel)
 	if err != nil {
 		return 0, err
@@ -862,6 +897,108 @@ func (s *Server) handleDeleteTeamLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, deleted)
 }
 
+// handleEvictTeamLogs deletes a team's least recently written archived runs,
+// oldest first, until it has freed at least ?bytes=, and answers what it
+// freed. The controller calls it when it grants a team without credits a log
+// write past its share, so a full share costs the team its oldest logs rather
+// than a run's logs.
+func (s *Server) handleEvictTeamLogs(w http.ResponseWriter, r *http.Request) {
+	team := r.PathValue("team")
+	want, err := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
+	if !teamblob.ValidTeam(team) || err != nil || want <= 0 {
+		writeLogsErr(w, http.StatusBadRequest, "evict needs a team slug and a positive bytes=")
+		return
+	}
+	if s.archive == nil {
+		writeLogsErr(w, http.StatusNotFound, "this logs service keeps no per-team store; start it with --archive-store")
+		return
+	}
+	freed, err := s.evictTeamLogs(r.Context(), team, want)
+	if err != nil {
+		s.logger.Error("logs archive", "op", "evict team logs", "team", team, "freed", freed, "err", err)
+		writeLogsErr(w, http.StatusBadGateway, "evict the team's archived logs: the object store refused; retry")
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, map[string]int64{"freed_bytes": freed})
+}
+
+// safety: a run in use, or written since its archive, is live and never
+// evicted; each evicted run is held exclusively from the decision to its
+// deletion, so no request restores it in between.
+func (s *Server) evictTeamLogs(ctx context.Context, team string, want int64) (int64, error) {
+	objs, err := s.archive.store.List(ctx, team, "runs/")
+	if err != nil {
+		return 0, err
+	}
+	type archived struct {
+		id    string
+		bytes int64
+		last  time.Time
+	}
+	byRun := map[string]*archived{}
+	for _, o := range objs {
+		id, _, ok := strings.Cut(strings.TrimPrefix(o.Rel, "runs/"), "/")
+		if !ok || validateID(id) != nil {
+			continue
+		}
+		a := byRun[id]
+		if a == nil {
+			a = &archived{id: id}
+			byRun[id] = a
+		}
+		a.bytes += o.Size
+		a.last = maxTime(a.last, o.LastModified)
+	}
+	runs := slices.SortedFunc(maps.Values(byRun), func(a, b *archived) int { return a.last.Compare(b.last) })
+	root, err := s.openRunsRoot()
+	if err != nil {
+		return 0, err
+	}
+	defer s.closeRoot(root, "evict team logs")
+	var freed int64
+	for _, a := range runs {
+		if freed >= want {
+			break
+		}
+		l := s.archive.lock(a.id)
+		if !l.rw.TryLock() {
+			continue
+		}
+		err := s.evictRun(ctx, root, a.id)
+		l.rw.Unlock()
+		switch {
+		case errors.Is(err, errRunLive):
+			continue
+		case err != nil:
+			return freed, err
+		}
+		freed += a.bytes
+	}
+	return freed, nil
+}
+
+var errRunLive = errors.New("the run was written since its archive")
+
+// safety: the caller holds the run exclusively.
+func (s *Server) evictRun(ctx context.Context, root *os.Root, runID string) error {
+	written, err := s.localWrittenSinceArchive(root, runID)
+	if err != nil {
+		return err
+	}
+	if written {
+		return errRunLive
+	}
+	if err := s.deleteArchivedRun(ctx, runID); err != nil {
+		return err
+	}
+	if err := root.RemoveAll(runID); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	s.runTotals.forget(runID)
+	s.archive.noteAbsent(runID, time.Now())
+	return nil
+}
+
 func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 	store := s.archive.store
 	runs, err := store.ListDirs(ctx, team, "runs/")
@@ -886,8 +1023,10 @@ func (s *Server) deleteTeamIndexes(ctx context.Context, team string) error {
 		if json.Unmarshal(body, &idx) != nil || idx.Team != team {
 			continue
 		}
+		day := idx.LastWrite.UTC().Format(dayLayout) + "/" + runID
 		operator = append(operator,
-			teamblob.Sized{Rel: indexDaysRel + idx.LastWrite.UTC().Format(dayLayout) + "/" + runID},
+			teamblob.Sized{Rel: indexDaysRel + day},
+			teamblob.Sized{Rel: indexFreeDaysRel + day},
 			teamblob.Sized{Rel: indexRunRel(runID), Size: int64(len(body))},
 		)
 	}

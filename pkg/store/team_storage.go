@@ -144,7 +144,15 @@ type StorageReservation struct {
 	Granted   int64           `json:"granted_bytes"`
 	Unlimited bool            `json:"unlimited,omitempty"`
 	ExpiresAt time.Time       `json:"expires_at"`
+	// EvictBytes is how much of the team's stored logs the controller evicts
+	// to bring it back inside its share after granting a log write past it.
+	EvictBytes int64 `json:"-"`
 }
+
+// LogEvictionHeadroom is the part of a free team's log share an eviction
+// frees beyond what a write needs, one eighth, so the next writes fit without
+// evicting again.
+func LogEvictionHeadroom(share int64) int64 { return share / 8 }
 
 // TeamStorageUsage is what one team holds in one store.
 type TeamStorageUsage struct {
@@ -269,7 +277,16 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, err
 	}
 	out := StorageReservation{ID: id, Tier: standing.Tier, Granted: max(req.Bytes, 0), ExpiresAt: now.Add(ttl)}
-	if standing.Tier == TeamTierFree {
+	switch {
+	// safety: a run is never left without logs because its team's share is
+	// full; the write is granted, and the team's least recently written logs
+	// are evicted to bring it back inside the share.
+	case standing.Tier == TeamTierFree && req.Kind == StorageLogs:
+		share := req.Kind.share(standing.AllowanceBytes)
+		if over := used + reserved + out.Granted - share; over > 0 {
+			out.EvictBytes = over + LogEvictionHeadroom(share)
+		}
+	case standing.Tier == TeamTierFree:
 		share := req.Kind.share(standing.AllowanceBytes)
 		room := share - used - reserved
 		if req.UpTo && (req.Bytes <= 0 || req.Bytes > room) {
@@ -283,7 +300,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 					" keeps at most its share of the free allowance; add credits to store more",
 			}
 		}
-	} else if req.UpTo && req.Bytes <= 0 {
+	case req.UpTo && req.Bytes <= 0:
 		out.Unlimited = true
 	}
 	if _, err := tx.ExecContext(ctx, `

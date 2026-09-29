@@ -247,7 +247,7 @@ func run(args []string) error {
 			"takes no slot back")
 	cacheBlobStore := fs.String("cache-blob-store", os.Getenv("SPARKWING_CACHE_BLOB_STORE"),
 		"the cache's --blob-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile what each "+
-			"team stores there and deletes a team's objects 30 days after they were last written; the operator's "+
+			"team stores there and deletes a team's objects 30 days after they were last read or written; the operator's "+
 			"team keeps its own. Empty leaves the cache's counts to its writes alone (env: SPARKWING_CACHE_BLOB_STORE)")
 	logsArchiveStore := fs.String("logs-archive-store", os.Getenv("SPARKWING_LOGS_ARCHIVE_STORE"),
 		"the logs service's --archive-store, as s3://bucket/prefix. The hourly storage pass lists it to reconcile "+

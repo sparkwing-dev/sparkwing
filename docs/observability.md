@@ -639,7 +639,7 @@ working, because deleting is how a store gets back under its ceiling.
 
 | Service | What it bounds | Refusal | State on |
 |--------|------|-------------|------|
-| `sparkwing-cache` | the artifact, dependency-archive, upload, team and git mirror trees | `507` on upload | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
+| `sparkwing-cache` | the artifact, dependency-archive, upload, team and git mirror trees | evicts the least recently read binaries, archives and artifacts down to seven eighths of the ceiling; `507` on upload only when the git mirrors and uploads in flight alone hold it | `GET /health` (`store_ceiling`), `sparkwing.cache.store_*` metrics |
 | `sparkwing-logs` | the whole log store | `507` on append | `GET /api/v1/health` (`store_ceiling`), `sparkwing_logs_store_*` metrics |
 | `sparkwing-controller` | the object store it writes through, on the BYO-backend path | the write fails with the ceiling error | `GET /api/v1/health` (`object_store.ceiling`), `sparkwing_object_store_bucket_*` metrics |
 

@@ -21,6 +21,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/sparkwing-dev/sparkwing/internal/storagequota"
 	"github.com/sparkwing-dev/sparkwing/internal/storagequota/storagequotatest"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 )
@@ -125,6 +126,8 @@ type archiveFixture struct {
 	client *billed
 	root   string
 	calls  *controllerCalls
+	// clock is the object store's, which stamps LastModified.
+	clock gofakes3.TimeSourceAdvancer
 }
 
 type controllerCalls struct {
@@ -157,7 +160,8 @@ func newArchiveFixture(t *testing.T, retention time.Duration) *archiveFixture {
 
 func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.Handler) *archiveFixture {
 	t.Helper()
-	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
+	clock := gofakes3.FixedTimeSource(time.Now())
+	fake := httptest.NewServer(gofakes3.New(s3mem.New(s3mem.WithTimeSource(clock)), gofakes3.WithTimeSource(clock)).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
 		Region:       "us-east-1",
@@ -215,7 +219,7 @@ func newArchiveFixtureWith(t *testing.T, retention time.Duration, counter http.H
 	srv.WithArchive(ArchiveOptions{Store: store})
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls}
+	return &archiveFixture{srv: srv, http: hs, raw: raw, client: client, root: root, calls: calls, clock: clock}
 }
 
 func (f *archiveFixture) do(t *testing.T, method, path, bearer, body string) (int, string) {
@@ -301,7 +305,7 @@ func TestArchiveMovesIdleRunsToTheirTeamsNamespaceAndRestoresThem(t *testing.T) 
 		"logs/teams/team-a/runs/run-a/build.log",
 		"logs/teams/team-a/runs/run-a/test.log",
 		"logs/index/runs/run-a.json",
-		"logs/index/days/" + day + "/run-a",
+		"logs/index/free-days/" + day + "/run-a",
 	} {
 		if !keys[k] {
 			t.Errorf("missing %s in %v", k, keys)
@@ -474,8 +478,8 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 	if err != nil || pruned != expired {
 		t.Fatalf("prune = %d, %v", pruned, err)
 	}
-	if got := f.client.count("ListObjectsV2"); got != 2 {
-		t.Errorf("prune listed %d times, want 2 (the days, then the expired day)", got)
+	if got := f.client.count("ListObjectsV2"); got != 3 {
+		t.Errorf("prune listed %d times, want 3 (each class's days, then the expired day)", got)
 	}
 	if got := f.client.count("GetObject"); got != expired {
 		t.Errorf("prune read %d indexes, want %d", got, expired)
@@ -501,8 +505,8 @@ func TestRetentionOnTheArchiveCostsBoundedRequests(t *testing.T) {
 	if _, err := f.srv.PruneArchive(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.client.total(); got != 1 {
-		t.Errorf("an idle prune cost %d requests, want 1", got)
+	if got := f.client.total(); got != 2 {
+		t.Errorf("an idle prune cost %d requests, want one listing per class", got)
 	}
 }
 
@@ -707,7 +711,7 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 			t.Fatalf("append = %d %s", code, body)
 		}
 	}
-	f.client.refuseKey = func(key string) bool { return strings.HasPrefix(key, "logs/index/days/") }
+	f.client.refuseKey = func(key string) bool { return strings.HasPrefix(key, "logs/index/free-days/") }
 	now := time.Now().Add(time.Hour)
 	const retries = 6
 	for i := range retries {
@@ -723,7 +727,7 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 	}
 	day := 0
 	for k, n := range f.client.keys {
-		if strings.HasPrefix(k, "logs/index/days/") {
+		if strings.HasPrefix(k, "logs/index/free-days/") {
 			day += n
 		}
 	}
@@ -732,5 +736,77 @@ func TestArchiveRetriesSendOnlyWhatHasNotLanded(t *testing.T) {
 	}
 	if !f.onVolume("stuck") {
 		t.Fatal("a run whose archive never finished left the volume")
+	}
+}
+
+// A team without credits keeps its archived logs for the free window and a
+// funded team for the whole retention, each run judged by its team's tier
+// when it was archived.
+func TestAFreeTeamsArchivedLogsExpireBeforeAFundedTeams(t *testing.T) {
+	counter := storagequotatest.New(1<<40, 0)
+	counter.Tiers["team-b"] = storagequota.TierFunded
+	f := newArchiveFixtureWith(t, DefaultArchiveRetention, counter)
+	now := time.Now()
+	for run, bearer := range map[string]string{"free-run": "Bearer a", "funded-run": "Bearer b"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", bearer, "x\n"); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+		f.age(t, run, now.Add(-40*24*time.Hour))
+	}
+	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 2 {
+		t.Fatalf("archive = %d, %v", n, err)
+	}
+	if pruned, err := f.srv.PruneArchive(context.Background(), now); err != nil || pruned != 1 {
+		t.Fatalf("prune = %d, %v; want the free team's run alone", pruned, err)
+	}
+	keys := f.keys(t)
+	if keys["logs/teams/team-a/runs/free-run/build.log"] {
+		t.Error("a free team's run past the free window survived")
+	}
+	if !keys["logs/teams/team-b/runs/funded-run/build.log"] {
+		t.Error("a funded team's run inside the retention was pruned")
+	}
+}
+
+// Evicting a team's logs deletes its least recently written archived runs
+// first, frees at least what was asked, and leaves other teams alone.
+func TestEvictingATeamsLogsTakesItsOldestRunsFirst(t *testing.T) {
+	f := newArchiveFixture(t, 0)
+	now := time.Now()
+	for i, run := range []string{"oldest", "older", "newest"} {
+		if code, body := f.do(t, http.MethodPost, "/api/v1/logs/"+run+"/build", "Bearer a", "0123456789\n"); code != http.StatusNoContent {
+			t.Fatalf("append = %d %s", code, body)
+		}
+		f.age(t, run, now.Add(-time.Duration(3-i)*time.Hour))
+		if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
+			t.Fatalf("archive %s = %d, %v", run, n, err)
+		}
+		f.clock.Advance(time.Minute)
+	}
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/other/build", "Bearer b", "x\n"); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	f.age(t, "other", now.Add(-5*time.Hour))
+	if n, err := f.srv.ArchiveOnce(context.Background(), now); err != nil || n != 1 {
+		t.Fatalf("archive other = %d, %v", n, err)
+	}
+	if code, _ := f.do(t, http.MethodPost, "/api/v1/teams/team-a/logs/evict?bytes=1", "Bearer a", ""); code != http.StatusForbidden {
+		t.Fatalf("a team's own bearer evicting = %d, want 403", code)
+	}
+	code, body := f.do(t, http.MethodPost, "/api/v1/teams/team-a/logs/evict?bytes=11", "Bearer deleter", "")
+	if code != http.StatusOK || !strings.Contains(body, `"freed_bytes":11`) {
+		t.Fatalf("evict = %d %s, want 11 bytes freed", code, body)
+	}
+	keys := f.keys(t)
+	for k, want := range map[string]bool{
+		"logs/teams/team-a/runs/oldest/build.log": false,
+		"logs/index/runs/oldest.json":             false,
+		"logs/teams/team-a/runs/older/build.log":  true,
+		"logs/teams/team-a/runs/newest/build.log": true,
+		"logs/teams/team-b/runs/other/build.log":  true,
+	} {
+		if keys[k] != want {
+			t.Errorf("%s present = %t, want %t", k, keys[k], want)
+		}
 	}
 }

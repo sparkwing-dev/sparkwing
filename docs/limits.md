@@ -66,7 +66,16 @@ append's claim with the controller at most once every 30 seconds per run,
 node, credential and claim; an append that names no claim generation is
 confirmed every time.
 
-A write past a share is refused with `413` and a reason that names the share,
+A log write is never refused for a full share, so a run always keeps its
+logs. A log write past the share is granted, and the controller asks the logs
+service, with its `logs.delete` credential, to evict the team's least recently
+written archived runs until the team is an eighth of the share below it
+(`POST /api/v1/teams/{team}/logs/evict?bytes=`). A run still in use or
+written since its archive is never evicted. The controller waits at most three
+seconds for the eviction and subtracts what it freed; bytes freed after that
+are counted by the next hourly storage pass.
+
+A cache write past its share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. The cache judges a declared
 `Content-Length` before it reads one byte, and stages a binary only after the
 check. An upload of unknown length gets the room the team has left, up to the
@@ -132,8 +141,8 @@ second run over the same data removes nothing more.
 |---|---|---|---|
 | Run events, node metrics | finished runs past the retention window | controller, hourly storage pass | `event_retention_days`, `node_metric_retention_days`; a multi-team controller writes 30 days where the operator set none |
 | A run's event bytes | released from the team's event share once the run finished more than the retention window ago | controller, hourly storage pass | `event_retention_days` |
-| Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive | logs service | `--retention` on `sparkwing-logs`; 30 days with `--archive-store` unless set, off otherwise |
-| Cache binaries, dependency archives and artifacts | written more than 30 days ago, including the default team and operator token's cache root | controller, hourly storage pass | `--cache-blob-store` |
+| Log files | a run's logs once they have gone unwritten for the retention window, on the volume and in the archive; a team without credits when its run was archived keeps its archived logs 30 days at most | logs service | `--retention` on `sparkwing-logs`; 90 days with `--archive-store` unless set, off otherwise |
+| Cache binaries, dependency archives and artifacts | last read or written more than 30 days ago, including the default team and operator token's cache root; a read renews an object older than a day, at most ten renewals a second per service | controller, hourly storage pass | `--cache-blob-store` |
 | Registry proxy entries | past `--proxy-max-age`, and least recently served first past the byte cap | cache, hourly and on each store | `--proxy-max-age`, `--proxy-max-bytes` (`SPARKWING_CACHE_PROXY_MAX_BYTES`, 2 GiB) |
 | Invitations | accepted, withdrawn or expired more than 30 days ago | controller, hourly storage pass | none |
 | API, CLI and runner tokens | revoked or expired more than 30 days ago | controller, hourly storage pass | none |
@@ -145,8 +154,14 @@ second run over the same data removes nothing more.
 | Storage reservations | an hour after a writer took one it never committed or released | controller, on the team's next write and in the hourly storage pass | none |
 
 Every rule keys on when a run finished or when a file or object was last
-written, never on when a run was created, so a run that just ended is never
-pruned for having started long ago.
+written or read, never on when a run was created, so a run that just ended is
+never pruned for having started long ago.
+
+A cache volume at `--max-store-bytes` or `--max-store-objects` evicts its
+least recently read binaries, archives and artifacts, as the volume's access
+times record them, down to seven eighths of the ceiling before it takes a
+write, rather than refusing the write. Git mirrors and uploads in flight are
+never evicted, so a volume their bytes alone fill still answers `507`.
 
 ## Everything a free team can grow
 
@@ -158,14 +173,14 @@ bounds it. The last column is where the bound is enforced or defaulted.
 | Teams per user | three created over the account's life, the personal team included | `pkg/store/identity.go` |
 | Free teams | `--free-team-slots`, 200 by default, released only when a team is deleted | `pkg/store/free_tier.go` |
 | Run events | the event share, 64 MiB by default | `pkg/store/free_tier.go` |
-| Logs, live and archived | the log share, 192 MiB by default | `pkg/store/team_storage.go`, `pkg/logs/log_quota.go` |
+| Logs, live and archived | the log share, 192 MiB by default, kept by evicting the team's least recently written archived runs; a log write is never refused for it | `pkg/store/team_storage.go`, `pkg/logs/archive.go` |
 | Cache binaries, dependency archives and artifacts | the cache share, 768 MiB by default, refused before the body is read | `pkg/store/team_storage.go`, `internal/cache/blobquota.go` |
 | Events per run | 256 KiB per event, 64 MiB and 50,000 events per run | `pkg/store/event_limits.go` |
 | Logs per run | 64 MiB per node and 1 GiB per run on the logs service | `pkg/logs/limits.go` |
-| Log files | the logs service's `--retention`, 30 days with an archive | `cmd/sparkwing-logs/main.go` |
+| Log files | 30 days after the last write for a team without credits, and the logs service's `--retention`, 90 days with an archive, for a funded team | `cmd/sparkwing-logs/main.go`, `pkg/logs/archive.go` |
 | Run events past retention | removed with their bytes 30 days after the run finished on a multi-team controller | `pkg/controller/team_storage.go`, `pkg/store/storage_retention.go` |
 | One cache object | 500 MiB per artifact or archive and 100 MiB per compiled binary, inside the share | `internal/cache/cache.go`, `internal/cache/blobstore.go` |
-| Team cache objects | 30 days after they were written | `pkg/controller/storage_pass.go` |
+| Team cache objects | 30 days after they were last read or written | `pkg/controller/storage_pass.go`, `internal/teamblob/teamblob.go` |
 | Git mirrors | registered by the operator only; a team's grant cannot add one | `internal/cache/gitcache.go` |
 | Registry proxy directory | shared by every team; 2 GiB, least recently served evicted first, and 7 days per entry | `internal/cache/proxycap.go` |
 | Registry proxy churn | the proxy takes no credential, because runner pods carry none, and is served inside the cluster only: the runner-bundle chart refuses a cache Service other than `ClusterIP` unless `cache.dependencyProxy.enabled=false`, which starts the cache with `--disable-proxy`. The cache's daily egress alarm reports what callers pull through it and refuses nothing | `internal/cache/cache.go`, `charts/sparkwing-runner-bundle/templates/validate.yaml`, `cmd/sparkwing-cache/main.go` |

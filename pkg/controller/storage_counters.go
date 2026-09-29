@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -110,7 +112,7 @@ func (s *Server) handleStorageReserve(w http.ResponseWriter, r *http.Request) {
 	res, err := s.store.ReserveStorage(r.Context(), store.StorageReserve{
 		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.Bytes, UpTo: req.UpTo, Now: time.Now(),
 	})
-	s.writeReservation(w, r, res, err)
+	s.writeReservation(w, r, store.Team(req.Team), res, err)
 }
 
 type storageCommitReq struct {
@@ -164,10 +166,44 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	next, err := s.store.RenewStorage(r.Context(), commit, store.StorageReserve{
 		Team: store.Team(req.Team), Kind: req.Store, Bytes: req.NextBytes, UpTo: true, Now: commit.Now,
 	})
-	s.writeReservation(w, r, next, err)
+	s.writeReservation(w, r, store.Team(req.Team), next, err)
 }
 
-func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, res store.StorageReservation, err error) {
+// LogEvictionTimeout bounds the eviction a log write past a team's share
+// waits for, inside the logs service's own wait for the reservation.
+const LogEvictionTimeout = 3 * time.Second
+
+// safety: the write was already granted, so an eviction that fails or runs
+// out of time leaves the team past its share only until its next write or
+// the hourly storage pass, which also counts bytes freed after the timeout.
+func (s *Server) evictTeamLogs(ctx context.Context, team store.Team, want int64) {
+	ts := s.teamStorage
+	if ts.LogsURL == "" || ts.LogsToken == "" {
+		s.logger.Warn("team past its log share and no logs service to evict from", "team", string(team), "bytes", want)
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, LogEvictionTimeout)
+	defer cancel()
+	target := strings.TrimRight(ts.LogsURL, "/") + "/api/v1/teams/" + url.PathEscape(string(team)) +
+		"/logs/evict?bytes=" + strconv.FormatInt(want, 10)
+	var out struct {
+		Freed int64 `json:"freed_bytes"`
+	}
+	if err := postRemote(ctx, target, ts.LogsToken, &out); err != nil {
+		s.logger.Warn("evict team logs", "team", string(team), "bytes", want, "err", err)
+		return
+	}
+	if out.Freed <= 0 {
+		return
+	}
+	if err := s.store.CommitStorage(ctx, store.StorageCommit{
+		Team: team, Kind: store.StorageLogs, Bytes: -out.Freed, Now: time.Now(),
+	}); err != nil {
+		s.logger.Warn("count evicted team logs", "team", string(team), "freed", out.Freed, "err", err)
+	}
+}
+
+func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, team store.Team, res store.StorageReservation, err error) {
 	var quota *store.StorageQuotaError
 	switch {
 	case errors.As(err, &quota):
@@ -179,6 +215,9 @@ func (s *Server) writeReservation(w http.ResponseWriter, r *http.Request, res st
 	case err != nil:
 		s.writeInternalError(w, r, "reserve team storage", err)
 	default:
+		if res.EvictBytes > 0 {
+			s.evictTeamLogs(r.Context(), team, res.EvictBytes)
+		}
 		writeJSON(w, http.StatusOK, res)
 	}
 }

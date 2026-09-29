@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -338,5 +340,53 @@ func TestTheServerIsItsOwnFreeTierSource(t *testing.T) {
 	}
 	if out := f.signIn(person("g-full", "full@example.com", "F")); !out.Waitlisted {
 		t.Fatal("a new account was admitted with every free slot taken")
+	}
+}
+
+// A log write past a free team's share is granted rather than refused, so a
+// run never loses its logs to a full share; the controller asks the logs
+// service to evict the team's oldest logs and counts what it freed.
+func TestALogWritePastTheShareEvictsInsteadOfRefusing(t *testing.T) {
+	var asked atomic.Int64
+	logsSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/teams/first/logs/evict" ||
+			r.Header.Get("Authorization") != "Bearer logs-delete" {
+			http.NotFound(w, r)
+			return
+		}
+		n, _ := strconv.ParseInt(r.URL.Query().Get("bytes"), 10, 64)
+		asked.Store(n)
+		_, _ = fmt.Fprintf(w, `{"freed_bytes":%d}`, n)
+	}))
+	t.Cleanup(logsSvc.Close)
+	raw, pub := multiTeamLicense(t)
+	f := newIdentityFixtureWith(t, fixtureOpts{license: raw, key: pub, configure: func(s *controller.Server) {
+		s.WithTeamStorage(controller.TeamStorage{LogsURL: logsSvc.URL, LogsToken: "logs-delete"})
+	}})
+	allowance := int64(16 << 10)
+	if _, err := f.store.SetCreditSettings(context.Background(), store.CreditSettingsUpdate{
+		StorageFreeAllowanceBytes: &allowance,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	freeTeamToken(t, f.store, "first")
+	writer := logsWriter(t, f.store, "first")
+	share := store.FreeLogShare(allowance)
+	if code, _ := f.reserve(writer, "first", "logs", share); code != http.StatusOK {
+		t.Fatalf("reserve the whole log share = %d", code)
+	}
+	code, res := f.reserve(writer, "first", "logs", 100)
+	if code != http.StatusOK || res.Granted != 100 {
+		t.Fatalf("a log write past the share = %d %+v, want it granted", code, res)
+	}
+	if want := 100 + store.LogEvictionHeadroom(share); asked.Load() != want {
+		t.Fatalf("asked the logs service to evict %d bytes, want %d", asked.Load(), want)
+	}
+	held, err := f.store.TeamStorage(context.Background(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := held[store.StorageLogs]; got.UsedBytes != 0 || got.ReservedBytes != share+100 {
+		t.Fatalf("logs after eviction = %+v, want the freed bytes off the count", got)
 	}
 }

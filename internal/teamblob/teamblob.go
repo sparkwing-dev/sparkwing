@@ -29,7 +29,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -46,6 +48,7 @@ type Client interface {
 	HeadObject(ctx context.Context, in *s3.HeadObjectInput, opt ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 	DeleteObject(ctx context.Context, in *s3.DeleteObjectInput, opt ...func(*s3.Options)) (*s3.DeleteObjectOutput, error)
 	DeleteObjects(ctx context.Context, in *s3.DeleteObjectsInput, opt ...func(*s3.Options)) (*s3.DeleteObjectsOutput, error)
+	CopyObject(ctx context.Context, in *s3.CopyObjectInput, opt ...func(*s3.Options)) (*s3.CopyObjectOutput, error)
 	ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2Input, opt ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 	CreateMultipartUpload(ctx context.Context, in *s3.CreateMultipartUploadInput, opt ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error)
 	UploadPart(ctx context.Context, in *s3.UploadPartInput, opt ...func(*s3.Options)) (*s3.UploadPartOutput, error)
@@ -112,6 +115,7 @@ type Store struct {
 	maxAge    func(team string) time.Duration
 	now       func() time.Time
 	breaker   breaker
+	lastRenew atomic.Int64
 }
 
 // New validates opts and returns a Store.
@@ -169,6 +173,7 @@ type Object struct {
 	Size         int64
 	LastModified time.Time
 	Metadata     map[string]string
+	ContentType  string
 }
 
 // ValidTeam reports whether team is a slug the store will namespace: a
@@ -453,6 +458,7 @@ func (s *Store) Get(ctx context.Context, team, rel string) (io.ReadCloser, Objec
 		Size:         aws.ToInt64(out.ContentLength),
 		LastModified: aws.ToTime(out.LastModified),
 		Metadata:     out.Metadata,
+		ContentType:  aws.ToString(out.ContentType),
 	}, nil
 }
 
@@ -489,7 +495,55 @@ func (s *Store) headKey(ctx context.Context, key string) (Object, error) {
 		Size:         aws.ToInt64(out.ContentLength),
 		LastModified: aws.ToTime(out.LastModified),
 		Metadata:     out.Metadata,
+		ContentType:  aws.ToString(out.ContentType),
 	}, nil
+}
+
+// RenewAfter is how old an object's LastModified grows before a read
+// renews it.
+const RenewAfter = 24 * time.Hour
+
+// safety: ten renewals a second per store keeps a burst of reads of stale
+// objects under the bucket's PUT-rate alarms; a read that finds the budget
+// spent renews nothing, and the object's next read renews it.
+const renewSpacing = 100 * time.Millisecond
+
+// Renew rewrites team's obj in place, unchanged, so its LastModified becomes
+// now. The storage pass and the bucket's lifecycle age an object from its
+// LastModified, so a read that renews it keeps what is still used. obj is
+// what a Get or Head of it returned; one renewed within [RenewAfter] costs
+// nothing.
+func (s *Store) Renew(ctx context.Context, team string, obj Object) error {
+	now := s.now()
+	if now.Sub(obj.LastModified) < RenewAfter {
+		return nil
+	}
+	last := s.lastRenew.Load()
+	if now.UnixNano()-last < int64(renewSpacing) || !s.lastRenew.CompareAndSwap(last, now.UnixNano()) {
+		return nil
+	}
+	key, err := s.Key(team, obj.Rel)
+	if err != nil {
+		return err
+	}
+	in := &s3.CopyObjectInput{
+		Bucket:            aws.String(s.bucket),
+		Key:               aws.String(key),
+		CopySource:        aws.String((&url.URL{Path: s.bucket + "/" + key}).EscapedPath()),
+		MetadataDirective: types.MetadataDirectiveReplace,
+		Metadata:          obj.Metadata,
+		ChecksumAlgorithm: types.ChecksumAlgorithmSha256,
+	}
+	if obj.ContentType != "" {
+		in.ContentType = aws.String(obj.ContentType)
+	}
+	return s.guarded(ctx, func() error {
+		_, err := s.client.CopyObject(ctx, in)
+		if err != nil {
+			return fmt.Errorf("teamblob: renew %s: %w", key, err)
+		}
+		return nil
+	})
 }
 
 // Delete removes team's rel. A missing object is not an error.
@@ -555,6 +609,7 @@ func (s *Store) deleteKeys(ctx context.Context, keys []sizedKey) (Deleted, error
 			if !failed[k.key] {
 				d.Objects++
 				d.Bytes += k.size
+				d.Keys = append(d.Keys, k.key)
 			}
 		}
 		if len(out.Errors) > 0 {
@@ -636,6 +691,8 @@ func (s *Store) walk(ctx context.Context, prefix string, visit func(types.Object
 type Deleted struct {
 	Objects int64 `json:"objects"`
 	Bytes   int64 `json:"bytes"`
+	// Keys are the full object keys the store confirmed deleted.
+	Keys []string `json:"-"`
 }
 
 // DeletePrefix removes every object of team under relPrefix: one LIST
@@ -657,6 +714,7 @@ func (s *Store) DeletePrefix(ctx context.Context, team, relPrefix string) (Delet
 		got, err := s.deleteKeys(ctx, keys)
 		d.Objects += got.Objects
 		d.Bytes += got.Bytes
+		d.Keys = append(d.Keys, got.Keys...)
 		derr = err
 		keys = keys[:0]
 	}

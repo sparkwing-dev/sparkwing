@@ -198,6 +198,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/logs/search", s.requireScope(scopeLogsRead, s.readableRun(queryRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleSearch)))))
 
 	mux.Handle("DELETE /api/v1/teams/{team}/logs", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleDeleteTeamLogs), scopeLogsDelete))
+	mux.Handle("POST /api/v1/teams/{team}/logs/evict", s.requireScope(scopeAdmin, http.HandlerFunc(s.handleEvictTeamLogs), scopeLogsDelete))
 
 	authed := s.authMiddleware(mux)
 

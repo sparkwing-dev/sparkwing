@@ -20,7 +20,9 @@ const DirectUploadTTL = 24 * time.Hour
 // day after it finishes; an unused upload starts its day at commit.
 const sourceBundleRetention = 24 * time.Hour
 
-// DirectCacheMaxAge is the controller's retention window for cache keys.
+// DirectCacheMaxAge is the controller's retention window for cache keys,
+// counted from an object's last read: a read renews an object older than a
+// day.
 const DirectCacheMaxAge = 30 * 24 * time.Hour
 
 const directUploadTablesSQL = `CREATE TABLE IF NOT EXISTS uploads (
@@ -424,16 +426,36 @@ func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, 
 	return res.RowsAffected()
 }
 
-// PruneExpiredCacheObjects removes direct cache rows only after the cache
-// bucket's successful retention listing has removed their bytes.
-func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
-	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND committed_at <= ?`,
-		string(StorageCache), cutoff)
+// PruneExpiredCacheObjects removes the direct cache rows of the objects the
+// cache bucket's retention listing deleted, named by the rel each was written
+// under, "<provenance>/<key>". A rel that names no direct object is skipped.
+func (s *Store) PruneExpiredCacheObjects(ctx context.Context, team Team, rels []string) (_ int64, err error) {
+	if len(rels) == 0 {
+		return 0, nil
+	}
+	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	defer rollbackUnlessDone(tx, &err)
+	var pruned int64
+	for _, rel := range rels {
+		provenance, key, ok := strings.Cut(rel, "/")
+		if !ok || (provenance != "local" && provenance != "cloud") || strings.HasPrefix(key, "sources/") {
+			continue
+		}
+		res, err := tx.ExecContext(ctx, `DELETE FROM data_objects WHERE team = ? AND store = ? AND provenance = ? AND key = ?`,
+			string(NormalizeTeam(team)), string(StorageCache), provenance, key)
+		if err != nil {
+			return 0, err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		pruned += n
+	}
+	return pruned, tx.Commit()
 }
 
 // TrustLocalBuilds reports whether the team permits cloud runners to execute

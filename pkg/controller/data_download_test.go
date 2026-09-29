@@ -29,11 +29,22 @@ import (
 type downloadHead struct {
 	teamblob.Client
 	keys []string
+	// age is how long ago every object was last written.
+	age    time.Duration
+	copies []string
 }
 
 func (h *downloadHead) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	h.keys = append(h.keys, aws.ToString(in.Key))
-	return &s3.HeadObjectOutput{ContentLength: aws.Int64(4), Metadata: map[string]string{"sha256": strings.Repeat("a", 64)}}, nil
+	return &s3.HeadObjectOutput{
+		ContentLength: aws.Int64(4), LastModified: aws.Time(time.Now().Add(-h.age)),
+		Metadata: map[string]string{"sha256": strings.Repeat("a", 64)},
+	}, nil
+}
+
+func (h *downloadHead) CopyObject(_ context.Context, in *s3.CopyObjectInput, _ ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
+	h.copies = append(h.copies, aws.ToString(in.Key))
+	return &s3.CopyObjectOutput{}, nil
 }
 
 func downloadFixture(t *testing.T) (*Server, string, *downloadHead) {
@@ -737,5 +748,20 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 		if body.DataDownloadURL != tc.want {
 			t.Fatalf("ingress=%v route=%q want %q", tc.ingress, body.DataDownloadURL, tc.want)
 		}
+	}
+}
+
+// Signing a cache download renews an object last written more than a day
+// ago, so the storage pass ages it from the read; a fresh one is left alone.
+func TestSigningACacheDownloadRenewsAStaleObject(t *testing.T) {
+	s, grant, head := downloadFixture(t)
+	s.WithTeamDownloadCaps(0, 0)
+	if response, _ := callDownload(t, s, grant, "bins/abc", false); response.Code != http.StatusOK || len(head.copies) != 0 {
+		t.Fatalf("a fresh object = %d, renewed %v; want it signed and left alone", response.Code, head.copies)
+	}
+	head.age = 2 * teamblob.RenewAfter
+	if response, _ := callDownload(t, s, grant, "bins/abc", false); response.Code != http.StatusOK ||
+		len(head.copies) != 1 || head.copies[0] != "cache/teams/team-a/bins/abc" {
+		t.Fatalf("a stale object = %d, renewed %v; want it signed and renewed in place", response.Code, head.copies)
 	}
 }

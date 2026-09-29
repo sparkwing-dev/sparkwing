@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -229,7 +230,8 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	var objectSize int64
 	var digest string
-	var objectKey string
+	var objectKey, rel string
+	var headed *teamblob.Object
 	switch {
 	case req.Kind == "source":
 		if grant == nil {
@@ -266,7 +268,8 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
+		rel = obj.Provenance + "/" + obj.Key
+		objectKey, err = bucket.Key(string(team), rel)
 	case req.Kind == "binary" && strings.HasPrefix(req.Key, "bin/"):
 		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader)
 		if errors.Is(findErr, store.ErrNotFound) {
@@ -278,7 +281,8 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
+		rel = obj.Provenance + "/" + obj.Key
+		objectKey, err = bucket.Key(string(team), rel)
 	case req.Kind == "artifact" && strings.HasPrefix(req.Key, "artifacts/"):
 		obj, findErr := s.store.CommittedObjectFor(r.Context(), team, req.Key, cloudReader)
 		if errors.Is(findErr, store.ErrNotFound) {
@@ -294,13 +298,15 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		objectSize, digest = obj.Size, obj.SHA256
-		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
+		rel = obj.Provenance + "/" + obj.Key
+		objectKey, err = bucket.Key(string(team), rel)
 	default:
 		if req.Kind == "binary" && (!strings.HasPrefix(req.Key, "bins/") || (cloudReader && s.directUploads != nil)) {
 			http.NotFound(w, r)
 			return
 		}
-		objectKey, err = bucket.Key(string(team), req.Key)
+		rel = req.Key
+		objectKey, err = bucket.Key(string(team), rel)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
@@ -315,6 +321,7 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		objectSize, digest = object.Size, object.Metadata["sha256"]
+		headed = &object
 	}
 	if err != nil || objectSize < 0 {
 		writeError(w, http.StatusBadRequest, errors.New("invalid download object key or size"))
@@ -363,5 +370,48 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		s.writeInternalError(w, r, "charge signed download", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, DataDownloadResponse{URL: signed, SHA256: digest, Size: objectSize, Expires: expires})
+	// safety: a source expires with its run, not with its reads, and a log
+	// keeps the logs service's retention.
+	if kind != store.StorageCache || req.Kind == "source" {
+		writeJSON(w, http.StatusOK, DataDownloadResponse{URL: signed, SHA256: digest, Size: objectSize, Expires: expires})
+		return
+	}
+	writeWholeJSON(w, DataDownloadResponse{URL: signed, SHA256: digest, Size: objectSize, Expires: expires})
+	s.renewSigned(r, bucket, team, rel, headed)
+}
+
+// safety: the answer names its length and is flushed first, so the caller has
+// its URL before the renewal starts; a renewal that fails leaves the object
+// aging from its last write.
+func (s *Server) renewSigned(r *http.Request, bucket *teamblob.Store, team store.Team, rel string, headed *teamblob.Object) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Minute)
+	defer cancel()
+	var obj teamblob.Object
+	var err error
+	if headed != nil {
+		obj = *headed
+	} else {
+		obj, err = bucket.Head(ctx, string(team), rel)
+	}
+	if err == nil {
+		err = bucket.Renew(ctx, string(team), obj)
+	}
+	if err != nil && !errors.Is(err, teamblob.ErrNotFound) {
+		s.logger.Warn("renew a signed download", "team", string(team), "rel", rel, "err", err)
+	}
+}
+
+func writeWholeJSON(w http.ResponseWriter, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }

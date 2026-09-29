@@ -111,6 +111,7 @@ type Client struct {
 
 	mu     sync.Mutex
 	funded map[string]time.Time
+	tiers  map[string]Tier
 }
 
 // New returns a client of the controller at controllerURL. A nil client
@@ -119,7 +120,7 @@ func New(controllerURL string, client *http.Client) *Client {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	return &Client{base: strings.TrimRight(controllerURL, "/"), http: client, now: time.Now, funded: map[string]time.Time{}}
+	return &Client{base: strings.TrimRight(controllerURL, "/"), http: client, now: time.Now, funded: map[string]time.Time{}, tiers: map[string]Tier{}}
 }
 
 // WithClock replaces time.Now, for a test.
@@ -131,6 +132,7 @@ func (c *Client) WithClock(now func() time.Time) *Client {
 func (c *Client) observe(team string, tier Tier) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.tiers[team] = tier
 	if tier == TierFunded {
 		c.funded[team] = c.now()
 		return
@@ -143,6 +145,14 @@ func (c *Client) recentlyFunded(team string) bool {
 	defer c.mu.Unlock()
 	at, ok := c.funded[team]
 	return ok && c.now().Sub(at) < MaxFundedAge
+}
+
+// LastTier reports the tier the controller last answered for team, or ""
+// when this client has not asked about it since it started.
+func (c *Client) LastTier(team string) Tier {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tiers[team]
 }
 
 // Reserve holds bytes of team's room in kind. With upTo it holds as much of
