@@ -7239,55 +7239,44 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
 
-  /api/v1/runs/{id}/goproxy/{path}:
+  /api/v1/runs/{id}/source-credential:
     parameters:
       - in: path
         name: id
         required: true
         schema: {type: string}
-      - in: path
-        name: path
-        required: true
-        schema: {type: string}
-    get:
+    post:
       x-sparkwing-scope: claim
       tags: [runs]
-      summary: Serve a claim's private Go modules.
+      summary: Issue a claim's one source credential to its Job's init container.
       description: >-
-        The GOPROXY protocol (`<module>/@v/list`, `.info`, `.mod`, `.zip`) for modules in a repository a team owner listed for the run's repository (Team > GitHub), fetched by the controller with the team's GitHub App token and built as the go command builds a module zip. It answers only a live, uncancelled plan or work claim token. Every other module, and `@latest`, is 404, so the go command moves on to the next proxy in GOPROXY.
-      responses:
-        "200": {description: The module file.}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-
-  /api/v1/runs/{id}/source:
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema: {type: string}
-    get:
-      x-sparkwing-scope: claim
-      tags: [runs]
-      summary: Check out a claim's run for its pod.
-      description: >-
-        Answers only a claim token (plan or work) whose claim is live and whose run has no cancel request. The controller fetches the run's recorded repository at its recorded commit with the team's credential (the GitHub App token for the repository, or the team's stored git credential for its host) and answers a gzipped tar of the checkout, `.git` included: origin names the remote with no credential, and HEAD is the run's branch at the commit. The credential never leaves the controller. The claim is checked again once the fetch is done, and a claim lost or cancelled meanwhile gets no tree. Submodules must be on the credential's host; LFS objects are fetched only through the GitHub App.
-      parameters:
-        - {in: query, name: depth, schema: {type: integer, minimum: 0, default: 1}, description: Commits of history to fetch; 0 fetches all of it.}
-        - {in: query, name: tags, schema: {type: string, enum: ["1"]}, description: Fetch the repository's tags.}
-        - {in: query, name: submodules, schema: {type: string, enum: ["1"]}, description: Check out submodules.}
-        - {in: query, name: lfs, schema: {type: string, enum: ["1"]}, description: Fetch LFS objects.}
+        Answers only a live, uncancelled plan or work claim token. Mints a read-only GitHub App installation token (`contents: read`, about an hour) for exactly the run's repository and the repositories a team owner listed for it (Team > GitHub), and answers it with the run's clone URL, commit, branch, those repositories and the checkout the run's plan asks for (depth, tags, submodules, LFS). A claim gets one credential, and none once its attempt has started, so the pipeline's container, which holds the same claim token, cannot mint one; each issue is recorded as a git credential release. Sparkwing Cloud fetches source only through the GitHub App; stored git credentials serve self-hosted runners.
       responses:
         "200":
-          description: The checkout.
+          description: The credential and what to check out.
           content:
-            application/gzip:
-              schema: {type: string, format: binary}
-        "400": {description: A malformed option.}
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.SourceCredential
+                type: object
+                properties:
+                  token: {type: string}
+                  expires_at: {type: integer, format: int64}
+                  repo_url: {type: string}
+                  sha: {type: string}
+                  branch: {type: string}
+                  repositories: {type: array, items: {type: string}}
+                  source:
+                    x-sparkwing-go-type: pkg/store.SourceSpec
+                    type: object
+                    properties:
+                      depth: {type: integer}
+                      tags: {type: boolean}
+                      submodules: {type: boolean}
+                      lfs: {type: boolean}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The run records no commit.}
-        "502": {description: The fetch failed.}
 
 components:
   securitySchemes:

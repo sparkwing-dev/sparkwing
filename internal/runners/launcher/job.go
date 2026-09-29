@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -39,6 +40,8 @@ const (
 	managedByLauncher   = "sparkwing-launcher"
 	jobAppName          = "sparkwing-job"
 	runNodeVerb         = "run-node"
+	fetchSourceVerb     = "fetch-source"
+	sourceDir           = "/tmp/src"
 	jobBearerEnv        = "SPARKWING_AGENT_TOKEN"
 	defaultScratchLimit = "20Gi"
 )
@@ -113,6 +116,7 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		{Name: "SPARKWING_HOME", Value: "/tmp/sparkwing"},
 		{Name: "GOCACHE", Value: "/tmp/go-build"},
 		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
+		{Name: "SPARKWING_SOURCE_DIR", Value: sourceDir},
 	}
 	for _, v := range []corev1.EnvVar{
 		{Name: "SPARKWING_LOGS_URL", Value: cfg.LogsURL},
@@ -124,6 +128,10 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 		}
 	}
 	env = append(env, k8s.DependencyProxyEnv(cfg.DependencyProxyURL)...)
+	// safety: the init container gets the same fixed env, and its command is
+	// the launcher's own; the pipeline's container adds only the module mode.
+	fetchEnv := slices.Clone(env)
+	env = append(env, corev1.EnvVar{Name: "GOFLAGS", Value: "-mod=mod"})
 	scratch := resource.MustParse(cfg.scratchLimit())
 	// safety: the lifetime runs from the claim on the controller's clock, so the
 	// margin covers the response and the Job create, and the Job never outlives
@@ -165,23 +173,8 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 						RunAsGroup:     ptr(int64(jobUID)),
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
-					Containers: []corev1.Container{{
-						Name:            "node",
-						Image:           cfg.Image,
-						ImagePullPolicy: corev1.PullIfNotPresent,
-						Command:         []string{k8s.JobBinary},
-						Args:            []string{runNodeVerb, claim.RunID, claim.NodeID},
-						Env:             env,
-						Resources:       classResources(cfg, claim.Class),
-						SecurityContext: &corev1.SecurityContext{
-							AllowPrivilegeEscalation: ptr(false),
-							ReadOnlyRootFilesystem:   ptr(true),
-							RunAsNonRoot:             ptr(true),
-							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-							SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-						},
-						VolumeMounts: []corev1.VolumeMount{{Name: scratchVolume, MountPath: "/tmp"}},
-					}},
+					InitContainers: []corev1.Container{jobContainer(cfg, claim, "source", fetchSourceVerb, fetchEnv)},
+					Containers:     []corev1.Container{jobContainer(cfg, claim, "node", runNodeVerb, env)},
 					Volumes: []corev1.Volume{{
 						Name:         scratchVolume,
 						VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &scratch}},
@@ -189,6 +182,26 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 				},
 			},
 		},
+	}
+}
+
+func jobContainer(cfg Config, claim store.LaunchClaim, name, verb string, env []corev1.EnvVar) corev1.Container {
+	return corev1.Container{
+		Name:            name,
+		Image:           cfg.Image,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{k8s.JobBinary},
+		Args:            []string{verb, claim.RunID, claim.NodeID},
+		Env:             env,
+		Resources:       classResources(cfg, claim.Class),
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr(false),
+			ReadOnlyRootFilesystem:   ptr(true),
+			RunAsNonRoot:             ptr(true),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		},
+		VolumeMounts: []corev1.VolumeMount{{Name: scratchVolume, MountPath: "/tmp"}},
 	}
 }
 
@@ -202,7 +215,10 @@ func classResources(cfg Config, class store.CPUClass) corev1.ResourceRequirement
 	}
 	cpu := resource.NewMilliQuantity(int64(min(float64(cores)-k8s.BandCPUHeadroom, cfg.CPUCeiling)*1000), resource.DecimalSI)
 	mem := resource.NewQuantity(min(memory, cfg.MemoryCeiling), resource.BinarySI)
-	list := corev1.ResourceList{corev1.ResourceCPU: *cpu, corev1.ResourceMemory: *mem}
+	list := corev1.ResourceList{
+		corev1.ResourceCPU: *cpu, corev1.ResourceMemory: *mem,
+		corev1.ResourceEphemeralStorage: resource.MustParse(cfg.scratchLimit()),
+	}
 	return corev1.ResourceRequirements{Requests: list, Limits: list.DeepCopy()}
 }
 

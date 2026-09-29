@@ -108,9 +108,6 @@ type GitCredentialRelease struct {
 	// Claimant is the claim the release is made against; the release
 	// re-checks it inside its own transaction. Not stored.
 	Claimant ClaimIdentity
-	// Claim, when set, is the claim token the release is made for, which the
-	// release fences as a sensitive write in place of Claimant. Not stored.
-	Claim *ClaimToken
 }
 
 // ErrClaimNotLive refuses a release whose claimant no longer holds a live
@@ -285,15 +282,7 @@ func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitC
 		return GitCredential{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	switch {
-	case rel.Claim != nil && (rel.Claim.Team != t.team || rel.Claim.RunID != rel.RunID):
-		return GitCredential{}, ErrClaimNotLive
-	case rel.Claim != nil:
-		err = fenceSensitiveClaimTx(ctx, tx, *rel.Claim, now)
-	default:
-		err = t.lockLiveRunClaimTx(ctx, tx, rel.RunID, rel.Claimant, now)
-	}
-	if err != nil {
+	if err := t.lockLiveRunClaimTx(ctx, tx, rel.RunID, rel.Claimant, now); err != nil {
 		return GitCredential{}, err
 	}
 	c, err := scanGitCredential(tx.QueryRowContext(ctx, `

@@ -742,6 +742,7 @@ var ErrSecretLimit = errors.New("store: secret limit reached")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
+var ErrSourceCredentialSpent = errors.New("store: this claim's source credential was already issued or its attempt has started")
 var ErrStorageQuota = errors.New("storage quota exceeded")
 var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
@@ -966,8 +967,6 @@ type GitCredentialRelease struct {
 	ReleasedAt   time.Time
 
 	Claimant ClaimIdentity
-
-	Claim *ClaimToken
 }
 const GitCredentialSSH = "ssh"
 const GitHubAppDeliveryRetention = 90 * 24 * time.Hour
@@ -1769,7 +1768,22 @@ type SkewError struct {
 	Requirements     []string
 }
 func (e *SkewError) Error() string
+type SourceCredential struct {
+	Token        string
+	ExpiresAt    int64
+	RepoURL      string
+	SHA          string
+	Branch       string
+	Repositories []string
+	Source       SourceSpec
+}
 func SourceKeyDigest(key string) (string, bool)
+type SourceSpec struct {
+	Depth      int
+	Tags       bool
+	Submodules bool
+	LFS        bool
+}
 type SpawnedChild struct {
 	ParentNodeID string
 	Pipeline     string
@@ -2492,6 +2506,7 @@ func (t *Tenant) SetGitHubAppExtraRepos(ctx context.Context, repository string, 
 func (t *Tenant) SetMemberRole(ctx context.Context, actorID, subjectID string, role Role, now time.Time) ([]string, error)
 func (t *Tenant) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispatch RepoDispatch, now time.Time) error
+func (t *Tenant) SpendSourceCredential(ctx context.Context, tok ClaimToken, credentialID, host, runner string, now time.Time) (_ SourceSpec, err error)
 func (t *Tenant) Team() Team
 func (t *Tenant) TouchRunHeartbeat(ctx context.Context, runID string) error
 func (t *Tenant) UnbindGitHubAppInstallation(ctx context.Context, installation int64) error

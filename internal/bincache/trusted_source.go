@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -134,7 +134,12 @@ func (g *trustedGit) gitRaw(ctx context.Context, dir string, remote bool, args .
 // standalone repository with its .git: origin names the remote with no
 // credential in it, and HEAD is branch at sha, or sha detached when branch is
 // empty. cred must be a credential the controller holds for the repository.
-func CheckoutSource(ctx context.Context, repoURL, sha, branch, dest string, cred DirectCredential, o SourceOptions) error {
+//
+// submoduleRepos lists, as sourceurl.Identity values, the only repositories a
+// submodule may name.
+func CheckoutSource(ctx context.Context, repoURL, sha, branch, dest string, cred DirectCredential, o SourceOptions,
+	submoduleRepos []string,
+) error {
 	if _, _, err := ValidateDirectSource(repoURL, sha); err != nil || sha == "" {
 		return errors.Join(errors.New("source: a trusted checkout needs the run's full commit id"), err)
 	}
@@ -145,10 +150,10 @@ func CheckoutSource(ctx context.Context, repoURL, sha, branch, dest string, cred
 	if err != nil {
 		return err
 	}
-	return errors.Join(g.checkout(ctx, strings.ToLower(sha), branch, dest, o), g.close())
+	return errors.Join(g.checkout(ctx, strings.ToLower(sha), branch, dest, o, submoduleRepos), g.close())
 }
 
-func (g *trustedGit) checkout(ctx context.Context, sha, branch, dest string, o SourceOptions) error {
+func (g *trustedGit) checkout(ctx context.Context, sha, branch, dest string, o SourceOptions, submoduleRepos []string) error {
 	if o.Depth < 0 {
 		return errors.New("source: depth must be 0 (all history) or more")
 	}
@@ -181,7 +186,11 @@ func (g *trustedGit) checkout(ctx context.Context, sha, branch, dest string, o S
 		return err
 	}
 	if o.Submodules {
-		if err := g.submodules(ctx, dest, 0); err != nil {
+		allowed := map[string]bool{}
+		for _, id := range submoduleRepos {
+			allowed[strings.ToLower(id)] = true
+		}
+		if err := g.submodules(ctx, dest, g.remote, allowed, 0); err != nil {
 			return err
 		}
 	}
@@ -205,10 +214,10 @@ func (g *trustedGit) checkout(ctx context.Context, sha, branch, dest string, o S
 	return nil
 }
 
-// safety: .gitmodules comes from the fetched tree, so every level is read
-// before it is fetched and each URL must name the credential's own host; a
-// relative URL resolves against origin, which already does.
-func (g *trustedGit) submodules(ctx context.Context, dir string, level int) error {
+// safety: .gitmodules comes from the fetched tree and a host-wide credential reaches every repository on its
+// host, so each level is read before it is fetched and every URL, relative ones resolved first, must name a
+// repository in allowed, the owner's list for the run's repository.
+func (g *trustedGit) submodules(ctx context.Context, dir, parentURL string, allowed map[string]bool, level int) error {
 	if !hasGitmodules(dir) {
 		return nil
 	}
@@ -219,20 +228,27 @@ func (g *trustedGit) submodules(ctx context.Context, dir string, level int) erro
 	if err != nil {
 		return fmt.Errorf("source: read .gitmodules: %w", err)
 	}
-	var paths []string
+	type sub struct{ path, url string }
+	subs := map[string]*sub{}
 	for _, line := range strings.Split(out, "\n") {
 		key, value, _ := strings.Cut(line, " ")
-		switch {
-		case strings.HasSuffix(key, ".path"):
+		name, field := key[:max(strings.LastIndex(key, "."), 0)], key[strings.LastIndex(key, ".")+1:]
+		if subs[name] == nil {
+			subs[name] = &sub{}
+		}
+		switch field {
+		case "path":
 			if !filepath.IsLocal(value) {
 				return fmt.Errorf("source: submodule path %q leaves the checkout", value)
 			}
-			paths = append(paths, value)
-		case strings.HasSuffix(key, ".url") && !strings.HasPrefix(value, "./") && !strings.HasPrefix(value, "../"):
-			if host, err := sourceurl.Host(value); err != nil || !strings.EqualFold(host, g.cred.Host) {
-				return fmt.Errorf("source: submodule %s is not on %s, the host the run's credential reaches",
-					sourceurl.Redact(value), g.cred.Host)
+			subs[name].path = value
+		case "url":
+			resolved, ok := resolveSubmoduleURL(parentURL, value)
+			if id, idOK := repoIdentity(resolved); !ok || !idOK || !allowed[id] {
+				return fmt.Errorf("source: submodule %s is not a repository the team's owner listed for this one",
+					sourceurl.Redact(value))
 			}
+			subs[name].url = resolved
 		}
 	}
 	scope, err := credentialScope(g.remote)
@@ -242,102 +258,85 @@ func (g *trustedGit) submodules(ctx context.Context, dir string, level int) erro
 	if err := directSubmodules(ctx, dir, scope, g.cred, g.opts, false); err != nil {
 		return err
 	}
-	for _, p := range paths {
-		if err := g.submodules(ctx, filepath.Join(dir, p), level+1); err != nil {
-			return err
+	for _, sm := range subs {
+		if sm.path != "" && sm.url != "" {
+			if err := g.submodules(ctx, filepath.Join(dir, sm.path), sm.url, allowed, level+1); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// ModuleCommit is one revision of a Go module's repository, fetched into
-// Dir, a working repository that has the commit's whole tree.
-type ModuleCommit struct {
-	Dir    string
-	Commit string
-	Time   time.Time
-}
-
-// FetchModuleCommit fetches rev of repoURL into dir, a new directory. rev is
-// a full ref, or the 12-digit commit prefix a pseudo-version carries, which
-// is resolved against the repository's branches and tags.
-func FetchModuleCommit(ctx context.Context, repoURL, rev, dir string, cred DirectCredential) (ModuleCommit, error) {
-	g, err := newTrustedGit(ctx, repoURL, cred)
-	if err != nil {
-		return ModuleCommit{}, err
+// safety: git resolves a relative URL against the parent's remote; one that climbs past the remote's path would
+// leave its host, so it is refused rather than clamped.
+func resolveSubmoduleURL(parent, raw string) (string, bool) {
+	if !strings.HasPrefix(raw, "./") && !strings.HasPrefix(raw, "../") {
+		return raw, true
 	}
-	m, err := g.moduleCommit(ctx, rev, dir)
-	return m, errors.Join(err, g.close())
-}
-
-func (g *trustedGit) moduleCommit(ctx context.Context, rev, dir string) (ModuleCommit, error) {
-	want := rev
-	if !strings.HasPrefix(rev, "refs/") {
-		// safety: a server serves only whole commit ids, so a prefix is resolved
-		// against a commits-only fetch kept apart from the repository archived.
-		probe := filepath.Join(dir, "probe")
-		if _, err := g.git(ctx, dir, false, "init", "--quiet", "--bare", "--", probe); err != nil {
-			return ModuleCommit{}, err
+	base, rest, scp := parent, "", false
+	if i := strings.Index(parent, "://"); i >= 0 {
+		j := strings.IndexByte(parent[i+3:], '/')
+		if j < 0 {
+			return "", false
 		}
-		if _, err := g.git(ctx, probe, true, "fetch", "--quiet", "--no-tags", "--filter=tree:0", "--", g.remote,
-			"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"); err != nil {
-			return ModuleCommit{}, err
-		}
-		full, err := g.git(ctx, probe, false, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
-		if err != nil {
-			return ModuleCommit{}, fmt.Errorf("no commit %s on any branch or tag", rev)
-		}
-		want = full
+		base, rest = parent[:i+3+j], parent[i+3+j:]
+	} else if host, p, ok := strings.Cut(parent, ":"); ok {
+		base, rest, scp = host+":", p, true
 	}
-	repo := filepath.Join(dir, "repo")
-	if _, err := g.git(ctx, dir, false, "init", "--quiet", "--", repo); err != nil {
-		return ModuleCommit{}, err
-	}
-	if _, err := g.git(ctx, repo, true, "fetch", "--quiet", "--no-tags", "--depth", "1", "--", g.remote, want); err != nil {
-		return ModuleCommit{}, err
-	}
-	out, err := g.git(ctx, repo, false, "log", "-1", "--format=%H %ct", "FETCH_HEAD")
-	if err != nil {
-		return ModuleCommit{}, err
-	}
-	commit, secs, _ := strings.Cut(out, " ")
-	unix, err := strconv.ParseInt(secs, 10, 64)
-	if err != nil {
-		return ModuleCommit{}, fmt.Errorf("read commit time: %w", err)
-	}
-	return ModuleCommit{Dir: repo, Commit: commit, Time: time.Unix(unix, 0).UTC()}, nil
-}
-
-// File returns path at the commit, and false when the commit has no such file.
-func (m ModuleCommit) File(ctx context.Context, path string) ([]byte, bool, error) {
-	g := &trustedGit{localEnv: directLocalGitEnv(directGitEnv(os.Environ()))}
-	if entry, err := g.git(ctx, m.Dir, false, "ls-tree", m.Commit, "--", path); err != nil || entry == "" {
-		return nil, false, err
-	}
-	out, err := g.gitRaw(ctx, m.Dir, false, "cat-file", "blob", m.Commit+":"+path)
-	return out, err == nil, err
-}
-
-// ModuleTags lists repoURL's tags whose names start with prefix.
-func ModuleTags(ctx context.Context, repoURL, prefix, dir string, cred DirectCredential) ([]string, error) {
-	g, err := newTrustedGit(ctx, repoURL, cred)
-	if err != nil {
-		return nil, err
-	}
-	tags, err := g.tags(ctx, prefix, dir)
-	return tags, errors.Join(err, g.close())
-}
-
-func (g *trustedGit) tags(ctx context.Context, prefix, dir string) ([]string, error) {
-	out, err := g.git(ctx, dir, true, "ls-remote", "--tags", "--refs", "--", g.remote, "refs/tags/"+prefix+"*")
-	if err != nil {
-		return nil, err
-	}
-	var tags []string
-	for _, line := range strings.Split(out, "\n") {
-		if _, ref, ok := strings.Cut(line, "\t"); ok {
-			tags = append(tags, strings.TrimPrefix(ref, "refs/tags/"))
+	segs := strings.FieldsFunc(rest, func(r rune) bool { return r == '/' })
+	for _, part := range strings.Split(raw, "/") {
+		switch part {
+		case ".", "":
+		case "..":
+			if len(segs) == 0 {
+				return "", false
+			}
+			segs = segs[:len(segs)-1]
+		default:
+			segs = append(segs, part)
 		}
 	}
-	return tags, nil
+	if scp {
+		return base + strings.Join(segs, "/"), true
+	}
+	return base + "/" + strings.Join(segs, "/"), true
+}
+
+// safety: matched against the owner's list in the form sourceurl.Identity gives: host with its port, lowercased
+// path, no .git.
+func repoIdentity(raw string) (string, bool) {
+	var host, p string
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil || u.RawQuery != "" || u.Fragment != "" {
+			return "", false
+		}
+		host, p = u.Host, u.Path
+	} else {
+		dest, rest, ok := strings.Cut(raw, ":")
+		if !ok {
+			return "", false
+		}
+		_, host, _ = strings.Cut(dest, "@")
+		if host == "" {
+			host = dest
+		}
+		p = rest
+	}
+	host = strings.TrimRight(strings.ToLower(host), ".")
+	p = strings.Trim(strings.TrimSuffix(strings.ToLower(strings.Trim(p, "/")), ".git"), "/")
+	if host == "" || p == "" || hasDotDot(p) {
+		return "", false
+	}
+	return host + "/" + p, true
+}
+
+func hasDotDot(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." || seg == "" {
+			return true
+		}
+	}
+	return false
 }

@@ -22,6 +22,9 @@ const trustedTok = "ghs_trusted_fixture"
 
 func newTrustedFixture(t *testing.T, subURL string) trustedFixture {
 	t.Helper()
+	if subURL == "" {
+		subURL = "../lib.git"
+	}
 	f := trustedFixture{repos: t.TempDir()}
 	f.env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com", "GIT_CONFIG_GLOBAL="+os.DevNull)
@@ -67,7 +70,7 @@ func (f trustedFixture) git(t *testing.T, cred DirectCredential) *trustedGit {
 func TestTrustedCheckoutDeliversARepositoryWithoutTheCredential(t *testing.T) {
 	f := newTrustedFixture(t, "../lib.git")
 	dest := filepath.Join(t.TempDir(), "src")
-	if err := f.git(t, f.cred).checkout(context.Background(), f.head, "main", dest, SourceOptions{Depth: 1}); err != nil {
+	if err := f.git(t, f.cred).checkout(context.Background(), f.head, "main", dest, SourceOptions{Depth: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(filepath.Join(dest, ".git")); err != nil || !fi.IsDir() {
@@ -98,7 +101,7 @@ func TestTrustedCheckoutFetchesFullHistoryTagsAndSubmodules(t *testing.T) {
 	f := newTrustedFixture(t, "../lib.git")
 	dest := filepath.Join(t.TempDir(), "src")
 	o := SourceOptions{Tags: true, Submodules: true}
-	if err := f.git(t, f.cred).checkout(context.Background(), f.head, "", dest, o); err != nil {
+	if err := f.git(t, f.cred).checkout(context.Background(), f.head, "", dest, o, []string{f.hostPort + "/lib"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitRun(t, f.env, "-C", dest, "rev-list", "--count", "HEAD"); got != "2" {
@@ -120,47 +123,34 @@ func TestTrustedCheckoutRefusals(t *testing.T) {
 	f := newTrustedFixture(t, "../lib.git")
 	wrong := f.cred
 	wrong.Secret = "ghs_wrong_one"
-	err := f.git(t, wrong).checkout(context.Background(), f.head, "", filepath.Join(t.TempDir(), "a"), SourceOptions{Depth: 1})
+	err := f.git(t, wrong).checkout(context.Background(), f.head, "", filepath.Join(t.TempDir(), "a"), SourceOptions{Depth: 1}, nil)
 	if err == nil || strings.Contains(err.Error(), "ghs_wrong_one") {
 		t.Fatalf("wrong token: err = %v", err)
 	}
 
-	far := newTrustedFixture(t, "https://elsewhere.example/lib.git")
-	err = far.git(t, far.cred).checkout(context.Background(), far.head, "", filepath.Join(t.TempDir(), "b"), SourceOptions{Depth: 1, Submodules: true})
-	if err == nil || !strings.Contains(err.Error(), "is not on") {
-		t.Fatalf("a submodule on another host: err = %v", err)
+	for name, sub := range map[string]func(hostPort string) string{
+		"unlisted, relative":   func(string) string { return "../secret.git" },
+		"unlisted, absolute":   func(hp string) string { return "http://" + hp + "/secret.git" },
+		"climbs past the host": func(string) string { return "../../../evil.example/lib.git" },
+		"another host":         func(string) string { return "https://elsewhere.example/lib.git" },
+	} {
+		mal := newTrustedFixture(t, "")
+		mal.setSubmoduleURL(t, sub(mal.hostPort))
+		err := mal.git(t, mal.cred).checkout(context.Background(), mal.head, "", filepath.Join(t.TempDir(), "b"),
+			SourceOptions{Depth: 1, Submodules: true}, []string{mal.hostPort + "/lib"})
+		if err == nil || !strings.Contains(err.Error(), "not a repository the team's owner listed") {
+			t.Fatalf("%s: err = %v, want the listed-repository refusal", name, err)
+		}
+	}
+	if err := f.git(t, f.cred).checkout(context.Background(), f.head, "", filepath.Join(t.TempDir(), "c"),
+		SourceOptions{Depth: 1, Submodules: true}, nil); err == nil {
+		t.Fatal("a submodule was fetched with no repository listed")
 	}
 
 	for name, o := range map[string]SourceOptions{"lfs": {LFS: true}, "depth": {Depth: -1}} {
-		if err := f.git(t, f.cred).checkout(context.Background(), f.head, "", filepath.Join(t.TempDir(), name), o); err == nil {
+		if err := f.git(t, f.cred).checkout(context.Background(), f.head, "", filepath.Join(t.TempDir(), name), o, nil); err == nil {
 			t.Fatalf("%s was not refused", name)
 		}
-	}
-}
-
-func TestModuleCommitResolvesTagsAndPseudoVersionPrefixes(t *testing.T) {
-	f := newTrustedFixture(t, "../lib.git")
-	ctx := context.Background()
-	tagged, err := f.git(t, f.cred).moduleCommit(ctx, "refs/tags/v1.0.0", t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mod, ok, err := tagged.File(ctx, "go.mod"); err != nil || !ok || string(mod) != "module example.com/app\n\n" {
-		t.Fatalf("go.mod = %q, %v, %v; want the exact bytes", mod, ok, err)
-	}
-	if _, ok, _ := tagged.File(ctx, "nope/go.mod"); ok {
-		t.Fatal("an absent file was reported present")
-	}
-	pseudo, err := f.git(t, f.cred).moduleCommit(ctx, f.head[:12], t.TempDir())
-	if err != nil || pseudo.Commit != f.head || pseudo.Time.IsZero() {
-		t.Fatalf("prefix resolved to %+v, %v", pseudo, err)
-	}
-	if _, err := f.git(t, f.cred).moduleCommit(ctx, "0123456789ab", t.TempDir()); err == nil {
-		t.Fatal("a prefix naming no commit resolved")
-	}
-	tags, err := f.git(t, f.cred).tags(ctx, "v", t.TempDir())
-	if err != nil || strings.Join(tags, ",") != "v1.0.0" {
-		t.Fatalf("tags = %v, %v", tags, err)
 	}
 }
 
@@ -179,4 +169,14 @@ func assertNoSecret(t *testing.T, root, secret string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (f *trustedFixture) setSubmoduleURL(t *testing.T, url string) {
+	t.Helper()
+	work := filepath.Join(t.TempDir(), "work")
+	gitRun(t, f.env, "clone", "--quiet", filepath.Join(f.repos, "app.git"), work)
+	gitRun(t, f.env, "-C", work, "config", "-f", ".gitmodules", "submodule.lib.url", url)
+	gitRun(t, f.env, "-C", work, "commit", "--quiet", "-am", "point the submodule elsewhere")
+	gitRun(t, f.env, "-C", work, "push", "--quiet", "origin", "HEAD:main")
+	f.head = gitRun(t, f.env, "-C", work, "rev-parse", "HEAD")
 }

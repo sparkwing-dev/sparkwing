@@ -5,6 +5,15 @@ from its host. It holds no git credential of its own, so the controller
 releases one for each run, at fetch time, to the runner holding the run's
 claim.
 
+A repository opted into controller dispatch on Sparkwing Cloud works
+differently: each Job's init container asks
+`POST /api/v1/runs/{id}/source-credential` once, with its claim token, for a
+read-only GitHub App token covering the run's repository and its
+[extra repositories](#extra-repositories), and checks the run out before the
+pipeline's container starts. Cloud fetches source only through the GitHub
+App; a team's stored git credentials serve self-hosted runners and machines,
+never Cloud Jobs. Submodules there must name a listed repository.
+
 ## Which credential a run gets
 
 `POST /api/v1/runs/{id}/git-credential` resolves the credential in a fixed

@@ -187,6 +187,7 @@ func (c *Client) SetNodeSummary(ctx context.Context, runID, nodeID, md string) e
 func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (c *Client) SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error)
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)

@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/store/internal/storetest"
 )
 
-// A claim token's credential release is a sensitive write: it commits only
-// while the claim is live at the token's generation and its run has no cancel
-// request, checked inside the transaction that writes the audit row.
-func TestReleaseGitCredential_FencesAClaimToken(t *testing.T) {
+// A claim is issued one source credential: a second ask, an ask once its
+// attempt has started, an ask from another team's handle and an ask after
+// its run is cancelled are all refused, and each issue leaves an audit row.
+func TestSpendSourceCredential_IssuesOnePerClaimBeforeItsAttempt(t *testing.T) {
 	ctx := context.Background()
-	f := newDispatchRun(t, "run-fence")
-	tok, err := f.authorize(t, f.claimRaw(t, store.PlanNodeID, store.ClaimTokenPlan), store.ClaimSensitive)
+	f := newDispatchRun(t, "run-spend")
+	plan, err := f.authorize(t, f.claimRaw(t, store.PlanNodeID, store.ClaimTokenPlan), store.ClaimSensitive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,46 +24,59 @@ func TestReleaseGitCredential_FencesAClaimToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := team.PutGitCredential(ctx, sshCredential("SHA256:one"), time.Now()); err != nil {
-		t.Fatal(err)
+	spend := func(tok store.ClaimToken) (store.SourceSpec, error) {
+		return team.SpendSourceCredential(ctx, tok, "github_app", "github.com", "claim:"+tok.NodeID, time.Now())
 	}
-	if _, err := team.ConfirmGitCredential(ctx, "gitlab.example.com", "SHA256:one", time.Now()); err != nil {
-		t.Fatal(err)
+	if spec, err := spend(plan); err != nil || spec != (store.SourceSpec{Depth: 1}) {
+		t.Fatalf("plan claim = %+v, %v; want one commit and nothing else", spec, err)
 	}
-	releaseFor := func(tok store.ClaimToken) error {
-		_, err := team.ReleaseGitCredential(ctx, "gitlab.example.com", store.GitCredentialRelease{
-			RunID: f.run, Runner: "claim:" + tok.RunID, TokenPrefix: tok.Prefix, Claim: &tok,
-		}, time.Now())
-		return err
-	}
-	if err := releaseFor(tok); err != nil {
-		t.Fatalf("live claim: %v", err)
-	}
-	if got, err := f.s.CheckClaimSensitive(ctx, tok, time.Now()); err != nil || got.Kind != store.ClaimTokenPlan || got.Prefix != tok.Prefix {
-		t.Fatalf("check = %+v, %v", got, err)
+	if _, err := spend(plan); !errors.Is(err, store.ErrSourceCredentialSpent) {
+		t.Fatalf("second ask: err = %v, want ErrSourceCredentialSpent", err)
 	}
 
-	other := tok
+	f.mustAccept(t, `{"pipeline":"demo","source":{"depth":0,"tags":true,"submodules":true},"nodes":[`+
+		`{"id":"a","deps":[],"spec_hash":"`+hashA+`"},{"id":"b","deps":[],"spec_hash":"`+hashA+`"}]}`)
+	a, err := f.authorize(t, f.claimRaw(t, "a", store.ClaimTokenWork), store.ClaimSensitive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec, err := spend(a); err != nil || spec != (store.SourceSpec{Depth: 0, Tags: true, Submodules: true}) {
+		t.Fatalf("work claim = %+v, %v; want the plan's full-history ask", spec, err)
+	}
+	b, err := f.authorize(t, f.claimRaw(t, "b", store.ClaimTokenWork), store.ClaimSensitive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.DB().ExecContext(ctx, storetest.Rebind(f.s,
+		`UPDATE nodes SET execution_started_at = ? WHERE run_id = ? AND node_id = ?`), time.Now().UnixNano(), f.run, "b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spend(b); !errors.Is(err, store.ErrSourceCredentialSpent) {
+		t.Fatalf("after the attempt started: err = %v, want ErrSourceCredentialSpent", err)
+	}
+	other := a
 	other.Team = "bravo"
-	later := tok
-	later.Generation++
-	for name, c := range map[string]store.ClaimToken{"another team": other, "a later generation": later} {
-		if err := releaseFor(c); err == nil {
-			t.Fatalf("%s: released", name)
-		}
+	if _, err := spend(other); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("another team: err = %v", err)
 	}
 	if err := f.s.RequestCancel(ctx, f.run); err != nil {
 		t.Fatal(err)
 	}
-	if err := releaseFor(tok); !errors.Is(err, store.ErrClaimCancelRequested) {
-		t.Fatalf("after cancel: err = %v, want ErrClaimCancelRequested", err)
-	}
-	if _, err := f.s.CheckClaimSensitive(ctx, tok, time.Now()); !errors.Is(err, store.ErrClaimCancelRequested) {
+	if _, err := f.s.CheckClaimSensitive(ctx, a, time.Now()); !errors.Is(err, store.ErrClaimCancelRequested) {
 		t.Fatalf("check after cancel: err = %v", err)
 	}
 	rels, err := team.GitCredentialReleases(ctx, 10)
-	if err != nil || len(rels) != 1 {
-		t.Fatalf("audit rows = %d, %v; want the one live release", len(rels), err)
+	if err != nil || len(rels) != 2 {
+		t.Fatalf("audit rows = %d, %v; want the plan's and a's", len(rels), err)
+	}
+}
+
+// A plan that asks for a negative depth is refused at accept.
+func TestAcceptPlan_RefusesANegativeSourceDepth(t *testing.T) {
+	f := newDispatchRun(t, "run-depth")
+	body := `{"pipeline":"demo","source":{"depth":-1},"nodes":[{"id":"a","deps":[],"spec_hash":"` + hashA + `"}]}`
+	if _, err := f.accept(f.claim(t, store.PlanNodeID, store.ClaimTokenPlan), body); !errors.Is(err, store.ErrPlanInvalid) {
+		t.Fatalf("err = %v, want ErrPlanInvalid", err)
 	}
 }
 
