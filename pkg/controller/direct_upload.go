@@ -349,6 +349,7 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 			"sha256": u.SHA256, "upload-id": u.ID,
 		},
 	})
+	copied := err == nil
 	if err != nil {
 		var api smithy.APIError
 		if errors.As(err, &api) && api.ErrorCode() == "PreconditionFailed" {
@@ -371,9 +372,21 @@ func (s *Server) handleDirectCommit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.store.CommitUpload(r.Context(), u.Team, u.ID, recordedUploader, time.Now()); err != nil {
-		if errors.Is(err, store.ErrObjectExists) {
+		switch {
+		case errors.Is(err, store.ErrObjectExists):
 			writeError(w, http.StatusConflict, err)
-		} else {
+		// safety: a team refused a slot never keeps the object its upload just
+		// copied into place, so the bucket holds nothing it is not counted for.
+		case errors.Is(err, store.ErrFreeStoragePaused):
+			if !copied {
+				writeError(w, http.StatusPaymentRequired, err)
+				return
+			}
+			if _, derr := d.client.DeleteObject(r.Context(), &s3.DeleteObjectInput{Bucket: aws.String(d.bucket), Key: aws.String(final)}); derr != nil {
+				s.logger.Warn("delete an upload refused a slot", "upload_id", u.ID, "err", derr)
+			}
+			writeError(w, http.StatusPaymentRequired, err)
+		default:
 			s.writeInternalError(w, r, "commit direct upload", err)
 		}
 		return

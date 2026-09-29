@@ -230,3 +230,24 @@ func TestRetriedRangeDoesNotSettleExtraQuota(t *testing.T) {
 		t.Fatalf("quota = %d used, %d reserved; want one copy", used, reserved)
 	}
 }
+
+// A final settle the controller refuses, because the team lost its chance at
+// a free slot, drops the block rather than retrying a commit that is refused
+// every time; the storage pass counts what the run wrote.
+func TestARefusedFinalCommitDropsTheLogBlock(t *testing.T) {
+	counter := storagequotatest.New(300, 0)
+	f := newArchiveFixtureWith(t, 0, counter)
+	if code, body := f.do(t, http.MethodPost, "/api/v1/logs/run-a/build", "Bearer a", line(10)); code != http.StatusNoContent {
+		t.Fatalf("append = %d %s", code, body)
+	}
+	counter.Tiers["team-a"] = storagequota.TierNone
+	f.srv.settleLogBlocks(context.Background(), true)
+	if n := len(f.srv.logBlocks.all()); n != 0 {
+		t.Fatalf("%d log blocks left after a refused final commit, want none", n)
+	}
+	calls := len(counter.Auths())
+	f.srv.settleLogBlocks(context.Background(), true)
+	if got := len(counter.Auths()); got != calls {
+		t.Fatalf("a later settle made %d more controller calls, want none", got-calls)
+	}
+}

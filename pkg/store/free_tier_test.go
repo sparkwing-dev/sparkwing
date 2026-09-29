@@ -109,8 +109,9 @@ func TestFreeSlotsBoundTheFreeTierAtEveryInstant(t *testing.T) {
 	}
 }
 
-// safety: two teams racing for the last slot both read one free; the lock
-// gives it to exactly one of them, and the rest are refused their next write.
+// safety: every team reserved while one slot was left, so each holds a
+// reservation; their commits race for the slot, exactly one takes it, and
+// every other commit is refused, so no team without a slot counts a byte.
 func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
@@ -119,31 +120,40 @@ func TestTheLastFreeSlotGoesToOneTeam(t *testing.T) {
 	}
 	const racers = 6
 	teams := make([]store.Team, racers)
+	held := make([]store.StorageReservation, racers)
 	for i := range teams {
 		teams[i] = teamHandle(t, st, store.Team(fmt.Sprintf("racer-%d", i))).Team()
+		res, err := reserve(st, teams[i], store.StorageCache, 1, time.Now())
+		if err != nil {
+			t.Fatalf("%s's reservation with a slot left: %v", teams[i], err)
+		}
+		held[i] = res
 	}
 	var wg sync.WaitGroup
 	errs := make([]error, racers)
 	for i, team := range teams {
-		wg.Go(func() { errs[i] = storeBytes(st, team) })
+		wg.Go(func() {
+			errs[i] = st.CommitStorage(ctx, store.StorageCommit{
+				ID: held[i].ID, Team: team, Kind: store.StorageCache, Bytes: 1, Now: time.Now(),
+			})
+		})
 	}
 	wg.Wait()
-	for _, err := range errs {
-		if err != nil && !errors.Is(err, store.ErrFreeStoragePaused) {
+	committed := 0
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			committed++
+		case !errors.Is(err, store.ErrFreeStoragePaused):
 			t.Fatalf("unexpected refusal: %v", err)
+		default:
+			if got := usageOf(t, st, teams[i], store.StorageCache); got.UsedBytes != 0 {
+				t.Fatalf("%s was refused a slot yet counts %d bytes", teams[i], got.UsedBytes)
+			}
 		}
 	}
-	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 1 {
-		t.Fatalf("slots taken %d, %v; want exactly one", taken, err)
-	}
-	refused := 0
-	for _, team := range teams {
-		if err := storeBytes(st, team); errors.Is(err, store.ErrFreeStoragePaused) {
-			refused++
-		}
-	}
-	if refused != racers-1 {
-		t.Fatalf("%d teams refused their next write, want every team but the slot's", refused)
+	if taken, _, err := st.FreeSlots(ctx); err != nil || taken != 1 || committed != 1 {
+		t.Fatalf("committed %d, slots taken %d, %v; want exactly one", committed, taken, err)
 	}
 }
 
@@ -303,5 +313,49 @@ func TestExpiryAndReconcileLowerAFreeTeamsEventBytes(t *testing.T) {
 	}
 	if got := standing(t, st, "acme"); got.EventBytes != 100 {
 		t.Fatalf("after the reconcile = %d, want the one run left", got.EventBytes)
+	}
+}
+
+// The slot is enforced on every commit path: a team that reserved while a
+// slot was open is refused its upload commit and its renewal once another
+// team took the last slot, and counts nothing.
+func TestEveryCommitPathRefusesATeamThatCannotTakeASlot(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	teamHandle(t, st, "team-a")
+	teamHandle(t, st, "team-b")
+	now := time.Now()
+	u, err := st.ReserveUpload(ctx, store.UploadRequest{
+		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("a", 64),
+		Size: 10, SHA256: strings.Repeat("a", 64), Principal: "runner-a", Provenance: "cloud", Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := reserve(st, "team-a", store.StorageLogs, 10, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storeBytes(st, "team-b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitUpload(ctx, "team-a", u.ID, u.Principal, now); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("upload commit without a slot = %v, want free storage paused", err)
+	}
+	if _, err := st.CommittedObject(ctx, "team-a", u.Key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a refused upload was published: %v", err)
+	}
+	_, err = st.RenewStorage(ctx, store.StorageCommit{ID: res.ID, Team: "team-a", Kind: store.StorageLogs, Bytes: 10, Now: now},
+		store.StorageReserve{Team: "team-a", Kind: store.StorageLogs, Bytes: 10, UpTo: true, Now: now})
+	if !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("renewal without a slot = %v, want free storage paused", err)
+	}
+	for _, kind := range []store.StorageKind{store.StorageCache, store.StorageLogs} {
+		if got := usageOf(t, st, "team-a", kind); got.UsedBytes != 0 {
+			t.Fatalf("team-a's %s without a slot = %d, want 0", kind, got.UsedBytes)
+		}
 	}
 }

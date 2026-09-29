@@ -113,10 +113,14 @@ The free tier is bounded by counting teams. A team without credits takes one
 of `--free-team-slots` (default 200) with the first byte it commits, in the
 transaction that counts it, and keeps it until the team is deleted. A
 reservation takes no slot, so one nobody commits costs the tier nothing; it is
-refused only once every slot is taken. Two teams whose reservations raced for
-the last slot both keep what they committed, and the one without the slot is
-refused its next write. The free bytes a deployment holds are therefore at
-most slots times the allowance, give or take those races. A team with a slot
+refused only once every slot is taken. A commit whose team cannot take a slot
+is refused with `402`, so no team without a slot commits a byte. A writer puts
+its bytes before it commits them, so teams whose reservations raced for the
+last slot can each leave one write behind: a direct upload's object is
+deleted when its commit is refused, while a cache object or a log block stays
+until the hourly pass counts it and the team's next reservation is refused.
+The free bytes a deployment holds are therefore at most slots times the
+allowance, plus those in-flight writes. A team with a slot
 keeps writing inside its shares after the slots run out; a team with neither a
 slot nor credits is refused its cache, log and event writes with `402`:
 `free storage is paused; buy credits or join the waitlist`.

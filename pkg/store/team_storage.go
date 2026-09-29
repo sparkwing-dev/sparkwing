@@ -191,8 +191,8 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 }
 
 // safety: the lock order puts the free tier before team_storage rows, so a
-// commit takes its slot before it locks a row. A team whose commit finds every
-// slot taken keeps what it stored and is refused its next reservation.
+// commit takes its slot before it locks a row. A commit whose team finds every
+// slot taken is refused, so no team without a slot commits a byte.
 func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64, now time.Time) error {
 	team = NormalizeTeam(team)
 	if bytes <= 0 || !holdsFreeAllowance(team) {
@@ -208,8 +208,11 @@ func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, bytes int64,
 	if err := lockFreeTierTx(ctx, tx); err != nil {
 		return err
 	}
-	_, err = takeFreeSlotTx(ctx, tx, team, now)
-	return err
+	slotted, err := takeFreeSlotTx(ctx, tx, team, now)
+	if err != nil || slotted {
+		return err
+	}
+	return freeStoragePaused(team)
 }
 
 // RenewStorage commits c and reserves next in one transaction, for a writer

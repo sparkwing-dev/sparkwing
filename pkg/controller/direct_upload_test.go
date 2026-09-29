@@ -530,3 +530,51 @@ func TestTeamOwnerCanChooseWhetherCloudTrustsLocalBinaries(t *testing.T) {
 		t.Fatalf("stored trust = %v, %v", trust, err)
 	}
 }
+
+// A free team that reserved an upload while a slot was open, and finds every
+// slot taken when it commits, is refused with 402 and the object its commit
+// copied into place is deleted, so the bucket holds nothing it is not counted for.
+func TestADirectCommitWithoutAFreeSlotIsRefusedAndItsObjectDeleted(t *testing.T) {
+	client, objects := directS3(t)
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		return s.WithDirectUploads(client, "bucket", "cache")
+	})
+	olga := f.ghUser(521, "olga")
+	_, prefix := f.runWork(olga, "run-bytes", "https://github.com/acme/widgets.git")
+	if err := f.store.SetTokenMetered(t.Context(), prefix, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SetFreeTeamSlots(t.Context(), 1); err != nil {
+		t.Fatal(err)
+	}
+	runner := claimedUploadGrant(t, f, olga.team, "run-bytes", prefix)
+	body := []byte("hello direct upload")
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	key := "bin/01234567-89abcdef/" + digest
+	var answer controller.DirectUploadResponse
+	if code := f.call("POST", "/api/v1/data/upload", runner, map[string]any{
+		"kind": "binary", "key": key, "size": len(body), "sha256": digest, "run_id": "run-bytes",
+	}, &answer); code != http.StatusOK {
+		t.Fatalf("reserve = %d", code)
+	}
+	if _, err := client.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String("bucket"), Key: aws.String("pending/" + answer.UploadID), Body: bytes.NewReader(body),
+		ChecksumSHA256: aws.String(answer.Headers["x-amz-checksum-sha256"]),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.GrantFreeSlot(t.Context(), store.Team(f.ghUser(522, "pat").team), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var ignored map[string]any
+	if code := f.call("POST", "/api/v1/data/commit", runner, map[string]any{"upload_id": answer.UploadID, "run_id": "run-bytes"}, &ignored); code != http.StatusPaymentRequired {
+		t.Fatalf("commit without a slot = %d, want 402; logs: %s", code, f.logs.String())
+	}
+	if _, ok := objects()["cache/teams/"+olga.team+"/cloud/"+key]; ok {
+		t.Fatal("the refused upload's object stayed in the bucket")
+	}
+	if _, err := f.store.CommittedObject(t.Context(), store.Team(olga.team), key); err == nil {
+		t.Fatal("the refused upload was recorded")
+	}
+}

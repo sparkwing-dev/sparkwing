@@ -311,7 +311,8 @@ unlock.
 - **controller:** a free tier bounded by counting teams. A team without
   credits takes one of `--free-team-slots` (200) with the first byte it
   commits, in that commit's transaction, and keeps it until the team is
-  deleted, so free storage never passes slots times the allowance. A team with
+  deleted; a commit that cannot take a slot is refused with `402`, so no team
+  without a slot commits a byte. A team with
   neither a slot nor credits is refused its storage writes with `402` "free
   storage is paused; buy credits or join the waitlist". Runs are never refused
   for billing: its own machines run them, and a metered claim still needs
