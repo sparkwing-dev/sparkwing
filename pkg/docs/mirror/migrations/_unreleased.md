@@ -31,7 +31,7 @@ protects direct database access, not mixed-version HTTP readers.
 
 The database migration labels historical positive-CPU-time points as command
 reports. Historical zero-CPU-time points remain unknown because their kind
-cannot be recovered. Learned profile format 6 discards incompatible learned
+cannot be recovered. Learned profile format 7 discards incompatible learned
 estimates on access or update while preserving explicit pins and wait
 statistics. New observations rebuild estimates; leave resource pins in place
 until their replacement estimates have been verified for the workload.

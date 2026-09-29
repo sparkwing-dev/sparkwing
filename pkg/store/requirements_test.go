@@ -233,6 +233,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"declared-run-repo",
 		"executor-enrollment-v1",
 		"executor-offer-arbitration-v1",
+		"metric-sample-kind",
 		"pipeline-scoped-secrets",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
@@ -280,6 +281,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	wantListed := []string{
 		"declared-run-repo",
 		"inherited-holder-marker",
+		"metric-sample-kind",
 		"pipeline-scoped-secrets",
 		"repo-scoped-secrets",
 		"session-token-digest",

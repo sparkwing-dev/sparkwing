@@ -37,10 +37,10 @@ type unreadable struct {
 const usageText = `usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>
 
 <root> is one directory to walk, normally the repository root; commentcheck
-takes no list of files. It parses every .go file under <root> and skips
-vendor, testdata, node_modules, .git and .claude-scratch. -staged and -base
-narrow the report to the lines those diffs add; -base also reads untracked
-.go files, which git diff alone leaves out.
+takes no list of files. It skips vendor, testdata, node_modules, .git and
+.claude-scratch. -staged and -base limit parsing to changed .go files and
+comment findings to added lines; -base also includes untracked .go files.
+Without either flag it parses every .go file under <root>.
 
 Allowed: GoDoc on exported API declarations and fields, body comments tagged
 hack:, safety:, bug: or perf:, and #nosec GNNN -- reason annotations.
@@ -71,15 +71,11 @@ func main() {
 	}
 	root := flag.Arg(0)
 
-	violations, unread, err := scan(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "commentcheck:", err)
-		os.Exit(2)
-	}
-
+	var added map[string]map[int]bool
 	scoped := -1
 	if *staged || *base != "" {
-		added, aerr := scopedAdds(root, *staged, *base)
+		var aerr error
+		added, aerr = scopedAdds(root, *staged, *base)
 		if aerr != nil {
 			if !*allowNoDiff {
 				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
@@ -89,9 +85,15 @@ func main() {
 			fmt.Println("commentcheck: skipped (no diff)")
 			return
 		}
-		violations = onlyAdded(violations, root, added)
-		unread = onlyChanged(unread, root, added)
 		scoped = len(added)
+	}
+	violations, unread, err := scan(root, added)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "commentcheck:", err)
+		os.Exit(2)
+	}
+	if added != nil {
+		violations = onlyAdded(violations, root, added)
 	}
 
 	if len(violations) > 0 {
@@ -110,10 +112,13 @@ func diffFailure(base string, err error) string {
 	return gatescope.DiffFailure("commentcheck", base, err)
 }
 
-func scan(root string) ([]violation, []unreadable, error) {
+func scan(root string, added map[string]map[int]bool) ([]violation, []unreadable, error) {
 	var violations []violation
 	var unread []unreadable
 	err := gatescope.Walk(root, ".go", func(path, _ string) {
+		if added != nil && !gatescope.Touched(added, root, path) {
+			return
+		}
 		v, perr := checkFile(path)
 		if perr != nil {
 			unread = append(unread, unreadable{file: path, err: perr})
@@ -349,20 +354,6 @@ func firstLine(text string) string {
 
 func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
 	return gatescope.AddedLines(root, staged, base, "*.go")
-}
-
-// safety: an unparseable file outside the scope is not something this run
-// claimed to judge. This asks whether the diff names the file, not whether it
-// added lines: a change that only deletes lines is the one most likely to
-// break parsing.
-func onlyChanged(unread []unreadable, root string, added map[string]map[int]bool) []unreadable {
-	var out []unreadable
-	for _, u := range unread {
-		if gatescope.Touched(added, root, u.file) {
-			out = append(out, u)
-		}
-	}
-	return out
 }
 
 func onlyAdded(violations []violation, root string, added map[string]map[int]bool) []violation {
