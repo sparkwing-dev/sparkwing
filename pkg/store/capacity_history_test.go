@@ -16,6 +16,8 @@ func TestProfileHistory(t *testing.T) {
 			raw  []byte
 		}{
 			{"schema-three", []byte(`{"schema":3,"samples":[{"d":9000000000,"c":14,"m":450}]}`)},
+			{"schema-ten", []byte(`{"schema":10,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
+			{"empty-schema-ten", []byte(`{"schema":10,"samples":[]}`)},
 			{"schema-nine", []byte(`{"schema":9,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
 			{"empty-schema-nine", []byte(`{"schema":9,"samples":[]}`)},
 			{"schema-eight", []byte(`{"schema":8,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},

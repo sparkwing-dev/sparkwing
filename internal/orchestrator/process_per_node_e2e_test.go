@@ -61,6 +61,41 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	}
 
 	assertNodesRecordedTheirUsage(t, home, "spawnproof", "produce", "consume")
+	st, err := store.Open(orchestrator.PathsAt(home).StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	run, err := st.GetLatestRun(t.Context(), "spawnproof", nil, time.Hour)
+	if err != nil || run == nil {
+		t.Fatalf("run=%+v error=%v", run, err)
+	}
+	samples, err := st.ListNodeMetrics(t.Context(), run.ID, "consume")
+	if err != nil || len(samples) == 0 {
+		t.Fatalf("leaf samples=%+v error=%v", samples, err)
+	}
+	for _, sample := range samples {
+		if sample.Kind != store.MetricInterval || sample.MemoryBytes <= 0 || sample.CPUMillicores < 0 {
+			t.Fatalf("leaf measurement=%+v", sample)
+		}
+	}
+	profiles, err := st.ListPipelineProfiles(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, profile := range profiles {
+		if profile.NodeID != "consume" {
+			continue
+		}
+		found = true
+		if profile.SampleCount != 1 || !profile.CPUMeasured || profile.PeakMemoryBytes <= 0 {
+			t.Fatalf("leaf profile=%+v", profile)
+		}
+	}
+	if !found {
+		t.Fatal("measured leaf did not produce a profile")
+	}
 }
 
 func TestProcessPerNode_QueuedNodesRecordUsage(t *testing.T) {

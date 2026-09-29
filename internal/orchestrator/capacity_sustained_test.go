@@ -26,6 +26,9 @@ func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	for i, cpu := range millicores {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 			Kind:          store.MetricInterval,
@@ -114,6 +117,9 @@ func TestRecordRunProfile_CommandCPUDoesNotJoinSampledWindows(t *testing.T) {
 	}
 	for _, nodeID := range []string{"fan-a", "fan-b"} {
 		if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishNode(ctx, "r1", nodeID, "success", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 5; i++ {

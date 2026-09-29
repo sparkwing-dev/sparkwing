@@ -1732,7 +1732,7 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 1)
-	backends, _, _ := openWingdBackends(t, home)
+	backends, st, _ := openWingdBackends(t, home)
 	la := testWingdAdmission(home, nil)
 
 	holderClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "test"})
@@ -1758,6 +1758,12 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 	node := sparkwing.Job(plan, "locked", func(context.Context) error { return nil }).
 		Resources(sparkwing.Cores(1)).
 		Concurrency(group)
+	if err := st.CreateRun(t.Context(), store.Run{ID: "node-waiter", Pipeline: "wingd-e2e-host-first", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(t.Context(), store.Node{RunID: "node-waiter", NodeID: node.ID(), Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 	r := NewNodeExecutor(backends)
 	ctx := withLocalAdmission(context.Background(), la, "test-run", "", "", false, 0, runCharge{})
 

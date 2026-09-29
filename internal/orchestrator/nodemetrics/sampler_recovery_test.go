@@ -3,80 +3,52 @@ package nodemetrics
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-func TestAttach_CPUReaderRecoversWithAFreshBaseline(t *testing.T) {
+func TestAttachRecoversWithoutBridgingMissingReadings(t *testing.T) {
+	start := time.Unix(100, 0)
 	for _, tc := range []struct {
-		name         string
-		available    []bool
-		wantPositive []bool
+		name      string
+		available []bool
+		want      []bool
 	}{
-		{"initial failure", []bool{false, true, true}, []bool{false, true}},
-		{"interrupted readings", []bool{true, true, false, true, true}, []bool{true, false, false, true}},
+		{"initial failure", []bool{false, true, true}, []bool{false, false, true}},
+		{"interrupted", []bool{true, true, false, true, true}, []bool{true, false, false, true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
-			oldCPU, oldRSS := cpuReader, rssReader
-			defer func() { cpuReader, rssReader = oldCPU, oldRSS }()
-			read := 0
-			cpuReader = func() (time.Duration, bool) {
-				i := read
-				read++
-				return time.Duration(i) * 5 * time.Millisecond, tc.available[min(i, len(tc.available)-1)]
-			}
-			rssReader = func() (int64, bool) { return 1024, true }
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			sink := &captureSink{sampleReady: make(chan struct{}, 16)}
-			detach := Attach(ctx, sink)
-			defer func() { detach(); waitForSamplerStop(t) }()
-			for i, positive := range tc.wantPositive {
-				select {
-				case <-sink.sampleReady:
-				case <-ctx.Done():
-					t.Fatal("sampler failed to emit expected readings")
+			synctest.Test(t, func(t *testing.T) {
+				var readings []reading
+				for i, ok := range tc.available {
+					readings = append(readings, reading{start.Add(time.Duration(i) * time.Second), time.Duration(i) * time.Second, 100, ok, nil})
 				}
-				sink.mu.Lock()
-				got := sink.samples[i].CPUMillicores
-				sink.mu.Unlock()
-				if (got > 0) != positive {
-					t.Errorf("reading %d: CPU = %d millicores; positive = %t, want %t", i, got, got > 0, positive)
+				fixedReadings(t, readings...)
+				t.Cleanup(SetIntervalForTest(time.Millisecond))
+				samples := make(chan Sample, 32)
+				finish := Attach(t.Context(), sinkFunc(func(_ context.Context, s Sample) error {
+					select {
+					case samples <- s:
+					default:
+					}
+					return nil
+				}))
+				defer func() {
+					if err := finish(); err != nil {
+						t.Error(err)
+					}
+				}()
+				for i, want := range tc.want {
+					select {
+					case got := <-samples:
+						if got.Valid != want || (got.CPUMillicores > 0) != want {
+							t.Errorf("sample%d=%+v; want valid/positive=%t", i, got, want)
+						}
+					case <-time.After(time.Second):
+						t.Fatal("sample deadline")
+					}
 				}
-			}
+			})
 		})
-	}
-}
-
-func TestAttach_TimestampsCompletedCPURead(t *testing.T) {
-	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
-	oldCPU, oldRSS := cpuReader, rssReader
-	defer func() { cpuReader, rssReader = oldCPU, oldRSS }()
-	completed := make(chan time.Time, 16)
-	cpuReader = func() (time.Duration, bool) {
-		select {
-		case completed <- time.Now():
-		default:
-		}
-		return 0, true
-	}
-	rssReader = func() (int64, bool) { return 1024, true }
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	sink := &captureSink{sampleReady: make(chan struct{}, 16)}
-	detach := Attach(ctx, sink)
-	defer func() { detach(); waitForSamplerStop(t) }()
-	select {
-	case <-sink.sampleReady:
-	case <-ctx.Done():
-		t.Fatal("sampler did not emit a reading")
-	}
-	<-completed
-	readAt := <-completed
-	sink.mu.Lock()
-	sample := sink.samples[0]
-	sink.mu.Unlock()
-	if sample.TS.Before(readAt) {
-		t.Fatalf("sample timestamp %s precedes CPU read %s", sample.TS, readAt)
 	}
 }

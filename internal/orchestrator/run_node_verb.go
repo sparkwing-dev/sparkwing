@@ -98,6 +98,7 @@ func RunNodeCommand(args []string) error {
 		}
 	}
 
+	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
 		holderID, token, NewJSONRenderer(), slog.Default(), nil, runOpts...)
 	if err != nil {

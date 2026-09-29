@@ -2,7 +2,7 @@ package nodemetrics
 
 import (
 	"context"
-	"log"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -17,7 +17,7 @@ type Sample struct {
 }
 
 type Sink interface {
-	Push(ctx context.Context, sample Sample) error
+	Push(context.Context, Sample) error
 }
 
 const defaultInterval = 2 * time.Second
@@ -36,143 +36,94 @@ func Interval() time.Duration {
 	return defaultInterval
 }
 
-var (
-	cpuReader = readCPUTime
-	rssReader = processRSS
-)
+type reading struct {
+	at        time.Time
+	cpu       time.Duration
+	memory    int64
+	valid     bool
+	processes map[int]processSample
+}
 
-var reportedChildCPU atomic.Int64
+var usageReader = func() reading { return processTreeUsage(os.Getpid()) }
 
-func AddReportedChildCPU(d time.Duration) {
-	if d > 0 {
-		reportedChildCPU.Add(int64(d))
+func intervalSample(previous, current reading) Sample {
+	sample := Sample{TS: current.at}
+	if current.valid && current.memory >= 0 {
+		sample.MemoryBytes = current.memory
 	}
-}
-
-var blindOnce sync.Once
-
-type attachment struct {
-	ctx  context.Context
-	sink Sink
-}
-
-type sharedSampler struct {
-	mu    sync.Mutex
-	sinks map[*attachment]struct{}
-	stop  chan struct{}
-}
-
-var shared = &sharedSampler{sinks: make(map[*attachment]struct{})}
-
-var loopsRunning sync.WaitGroup
-
-func Attach(ctx context.Context, sink Sink) (detach func()) {
-	a := &attachment{ctx: ctx, sink: sink}
-	shared.add(a)
-	return func() { shared.remove(a) }
-}
-
-func (s *sharedSampler) add(a *attachment) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sinks[a] = struct{}{}
-	if s.stop == nil {
-		stop := make(chan struct{})
-		s.stop = stop
-		loopsRunning.Add(1)
-		go s.loop(stop, Interval())
+	sample.Valid = previous.valid && current.valid && previous.cpu >= 0 && current.cpu >= previous.cpu && previous.memory >= 0 && current.memory >= 0 && current.at.After(previous.at)
+	if sample.Valid {
+		sample.CPUMillicores = intervalMillicores(current.cpu-previous.cpu, current.at.Sub(previous.at))
 	}
+	return sample
 }
 
-func (s *sharedSampler) remove(a *attachment) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sinks, a)
-	if len(s.sinks) == 0 && s.stop != nil {
-		close(s.stop)
-		s.stop = nil
-	}
-}
-
-func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.stop != stop {
-		return nil
-	}
-	for a := range s.sinks {
-		if a.ctx.Err() != nil {
-			delete(s.sinks, a)
+// Attach samples a dedicated node process until finish collects its final reading.
+// Finish joins collection and returns the first delivery error, including on repeated calls.
+func Attach(ctx context.Context, sink Sink) (finish func() error) {
+	previous := usageReader()
+	stop, done := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var firstError error
+	push := func(sample Sample) {
+		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := sink.Push(writeCtx, sample); firstError == nil {
+			firstError = err
 		}
 	}
-	if len(s.sinks) == 0 {
-		close(stop)
-		s.stop = nil
-		return nil
+	if !previous.valid || previous.cpu < 0 || previous.memory < 0 {
+		push(Sample{TS: previous.at})
 	}
-	live := make([]*attachment, 0, len(s.sinks))
-	for a := range s.sinks {
-		live = append(live, a)
+	observed := make(map[int]processSample)
+	for pid, p := range previous.processes {
+		observed[pid] = p
 	}
-	return live
-}
-
-func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
-	defer loopsRunning.Done()
-	prevCPU, havePrev := cpuReader()
-	havePrev = havePrev && prevCPU >= 0
-	if !havePrev {
-		blindOnce.Do(func() {
-			log.Printf("nodemetrics: CPU accounting unavailable on %s; samples will be marked unavailable", runtime.GOOS)
-		})
-	}
-	prevWall := time.Now()
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-t.C:
-			var totalCPU int64
-			cpu, ok := cpuReader()
-			now := time.Now()
-			ok = ok && cpu >= 0
-			validCPU := ok && havePrev && cpu >= prevCPU && now.After(prevWall)
-			if ok {
-				if validCPU {
-					totalCPU = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
+	incomplete := false
+	initialMemory := previous.memory
+	initialMemoryValid := previous.valid && initialMemory >= 0
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(Interval())
+		defer ticker.Stop()
+		collect := func(final bool) {
+			current := usageReader()
+			sample := intervalSample(previous, current)
+			if initialMemoryValid {
+				sample.MemoryBytes = max(sample.MemoryBytes, initialMemory)
+				initialMemoryValid = false
+			}
+			if current.valid {
+				for pid, p := range observed {
+					q, exists := current.processes[pid]
+					if !exists || p.birth != q.birth || p.parent != q.parent {
+						incomplete = true
+					}
 				}
-				prevCPU = cpu
-				prevWall = now
+				for pid, p := range current.processes {
+					observed[pid] = p
+				}
 			}
-			havePrev = ok
-			live := s.liveSinks(stop)
-			if len(live) == 0 {
+			if incomplete || (final && len(current.processes) > 1) {
+				sample.Valid = false
+			}
+			push(sample)
+			previous = current
+		}
+		for {
+			select {
+			case <-stop:
+				collect(true)
 				return
-			}
-			// perf: RSS costs a subprocess on darwin, so it is read only once
-			// the tick is known to have somewhere to go.
-			totalRSS, validRSS := rssReader()
-			validRSS = validRSS && totalRSS >= 0
-			if !validRSS {
-				totalRSS = 0
-			}
-			// safety: the process total is clamped before it is divided, so
-			// the shares sum to a rate the host could serve rather than to a
-			// multiple of it.
-			share := int64(len(live))
-			sample := Sample{
-				Valid:         validCPU && validRSS,
-				TS:            now,
-				CPUMillicores: totalCPU / share,
-				MemoryBytes:   totalRSS / share,
-			}
-			for _, a := range live {
-				_ = a.sink.Push(a.ctx, sample)
+			case <-ticker.C:
+				collect(false)
 			}
 		}
+	}()
+	return func() error {
+		once.Do(func() { close(stop) })
+		<-done
+		return firstError
 	}
 }
 

@@ -84,6 +84,16 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 		if n.Outcome == "cached" {
 			continue
 		}
+		attempts := 0
+		for _, attempt := range n.ExecutionAttempts {
+			if attempt.RunID == run.ID {
+				attempts++
+			}
+		}
+		if n.Status != "done" || n.Outcome != "success" || n.AttemptsConsumed > 1 || attempts > 1 {
+			runValid = false
+			continue
+		}
 		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
 			runValid = false

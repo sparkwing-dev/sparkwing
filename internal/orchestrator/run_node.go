@@ -417,6 +417,7 @@ func runNodeCLI(args []string) error {
 			_ = os.Unsetenv(name)
 		}
 	}
+	ctx = withProcessNode(ctx, runID, nodeID)
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
 		selectLocalRenderer(), slog.Default(), nil, runOpts...)
 	if err != nil {

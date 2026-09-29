@@ -120,3 +120,17 @@ SELECT ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind
 	}
 	return out, rows.Err()
 }
+
+func invalidateNodeMeasurementHistory(ctx context.Context, tx *storeTx) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu_time_nanos, kind)
+SELECT n.run_id, n.node_id,
+       COALESCE((SELECT MIN(m.ts) FROM node_metrics m WHERE m.run_id = n.run_id AND m.node_id = n.node_id),
+                n.started_at, n.finished_at, r.started_at),
+       0, 0, 0, ''
+  FROM nodes n JOIN runs r ON r.id = n.run_id
+ WHERE NOT EXISTS (SELECT 1 FROM node_metrics m
+                   WHERE m.run_id = n.run_id AND m.node_id = n.node_id AND m.kind = '')
+ON CONFLICT (run_id, node_id, ts) DO UPDATE SET kind = ''`)
+	return err
+}

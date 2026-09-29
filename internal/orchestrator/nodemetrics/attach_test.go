@@ -2,250 +2,176 @@ package nodemetrics
 
 import (
 	"context"
-	"runtime"
+	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
-func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int64) {
+func fixedReadings(t *testing.T, values ...reading) {
 	t.Helper()
-	if samplerRunning() {
-		t.Fatal("a shared sampler loop is already running; stub before attaching")
+	original := usageReader
+	index := 0
+	usageReader = func() reading {
+		value := values[min(index, len(values)-1)]
+		index++
+		return value
 	}
-	prevCPU, prevRSS := cpuReader, rssReader
-	cpuReader = cpu
-	rssReader = func() (int64, bool) { return rss(), true }
-	t.Cleanup(func() {
-		waitForSamplerStop(t)
-		cpuReader, rssReader = prevCPU, prevRSS
+	t.Cleanup(func() { usageReader = original })
+	t.Cleanup(SetIntervalForTest(time.Hour))
+}
+
+func TestAttachFinalReadingAndIdempotentFinish(t *testing.T) {
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{start, time.Second, 100, true, nil}, reading{start.Add(2 * time.Second), 2 * time.Second, 300, true, nil})
+	sink := &captureSink{}
+	finish := Attach(t.Context(), sink)
+	for range 2 {
+		if err := finish(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	samples := sink.snapshot()
+	if len(samples) != 1 || !samples[0].Valid || samples[0].CPUMillicores != 500 || samples[0].MemoryBytes != 300 || !samples[0].TS.Equal(start.Add(2*time.Second)) {
+		t.Fatalf("final reading = %+v; want one valid 500m/300-byte reading at102s", samples)
+	}
+}
+
+func TestAttachFinishDrainsDeliveryAfterCancellation(t *testing.T) {
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{start, 0, 100, true, nil}, reading{start.Add(time.Second), time.Second, 200, true, nil})
+	ctx, cancel := context.WithCancel(t.Context())
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	sink := sinkFunc(func(writeCtx context.Context, _ Sample) error {
+		if err := writeCtx.Err(); err != nil {
+			t.Errorf("delivery inherited execution cancellation: %v", err)
+		}
+		if _, ok := writeCtx.Deadline(); !ok {
+			t.Error("delivery context has no deadline")
+		}
+		close(entered)
+		<-release
+		return nil
 	})
-}
-
-func clampingCPU() func() (time.Duration, bool) {
-	var cumulative time.Duration
-	return func() (time.Duration, bool) {
-		cumulative += time.Hour
-		return cumulative, true
-	}
-}
-
-func samplerRunning() bool {
-	shared.mu.Lock()
-	defer shared.mu.Unlock()
-	return shared.stop != nil
-}
-
-func waitForSamplerStop(t *testing.T) {
-	t.Helper()
-	stopped := make(chan struct{})
-	go func() {
-		loopsRunning.Wait()
-		close(stopped)
-	}()
-	select {
-	case <-stopped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("a shared sampler loop did not exit")
-	}
-}
-
-func (s *captureSink) snapshot() []Sample {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]Sample(nil), s.samples...)
-}
-
-func awaitSampleAfter(t *testing.T, sink *captureSink, boundary time.Time) Sample {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, sm := range sink.snapshot() {
-			if sm.TS.After(boundary) {
-				return sm
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("no sample after %s", boundary)
-	return Sample{}
-}
-
-func awaitSharedTick(t *testing.T, a, b *captureSink) (Sample, Sample) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		as, bs := a.snapshot(), b.snapshot()
-		for _, x := range as {
-			for _, y := range bs {
-				if x.TS.Equal(y.TS) {
-					return x, y
-				}
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("no interval was sampled with both nodes attached")
-	return Sample{}, Sample{}
-}
-
-func TestAttach_SplitsIntervalAcrossAttachedNodes(t *testing.T) {
-	const processRSSBytes = 1000
-	hostMilli := int64(runtime.NumCPU()) * 1000
-	stubReaders(t, clampingCPU(), func() int64 { return processRSSBytes })
-	t.Cleanup(SetIntervalForTest(20 * time.Millisecond))
-
-	first, second := &captureSink{}, &captureSink{}
-	ctx := context.Background()
-	detachFirst := Attach(ctx, first)
-	defer detachFirst()
-	detachSecond := Attach(ctx, second)
-
-	a, b := awaitSharedTick(t, first, second)
-	if a.CPUMillicores != hostMilli/2 || b.CPUMillicores != hostMilli/2 {
-		t.Errorf("shared-interval CPU = %d and %d, want %d each", a.CPUMillicores, b.CPUMillicores, hostMilli/2)
-	}
-	if sum := a.CPUMillicores + b.CPUMillicores; sum < hostMilli-1 || sum > hostMilli {
-		t.Errorf("shared-interval CPU sums to %d, want the process total %d (less integer-division remainder)", sum, hostMilli)
-	}
-	if a.MemoryBytes != processRSSBytes/2 || b.MemoryBytes != processRSSBytes/2 {
-		t.Errorf("shared-interval memory = %d and %d, want %d each", a.MemoryBytes, b.MemoryBytes, processRSSBytes/2)
-	}
-	if sum := a.MemoryBytes + b.MemoryBytes; sum < processRSSBytes-1 || sum > processRSSBytes {
-		t.Errorf("shared-interval memory sums to %d, want the process total %d", sum, processRSSBytes)
-	}
-
-	detachSecond()
-	alone := awaitSampleAfter(t, first, time.Now())
-	if alone.CPUMillicores != hostMilli {
-		t.Errorf("sole-node CPU = %d, want the whole process %d", alone.CPUMillicores, hostMilli)
-	}
-	if alone.MemoryBytes != processRSSBytes {
-		t.Errorf("sole-node memory = %d, want the whole process %d", alone.MemoryBytes, processRSSBytes)
-	}
-}
-
-func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
-	stubReaders(t, clampingCPU(), func() int64 { return 1000 })
-	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
-
-	first := &captureSink{}
-	detach := Attach(context.Background(), first)
-	awaitSampleAfter(t, first, time.Time{})
-	if !samplerRunning() {
-		t.Fatal("no loop running while a node is attached")
-	}
-	detach()
-	waitForSamplerStop(t)
-	if samplerRunning() {
-		t.Fatal("loop still registered after the last node detached")
-	}
-
-	second := &captureSink{}
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	detachSecond := Attach(cancelCtx, second)
-	defer detachSecond()
-	awaitSampleAfter(t, second, time.Time{})
-	if !samplerRunning() {
-		t.Fatal("attaching again did not restart the loop")
-	}
-
+	finish := Attach(ctx, sink)
 	cancel()
-	waitForSamplerStop(t)
-	if samplerRunning() {
-		t.Fatal("loop still registered after its only node was cancelled")
-	}
-}
-
-func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
-	}
-	inTick := make(chan struct{})
-	release := make(chan struct{})
-	var calls, resumed atomic.Int64
-	stubReaders(t, func() (time.Duration, bool) {
-		if calls.Add(1) == 2 {
-			close(inTick)
-			<-release
-			resumed.Add(1)
-			return time.Hour, true
-		}
-		return 0, true
-	}, func() int64 { return 1000 })
-	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
-
-	retiring := &captureSink{}
-	detachRetiring := Attach(context.Background(), retiring)
+	go func() { finished <- finish() }()
+	<-entered
 	select {
-	case <-inTick:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first loop never reached a tick")
+	case <-finished:
+		t.Error("finish returned before delivery completed")
+	default:
 	}
-	detachRetiring()
-
-	replacement := &captureSink{}
-	detachReplacement := Attach(context.Background(), replacement)
-	defer detachReplacement()
 	close(release)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for resumed.Load() == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if resumed.Load() == 0 {
-		t.Fatal("retired loop never resumed inside its tick")
-	}
-
-	awaitSampleAfter(t, replacement, time.Time{})
-	settle := time.Now().Add(200 * time.Millisecond)
-	for time.Now().Before(settle) {
-		for _, sm := range replacement.snapshot() {
-			if sm.CPUMillicores != 0 {
-				t.Fatalf("replacement node charged %d millicores by the retired loop", sm.CPUMillicores)
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-
-	detachReplacement()
-	waitForSamplerStop(t)
-	if samplerRunning() {
-		t.Fatal("a loop still owns the registry after every node left")
+	if err := <-finished; err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestAttach_ConcurrentAttachDetachWhileTicking(t *testing.T) {
-	stubReaders(t, clampingCPU(), func() int64 { return 1000 })
-	t.Cleanup(SetIntervalForTest(time.Millisecond))
+func TestAttachRetainsFirstDeliveryError(t *testing.T) {
+	first, second := errors.New("initial write"), errors.New("final write")
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{at: start}, reading{start.Add(time.Second), 0, 100, true, nil})
+	writes := 0
+	finish := Attach(t.Context(), sinkFunc(func(context.Context, Sample) error {
+		writes++
+		if writes == 1 {
+			return first
+		}
+		return second
+	}))
+	if err := finish(); !errors.Is(err, first) {
+		t.Fatalf("finish error=%v; want first write failure", err)
+	}
+	if writes != 2 {
+		t.Fatalf("writes=%d; want initial unknown and final reading", writes)
+	}
+}
 
-	var wg sync.WaitGroup
-	for worker := 0; worker < 8; worker++ {
-		wg.Add(1)
-		go func(worker int) {
-			defer wg.Done()
-			for round := 0; round < 25; round++ {
-				ctx, cancel := context.WithCancel(context.Background())
-				detach := Attach(ctx, &captureSink{})
-				time.Sleep(time.Millisecond)
-				if (worker+round)%2 == 0 {
-					cancel()
-					continue
-				}
-				detach()
-				cancel()
+func TestAttachConcurrentFinishWritesOnce(t *testing.T) {
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{start, 0, 100, true, nil}, reading{start.Add(time.Second), 0, 100, true, nil})
+	sink := &captureSink{}
+	finish := Attach(t.Context(), sink)
+	var group sync.WaitGroup
+	for range 8 {
+		group.Go(func() {
+			if err := finish(); err != nil {
+				t.Error(err)
 			}
-		}(worker)
+		})
 	}
-	wg.Wait()
+	group.Wait()
+	if got := len(sink.snapshot()); got != 1 {
+		t.Fatalf("final writes=%d; want1", got)
+	}
+}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for samplerRunning() && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Millisecond)
+func TestAttachFinalDescendantsRemainUnknown(t *testing.T) {
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{at: start, valid: true}, reading{at: start.Add(time.Second), cpu: time.Second, memory: 200, valid: true, processes: map[int]processSample{1: {}, 2: {parent: 1}}})
+	sink := &captureSink{}
+	finish := Attach(t.Context(), sink)
+	if err := finish(); err != nil {
+		t.Fatal(err)
 	}
-	if samplerRunning() {
-		t.Fatal("loop still running after every node left")
+	if got := sink.snapshot(); len(got) != 1 || got[0].Valid || got[0].MemoryBytes != 200 {
+		t.Fatalf("unfinished process tree qualified: %+v", got)
 	}
-	waitForSamplerStop(t)
+}
+
+func TestAttachRetainsInitialMemoryObservation(t *testing.T) {
+	start := time.Unix(100, 0)
+	fixedReadings(t, reading{start, time.Second, 300, true, nil}, reading{start.Add(2 * time.Second), 2 * time.Second, 100, true, nil})
+	sink := &captureSink{}
+	finish := Attach(t.Context(), sink)
+	if err := finish(); err != nil {
+		t.Fatal(err)
+	}
+	samples := sink.snapshot()
+	if len(samples) != 1 || !samples[0].Valid || samples[0].CPUMillicores != 500 || samples[0].MemoryBytes != 300 {
+		t.Fatalf("initial memory observation lost: %+v; want one valid 500m/300-byte interval", samples)
+	}
+}
+
+func TestAttachDisappearingProcessRemainsUnknown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Unix(100, 0)
+		fixedReadings(t,
+			reading{at: start, cpu: 1200 * time.Millisecond, memory: 300, valid: true, processes: map[int]processSample{
+				1: {birth: 1, cpu: time.Second}, 2: {parent: 1, birth: 2, cpu: 100 * time.Millisecond}, 3: {parent: 1, birth: 3, cpu: 100 * time.Millisecond},
+			}},
+			reading{at: start.Add(time.Second), cpu: 1400 * time.Millisecond, memory: 100, valid: true, processes: map[int]processSample{
+				1: {birth: 1, cpu: 1300 * time.Millisecond, reaped: 100 * time.Millisecond},
+			}},
+			reading{at: start.Add(2 * time.Second), cpu: 1500 * time.Millisecond, memory: 100, valid: true, processes: map[int]processSample{
+				1: {birth: 1, cpu: 1400 * time.Millisecond, reaped: 100 * time.Millisecond},
+			}},
+		)
+		t.Cleanup(SetIntervalForTest(time.Millisecond))
+		samples := make(chan Sample, 32)
+		finish := Attach(t.Context(), sinkFunc(func(_ context.Context, s Sample) error {
+			select {
+			case samples <- s:
+			default:
+			}
+			return nil
+		}))
+		defer func() {
+			if err := finish(); err != nil {
+				t.Error(err)
+			}
+		}()
+		for i := 0; i < 2; i++ {
+			select {
+			case sample := <-samples:
+				if sample.Valid {
+					t.Errorf("disappearing child qualified despite ambiguous reap: %+v", sample)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("sample deadline")
+			}
+		}
+	})
 }
