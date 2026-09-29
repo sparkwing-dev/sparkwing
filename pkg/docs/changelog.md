@@ -23,6 +23,7 @@ unlock.
 ### Fixed
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- **tests:** Check the exact empty-artifact hash exception in the secret-scan policy.
 - **store:** Discard obsolete learned resource estimates before reading or updating profiles; preserve explicit pins and wait statistics.
 - **security checks:** Recognize the empty artifact content hash in the history scanner.
 - **tests:** Start Kubernetes execution deadlines after fixture setup and retain fallback outcomes.
