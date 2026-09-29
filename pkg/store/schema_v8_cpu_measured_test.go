@@ -71,7 +71,6 @@ func TestSchemaV8_UpgradePreservesRowsAndInvalidatesIncompatibleLearning(t *test
 			t.Errorf("incompatible learning survived upgrade: %+v", profile)
 		}
 	}
-
 }
 
 func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {

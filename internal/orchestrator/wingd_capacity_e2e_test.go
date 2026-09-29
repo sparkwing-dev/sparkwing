@@ -72,7 +72,6 @@ func TestWingd_EmbeddedBurnerRetainsCommandUsageWithoutLearning(t *testing.T) {
 	if commands == 0 {
 		t.Fatal("busy subprocess has no retained command CPU measurement")
 	}
-
 }
 
 func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
