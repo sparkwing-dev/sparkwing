@@ -110,3 +110,57 @@ func TestRunNode_RefusedClaimCreatesNoJob(t *testing.T) {
 		})
 	}
 }
+
+// A controller over its request budget answers the named claim 429 with a
+// Retry-After. That is backpressure, not a refusal: the dispatcher waits and
+// claims again, and the node's fate is decided by the answer after it.
+func TestRunNode_RateLimitedClaimRetriesInsteadOfFailingTheNode(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	controllerHandler := controller.New(st, nil).Handler()
+	var claims atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/build/claim") {
+			w.Header().Set("Content-Type", "application/json")
+			if claims.Add(1) == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"request budget spent"}`))
+				return
+			}
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write([]byte(`{"error":"insufficient credits: balance 0, need 60"}`))
+			return
+		}
+		controllerHandler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	r := New(fake.NewSimpleClientset(), client.New(srv.URL, nil), Config{
+		Namespace: "default", Image: "runner", ControllerURL: srv.URL,
+		PollInterval: time.Millisecond, MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+	runCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	r.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if n := claims.Load(); n != 2 {
+		t.Fatalf("claim attempts = %d, want the 429 retried once", n)
+	}
+	node, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if node.FailureReason != store.FailureCreditsExhausted {
+		t.Errorf("failure reason = %q, want the answer after the 429 (%q)", node.FailureReason, store.FailureCreditsExhausted)
+	}
+}

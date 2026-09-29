@@ -156,6 +156,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	res := r.resolveResources(ctx, req)
 	fence, class, refused := r.claimNode(ctx, req, name)
 	if refused != nil {
+		if ctx.Err() != nil {
+			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+		}
 		return r.refuseUnclaimedJob(ctx, req, refused)
 	}
 	// safety: the dispatcher reached here holding the run's trigger claim,
@@ -530,17 +533,39 @@ const MaxDeclaredJobActiveDeadline = 24 * time.Hour
 
 // safety: every refusal is returned, including a controller that does not
 // serve the named-claim route, because the claim is where the credit check
-// lives and an unfenced Job would run on compute nobody paid for.
+// lives and an unfenced Job would run on compute nobody paid for. A 429 or 503
+// with a Retry-After is backpressure rather than a refusal, so the claim waits
+// it out and asks again instead of failing the node.
 func (r *Runner) claimNode(
 	ctx context.Context, req runner.Request, jobName string,
 ) (store.NodeClaimFence, store.CPUClass, error) {
 	holderID := "k8s-job:" + jobName
-	n, err := r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true, r.cfg.Labels)
-	// safety: only the operator's metered pool may claim it sizes a node to its
-	// cpu class, so an unmetered installation claims the node plainly and gets
-	// the pod shape it always had.
-	if errors.Is(err, store.ErrLockHeld) {
-		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false, r.cfg.Labels)
+	shed := client.NewShedLog(client.ShedWarnInterval)
+	var n *store.Node
+	var err error
+	for {
+		n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, true, r.cfg.Labels)
+		// safety: only the operator's metered pool may claim it sizes a node to its
+		// cpu class, so an unmetered installation claims the node plainly and gets
+		// the pod shape it always had.
+		if errors.Is(err, store.ErrLockHeld) {
+			n, err = r.ctrl.ClaimNodeByID(ctx, req.RunID, req.NodeID, holderID, ClaimLease, false, r.cfg.Labels)
+		}
+		wait, backpressure := client.UnavailableBackoff(err, r.cfg.PollInterval)
+		if !backpressure {
+			break
+		}
+		if shed.Due() {
+			r.logger.Warn("k8s: the controller is shedding this node's claim; waiting to claim again",
+				"run_id", req.RunID, "node_id", req.NodeID, "retry_after", wait, "err", err)
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return store.NodeClaimFence{}, store.CPUClass{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	if err != nil {
 		r.logger.Warn("k8s: claiming the node for its Job failed, so no Job is created",
