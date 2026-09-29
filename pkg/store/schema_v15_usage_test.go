@@ -269,12 +269,12 @@ func TestNodeMetricSample_CPUTimeRoundTrips(t *testing.T) {
 	}
 	base := time.Now()
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: base, CPUMillicores: 2000, MemoryBytes: 1 << 30, CPUTime: 800 * time.Millisecond,
+		Kind: store.MetricCommand, TS: base, CPUMillicores: 2000, MemoryBytes: 1 << 30, CPUTime: 800 * time.Millisecond,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: base.Add(time.Second), CPUMillicores: 500, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval, TS: base.Add(time.Second), CPUMillicores: 500, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}

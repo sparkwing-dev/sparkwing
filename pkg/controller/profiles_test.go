@@ -43,7 +43,8 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	base := time.Now()
 	for i := range 3 {
 		if err := st.AddNodeMetricSample(ctx, "run-1", "node-1", store.MetricSample{
-			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
+			Kind: store.MetricInterval,
+			TS:   base.Add(time.Duration(i) * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +107,8 @@ func TestFinishRun_NoPinNoDrift(t *testing.T) {
 	base := time.Now()
 	for i := range 2 {
 		_ = st.AddNodeMetricSample(ctx, "run-2", "node-1", store.MetricSample{
-			TS: base.Add(time.Duration(i) * time.Second), CPUMillicores: 2000, MemoryBytes: 2 << 30,
+			Kind: store.MetricInterval,
+			TS:   base.Add(time.Duration(i) * time.Second), CPUMillicores: 2000, MemoryBytes: 2 << 30,
 		})
 	}
 

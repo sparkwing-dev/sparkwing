@@ -13,6 +13,7 @@ import (
 )
 
 type usageSample struct {
+	kind          store.MetricKind
 	at            time.Duration
 	cpuMillicores int64
 	memoryBytes   int64
@@ -155,7 +156,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			nodes: []usageNode{{
 				id: "mixed", dur: 2 * time.Second, wall: 2 * time.Second,
 				samples: []usageSample{
-					{at: 0, cpuMillicores: 100, memoryBytes: 128 << 20},
+					{kind: store.MetricInterval, at: 0, cpuMillicores: 100, memoryBytes: 128 << 20},
 					command(500*time.Millisecond, 500, 512<<20, 200*time.Millisecond),
 					command(1200*time.Millisecond, 500, 512<<20, 200*time.Millisecond),
 				},
@@ -186,11 +187,11 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			nodes: []usageNode{{
 				id: "pod", dur: 10 * time.Second,
 				samples: []usageSample{
-					{at: 0, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 2 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 4 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 6 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
-					{at: 8 * time.Second, cpuMillicores: 2000, memoryBytes: 2 << 30},
+					{kind: store.MetricInterval, at: 0, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 2 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 4 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 6 * time.Second, cpuMillicores: 500, memoryBytes: 1 << 30},
+					{kind: store.MetricInterval, at: 8 * time.Second, cpuMillicores: 2000, memoryBytes: 2 << 30},
 				},
 			}},
 			wantNodes:   []wantNode{{id: "pod", sustained: 0.8, peak: 2.0, peakMem: 2 << 30}},
@@ -269,6 +270,7 @@ func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 	out := make([]usageSample, n)
 	for i := range out {
 		out[i] = usageSample{
+			kind:          store.MetricInterval,
 			at:            time.Duration(i) * nodemetrics.Interval(),
 			cpuMillicores: cpuMillicores,
 			memoryBytes:   memoryBytes,
@@ -278,7 +280,7 @@ func ticks(n int, cpuMillicores, memoryBytes int64) []usageSample {
 }
 
 func command(at time.Duration, cpuMillicores, memoryBytes int64, cpu time.Duration) usageSample {
-	return usageSample{at: at, cpuMillicores: cpuMillicores, memoryBytes: memoryBytes, cpuTime: cpu}
+	return usageSample{kind: store.MetricCommand, at: at, cpuMillicores: cpuMillicores, memoryBytes: memoryBytes, cpuTime: cpu}
 }
 
 func fanNode(id string, jitter time.Duration) usageNode {
@@ -312,6 +314,7 @@ func seedUsageRun(t *testing.T, pipeline string, nodes []usageNode) (*store.Stor
 		}
 		for _, s := range n.samples {
 			if err := st.AddNodeMetricSample(ctx, "r1", n.id, store.MetricSample{
+				Kind:          s.kind,
 				TS:            start.Add(n.start + s.at),
 				CPUMillicores: s.cpuMillicores,
 				MemoryBytes:   s.memoryBytes,

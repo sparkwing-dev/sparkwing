@@ -643,6 +643,7 @@ func (l *Loopback) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		ts = parsed
 	}
 	if err := l.state.AddNodeMetricSample(r.Context(), r.PathValue("id"), r.PathValue("nodeID"), store.MetricSample{
+		Kind:          body.Kind,
 		TS:            ts,
 		CPUMillicores: body.CPUMillicores,
 		MemoryBytes:   body.MemoryBytes,
@@ -1326,6 +1327,7 @@ func (l *Loopback) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) 
 	points := make([]metricSample, 0, len(samples))
 	for _, s := range samples {
 		points = append(points, metricSample{
+			Kind:          s.Kind,
 			TS:            s.TS.UTC().Format(time.RFC3339Nano),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,

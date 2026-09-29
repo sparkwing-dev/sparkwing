@@ -10,11 +10,11 @@ import (
 )
 
 type metricSample struct {
-	TS            string `json:"ts"`
-	CPUMillicores int64  `json:"cpu_millicores"`
-	MemoryBytes   int64  `json:"memory_bytes"`
-	// safety: zero is a sampler tick; nonzero is a per-command measurement.
-	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
+	Kind          store.MetricKind `json:"kind"`
+	TS            string           `json:"ts"`
+	CPUMillicores int64            `json:"cpu_millicores"`
+	MemoryBytes   int64            `json:"memory_bytes"`
+	CPUTimeNanos  int64            `json:"cpu_time_nanos,omitempty"`
 }
 
 func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +35,7 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		ts = parsed
 	}
 	if err := s.store.AddNodeMetricSample(r.Context(), runID, nodeID, store.MetricSample{
+		Kind:          body.Kind,
 		TS:            ts,
 		CPUMillicores: body.CPUMillicores,
 		MemoryBytes:   body.MemoryBytes,
@@ -61,6 +62,7 @@ func (s *Server) handleGetNodeMetrics(w http.ResponseWriter, r *http.Request) {
 	points := make([]metricSample, 0, len(samples))
 	for _, s := range samples {
 		points = append(points, metricSample{
+			Kind:          s.Kind,
 			TS:            s.TS.UTC().Format(time.RFC3339Nano),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,

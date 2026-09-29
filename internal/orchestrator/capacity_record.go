@@ -91,9 +91,13 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		measured = true
 		var observedCores float64
 		hasNodeCPU := false
+		unknown := false
 		var peakMem int64
 		commandMem := map[int64]int64{}
 		for _, s := range samples {
+			if s.Kind == store.MetricUnknown {
+				unknown, runValid = true, false
+			}
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
@@ -101,7 +105,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			total := intervals[key]
 			if s.OneShot() {
 				commandMem[key] = max(commandMem[key], s.MemoryBytes)
-			} else {
+			} else if s.Kind == store.MetricInterval {
 				hasNodeCPU, hasRunCPU, total.hasCPU = true, true, true
 				observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
 				add(&total.cpuMillicores, s.CPUMillicores)
@@ -124,7 +128,11 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		occupancy := nodeOccupancy(n, samples, exactWall)
 		meanCores := exactMeanCores(exactCPU, occupancy)
 		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, math.Max(observedCores, meanCores))
-		if contended || (!hasNodeCPU && exactCPU == 0) {
+		if !hasNodeCPU && exactCPU == 0 {
+			runValid = false
+			continue
+		}
+		if unknown || contended {
 			continue
 		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
@@ -142,7 +150,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		}
 	}
 	if !runValid {
-		slog.WarnContext(ctx, "run resource totals are outside the supported range", "pipeline", pipeline, "run_id", runID)
+		slog.WarnContext(ctx, "run resource measurements are incomplete or exceed the supported range", "pipeline", pipeline, "run_id", runID)
 		return
 	}
 	if dominant || !measured || (!hasRunCPU && cpuIntegral == 0) {
@@ -220,7 +228,7 @@ func sustainedProcessCores(intervals map[int64]intervalTotal, meanCores float64)
 func sustainedNodeCores(samples []store.MetricSample, meanCores float64) float64 {
 	cores := make([]float64, 0, len(samples))
 	for _, s := range samples {
-		if !s.OneShot() {
+		if s.Kind == store.MetricInterval {
 			cores = append(cores, float64(s.CPUMillicores)/1000.0)
 		}
 	}

@@ -11,11 +11,11 @@ import (
 func TestRecordRunProfileCommandCPUDoesNotBecomeExitSpike(t *testing.T) {
 	st, start := seedUsageRun(t, "command", []usageNode{{id: "build", dur: 10 * time.Second, wall: 10 * time.Second}})
 	for i := range 5 {
-		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{TS: start.Add(time.Duration(i) * 2 * time.Second), CPUMillicores: 100, MemoryBytes: 64 << 20}); err != nil {
+		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricInterval, TS: start.Add(time.Duration(i) * 2 * time.Second), CPUMillicores: 100, MemoryBytes: 64 << 20}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{TS: start.Add(8*time.Second + time.Millisecond), CPUMillicores: 100, CPUTime: time.Second, MemoryBytes: 64 << 20}); err != nil {
+	if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricCommand, TS: start.Add(8*time.Second + time.Millisecond), CPUMillicores: 100, CPUTime: time.Second, MemoryBytes: 64 << 20}); err != nil {
 		t.Fatal(err)
 	}
 	samples, err := st.ListNodeMetrics(t.Context(), "r1", "build")
@@ -47,13 +47,13 @@ func TestRecordRunProfileCommandOnlyBucketsAreNotSampledZeros(t *testing.T) {
 			st, start := seedUsageRun(t, "command", []usageNode{{id: "build", dur: 30 * time.Second, wall: 30 * time.Second}})
 			if measured {
 				for i, cpu := range test.rates {
-					if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{TS: start.Add(time.Duration(i) * 2 * time.Second), CPUMillicores: cpu, MemoryBytes: 64 << 20}); err != nil {
+					if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricInterval, TS: start.Add(time.Duration(i) * 2 * time.Second), CPUMillicores: cpu, MemoryBytes: 64 << 20}); err != nil {
 						t.Fatal(err)
 					}
 				}
 			}
 			for i := range 10 {
-				if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{TS: start.Add(time.Duration(i+5) * 2 * time.Second), CPUMillicores: 100, CPUTime: time.Millisecond, MemoryBytes: 64 << 20}); err != nil {
+				if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricCommand, TS: start.Add(time.Duration(i+5) * 2 * time.Second), CPUMillicores: 0, CPUTime: 0, MemoryBytes: 64 << 20}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -83,7 +83,7 @@ func TestRecordRunProfileCommandOnlyUpdatesPins(t *testing.T) {
 		if err := st.UpsertProfilePin(t.Context(), "command", "", 4, 512<<20); err != nil {
 			t.Fatal(err)
 		}
-		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{TS: start, CPUTime: time.Millisecond, CPUMillicores: 100}); err != nil {
+		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: store.MetricCommand, TS: start, CPUTime: time.Millisecond, CPUMillicores: 100}); err != nil {
 			t.Fatal(err)
 		}
 		recordRunProfile(t.Context(), localState{st: st}, "command", "r1", &capacity.Pin{Cores: cores}, "", runCharge{}, false, start, start.Add(time.Second))
@@ -93,6 +93,46 @@ func TestRecordRunProfileCommandOnlyUpdatesPins(t *testing.T) {
 		}
 		if p == nil || p.PinnedCores != cores || p.PinnedMemoryBytes != 0 || p.SampleCount != 0 {
 			t.Fatalf("pin update to %v lost: %+v", cores, p)
+		}
+	}
+}
+
+func TestRecordRunProfileUnknownKindPreventsLearning(t *testing.T) {
+	st, start := seedUsageRun(t, "unknown", []usageNode{{id: "build", dur: 10 * time.Second, wall: 10 * time.Second}})
+	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricUnknown} {
+		if err := st.AddNodeMetricSample(t.Context(), "r1", "build", store.MetricSample{Kind: kind, TS: start.Add(time.Duration(i) * time.Second), CPUMillicores: 100, MemoryBytes: 200}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordRunProfile(t.Context(), localState{st: st}, "unknown", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
+	for _, nodeID := range []string{"", "build"} {
+		p, err := st.GetPipelineProfile(t.Context(), "unknown", nodeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p != nil && p.SampleCount != 0 {
+			t.Fatalf("mixed unknown history learned %q: %+v", nodeID, p)
+		}
+	}
+}
+
+func TestRecordRunProfileCommandOnlyNodePreventsPartialRollup(t *testing.T) {
+	st, start := seedUsageRun(t, "partial", []usageNode{
+		{id: "sampled", dur: 10 * time.Second, samples: ticks(5, 200, 400)},
+		{id: "command-only", dur: 10 * time.Second, samples: []usageSample{command(time.Second, 1000, 600, time.Second)}},
+	})
+	recordRunProfile(t.Context(), localState{st: st}, "partial", "r1", nil, "", runCharge{}, false, start, start.Add(10*time.Second))
+	measured, err := st.GetPipelineProfile(t.Context(), "partial", "sampled")
+	if err != nil || measured == nil || measured.SampleCount != 1 {
+		t.Fatalf("valid node observation lost: %+v, %v", measured, err)
+	}
+	for _, node := range []string{"", "command-only"} {
+		profile, err := st.GetPipelineProfile(t.Context(), "partial", node)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if profile != nil && profile.SampleCount != 0 {
+			t.Fatalf("partial CPU coverage learned %q: %+v", node, profile)
 		}
 	}
 }

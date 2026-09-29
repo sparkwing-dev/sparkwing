@@ -126,6 +126,7 @@ type stateMetricsSink struct {
 
 func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) error {
 	return s.backend.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
+		Kind:          store.MetricInterval,
 		TS:            sample.TS,
 		CPUMillicores: sample.CPUMillicores,
 		MemoryBytes:   sample.MemoryBytes,
@@ -284,6 +285,7 @@ func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, n
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
 		nodemetrics.AddReportedChildCPU(s.CPUTime)
 		_ = r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{
+			Kind:          store.MetricCommand,
 			TS:            time.Now(),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,

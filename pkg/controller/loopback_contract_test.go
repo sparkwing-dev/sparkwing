@@ -96,8 +96,42 @@ func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	if err := backend.Close(); err != nil {
 		t.Fatalf("close backend: %v", err)
 	}
-	if has, _ := art.Has(context.Background(), "runs/run-contract/state.ndjson"); !has {
-		t.Error("no state.ndjson landed in the bucket for run-contract")
+	rc, err := art.Get(t.Context(), "runs/run-contract/state.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	raw, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var envelope struct {
+			Kind string `json:"kind"`
+			Data struct {
+				Sample struct {
+					Kind          string
+					CPUTime       int64
+					CPUMillicores int64
+					MemoryBytes   int64
+				} `json:"sample"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Kind != "metric_sample" {
+			continue
+		}
+		sample := envelope.Data.Sample
+		if sample.CPUTime != 0 || sample.CPUMillicores != 0 || sample.MemoryBytes != 400 {
+			t.Fatalf("archived sample=%+v", sample)
+		}
+		kinds[sample.Kind]++
+	}
+	if len(kinds) != 3 || kinds["interval"] != 1 || kinds["command"] != 1 || kinds[""] != 1 {
+		t.Fatalf("archived kinds=%v", kinds)
 	}
 }
 
@@ -252,11 +286,24 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	if err := c.SetNodeArtifactManifest(ctx, runID, "produce", "sha256:abc"); err != nil {
 		t.Fatalf("SetNodeArtifactManifest: %v", err)
 	}
-	if err := c.AddNodeMetricSample(ctx, runID, "produce", store.MetricSample{
-		TS: time.Now().UTC(), CPUMillicores: 250, MemoryBytes: 1 << 20, CPUTime: 40 * time.Millisecond,
-	}); err != nil {
-		t.Fatalf("AddNodeMetricSample: %v", err)
+	for i, kind := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
+		if err := c.AddNodeMetricSample(ctx, runID, "produce", store.MetricSample{Kind: kind, TS: time.Unix(int64(i+1), 0), MemoryBytes: 400}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	if backing == "sqlite" {
+		samples, err := c.ListNodeMetrics(ctx, runID, "produce")
+		if err != nil || len(samples) != 3 {
+			t.Fatalf("samples=%+v, %v", samples, err)
+		}
+		for i, want := range []store.MetricKind{store.MetricInterval, store.MetricCommand, store.MetricUnknown} {
+			if samples[i].Kind != want || samples[i].CPUTime != 0 || samples[i].CPUMillicores != 0 || samples[i].MemoryBytes != 400 {
+				t.Fatalf("sample %d=%+v; want kind %q with zero CPU and 400 bytes", i, samples[i], want)
+			}
+		}
+
+	}
+
 	if err := c.AppendEvent(ctx, runID, "produce", "node_started", []byte(`{}`)); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}
