@@ -923,9 +923,10 @@ sign-in through it, and does not withdraw another account's claim on its
 address. A provider account joins an existing account only through this link
 flow, never by its address. A first sign-in whose verified address an existing
 account holds, from a provider that account has no sign-in with, answers `409`:
-"An account with this email already exists. Sign in with Google, then link
-GitHub from account settings.", naming the account's own providers and the one
-refused. A matching address shows only who holds it now, and a reassigned work
+"An account with this email already exists. Sign in the way you did before,
+then link this provider from account settings." The message names none of the
+account's providers, because the person holding the address may not be the
+account's owner. A matching address shows only who holds it now, and a reassigned work
 address would otherwise reach the previous holder's teams. A second provider
 account from a provider the account already signs in with gets an account of its
 own, as does one the account unlinked.

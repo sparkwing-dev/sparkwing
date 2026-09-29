@@ -1573,9 +1573,9 @@ unlock.
   longer joins an existing account because both report the same verified
   email. See [migration guide](docs/migrations/_unreleased.md#sign-in-no-longer-joins-accounts-by-email). The first sign-in by a provider account whose address an existing
   account holds, from a provider that account does not sign in with, answers
-  `409` with "An account with this email already exists. Sign in with Google,
-  then link GitHub from account settings.", and the dashboard shows it on the
-  sign-in page. A reassigned work address let its new holder take over the
+  `409` with "An account with this email already exists. Sign in the way you
+  did before, then link this provider from account settings.", and the
+  dashboard shows it on the sign-in page. A reassigned work address let its new holder take over the
   previous holder's account. To add the second provider, sign in with the
   first and link the other from **Account -> Linked sign-ins**; sign-ins
   attached before this change keep working. `SignInResult.Linked` is removed

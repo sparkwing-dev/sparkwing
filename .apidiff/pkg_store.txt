@@ -17,13 +17,6 @@ type AccountDeletion struct {
 
 	RevokedPrefixes []string
 }
-type AccountExistsError struct {
-	Provider string
-
-	Existing []string
-}
-func (e *AccountExistsError) Error() string
-func (e *AccountExistsError) Unwrap() error
 const AcquireCached AcquireKind = "cached"
 const AcquireCancellingOthers AcquireKind = "cancelling_others"
 const AcquireCoalesced AcquireKind = "coalesced"

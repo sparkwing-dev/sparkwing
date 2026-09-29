@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -595,12 +596,11 @@ func TestSignInRefusesANewProviderOnAnExistingAccountsAddress(t *testing.T) {
 	alice := signIn(t, st, "g-alice", "alice@corp.example")
 
 	_, err := st.ResolveSignIn(ctx, gh("gh-reassigned", "alice@corp.example"), store.SignUpConditions{}, time.Now())
-	var exists *store.AccountExistsError
-	if !errors.As(err, &exists) || !errors.Is(err, store.ErrAccountExists) {
-		t.Fatalf("GitHub sign-in on Alice's address = %v, want AccountExistsError", err)
+	if !errors.Is(err, store.ErrAccountExists) {
+		t.Fatalf("GitHub sign-in on Alice's address = %v, want ErrAccountExists", err)
 	}
-	if want := "An account with this email already exists. Sign in with Google, then link GitHub from account settings."; err.Error() != want {
-		t.Fatalf("refusal = %q, want %q", err.Error(), want)
+	if strings.Contains(err.Error(), "Google") || strings.Contains(err.Error(), "google") {
+		t.Fatalf("refusal = %q names the existing account's provider", err.Error())
 	}
 	if ids := identitiesOf(t, st, alice.Account.ID); len(ids) != 1 {
 		t.Fatalf("Alice's identities after the refusal = %+v, want only Google", ids)

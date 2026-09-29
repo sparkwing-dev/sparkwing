@@ -99,7 +99,7 @@ func TestGitHubOnAGoogleUsersAddressIsRefusedUntilLinked(t *testing.T) {
 		Error string `json:"error"`
 	}
 	if code := f.githubExchange(ghPerson(401, "dual", "dual@example.com"), &refused); code != http.StatusConflict ||
-		refused.Error != "An account with this email already exists. Sign in with Google, then link GitHub from account settings." {
+		refused.Error != "An account with this email already exists. Sign in the way you did before, then link this provider from account settings." {
 		t.Fatalf("github exchange on the google user's address = %d %q, want 409 with the link instructions", code, refused.Error)
 	}
 	var linked identityBody

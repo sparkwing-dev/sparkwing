@@ -346,6 +346,11 @@ type oauthExchangeResp struct {
 	Waitlisted bool         `json:"waitlisted"`
 }
 
+// safety: the refusal names none of the existing account's providers, because
+// whoever holds the address now may not be that account's owner.
+var errAccountExistsSignIn = errors.New("An account with this email already exists. " + //nolint:staticcheck // shown to the person signing in
+	"Sign in the way you did before, then link this provider from account settings.")
+
 func (s *Server) handleGoogleExchange(w http.ResponseWriter, r *http.Request) {
 	s.oauthExchange(w, r, store.ProviderGoogle)
 }
@@ -390,9 +395,8 @@ func (s *Server) oauthExchange(w http.ResponseWriter, r *http.Request, name stri
 	}
 	now := time.Now().UTC()
 	res, err := s.store.ResolveSignIn(r.Context(), profile, s.signUpConditions(r.Context()), now)
-	var exists *store.AccountExistsError
-	if errors.As(err, &exists) {
-		writeError(w, http.StatusConflict, exists)
+	if errors.Is(err, store.ErrAccountExists) {
+		writeError(w, http.StatusConflict, errAccountExistsSignIn)
 		return
 	}
 	if err != nil {

@@ -357,7 +357,7 @@ func TestOAuthCallbackReportsAProviderRefusal(t *testing.T) {
 
 func TestOAuthCallbackShowsTheControllersAccountExistsRefusal(t *testing.T) {
 	t.Parallel()
-	const refusal = "An account with this email already exists. Sign in with Google, then link GitHub from account settings."
+	const refusal = "An account with this email already exists. Sign in the way you did before, then link this provider from account settings."
 	ctrl := newIdentityController(t, true)
 	ctrl.refuseExchange = refusal
 	rec := oauthCallback(teamDashboard(t, ctrl.URL), "github",

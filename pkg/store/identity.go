@@ -126,7 +126,8 @@ var (
 	ErrEmailMismatch    = errors.New("store: invitation is addressed to another email")
 	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
 	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
-	// ErrAccountExists is what every [*AccountExistsError] wraps.
+	// ErrAccountExists refuses a first sign-in whose verified address an
+	// existing account holds. It names none of that account's providers.
 	ErrAccountExists    = errors.New("store: an account with this email already exists")
 	ErrTeamLimit        = errors.New("store: this user has created as many teams as one user may")
 	ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
@@ -464,61 +465,6 @@ func personalDisplayName(p SignInProfile) string {
 
 var errSignInIdentityChanged = errors.New("store: sign-in identity changed during resolution")
 
-// AccountExistsError refuses a sign-in by a provider account no account holds
-// yet whose address belongs to an existing account. Its message is written
-// for the person signing in.
-type AccountExistsError struct {
-	// Provider is the provider whose sign-in was refused.
-	Provider string
-	// Existing lists the providers the existing account signs in with.
-	Existing []string
-}
-
-func (e *AccountExistsError) Error() string {
-	with := "the provider you used before"
-	if len(e.Existing) > 0 {
-		labels := make([]string, len(e.Existing))
-		for i, p := range e.Existing {
-			labels[i] = providerLabel(p)
-		}
-		with = strings.Join(labels, " or ")
-	}
-	return "An account with this email already exists. Sign in with " + with +
-		", then link " + providerLabel(e.Provider) + " from account settings."
-}
-
-func (e *AccountExistsError) Unwrap() error { return ErrAccountExists }
-
-func providerLabel(provider string) string {
-	switch provider {
-	case ProviderGoogle:
-		return "Google"
-	case ProviderGitHub:
-		return "GitHub"
-	}
-	return provider
-}
-
-func accountExistsTx(ctx context.Context, tx *storeTx, accountID, provider string) (err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT provider FROM identities WHERE account_id = ? ORDER BY provider`, accountID)
-	if err != nil {
-		return err
-	}
-	defer closeRowsInto(rows, &err)
-	refusal := &AccountExistsError{Provider: provider}
-	for rows.Next() {
-		var p string
-		if err = rows.Scan(&p); err != nil {
-			return err
-		}
-		refusal.Existing = append(refusal.Existing, p)
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	return refusal
-}
-
 // ResolveSignIn turns an authenticated provider profile into an account and
 // makes sure the account has a team to land in.
 //
@@ -527,7 +473,7 @@ func accountExistsTx(ctx context.Context, tx *storeTx, accountID, provider strin
 //  1. An identity seen before belongs to the account it already belongs to.
 //  2. Otherwise, when an existing account holds the address verified, holds
 //     no identity from this provider and did not unlink this one, the
-//     sign-in is refused with an [*AccountExistsError]. The provider account
+//     sign-in is refused with [ErrAccountExists]. The provider account
 //     joins that account only through [Store.LinkIdentity], which a signed-in
 //     session drives.
 //  3. Otherwise it becomes a new account.
@@ -632,7 +578,7 @@ func (s *Store) resolveSignInOnce(ctx context.Context, p SignInProfile, c SignUp
 		}
 		switch {
 		case err == nil:
-			return SignInResult{}, accountExistsTx(ctx, tx, accountID, p.Provider)
+			return SignInResult{}, ErrAccountExists
 		case errors.Is(err, sql.ErrNoRows):
 			if accountID, err = newIdentityID(); err != nil {
 				return SignInResult{}, err
