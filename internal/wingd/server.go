@@ -46,6 +46,7 @@ type Daemon struct {
 	shutdownOne sync.Once
 	graceTimer  *time.Timer
 	finalizers  sync.WaitGroup
+	connections sync.WaitGroup
 
 	events      eventWindow
 	journal     *journal.Writer
@@ -271,11 +272,19 @@ func (d *Daemon) Run(ctx context.Context) error {
 			_ = nc.Close()
 			continue
 		}
-		d.mu.Lock()
-		d.conns[c] = struct{}{}
-		d.mu.Unlock()
-		go d.serveConn(c)
+		d.startConn(c) //nolint:contextcheck // Socket closure and the shutdown join govern connection lifetime.
 	}
+}
+
+func (d *Daemon) startConn(c *conn) {
+	d.mu.Lock()
+	d.conns[c] = struct{}{}
+	d.mu.Unlock()
+	d.connections.Add(1)
+	go func() {
+		defer d.connections.Done()
+		d.serveConn(c)
+	}()
 }
 
 func (d *Daemon) heartbeatLoop(stop <-chan struct{}, done chan<- struct{}) {
@@ -369,6 +378,7 @@ func (d *Daemon) finalShutdown() {
 	for _, c := range toClose {
 		c.close()
 	}
+	d.connections.Wait()
 	if err := d.persistState(); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
