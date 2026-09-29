@@ -1,0 +1,187 @@
+package controller
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
+)
+
+var claimWorkKinds = []store.ClaimTokenKind{store.ClaimTokenWork}
+
+type claimHeartbeatReq struct {
+	LeaseSecs int `json:"lease_secs"`
+}
+
+type claimBeatResp struct {
+	Cancel bool `json:"cancel"`
+}
+
+// safety: a refused beat is 409 and renews nothing, which is how a claim that
+// was lost, superseded or can no longer be paid for reaches the pod.
+func (s *Server) handleClaimHeartbeat(w http.ResponseWriter, r *http.Request) {
+	tok, _ := claimTokenFromContext(r.Context())
+	var req claimHeartbeatReq
+	if err := decodeOptionalJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	beat, err := s.store.HeartbeatClaim(r.Context(), tok, time.Duration(req.LeaseSecs)*time.Second, time.Now())
+	if beat.Charge.Cancel {
+		if _, aerr := s.store.AppendEventOnce(r.Context(), tok.RunID, tok.NodeID, store.EventKindCreditsExhausted, nil); aerr != nil {
+			s.logger.Warn("recording an exhausted-credit cancellation failed", "run_id", tok.RunID, "err", aerr)
+		}
+		if cerr := s.store.RequestCancel(r.Context(), tok.RunID); cerr != nil {
+			s.logger.Error("cancelling a run for exhausted credits failed", "run_id", tok.RunID, "err", cerr)
+		}
+	}
+	switch {
+	case errors.Is(err, store.ErrLockHeld):
+		writeError(w, http.StatusConflict, store.ErrLockHeld)
+	case err != nil:
+		s.writeInternalError(w, r, "claim heartbeat", err)
+	default:
+		writeJSON(w, http.StatusOK, claimBeatResp{Cancel: beat.Cancel})
+	}
+}
+
+type claimExecutionResp struct {
+	SpecHash string `json:"spec_hash"`
+}
+
+func (s *Server) handleClaimExecutionStart(w http.ResponseWriter, r *http.Request) {
+	tok, _ := claimTokenFromContext(r.Context())
+	hash, err := s.store.StartClaimExecution(r.Context(), tok, time.Now())
+	if err != nil {
+		writeClaimRefusal(w, r, s, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, claimExecutionResp{SpecHash: hash})
+}
+
+type childRunReq struct {
+	Ordinal  int64             `json:"ordinal"`
+	Pipeline string            `json:"pipeline"`
+	Args     map[string]string `json:"args,omitempty"`
+	Repo     string            `json:"repo,omitempty"`
+	Branch   string            `json:"branch,omitempty"`
+}
+
+// safety: the child builds the parent's own commit, read from the parent's
+// trigger, so a node cannot point a child at a repository its run was not
+// admitted for.
+func (s *Server) handleEnqueueChildRun(w http.ResponseWriter, r *http.Request) {
+	tok, _ := claimTokenFromContext(r.Context())
+	var req childRunReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	parent, err := s.store.GetTrigger(r.Context(), tok.RunID)
+	if err != nil || store.NormalizeTeam(parent.Team) != tok.Team {
+		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
+		return
+	}
+	if (req.Repo != "" && req.Repo != parent.Repo) || (req.Branch != "" && req.Branch != parent.GitBranch) {
+		writeError(w, http.StatusUnprocessableEntity,
+			errors.New("a controller-dispatched node starts children of its own repository and commit only"))
+		return
+	}
+	ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), tok.RunID)
+	if err != nil {
+		s.writeInternalError(w, r, "ancestor walk", err)
+		return
+	}
+	if slices.Contains(append(ancestors, parent.Pipeline), req.Pipeline) {
+		writeError(w, http.StatusConflict, fmt.Errorf("cycle: %s would re-enter itself", req.Pipeline))
+		return
+	}
+	now := time.Now()
+	childID, err := s.store.EnqueueChildRun(r.Context(), tok, req.Ordinal, store.Trigger{
+		ID: newRunID(), Pipeline: req.Pipeline, Args: req.Args, TriggerSource: "await-pipeline",
+		TriggerEnv: parent.TriggerEnv, GitBranch: parent.GitBranch, GitSHA: parent.GitSHA,
+		Repo: parent.Repo, RepoURL: parent.RepoURL, GithubOwner: parent.GithubOwner, GithubRepo: parent.GithubRepo,
+		RepoInherited: true, CreatedAt: now,
+	}, now)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusAccepted, triggerResp{RunID: childID, Status: "dispatched"})
+	case errors.Is(err, store.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err)
+	case errors.Is(err, store.ErrClaimResultConflict):
+		writeError(w, http.StatusConflict, err)
+	case s.writeComputeLimitRefusal(w, r, "", "", err):
+	default:
+		writeClaimRefusal(w, r, s, err)
+	}
+}
+
+// safety: a claim reads only the children its own run started, and only
+// their redacted form and finished outputs.
+func (s *Server) claimChild(w http.ResponseWriter, r *http.Request) (string, bool) {
+	tok, _ := claimTokenFromContext(r.Context())
+	childID := r.PathValue("childID")
+	ok, err := s.store.IsChildRunOf(r.Context(), tok.Team, tok.RunID, childID)
+	if err != nil {
+		s.writeInternalError(w, r, "child run", err)
+		return "", false
+	}
+	if !ok {
+		writeError(w, http.StatusNotFound, runNotFound(childID))
+	}
+	return childID, ok
+}
+
+func (s *Server) handleGetChildRun(w http.ResponseWriter, r *http.Request) {
+	childID, ok := s.claimChild(w, r)
+	if !ok {
+		return
+	}
+	run, err := s.store.GetRun(r.Context(), childID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, runNotFound(childID))
+		return
+	}
+	writeJSON(w, http.StatusOK, store.RedactedRun(run))
+}
+
+func (s *Server) handleGetChildNodeOutput(w http.ResponseWriter, r *http.Request) {
+	childID, ok := s.claimChild(w, r)
+	if !ok {
+		return
+	}
+	r.SetPathValue("id", childID)
+	s.handleGetNodeOutput(w, r)
+}
+
+const maxLauncherSyncJobs = 1000
+
+type launcherSyncReq struct {
+	Jobs         []store.LaunchJob `json:"jobs"`
+	CapacityWait string            `json:"capacity_wait,omitempty"`
+}
+
+type launcherSyncResp struct {
+	Jobs []store.LaunchJobResult `json:"jobs"`
+}
+
+func (s *Server) handleLauncherSync(w http.ResponseWriter, r *http.Request) {
+	var req launcherSyncReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.Jobs) > maxLauncherSyncJobs || len(req.CapacityWait) > 200 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("at most %d jobs and a 200-byte reason", maxLauncherSyncJobs))
+		return
+	}
+	jobs, err := s.store.SyncLaunchJobs(r.Context(), claimIdentity(r), req.Jobs, req.CapacityWait, time.Now())
+	if err != nil {
+		s.writeInternalError(w, r, "launcher sync", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, launcherSyncResp{Jobs: jobs})
+}

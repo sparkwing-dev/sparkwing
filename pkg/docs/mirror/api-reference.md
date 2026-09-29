@@ -71,6 +71,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
+| `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -107,7 +108,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.state` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}` | `runs.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
@@ -115,6 +116,9 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
+| `POST` | `/api/v1/runs/{id}/children` | `claim` |
+| `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
+| `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
 | `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
@@ -128,10 +132,10 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `nodes.claim` |
@@ -145,29 +149,29 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.state` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `claim` or `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/oidc-token` | `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
@@ -247,7 +251,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/triggers` | `runs.write` |
 | `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
-| `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/triggers/{id}` | `claim` or `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |

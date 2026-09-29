@@ -2977,6 +2977,15 @@ type planSnapshot struct {
 	Resources *snapshotResources `json:"plan_resources,omitempty"`
 
 	Secrets pipelines.SecretsField `json:"secrets,omitempty"`
+
+	Source *snapshotSource `json:"source,omitempty"`
+}
+
+type snapshotSource struct {
+	Depth      int  `json:"depth"`
+	Tags       bool `json:"tags,omitempty"`
+	Submodules bool `json:"submodules,omitempty"`
+	LFS        bool `json:"lfs,omitempty"`
 }
 
 type snapshotNode struct {
@@ -2996,6 +3005,8 @@ type snapshotNode struct {
 	Modifiers *snapshotModifiers `json:"modifiers,omitempty"`
 
 	Work *snapshotWork `json:"work,omitempty"`
+
+	SpecHash string `json:"spec_hash,omitempty"`
 }
 
 type snapshotConsume struct {
@@ -3096,6 +3107,14 @@ type planSnapshotMeta struct {
 }
 
 func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) ([]byte, error) {
+	snap, err := buildPlanSnapshot(p, rc, meta)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(snap)
+}
+
+func buildPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSnapshotMeta) (planSnapshot, error) {
 	snap := planSnapshot{
 		AdmissionClass: p.AdmissionClassValue(),
 		Pipeline:       rc.Pipeline,
@@ -3148,7 +3167,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		if w := n.Work(); w != nil {
 			work, err := walker.walk(w, n.ResultStep())
 			if err != nil {
-				return nil, fmt.Errorf("plan node %q: %w", n.ID(), err)
+				return snap, fmt.Errorf("plan node %q: %w", n.ID(), err)
 			}
 			sn.Work = work
 		}
@@ -3174,14 +3193,14 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		if w := rec.Work(); w != nil {
 			work, err := walker.walk(w, rec.ResultStep())
 			if err != nil {
-				return nil, fmt.Errorf("plan node %q (on_failure of %q): %w", rec.ID(), n.ID(), err)
+				return snap, fmt.Errorf("plan node %q (on_failure of %q): %w", rec.ID(), n.ID(), err)
 			}
 			recSnap.Work = work
 		}
 		snap.Nodes = append(snap.Nodes, recSnap)
 		seen[rec.ID()] = true
 	}
-	return json.Marshal(snap)
+	return snap, nil
 }
 
 func snapshotConsumeEdges(edges []sparkwing.ConsumeEdge) []snapshotConsume {

@@ -904,7 +904,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("POST /api/v1/runs", requireScope(ScopeRunsState, http.HandlerFunc(s.handleCreateRun)))
 	mux.Handle("GET /api/v1/runs", requireScope(ScopeRunsRead, s.reconcileBeforeRead(s.handleListRuns)))
-	mux.Handle("GET /api/v1/runs/{id}", requireScope(ScopeRunsRead, s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/runs/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetRun)).orElse(requireScope(ScopeRunsRead, s.readableRun(s.reconcileBeforeRead(s.handleGetRun)), ScopeNodesClaim, ScopeTriggersClaim)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleListNodes)), ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/receipt", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetRunReceipt)))
 	mux.Handle("GET /api/v1/runs/{id}/pending-triggers", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleListPendingTriggersForParent)), ScopeNodesClaim, ScopeTriggersClaim))
@@ -913,16 +913,19 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/attempt", s.newClaimResultRoute([]store.ClaimTokenKind{store.ClaimTokenPlan, store.ClaimTokenWork}, nil, s.handleReportAttempt))
 
 	mux.Handle("POST /api/v1/runs/{id}/nodes", requireScope(ScopeRunsState, s.claimedRun(http.HandlerFunc(s.handleCreateNode))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleStartNode)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleStartNode)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleFinishNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeDeps))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput))))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNode)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode)))))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
+	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
+	mux.Handle("GET /api/v1/runs/{id}/children/{childID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildRun)))
+	mux.Handle("GET /api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetChildNodeOutput)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleWriteNodeDispatch))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatch", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetNodeDispatch)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/dispatches", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeDispatches)))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/logs", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeLiveLog)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleAppendNodeLiveLog)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs", requireScope(ScopeRunsRead, s.metered(egress.ClassLog, s.readableRun(http.HandlerFunc(s.handleReadNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/logs/stream", requireScope(ScopeRunsRead, s.meteredStream(egress.ClassLogStream, s.readableRun(http.HandlerFunc(s.handleStreamNodeLiveLog))), ScopeLogsRead, ScopeNodesClaim, ScopeTriggersClaim))
 	mux.Handle("GET /api/v1/runs/{id}/log-access", requireScope(ScopeLogsRead, http.HandlerFunc(handleRunLogAccess), ScopeLogsWrite, ScopeRunsRead, ScopeNodesClaim, ScopeTriggersClaim))
@@ -937,7 +940,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("POST /api/v1/triggers/{id}/claim", requireScope(ScopeTriggersClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimSpecificTrigger))))
-	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim))
+	mux.Handle("GET /api/v1/triggers/{id}", newClaimSensitiveRoute(claimSourceKinds, nil, http.HandlerFunc(s.handleGetTrigger)).orElse(requireScope(ScopeTriggersRead, s.readableTrigger(http.HandlerFunc(s.handleGetTrigger)), ScopeNodesClaim, ScopeTriggersClaim)))
 	// safety: a refresh fetches any caller-named repository with the operator's
 	// cache credential and holds a mirror fetch open, so it is the operator's
 	// alone; the CLI's warm-up before a trigger is best-effort without it.
@@ -982,9 +985,9 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/pipelines/{name}/profile/contention", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordContention))))
 	mux.Handle("POST /api/v1/pipelines/{name}/profile/waits", requireScope(ScopeRunsState, s.claimedPipeline(http.HandlerFunc(s.handleRecordWaitObservation))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/metrics", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAddNodeMetric)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeMetric)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/metrics", requireScope(ScopeRunsRead, s.readableRun(http.HandlerFunc(s.handleGetNodeMetrics)), ScopeNodesClaim, ScopeTriggersClaim))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeUsage))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/usage", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAddNodeUsage)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAddNodeUsage)))))
 
 	mux.Handle("DELETE /api/v1/runs/{id}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteRun)))
 
@@ -1030,25 +1033,25 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleResetNodeForAutoRetry))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/revoke-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleRevokeNodeReady))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finalize-ready", requireScope(ScopeRunsState, s.withTriggerClaimFence(http.HandlerFunc(s.handleFinalizeNodeReady))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatNodeClaim))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/heartbeat", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.heartbeatBudgeted(http.HandlerFunc(s.handleHeartbeatNodeClaim)))))
 	// safety: a dispatcher that executes a node itself needs the fence every
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim)))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendNodeAnnotation))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeSummary))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeArtifactManifest))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleUpdateNodeActivity)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeActivity)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/touch", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleTouchNodeHeartbeat)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleTouchNodeHeartbeat)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/annotations", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendNodeAnnotation)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendNodeAnnotation)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/summary", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeSummary)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeSummary)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetNodeArtifactManifest)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetNodeArtifactManifest)))))
 
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleStartNodeStep))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeStep))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSkipNodeStep))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendStepAnnotation))))
-	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetStepSummary))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/start", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleStartNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleStartNodeStep)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/finish", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleFinishNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeStep)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/skip", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSkipNodeStep)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSkipNodeStep)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/annotations", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleAppendStepAnnotation)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAppendStepAnnotation)))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/steps/summary", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleSetStepSummary)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleSetStepSummary)))))
 	mux.Handle("GET /api/v1/runs/{id}/steps", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListNodeSteps)))
 
 	mux.Handle("POST /api/v1/runs/{id}/debug-pauses", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateDebugPause)))
@@ -1171,6 +1174,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/teams/{team}/trust", requireScope(ScopeAdmin, http.HandlerFunc(s.handleBillingTrustSet)))
 	mux.Handle("PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetRepoDispatch)))
 	mux.Handle("POST /api/v1/launcher/claim", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLaunchClaim)))
+	mux.Handle("POST /api/v1/launcher/sync", requireScope(ScopeClaimsLaunch, http.HandlerFunc(s.handleLauncherSync)))
 	mux.Handle("GET /api/v1/operator/session", s.requireOperator(s.handleOperatorSession))
 	mux.Handle("GET /api/v1/operator/teams", s.requireOperator(s.handleOperatorTeams))
 	mux.Handle("GET /api/v1/operator/teams/{team}", s.requireOperator(s.handleOperatorTeam))

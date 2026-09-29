@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -87,6 +88,12 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 			if err := download(ctx, dir, env); err != nil {
 				return fmt.Errorf("fetch-source: download modules in %s: %w", dir, err)
 			}
+		}
+		// safety: the pipeline's build finds these modules in the cache and
+		// must not ask a public proxy or checksum database about them.
+		goEnv := "GOPRIVATE=" + strings.Join(ids, ",") + "\n"
+		if err := os.WriteFile(filepath.Join(filepath.Dir(dest), orchestrator.GoEnvFile), []byte(goEnv), 0o644); err != nil {
+			return fmt.Errorf("fetch-source: %w", err)
 		}
 	}
 	// safety: everything under the scratch volume's root was written by this

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -25,6 +26,13 @@ const ServiceAccount = "sparkwing-customer-job"
 
 // JobLabel names every launcher Job's pod by its Job, so no node runs two.
 const JobLabel = "sparkwing.dev/job"
+
+// Annotations naming the claim a launcher Job was built for.
+const (
+	RunAnnotation        = "sparkwing.dev/run-id"
+	NodeAnnotation       = "sparkwing.dev/node-id"
+	GenerationAnnotation = "sparkwing.dev/claim-generation"
+)
 
 // MaxDeadline bounds a Job's life, and with it the life of its claim token.
 const MaxDeadline = store.MaxClaimTokenLifetime
@@ -139,7 +147,9 @@ func BuildJob(cfg Config, claim store.LaunchClaim) *batchv1.Job {
 	deadline := max(claim.LifetimeSecs-int64(DeadlineMargin/time.Second), 1)
 	backoff, ttl := int32(0), int32(jobTTLAfterFinished)
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: labels, Annotations: map[string]string{
+			RunAnnotation: claim.RunID, NodeAnnotation: claim.NodeID, GenerationAnnotation: strconv.FormatInt(claim.Generation, 10),
+		}},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoff,
 			TTLSecondsAfterFinished: &ttl,

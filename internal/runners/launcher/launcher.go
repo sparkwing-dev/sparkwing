@@ -26,15 +26,36 @@ type Launcher struct {
 	Holder string
 	Poll   time.Duration
 	Logger *slog.Logger
+	// Capacity reports why the fleet can start no machine for another Job,
+	// or "" when it can. Nil reads the fleet's capacity from its Jobs alone.
+	Capacity func(context.Context) (string, error)
 }
 
 // Run claims and launches until ctx ends. An idle queue is polled every
-// l.Poll; a claim is followed at once by the next.
+// l.Poll; a claim is followed at once by the next. Every [SyncInterval] it
+// reconciles its Jobs, and while the fleet has no capacity it claims nothing,
+// so ready nodes wait in the controller's queue unbilled.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.Config.Validate(); err != nil {
 		return err
 	}
+	var lastSync time.Time
+	var waiting string
 	for ctx.Err() == nil {
+		if time.Since(lastSync) >= SyncInterval {
+			var err error
+			if waiting, err = l.Sync(ctx); err != nil && ctx.Err() == nil {
+				l.Logger.Warn("launcher: sync failed", "err", err)
+			}
+			lastSync = time.Now()
+		}
+		if waiting != "" {
+			select {
+			case <-ctx.Done():
+			case <-time.After(l.Poll):
+			}
+			continue
+		}
 		launched, err := l.LaunchOne(ctx)
 		if err != nil && ctx.Err() == nil {
 			l.Logger.Warn("launcher: launch failed", "err", err)

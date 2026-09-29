@@ -22,6 +22,36 @@ unlock.
 
 ### Added
 
+- **controller + store + runner + SDK:** A run of an opted-in repository runs
+  end to end on the controller-dispatch path. A Job's pipeline container is
+  trusted code that renews its claim every 5 seconds, records the execution
+  start before any pipeline code runs, builds the pipeline from the checkout
+  the init container prepared (with `GOPRIVATE` set for the listed
+  repositories), and runs it with the claim token as its only credential. The
+  planning node runs the pipeline binary's new `plan --json`, which plans the
+  run and writes the document `POST /api/v1/runs/{id}/plan` accepts, each
+  node carrying its spec hash; a node's pod plans again and refuses a node
+  whose hash differs (`plan-drift`). The new `Plan.Checkout` sets the depth,
+  tags, submodules and LFS a run's checkout gets. A claim token now reads its
+  own run, trigger and nodes, beats its claim (answered with `cancel` when the
+  run is being cancelled), records node, step and live-log progress, and
+  reports its attempt; the pipeline process renews its cache grant through the
+  claim every 2 minutes. `RunAndAwait` from such a node starts a child of the
+  same repository and commit through `POST /api/v1/runs/{id}/children`, one
+  child per call however often it is retried, and reads it through
+  `GET /api/v1/runs/{id}/children/{childID}`; a child of an opted-in
+  repository is planned by the controller as well. The launcher reconciles its
+  Jobs through `POST /api/v1/launcher/sync` every 5 seconds: it deletes the Job
+  of a claim that ended or whose run is being cancelled, and hands back the
+  claim of a Job that waited 4 minutes for a machine, so its node returns to
+  the queue unbilled with no attempt spent. While any Job has waited 2 minutes,
+  or `--node-pool` names a Karpenter NodePool with under 4 cores left under its
+  CPU limit, it claims nothing and queued nodes show
+  `waiting for Cloud capacity` with a `capacity_wait` event. Opting a
+  repository in is accepted. On this path a node cannot read secrets, mint
+  OIDC tokens, hold concurrency slots, write the durable log store (its live
+  log reaches the dashboard), or start a child of another repository.
+
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that
@@ -38,9 +68,7 @@ unlock.
   a team that cannot pay never holds the queue. Every other repository keeps
   the trigger path, a manual retry follows its repository's path, and no other
   claim path, executor offers included, takes a controller-dispatched node.
-  Opting a repository in answers `409` until pods can fetch source and report
-  through claim tokens. Schema v84 adds the `repos` table, `runs.dispatch`
-  and `nodes.timeout_ms`.
+  Schema v84 adds the `repos` table, `runs.dispatch` and `nodes.timeout_ms`.
 
 - **controller + store + runner:** A controller-dispatched Job fetches its
   run's source in the Job's own pod, and the controller never fetches a

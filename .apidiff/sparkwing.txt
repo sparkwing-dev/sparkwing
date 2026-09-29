@@ -71,6 +71,17 @@ type CacheKeyFn func(ctx context.Context) (CacheKey, error)
 const Cached Outcome = "cached"
 const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"
+type Checkout struct {
+	Depth int
+
+	FullHistory bool
+
+	Tags bool
+
+	Submodules bool
+
+	LFS bool
+}
 type Cmd struct {
 }
 func (c *Cmd) Capture() (ExecResult, error)
@@ -474,6 +485,8 @@ type Plan struct {
 }
 func (p *Plan) AdmissionClass(class AdmissionClass) *Plan
 func (p *Plan) AdmissionClassValue() AdmissionClass
+func (p *Plan) Checkout(c Checkout) *Plan
+func (p *Plan) CheckoutValue() *Checkout
 func (p *Plan) ClaimWait(d time.Duration) *Plan
 func (p *Plan) ClaimWaitValue() time.Duration
 func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan

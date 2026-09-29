@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
@@ -26,7 +30,7 @@ type launchFixture struct {
 	kube *fake.Clientset
 }
 
-func newLaunchFixture(t *testing.T) launchFixture {
+func newLaunchFixture(t *testing.T, wrap ...func(http.Handler) http.Handler) launchFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -38,7 +42,11 @@ func newLaunchFixture(t *testing.T) launchFixture {
 	if _, _, err := st.CreateToken("operator", store.TokenKindService, []string{controller.ScopeAdmin}, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	h := controller.New(st, nil).EnableAuthFromStore().Handler()
+	for _, w := range wrap {
+		h = w(h)
+	}
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return launchFixture{st: st, url: srv.URL, kube: fake.NewSimpleClientset()}
 }
@@ -108,14 +116,8 @@ func TestLaunchOne_RunsAnOptedInRepoAsOneJobWithAClaimToken(t *testing.T) {
 		t.Fatalf("unknown dispatch answered %d, want 400", code)
 	}
 	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
-		`{"dispatch":"controller"}`); code != http.StatusConflict {
-		t.Fatalf("opting in before the path is complete answered %d, want 409", code)
-	}
-	// safety: the setter refuses controller dispatch until the path can run, so
-	// the test writes the row it will write once it accepts it.
-	if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)`,
-		string(store.DefaultTeam), store.RepoKey("korey", "probe"), string(store.RepoDispatchController), time.Now().UnixNano()); err != nil {
-		t.Fatal(err)
+		`{"dispatch":"controller"}`); code != http.StatusOK {
+		t.Fatalf("opting in answered %d, want 200", code)
 	}
 	f.intake(t, "run-old", "korey/other")
 	f.intake(t, "run-new", "korey/probe")
@@ -187,5 +189,136 @@ func TestLaunchOne_CreatesNoJobForATokenUnderTheFloor(t *testing.T) {
 	}
 	if actions := f.kube.Actions(); len(actions) != 0 {
 		t.Fatalf("kubernetes actions = %v, want none for a claim under the floor", actions)
+	}
+}
+
+func (f launchFixture) optedInRun(t *testing.T, runID string) {
+	t.Helper()
+	tn, err := f.st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.SetRepoDispatch(context.Background(), "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.intake(t, runID, "korey/probe")
+}
+
+func (f launchFixture) unplacedPod(t *testing.T, job string, waited time.Duration) {
+	t.Helper()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job + "-pod", Namespace: "sparkwing-jobs", Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "sparkwing-launcher", launcher.JobLabel: job,
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+			Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-waited)),
+		}}},
+	}
+	if _, err := f.kube.CoreV1().Pods("sparkwing-jobs").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f launchFixture) jobNames(t *testing.T) []string {
+	t.Helper()
+	jobs, err := f.kube.BatchV1().Jobs("sparkwing-jobs").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, j := range jobs.Items {
+		names = append(names, j.Name)
+	}
+	return names
+}
+
+// A Job that has waited past the release point for a machine is deleted and
+// its node goes back to the queue unbilled, marked as waiting; the launcher
+// then reports it has no capacity. A Job that just started waiting stays.
+func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-wait")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	job := f.jobNames(t)[0]
+	f.unplacedPod(t, job, 30*time.Second)
+	if reason, err := l.Sync(ctx); err != nil || reason != "" {
+		t.Fatalf("sync of a fresh Job = %q, %v; want capacity", reason, err)
+	}
+	if names := f.jobNames(t); len(names) != 1 {
+		t.Fatalf("a Job waiting 30s was deleted: %v", names)
+	}
+	if err := f.kube.CoreV1().Pods("sparkwing-jobs").Delete(ctx, job+"-pod", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
+	reason, err := l.Sync(ctx)
+	if err != nil || reason == "" {
+		t.Fatalf("sync of a stuck Job = %q, %v; want a capacity wait", reason, err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("the stuck Job was kept: %v", names)
+	}
+	n, err := f.st.GetNode(ctx, "run-wait", store.PlanNodeID)
+	if err != nil || n.ClaimedBy != "" || n.AttemptsConsumed != 0 || n.StatusDetail != store.CapacityWaitDetail {
+		t.Fatalf("node after release = %+v %v", n, err)
+	}
+}
+
+// A cancelled run's Job is deleted on the next sync, which is what stops a
+// pod that is not heartbeating.
+func TestSync_DeletesACancelledRunsJob(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-cancel")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	if _, err := l.Sync(ctx); err != nil || len(f.jobNames(t)) != 1 {
+		t.Fatalf("sync of a live claim: %v, jobs %v", err, f.jobNames(t))
+	}
+	if err := f.st.RequestCancel(ctx, "run-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("the cancelled run's Job survived: %v", names)
+	}
+}
+
+// With no capacity the launcher's sync says so: the node stays queued in the
+// controller, unclaimed and unbilled, and says why; with room it is claimed.
+func TestSync_ReportsAFullPoolAndLeavesTheNodeQueued(t *testing.T) {
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-full")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	pool := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "karpenter.sh/v1", "kind": "NodePool", "metadata": map[string]any{"name": "jobs"},
+		"spec":   map[string]any{"limits": map[string]any{"cpu": "80"}},
+		"status": map[string]any{"resources": map[string]any{"cpu": "78"}},
+	}}
+	l.Capacity = launcher.NodePoolCapacity(dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pool), "jobs")
+	ctx := context.Background()
+	if reason, err := l.Sync(ctx); err != nil || reason == "" {
+		t.Fatalf("sync with the pool full = %q, %v; want a capacity wait", reason, err)
+	}
+	n, err := f.st.GetNode(ctx, "run-full", store.PlanNodeID)
+	if err != nil || n.ClaimedBy != "" || n.StatusDetail != store.CapacityWaitDetail {
+		t.Fatalf("queued node = %+v %v", n, err)
+	}
+	pool.Object["status"] = map[string]any{"resources": map[string]any{"cpu": "72"}}
+	l.Capacity = launcher.NodePoolCapacity(dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), pool), "jobs")
+	if reason, err := l.Sync(ctx); err != nil || reason != "" {
+		t.Fatalf("sync with 8 cores free = %q, %v; want capacity", reason, err)
+	}
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch with room: %v %v", launched, err)
 	}
 }

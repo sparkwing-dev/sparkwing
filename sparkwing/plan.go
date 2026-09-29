@@ -31,6 +31,8 @@ type Plan struct {
 
 	claimWait time.Duration
 
+	checkout *Checkout
+
 	admissionClass AdmissionClass
 
 	lintWarnings []LintWarning

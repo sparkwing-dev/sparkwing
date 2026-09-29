@@ -16,14 +16,9 @@ import (
 
 var launcherIdentity = store.ClaimIdentity{Principal: "launcher", TokenPrefix: "swr_launch"}
 
-// safety: the setter refuses controller dispatch until the path can run, so
-// tests write the row the way that setter will once it accepts it.
-func optInForTest(t *testing.T, st *store.Store, team *store.Tenant, owner, name string) error {
+func optInForTest(t *testing.T, _ *store.Store, team *store.Tenant, owner, name string) error {
 	t.Helper()
-	_, err := st.DB().ExecContext(context.Background(), storetest.Rebind(st,
-		`INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)`),
-		string(team.Team()), store.RepoKey(owner, name), string(store.RepoDispatchController), time.Now().UnixNano())
-	return err
+	return team.SetRepoDispatch(context.Background(), owner, name, store.RepoDispatchController, time.Now())
 }
 
 func launchRequest() store.LaunchClaimRequest {
@@ -83,8 +78,8 @@ func TestRepoDispatch_OnlyAnOptedInRepoSkipsTheTriggerPath(t *testing.T) {
 	if err := alpha.SetRepoDispatch(ctx, "korey", "probe", "shell", time.Now()); !errors.Is(err, store.ErrInvalidInput) {
 		t.Fatalf("unknown dispatch: err = %v", err)
 	}
-	if err := alpha.SetRepoDispatch(ctx, "korey", "other", store.RepoDispatchController, time.Now()); !errors.Is(err, store.ErrControllerDispatchIncomplete) {
-		t.Fatalf("opting in before the path can run: err = %v, want ErrControllerDispatchIncomplete", err)
+	if err := alpha.SetRepoDispatch(ctx, "korey", "other", store.RepoDispatchController, time.Now()); err != nil {
+		t.Fatalf("opt a repository in: %v", err)
 	}
 }
 

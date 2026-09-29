@@ -33,6 +33,13 @@ type AcquireSlotResponse struct {
 	Holders     []WaiterHolder
 }
 func AdvisedPoll(configured time.Duration, advisor PollAdvisor) time.Duration
+type ChildRun struct {
+	Ordinal  int64
+	Pipeline string
+	Args     map[string]string
+	Repo     string
+	Branch   string
+}
 type ClaimCapacity struct {
 	MaxConcurrent int
 	ActiveClaims  int
@@ -86,6 +93,7 @@ func (c *Client) DisarmCron(ctx context.Context, name string) (*crons.ScheduleVi
 func (c *Client) DisconnectGitHubWebhook(
 	ctx context.Context, pipeline, repo string,
 ) (*controller.GitHubWebhookDisconnectResponse, error)
+func (c *Client) EnqueueChildRun(ctx context.Context, runID string, child ChildRun) (string, error)
 func (c *Client) EnqueueTrigger(
 	ctx context.Context,
 	pipeline string,
@@ -122,6 +130,8 @@ func (c *Client) FinishTrigger(ctx context.Context, triggerID string) error
 func (c *Client) ForceReleaseSuperseded(ctx context.Context, key string) ([]WaiterHolder, error)
 func (c *Client) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
 func (c *Client) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
+func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error)
+func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store.Run, error)
 func (c *Client) GetCron(ctx context.Context, name string) (*crons.DetailView, error)
 func (c *Client) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
 func (c *Client) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
@@ -135,10 +145,12 @@ func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetSecretForPipeline(ctx context.Context, name, pipeline string) (*Secret, error)
 func (c *Client) GetSecretForRun(ctx context.Context, name, runID string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
+func (c *Client) HeartbeatClaim(ctx context.Context, runID, nodeID string, lease time.Duration) (cancel bool, err error)
 func (c *Client) HeartbeatExecutor(ctx context.Context, name string, headroom Headroom) error
 func (c *Client) HeartbeatNodeClaim(ctx context.Context, runID, nodeID, holderID string, lease time.Duration, headroom *Headroom) error
 func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease time.Duration) (*HeartbeatSlotResponse, error)
 func (c *Client) HeartbeatTrigger(ctx context.Context, id string) (*HeartbeatStatus, error)
+func (c *Client) LauncherSync(ctx context.Context, jobs []store.LaunchJob, capacityWait string) ([]store.LaunchJobResult, error)
 func (c *Client) ListApprovalsForRun(ctx context.Context, runID string) ([]*store.Approval, error)
 func (c *Client) ListCrons(ctx context.Context) (*crons.OverviewView, error)
 func (c *Client) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
@@ -169,6 +181,7 @@ func (c *Client) RecordProfileObservation(ctx context.Context, pipeline, nodeID 
 func (c *Client) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
+func (c *Client) ReportAttempt(ctx context.Context, runID, nodeID string, report store.AttemptReport) error
 func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string) error
 func (c *Client) ResetObjectStoreBreaker(ctx context.Context) (*ObjectStoreBreaker, error)
@@ -188,9 +201,11 @@ func (c *Client) SetPipelinePin(ctx context.Context, pipeline, nodeID string, co
 func (c *Client) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
 func (c *Client) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) SourceCredential(ctx context.Context, runID string) (*store.SourceCredential, error)
+func (c *Client) StartClaimExecution(ctx context.Context, runID, nodeID string) (specHash string, err error)
 func (c *Client) StartNode(ctx context.Context, runID, nodeID string) error
 func (c *Client) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
 func (c *Client) StreamNodeLiveLog(ctx context.Context, runID, nodeID string, since int64) (io.ReadCloser, error)
+func (c *Client) SubmitPlan(ctx context.Context, runID string, plan []byte) error
 func (c *Client) Token() string
 func (c *Client) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 func (c *Client) TouchRunHeartbeat(ctx context.Context, runID string) error

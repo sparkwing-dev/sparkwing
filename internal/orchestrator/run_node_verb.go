@@ -63,6 +63,9 @@ func RunNodeCommand(args []string) error {
 	defer abandon(nil)
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	if isClaimToken(token) && apiSocket == "" {
+		return runLaunchedNode(ctx, *controllerURL, runID, nodeID, token, slog.Default())
+	}
 	var runOpts []RunNodeOption
 	if apiSocket != "" {
 		runOpts = append(runOpts, OverAPISocket(apiSocket))

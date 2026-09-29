@@ -270,7 +270,9 @@ func (s *Server) secretValuesAllowed(r *http.Request) bool {
 		// feed runners "***" as a real argument value instead of failing.
 		return s.authMiddleware().AuthDisabled()
 	}
-	if p.HasScope(ScopeAdmin) {
+	// safety: only a claim route bound to the claim's own run and live claim
+	// serves a claim principal, so reaching here is holding that claim.
+	if p.HasScope(ScopeAdmin) || p.Kind == principalKindClaim {
 		return true
 	}
 	if !p.HasScope(ScopeNodesClaim) {

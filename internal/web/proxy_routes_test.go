@@ -299,6 +299,12 @@ func routeScopes(t *testing.T, source string, values map[string]string) map[stri
 		if !ok {
 			return true
 		}
+		// safety: a claim route answers every other bearer through its orElse handler.
+		if fallback, ok := wrapped.Fun.(*ast.SelectorExpr); ok && fallback.Sel.Name == "orElse" && len(wrapped.Args) == 1 {
+			if wrapped, ok = wrapped.Args[0].(*ast.CallExpr); !ok {
+				return true
+			}
+		}
 		if wrapperName(wrapped.Fun) != "requireScope" || len(wrapped.Args) == 0 {
 			return true
 		}

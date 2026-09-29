@@ -21,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwingcache"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -74,7 +75,15 @@ func RunNodeOnce(
 		return runner.Result{}, fmt.Errorf("ensure root: %w", err)
 	}
 	var logsBackend LogBackend
-	if logsURL != "" {
+	if cfg.claim != nil {
+		// safety: the logs service answers no claim token, so a claimed pod
+		// keeps its log on its own volume and streams it to the live view.
+		fsLogs, err := fs.NewLogStore(paths.Root)
+		if err != nil {
+			return runner.Result{}, fmt.Errorf("pod log store: %w", err)
+		}
+		logsBackend = NewLogStoreBackend(fsLogs, logger).WithLiveSink(stateClient)
+	} else if logsURL != "" {
 		logsBackend = NewHTTPLogsWithToken(logsURL, httpClient, token, logger)
 	} else {
 		logsBackend = localLogs{paths: paths}
@@ -102,7 +111,7 @@ func RunNodeOnce(
 		}
 		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, cfg.gitcacheGrant, logger)
 	}
-	if shouldRunRemote(trigger, cfg.brokeredChild) {
+	if shouldRunRemote(trigger, cfg.brokeredChild || cfg.claim != nil) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
@@ -134,6 +143,9 @@ func RunNodeOnce(
 		}
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, stateHTTP, store.DefaultConcurrencyLease)
+	if cfg.claim != nil {
+		backends.State = cfg.claim
+	}
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)
 	if !ok {
@@ -143,16 +155,8 @@ func RunNodeOnce(
 		)
 	}
 
-	rc := sparkwing.RunContext{
-		RunID:    run.ID,
-		Pipeline: run.Pipeline,
-		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
-			run.GitSHA, run.GitBranch, "", run.DeclaredRepo, run.RepoURL),
-		Trigger:   sparkwing.TriggerInfo{Source: run.TriggerSource},
-		StartedAt: run.StartedAt,
-		NoCache:   noCacheFromEnv(),
-		DryRun:    dryRunFromEnv(),
-	}
+	rc := runContextFor(run)
+	rc.NoCache, rc.DryRun = noCacheFromEnv(), dryRunFromEnv()
 	sparkwing.SetGit(rc.Git)
 
 	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
@@ -225,7 +229,7 @@ func RunNodeOnce(
 
 	childDiagnostics := podChildAwaitDiagnostics{logger: logger}
 	childAwait := childAwaitConfig{
-		state:       stateClient,
+		state:       backends.State,
 		concurrency: backends.Concurrency,
 		parentRunID: runID,
 		retryOf:     run.RetryOf,
@@ -263,6 +267,13 @@ func RunNodeOnce(
 	}
 	if node == nil {
 		return runner.Result{}, errors.Join(fmt.Errorf("node %q not found in plan for %s (static nodes + all ExpandFrom generators exhausted)", nodeID, run.Pipeline), generatorErr)
+	}
+	if cfg.claim != nil {
+		hash, err := claimNodeSpecHash(plan, rc, reg, nodeID)
+		if err != nil || hash != cfg.claim.specHash {
+			return runner.Result{}, errors.Join(fmt.Errorf(
+				"plan-drift: node %q planned differently than the run's accepted plan", nodeID), err)
+		}
 	}
 
 	if admission != nil {
@@ -324,6 +335,17 @@ func RunNodeOnce(
 
 var MetricsHook func(pipeline, outcome string, d time.Duration)
 
+func runContextFor(run *store.Run) sparkwing.RunContext {
+	return sparkwing.RunContext{
+		RunID:    run.ID,
+		Pipeline: run.Pipeline,
+		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
+			run.GitSHA, run.GitBranch, "", run.DeclaredRepo, run.RepoURL),
+		Trigger:   sparkwing.TriggerInfo{Source: run.TriggerSource},
+		StartedAt: run.StartedAt,
+	}
+}
+
 func runNodeCLI(args []string) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),
@@ -367,6 +389,9 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	if isClaimToken(token) && apiSocket == "" {
+		return runClaimedNode(ctx, *controllerURL, runID, nodeID, token)
+	}
 	var runOpts []RunNodeOption
 	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
 	if brokeredChild {
