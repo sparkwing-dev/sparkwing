@@ -23,6 +23,8 @@ unlock.
 ### Fixed
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- **tests:** Measure pause timeout over the recorded pause rather than the entire run.
+
 - **tests:** Finish credit-ledger worker iterations before cancelling their database context.
 - **tests:** Check the exact empty-artifact hash exception in the secret-scan policy.
 - **store:** Discard obsolete learned resource estimates before reading or updating profiles; preserve explicit pins and wait statistics.
