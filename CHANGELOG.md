@@ -58,6 +58,8 @@ unlock.
   `GET /api/v1/secrets/{name}?run=` with its claim token, each read recorded
   as a `secret_released` event on the node; a planning node reads none, and
   an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
+  refused and audited with the claim's token prefix. A plan whose `secrets`
+  name breaks the secret-name grammar or lists more than 100 names is
   refused. A work node writes its own node's durable log to the logs
   service with its claim token, which the service checks against the
   controller on every append and seal, never from a cache, and answers on no

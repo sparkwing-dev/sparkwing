@@ -199,6 +199,22 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 	if code := f.call("GET", "/api/v1/secrets/UNDECLARED?run=run-sec", work, nil, &refused); code != http.StatusForbidden || refused["error"] != "secret_undeclared" {
 		t.Fatalf("undeclared secret = %d %v, want 403 secret_undeclared", code, refused)
 	}
+	var probes []string
+	for _, line := range strings.Split(f.logs.String(), "\n") {
+		if strings.Contains(line, "event=secret_undeclared") {
+			probes = append(probes, line)
+		}
+	}
+	if len(probes) != 1 {
+		t.Fatalf("audited %d undeclared-secret probes, want 1: %q", len(probes), probes)
+	}
+	_, id, _ := strings.Cut(probes[0], "principal_id=")
+	id, _, _ = strings.Cut(id, " ")
+	for _, want := range []string{"principal_kind=claim", "team=" + olga.team, "run_id=run-sec", "node_id=a"} {
+		if !strings.Contains(probes[0], want) || id == "" || !strings.HasPrefix(strings.TrimPrefix(work, "Bearer "), id) {
+			t.Fatalf("the probe's audit record %q lacks %s or the claim's token prefix", probes[0], want)
+		}
+	}
 	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-other", work, nil, nil); code != http.StatusForbidden {
 		t.Fatalf("another run's secret = %d, want 403", code)
 	}

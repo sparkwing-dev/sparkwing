@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secretname"
 )
 
 // PlanNodeID is the node every controller-dispatched run starts with. Its
@@ -47,6 +49,11 @@ type submittedPlan struct {
 	PlanConc  *json.RawMessage  `json:"plan_concurrency"`
 	PlanConcs []json.RawMessage `json:"plan_concurrency_groups"`
 	Source    *plannedSource    `json:"source"`
+	Secrets   []struct {
+		Name     string `json:"name"`
+		Required bool   `json:"required"`
+		Optional bool   `json:"optional"`
+	} `json:"secrets"`
 }
 
 type submittedNode struct {
@@ -279,6 +286,17 @@ func validatePlan(body []byte) ([]plannedNode, error) {
 	}
 	if plan.PlanConc != nil || len(plan.PlanConcs) > 0 {
 		return nil, planRefused("plan-level concurrency groups are not supported; declare concurrency on nodes")
+	}
+	// safety: the plan's secrets are the names its work claims may read, so
+	// they are held to the storage name grammar and to no more than a team
+	// can hold.
+	if len(plan.Secrets) > MaxSecretsPerTeam {
+		return nil, planRefused("the plan declares %d secrets; the limit is %d", len(plan.Secrets), MaxSecretsPerTeam)
+	}
+	for _, sec := range plan.Secrets {
+		if err := secretname.Validate(sec.Name); err != nil {
+			return nil, planRefused("%v", err)
+		}
 	}
 	if len(plan.Nodes) > MaxPlanNodes {
 		return nil, planRefused("the plan has %d nodes; the limit is %d", len(plan.Nodes), MaxPlanNodes)

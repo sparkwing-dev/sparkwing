@@ -211,6 +211,11 @@ func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
 	sec, err := tn.ReleaseClaimSecret(r.Context(), tok, r.PathValue("name"), time.Now())
 	switch {
 	case errors.Is(err, store.ErrSecretUndeclared):
+		// safety: a read of a name the plan never declared is a probe, so it
+		// is recorded with the claim that made it.
+		s.logger.WarnContext(r.Context(), "audit", append(requestLogAttrs(r), "event", "secret_undeclared",
+			"principal_kind", "claim", "principal_id", tok.Prefix, "team", string(tok.Team),
+			"run_id", tok.RunID, "node_id", tok.NodeID)...)
 		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "secret_undeclared", Message: err.Error()})
 		return
 	case errors.Is(err, store.ErrNotFound):

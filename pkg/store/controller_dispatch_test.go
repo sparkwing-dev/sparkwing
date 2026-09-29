@@ -209,7 +209,16 @@ func TestAcceptPlan_RefusesInvalidPlansAndWritesNothing(t *testing.T) {
 	for i := range huge {
 		huge[i] = fmt.Sprintf("n%d", i)
 	}
+	secrets := make([]string, store.MaxSecretsPerTeam+1)
+	for i := range secrets {
+		secrets[i] = fmt.Sprintf(`{"name":"S%d"}`, i)
+	}
 	cases := map[string]string{
+		"secrets not a list":        `{"secrets":{"name":"S"},"nodes":[]}`,
+		"empty secret name":         `{"secrets":[{"name":""}],"nodes":[]}`,
+		"traversing secret name":    `{"secrets":[{"name":"a/../b"}],"nodes":[]}`,
+		"secret name with a space":  `{"secrets":[{"name":"DEPLOY TOKEN"}],"nodes":[]}`,
+		"too many secrets":          `{"secrets":[` + strings.Join(secrets, ",") + `],"nodes":[]}`,
 		"not json":                  `{"nodes":[`,
 		"two documents":             planOf("a") + planOf("b"),
 		"cycle":                     planOf("a:c", "b:a", "c:b"),
