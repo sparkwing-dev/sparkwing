@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,8 +32,7 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 5.1s of real work; the fast class runs under -short")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +96,12 @@ func TestWarmFallback_JobHoldsTheClaimItExecutesUnder(t *testing.T) {
 		PollInterval: time.Millisecond, ClaimWaitTimeout: 10 * time.Millisecond,
 	}, quiet)
 
-	warm.RunNode(dispatchCtx, runner.Request{RunID: "run-1", NodeID: "build"})
+	runCtx, cancel := context.WithTimeout(dispatchCtx, 15*time.Second)
+	defer cancel()
+	result := warm.RunNode(runCtx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if result.Outcome != sparkwing.Failed || result.Err == nil || !strings.Contains(result.Err.Error(), "exited without writing terminal state") {
+		t.Fatalf("fallback result = %+v, want failure from the missing terminal state", result)
+	}
 
 	n, err := st.GetNode(ctx, "run-1", "build")
 	if err != nil {
