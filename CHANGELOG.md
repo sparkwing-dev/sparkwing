@@ -1212,6 +1212,18 @@ unlock.
 
 ### Fixed
 
+- **runner + controller:** A runner, agent, worker or launcher whose token is
+  revoked or expired no longer polls the controller twice a second forever. The
+  controller's `401` for such a token carries `token_state: revoked|expired`
+  and `Retry-After: 3600`; the loop logs one error naming the token prefix and
+  how to re-enroll, then asks at most once an hour. The runner agent and
+  `sparkwing cluster worker` resume within seconds when their config file is
+  rewritten, so `sparkwing cluster runners add --force` recovers a parked agent
+  without a restart. Other claim failures back off exponentially with jitter
+  from one second to five minutes, and a `429` waits out its `Retry-After`. A
+  heartbeat refused for a dead token stops its node or run at once. An expired
+  token's `401` message now reads `token is expired` rather than `token is
+  revoked or expired`.
 - **controller:** `--shed-queue-depth` measures the submitting team's pending
   triggers rather than every team's, so one team's backlog no longer answers
   503 to another team's webhooks and submissions. Schema v85 adds the partial
@@ -2446,7 +2458,7 @@ unlock.
   sweep reached the index without it, and opening it failed with
   `no such column: claim_principal`. Both dialects now carry the columns.
 
-- **CLI + cluster:** `sparkwing worker` and the in-process worker loop now name
+- **CLI + cluster:** `sparkwing cluster worker` and the in-process worker loop now name
   themselves to the controller, honor `X-Sparkwing-Poll-After`, and back off on
   a `Retry-After` instead of repolling at their own cadence. They had no runner
   identity, so a fleet under a per-runner budget shared one bucket, and a shed

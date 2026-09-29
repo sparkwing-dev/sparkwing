@@ -1413,6 +1413,48 @@ that term, but never past 30 days from creation. Reaching that age deletes the
 row and answers `401`, so the browser signs in again. An embedder changes the cap with
 `controller.Server.WithSessionMaxLifetime`.
 
+## When a runner's token dies
+
+A controller answers a revoked or expired token with a `401` whose body
+carries `"token_state": "revoked"` or `"token_state": "expired"` and a
+`Retry-After: 3600` header. Other `401`s, such as an unknown token, carry no
+`token_state`. A token's state is only reported to a caller that sent a
+bearer whose hash matched that row, so the field tells nobody anything about
+a token they do not already hold.
+
+Every loop that polls the controller for work reads that field: the runner
+agent, the other `sparkwing-runner` claim loops (node pool, trigger loop,
+worker and Job launcher), and `sparkwing cluster worker`. On a dead token
+the loop logs one error naming the token's prefix and how to recover, then
+parks. It does not
+exit, because a supervisor would restart it into the same refusal. While
+parked it asks the controller at most once an hour, so a fleet of revoked
+machines costs the controller one request per machine per hour rather than
+one per poll. A network error during that hourly check keeps it parked. If
+the controller answers again, the loop resumes and logs that it did.
+
+A heartbeat for work already claimed stops instead: a dead token can neither
+renew the claim nor report the result, so the runner cancels the node or run
+rather than beating until the lease lapses.
+
+To recover, give the machine a live token:
+
+- **Runner agent** (`sparkwing cluster runners add`): run
+  `sparkwing cluster runners add --force` with the same `--profile` and
+  `--name`. The parked agent watches its config file and reloads it within
+  seconds of the rewrite, without a restart.
+- **`sparkwing cluster worker`**: point the profile at a live token. The worker
+  watches the profile file and reloads it within seconds.
+- **A token passed with `--token` or `SPARKWING_AGENT_TOKEN`**: restart the
+  process with a live token.
+
+Failures that are not a dead token back off rather than parking. A network
+error, a `5xx` or another `401` waits about a second, doubling on each
+consecutive failure up to five minutes, with up to a quarter of each wait
+taken off at random so a fleet does not retry in step. A `429` or `503`
+waits at least as long as its `Retry-After`. The first answered request
+resets the backoff.
+
 ## Extension points
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
