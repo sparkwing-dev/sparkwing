@@ -33,6 +33,11 @@ func runFetchSourceCLI(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctrl := client.NewWithToken(os.Getenv("SPARKWING_CONTROLLER_URL"), nil, os.Getenv("SPARKWING_AGENT_TOKEN"))
+	// safety: the pod's first beat opens its node's billing, so the fetch is
+	// billed; the lease outlasts the fetch until the node's container beats.
+	if _, err := ctrl.HeartbeatClaim(ctx, args[0], args[1], store.MaxLeaseDuration); err != nil {
+		return fmt.Errorf("fetch-source: renew the claim: %w", err)
+	}
 	return fetchSource(ctx, ctrl, args[0], os.Getenv("SPARKWING_SOURCE_DIR"), os.Getenv("GOMODCACHE"),
 		bincache.CheckoutSource, goModDownload)
 }

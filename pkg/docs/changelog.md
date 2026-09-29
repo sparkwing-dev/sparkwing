@@ -46,7 +46,9 @@ unlock.
   running Job of a claim that ended or whose run is being cancelled, leaves a
   finished Job and its pod log to the Job's TTL, and hands back the
   claim of a Job that waited 4 minutes for a machine, so its node returns to
-  the queue unbilled with no attempt spent. While any Job has waited 2 minutes,
+  the queue unbilled with no attempt spent. A launched node's billing opens
+  when its pod first renews the claim, at the start of the source fetch, not
+  at the claim. While any Job has waited 2 minutes,
   or `--node-pool` names a Karpenter NodePool with under 4 cores left under its
   CPU limit, it claims nothing and queued nodes show
   `waiting for Cloud capacity` with a `capacity_wait` event. Opting a

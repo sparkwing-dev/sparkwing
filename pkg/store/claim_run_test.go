@@ -261,3 +261,56 @@ func TestEnqueueChildRun_RoutesAChildByItsRepository(t *testing.T) {
 	}
 	child(0, "child-probe", "probe")
 }
+
+// A launch claim reserves its team's credits; a Job that never got a machine
+// hands the reservation back whole, and a pod's first beat opens billing,
+// after which its claim is never handed back.
+func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
+	ctx := context.Background()
+	st := storetest.Open(t)
+	_, lt, err := st.CreateToken("launcher", store.TokenKindService, []string{store.LaunchScope}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := store.ClaimIdentity{Principal: lt.Principal, TokenPrefix: lt.Prefix}
+	paying := teamHandle(t, st, "paying")
+	if err := optInForTest(t, st, paying, "korey", "probe"); err != nil {
+		t.Fatal(err)
+	}
+	intake(t, paying, "run-billed", "korey", "probe")
+	const granted = 100 * store.MicroCreditsPerCent
+	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_launch", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	claim := func() store.LaunchJob {
+		t.Helper()
+		c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+		if err != nil || c == nil {
+			t.Fatalf("launch claim: %+v %v", c, err)
+		}
+		if balance, err := paying.CreditBalanceMicro(ctx); err != nil || balance >= granted {
+			t.Fatalf("balance after the claim = %d (%v); nothing reserved", balance, err)
+		}
+		return store.LaunchJob{RunID: c.RunID, NodeID: c.NodeID, Generation: c.Generation, Release: true}
+	}
+	first := claim()
+	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{first}, "", time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
+		t.Fatalf("release = %+v %v", res, err)
+	}
+	if balance, err := paying.CreditBalanceMicro(ctx); err != nil || balance != granted {
+		t.Fatalf("balance after the release = %d (%v), want the whole grant back", balance, err)
+	}
+	second := claim()
+	tok := store.ClaimToken{Team: paying.Team(), RunID: second.RunID, NodeID: second.NodeID, Generation: second.Generation}
+	if _, err := st.HeartbeatClaim(ctx, tok, time.Minute, time.Now()); err != nil {
+		t.Fatalf("beat: %v", err)
+	}
+	var billingFrom int64
+	if err := st.DB().QueryRowContext(ctx, storetest.Rebind(st, `SELECT credit_billing_from FROM nodes WHERE run_id = ? AND node_id = ?`),
+		second.RunID, second.NodeID).Scan(&billingFrom); err != nil || billingFrom == 0 {
+		t.Fatalf("billing after the first beat opened at %d (%v)", billingFrom, err)
+	}
+	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{second}, "", time.Now()); err != nil || res[0].State != store.LaunchJobKeep {
+		t.Fatalf("releasing a billed claim = %+v %v, want keep", res, err)
+	}
+}
