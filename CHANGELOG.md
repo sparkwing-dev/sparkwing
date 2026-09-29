@@ -26,6 +26,8 @@ unlock.
 
 ### Fixed
 
+- **checks:** Parse only changed Go files when checking comments in a staged or branch diff.
+
 - **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
 - **tests:** Include metric sample kinds in database requirement expectations.
 
