@@ -334,7 +334,6 @@ sparkwing cluster limits set --name runner_alarm --value 40 --profile prod
 
 # Remove the per-run node cap
 sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod
-
 ```
 
 ## `sparkwing cluster limits show`

@@ -1894,7 +1894,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "402":
           description: >-
-            The claiming token is metered and the credit balance does not cover a minute of its time. The node stays ready and the waiting run records why.
+            The claiming token is metered and the credit balance or a spend limit does not cover a minute of its time. The node stays ready and the waiting run records why.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditsRefused"}
@@ -2100,7 +2100,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409":
-          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first).
           content:
             application/json:
               schema:
@@ -2131,7 +2131,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
+        "409": {description: "The team has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first)."}
 
   /api/v1/teams/{team}/trust:
     parameters:
@@ -2154,7 +2154,7 @@ paths:
       tags: [teams]
       summary: Grant or revoke a team's billing trust on the operator's word.
       description: >-
-        A granted team buys up to $500 over 30 days, or `limit_cents` when given, whatever the automatic rule says. A revoked team is held to the new-team $50 even when the rule would trust it, and `automatic` returns the team to the rule. The change records the operator, the reason, and the trust before and after as a business event.
+        A granted team buys and spends up to $500 over 30 days, or `limit_cents` when given, and spends up to $200 in a UTC day, or `daily_cap_cents`, whatever the automatic rule says. With a card on file it is charged each time its debt reaches $100, or `rung_cents`, and `runner_cap` sets the Cloud nodes it holds at once in place of `max_concurrent_runners`. Each override is only for `granted`, and zero keeps the default. A revoked team is held to the new-team $50 over 30 days and $25 a day even when the rule would trust it, and `automatic` returns the team to the rule. A team under a hold of any cause is untrusted, even when granted, until the hold is released. The change records the operator, the reason, the overrides, and the trust before and after as a business event.
       requestBody:
         required: true
         content:
@@ -2166,7 +2166,10 @@ paths:
               properties:
                 trust: {type: string, enum: [granted, revoked, automatic], description: "`automatic` returns the team to the automatic rule."}
                 reason: {type: string}
-                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
+                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit and spend ceiling, up to $5,000; only with `granted`."}
+                daily_cap_cents: {type: integer, format: int64, description: "Replaces the granted team's daily spend cap, up to $5,000; only with `granted`."}
+                rung_cents: {type: integer, format: int64, description: "Replaces the debt at which the granted team's card is charged, from 50 cents up to $5,000; only with `granted`."}
+                runner_cap: {type: integer, format: int64, description: "Sets the Cloud nodes the granted team holds at once, up to 10,000; only with `granted`."}
       responses:
         "200":
           description: The team's billing trust after the change.
@@ -3995,7 +3998,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "409":
           description: >-
-            Another grant holds this kind and reference under different terms, or the grant would lift the balance above the cap (`balance_cap`, with `balance_micro`, `cap_micro` and `amount_micro`).
+            Another grant holds this kind and reference under different terms, the payment drew an early fraud warning and is refunded rather than granted (`payment_warned`), or the grant would lift the balance above the cap (`balance_cap`, with `balance_micro`, `cap_micro` and `amount_micro`).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/Error"}
@@ -4004,11 +4007,12 @@ paths:
     post:
       x-sparkwing-scope: credits.grant
       tags: [credits]
-      summary: Take back what a payment still has on the ledger.
+      summary: Take back what a payment still has on the ledger, or part of it.
       description: |
         Writes one `reversal` of what the paid grant carrying `payment_id`
         still has, less what earlier reversals of it took back, in the team
-        the payment funded. The balance may go below zero, which stops the
+        the payment funded. A positive `amount_micro` smaller than that takes
+        back only that much, as a partial refund does. The balance may go below zero, which stops the
         team's new metered claims. `reference` names the reversal, such as
         `refund:<payment id>` for an operator's refund or the dispute id for
         a lost chargeback; a repeat under it answers 200 with the reversal
@@ -4026,6 +4030,7 @@ paths:
               properties:
                 payment_id: {type: string, description: The payment id the paid grant carries as its reference.}
                 reference: {type: string, description: This reversal's own reference.}
+                amount_micro: {type: integer, format: int64, minimum: 0, description: "How much to take back; zero or absent takes back all that remains."}
       responses:
         "200":
           description: The reversal this reference already wrote, or nothing left to take back.
@@ -4139,7 +4144,7 @@ paths:
       tags: [credits]
       summary: Read the units the ledger prices in.
       description: >-
-        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with.
+        The checkout service reads these before its first grant and refuses to grant when a cent is not the micro-credits it computes with. It saves no card, reports no card payment, records no fraud warning and reverses no refund unless `capabilities` names `card-billing-v1`.
       responses:
         "200":
           description: The ledger's units.
@@ -4148,11 +4153,169 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.creditUnitsJSON
                 type: object
-                required: [micro_per_credit, credits_per_dollar, micro_per_cent]
+                required: [micro_per_credit, credits_per_dollar, micro_per_cent, capabilities]
                 properties:
                   micro_per_credit: {type: integer, format: int64}
                   credits_per_dollar: {type: integer, format: int64}
                   micro_per_cent: {type: integer, format: int64}
+                  capabilities: {type: array, items: {type: string}, description: "The contracts this controller serves; `card-billing-v1` covers partial reversals, saved cards, card payments and payment warnings."}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/credits/cards:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Record the card an owner put on file through Stripe.
+      description: |
+        The checkout service reports the card saved on the setup page the
+        controller opened for `team`. It replaces any card on file, records a
+        `card.added` business event, and makes a charge that failed on the old
+        card due again at once. While the team is trusted, its usage is billed
+        to this card.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.savedCardReq
+              type: object
+              required: [team, customer, payment_method, fingerprint]
+              properties:
+                team: {type: string, description: The team the setup page was opened for.}
+                customer: {type: string, description: The Stripe customer id.}
+                payment_method: {type: string, description: The Stripe payment method id.}
+                fingerprint: {type: string, description: "The card's fingerprint, which the spend limits and fraud warnings follow across teams."}
+                brand: {type: string}
+                last4: {type: string}
+      responses:
+        "204": {description: Card saved.}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: The team is not registered.}
+
+  /api/v1/credits/card-payments:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Report the outcome of an attempt to pay a card charge.
+      description: |
+        The checkout service's webhook and the pay-now Checkout report here,
+        and the controller's payment worker settles its own calls the same
+        way. `succeeded` settles the payment: the live attempt of the open
+        charge paying exactly the charge's amount pays it off, grants the
+        amount and lifts the hold a decline placed. Any other payment, a
+        second one or the wrong amount, is granted and queued for a refund. A
+        payment that drew an actionable early fraud warning, or was made by a
+        card that did, grants nothing and holds the team. A repeat of a
+        settled payment changes nothing.
+        `failed` records a declined attempt: the charge stays open and is
+        retried after 1, 3 and 7 days, the team is held until it is paid, and
+        its owners are mailed on the first failure. `processing` and
+        `created` change nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.cardPaymentReq
+              type: object
+              required: [status]
+              properties:
+                team: {type: string, description: "The charge's team; checked against the attempt when given."}
+                charge_id: {type: string, description: "Required with `succeeded`."}
+                attempt_id: {type: string, description: "The attempt the payment was made under; required with `succeeded` and `failed`."}
+                payment_intent: {type: string, description: "The Stripe payment intent; required with `succeeded`."}
+                amount_cents: {type: integer, format: int64, description: "What was paid; required and positive with `succeeded`."}
+                status: {type: string, enum: [succeeded, failed, processing, created]}
+                decline_code: {type: string, description: "Why a `failed` attempt was declined."}
+                fingerprint: {type: string, description: "The card that paid, which a pay-now Checkout may take from another card than the one on file."}
+      responses:
+        "204": {description: Recorded.}
+        "400": {description: "The status is unknown, a required field is missing, or the attempt is not for this charge and team."}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: No attempt carries the attempt id.}
+
+  /api/v1/credits/warnings:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Record an early fraud warning on a payment.
+      description: |
+        The warning is stored whether or not the ledger has seen its payment
+        yet, and a repeat of `warning_id` writes nothing new. An `actionable`
+        warning holds the team the payment funded, when the ledger knows it,
+        and the warned payment, or a later payment by the same card, is never
+        granted: its refund returns the money. A warning that is not
+        actionable is stored and stops nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.paymentWarningReq
+              type: object
+              required: [warning_id, payment_intent]
+              properties:
+                warning_id: {type: string, description: The Stripe early fraud warning id.}
+                payment_intent: {type: string, description: The payment the warning is on.}
+                fingerprint: {type: string, description: The card that made the payment.}
+                actionable: {type: boolean, description: "Stripe's word that the payment can still be refunded to head off a dispute."}
+                reason: {type: string, description: Accepted and not recorded.}
+      responses:
+        "200":
+          description: The team the warning holds.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.paymentWarningJSON
+                type: object
+                required: [team, held]
+                properties:
+                  team: {type: string, description: "Empty when the ledger does not know the payment yet or the warning is not actionable."}
+                  held: {type: boolean}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/credits/card-refunds:
+    post:
+      x-sparkwing-scope: credits.grant
+      tags: [credits]
+      summary: Report the status of a refund the controller queued.
+      description: |
+        The controller refunds a card payment that paid no open charge,
+        under a queue key of the payment intent and the attempt number,
+        `<payment intent>-<attempt>`. The checkout service reports each
+        refund's status here as Stripe announces it. Only the queue's current
+        key moves it, even when the report arrives before the controller
+        recorded the refund: `succeeded` finishes the refund, and `failed` or
+        `canceled` makes it due again after 1, 6 and then every 24 hours under
+        the next key. Any other status, or a key the queue does not hold,
+        answers `queued: false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.cardRefundReq
+              type: object
+              required: [payment_intent, refund_id, queue, status]
+              properties:
+                payment_intent: {type: string}
+                refund_id: {type: string, description: The Stripe refund id.}
+                queue: {type: string, description: "The queue key the refund was made under."}
+                status: {type: string, description: "Stripe's refund status, such as `succeeded`, `failed`, `canceled` or `pending`."}
+      responses:
+        "200":
+          description: Whether the report moved the queue.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.cardRefundJSON
+                type: object
+                required: [queued]
+                properties:
+                  queued: {type: boolean}
+        "400": {description: "The payment intent, refund id, queue key or status is missing."}
         "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/credits/history:
@@ -4534,16 +4697,17 @@ paths:
       summary: Read every compute guard and the cloud runners in use.
       description: |
         Compute guards bound what the controller starts before the credit
-        ledger bills it. Every guard is zero by default, which is unlimited.
-        The runner guards count cloud runners, which are the claims a metered
-        token holds; the node and hourly guards count one metered principal's
-        runs, and their `max_global_*` counterparts count every run on the
-        controller. For an operator, `usage` reports the cloud runners claimed
-        right now, in total and per principal, and whether the count reached
-        `runner_alarm`. Team readers do not receive those global fields.
-        It also reports `derived_runner_cap`, the runner ceiling for principals
-        in the request's team after that team's recent paid credit has raised
-        `max_concurrent_runners`, together with that team's paid credit.
+        ledger bills it. Every guard is zero by default, which is unlimited,
+        except `max_concurrent_runners`: it counts one team's cloud runners
+        across every token of the team, and zero means 100 per team. An
+        operator's `runner_cap` on a granted team's trust replaces it for
+        that team. The other runner guards count cloud runners, which are the
+        claims a metered token holds; the node and hourly guards count one
+        metered principal's runs, and their `max_global_*` counterparts count
+        every run on the controller. For an operator, `usage` reports the
+        cloud runners claimed right now, in total and per principal, and
+        whether the count reached `runner_alarm`. Team readers do not receive
+        those global fields.
       responses:
         "200":
           description: Guards and current usage.
@@ -4646,7 +4810,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "402":
           description: >-
-            The claiming token is metered and the credit balance does not cover a minute of its time. The node is not claimed.
+            The claiming token is metered and the credit balance or a spend limit does not cover a minute of its time. The node is not claimed.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreditsRefused"}
@@ -4871,7 +5035,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: "The session signed in more than 10 minutes ago (`error: reauth_required`); sign in again and retry."}
         "409":
-          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support).
+          description: The account is the last owner of teams that have other members, or a team being deleted has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first).
           content:
             application/json:
               schema:
@@ -5182,7 +5346,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {description: "This is the owner's only team, or the team has a credit checkout in progress (wait for it to expire or complete) or is on hold over a disputed payment (contact support)."}
+        "409": {description: "This is the owner's only team, or the team has a credit checkout in progress (wait for it to expire or complete), is on hold over a disputed payment (contact support), or owes for usage on its card or has a card charge in progress (pay it first)."}
 
   /api/v1/team/members:
     get:
@@ -6703,7 +6867,7 @@ paths:
       tags: [teams]
       summary: Read the active team's balance, prices, recent usage and grants.
       description: >-
-        Any member of the active team reads it. One credit is $0.001 and `credits_per_dollar` of them make a dollar; amounts are micro-credits, a fixed unit of 10^-8 dollars, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them.
+        Any member of the active team reads it. One credit is $0.001 and `credits_per_dollar` of them make a dollar; amounts are micro-credits, a fixed unit of 10^-8 dollars, `micro_per_credit` to the credit. `usage` is the team's runner spend grouped by run, newest first, with reservations, usage and refunds netted; `grants` are its purchases, operator grants and refund reversals, newest first; each holds at most 50 rows. `checkout_enabled` reports whether this controller sells credits, and `can_purchase` whether the caller, an owner, may buy them; a team whose usage is billed to its card (`card_billed`) buys none. `limits` is what the team may still spend and the limit that binds first, and `open_charge` the card charge waiting to be paid.
       responses:
         "200":
           description: Team billing.
@@ -6712,12 +6876,12 @@ paths:
               schema:
                 x-sparkwing-go-type: pkg/controller.teamBillingJSON
                 type: object
-                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, trusted, purchase_limit_cents, purchased_30d_cents, checkout_enabled, can_purchase, usage, grants]
+                required: [team, balance_micro, balance_cap_micro, frozen, micro_per_credit, credits_per_dollar, min_billable_seconds, purchase_min_cents, purchase_max_cents, rate_table, storage_rate_micro_per_gb_day, storage_free_allowance_bytes, storage_charged_micro, trusted, purchase_limit_cents, purchased_30d_cents, checkout_enabled, can_purchase, card_billed, can_add_card, limits, usage, grants]
                 properties:
                   team: {type: string}
                   balance_micro: {type: integer, format: int64}
                   balance_cap_micro: {type: integer, format: int64, description: The most a team's balance may hold.}
-                  frozen: {type: boolean, description: "True while the team's cloud usage is held over a payment dispute; its metered claims are refused."}
+                  frozen: {type: boolean, description: "True while the team's cloud usage is held over a payment dispute, an early fraud warning, a declined card charge or an operator's hold; its metered claims are refused."}
                   micro_per_credit: {type: integer, format: int64}
                   credits_per_dollar: {type: integer, format: int64}
                   min_billable_seconds: {type: integer, format: int64, description: The least one node or trigger step is billed for.}
@@ -6739,7 +6903,45 @@ paths:
                   purchase_limit_cents: {type: integer, format: int64, description: "What the team may buy over 30 days: $50 until trusted, $500 once trusted, or an operator's override."}
                   purchased_30d_cents: {type: integer, format: int64, description: "What the team paid over the last 30 days, less refunds of those payments, plus its checkouts still open or, for three days after their session expired, still awaiting a late payment."}
                   checkout_enabled: {type: boolean}
-                  can_purchase: {type: boolean}
+                  can_purchase: {type: boolean, description: "True for an owner while checkout is enabled and the team is not card-billed."}
+                  card:
+                    x-sparkwing-go-type: pkg/controller.teamCardJSON
+                    type: object
+                    description: The card on file; absent when the team has none.
+                    required: [brand, last4, added_at]
+                    properties:
+                      brand: {type: string}
+                      last4: {type: string}
+                      added_at: {type: integer, format: int64, description: Unix seconds.}
+                  card_billed: {type: boolean, description: "True when the team is trusted and has a card on file, so its usage is charged to the card and its balance may run below zero."}
+                  can_add_card: {type: boolean, description: "True for an owner of a trusted team while checkout is enabled."}
+                  open_charge:
+                    x-sparkwing-go-type: pkg/controller.teamChargeJSON
+                    type: object
+                    description: The card charge waiting to be paid; absent when none is open.
+                    required: [id, amount_cents, failures, opened_at]
+                    properties:
+                      id: {type: string}
+                      amount_cents: {type: integer, format: int64}
+                      failures: {type: integer, format: int64, description: How many attempts to charge it failed.}
+                      decline_code: {type: string, description: The last failed attempt's decline code.}
+                      next_attempt_at: {type: integer, format: int64, description: "Unix seconds of the next automatic retry after a failure; absent once the retries are spent."}
+                      opened_at: {type: integer, format: int64, description: Unix seconds.}
+                  limits:
+                    x-sparkwing-go-type: pkg/controller.teamLimitsJSON
+                    type: object
+                    description: "The team's spend limits, in cents. Spend counts prepaid and card-billed usage alike."
+                    required: [ceiling_cents, daily_cap_cents, budget_cents, rung_cents, credit_limit_cents, spent_30d_cents, spent_today_cents, headroom_cents, binding]
+                    properties:
+                      ceiling_cents: {type: integer, format: int64, description: "What the team may spend over 30 days: $50 until trusted, $500 once trusted, or an operator's override."}
+                      daily_cap_cents: {type: integer, format: int64, description: "What the team may spend in a UTC day: $25 until trusted, $200 once trusted, or an operator's override."}
+                      budget_cents: {type: integer, format: int64, description: "The owner's 30-day budget, or the ceiling when none is set or it is higher."}
+                      rung_cents: {type: integer, format: int64, description: "The debt at which a card-billed team's card is charged; zero until trusted."}
+                      credit_limit_cents: {type: integer, format: int64, description: "How far below zero the balance may run: twice the rung while card-billed with no failed charge, otherwise zero."}
+                      spent_30d_cents: {type: integer, format: int64}
+                      spent_today_cents: {type: integer, format: int64}
+                      headroom_cents: {type: integer, format: int64, description: What the team may still spend before a limit refuses new work.}
+                      binding: {type: string, enum: [balance, ceiling, daily_cap, budget, card_ceiling, card_daily_cap, charge_failed], description: "The limit that binds first; the `card_` limits hold the card on file across every team it pays for."}
                   usage:
                     type: array
                     items:
@@ -6799,7 +7001,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409":
           description: >-
-            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`) or pass the team's 30-day purchase limit (`purchase_limit`). A team whose deletion has begun also answers 409, with only `error`.
+            The purchase, with the checkouts still open, would lift the balance above the cap (`balance_cap`) or pass the team's 30-day purchase limit (`purchase_limit`). A team whose usage is billed to its card buys no prepaid credit (`card_on_file`, with only `error` and `code`), and a team whose deletion has begun answers with only `error`.
           content:
             application/json:
               schema:
@@ -6826,6 +7028,76 @@ paths:
                       amount_cents: {type: integer, format: int64}
         "502": {description: The checkout service or Stripe did not open a session.}
         "503": {description: "This controller sells no credits (`checkout_unavailable`)."}
+
+  /api/v1/team/billing/card:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Open a Stripe page to put a card on file for the active team.
+      description: >-
+        An owner of a trusted team adds a card, and the team's usage is then billed to it: the balance may run below zero to twice the team's rung, the card is charged each time the debt reaches the rung and on the 1st of the month for debt carried over, and the team buys no more prepaid credit. The request has no body. The controller asks its checkout service for a card setup page and answers with the page to send the owner to; the card is saved when Stripe confirms it, and replaces any card on file.
+      responses:
+        "200":
+          description: The Stripe card setup page.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.hostedPageJSON
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "The team is not trusted and prepays until it is (`card_not_trusted`)."}
+        "502": {description: The checkout service or Stripe did not open the page.}
+        "503": {description: "This controller bills no cards (`checkout_unavailable`)."}
+
+  /api/v1/team/billing/pay:
+    post:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Open a Stripe Checkout page to pay the active team's open card charge.
+      description: >-
+        An owner pays the open charge by hand, typically after a decline, with the card on file or another. The request has no body. The controller opens a pay-now attempt on the charge and answers with the Checkout page; the payment settles the charge when Stripe confirms it and lifts the decline's hold. An attempt left unpaid for 35 minutes lapses.
+      responses:
+        "200":
+          description: The Stripe Checkout page.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.hostedPageJSON
+                type: object
+                required: [url]
+                properties:
+                  url: {type: string}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "No charge is open, or an attempt to pay it is already in flight (`no_payable_charge`)."}
+        "502": {description: The checkout service or Stripe did not open the page.}
+        "503": {description: "This controller bills no cards (`checkout_unavailable`)."}
+
+  /api/v1/team/billing/budget:
+    put:
+      x-sparkwing-scope: team.admin
+      tags: [teams]
+      summary: Set the active team's 30-day spend budget.
+      description: >-
+        An owner sets a budget, up to $5,000, that stops the team's new Cloud work once its 30-day spend reaches it; zero removes it and leaves the ceiling, and a budget above the ceiling changes nothing. Owners are mailed when the spend passes 50%, 80% and 100% of the budget, once for each threshold in a month.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.teamBudgetReq
+              type: object
+              properties:
+                budget_cents: {type: integer, format: int64, minimum: 0, maximum: 500000}
+      responses:
+        "204": {description: Budget set.}
+        "400": {description: "The budget is negative or above $5,000, or the body is malformed."}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /api/v1/data/capabilities:
     get:
@@ -7202,7 +7474,7 @@ paths:
       tags: [operator]
       summary: Grant, revoke or reset a team's billing trust from the operator console.
       description: >-
-        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor. A limit on a revoked team is refused until trust is granted without one.
+        Takes the body and answers the shape of POST /api/v1/teams/{team}/trust, and records the operator's account as the actor. A limit, daily cap, rung or runner cap on a revoked team is refused until trust is granted without one.
       requestBody:
         required: true
         content:
@@ -7214,7 +7486,10 @@ paths:
               properties:
                 trust: {type: string, enum: [granted, revoked, automatic]}
                 reason: {type: string}
-                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit, up to $5,000; only with `granted`."}
+                limit_cents: {type: integer, format: int64, description: "Replaces the granted team's 30-day purchase limit and spend ceiling, up to $5,000; only with `granted`."}
+                daily_cap_cents: {type: integer, format: int64, description: "Replaces the granted team's daily spend cap, up to $5,000; only with `granted`."}
+                rung_cents: {type: integer, format: int64, description: "Replaces the debt at which the granted team's card is charged, from 50 cents up to $5,000; only with `granted`."}
+                runner_cap: {type: integer, format: int64, description: "Sets the Cloud nodes the granted team holds at once, up to 10,000; only with `granted`."}
       responses:
         "200":
           description: The team's billing trust after the change.
@@ -8205,9 +8480,6 @@ components:
         runners: {type: integer, format: int64, description: Claims metered tokens hold across the controller. Operator only; omitted for team readers.}
         by_principal: {type: object, additionalProperties: {type: integer, format: int64}, description: The same count per principal.}
         alarm_reached: {type: boolean, description: Whether the count reached runner_alarm. Operator only; omitted for team readers.}
-        derived_runner_cap: {type: integer, format: int64, description: The concurrent-runner cap a metered principal in the request's team is held to once that team's recent paid credit has scaled max_concurrent_runners. Absent while max_concurrent_runners is unset.}
-        recent_paid_micro: {type: integer, format: int64, description: "Paid credit granted to the request's team over the scaling window, in micro-credits, less reversals of those grants."}
-        scale_window_seconds: {type: integer, format: int64, description: How far back paid credit counts toward the derived cap.}
     RequestBudgets:
       x-sparkwing-go-type: pkg/controller.requestBudgetsJSON
       type: object
@@ -8423,11 +8695,11 @@ components:
     CreditsRefused:
       x-sparkwing-go-type: pkg/controller.creditsRefusalJSON
       type: object
-      description: A claim or heartbeat the credit balance could not pay for, or a claim for a team whose cloud usage is held.
+      description: A claim or heartbeat the credit balance or a spend limit could not pay for, or a claim for a team whose cloud usage is held.
       required: [error, code, balance_micro, required_micro]
       properties:
         error: {type: string}
-        code: {type: string, enum: [insufficient_credits, credits_frozen], description: "credits_frozen when the team is held over a payment dispute."}
+        code: {type: string, enum: [insufficient_credits, credits_frozen, spend_limit], description: "credits_frozen when the team is held; spend_limit when the 30-day ceiling, the daily cap, the owner's budget or a failed card charge refuses it."}
         balance_micro: {type: integer, format: int64}
         required_micro: {type: integer, format: int64}
     CreateTokenRequest:

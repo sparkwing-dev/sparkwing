@@ -51,6 +51,10 @@ type CacheGrantResponse struct {
 	ExpiresAt time.Time
 }
 func CacheObjectMaxAge(team string) time.Duration
+const CardBillingCapability = "card-billing-v1"
+const CardBillingInterval = 30 * time.Second
+const CardNotTrustedCode = "card_not_trusted"
+const CardOnFileCode = "card_on_file"
 const CheckoutAmountCode = "amount_out_of_range"
 const CheckoutUnavailableCode = "checkout_unavailable"
 type Cipher interface {
@@ -251,6 +255,7 @@ const MeteredInProcessNodesCode = "metered_inprocess_nodes"
 func New(st *store.Store, logger *slog.Logger) *Server
 func NewAuthenticator(st *store.Store, cacheTTL time.Duration) *Authenticator
 func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) *Loopback
+const NoPayableChargeCode = "no_payable_charge"
 type NoopDispatcher struct {
 	Logger *slog.Logger
 }
@@ -279,6 +284,7 @@ type ObjectStoreBreakerResponse struct {
 }
 func OpenSecretValue(c Cipher, team store.Team, sec *store.Secret) (string, error)
 func ParseGitHubWebhookConfig(raw string) (GitHubWebhookConfig, error)
+const PaymentWarnedCode = "payment_warned"
 type PoolConfig struct {
 	Client kubernetes.Interface
 
@@ -430,6 +436,7 @@ type SourceTokenResponse struct {
 
 	ExtraRepositories []string
 }
+const SpendLimitCode = "spend_limit"
 const StorageMaintenanceInterval = time.Hour
 const StoragePassEvery = time.Hour
 type StorageTierResponse struct {

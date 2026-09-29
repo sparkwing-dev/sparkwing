@@ -38,6 +38,9 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
+| `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
+| `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
+| `POST` | `/api/v1/credits/cards` | `credits.grant` |
 | `POST` | `/api/v1/credits/checkouts/closed` | `credits.grant` |
 | `POST` | `/api/v1/credits/freezes` | `credits.grant` |
 | `POST` | `/api/v1/credits/grants` | `credits.grant` |
@@ -47,6 +50,7 @@ Every route the controller and logs service register, with the scope each requir
 | `PUT` | `/api/v1/credits/settings` | `admin` |
 | `GET` | `/api/v1/credits/teams/{team}` | `admin` |
 | `GET` | `/api/v1/credits/units` | `credits.grant` |
+| `POST` | `/api/v1/credits/warnings` | `credits.grant` |
 | `GET` | `/api/v1/crons` | `runs.read` |
 | `DELETE` | `/api/v1/crons/repos` | `runs.control` |
 | `PUT` | `/api/v1/crons/repos` | `runs.control` |
@@ -197,7 +201,10 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/team` | `team.admin` |
 | `PATCH` | `/api/v1/team` | `team.admin` |
 | `GET` | `/api/v1/team/billing` | `runs.read` |
+| `PUT` | `/api/v1/team/billing/budget` | `team.admin` |
+| `POST` | `/api/v1/team/billing/card` | `team.admin` |
 | `POST` | `/api/v1/team/billing/checkout` | `team.admin` |
+| `POST` | `/api/v1/team/billing/pay` | `team.admin` |
 | `GET` | `/api/v1/team/build-trust` | `runs.read` |
 | `PUT` | `/api/v1/team/build-trust` | `team.admin` |
 | `GET` | `/api/v1/team/cli-tokens` | `runs.read` |
