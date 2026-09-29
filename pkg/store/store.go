@@ -179,6 +179,9 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	st.outputDir = filepath.Dir(path)
+	if err := st.convertLegacyOutputs(context.Background()); err != nil {
+		return nil, errors.Join(fmt.Errorf("move node outputs out of %s: %w", path, err), st.Close())
+	}
 	return st, nil
 }
 

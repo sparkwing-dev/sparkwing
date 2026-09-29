@@ -263,3 +263,118 @@ func TestFinishNode_KeepsLocalOutputBytesBesideTheStore(t *testing.T) {
 		t.Fatalf("output bytes on a store with no output dir: err = %v", err)
 	}
 }
+
+func setInlineOutput(t *testing.T, s *store.Store, runID, nodeID string, data []byte) {
+	t.Helper()
+	q := `UPDATE nodes SET output_json = ? WHERE run_id = ? AND node_id = ?`
+	if s.Dialect() == store.DialectPostgres {
+		q = `UPDATE nodes SET output_json = $1 WHERE run_id = $2 AND node_id = $3`
+	}
+	if _, err := s.DB().Exec(q, data, runID, nodeID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacyOutputs_MovesRetainedOutputsOnce(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	old := time.Now().Add(-store.OutputRetention - time.Hour)
+	mk := func(id, status string, finished *time.Time) {
+		t.Helper()
+		if err := s.CreateRun(ctx, store.Run{ID: id, Pipeline: "p", Status: "running", StartedAt: old.Add(-time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: id, NodeID: "n", Status: "done", Outcome: "success"}); err != nil {
+			t.Fatal(err)
+		}
+		setInlineOutput(t, s, id, "n", []byte(`"`+id+`"`))
+		if finished != nil {
+			if err := store.FinishRunAtForTest(ctx, s, id, status, *finished); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	recent, older := time.Now(), old.Add(-time.Hour)
+	mk("run-a-recent", "failed", &recent)
+	mk("run-b-old-failed", "failed", &old)
+	mk("run-c-old-newest-success", "success", &old)
+	mk("run-d-old-success", "success", &older)
+	mk("run-e-unfinished", "", nil)
+	mk("run-f-has-ref", "failed", &recent)
+	ref := commitOutput(t.Context(), t, s, store.DefaultTeam, "run-f-has-ref", "n", []byte(`"newer"`))
+	if err := s.FinishNodeWithOutputRef(ctx, "run-f-has-ref", "n", "success", "", &ref, "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := func() []string {
+		t.Helper()
+		var ids []string
+		after := ""
+		for {
+			batch, err := s.LegacyOutputs(ctx, after, "n", 2, time.Now().Add(-store.OutputRetention))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, o := range batch {
+				ids = append(ids, o.RunID)
+				after = o.RunID
+			}
+			if len(batch) < 2 {
+				return ids
+			}
+		}
+	}
+	got := strings.Join(listed(), ",")
+	if want := "run-a-recent,run-c-old-newest-success,run-e-unfinished"; got != want {
+		t.Fatalf("outputs to move = %s, want %s", got, want)
+	}
+	batch, err := s.LegacyOutputs(ctx, "", "", 10, time.Now().Add(-store.OutputRetention))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range batch {
+		if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
+			t.Fatalf("recording %s again: %v", o.RunID, err)
+		}
+	}
+	if left := listed(); len(left) != 0 {
+		t.Fatalf("outputs left after the move: %v", left)
+	}
+	obj, err := s.NodeOutputObject(ctx, store.DefaultTeam, "run-a-recent", "n")
+	if err != nil || obj.Key != store.MigratedOutputKey("run-a-recent", "n") || obj.Size != int64(len(`"run-a-recent"`)) {
+		t.Fatalf("moved output = %+v, %v", obj, err)
+	}
+	if n, _ := s.GetNode(ctx, "run-f-has-ref", "n"); n.OutputRef == nil || *n.OutputRef != ref {
+		t.Fatalf("the move replaced a newer ref: %+v", n.OutputRef)
+	}
+}
+
+func TestOpen_MovesALaptopsInlineOutputsIntoItsOutputDir(t *testing.T) {
+	target := storetest.NewSQLite(t)
+	s := target.Open(t)
+	ctx := t.Context()
+	if err := s.CreateRun(ctx, store.Run{ID: "run-inline", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run-inline", NodeID: "n", Status: "done", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	setInlineOutput(t, s, "run-inline", "n", []byte(`{"kept":true}`))
+	if out, err := s.GetNodeOutput(ctx, "run-inline", "n"); err != nil || out != nil {
+		t.Fatalf("an inline output read before the move: %s, %v", out, err)
+	}
+	if _, err := s.DB().Exec(`DELETE FROM sparkwing_meta WHERE key = 'outputs_converted'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := target.Open(t)
+	out, err := reopened.GetNodeOutput(ctx, "run-inline", "n")
+	if err != nil || string(out) != `{"kept":true}` {
+		t.Fatalf("output after the move = %s, %v", out, err)
+	}
+}
