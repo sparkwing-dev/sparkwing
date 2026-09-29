@@ -771,7 +771,8 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
+		CPUMeasured: true,
+		Duration:    20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
 	}, 3)
 
 	gate := newWingdGate()
@@ -878,7 +879,8 @@ func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
 	seedProfile(t, st, "wingd-e2e-hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
 	}, 4)
 
 	gate := newWingdGate()
@@ -977,7 +979,8 @@ func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
 	startWingd(t, home, 2)
 	backends, st, _ := openWingdBackends(t, home)
 	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
+		CPUMeasured: true,
+		Duration:    time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
 	}, 3)
 
 	gate := newWingdGate()
@@ -1035,14 +1038,16 @@ func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedProfile(t, st, "wingd-e2e-profiled-stage", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
 	}, 4)
 	seedNodeProfile(t, st, "wingd-e2e-profiled-stage", "quick", store.ProfileObservation{
 		Duration: 100 * time.Millisecond, PeakCores: 0.1, PeakMemoryBytes: 64 << 20,
 		CPUMeasured: true,
 	}, 4)
 	seedNodeProfile(t, st, "wingd-e2e-profiled-stage", "heavy", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 8, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1099,7 +1104,8 @@ func TestWingd_SemaphoresOnlyRunStillAdmitsNodeHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-plan-sem-unpinned", "hold", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1158,7 +1164,8 @@ func TestWingd_RecoveryNodeAdmitsHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-recovery-unpinned", "recover", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
@@ -1222,7 +1229,8 @@ func TestWingd_ChildTriggerInheritsRunSemaphoreWhileNodeHasHostLease(t *testing.
 	wingdE2EChild.Store(launch)
 
 	seedNodeProfile(t, st, "wingd-e2e-plan-sem-spawn-child", "spawn-child", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	res, err := Run(context.Background(), backends, Options{
@@ -1296,7 +1304,8 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeProfile(t, st, "wingd-e2e-cached-unpinned", "cached", store.ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 1, PeakMemoryBytes: 16 << 30,
 	}, 4)
 
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})

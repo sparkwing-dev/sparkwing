@@ -28,7 +28,7 @@ func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 		t.Fatalf("seed legacy node profile: %v", err)
 	}
 	if err := st.RecordProfileObservation(ctx, "zero-peak", "", store.ProfileObservation{
-		Duration: time.Second, PeakCores: 0, PeakMemoryBytes: 128 << 20, CPUMeasured: false,
+		Duration: time.Second, PeakCores: 0, PeakMemoryBytes: 128 << 20, CPUMeasured: true,
 	}); err != nil {
 		t.Fatalf("seed zero-peak profile: %v", err)
 	}
