@@ -28,6 +28,11 @@ unlock.
 
 ### Fixed
 
+- **controller:** Preserve terminal run outcomes across completion retries
+  Only the first terminal transition attempts profile folding; failed folds are
+  not retried. GitHub status retries use the stored outcome. Completion requests
+  require `success`, `failed`, or `cancelled`.
+
 - **metrics:** Reject conflicting readings at the same node timestamp; identical retries remain accepted.
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.

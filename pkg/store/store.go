@@ -3567,6 +3567,34 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 	return tx.Commit()
 }
 
+// FinishRunIfActive records a terminal outcome once and reports whether it committed the transition.
+func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (bool, error) {
+	if status != "success" && status != "failed" && status != "cancelled" {
+		return false, errors.New("run completion requires a terminal status")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, finishRunStmt+" AND NOT ("+runTerminalIn+")",
+		status, errMsg, time.Now().UnixNano(), runID)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return count == 1, nil
+}
+
 // FinishRunsIfActive atomically finalizes the named non-terminal runs. A
 // failure rolls back every member, so one shared lease cannot be partly
 // cancelled.
