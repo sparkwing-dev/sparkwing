@@ -3568,7 +3568,7 @@ func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) err
 }
 
 // FinishRunIfActive records a terminal outcome once and reports whether it committed the transition.
-func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (bool, error) {
+func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg string) (changed bool, err error) {
 	if status != "success" && status != "failed" && status != "cancelled" {
 		return false, errors.New("run completion requires a terminal status")
 	}
@@ -3576,7 +3576,7 @@ func (s *Store) FinishRunIfActive(ctx context.Context, runID, status, errMsg str
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if err := s.assertRunMutationFenceTx(ctx, tx, runID); err != nil {
 		return false, err
 	}
