@@ -22,11 +22,15 @@ unlock.
 
 ### Changed
 
+- **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/_unreleased.md#profile-observations).
+
 - **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
 
 ### Fixed
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/_unreleased.md#controller-run-profiles).
+
 - **metrics:** Exclude unavailable CPU and RSS readings from learned costs; reject RSS conversion overflow and clamp CPU rates before integer conversion.
 
 - **tests:** Start Kubernetes runner deadlines after database setup.

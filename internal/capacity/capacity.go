@@ -83,13 +83,13 @@ func resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 		res.Source = store.CostSourcePin
 		return res
 	}
-	if profile == nil {
+	if profile == nil || !profile.CPUMeasured {
 		res.Cores = coldStartCores(numCPU)
 		res.Source = store.CostSourceDefault
 		return res
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
-	if !versionChanged && measurementQualifies(profile) {
+	if !versionChanged && profile.SampleCount >= MinSamples {
 		res.Cores = math.Max(cores, MeasuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
@@ -187,19 +187,14 @@ func ApplyCeiling(res Resolution, ceilingCores float64, ceilingMemoryBytes int64
 	return res
 }
 
-func measurementQualifies(profile *store.PipelineProfile) bool {
-	return profile != nil && profile.SampleCount >= MinSamples &&
-		(profile.PeakCores > 0 || profile.CPUMeasured)
-}
-
 func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
-	if profile == nil || grantableCores <= 0 {
+	if profile == nil || !profile.CPUMeasured || grantableCores <= 0 {
 		return false
 	}
 	if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
 		return false
 	}
-	if measurementQualifies(profile) {
+	if profile.SampleCount >= MinSamples {
 		return false
 	}
 	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
@@ -227,7 +222,7 @@ type Drift struct {
 }
 
 func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
-	if pin.Empty() || profile == nil || profile.SampleCount < MinSamples {
+	if pin.Empty() || profile == nil || !profile.CPUMeasured || profile.SampleCount < MinSamples {
 		return nil
 	}
 	if charged := chargedCores(profile); pin.Cores > 0 && charged > 0 {

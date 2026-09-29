@@ -13,7 +13,7 @@ func TestRecordContention_IncrementsRollupCount(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 
-	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{Duration: 10 * time.Second}); err != nil {
+	if err := st.RecordProfileObservation(ctx, "demo", "", store.ProfileObservation{CPUMeasured: true, Duration: 10 * time.Second}); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
 	for range 2 {

@@ -78,7 +78,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	}
 	var runPeakCores float64
 	var runPeakMem int64
-	measured := false
+	measured := 0
 	runValid := true
 	for _, n := range nodes {
 		if n.Outcome == "cached" {
@@ -94,7 +94,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 			runValid = false
 			continue
 		}
-		measured = true
+		measured++
 		_ = s.store.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeMetricSpan(samples),
 			PeakCores:       peakCores,
@@ -107,7 +107,8 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 			runPeakMem = peakMem
 		}
 	}
-	if !measured || !runValid {
+	// safety: worker timestamps do not establish simultaneous resource usage.
+	if measured != 1 || !runValid {
 		return
 	}
 	_ = s.store.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{

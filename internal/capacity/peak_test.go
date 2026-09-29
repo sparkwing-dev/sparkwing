@@ -21,9 +21,9 @@ func TestResolvePeak(t *testing.T) {
 		{name: "pin", pin: &Pin{Cores: 3, MemoryBytes: 1024}, peak: 3, host: 3, memory: 1024, source: store.CostSourcePin},
 		{name: "measured", profile: &store.PipelineProfile{PlanHash: "a", SampleCount: 3, CPUMeasured: true, PeakCores: 2, SustainedCores: 0.5, PeakMemoryBytes: 512}, hash: "a", peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasured},
 		{name: "changed plan", profile: &store.PipelineProfile{PlanHash: "a", SampleCount: 3, CPUMeasured: true, PeakCores: 2, SustainedCores: 0.5, PeakMemoryBytes: 512}, hash: "b", peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasuring},
-		{name: "previous plan", profile: &store.PipelineProfile{PrevPeakCores: 2, PrevSustainedCores: 0.5, PrevPeakMemoryBytes: 512}, peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasuring},
-		{name: "changed empty plan", profile: &store.PipelineProfile{PlanHash: "b", PrevPeakCores: 2, PrevSustainedCores: 0.5, PrevPeakMemoryBytes: 512}, hash: "c", peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasuring},
-		{name: "floor", profile: &store.PipelineProfile{PrevPeakCores: 2, PrevSustainedCores: 0.5, FloorCores: 3, FloorMemoryBytes: 512}, peak: 6, host: 6, memory: 1024, source: store.CostSourceFloor},
+		{name: "previous plan", profile: &store.PipelineProfile{CPUMeasured: true, PrevPeakCores: 2, PrevSustainedCores: 0.5, PrevPeakMemoryBytes: 512}, peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasuring},
+		{name: "changed empty plan", profile: &store.PipelineProfile{CPUMeasured: true, PlanHash: "b", PrevPeakCores: 2, PrevSustainedCores: 0.5, PrevPeakMemoryBytes: 512}, hash: "c", peak: 2, host: 0.5, memory: 512, source: store.CostSourceMeasuring},
+		{name: "floor", profile: &store.PipelineProfile{CPUMeasured: true, PrevPeakCores: 2, PrevSustainedCores: 0.5, FloorCores: 3, FloorMemoryBytes: 512}, peak: 6, host: 6, memory: 1024, source: store.CostSourceFloor},
 		{name: "measured zero", profile: &store.PipelineProfile{SampleCount: 3, CPUMeasured: true}, peak: 0.1, host: 0.1, source: store.CostSourceMeasured},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

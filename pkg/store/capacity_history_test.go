@@ -16,6 +16,10 @@ func TestProfileHistory(t *testing.T) {
 			raw  []byte
 		}{
 			{"schema-three", []byte(`{"schema":3,"samples":[{"d":9000000000,"c":14,"m":450}]}`)},
+			{"schema-nine", []byte(`{"schema":9,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
+			{"empty-schema-nine", []byte(`{"schema":9,"samples":[]}`)},
+			{"schema-eight", []byte(`{"schema":8,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
+			{"empty-schema-eight", []byte(`{"schema":8,"samples":[]}`)},
 			{"schema-seven", []byte(`{"schema":7,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
 			{"empty-schema-seven", []byte(`{"schema":7,"samples":[]}`)},
 			{"schema-six", []byte(`{"schema":6,"samples":[{"d":9000000000,"c":14,"s":12,"m":450}]}`)},
@@ -112,7 +116,7 @@ func TestProfileHistory(t *testing.T) {
 							}
 							if contended {
 								check(p, 0, 2, 60)
-								if err := st.RecordProfileObservation(ctx, "history", node, store.ProfileObservation{PlanHash: hash, Contended: true}); err != nil {
+								if err := st.RecordProfileObservation(ctx, "history", node, store.ProfileObservation{CPUMeasured: true, PlanHash: hash, Contended: true}); err != nil {
 									t.Fatal(err)
 								}
 								p, err = st.GetPipelineProfile(ctx, "history", node)

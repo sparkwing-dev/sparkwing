@@ -90,12 +90,8 @@ type PipelineProfile struct {
 	WaitP99 time.Duration `json:"wait_p99_ns,omitempty"`
 	// WaitSampleCount is how many wait observations back WaitP50/WaitP99.
 	WaitSampleCount int `json:"wait_sample_count,omitempty"`
-	// CPUMeasured records whether the sampler that produced these
-	// observations could actually measure CPU on this platform. A healthy
-	// sampler sets it true even when the peak is a genuine near-zero (a
-	// sleep-heavy pipeline), so admission can cost the pipeline at its real
-	// tiny cost; a blind sampler leaves it false, keeping the conservative
-	// default. Meaningful only on the rollup row.
+	// CPUMeasured records that profile observations included measured CPU.
+	// Admission uses learned resource values only when it is true.
 	CPUMeasured bool      `json:"cpu_measured"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// PinnedCores and PinnedMemoryBytes record the explicit .Resources()
@@ -151,9 +147,8 @@ type ProfileObservation struct {
 	// charged core figure is computed from; left zero it degrades the
 	// profile to peak pricing rather than to free.
 	SustainedCores float64
-	// CPUMeasured reports whether the sampler could measure CPU for this
-	// run. It gates whether a near-zero peak is trusted as a real
-	// measurement or treated as a blind sampler's uninformative zero.
+	// CPUMeasured must be true to update learned resource values.
+	// False observations are validated but leave the profile unchanged.
 	CPUMeasured bool
 	// PlanHash is the DAG-topology fingerprint of the version this run
 	// executed. When it differs from the stored profile's hash the version
@@ -184,7 +179,7 @@ type profileSample struct {
 	S float64 `json:"s,omitempty"`
 }
 
-const profileSchemaCurrent = 8
+const profileSchemaCurrent = 10
 
 type profileWindowDoc struct {
 	Schema  int             `json:"schema"`
@@ -222,6 +217,9 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
 			return errors.New("profile CPU values must be finite and nonnegative")
 		}
+	}
+	if !obs.CPUMeasured {
+		return nil
 	}
 	return retryOnBusy(func() error { return s.recordProfileObservation(ctx, pipeline, nodeID, obs) })
 }

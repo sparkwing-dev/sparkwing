@@ -13,7 +13,7 @@ func TestChargeChainMemoryIntegers(t *testing.T) {
 		{math.MaxInt64, math.MaxInt64, math.MaxInt64},
 	} {
 		amounts := map[string]int64{}
-		for _, step := range chargeChain(store.PipelineProfile{PrevPeakMemoryBytes: tc.previous, FloorMemoryBytes: tc.floor}, 4) {
+		for _, step := range chargeChain(store.PipelineProfile{CPUMeasured: true, PrevPeakMemoryBytes: tc.previous, FloorMemoryBytes: tc.floor}, 4) {
 			amounts[step.Step] = step.MemoryBytes
 		}
 		if amounts["prev_charge"] != tc.previous || amounts["floor"] != tc.wantFloor {
