@@ -1065,7 +1065,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 50
+const expectedSchemaVersion = 51
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -1828,6 +1828,7 @@ func (s *Store) migratePostgres(ctx context.Context) error {
 // 21 needs an entry: no binary that reads requirements knows fewer than 27 versions.
 var migrationRequirements = map[int][]string{
 	50: {"metric-sample-kind"},
+	51: {"process-tree-accounting"},
 	21: {"session-token-digest"},
 	22: {"repo-scoped-secrets"},
 	26: {"unique-token-prefix"},
@@ -1998,6 +1999,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE node_metrics SET kind = 'command' WHERE cpu_time_nanos > 0 AND kind = ''")
 		return err
+	case 51:
+		return invalidateNodeMeasurementHistory(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2358,6 +2361,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE node_metrics SET kind = 'command' WHERE cpu_time_nanos > 0 AND kind = ''")
 		return err
+	case 51:
+		return invalidateNodeMeasurementHistory(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

@@ -29,6 +29,9 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	for i, cpu := range []int64{500, 2000, 1500} {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 			Kind:          store.MetricInterval,
@@ -81,6 +84,9 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind: store.MetricInterval,
 		TS:   start, CPUMillicores: 4000, MemoryBytes: 1 << 30,
@@ -120,6 +126,9 @@ func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind: store.MetricInterval,
 		TS:   start, CPUMillicores: 1000, MemoryBytes: 1 << 30,
@@ -150,6 +159,9 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind:          store.MetricInterval,
 		TS:            start,
@@ -177,7 +189,7 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 	}
 }
 
-func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.T) {
+func TestRecordRunProfile_RollupSumsDistinctNodeIntervals(t *testing.T) {
 	if runtime.NumCPU() < 3 {
 		t.Skip("host cannot hold a three-core reading")
 	}
@@ -201,6 +213,9 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 	}
 	for _, nodeID := range []string{"fan-a", "fan-b"} {
 		if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishNode(ctx, "r1", nodeID, "success", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		for _, tick := range ticks {
@@ -263,6 +278,9 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
 			t.Fatal(err)
 		}
+		if err := st.FinishNode(ctx, runID, "build", "success", "", nil); err != nil {
+			t.Fatal(err)
+		}
 		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
 			Kind:          store.MetricInterval,
 			TS:            start,
@@ -302,6 +320,9 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "build", Status: "pending"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.FinishNode(ctx, "r1", "build", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
 		Kind: store.MetricInterval,
 		TS:   submit.Add(10 * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
@@ -339,6 +360,9 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 			t.Fatal(err)
 		}
 		if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: "build", Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishNode(ctx, runID, "build", "success", "", nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
@@ -512,6 +536,9 @@ func TestRecordRunProfile_NoSamplesWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "quick", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "r1", "quick", "success", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	recordRunProfile(ctx, localState{st: st}, "demo", "r1", nil, "", runCharge{}, false, start, start.Add(time.Second))

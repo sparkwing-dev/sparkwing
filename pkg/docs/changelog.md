@@ -22,6 +22,10 @@ unlock.
 
 ### Changed
 
+- **metrics (Breaking):** Sample dedicated node process trees on Linux and macOS.
+  Exclude incomplete executions from profile learning and prevent historical measurements
+  from rebuilding incompatible profiles. See [migration guidance](docs/migrations/_unreleased.md#local-process-measurements).
+
 - **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/_unreleased.md#profile-observations).
 
 - **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).

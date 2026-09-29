@@ -39,14 +39,11 @@ func (s *profileCapture) SetPipelinePin(_ context.Context, _, _ string, cores fl
 }
 
 func TestRecordRunProfile_RejectsOverflow(t *testing.T) {
-	for _, dimension := range []string{"interval CPU", "interval memory", "command memory", "combined memory", "lifetime CPU"} {
+	for _, dimension := range []string{"interval CPU", "interval memory", "lifetime CPU"} {
 		for _, valid := range []bool{false, true} {
 			for _, contended := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/valid=%v/contended=%v", dimension, valid, contended), func(t *testing.T) {
 					values := []int64{math.MaxInt64, math.MaxInt64, math.MaxInt64}
-					if dimension == "combined memory" {
-						values = []int64{math.MaxInt64 - 1, 1, 1}
-					}
 					if valid {
 						values = []int64{math.MaxInt64 - 2, 1, 1}
 					}
@@ -54,22 +51,13 @@ func TestRecordRunProfile_RejectsOverflow(t *testing.T) {
 					end := start.Add(time.Second)
 					st := &profileCapture{samples: map[string][]store.MetricSample{}, observations: map[string]store.ProfileObservation{}}
 					for i, value := range values {
-						node := &store.Node{NodeID: fmt.Sprint(i), Outcome: "success", StartedAt: &start, FinishedAt: &end, CPUNanos: 1, ProcessWallNanos: int64(time.Second)}
+						node := &store.Node{NodeID: fmt.Sprint(i), Status: "done", Outcome: "success", StartedAt: &start, FinishedAt: &end, CPUNanos: 1, ProcessWallNanos: int64(time.Second)}
 						sample := store.MetricSample{Kind: store.MetricInterval, TS: start, CPUMillicores: 1}
 						switch dimension {
 						case "interval CPU":
 							sample.CPUMillicores = value
 						case "interval memory":
 							sample.MemoryBytes = value
-						case "command memory":
-							sample.Kind = store.MetricCommand
-							sample.MemoryBytes, sample.CPUTime = value, 1
-						case "combined memory":
-							sample.MemoryBytes = value
-							if i > 0 {
-								sample.Kind = store.MetricCommand
-								sample.CPUTime = 1
-							}
 						case "lifetime CPU":
 							node.CPUNanos = value
 						}

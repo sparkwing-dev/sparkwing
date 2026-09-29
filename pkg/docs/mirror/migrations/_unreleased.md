@@ -32,10 +32,30 @@ protects direct database access, not mixed-version HTTP readers.
 
 The database migration labels historical positive-CPU-time points as command
 reports. Historical zero-CPU-time points remain unknown because their kind
-cannot be recovered. Learned profile format 10 discards incompatible learned
+cannot be recovered. Learned profile format 11 discards incompatible learned
 estimates on access or update while preserving explicit pins and wait
 statistics. New observations rebuild estimates; leave resource pins in place
 until their replacement estimates have been verified for the workload.
+
+Schema 51 marks pre-upgrade nodes with an unknown metric so replay cannot
+rebuild estimates from their old samples or exit totals. Numeric diagnostics
+remain; the earliest sample can lose its command classification. Nodes with an
+existing unknown sample are unchanged. New nodes created after migration remain
+eligible. The `process-tree-accounting` database requirement rejects older read-write
+store openers. Drain or stop runs and close all writers before upgrading.
+
+## Local process measurements
+
+Dedicated node processes sample their observed process tree on Linux and macOS.
+CPU rates use changes in live and reaped-child counters. RSS sums resident bytes;
+shared pages can be counted more than once, and sampling can miss short peaks.
+The first interval retains the initial RSS observation. Run totals approximate
+overlap using each node's maximum reading within a sampling bucket.
+
+Embedded execution, observed process identity loss, unfinished nodes and multiple
+attempts within the source run do not qualify for learning. Identity loss includes ordinary
+child reaping when no identity-specific receipt is available. Unavailable
+readings remain unknown. Metric delivery errors fail the affected attempt; an automatic retry can still succeed.
 
 ## Profile observations
 

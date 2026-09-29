@@ -235,6 +235,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"executor-offer-arbitration-v1",
 		"metric-sample-kind",
 		"pipeline-scoped-secrets",
+		"process-tree-accounting",
 	}
 	if got := store.MissingRequirements(preFleet, store.KnownRequirements()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("requirements unknown to a pre-fleet binary = %v, want %v", got, want)
@@ -283,6 +284,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 		"inherited-holder-marker",
 		"metric-sample-kind",
 		"pipeline-scoped-secrets",
+		"process-tree-accounting",
 		"repo-scoped-secrets",
 		"session-token-digest",
 		"unique-token-prefix",

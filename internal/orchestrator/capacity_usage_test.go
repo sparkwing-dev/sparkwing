@@ -150,7 +150,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantNoRollup: true,
 		},
 		{
-			name:      "command reports preserve interval CPU and existing memory aggregation",
+			name:      "command reports preserve interval CPU and the individual memory peak",
 			hostCores: 1,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{{
@@ -164,7 +164,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantNodes:   []wantNode{{id: "mixed", sustained: 0.1, peak: 0.1, peakMem: 512 << 20}},
 			wantSustain: 0.1,
 			wantPeak:    0.1,
-			wantPeakMem: 640 << 20,
+			wantPeakMem: 512 << 20,
 		},
 		{
 			name:      "peak memory comes from the kernel high-water mark",
@@ -376,7 +376,7 @@ func TestRecordRunProfile_SubTickNodesAreNoLongerInvisible(t *testing.T) {
 	}
 }
 
-func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
+func TestRecordRunProfile_RetriedNodeRetainsUsageWithoutLearning(t *testing.T) {
 	st, start := seedUsageRun(t, "retried", nil)
 	ctx := context.Background()
 	if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: "flaky", Status: "pending"}); err != nil {
@@ -391,17 +391,21 @@ func TestRecordRunProfile_RetriedNodeIsPricedOnEveryAttempt(t *testing.T) {
 		}
 	}
 
+	if err := st.FinishNode(ctx, "r1", "flaky", "success", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, "UPDATE nodes SET attempts_consumed = 2 WHERE run_id = 'r1' AND node_id = 'flaky'"); err != nil {
+		t.Fatal(err)
+	}
+	node, err := st.GetNode(ctx, "r1", "flaky")
+	if err != nil || node == nil || node.CPUNanos != int64(time.Second) || node.ProcessWallNanos != int64(2*time.Second) || node.MaxRSSBytes != 128<<20 {
+		t.Fatalf("attempt usage was not retained: %+v, %v", node, err)
+	}
 	recordRunProfile(ctx, localState{st: st}, "retried", "r1", nil, "", runCharge{}, false, start, start.Add(2*time.Second))
-
-	prof, err := st.GetPipelineProfile(ctx, "retried", "flaky")
-	if err != nil || prof == nil {
-		t.Fatalf("node profile missing: %v", err)
-	}
-	assertCores(t, "node SustainedCores", prof.SustainedCores, 0.5)
-	if prof.PeakMemoryBytes != 128<<20 {
-		t.Errorf("PeakMemoryBytes = %d, want the 128MiB high-water across attempts", prof.PeakMemoryBytes)
-	}
-	if prof.P50Duration != 2*time.Second {
-		t.Errorf("P50Duration = %s, want both attempts' occupancy", prof.P50Duration)
+	for _, id := range []string{"", "flaky"} {
+		profile, err := st.GetPipelineProfile(ctx, "retried", id)
+		if err != nil || (profile != nil && profile.SampleCount != 0) {
+			t.Fatalf("retried node qualified for learning: %+v, %v", profile, err)
+		}
 	}
 }
