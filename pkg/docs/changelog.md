@@ -38,6 +38,8 @@ unlock.
   Only the first terminal transition attempts profile folding; failed folds are
   not retried. GitHub status retries use the stored outcome. Completion requests
   require `success`, `failed`, or `cancelled`.
+- **execution:** Propagate spawn cancellation through child execution and waits, and join child cleanup before returning.
+
 - **object-store metrics:** Reject invalid sample kinds and negative resource
   values before appending state.
 
