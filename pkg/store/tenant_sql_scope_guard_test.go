@@ -26,8 +26,9 @@ var reviewedUnscopedSQL = map[string]string{
 		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
-	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
-	"lockCommittedTx":       "the storage pass reconciles every team's count of one store from one bucket listing",
+	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
+	"(*Store).TeamsOverFreeLogShare": "the storage pass finds every team whose logs are past its share, slot or no slot",
+	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
 	"applyAgentNameIndexMigration": "the schema migration retires expired agent tokens and refuses duplicate agent names in every team " +
 		"before it builds the index that spans them",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
