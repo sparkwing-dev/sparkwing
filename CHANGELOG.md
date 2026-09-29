@@ -27,6 +27,13 @@ unlock.
 ### Fixed
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- **tests:** Start Kubernetes runner deadlines after database setup.
+- **checks:** Parse only changed Go files when checking comments in a staged or branch diff.
+
+- **capacity:** Withhold run estimates when an uncached node has missing or unreadable measurements; retain explicit pins and valid node estimates.
+- **tests:** Include metric sample kinds in database requirement expectations.
+- **CI:** Supply PostgreSQL 17 to the hosted pre-release check through its existing server URL.
+
 - **tests:** Assert heartbeat retry delays and terminal errors through the existing sleeper.
 
 - **tests:** Measure pause timeout over the recorded pause rather than the entire run.
