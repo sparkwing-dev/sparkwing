@@ -230,6 +230,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
 		"billing-trust-v1",
+		"claim-cache-scope-v1",
 		"credit-value-v1",
 		"cron-schedule-names-v1",
 		"declared-run-repo",
@@ -286,6 +287,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	}
 	wantListed := []string{
 		"billing-trust-v1",
+		"claim-cache-scope-v1",
 		"credit-value-v1",
 		"declared-run-repo",
 		"github-app-cron-identity-v1",
@@ -301,5 +303,25 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	}
 	if got, err := ro.Requirements(context.Background()); err != nil || !reflect.DeepEqual(got, wantListed) {
 		t.Fatalf("read-only requirements = %v, %v; want %v", got, err, wantListed)
+	}
+}
+
+// A controller that predates v88 reads binaries without their ref, so v88
+// stamps a requirement it lacks and that controller refuses the store; one
+// that knows every other requirement still lacks exactly this one.
+func TestRequirements_ClaimCacheScopeRefusesAnOlderController(t *testing.T) {
+	st := storetest.Open(t)
+	listed, err := st.Requirements(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var older []string
+	for _, name := range store.KnownRequirements() {
+		if name != "claim-cache-scope-v1" {
+			older = append(older, name)
+		}
+	}
+	if got := store.MissingRequirements(older, listed); len(got) != 1 || got[0] != "claim-cache-scope-v1" {
+		t.Fatalf("a controller predating v88 lacks %v of the stamped %v, want only claim-cache-scope-v1", got, listed)
 	}
 }

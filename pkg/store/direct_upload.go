@@ -61,9 +61,9 @@ func applyDirectUploadMigration(ctx context.Context, tx *storeTx) error {
 	return execStatements(ctx, tx, directUploadTablesSQL)
 }
 
-// safety: ” is every object written before v87 and by any caller that is not
-// a claim token, which a claim never reads; a claim's object carries its run's
-// git ref.
+// safety: an empty ref marks every object written before v88 and by any
+// caller that is not a claim token, which a claim never reads; a claim's
+// object carries its run's git ref.
 var cacheRefCols = map[string]string{"ref": "TEXT NOT NULL DEFAULT ''"}
 
 func applyCacheRefMigration(ctx context.Context, tx *storeTx, postgres bool) error {

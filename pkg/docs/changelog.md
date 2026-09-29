@@ -77,7 +77,9 @@ unlock.
   GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
   first binary committed for an input and refuses a second, and a claim whose
   run names no ref writes no cache. Other callers never read a claim's
-  binaries. Schema v87 adds `uploads.ref` and `data_objects.ref`. A work node reads another run's output only through
+  binaries. Schema v88 adds `uploads.ref` and `data_objects.ref` and stamps
+  the `claim-cache-scope-v1` requirement, so an older controller refuses the
+  store rather than read a claim's binaries unscoped. A work node reads another run's output only through
   `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
   itself: the cache entry of the node's memoization, the leader its own
   coalesce waiter names, or the newest successful run of a pipeline and node
