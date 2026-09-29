@@ -41,6 +41,7 @@ func seedFinishRunFollowUpState(t *testing.T, st *store.Store, runID string) str
 		}
 		for s := range 5 {
 			if err := st.AddNodeMetricSample(ctx, runID, nodeID, store.MetricSample{
+				Kind:          store.MetricInterval,
 				TS:            time.Now().UTC().Add(time.Duration(s) * time.Second),
 				CPUMillicores: 500,
 				MemoryBytes:   1 << 20,

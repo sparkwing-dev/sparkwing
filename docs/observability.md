@@ -181,57 +181,45 @@ cluster metrics-server is involved.
 
 ### What's measured
 
-- **CPU**: millicores from `getrusage`, covering the runner process and
-  the commands it spawned, clamped to the host's core count so a large
-  reaped subtree cannot register as an impossible rate.
-- **Memory**: resident bytes -- `/proc/self/statm` on Linux, `ps -o rss=`
-  on macOS, and the Go runtime's system reservation where neither is
-  available. Both platform sources report the footprint at the moment of
-  the sample, not a high-water mark.
+- **CPU**: millicores from changes in `getrusage` CPU time, clamped to
+  the host's core count. The counters cover the runner and reaped child
+  work; they do not measure live children. A child's CPU may arrive only
+  after it exits, so its timing can differ from the interval charged.
+- **Memory**: the runner's resident bytes from `/proc/self/statm` on Linux
+  or `ps -o rss=` on macOS. These readings omit child processes. When the
+  platform read is unavailable, the sampler uses the Go runtime's system
+  reservation, which is a different quantity from resident memory.
 
-One sampler runs per process, and each interval's reading is split
-evenly among the nodes attached to it. A plan-level node of a local run
-is its own process and a cluster node is its own pod, so there is one
-attachment and the chart is that node's exact usage. Several nodes do
-share one process in three shapes: a `JobSpawn` child runs inside its
-parent's process while the parent is still attached; `sparkwing cluster
-worker --runner inprocess` and `sparkwing handle-trigger --runner
-inprocess` (the default runner kind for both) run every node of a
-claimed trigger in the one worker process; and a test binary or a
-program embedding the SDK runs nodes inside itself. There each node's
-chart is an estimate of its share -- the shares still sum to what the
-process drew, which is what right-sizing and admission need -- and a
-node joining or leaving between ticks can land up to one interval of
-its cost on the nodes beside it.
+One sampler runs per process and divides each interval equally among its
+attached nodes. A dedicated local node has one attachment. Nested jobs,
+embedded execution and in-process workers can share a sampler; their
+readings estimate each node's share of that process. A node joining or
+leaving between ticks can shift attribution by one interval.
 
-Sampling every 2 seconds cannot see everything. A node shorter than one
-interval produces no samples at all, and CPU burned by a command that
-started and finished between two ticks may not appear in either. So a
-node's row also records what the kernel charged its process at exit --
-total CPU time, peak resident set, and the span the process existed for
--- which the capacity fold reads as a floor under the sampled figures.
-Those exit figures exist only where sparkwing supervised a process,
-which today means local runs; a pod reports none and prices from its
-samples alone.
+Sampling every 2 seconds misses shorter peaks and may produce no interval
+readings for a short node. Supervised local processes also report exit CPU
+time, peak resident set and process lifetime. The local capacity fold uses
+CPU time divided by that matching lifetime as a floor under sampled CPU.
+Exit RSS is a process high-water mark, not simultaneous process-tree memory.
+Pods and embedded nodes do not provide these supervised exit figures.
 
-The exit figures cover the whole process, including runtime startup,
-plan rebuild, and teardown, which is why the span is recorded with them
-rather than taken from the node's own start and finish timestamps: those
-are stamped from inside the process once startup is done, and dividing
-the process's whole CPU by that narrower window would report a draw the
-machine never gave. The node's recorded duration is the process's whole
-life for the same reason -- it is how long the box was occupied. A node
-retried in place accumulates every attempt's CPU and occupancy, since
-the machine ran them all, while the peak stays a high-water.
+The process lifetime includes startup and teardown. Retries accumulate CPU
+and occupancy, while exit memory retains the largest reported peak.
 
-Per-command reports and sampler ticks are folded differently when a run
-is priced. A tick is a rate that already covers its window, so
-concurrent nodes' ticks add up. A command report is a rate over the
-command's own span, so the fold integrates it instead: four 400ms
-commands at two cores each, run back to back inside one window, are 1.6
-cores of that window rather than the eight their rates would add to.
-Command memory is a lifetime high-water, so one node's several reports
-in a window contribute the largest, not the sum.
+Each stored point has a `kind`:
+
+- `interval`: a sampled CPU rate and memory reading, including measured zero.
+- `command`: a completed command's lifetime CPU and memory report, including
+  commands whose reported CPU time is zero.
+- Empty or omitted: unknown measurement kind. These points remain readable,
+  but a node's unknown points prevent its observations and the run rollup
+  from updating learned profiles.
+
+Only interval rates contribute to sampled CPU peaks and percentiles.
+A command's lifetime CPU cannot be assigned to its completion interval.
+Command memory contributes the largest command peak in a window; this does
+not establish the combined memory of overlapping children. These limits
+must be considered before using learned costs to reduce resource pins.
 
 ### API
 
@@ -241,8 +229,8 @@ in a window contribute the largest, not the sum.
 ```json
 {
   "points": [
-    { "ts": "2026-04-12T10:00:00Z", "cpu_millicores": 450, "memory_bytes": 536870912 },
-    { "ts": "2026-04-12T10:00:02Z", "cpu_millicores": 1200, "memory_bytes": 1073741824 }
+    { "kind": "interval", "ts": "2026-04-12T10:00:00Z", "cpu_millicores": 450, "memory_bytes": 536870912 },
+    { "kind": "interval", "ts": "2026-04-12T10:00:02Z", "cpu_millicores": 1200, "memory_bytes": 1073741824 }
   ]
 }
 ```

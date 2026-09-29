@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
+
 ### Fixed
 
 - **tests:** Finish credit-ledger worker iterations before cancelling their database context.

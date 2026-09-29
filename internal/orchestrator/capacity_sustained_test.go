@@ -28,6 +28,7 @@ func sustainedFixture(t *testing.T, pipeline string, millicores []int64) (*store
 	}
 	for i, cpu := range millicores {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+			Kind:          store.MetricInterval,
 			TS:            start.Add(time.Duration(i) * 2 * time.Second),
 			CPUMillicores: cpu,
 			MemoryBytes:   1 << 30,
@@ -99,10 +100,7 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 	}
 }
 
-func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
-	if runtime.NumCPU() < 5 {
-		t.Skip("host cannot hold a five-core reading")
-	}
+func TestRecordRunProfile_CommandCPUDoesNotJoinSampledWindows(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +118,7 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 		}
 		for i := 0; i < 5; i++ {
 			if err := st.AddNodeMetricSample(ctx, "r1", nodeID, store.MetricSample{
+				Kind:          store.MetricInterval,
 				TS:            start.Add(time.Duration(i) * 2 * time.Second),
 				CPUMillicores: 500,
 				MemoryBytes:   1 << 30,
@@ -129,6 +128,7 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 		}
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "fan-a", store.MetricSample{
+		Kind: store.MetricCommand, CPUTime: 4 * time.Second,
 		TS:            start.Add(8*time.Second + time.Millisecond),
 		CPUMillicores: 4000,
 	}); err != nil {
@@ -141,11 +141,11 @@ func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 5.0 {
-		t.Errorf("rollup PeakCores = %v, want 5.0 (the one-shot's four cores plus the two halves beside it)", rollup.PeakCores)
+	if rollup.PeakCores != 1.0 {
+		t.Errorf("rollup PeakCores = %v, want 1.0 from two half-core interval readings", rollup.PeakCores)
 	}
-	if rollup.SustainedCores != 1.8 {
-		t.Errorf("rollup SustainedCores = %v, want 1.8 (four windows at one core and one at five)", rollup.SustainedCores)
+	if rollup.SustainedCores != 1.0 {
+		t.Errorf("rollup SustainedCores = %v, want 1.0 from five one-core intervals", rollup.SustainedCores)
 	}
 }
 

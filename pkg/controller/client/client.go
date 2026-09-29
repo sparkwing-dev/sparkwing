@@ -472,6 +472,7 @@ func (c *Client) AddNodeMetricSample(ctx context.Context, runID, nodeID string, 
 		"cpu_millicores": sample.CPUMillicores,
 		"memory_bytes":   sample.MemoryBytes,
 		"cpu_time_nanos": int64(sample.CPUTime),
+		"kind":           sample.Kind,
 	}
 	return c.post(ctx, path, body, http.StatusNoContent, nil)
 }

@@ -729,7 +729,11 @@ const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MeteringFree
 const MeteringPaid
 const MeteringUnknown NodeMetering = iota
+const MetricCommand MetricKind = "command"
+const MetricInterval MetricKind = "interval"
+type MetricKind string
 type MetricSample struct {
+	Kind          MetricKind
 	TS            time.Time
 	CPUMillicores int64
 	MemoryBytes   int64
@@ -737,6 +741,7 @@ type MetricSample struct {
 	CPUTime time.Duration
 }
 func (m MetricSample) OneShot() bool
+const MetricUnknown MetricKind = ""
 const MicroCreditsPerCredit = 1_000_000
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinSuppliedTokenLen = 32

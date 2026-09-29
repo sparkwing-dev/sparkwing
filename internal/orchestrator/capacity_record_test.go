@@ -31,6 +31,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 	for i, cpu := range []int64{500, 2000, 1500} {
 		if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+			Kind:          store.MetricInterval,
 			TS:            start.Add(time.Duration(i) * 2 * time.Second),
 			CPUMillicores: cpu,
 			MemoryBytes:   int64(i+1) << 30,
@@ -81,7 +82,8 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: start, CPUMillicores: 4000, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval,
+		TS:   start, CPUMillicores: 4000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,8 @@ func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: start, CPUMillicores: 1000, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval,
+		TS:   start, CPUMillicores: 1000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,6 +151,7 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
+		Kind:          store.MetricInterval,
 		TS:            start,
 		CPUMillicores: int64(runtime.NumCPU()+4) * 1000,
 		MemoryBytes:   1 << 30,
@@ -192,8 +196,8 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 		ts    time.Time
 		share store.MetricSample
 	}{
-		{ts: start, share: store.MetricSample{CPUMillicores: 500, MemoryBytes: 1 << 30}},
-		{ts: start.Add(2 * time.Second), share: store.MetricSample{CPUMillicores: 1000, MemoryBytes: 2 << 30}},
+		{ts: start, share: store.MetricSample{Kind: store.MetricInterval, CPUMillicores: 500, MemoryBytes: 1 << 30}},
+		{ts: start.Add(2 * time.Second), share: store.MetricSample{Kind: store.MetricInterval, CPUMillicores: 1000, MemoryBytes: 2 << 30}},
 	}
 	for _, nodeID := range []string{"fan-a", "fan-b"} {
 		if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: nodeID, Status: "pending"}); err != nil {
@@ -208,6 +212,7 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 		}
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "fan-a", store.MetricSample{
+		Kind: store.MetricCommand, CPUTime: 300 * time.Millisecond,
 		TS:            start.Add(2*time.Second + time.Millisecond),
 		CPUMillicores: 300,
 	}); err != nil {
@@ -220,8 +225,8 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 2.3 {
-		t.Errorf("rollup PeakCores = %v, want 2.3 (both nodes' readings plus the one-shot drawn beside them)", rollup.PeakCores)
+	if rollup.PeakCores != 2.0 {
+		t.Errorf("rollup PeakCores = %v, want 2.0 from both nodes' interval readings", rollup.PeakCores)
 	}
 	if rollup.PeakMemoryBytes != 4<<30 {
 		t.Errorf("rollup PeakMemoryBytes = %d, want %d (both halves of the heaviest tick)", rollup.PeakMemoryBytes, int64(4)<<30)
@@ -259,6 +264,7 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
+			Kind:          store.MetricInterval,
 			TS:            start,
 			CPUMillicores: 1200,
 			MemoryBytes:   1 << 30,
@@ -297,7 +303,8 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: submit.Add(10 * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval,
+		TS:   submit.Add(10 * time.Second), CPUMillicores: 1000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +342,8 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 			t.Fatal(err)
 		}
 		if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
-			TS: start, CPUMillicores: 3000, MemoryBytes: 2 << 30,
+			Kind: store.MetricInterval,
+			TS:   start, CPUMillicores: 3000, MemoryBytes: 2 << 30,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -418,7 +426,8 @@ func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "land1", "build", store.MetricSample{
-		TS: start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval,
+		TS:   start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +475,8 @@ func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", store.MetricSample{
-		TS: start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
+		Kind: store.MetricInterval,
+		TS:   start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
 	}); err != nil {
 		t.Fatal(err)
 	}
