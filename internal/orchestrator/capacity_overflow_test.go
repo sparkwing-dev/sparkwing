@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"runtime"
 	"testing"
 	"time"
 
@@ -77,6 +78,20 @@ func TestRecordRunProfile_RejectsOverflow(t *testing.T) {
 					recordRunProfile(t.Context(), st, "demo", "run", &pin, "shape", runCharge{}, contended, start, end)
 					if _, recorded := st.observations[""]; recorded != valid {
 						t.Errorf("run recorded = %v, want %v; observation %+v", recorded, valid, st.observations[""])
+					}
+					if valid {
+						observation := st.observations[""]
+						cores, memory := observation.PeakCores, observation.PeakMemoryBytes
+						if contended {
+							cores, memory = observation.FloorCores, observation.FloorMemoryBytes
+						}
+						if dimension == "interval CPU" || dimension == "lifetime CPU" {
+							if want := float64(runtime.NumCPU()); cores != want {
+								t.Errorf("CPU charge = %v, want host limit %v", cores, want)
+							}
+						} else if memory != math.MaxInt64 {
+							t.Errorf("memory = %d, want %d", memory, int64(math.MaxInt64))
+						}
 					}
 					if st.pin != pin {
 						t.Errorf("pin = %+v, want %+v", st.pin, pin)

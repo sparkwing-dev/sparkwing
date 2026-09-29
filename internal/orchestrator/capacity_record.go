@@ -64,8 +64,16 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	bucket := nodemetrics.Interval()
 	intervals := map[int64]intervalTotal{}
-	var cpuIntegral time.Duration
+	var cpuIntegral int64
 	var exactPeakMem int64
+	runValid := true
+	add := func(total *int64, value int64) {
+		if *total < 0 || value < 0 || *total > math.MaxInt64-value {
+			runValid = false
+			return
+		}
+		*total += value
+	}
 	measured := false
 	hasRunCPU := false
 	for _, n := range nodes {
@@ -96,17 +104,17 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			} else {
 				hasNodeCPU, hasRunCPU, total.hasCPU = true, true, true
 				observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
-				total.cpuMillicores += s.CPUMillicores
-				total.memoryBytes += s.MemoryBytes
+				add(&total.cpuMillicores, s.CPUMillicores)
+				add(&total.memoryBytes, s.MemoryBytes)
 			}
 			intervals[key] = total
 		}
 		for key, mem := range commandMem {
 			total := intervals[key]
-			total.oneShotMemoryBytes += mem
+			add(&total.oneShotMemoryBytes, mem)
 			intervals[key] = total
 		}
-		cpuIntegral += exactCPU
+		add(&cpuIntegral, int64(exactCPU))
 		if exactMem > exactPeakMem {
 			exactPeakMem = exactMem
 		}
@@ -128,6 +136,15 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			PlanHash:        planHash,
 		})
 	}
+	for _, total := range intervals {
+		if total.memoryBytes > math.MaxInt64-total.oneShotMemoryBytes {
+			runValid = false
+		}
+	}
+	if !runValid {
+		slog.WarnContext(ctx, "run resource totals are outside the supported range", "pipeline", pipeline, "run_id", runID)
+		return
+	}
 	if dominant || !measured || (!hasRunCPU && cpuIntegral == 0) {
 		return
 	}
@@ -135,7 +152,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	if runDur < 0 {
 		runDur = 0
 	}
-	runMeanCores := exactMeanCores(cpuIntegral, runDur)
+	runMeanCores := exactMeanCores(time.Duration(cpuIntegral), runDur)
 	runPeakCores, runPeakMem := peakProcessReading(ctx, pipeline, intervals, runMeanCores, exactPeakMem)
 	runSustainedCores := math.Min(sustainedProcessCores(intervals, runMeanCores), runPeakCores)
 	if contended {
