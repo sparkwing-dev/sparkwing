@@ -345,3 +345,50 @@ func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 		t.Fatalf("a release after cancel = %d, want 204", code)
 	}
 }
+
+// A work claim's durable-log validation answers with the claim's team only
+// for the claim's own attempt; any attempt, claim or trigger header is
+// refused, even an attempt ordinal on its own.
+func TestClaimRun_LogValidationBindsTheClaimsOwnAttempt(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-log", "acme", "widgets")
+	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}}}
+	if code := f.call("POST", "/api/v1/runs/run-log/plan", plan, doc, nil); code != http.StatusOK {
+		t.Fatalf("accept plan = %d", code)
+	}
+	work := "Bearer " + f.launchNode("run-log", "a")
+	validate := func(headers map[string]string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, f.url+"/api/v1/runs/run-log/nodes/a/claim/validate", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", work)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode, resp.Header.Get(store.ClaimTeamHeader)
+	}
+	if code, team := validate(nil); code != http.StatusNoContent || team != olga.team {
+		t.Fatalf("own attempt's validation = %d team %q, want 204 team %q", code, team, olga.team)
+	}
+	for what, headers := range map[string]map[string]string{
+		"an attempt ordinal": {store.AttemptOrdinalHeader: "2"},
+		"a trigger stream":   {store.TriggerGenerationHeader: "4"},
+		"another claim": {
+			store.ClaimHolderHeader: "h", store.ClaimMembershipHeader: "m", store.ClaimReservationHeader: "r",
+			store.ClaimGenerationHeader: "9", store.AttemptOrdinalHeader: "1",
+		},
+	} {
+		if code, team := validate(headers); code != http.StatusForbidden || team != "" {
+			t.Errorf("validation naming %s = %d team %q, want 403 and no team", what, code, team)
+		}
+	}
+}
