@@ -25,7 +25,8 @@ VALUES (?, '', 19100, 19100, 3.0, 0, 2, ?, ?)`,
 	}
 
 	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
-		Duration: 10 * time.Second, PeakCores: 3.0,
+		CPUMeasured: true,
+		Duration:    10 * time.Second, PeakCores: 3.0,
 	}); err != nil {
 		t.Fatalf("RecordProfileObservation: %v", err)
 	}
