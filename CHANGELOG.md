@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **store:** Retain concurrent profile updates, preserve integer percentiles, and reject invalid resource observations
+- **orchestrator:** Stop charging command lifetime CPU to its completion interval
+
 ## [v0.64.0] - 2026-09-28
 ### Added
 
