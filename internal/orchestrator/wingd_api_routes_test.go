@@ -58,6 +58,8 @@ var apiWriteRoutes = []string{
 	"GET /api/v1/concurrency/{key}/resolve",
 	"POST /api/v1/object-store/reset-breaker",
 	"POST /api/v1/gitcache/refresh",
+	"POST /api/v1/launcher/claim",
+	"PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch",
 	"POST /api/v1/nodes/claim",
 	"POST /api/v1/nodes/claim/prepare",
 	"PUT /api/v1/pipelines/{name}/profile/pin",
