@@ -22,6 +22,8 @@ unlock.
 
 ### Fixed
 
+- **metrics:** Reject negative usage, unrepresentable timestamps, and malformed explicit timestamps before storing samples.
+
 - **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
 
 ## [v0.64.0] - 2026-09-28

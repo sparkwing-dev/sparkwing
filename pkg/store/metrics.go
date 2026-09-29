@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -33,6 +34,12 @@ func (m MetricSample) OneShot() bool { return m.CPUTime > 0 }
 // AddNodeMetricSample appends; duplicates by (run, node, ts) are
 // silently ignored so retries don't trip UNIQUE.
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error {
+	if sample.CPUMillicores < 0 || sample.MemoryBytes < 0 || sample.CPUTime < 0 {
+		return errors.New("node metrics require nonnegative CPU rate, memory and CPU time")
+	}
+	if !time.Unix(0, sample.TS.UnixNano()).Equal(sample.TS) {
+		return errors.New("node metric timestamp exceeds the nanosecond storage range")
+	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
@@ -46,7 +53,7 @@ INSERT INTO node_metrics (run_id, node_id, ts, cpu_millicores, memory_bytes, cpu
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (run_id, node_id, ts) DO NOTHING`,
 		runID, nodeID, sample.TS.UnixNano(), sample.CPUMillicores, sample.MemoryBytes,
-		max(int64(sample.CPUTime), 0)); err != nil {
+		int64(sample.CPUTime)); err != nil {
 		return err
 	}
 	return tx.Commit()
