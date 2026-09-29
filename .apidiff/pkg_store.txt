@@ -754,7 +754,8 @@ var ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
 var ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
 var ErrTeamFull = errors.New("store: this team holds as many members as a team without purchased credits may")
 var ErrTeamLimit = errors.New("store: this user has created as many teams as one user may")
-var ErrTokenRevoked = errors.New("token is revoked or expired")
+var ErrTokenExpired = errors.New("token is expired")
+var ErrTokenRevoked = errors.New("token is revoked")
 var ErrTooManyPendingUploads = fmt.Errorf("a team holds at most %d uncommitted uploads; commit them or wait for them to expire", DirectUploadMaxPending)
 var ErrUnknownPayment = errors.New("credits: no paid grant carries this payment id")
 var ErrUnknownTeam = errors.New("store: team is not registered")
@@ -2555,6 +2556,7 @@ type Token struct {
 }
 func (t *Token) HasScope(scope string) bool
 func (t *Token) IsValid(now time.Time) bool
+func TokenEnded(revokedAt, expiresAt *time.Time, now time.Time) error
 func TokenKindFromPrefix(raw string) string
 const TokenKindRunner = "runner"
 const TokenKindService = "service"
