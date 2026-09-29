@@ -64,7 +64,10 @@ most one uncommitted block per live run. A crashed logs service leaves its
 blocks reserved until they expire after an hour. It also confirms an
 append's claim with the controller at most once every 30 seconds per run,
 node, credential and claim; an append that names no claim generation is
-confirmed every time.
+confirmed every time. A work node's claim token is confirmed at most once
+every 5 seconds per token, run and node, and the cached confirmation keeps
+the team the controller bound the claim to, so a revoked claim stops writing
+within 5 seconds and every write is counted to its team.
 
 A write past a share is refused with `413` and a reason that names the share,
 what the team holds and what the write needs. The cache judges a declared

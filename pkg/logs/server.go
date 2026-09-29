@@ -834,12 +834,22 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	if err != nil {
 		return nil, http.StatusUnauthorized, err
 	}
-	// safety: a claim token is checked on every write, so its revocation
-	// takes effect at once and every write carries the team it is counted to.
-	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
-	cacheable = cacheable && (p == nil || p.Kind != "claim")
-	if cacheable && s.claims.valid(key, time.Now()) {
-		return nil, 0, nil
+	// safety: a claim token's confirmation is trusted for no more than
+	// MaxClaimTokenCacheTTL, so its revocation takes effect within it, and the
+	// entry keeps the claim's team, so a write served from it is labeled too.
+	claimToken := p != nil && p.Kind == "claim"
+	ttl := s.claimCacheTTL()
+	if claimToken {
+		ttl = min(ttl, MaxClaimTokenCacheTTL)
+	}
+	key, cacheable := claimCacheKey(r, runID, nodeID, credential, claimToken)
+	if cacheable {
+		if team, ok := s.claims.valid(key, time.Now()); ok {
+			if claimToken {
+				p.Team = team
+			}
+			return nil, 0, nil
+		}
 	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
@@ -861,13 +871,17 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	if resp.StatusCode == http.StatusNoContent {
 		// safety: a claim's run is labeled with the team the controller
 		// bound the claim to, never one the pod names.
-		if p != nil && p.Kind == "claim" {
+		if claimToken {
 			if p.Team = resp.Header.Get(store.ClaimTeamHeader); p.Team == "" {
 				return nil, http.StatusBadGateway, errors.New("validate log claim: the controller named no team")
 			}
 		}
-		if cacheable && s.claimCacheTTL() > 0 {
-			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
+		if cacheable && ttl > 0 {
+			team := ""
+			if claimToken {
+				team = p.Team
+			}
+			s.claims.remember(key, time.Now().Add(ttl), team)
 		}
 		return resp.Header, 0, nil
 	}
