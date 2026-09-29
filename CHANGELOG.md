@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **accounting:** Negative node resource observations and CPU or wall-time overflow reject the entire update without changing stored usage.
+
 ## [v0.64.0] - 2026-09-28
 ### Added
 
