@@ -227,42 +227,64 @@ func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.
 }
 
 // A work claim takes and returns concurrency slots for its own run in its
-// own team; another run's slot, a planning claim and a cancelled run's new
-// acquire are refused, while a release after cancel still frees the slot.
-func TestClaimRun_ConcurrencySlotsStayInTheClaimsRunAndTeam(t *testing.T) {
+// own team, and only as its node's accepted plan declares them: another run,
+// another node, another key or policy, a planning claim and a cancelled run's
+// new acquire are refused, the lease never outlives the claim, and a release
+// after cancel still frees the slot.
+func TestClaimRun_ConcurrencySlotsFollowTheAcceptedPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	plan := "Bearer " + f.launchedRun(olga, "run-slot", "acme", "widgets")
 	f.launchedRun(olga, "run-stranger", "acme", "widgets")
-	acquire := func(run string) map[string]any {
-		return map[string]any{"holder_id": "h-" + run, "run_id": run, "node_id": "a", "max": 1}
-	}
-	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", plan, acquire("run-slot"), nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", plan, map[string]any{
+		"holder_id": "h", "run_id": "run-slot", "node_id": "plan", "max": 1, "cost": 1, "policy": "queue",
+	}, nil); code != http.StatusForbidden {
 		t.Fatalf("a planning claim's acquire = %d, want 403", code)
 	}
-	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}}}
+	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA, "modifiers": map[string]any{
+		"conc_group": "deploy", "conc_capacity": 1, "conc_cost": 1, "conc_on_limit": "queue",
+	}}}}
 	if code := f.call("POST", "/api/v1/runs/run-slot/plan", plan, doc, nil); code != http.StatusOK {
 		t.Fatalf("accept plan = %d", code)
 	}
-	work := "Bearer " + f.launchNode("run-slot", "a")
-	var got map[string]any
-	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", work, acquire("run-slot"), &got); code != http.StatusOK || got["granted"] != true {
-		t.Fatalf("own run's acquire = %d %v", code, got)
+	wk := "Bearer " + f.launchNode("run-slot", "a")
+	body := func(run, node, policy string, lease int) map[string]any {
+		return map[string]any{"holder_id": run + "/" + node, "run_id": run, "node_id": node, "max": 1, "cost": 1, "policy": policy, "lease_secs": lease}
 	}
-	if code := f.call("POST", "/api/v1/concurrency/deploy/acquire", work, acquire("run-stranger"), nil); code != http.StatusForbidden {
-		t.Fatalf("another run's acquire = %d, want 403", code)
+	for _, c := range []struct {
+		key  string
+		body map[string]any
+		what string
+	}{
+		{"g:deploy", body("run-stranger", "a", "queue", 0), "another run's acquire"},
+		{"g:deploy", body("run-slot", "b", "queue", 0), "another node's acquire"},
+		{"g:other", body("run-slot", "a", "queue", 0), "an undeclared key"},
+		{"g:deploy", body("run-slot", "a", "cancel_others", 0), "an undeclared policy"},
+	} {
+		if code := f.call("POST", "/api/v1/concurrency/"+c.key+"/acquire", wk, c.body, nil); code != http.StatusForbidden {
+			t.Errorf("%s = %d, want 403", c.what, code)
+		}
+	}
+	var got map[string]any
+	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 30*24*3600), &got); code != http.StatusOK || got["granted"] != true {
+		t.Fatalf("the declared acquire = %d %v", code, got)
 	}
 	for team, want := range map[store.Team]int{store.Team(olga.team): 1, store.DefaultTeam: 0} {
 		tn, err := f.store.ForTeam(ctx, team)
 		if err != nil {
 			t.Fatal(err)
 		}
-		st, err := tn.GetConcurrencyState(ctx, "deploy")
+		st, err := tn.GetConcurrencyState(ctx, "g:deploy")
 		held := 0
 		if err == nil {
 			held = len(st.Holders)
+			for _, h := range st.Holders {
+				if h.LeaseExpiresAt.After(time.Now().Add(2 * time.Hour)) {
+					t.Errorf("the holder's lease runs to %v, past the claim token", h.LeaseExpiresAt)
+				}
+			}
 		} else if !errors.Is(err, store.ErrNotFound) {
 			t.Fatal(err)
 		}
@@ -273,10 +295,10 @@ func TestClaimRun_ConcurrencySlotsStayInTheClaimsRunAndTeam(t *testing.T) {
 	if err := f.store.RequestCancel(ctx, "run-slot"); err != nil {
 		t.Fatal(err)
 	}
-	if code := f.call("POST", "/api/v1/concurrency/other/acquire", work, acquire("run-slot"), nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/concurrency/g:deploy/acquire", wk, body("run-slot", "a", "queue", 0), nil); code != http.StatusForbidden {
 		t.Fatalf("an acquire after cancel = %d, want 403", code)
 	}
-	if code := f.call("POST", "/api/v1/concurrency/deploy/release", work, map[string]any{"holder_id": "h-run-slot", "outcome": "cancelled"}, nil); code != http.StatusNoContent {
+	if code := f.call("POST", "/api/v1/concurrency/g:deploy/release", wk, map[string]any{"holder_id": "run-slot/a", "outcome": "cancelled"}, nil); code != http.StatusNoContent {
 		t.Fatalf("a release after cancel = %d, want 204", code)
 	}
 }

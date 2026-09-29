@@ -187,6 +187,12 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id and run_id are required"))
 		return
 	}
+	if tok, claim := claimTokenFromContext(r.Context()); claim {
+		if err := s.checkClaimAcquire(r, tenant, tok, key, &body); err != nil {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "slot_undeclared", Message: err.Error()})
+			return
+		}
+	}
 	req := store.AcquireSlotRequest{
 		Key:               key,
 		HolderID:          body.HolderID,
@@ -268,6 +274,9 @@ func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
+	if tok, claim := claimTokenFromContext(r.Context()); claim {
+		lease = claimSlotLease(tok, lease)
+	}
 	expires, superseded, err := tenant.HeartbeatConcurrencySlot(r.Context(), key, body.HolderID, lease)
 	if err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
@@ -635,4 +644,32 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// safety: a claim takes only a slot its node's accepted plan declares, for its
+// own node, joins no other run's holder, and holds it no longer than its
+// claim token lives, so it cannot supersede or block another run's holder
+// beyond what the declared policy allows.
+func (s *Server) checkClaimAcquire(r *http.Request, tenant *store.Tenant, tok store.ClaimToken, key string, body *acquireSlotReq) error {
+	if body.NodeID != tok.NodeID {
+		return errors.New("a claim acquires slots for its own node only")
+	}
+	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
+		return err
+	}
+	if body.InheritedHolderID != "" {
+		holder, err := tenant.ConcurrencyHolder(r.Context(), key, body.InheritedHolderID, time.Now())
+		if err != nil || holder.RunID != tok.RunID {
+			return errors.New("a claim joins only a holder of its own run")
+		}
+	}
+	body.LeaseSecs = int(claimSlotLease(tok, time.Duration(body.LeaseSecs)*time.Second) / time.Second)
+	return nil
+}
+
+func claimSlotLease(tok store.ClaimToken, lease time.Duration) time.Duration {
+	if lease <= 0 {
+		lease = store.DefaultConcurrencyLease
+	}
+	return max(min(lease, time.Until(tok.ExpiresAt)), time.Second)
 }

@@ -62,8 +62,10 @@ unlock.
   service with its claim token, which the service checks against the
   controller on every append and seal and answers on no other route. A work
   node takes, renews, observes and releases concurrency slots with its claim
-  token, for its own run in its own team; a new acquire is refused once the
-  run is being cancelled, a release is not. On this path a node cannot start
+  token, for its own run and node in its own team, and only with the key,
+  policy, capacity and cost its accepted plan declares for the node; a slot's
+  lease never outlives the claim token, a new acquire is refused once the run
+  is being cancelled, and a release is not. On this path a node cannot start
   a child of another repository, and its OIDC token request is answered `422`
   naming the gap until Sparkwing Cloud OIDC is enabled for it.
 

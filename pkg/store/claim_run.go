@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -159,4 +161,53 @@ func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name st
 		return nil, err
 	}
 	return sec, tx.Commit()
+}
+
+// ErrSlotUndeclared refuses a claim a concurrency slot its node's accepted
+// plan does not declare with that key, policy, capacity and cost.
+var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no such slot for this node")
+
+// CheckClaimSlot allows tok's work claim to acquire key only as its node's
+// accepted plan declares it: the node's concurrency group, under the key its
+// scope names, with the declared policy, capacity and cost, or the node's
+// memoization under its coalescing key.
+func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error {
+	var plan []byte
+	if err := s.queryRow(ctx, `SELECT plan_json FROM runs WHERE team = ? AND id = ?`,
+		string(tok.Team), tok.RunID).Scan(&plan); err != nil {
+		return err
+	}
+	var doc struct {
+		Nodes []struct {
+			ID        string             `json:"id"`
+			Modifiers submittedModifiers `json:"modifiers"`
+		} `json:"nodes"`
+	}
+	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
+		return ErrSlotUndeclared
+	}
+	for _, n := range doc.Nodes {
+		if n.ID != tok.NodeID {
+			continue
+		}
+		m := n.Modifiers
+		memo := m.Cache && strings.HasPrefix(key, memoSlotPrefix) && policy == OnLimitCoalesce && capacity == 1 && cost == 1
+		group := m.ConcGroup != "" && key == declaredSlotKey(m, tok.RunID) && policy == m.ConcOnLimit &&
+			capacity == m.ConcCapacity && cost == m.ConcCost
+		if memo || group {
+			return nil
+		}
+	}
+	return ErrSlotUndeclared
+}
+
+const memoSlotPrefix = "memo:"
+
+// safety: the SDK's key for a node's group: a run-scoped group is qualified
+// by its run, so a claim can name no other run's run-scoped key.
+func declaredSlotKey(m submittedModifiers, runID string) string {
+	if m.ConcScope == "run" {
+		return "r:" + strconv.Itoa(len(runID)) + ":" + runID + m.ConcGroup
+	}
+	return "g:" + m.ConcGroup
 }
