@@ -823,3 +823,46 @@ func TestARefundDebitsTheCardThatPaid(t *testing.T) {
 		t.Fatalf("buckets after the refund: first card %d, replacement %d; want the refund netted on the first", old, replacement)
 	}
 }
+
+// An outcome can reach the controller before the worker binds its refund: a
+// failure still puts the payment back in the queue, a success still finishes
+// it, the late bind changes neither, and a repeated failure counts once.
+func TestARefundOutcomeBeforeItsBindIsKept(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		dueLate bool
+	}{{"failed", true}, {"succeeded", false}} {
+		t.Run(tc.status, func(t *testing.T) {
+			s := storetest.Open(t)
+			ctx := context.Background()
+			now := time.Now()
+			acme := teamHandle(t, s, "acme")
+			trustWithCard(t, acme, now)
+			spend(t, s, "acme", "ch_1", 15_000)
+			w := dueCharge(t, s, now)
+			if _, err := s.SettleCardPayment(ctx, store.CardPayment{
+				ChargeID: w.ChargeID, AttemptID: w.AttemptID, PaymentIntent: "pi_short", AmountCents: 100,
+			}, now); err != nil {
+				t.Fatal(err)
+			}
+			if queued, err := s.ReportCardRefund(ctx, "pi_short", "re_1", tc.status, now); err != nil || !queued {
+				t.Fatalf("early %s report = %v, %v; want applied", tc.status, queued, err)
+			}
+			if _, err := s.ReportCardRefund(ctx, "pi_short", "re_1", tc.status, now); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.MarkCardRefundMade(ctx, "acme", "pi_short", "re_1", "pending", now); err != nil {
+				t.Fatal(err)
+			}
+			due, err := s.DueCardRefunds(ctx, now.Add(2*time.Hour))
+			switch {
+			case err != nil:
+				t.Fatal(err)
+			case tc.dueLate && (len(due) != 1 || due[0].Key != "pi_short-1"):
+				t.Fatalf("after an early failure = %+v; want one retry under the next key", due)
+			case !tc.dueLate && len(due) != 0:
+				t.Fatalf("after an early success = %+v; want nothing due", due)
+			}
+		})
+	}
+}

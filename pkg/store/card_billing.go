@@ -1137,51 +1137,58 @@ func (s *Store) DueCardRefunds(ctx context.Context, now time.Time) (_ []CardRefu
 	return out, rows.Err()
 }
 
-// MarkCardRefundMade records the refund Stripe made for a queued payment and
-// the status it reported.
+// MarkCardRefundMade binds the refund Stripe made for a queued payment and
+// the status it answered with. A refund whose outcome its webhook already
+// reported is left as that report set it.
 func (s *Store) MarkCardRefundMade(
 	ctx context.Context, team Team, paymentIntent, refundID, status string, now time.Time,
 ) error {
-	_, err := s.setCardRefundStatus(ctx, team, paymentIntent, refundID, status, now)
+	_, err := s.applyCardRefund(ctx, team, paymentIntent, refundID, status,
+		`status = 'due' AND refund_id != ?`, []any{refundID}, now)
 	return err
 }
 
-// ReportCardRefund applies a later status of a refund, as Stripe announces
-// it. It reports whether the refund was one the controller queued; a failed
-// or canceled one is due again.
+// ReportCardRefund applies a refund's status as Stripe announces it and
+// reports whether it changed a refund the controller queued; a failed or
+// canceled one is due again.
 func (s *Store) ReportCardRefund(ctx context.Context, paymentIntent, refundID, status string, now time.Time) (bool, error) {
 	var team string
-	err := s.queryRow(ctx, `SELECT team FROM card_refunds WHERE payment_intent = ? AND refund_id = ?`,
-		paymentIntent, refundID).Scan(&team)
+	err := s.queryRow(ctx, `SELECT team FROM card_refunds WHERE payment_intent = ?`, paymentIntent).Scan(&team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return s.setCardRefundStatus(ctx, Team(team), paymentIntent, refundID, status, now)
-}
-
-func (s *Store) setCardRefundStatus(
-	ctx context.Context, team Team, paymentIntent, refundID, status string, now time.Time,
-) (bool, error) {
-	var res sql.Result
-	var err error
+	// safety: an outcome may arrive before the worker binds its refund, so a
+	// row still due takes it then; a repeat of an outcome already applied, or
+	// a late report of an earlier refund, matches neither and changes nothing.
 	switch status {
 	case CardRefundSucceeded:
-		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ? WHERE team = ? AND payment_intent = ?`,
-			refundID, CardRefundSucceeded, string(team), paymentIntent)
+		return s.applyCardRefund(ctx, Team(team), paymentIntent, refundID, status,
+			`(refund_id = ? OR status = 'due')`, []any{refundID}, now)
+	case "failed", "canceled":
+		return s.applyCardRefund(ctx, Team(team), paymentIntent, refundID, status,
+			`((refund_id = ? AND status != 'due') OR (refund_id != ? AND status = 'due'))`, []any{refundID, refundID}, now)
+	}
+	return false, nil
+}
+
+func (s *Store) applyCardRefund(
+	ctx context.Context, team Team, paymentIntent, refundID, status, when string, whenArgs []any, now time.Time,
+) (bool, error) {
+	set, args := `refund_id = ?, status = ?`, []any{refundID, CardRefundPending}
+	switch status {
+	case CardRefundSucceeded:
+		args[1] = CardRefundSucceeded
 	case "failed", "canceled":
 		// safety: a refund can fail after it succeeded; its reversal is capped
 		// at what the payment still holds, so retrying cannot take back twice.
-		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ?, attempts = attempts + 1,
-		    next_attempt_at = ? WHERE team = ? AND payment_intent = ?`,
-			refundID, CardRefundDue, now.Add(cardRefundBackoff(ctx, s, team, paymentIntent)).UnixNano(),
-			string(team), paymentIntent)
-	default:
-		res, err = s.exec(ctx, `UPDATE card_refunds SET refund_id = ?, status = ? WHERE team = ? AND payment_intent = ?
-		    AND status = ?`, refundID, CardRefundPending, string(team), paymentIntent, CardRefundDue)
+		set = `refund_id = ?, status = ?, attempts = attempts + 1, next_attempt_at = ?`
+		args = []any{refundID, CardRefundDue, now.Add(cardRefundBackoff(ctx, s, team, paymentIntent)).UnixNano()}
 	}
+	args = append(append(args, string(team), paymentIntent), whenArgs...)
+	res, err := s.exec(ctx, `UPDATE card_refunds SET `+set+` WHERE team = ? AND payment_intent = ? AND `+when, args...)
 	if err != nil {
 		return false, err
 	}
