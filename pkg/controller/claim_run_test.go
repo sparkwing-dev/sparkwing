@@ -397,9 +397,10 @@ func TestClaimRun_LogValidationBindsTheClaimsOwnAttempt(t *testing.T) {
 // A work claim reads another run's output only through a reference its plan
 // declares, and the controller picks the run: a memoized result through its
 // cache entry, the leader its own coalesce waiter names, and the newest
-// successful run of a declared pipeline reference. An undeclared reference,
-// another node's waiter and a read naming another run are refused or find
-// nothing, and a refusal is audited.
+// successful run of a declared pipeline reference. A memoized result reaches
+// it only under its own node's key and only from its own repository, pipeline
+// and node; an undeclared reference, another node's waiter or key, and a read
+// naming another run are refused or find nothing, and a refusal is audited.
 func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	ctx := context.Background()
 	f := newAppFixture(t)
@@ -425,32 +426,51 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 			t.Fatalf("finish %s/%s = %d", runID, nodeID, code)
 		}
 	}
-	finished("run-leader", "lead", memo, `{"from":"leader"}`)
-	finished("run-stranger", "lead", memo, `{"from":"stranger"}`)
-	finished("run-origin", "memo", memo, `{"from":"cache"}`)
+	finished("run-leader", "c", memo, `{"from":"leader"}`)
+	finished("run-stranger", "m", memo, `{"from":"stranger"}`)
+	finished("run-origin", "m", memo, `{"from":"cache"}`)
+	finished("run-node", "x", memo, `{"from":"another node"}`)
+	finished("run-pipeline", "m", memo, `{"from":"another pipeline"}`)
+	finished("run-repo", "m", memo, `{"from":"another repository"}`)
 	finished("run-last", "build", nil, `{"from":"last"}`)
+	for _, q := range []string{
+		`UPDATE runs SET pipeline = 'deploy' WHERE id = 'run-pipeline'`,
+		`UPDATE triggers SET github_repo_id = 702 WHERE id = 'run-repo'`,
+	} {
+		if _, err := f.store.DB().ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	accept("run-in",
 		map[string]any{"id": "m", "modifiers": memo},
 		map[string]any{"id": "c", "modifiers": memo},
 		map[string]any{"id": "r", "pipeline_refs": []map[string]string{{"pipeline": "build", "node": "build"}}})
+	ns := func(node, hash string) string { return store.ClaimMemoKey("acme/widgets", "build", node, hash) }
 	now := time.Now().UnixNano()
-	for _, q := range []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO concurrency_cache (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
- VALUES (?, 'memo:h1', 'h1', '', 'run-origin', 'memo', ?, ?, ?)`, []any{olga.team, now, now + int64(time.Hour), now}},
-		{`INSERT INTO concurrency_waiters (team, key, run_id, node_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id)
- VALUES (?, 'memo:h2', 'run-in', 'c', ?, 'coalesce', 'h2', 'run-leader', 'lead')`, []any{olga.team, now}},
-		{`INSERT INTO concurrency_waiters (team, key, run_id, node_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id)
- VALUES (?, 'memo:h3', 'run-in', 'm', ?, 'coalesce', 'h3', 'run-stranger', 'lead')`, []any{olga.team, now}},
-		{`INSERT INTO concurrency_cache (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
- VALUES (?, 'memo:h4', 'h4', '', 'run-stranger', 'lead', ?, ?, ?)`, []any{string(store.DefaultTeam), now, now + int64(time.Hour), now}},
-	} {
-		if _, err := f.store.DB().ExecContext(ctx, q.sql, q.args...); err != nil {
+	cache := func(team, key, hash, run, node string) {
+		t.Helper()
+		if _, err := f.store.DB().ExecContext(ctx, `INSERT INTO concurrency_cache
+ (team, key, cache_key_hash, output_ref, origin_run_id, origin_node_id, created_at, expires_at, last_hit_at)
+ VALUES (?, ?, ?, '', ?, ?, ?, ?, ?)`, team, key, hash, run, node, now, now+int64(time.Hour), now); err != nil {
 			t.Fatal(err)
 		}
 	}
+	waiter := func(key, hash, node, leaderRun, leaderNode string) {
+		t.Helper()
+		if _, err := f.store.DB().ExecContext(ctx, `INSERT INTO concurrency_waiters
+ (team, key, run_id, node_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id)
+ VALUES (?, ?, 'run-in', ?, ?, 'coalesce', ?, ?, ?)`, olga.team, key, node, now, hash, leaderRun, leaderNode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache(olga.team, ns("m", "h1"), "h1", "run-origin", "m")
+	cache(olga.team, ns("c", "h1"), "h1", "run-leader", "c")
+	waiter(ns("c", "h2"), "h2", "c", "run-leader", "c")
+	waiter(ns("m", "h3"), "h3", "m", "run-stranger", "m")
+	cache(string(store.DefaultTeam), ns("m", "h4"), "h4", "run-stranger", "m")
+	cache(olga.team, ns("m", "h5"), "h5", "run-node", "x")
+	cache(olga.team, ns("m", "h6"), "h6", "run-pipeline", "m")
+	cache(olga.team, ns("m", "h7"), "h7", "run-repo", "m")
 	tokens := map[string]string{}
 	for _, n := range []string{"m", "c", "r"} {
 		tokens[n] = "Bearer " + f.launchNode("run-in", n)
@@ -461,8 +481,8 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/claim/input", tokens[node], req, &in)
 		return code, in
 	}
-	memoIn := func(kind store.ClaimInputKind, hash string) store.ClaimInputRequest {
-		return store.ClaimInputRequest{Kind: kind, Key: "memo:" + hash, CacheKeyHash: hash}
+	memoIn := func(kind store.ClaimInputKind, node, hash string) store.ClaimInputRequest {
+		return store.ClaimInputRequest{Kind: kind, Key: ns(node, hash), CacheKeyHash: hash}
 	}
 	lastRun := store.ClaimInputRequest{Kind: store.ClaimInputLastRun, Pipeline: "build", Node: "build"}
 	for _, c := range []struct {
@@ -470,30 +490,34 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		req         store.ClaimInputRequest
 		run, output string
 	}{
-		{"m", memoIn(store.ClaimInputCached, "h1"), "run-origin", `{"from":"cache"}`},
-		{"c", memoIn(store.ClaimInputCoalesced, "h2"), "run-leader", `{"from":"leader"}`},
-		{"c", memoIn(store.ClaimInputCoalesced, "h1"), "run-origin", `{"from":"cache"}`},
+		{"m", memoIn(store.ClaimInputCached, "m", "h1"), "run-origin", `{"from":"cache"}`},
+		{"c", memoIn(store.ClaimInputCoalesced, "c", "h2"), "run-leader", `{"from":"leader"}`},
+		{"c", memoIn(store.ClaimInputCoalesced, "c", "h1"), "run-leader", `{"from":"leader"}`},
 		{"r", lastRun, "run-last", `{"from":"last"}`},
 	} {
 		if code, in := input(c.node, c.req); code != http.StatusOK || in.RunID != c.run || string(in.Output) != c.output {
 			t.Errorf("node %s's %s input %s = %d %s %s, want %s %s", c.node, c.req.Kind, c.req.Key, code, in.RunID, in.Output, c.run, c.output)
 		}
 	}
-	otherKey, otherRef := memoIn(store.ClaimInputCached, "h1"), lastRun
-	otherKey.Key = "memo:h2"
+	bare, otherRef := memoIn(store.ClaimInputCached, "m", "h1"), lastRun
+	bare.Key = "memo:h1"
 	otherRef.Node = "lead"
 	for what, c := range map[string]struct {
 		node string
 		req  store.ClaimInputRequest
 		want int
 	}{
-		"a cache entry on a node that declares no memoization": {"r", memoIn(store.ClaimInputCached, "h1"), http.StatusForbidden},
-		"a cache entry under a key its hash does not name":     {"m", otherKey, http.StatusForbidden},
+		"a cache entry on a node that declares no memoization": {"r", memoIn(store.ClaimInputCached, "r", "h1"), http.StatusForbidden},
+		"a sibling node's key for a known hash":                {"m", memoIn(store.ClaimInputCached, "c", "h1"), http.StatusForbidden},
+		"a bare memo key for a known hash":                     {"m", bare, http.StatusForbidden},
+		"an entry another node wrote under its key":            {"m", memoIn(store.ClaimInputCached, "m", "h5"), http.StatusForbidden},
+		"an entry another pipeline wrote under its key":        {"m", memoIn(store.ClaimInputCached, "m", "h6"), http.StatusForbidden},
+		"an entry another repository wrote under its key":      {"m", memoIn(store.ClaimInputCoalesced, "m", "h7"), http.StatusForbidden},
 		"an undeclared pipeline reference":                     {"r", otherRef, http.StatusForbidden},
 		"a pipeline reference on a node that declares none":    {"m", lastRun, http.StatusForbidden},
-		"another node's coalesce waiter":                       {"c", memoIn(store.ClaimInputCoalesced, "h3"), http.StatusNotFound},
-		"a key with no waiter and no cache entry":              {"m", memoIn(store.ClaimInputCoalesced, "h9"), http.StatusNotFound},
-		"another team's cache entry":                           {"m", memoIn(store.ClaimInputCached, "h4"), http.StatusNotFound},
+		"another node's coalesce waiter":                       {"c", memoIn(store.ClaimInputCoalesced, "c", "h3"), http.StatusNotFound},
+		"a key with no waiter and no cache entry":              {"m", memoIn(store.ClaimInputCoalesced, "m", "h9"), http.StatusNotFound},
+		"another team's cache entry":                           {"m", memoIn(store.ClaimInputCached, "m", "h4"), http.StatusNotFound},
 	} {
 		if code, in := input(c.node, c.req); code != c.want {
 			t.Errorf("%s = %d %s, want %d", what, code, in.Output, c.want)
@@ -502,10 +526,10 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
 		t.Error("a refused input was not audited")
 	}
-	if code := f.call("POST", "/api/v1/runs/run-leader/nodes/lead/claim/input", tokens["c"], memoIn(store.ClaimInputCoalesced, "h2"), nil); code != http.StatusForbidden {
+	if code := f.call("POST", "/api/v1/runs/run-leader/nodes/c/claim/input", tokens["c"], memoIn(store.ClaimInputCoalesced, "c", "h2"), nil); code != http.StatusForbidden {
 		t.Errorf("an input read naming the leader's run in its path = %d, want 403", code)
 	}
-	if code := f.call("GET", "/api/v1/runs/run-stranger/nodes/lead/output", tokens["c"], nil, nil); code == http.StatusOK {
+	if code := f.call("GET", "/api/v1/runs/run-stranger/nodes/m/output", tokens["m"], nil, nil); code == http.StatusOK {
 		t.Errorf("another run's output read directly = %d, want refused", code)
 	}
 }

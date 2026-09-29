@@ -86,7 +86,8 @@ unlock.
   store rather than read a claim's binaries unscoped. A work node reads another run's output only through
   `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
   itself: the cache entry of the node's memoization, the leader its own
-  coalesce waiter names, or the newest successful run of a pipeline and node
+  coalesce waiter names, both only under the node's own memo key and from a
+  run of its repository, pipeline and node, or the newest successful run of a pipeline and node
   its plan declares in the new per-node `pipeline_refs` field, which the SDK
   fills from the `RefToLastRun` fields a job struct holds; an undeclared
   reference is refused and audited, and a ref built in a step body is refused

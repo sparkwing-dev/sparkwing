@@ -288,7 +288,11 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	var runID, nodeID string
 	switch req.Kind {
 	case ClaimInputCached, ClaimInputCoalesced:
-		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != memoSlotPrefix+req.CacheKeyHash {
+		prefix, err := s.claimMemoPrefix(ctx, tok)
+		if err != nil {
+			return ClaimInput{}, err
+		}
+		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != prefix+req.CacheKeyHash {
 			return ClaimInput{}, ErrInputUndeclared
 		}
 		found := false
@@ -327,6 +331,11 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 		runID, nodeID = run.ID, req.Node
 	default:
 		return ClaimInput{}, fmt.Errorf("%w: input kind %q is not cached, coalesced or last_run", ErrInvalidInput, req.Kind)
+	}
+	if req.Kind != ClaimInputLastRun {
+		if err := s.sameMemoIdentity(ctx, tok, runID, nodeID); err != nil {
+			return ClaimInput{}, err
+		}
 	}
 	in := ClaimInput{RunID: runID, NodeID: nodeID}
 	var status, outcome string
@@ -388,4 +397,31 @@ func declaredSlotKey(m submittedModifiers, runID string) string {
 		return "r:" + strconv.Itoa(len(runID)) + ":" + runID + m.ConcGroup
 	}
 	return "g:" + m.ConcGroup
+}
+
+// safety: a memoized result reaches a claim only from its own team,
+// repository, pipeline and node, whoever wrote the entry under its key, so a
+// hash known from elsewhere in the team discloses nothing.
+func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, runID, nodeID string) error {
+	identity := func(id string) (pipeline string, repoID int64, err error) {
+		err = s.queryRow(ctx, `SELECT r.pipeline, COALESCE(t.github_repo_id, 0) FROM runs r
+  JOIN triggers t ON t.team = r.team AND t.id = r.id
+ WHERE r.team = ? AND r.id = ?`, string(tok.Team), id).Scan(&pipeline, &repoID)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrInputUndeclared
+		}
+		return pipeline, repoID, err
+	}
+	ownPipeline, ownRepo, err := identity(tok.RunID)
+	if err != nil {
+		return err
+	}
+	pipeline, repo, err := identity(runID)
+	if err != nil {
+		return err
+	}
+	if nodeID != tok.NodeID || pipeline != ownPipeline || ownRepo == 0 || repo != ownRepo {
+		return ErrInputUndeclared
+	}
+	return nil
 }

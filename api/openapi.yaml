@@ -3492,7 +3492,7 @@ paths:
       tags: [nodes]
       summary: Read a controller-dispatched node's input from another run of its team.
       description: >-
-        A work claim token reads, for its own run and node only, the output its node takes from another run through a reference the run's accepted plan declares for the node, and the controller picks the run: `cached` reads the cache entry of the node's declared memoization, `coalesced` reads the leader the node's own coalesce waiter names or else the cache entry that leader wrote, and `last_run` reads the newest successful run of a pipeline and node the node declares in `pipeline_refs`, as `RefToLastRun` does. The request never names the run it reads. An undeclared reference is refused `403` `input_undeclared` and recorded as an audit record naming the claim.
+        A work claim token reads, for its own run and node only, the output its node takes from another run through a reference the run's accepted plan declares for the node, and the controller picks the run: `cached` reads the cache entry of the node's declared memoization, `coalesced` reads the leader the node's own coalesce waiter names or else the cache entry that leader wrote, and `last_run` reads the newest successful run of a pipeline and node the node declares in `pipeline_refs`, as `RefToLastRun` does. A memoized read names the node's own memo key, its repository, pipeline and node before the hash, and answers only from a run of the same repository, pipeline and node. The request never names the run it reads. An undeclared reference is refused `403` `input_undeclared` and recorded as an audit record naming the claim.
       requestBody:
         required: true
         content:
