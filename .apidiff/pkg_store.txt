@@ -1544,6 +1544,7 @@ type RegisteredAgent struct {
 	Enrolled bool
 	LastSeen time.Time
 }
+const ReleaseBackoff = 5 * time.Minute
 type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
 const RepoDispatchTrigger RepoDispatch = ""

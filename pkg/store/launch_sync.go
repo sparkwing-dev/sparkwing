@@ -41,6 +41,10 @@ type LaunchJobResult struct {
 // the launcher has no Cloud capacity to start it.
 const CapacityWaitDetail = "waiting for Cloud capacity"
 
+// ReleaseBackoff is how long a node whose Job never got a machine waits in
+// the queue before the launcher may claim it again.
+const ReleaseBackoff = 5 * time.Minute
+
 const maxCapacityWaitMarks = 100
 
 // SyncLaunchJobs answers, for each Job the launcher holds, whether to keep
@@ -115,9 +119,10 @@ func (s *Store) releaseLaunchClaim(ctx context.Context, team Team, launcher Clai
 	if _, err := s.chargeNodeTx(ctx, tx, j.RunID, j.NodeID, launcher.TokenPrefix, now, true); err != nil {
 		return false, err
 	}
+	retryAt := now.Add(ReleaseBackoff).UnixNano()
 	if _, err := tx.ExecContext(ctx, `UPDATE nodes SET credit_charged_through = 0, status_detail = ?,
-       `+endClaimSet+`
- WHERE team = ? AND run_id = ? AND node_id = ?`, CapacityWaitDetail, string(team), j.RunID, j.NodeID); err != nil {
+       ready_at = ?, placement_hold_from = ?, `+endClaimSet+`
+ WHERE team = ? AND run_id = ? AND node_id = ?`, CapacityWaitDetail, retryAt, retryAt, string(team), j.RunID, j.NodeID); err != nil {
 		return false, err
 	}
 	if _, err := appendEventTx(ctx, tx, j.RunID, j.NodeID, "capacity_wait",
@@ -127,13 +132,8 @@ func (s *Store) releaseLaunchClaim(ctx context.Context, team Team, launcher Clai
 	return true, tx.Commit()
 }
 
-func (s *Store) markCapacityWait(ctx context.Context, reason string, now time.Time) (err error) {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	defer rollbackUnlessDone(tx, &err)
-	rows, err := tx.QueryContext(ctx, `SELECT n.team, n.run_id, n.node_id FROM nodes n
+func (s *Store) markCapacityWait(ctx context.Context, reason string, now time.Time) error {
+	rows, err := s.query(ctx, `SELECT n.team, n.run_id, n.node_id FROM nodes n
   JOIN runs r ON r.team = n.team AND r.id = n.run_id
  WHERE n.kind IN ('`+nodeKindPlan+`', '`+nodeKindWork+`') AND n.ready_at IS NOT NULL AND n.ready_at <= ?
    AND n.claimed_by IS NULL AND n.`+nodeNotDone+` AND n.status_detail != ?
@@ -156,13 +156,34 @@ func (s *Store) markCapacityWait(ctx context.Context, reason string, now time.Ti
 		return err
 	}
 	for _, k := range waiting {
-		if _, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail = ?
- WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL`, CapacityWaitDetail, k[0], k[1], k[2]); err != nil {
+		if err := s.markNodeWaiting(ctx, Team(k[0]), k[1], k[2], reason, now); err != nil {
 			return err
 		}
-		if _, err := appendEventTx(ctx, tx, k[1], k[2], "capacity_wait", map[string]string{"reason": reason}, now); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+// safety: the run row is locked before its node, the store's order.
+func (s *Store) markNodeWaiting(ctx context.Context, team Team, runID, nodeID, reason string, now time.Time) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := lockDispatchRunTx(ctx, tx, team, runID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE nodes SET status_detail = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND claimed_by IS NULL AND status_detail != ?`,
+		CapacityWaitDetail, string(team), runID, nodeID, CapacityWaitDetail)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	if _, err := appendEventTx(ctx, tx, runID, nodeID, "capacity_wait", map[string]string{"reason": reason}, now); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

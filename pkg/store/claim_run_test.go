@@ -142,7 +142,10 @@ func TestSyncLaunchJobs_ReleasesOnlyAnUnstartedClaim(t *testing.T) {
 		t.Fatal("the release recorded no capacity_wait event")
 	}
 
-	again, retok := f.launch(t, time.Now())
+	if c, err := f.s.ClaimLaunch(ctx, launcherIdentity, launchRequest(), time.Now()); err != nil || c != nil {
+		t.Fatalf("the released node was claimed inside its backoff: %+v %v", c, err)
+	}
+	again, retok := f.launch(t, time.Now().Add(store.ReleaseBackoff))
 	if again.Generation <= claim.Generation || f.node(t, store.PlanNodeID).StatusDetail != "" {
 		t.Fatalf("reclaimed at generation %d after %d, detail %q", again.Generation, claim.Generation, f.node(t, store.PlanNodeID).StatusDetail)
 	}
@@ -282,9 +285,9 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 	if _, err := paying.GrantCredits(ctx, store.CreditGrantPaid, granted, "pay_launch", "admin"); err != nil {
 		t.Fatal(err)
 	}
-	claim := func() store.LaunchJob {
+	claim := func(at time.Time) store.LaunchJob {
 		t.Helper()
-		c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), time.Now())
+		c, err := st.ClaimLaunch(ctx, launcher, launchRequest(), at)
 		if err != nil || c == nil {
 			t.Fatalf("launch claim: %+v %v", c, err)
 		}
@@ -293,14 +296,14 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 		}
 		return store.LaunchJob{RunID: c.RunID, NodeID: c.NodeID, Generation: c.Generation, Release: true}
 	}
-	first := claim()
+	first := claim(time.Now())
 	if res, err := st.SyncLaunchJobs(ctx, launcher, []store.LaunchJob{first}, "", time.Now()); err != nil || res[0].State != store.LaunchJobDelete {
 		t.Fatalf("release = %+v %v", res, err)
 	}
 	if balance, err := paying.CreditBalanceMicro(ctx); err != nil || balance != granted {
 		t.Fatalf("balance after the release = %d (%v), want the whole grant back", balance, err)
 	}
-	second := claim()
+	second := claim(time.Now().Add(store.ReleaseBackoff))
 	tok := store.ClaimToken{Team: paying.Team(), RunID: second.RunID, NodeID: second.NodeID, Generation: second.Generation}
 	if _, err := st.HeartbeatClaim(ctx, tok, time.Minute, time.Now()); err != nil {
 		t.Fatalf("beat: %v", err)

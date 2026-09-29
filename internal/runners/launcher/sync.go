@@ -20,10 +20,6 @@ import (
 )
 
 const (
-	// UnschedulableWait is how long a Job's pod may wait for a machine before
-	// the launcher stops claiming: past a cold start, a pod still unplaced
-	// means the pool is full or the fleet is closed to new machines.
-	UnschedulableWait = 2 * time.Minute
 	// UnschedulableRelease is how long before the launcher hands the claim
 	// of a Job that never got a machine back, well inside the claim's lease,
 	// so the node waits in the queue unbilled with no attempt spent.
@@ -31,12 +27,15 @@ const (
 	// SyncInterval is how often the launcher reconciles its Jobs with the
 	// controller.
 	SyncInterval = 5 * time.Second
+	// safety: under the controller's per-request cap, so any number of Jobs
+	// syncs.
+	syncBatch = 500
 )
 
 // Sync reconciles the launcher's Jobs with the controller: it deletes each Job
-// whose claim ended or whose run is being cancelled, hands back the claim of a
-// Job that never got a machine, and reports why it is not claiming, if it is
-// not. It returns that reason, empty when there is capacity to claim.
+// whose claim ended or whose run is being cancelled, and hands back the claim
+// of a Job that never got a machine. It returns why the pool can start no
+// machine, empty when it can, which pauses every claim until it can.
 func (l *Launcher) Sync(ctx context.Context) (string, error) {
 	sel := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher}
 	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, sel)
@@ -53,7 +52,6 @@ func (l *Launcher) Sync(ctx context.Context) (string, error) {
 			unplaced[p.Labels[JobLabel]] = max(unplaced[p.Labels[JobLabel]], time.Since(since))
 		}
 	}
-	var reason string
 	claims := make([]store.LaunchJob, 0, len(jobs.Items))
 	names := map[store.LaunchJob]string{}
 	for _, j := range jobs.Items {
@@ -63,23 +61,28 @@ func (l *Launcher) Sync(ctx context.Context) (string, error) {
 		if err != nil || j.Annotations[RunAnnotation] == "" || jobFinished(j) {
 			continue
 		}
-		waited := unplaced[j.Name]
-		if waited >= UnschedulableWait {
-			reason = "a Job has waited over " + UnschedulableWait.String() + " for a machine"
-		}
 		key := store.LaunchJob{RunID: j.Annotations[RunAnnotation], NodeID: j.Annotations[NodeAnnotation], Generation: gen}
 		names[key] = j.Name
-		key.Release = waited >= UnschedulableRelease
+		key.Release = unplaced[j.Name] >= UnschedulableRelease
 		claims = append(claims, key)
 	}
-	if reason == "" && l.Capacity != nil {
+	var reason string
+	if l.Capacity != nil {
 		if reason, err = l.Capacity(ctx); err != nil {
 			l.Logger.Warn("launcher: capacity check failed; claiming anyway", "err", err)
 		}
 	}
-	results, err := l.Ctrl.LauncherSync(ctx, claims, reason)
-	if err != nil {
-		return reason, fmt.Errorf("sync jobs: %w", err)
+	var results []store.LaunchJobResult
+	for start := 0; start == 0 || start < len(claims); start += syncBatch {
+		wait := ""
+		if start == 0 {
+			wait = reason
+		}
+		batch, err := l.Ctrl.LauncherSync(ctx, claims[start:min(start+syncBatch, len(claims))], wait)
+		if err != nil {
+			return reason, fmt.Errorf("sync jobs: %w", err)
+		}
+		results = append(results, batch...)
 	}
 	var errs []error
 	for _, r := range results {

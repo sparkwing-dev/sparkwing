@@ -2,6 +2,7 @@ package launcher_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -257,16 +258,51 @@ func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
-	reason, err := l.Sync(ctx)
-	if err != nil || reason == "" {
-		t.Fatalf("sync of a stuck Job = %q, %v; want a capacity wait", reason, err)
+	f.intake(t, "run-next", "korey/probe")
+	if reason, err := l.Sync(ctx); err != nil || reason != "" {
+		t.Fatalf("sync of a stuck Job = %q, %v; one Job that cannot fit pauses nobody", reason, err)
 	}
 	if names := f.jobNames(t); len(names) != 0 {
 		t.Fatalf("the stuck Job was kept: %v", names)
 	}
 	n, err := f.st.GetNode(ctx, "run-wait", store.PlanNodeID)
-	if err != nil || n.ClaimedBy != "" || n.AttemptsConsumed != 0 || n.StatusDetail != store.CapacityWaitDetail {
-		t.Fatalf("node after release = %+v %v", n, err)
+	if err != nil || n.ClaimedBy != "" || n.AttemptsConsumed != 0 || n.StatusDetail != store.CapacityWaitDetail ||
+		n.ReadyAt == nil || n.ReadyAt.Before(time.Now().Add(store.ReleaseBackoff-time.Minute)) {
+		t.Fatalf("node after release = %+v %v, want it queued behind the backoff", n, err)
+	}
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch after the release: %v %v", launched, err)
+	}
+	if launched, err := l.LaunchOne(ctx); launched || err != nil {
+		t.Fatalf("the released node was claimed again inside its backoff: %v %v", launched, err)
+	}
+	if names := f.jobNames(t); len(names) != 1 || !strings.Contains(names[0], "plan") {
+		t.Fatalf("jobs after the release = %v, want run-next's plan alone", names)
+	}
+}
+
+// Any number of Jobs syncs, however many the controller takes in one request.
+func TestSync_PagesPastTheControllersRequestCap(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	for i := range 1001 {
+		job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("gone-%d", i), Namespace: "sparkwing-jobs",
+			Labels: map[string]string{"app.kubernetes.io/managed-by": "sparkwing-launcher"},
+			Annotations: map[string]string{
+				launcher.RunAnnotation: "run-gone", launcher.NodeAnnotation: fmt.Sprintf("n%d", i), launcher.GenerationAnnotation: "1",
+			},
+		}}
+		if _, err := f.kube.BatchV1().Jobs("sparkwing-jobs").Create(ctx, job, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of 1001 Jobs: %v", err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("%d Jobs of ended claims survived", len(names))
 	}
 }
 

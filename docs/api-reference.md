@@ -251,7 +251,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/triggers` | `runs.write` |
 | `POST` | `/api/v1/triggers/claim` | `triggers.claim` |
 | `GET` | `/api/v1/triggers/spawned-child` | `triggers.read` |
-| `GET` | `/api/v1/triggers/{id}` | `claim` or `triggers.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/triggers/{id}` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/claim` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/done` | `triggers.claim` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `triggers.claim` |
