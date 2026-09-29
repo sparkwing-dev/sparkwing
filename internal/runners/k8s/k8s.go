@@ -495,8 +495,25 @@ func (r *Runner) observePodPhase(ctx context.Context, jobName string) string {
 	return string(p.Status.Phase)
 }
 
-func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
-	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
+// safety: a dead token stops the heartbeat but leaves the Job alone, because
+// the pod renews its node claim with its own credential and decides its fate
+// by that claim.
+func heartbeatLoop(ctx context.Context, ctrl nodeHeartbeater, runID, nodeID string, logger *slog.Logger) {
+	beat := func() (stop bool) {
+		err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
+		if client.IsTokenDead(err) {
+			logger.Error("k8s: the controller refuses this dispatcher's token; stopping the node heartbeat",
+				"run_id", runID, "node_id", nodeID, "err", err)
+			return true
+		}
+		if err != nil {
+			logger.Debug("k8s: heartbeat failed", "run_id", runID, "node_id", nodeID, "err", err)
+		}
+		return false
+	}
+	if beat() {
+		return
+	}
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
@@ -504,12 +521,15 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
-				logger.Debug("k8s: heartbeat failed",
-					"run_id", runID, "node_id", nodeID, "err", err)
+			if beat() {
+				return
 			}
 		}
 	}
+}
+
+type nodeHeartbeater interface {
+	TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
 }
 
 // ClaimLease is the lease the dispatcher takes on a node it executes through a
@@ -655,13 +675,18 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 		if err == nil && runner.NodeTerminal(n) {
 			return runner.ResultFromNode(ctx, n, r.ctrl)
 		}
+		if client.IsTokenDead(err) {
+			return runner.ClaimLost(err)
+		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			r.logger.Warn("node poll after missing job failed",
 				"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
 		}
 		if graceExpired {
 			if err := r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
-				string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); err != nil {
+				string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); client.IsTokenDead(err) {
+				return runner.ClaimLost(err)
+			} else if err != nil {
 				r.logger.Warn("finish node after missing job failed",
 					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
 			} else if n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID); err == nil && runner.NodeTerminal(n) {
@@ -683,6 +708,9 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 
 func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *batchv1.Job) runner.Result {
 	n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
+	if client.IsTokenDead(err) {
+		return runner.ClaimLost(err)
+	}
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return runner.Result{

@@ -213,16 +213,6 @@ type authCacheEntry struct {
 	revokedAt *time.Time
 }
 
-func (e *authCacheEntry) tokenLive(now time.Time) bool {
-	if e.revokedAt != nil && !now.Before(*e.revokedAt) {
-		return false
-	}
-	if e.tokenExp != nil && !now.Before(*e.tokenExp) {
-		return false
-	}
-	return true
-}
-
 type authFailureEntry struct {
 	reason  error
 	expires time.Time
@@ -239,6 +229,10 @@ const (
 
 	authBusyRetryAfter        = time.Second
 	authUnavailableRetryAfter = 5 * time.Second
+
+	// safety: a revoked or expired credential never authenticates again, so the
+	// hint tells a client that heeds it to stop asking for an hour.
+	deadTokenRetryAfter = time.Hour
 )
 
 var (
@@ -326,15 +320,16 @@ func (a *Authenticator) cached(key string, now time.Time) (*Principal, error) {
 		return nil, nil
 	}
 	e := v.(*authCacheEntry)
+	// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
+	ended := store.TokenEnded(e.revokedAt, e.tokenExp, now)
 	switch {
 	case !now.Before(e.expires):
 		a.cache.Delete(key)
 		observeAuthCache(authCacheMiss)
 		return nil, nil
-	// safety: a cached entry outlives the row's own clock, so expiry and revocation are rechecked on every hit.
-	case !e.tokenLive(now):
+	case ended != nil:
 		a.cache.Delete(key)
-		return nil, store.ErrTokenRevoked
+		return nil, ended
 	default:
 		observeAuthCache(authCacheHit)
 		cp := *e.principal
@@ -419,7 +414,7 @@ func authRejection(err error) bool {
 		return true
 	case errors.Is(err, store.ErrInvalidToken), errors.Is(err, store.ErrNoTokenCandidates):
 		return true
-	case errors.Is(err, store.ErrUnknownToken), errors.Is(err, store.ErrTokenRevoked):
+	case errors.Is(err, store.ErrUnknownToken), errors.Is(err, store.ErrTokenRevoked), errors.Is(err, store.ErrTokenExpired):
 		return true
 	case errors.Is(err, store.ErrInvalidCredentials):
 		return true
@@ -575,9 +570,14 @@ func (a *Authenticator) writeAuthFailure(w http.ResponseWriter, err error) {
 			Message: "authentication is busy, retry shortly",
 		})
 	case authRejection(err):
+		state := deadTokenState(err)
+		if state != "" {
+			setRetryAfter(w, deadTokenRetryAfter)
+		}
 		writeAuthError(w, http.StatusUnauthorized, authErrorBody{
-			Code:    "unauthenticated",
-			Message: err.Error(),
+			Code:       "unauthenticated",
+			TokenState: state,
+			Message:    err.Error(),
 		})
 	default:
 		a.log().Error("auth.unavailable", "error", err.Error())
@@ -586,6 +586,19 @@ func (a *Authenticator) writeAuthFailure(w http.ResponseWriter, err error) {
 			Code:    "unavailable",
 			Message: "authentication is temporarily unavailable",
 		})
+	}
+}
+
+// safety: only a bearer whose hash matched reaches revoked or expired, so the
+// state tells a caller nothing about a token it does not already hold.
+func deadTokenState(err error) string {
+	switch {
+	case errors.Is(err, store.ErrTokenRevoked):
+		return "revoked"
+	case errors.Is(err, store.ErrTokenExpired):
+		return "expired"
+	default:
+		return ""
 	}
 }
 
@@ -660,6 +673,7 @@ type authErrorBody struct {
 	Code         string `json:"error"`
 	MissingScope string `json:"missing_scope,omitempty"`
 	Principal    string `json:"principal,omitempty"`
+	TokenState   string `json:"token_state,omitempty"`
 	Message      string `json:"message"`
 }
 

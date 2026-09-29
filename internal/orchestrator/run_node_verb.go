@@ -190,7 +190,7 @@ func heartbeatDispatchedClaim(
 			lastOK = time.Now()
 		case ctx.Err() != nil:
 			return true
-		case errors.Is(err, store.ErrLockHeld):
+		case errors.Is(err, store.ErrLockHeld) || client.IsTokenDead(err):
 			logger.Error("run-node: the controller refused the claim renewal; stopping the node",
 				"run_id", runID, "node_id", nodeID, "holder_id", fence.HolderID)
 			abandon(fmt.Errorf("%w: %w", errClaimAbandoned, err))

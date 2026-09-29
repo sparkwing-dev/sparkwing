@@ -428,6 +428,11 @@ func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cm
 	readCtx := context.WithoutCancel(ctx)
 
 	n, err := r.ctrl.GetNode(readCtx, req.RunID, req.NodeID)
+	if client.IsTokenDead(err) {
+		res := runner.ClaimLost(err)
+		res.Usage = usage
+		return res
+	}
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.cfg.Logger.Warn("local runner: read node row",
 			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
@@ -454,8 +459,13 @@ func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cm
 	return verdict.result
 }
 
+// safety: a dead token stops supervision but not the child, which may hold a
+// live claim of its own; its exit is read as usual, and a refused read of it
+// is a lost claim.
 func (r *Runner) supervise(ctx context.Context, req runner.Request, bounces chan<- *store.NodeBounce) {
-	_ = r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID)
+	if r.tokenDied(req, r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID)) {
+		return
+	}
 	t := time.NewTicker(r.cfg.SuperviseInterval)
 	defer t.Stop()
 	var handed int64
@@ -466,10 +476,16 @@ func (r *Runner) supervise(ctx context.Context, req runner.Request, bounces chan
 		case <-t.C:
 		}
 		if err := r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID); err != nil {
+			if r.tokenDied(req, err) {
+				return
+			}
 			r.cfg.Logger.Debug("local runner: heartbeat failed",
 				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 		}
 		b, err := r.pollBounce(ctx, req)
+		if r.tokenDied(req, err) {
+			return
+		}
 		if err != nil {
 			r.cfg.Logger.Debug("local runner: poll for bounce request",
 				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
@@ -484,6 +500,16 @@ func (r *Runner) supervise(ctx context.Context, req runner.Request, bounces chan
 		default:
 		}
 	}
+}
+
+func (r *Runner) tokenDied(req runner.Request, err error) bool {
+	if !client.IsTokenDead(err) {
+		return false
+	}
+	r.cfg.Logger.Error("local runner: the controller refuses this dispatcher's token; "+
+		"no longer supervising the node, which finishes under its own claim",
+		"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+	return true
 }
 
 func forwardRecords(out io.Reader, req runner.Request, logger *slog.Logger) {

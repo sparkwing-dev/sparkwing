@@ -43,6 +43,7 @@ type runWait struct {
 	refs   int
 	nodes  map[string]*store.Node
 	cancel context.CancelFunc
+	lost   error
 }
 
 type coordinator interface {
@@ -120,8 +121,14 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			return r.revokeAndReportCancelled(ctx, req)
 		case <-poll.C:
 			r.mu.Lock()
-			n := wait.nodes[req.NodeID]
+			n, lost := wait.nodes[req.NodeID], wait.lost
 			r.mu.Unlock()
+			// safety: a dead token is a lost claim, so the node is neither
+			// revoked nor handed to the fallback; an executor that claimed it
+			// finishes it under its own claim.
+			if lost != nil {
+				return runner.ClaimLost(lost)
+			}
 			if n == nil {
 				continue
 			}
@@ -160,6 +167,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 			}
 			if !claimedSeen && !time.Now().Before(finalizeAt) {
 				resolution, rerr := r.ctrl.FinalizeNodeReady(ctx, req.RunID, req.NodeID)
+				if client.IsTokenDead(rerr) {
+					return runner.ClaimLost(rerr)
+				}
 				if rerr != nil {
 					r.logger.Warn("warmpool: offer finalization failed",
 						"run_id", req.RunID, "node_id", req.NodeID, "err", rerr)
@@ -220,6 +230,14 @@ func (r *Runner) pollRun(ctx context.Context, runID string, wait *runWait) {
 	for {
 		nodes, err := r.ctrl.ListNodes(ctx, runID)
 		if ctx.Err() != nil {
+			return
+		}
+		if client.IsTokenDead(err) {
+			r.logger.Error("warmpool: the controller refuses this dispatcher's token; stopping the run's node poll",
+				"run_id", runID, "err", err)
+			r.mu.Lock()
+			wait.lost = err
+			r.mu.Unlock()
 			return
 		}
 		changed := false
@@ -362,7 +380,11 @@ func heartbeatLoop(
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); err != nil {
+			if err := ctrl.TouchNodeHeartbeat(ctx, runID, nodeID); client.IsTokenDead(err) {
+				logger.Error("warmpool: the controller refuses this dispatcher's token; stopping the node heartbeat",
+					"run_id", runID, "node_id", nodeID, "err", err)
+				return
+			} else if err != nil {
 				logger.Debug("warmpool: heartbeat failed",
 					"run_id", runID, "node_id", nodeID, "err", err)
 			}

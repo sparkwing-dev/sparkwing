@@ -33,6 +33,7 @@ type AcquireSlotResponse struct {
 	Holders     []WaiterHolder
 }
 func AdvisedPoll(configured time.Duration, advisor PollAdvisor) time.Duration
+func AsTokenDead(err error) *TokenDeadError
 type ChildRun struct {
 	Ordinal  int64
 	Pipeline string
@@ -259,6 +260,7 @@ type CronReposResponse struct {
 	Schedules []crons.ScheduleView
 	Withdrawn []string
 }
+const DeadTokenRetry = time.Hour
 var ErrControllerFailed = errors.New("the controller failed to answer")
 var ErrControllerLacksRoute = errors.New("controller/client: controller does not serve this route")
 var ErrForeignNotFound = errors.New("controller/client: 404 from something other than the controller")
@@ -275,6 +277,8 @@ type ExecutorClaimOfferResult struct {
 	Node    *store.Node
 	Pending bool
 }
+const FailureBackoffBase = time.Second
+const FailureBackoffCap = 5 * time.Minute
 type GitMeta struct {
 	Branch      string
 	SHA         string
@@ -295,6 +299,7 @@ type HeartbeatSlotResponse struct {
 type HeartbeatStatus struct {
 	CancelRequested bool
 }
+func IsTokenDead(err error) bool
 type LiveLogChunk struct {
 	Start int64
 
@@ -309,6 +314,7 @@ const MaxClaimBackoff = 30 * time.Second
 const MaxPollAdvice = 8 * time.Second
 const MaxUnavailableWait = 5 * time.Second
 func New(baseURL string, httpClient *http.Client) *Client
+func NewPacer(floor time.Duration) *Pacer
 func NewShedLog(every time.Duration) *ShedLog
 func NewWithToken(baseURL string, httpClient *http.Client, token string) *Client
 type OIDCToken struct {
@@ -356,6 +362,19 @@ type ObjectStoreClassState struct {
 	TrippedAt     time.Time
 	TrippedWindow string
 }
+type Pace struct {
+	Wait time.Duration
+
+	Shed bool
+
+	Parked bool
+
+	Dead *TokenDeadError
+}
+type Pacer struct {
+}
+func (p *Pacer) Failure(err error) Pace
+func (p *Pacer) Success() (resumed bool)
 type PollAdvisor interface {
 	PollAdvice() time.Duration
 }
@@ -402,6 +421,14 @@ type StateWaiter struct {
 	Position      int
 }
 func (w StateWaiter) CancelTimeoutDuration() time.Duration
+type TokenDeadError struct {
+	State string
+
+	Message string
+}
+func (e *TokenDeadError) Error() string
+func (e *TokenDeadError) Explain(token, remedy string) string
+func TokenPrefix(token string) string
 type TriggerMeta struct {
 	Source string
 	Env    map[string]string
