@@ -189,11 +189,33 @@ func (s *Store) ReserveStorage(ctx context.Context, req StorageReserve) (_ Stora
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, req.Team, req.Now); err != nil {
+		return StorageReservation{}, err
+	}
 	out, err := reserveStorageTx(ctx, tx, req)
 	if err != nil {
 		return StorageReservation{}, err
 	}
 	return out, tx.Commit()
+}
+
+// safety: the store's lock order puts the free tier before team_storage rows,
+// so a writer takes its slot before it locks a row. A team refused a slot is
+// refused by the reservation that follows.
+func takeStorageSlotTx(ctx context.Context, tx *storeTx, team Team, now time.Time) error {
+	team = NormalizeTeam(team)
+	standing, err := storageStandingTx(ctx, tx, team)
+	if err != nil || standing.Tier != TeamTierNone {
+		return err
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if err := lockFreeTierTx(ctx, tx); err != nil {
+		return err
+	}
+	_, err = takeFreeSlotTx(ctx, tx, team, now)
+	return err
 }
 
 // RenewStorage commits c and reserves next in one transaction, for a writer
@@ -210,6 +232,9 @@ func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageR
 		return StorageReservation{}, err
 	}
 	defer rollbackUnlessDone(tx, &err)
+	if err := takeStorageSlotTx(ctx, tx, next.Team, next.Now); err != nil {
+		return StorageReservation{}, err
+	}
 	replayed, err := commitStorageTx(ctx, tx, c)
 	if err != nil {
 		return StorageReservation{}, err
@@ -260,17 +285,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 		return StorageReservation{}, err
 	}
 	if standing.Tier == TeamTierNone {
-		if err := lockFreeTierTx(ctx, tx); err != nil {
-			return StorageReservation{}, err
-		}
-		slotted, err := takeFreeSlotTx(ctx, tx, team, now)
-		if err != nil {
-			return StorageReservation{}, err
-		}
-		if !slotted {
-			return StorageReservation{}, freeStoragePaused(team)
-		}
-		standing.Tier = TeamTierFree
+		return StorageReservation{}, freeStoragePaused(team)
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)
 	if err != nil {

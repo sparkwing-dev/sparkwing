@@ -656,3 +656,38 @@ func TestRenewReceiptReplaysTheSameNextReservation(t *testing.T) {
 		t.Fatalf("replay after next block release = %v, want invalid input", err)
 	}
 }
+
+// safety: a renewal commits under the team's row lock, and a team without a
+// slot then takes one under the free-tier lock; a reservation racing it must
+// take the two in the same order or Postgres aborts one of them.
+func TestRenewalsAndReservationsTakingSlotsNeverDeadlock(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	const teams = 24
+	for i := range teams {
+		teamHandle(t, st, store.Team(fmt.Sprintf("team-%d", i)))
+	}
+	errs := make(chan error, 2*teams)
+	var wg sync.WaitGroup
+	for i := range teams {
+		team := store.Team(fmt.Sprintf("team-%d", i))
+		wg.Go(func() {
+			_, err := st.RenewStorage(ctx,
+				store.StorageCommit{ID: "r-" + string(team), Team: team, Kind: store.StorageLogs, Bytes: 1, Now: now},
+				store.StorageReserve{Team: team, Kind: store.StorageLogs, Bytes: 1, UpTo: true, Now: now})
+			errs <- err
+		})
+		wg.Go(func() {
+			_, err := reserve(st, team, store.StorageLogs, 1, now)
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a racing write = %v, want every write admitted", err)
+		}
+	}
+}

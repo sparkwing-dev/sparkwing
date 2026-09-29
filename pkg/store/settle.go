@@ -290,7 +290,8 @@ func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string
 }
 
 // safety: lock order is executor eligibility, trigger, run, node rows, free
-// tier, credit ledger, so siblings serialize on the run and nothing deadlocks.
+// tier, team_storage rows, credit ledger, so siblings serialize on the run and
+// nothing deadlocks.
 // A charged event locks its node before free-tier admission; a trigger insert
 // admitting first locks only rows it creates. Lock a node's run before the node.
 func lockTeamRunRowTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
