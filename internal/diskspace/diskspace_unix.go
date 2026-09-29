@@ -4,12 +4,14 @@ package diskspace
 
 import "syscall"
 
+var statfs = syscall.Statfs
+
 // Usage reports the bytes available to this user and the volume's total
 // size. ok is false where the path cannot be stat'd, which a caller treats
 // as "unknown" rather than zero.
 func Usage(path string) (free, total uint64, ok bool) {
 	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
+	if err := statfs(path, &st); err != nil {
 		return 0, 0, false
 	}
 	//nolint:unconvert // darwin statfs fields are int64; linux are uint64.

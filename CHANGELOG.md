@@ -29,6 +29,8 @@ unlock.
 ### Fixed
 
 - **accounting:** Preserve integer memory precision in learned floors and carried costs. Saturate overflowing allocation headroom before applying configured ceilings.
+- Tests: verify disk-space units without relying on concurrent filesystem activity.
+
 - Tests: declare measured inputs in admission and profile migration fixtures.
 
 - Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/_unreleased.md#controller-run-profiles).
