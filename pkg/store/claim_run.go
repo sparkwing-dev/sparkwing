@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -99,4 +101,62 @@ func (s *Store) HeartbeatClaim(ctx context.Context, tok ClaimToken, lease time.D
 		return ClaimBeat{}, errors.Join(err, ErrLockHeld)
 	}
 	return beat, tx.Commit()
+}
+
+// ErrSecretUndeclared refuses a claim a secret its run's accepted plan does
+// not declare.
+var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
+
+// ReleaseClaimSecret returns the secret name to tok's live work claim, looked
+// up for the run's pipeline, when the run's accepted plan declares it. It
+// records the release as a secret_released event on the node under the
+// sensitive fence, so a release after the claim ended or its run was
+// cancelled is refused, and a planning claim is never answered.
+func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error) {
+	if tok.Team != t.team || tok.Kind != ClaimTokenWork {
+		return nil, ErrClaimNotLive
+	}
+	var pipeline string
+	var plan []byte
+	if err := t.s.queryRow(ctx, `SELECT pipeline, plan_json FROM runs WHERE team = ? AND id = ?`,
+		string(t.team), tok.RunID).Scan(&pipeline, &plan); err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Secrets []struct {
+			Name string `json:"name"`
+		} `json:"secrets"`
+	}
+	if len(plan) > 0 {
+		if err := json.Unmarshal(plan, &doc); err != nil {
+			return nil, fmt.Errorf("read the run's plan: %w", err)
+		}
+	}
+	declared := false
+	for _, d := range doc.Secrets {
+		declared = declared || d.Name == name
+	}
+	if !declared {
+		return nil, ErrSecretUndeclared
+	}
+	sec, err := t.GetSecretForRun(name, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := t.s.beginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if err := lockExecutorEligibilityTx(ctx, tx, false); err != nil {
+		return nil, err
+	}
+	if err := fenceSensitiveClaimTx(ctx, tx, tok, now); err != nil {
+		return nil, err
+	}
+	if _, err := appendEventTx(ctx, tx, tok.RunID, tok.NodeID, "secret_released",
+		map[string]any{"name": name, "generation": tok.Generation}, now); err != nil {
+		return nil, err
+	}
+	return sec, tx.Commit()
 }

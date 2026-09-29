@@ -185,7 +185,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
-| `GET` | `/api/v1/secrets/{name}` | `secrets.read` or `team.admin` |
+| `GET` | `/api/v1/secrets/{name}` | `claim` or `secrets.read` or `team.admin` |
 | `GET` | `/api/v1/services` | `authenticated` |
 | `GET` | `/api/v1/signups` | `admin` |
 | `PUT` | `/api/v1/signups` | `admin` |

@@ -154,3 +154,67 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("read the child with the ended plan claim = %d, want 403", code)
 	}
 }
+
+// A work claim reads a secret its run's plan declares, and each read is
+// recorded on its node; an undeclared name, a planning claim, another run
+// and a cancelled run are all refused.
+func TestClaimRun_SecretsReachOnlyALiveWorkClaimAndOnlyDeclaredNames(t *testing.T) {
+	f := newAppFixture(t)
+	olga := f.ghUser(501, "olga")
+	f.connect(olga, 501, 7, acmeAdmin)
+	plan := "Bearer " + f.launchedRun(olga, "run-sec", "acme", "widgets")
+	f.launchedRun(olga, "run-other", "acme", "widgets")
+	tn, err := f.store.ForTeam(context.Background(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"DEPLOY_TOKEN", "UNDECLARED"} {
+		if err := tn.CreateOrReplaceSecret(store.Secret{Name: name, Value: "v-" + name, Pipeline: "build", Masked: true}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	doc := map[string]any{
+		"nodes":   []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}},
+		"secrets": []map[string]any{{"name": "DEPLOY_TOKEN", "required": true}},
+	}
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", plan, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("a planning claim's secret read = %d, want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/runs/run-sec/plan", plan, doc, nil); code != http.StatusOK {
+		t.Fatalf("accept plan = %d", code)
+	}
+	work := "Bearer " + f.launchNode("run-sec", "a")
+	var sec struct{ Value string }
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, &sec); code != http.StatusOK || sec.Value != "v-DEPLOY_TOKEN" {
+		t.Fatalf("declared secret = %d %+v", code, sec)
+	}
+	var refused map[string]any
+	if code := f.call("GET", "/api/v1/secrets/UNDECLARED?run=run-sec", work, nil, &refused); code != http.StatusForbidden || refused["error"] != "secret_undeclared" {
+		t.Fatalf("undeclared secret = %d %v, want 403 secret_undeclared", code, refused)
+	}
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-other", work, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("another run's secret = %d, want 403", code)
+	}
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN", work, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("a secret read naming no run = %d, want 403", code)
+	}
+	events, err := f.store.ListEventsAfter(context.Background(), "run-sec", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := 0
+	for _, e := range events {
+		if e.Kind == "secret_released" && e.NodeID == "a" && strings.Contains(string(e.Payload), "DEPLOY_TOKEN") {
+			released++
+		}
+	}
+	if released != 1 {
+		t.Fatalf("recorded %d secret releases, want 1: %+v", released, events)
+	}
+	if err := f.store.RequestCancel(context.Background(), "run-sec"); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.call("GET", "/api/v1/secrets/DEPLOY_TOKEN?run=run-sec", work, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("a secret read after cancel = %d, want 403", code)
+	}
+}

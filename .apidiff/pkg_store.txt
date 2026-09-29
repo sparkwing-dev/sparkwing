@@ -743,6 +743,7 @@ var ErrRunNotLive = errors.New("run is not live")
 var ErrRunnerTokenLimit = errors.New("store: this team holds as many runner tokens as a team may")
 var ErrSecretInputHash = errors.New("inputs_hash is forbidden when a secret argument is supplied")
 var ErrSecretLimit = errors.New("store: secret limit reached")
+var ErrSecretUndeclared = errors.New("store: the run's pipeline does not declare this secret")
 var ErrSessionBackend = errors.New("sessions: backend unavailable")
 var ErrSlugTaken = errors.New("store: that team slug is taken")
 var ErrSourceAlreadyBound = errors.New("source bundle already used or expired; upload again")
@@ -2508,6 +2509,7 @@ func (t *Tenant) RecordGitHubCheckRun(ctx context.Context, runID string, checkRu
 func (t *Tenant) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (t *Tenant) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
 func (t *Tenant) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl, promoteLease time.Duration) (released bool, followers, promoted []ConcurrencyWaiter, err error)
+func (t *Tenant) ReleaseClaimSecret(ctx context.Context, tok ClaimToken, name string, now time.Time) (_ *Secret, err error)
 func (t *Tenant) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (t *Tenant) ReleaseGitCredential(ctx context.Context, host string, rel GitCredentialRelease, now time.Time) (_ GitCredential, err error)
 func (t *Tenant) ReleaseOperatorHolds(ctx context.Context, actor, reason string, now time.Time) (int64, error)

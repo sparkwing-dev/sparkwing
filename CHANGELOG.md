@@ -54,9 +54,13 @@ unlock.
   with a `capacity_wait` event. A planning node whose `.sparkwing` pins a
   sparkwing release before v0.65.0 fails before its build, naming the pin. The
   opt-in's audit record names the repository. Opting a repository in is
-  accepted. On this path a node cannot read secrets, mint
-  OIDC tokens, hold concurrency slots, write the durable log store (its live
-  log reaches the dashboard), or start a child of another repository.
+  accepted. A work node reads a secret its pipeline declares through
+  `GET /api/v1/secrets/{name}?run=` with its claim token, each read recorded
+  as a `secret_released` event on the node; a planning node reads none, and
+  an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
+  refused. On this path a node cannot mint OIDC tokens, hold concurrency
+  slots, write the durable log store (its live log reaches the dashboard), or
+  start a child of another repository.
 
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with

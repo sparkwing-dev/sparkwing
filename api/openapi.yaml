@@ -2628,7 +2628,7 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: secrets.read or team.admin
+      x-sparkwing-scope: claim or secrets.read or team.admin
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
@@ -2636,6 +2636,10 @@ paths:
         a runner reading through the run it has claimed. Every other caller,
         a dashboard session or a team owner's token included, gets `403`
         with error `write_only`; it may still read an unmasked variable.
+        A controller-dispatched node's work claim token reads with `?run=` set
+        to its own run, and only a secret its run's accepted plan declares
+        (`403 secret_undeclared` otherwise); each read is recorded as a
+        `secret_released` event on the node. A planning claim reads none.
         Every secrets response carries `Cache-Control: no-store`.
       responses:
         "200":

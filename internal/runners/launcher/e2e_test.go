@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,6 +54,10 @@ func (j *Check) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		if got := j.Build.Get(ctx); got.Digest != "sha-e2e" {
 			return fmt.Errorf("upstream digest %q", got.Digest)
 		}
+		if s := sparkwing.PipelineSecrets[E2ESecrets](ctx); s == nil || s.Token != "tok-e2e-value" {
+			return fmt.Errorf("pipeline secrets %+v", s)
+		}
+		sparkwing.Info(ctx, "token=%s", sparkwing.MustSecret(ctx, "E2E_TOKEN"))
 		sub, err := sparkwing.RunAndAwait[Out, sparkwing.NoInputs](ctx, "e2e-sub", "leaf")
 		if err != nil {
 			return err
@@ -74,6 +79,12 @@ func (j *Leaf) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 }
 
 type E2E struct{ sparkwing.Base }
+
+type E2ESecrets struct {
+	Token string ` + "`sw:\"E2E_TOKEN,required\"`" + `
+}
+
+func (E2E) Secrets() any { return &E2ESecrets{} }
 
 func (p *E2E) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	fmt.Println("plan-time stdout must not reach the plan document")
@@ -205,6 +216,9 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	if _, err := f.st.DB().ExecContext(ctx, `UPDATE triggers SET pipeline = 'e2e' WHERE id = 'run-e2e'`); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.st.CreateOrReplaceSecret(store.Secret{Name: "E2E_TOKEN", Value: "tok-e2e-value", Pipeline: "e2e", Masked: true}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
 	l.Config.ControllerURL = f.url
 	home := t.TempDir()
@@ -329,6 +343,14 @@ func TestE2E_AControllerDispatchedRunPlansRunsAndAwaitsAChild(t *testing.T) {
 	}
 	if _, err := f.st.GetNode(ctx, childID, store.PlanNodeID); err != nil {
 		t.Fatalf("the child was not planned by the controller: %v", err)
+	}
+	for job, out := range logs {
+		if strings.Contains(out.String(), "tok-e2e-value") {
+			t.Errorf("%s logged the secret's value", job)
+		}
+		if strings.Contains(job, "check") && !strings.Contains(out.String(), "token=***") {
+			t.Errorf("check's log has no masked token line:\n%s", out)
+		}
 	}
 	if n := len(started); n != 5 {
 		t.Errorf("%d Jobs ran, want 5: the parent's plan, build and check, and the child's plan and leaf", n)

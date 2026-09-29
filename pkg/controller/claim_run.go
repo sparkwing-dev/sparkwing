@@ -185,3 +185,41 @@ func (s *Server) handleLauncherSync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, launcherSyncResp{Jobs: jobs})
 }
+
+func secretRunBinding(r *http.Request) (string, string) {
+	return r.URL.Query().Get("run"), ""
+}
+
+// safety: a work claim reads only a secret its run's plan declares, each read
+// is recorded on its node, and the value is masked in the node's logs by the
+// pipeline that asked for it.
+func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
+	noStoreSecrets(w)
+	tok, _ := claimTokenFromContext(r.Context())
+	tn, err := s.tenantForTeam(r.Context(), tok.Team)
+	if err != nil {
+		writeError(w, http.StatusNotFound, runNotFound(tok.RunID))
+		return
+	}
+	sec, err := tn.ReleaseClaimSecret(r.Context(), tok, r.PathValue("name"), time.Now())
+	switch {
+	case errors.Is(err, store.ErrSecretUndeclared):
+		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "secret_undeclared", Message: err.Error()})
+		return
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, err)
+		return
+	case err != nil:
+		writeClaimRefusal(w, r, s, err)
+		return
+	}
+	plain, err := s.openStoredSecret(tn.Team(), sec)
+	if err != nil {
+		s.writeInternalError(w, r, "open a claim's secret", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, secretJSON{
+		Name: sec.Name, Value: plain, Pipeline: sec.Pipeline, Masked: sec.Masked, Shared: sec.Shared,
+		CreatedAt: sec.CreatedAt.Unix(), UpdatedAt: sec.UpdatedAt.Unix(),
+	})
+}

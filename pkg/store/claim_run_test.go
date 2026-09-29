@@ -317,3 +317,41 @@ func TestLaunchBilling_ReleaseRefundsAndTheFirstBeatBills(t *testing.T) {
 		t.Fatalf("releasing a billed claim = %+v %v, want keep", res, err)
 	}
 }
+
+// The secret release is fenced like any sensitive write: the claim must be a
+// live work claim of a run that is not being cancelled, and the name must be
+// one the accepted plan declares.
+func TestReleaseClaimSecret_FencesTheClaimAndTheDeclaredName(t *testing.T) {
+	ctx := context.Background()
+	f := newDispatchRun(t, "run-secret")
+	if err := f.s.CreateOrReplaceSecret(store.Secret{Name: "TOK", Value: "v", Pipeline: "demo"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	team, err := f.s.ForTeam(ctx, store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, planTok := f.launch(t, time.Now())
+	if _, err := team.ReleaseClaimSecret(ctx, planTok, "TOK", time.Now()); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("a planning claim's release: err = %v, want ErrClaimNotLive", err)
+	}
+	if _, err := f.accept(planTok, `{"nodes":[{"id":"a","deps":[],"spec_hash":"`+hashA+`"}],"secrets":[{"name":"TOK"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	_, work := f.launch(t, time.Now())
+	if sec, err := team.ReleaseClaimSecret(ctx, work, "TOK", time.Now()); err != nil || sec.Value != "v" {
+		t.Fatalf("declared release = %+v %v", sec, err)
+	}
+	if _, err := team.ReleaseClaimSecret(ctx, work, "OTHER", time.Now()); !errors.Is(err, store.ErrSecretUndeclared) {
+		t.Fatalf("undeclared release: err = %v", err)
+	}
+	if _, err := team.ReleaseClaimSecret(ctx, work, "TOK", time.Now().Add(5*time.Minute)); !errors.Is(err, store.ErrClaimNotLive) {
+		t.Fatalf("release after the lease lapsed: err = %v, want ErrClaimNotLive", err)
+	}
+	if err := f.s.RequestCancel(ctx, "run-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.ReleaseClaimSecret(ctx, work, "TOK", time.Now()); !errors.Is(err, store.ErrClaimCancelRequested) {
+		t.Fatalf("release after cancel: err = %v, want ErrClaimCancelRequested", err)
+	}
+}
