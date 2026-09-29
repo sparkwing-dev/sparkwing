@@ -19,7 +19,7 @@ func hasGitmodules(checkout string) bool {
 }
 
 // safety: Submodules use only the released host credential, without host git config or hooks.
-func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCredential, opts directOptions) (err error) {
+func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCredential, opts directOptions, recursive bool) (err error) {
 	defer func() { err = redactCredential(err, cred) }()
 	if cred.Empty() {
 		return errors.New("direct source: submodules are fetched only with a credential the controller released")
@@ -62,9 +62,15 @@ func directSubmodules(ctx context.Context, checkout, scope string, cred DirectCr
 		defer cancel()
 	}
 	// safety: jobs 1 keeps the helper's asks in order on the one pipe.
-	cmd := exec.CommandContext(ctx, "git", "-C", checkout, "-c", "core.hooksPath=/dev/null",
+	args := []string{
+		"-C", checkout, "-c", "core.hooksPath=/dev/null",
 		"-c", "http.followRedirects=false", "-c", "protocol.file.allow=never",
-		"submodule", "update", "--init", "--recursive", "--depth", "1", "--jobs", "1")
+		"submodule", "update", "--init", "--depth", "1", "--jobs", "1",
+	}
+	if recursive {
+		args = append(args, "--recursive")
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = env
 	cmd.ExtraFiles = extra
 	killGroupOnCancel(cmd)

@@ -50,7 +50,7 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 		t.Fatalf("checkout: %v", err)
 	}
 	fetchedMain := seen.Load()
-	if err := directSubmodules(context.Background(), dest, srv.URL+"/", cred, httpOnly); err != nil {
+	if err := directSubmodules(context.Background(), dest, srv.URL+"/", cred, httpOnly, true); err != nil {
 		t.Fatalf("submodules: %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(dest, "vendor", "lib", "lib.txt")); err != nil || string(got) != "private library\n" {
@@ -67,14 +67,14 @@ func TestDirectSubmodulesFetchWithTheOneReleasedToken(t *testing.T) {
 	if err := directCheckout(context.Background(), t.TempDir(), srv.URL+"/app.git", "main", "", again, opts); err != nil {
 		t.Fatal(err)
 	}
-	err := directSubmodules(context.Background(), again, srv.URL+"/", wrong, httpOnly)
+	err := directSubmodules(context.Background(), again, srv.URL+"/", wrong, httpOnly, true)
 	if err == nil {
 		t.Fatal("a wrong token fetched the private submodule")
 	}
 	if strings.Contains(err.Error(), "ghs_wrong") {
 		t.Fatalf("the error carries the token: %v", err)
 	}
-	if err := directSubmodules(context.Background(), again, srv.URL+"/", DirectCredential{}, httpOnly); err == nil {
+	if err := directSubmodules(context.Background(), again, srv.URL+"/", DirectCredential{}, httpOnly, true); err == nil {
 		t.Fatal("submodules were fetched with no released credential")
 	}
 }

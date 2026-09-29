@@ -51,7 +51,7 @@ func FetchRunSourceDirect(ctx context.Context, src RunSource, logger *slog.Logge
 		fetchOpts.cred = cred
 		return fetchPipelineSourceDirect(ctx, src.RepoURL, src.Branch, src.SHA, src.WorkDir, fetchOpts)
 	}, func(checkout string, cred DirectCredential) error {
-		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, opts)
+		return directSubmodules(ctx, checkout, "https://"+cred.Host+"/", cred, opts, true)
 	})
 }
 
