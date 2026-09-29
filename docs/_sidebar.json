@@ -37,6 +37,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "diagnosing-admission",
         "security",
         "threat-model",
         "auth",
