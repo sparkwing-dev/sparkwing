@@ -115,7 +115,7 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-			name:      "sequential commands in one window integrate rather than sum",
+			name:      "sequential command reports do not establish interval CPU",
 			hostCores: 2,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{{
@@ -128,13 +128,11 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 				},
 			}},
 
-			wantNodes:   []wantNode{{id: "serial", sustained: 2.0, peak: 2.0, peakMem: 512 << 20}},
-			wantSustain: 1.6,
-			wantPeak:    1.6,
-			wantPeakMem: 512 << 20,
+			wantNodes:    []wantNode{{id: "serial", absent: true}},
+			wantNoRollup: true,
 		},
 		{
-			name:      "concurrent commands in one window still sum",
+			name:      "concurrent command reports do not establish interval CPU",
 			hostCores: 2,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{
@@ -147,16 +145,11 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 					samples: []usageSample{command(3*time.Microsecond, 1000, 256<<20, 2*time.Second)},
 				},
 			},
-			wantNodes: []wantNode{
-				{id: "cmd-a", sustained: 1.0, peak: 1.0, peakMem: 256 << 20},
-				{id: "cmd-b", sustained: 1.0, peak: 1.0, peakMem: 256 << 20},
-			},
-			wantSustain: 2.0,
-			wantPeak:    2.0,
-			wantPeakMem: 512 << 20,
+			wantNodes:    []wantNode{{id: "cmd-a", absent: true}, {id: "cmd-b", absent: true}},
+			wantNoRollup: true,
 		},
 		{
-			name:      "a window adds its tick to one command mark, not to every one",
+			name:      "command reports preserve interval CPU and existing memory aggregation",
 			hostCores: 1,
 			runWall:   2 * time.Second,
 			nodes: []usageNode{{
@@ -167,9 +160,9 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 					command(1200*time.Millisecond, 500, 512<<20, 200*time.Millisecond),
 				},
 			}},
-			wantNodes:   []wantNode{{id: "mixed", sustained: 0.5, peak: 0.5, peakMem: 512 << 20}},
-			wantSustain: 0.3,
-			wantPeak:    0.3,
+			wantNodes:   []wantNode{{id: "mixed", sustained: 0.1, peak: 0.1, peakMem: 512 << 20}},
+			wantSustain: 0.1,
+			wantPeak:    0.1,
 			wantPeakMem: 640 << 20,
 		},
 		{

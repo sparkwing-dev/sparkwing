@@ -107,6 +107,7 @@ func ensureDescribeFromSource(ctx context.Context, sparkwingDir, key string, env
 	if _, err := os.Stat(describeCachePath(key)); err == nil {
 		return
 	}
+	// #nosec G702 -- this intentionally executes the operator-selected pipeline source with fixed arguments.
 	cmd := exec.CommandContext(ctx, "go", "run", ".", "--describe")
 	cmd.Dir = sparkwingDir
 	cmd.Env = env
@@ -153,6 +154,7 @@ func pipelineFlagsFromCache(ctx context.Context, sparkwingDir, pipelineName stri
 func runDescribeBinary(ctx context.Context, sparkwingDir, binPath string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	// #nosec G702 -- this intentionally executes the selected pipeline binary without a shell.
 	cmd := exec.CommandContext(ctx, binPath, "--describe")
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	// safety: inherited output pipes must not extend the metadata deadline.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -216,7 +217,29 @@ type profileMutState struct {
 // figures into the Prev pair, so the changed version re-measures from a warm
 // start at what its predecessor was charged.
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
-	st, err := s.loadProfileMutState(ctx, pipeline, nodeID)
+	if obs.Duration < 0 || obs.PeakMemoryBytes < 0 || obs.FloorMemoryBytes < 0 {
+		return errors.New("profile duration and memory must be nonnegative")
+	}
+	for _, value := range []float64{obs.PeakCores, obs.SustainedCores, obs.FloorCores} {
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return errors.New("profile CPU values must be finite and nonnegative")
+		}
+	}
+	return retryOnBusy(func() error { return s.recordProfileObservation(ctx, pipeline, nodeID, obs) })
+}
+
+func (s *Store) recordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
+ (pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
+ VALUES (?,?,0,0,0,0,0,?) ON CONFLICT (pipeline,node_id) DO NOTHING`, pipeline, nodeID, time.Now().UnixNano()); err != nil {
+		return err
+	}
+	st, err := loadProfileMutState(ctx, tx, pipeline, nodeID)
 	if err != nil {
 		return err
 	}
@@ -258,8 +281,7 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 	if err != nil {
 		return err
 	}
-	return retryOnBusy(func() error {
-		_, err := s.exec(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipeline_profiles
     (pipeline, node_id, p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, samples_json,
      plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores)
@@ -280,14 +302,16 @@ ON CONFLICT (pipeline, node_id) DO UPDATE SET
     prev_peak_memory_bytes = excluded.prev_peak_memory_bytes,
     sustained_cores       = excluded.sustained_cores,
     prev_sustained_cores  = excluded.prev_sustained_cores`,
-			pipeline, nodeID,
-			prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
-			prof.PeakCores, prof.PeakMemoryBytes, len(window),
-			boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
-			planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
-			prof.SustainedCores, prevSustainedCores)
+		pipeline, nodeID,
+		prof.P50Duration.Milliseconds(), prof.P99Duration.Milliseconds(),
+		prof.PeakCores, prof.PeakMemoryBytes, len(window),
+		boolToInt(cpuMeasured), time.Now().UnixNano(), raw,
+		planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes,
+		prof.SustainedCores, prevSustainedCores)
+	if err != nil {
 		return err
-	})
+	}
+	return tx.Commit()
 }
 
 // safety: resolve missing sustained cores before storing; a literal zero can
@@ -306,15 +330,15 @@ func foldFloor(stored, observed float64) float64 {
 	return math.Max(observed, floorDecayFactor*stored)
 }
 
-func (s *Store) loadProfileMutState(ctx context.Context, pipeline, nodeID string) (profileMutState, error) {
+func loadProfileMutState(ctx context.Context, tx *storeTx, pipeline, nodeID string) (profileMutState, error) {
 	var (
 		raw      []byte
 		st       profileMutState
 		measured int
 	)
-	err := s.queryRow(ctx,
+	err := tx.QueryRowContext(ctx,
 		`SELECT samples_json, plan_hash, peak_cores, peak_memory_bytes, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, cpu_measured, sustained_cores, prev_sustained_cores
-		   FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`,
+		   FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`+tx.forUpdate(),
 		pipeline, nodeID).Scan(&raw, &st.planHash, &st.peakCores, &st.peakMemoryBytes,
 		&st.floorCores, &st.floorMemoryBytes, &st.prevPeakCores, &st.prevPeakMemoryBytes, &measured,
 		&st.sustainedCores, &st.prevSustainedCores)
@@ -357,12 +381,8 @@ func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait
 	if len(window) > profileWindow {
 		window = window[len(window)-profileWindow:]
 	}
-	xs := make([]float64, len(window))
-	for i, ms := range window {
-		xs[i] = float64(ms)
-	}
-	p50 := int64(percentile(xs, 0.50))
-	p99 := int64(percentile(xs, 0.99))
+	p50 := percentile(window, 0.50)
+	p99 := percentile(window, 0.99)
 	raw, err := json.Marshal(waitWindowDoc{Schema: waitSchemaCurrent, Samples: window})
 	if err != nil {
 		return err
@@ -794,34 +814,34 @@ func annotateResourcePercentiles(prof *PipelineProfile, samples []profileSample)
 		return
 	}
 	cores := make([]float64, len(samples))
-	mems := make([]float64, len(samples))
+	mems := make([]int64, len(samples))
 	for i, s := range samples {
 		cores[i] = s.C
-		mems[i] = float64(s.M)
+		mems[i] = s.M
 	}
 	prof.CPUP50 = percentile(cores, 0.50)
 	prof.CPUP95 = percentile(cores, 0.95)
-	prof.MemoryP50Bytes = int64(percentile(mems, 0.50))
-	prof.MemoryP95Bytes = int64(percentile(mems, 0.95))
+	prof.MemoryP50Bytes = percentile(mems, 0.50)
+	prof.MemoryP95Bytes = percentile(mems, 0.95)
 }
 
 func profileFromWindow(window []profileSample) PipelineProfile {
-	durations := make([]float64, len(window))
+	durations := make([]int64, len(window))
 	cores := make([]float64, len(window))
 	sustained := make([]float64, len(window))
-	mems := make([]float64, len(window))
+	mems := make([]int64, len(window))
 	for i, s := range window {
-		durations[i] = float64(s.D)
+		durations[i] = s.D
 		cores[i] = s.C
 		sustained[i] = s.S
-		mems[i] = float64(s.M)
+		mems[i] = s.M
 	}
 	return PipelineProfile{
-		P50Duration:     time.Duration(int64(percentile(durations, 0.50))),
-		P99Duration:     time.Duration(int64(percentile(durations, 0.99))),
+		P50Duration:     time.Duration(percentile(durations, 0.50)),
+		P99Duration:     time.Duration(percentile(durations, 0.99)),
 		PeakCores:       percentile(cores, peakPercentile),
 		SustainedCores:  percentile(sustained, peakPercentile),
-		PeakMemoryBytes: int64(percentile(mems, peakPercentile)),
+		PeakMemoryBytes: percentile(mems, peakPercentile),
 		SampleCount:     len(window),
 	}
 }
@@ -862,12 +882,12 @@ func NearestRankIndex(xs []float64, q float64) int {
 	return order[nearestRank(len(xs), q)]
 }
 
-func percentile(xs []float64, q float64) float64 {
+func percentile[T ~int64 | ~float64](xs []T, q float64) T {
 	if len(xs) == 0 {
 		return 0
 	}
-	sorted := append([]float64(nil), xs...)
-	sort.Float64s(sorted)
+	sorted := slices.Clone(xs)
+	slices.Sort(sorted)
 	return sorted[nearestRank(len(sorted), q)]
 }
 
