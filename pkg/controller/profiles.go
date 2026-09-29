@@ -79,13 +79,18 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	var runPeakCores float64
 	var runPeakMem int64
 	measured := false
+	runValid := true
 	for _, n := range nodes {
 		samples, err := s.store.ListNodeMetrics(ctx, run.ID, n.NodeID)
 		if err != nil || len(samples) == 0 {
 			continue
 		}
+		peakCores, peakMem, hasCPU := samplePeaks(samples)
+		if !hasCPU {
+			runValid = false
+			continue
+		}
 		measured = true
-		peakCores, peakMem := samplePeaks(samples)
 		_ = s.store.RecordProfileObservation(ctx, run.Pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeMetricSpan(samples),
 			PeakCores:       peakCores,
@@ -98,7 +103,7 @@ func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 			runPeakMem = peakMem
 		}
 	}
-	if !measured {
+	if !measured || !runValid {
 		return
 	}
 	_ = s.store.RecordProfileObservation(ctx, run.Pipeline, "", store.ProfileObservation{
@@ -127,16 +132,21 @@ func (s *Server) emitNodeDrift(ctx context.Context, run *store.Run, nodeID strin
 	_, _ = s.store.AppendEvent(ctx, run.ID, nodeID, "resource_pin_drift", payload)
 }
 
-func samplePeaks(samples []store.MetricSample) (float64, int64) {
+func samplePeaks(samples []store.MetricSample) (float64, int64, bool) {
+	var hasCPU, unknown bool
 	var cores float64
 	var mem int64
 	for _, s := range samples {
-		cores = maxF(cores, float64(s.CPUMillicores)/1000.0)
+		unknown = unknown || s.Kind == store.MetricUnknown
+		if s.Kind == store.MetricInterval {
+			hasCPU = true
+			cores = maxF(cores, float64(s.CPUMillicores)/1000.0)
+		}
 		if s.MemoryBytes > mem {
 			mem = s.MemoryBytes
 		}
 	}
-	return cores, mem
+	return cores, mem, hasCPU && !unknown
 }
 
 func nodeMetricSpan(samples []store.MetricSample) (d time.Duration) {

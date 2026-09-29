@@ -47,7 +47,7 @@ func TestLocalStateServesEveryRunCoordinationMethod(t *testing.T) {
 		t.Fatalf("ListNodes = %d nodes, %v; want 1, nil", len(nodes), err)
 	}
 
-	sample := store.MetricSample{TS: time.Now().Truncate(time.Millisecond), CPUMillicores: 1500, MemoryBytes: 1 << 30, CPUTime: 3 * time.Second}
+	sample := store.MetricSample{Kind: store.MetricCommand, TS: time.Now().Truncate(time.Millisecond), CPUMillicores: 1500, MemoryBytes: 1 << 30, CPUTime: 3 * time.Second}
 	if err := st.AddNodeMetricSample(ctx, "r1", "build", sample); err != nil {
 		t.Fatalf("seed metric: %v", err)
 	}

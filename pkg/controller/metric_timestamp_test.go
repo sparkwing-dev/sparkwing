@@ -13,6 +13,7 @@ import (
 )
 
 type metricState struct {
+	loopbackCoordination
 	LoopbackState
 	store *store.Store
 }
