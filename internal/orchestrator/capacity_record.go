@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"runtime"
 	"time"
@@ -52,9 +53,12 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		return
 	}
 	if pin.Empty() {
-		_ = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
+		err = st.SetPipelinePin(ctx, pipeline, "", 0, 0)
 	} else {
-		_ = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+		err = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", pipeline, "err", err)
 	}
 	dominant := cacheDominant(nodes)
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()

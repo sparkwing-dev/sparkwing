@@ -228,12 +228,12 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 	return retryOnBusy(func() error { return s.recordProfileObservation(ctx, pipeline, nodeID, obs) })
 }
 
-func (s *Store) recordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
+func (s *Store) recordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) (err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackUnlessDone(tx, &err)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO pipeline_profiles
  (pipeline,node_id,p50_duration_ms,p99_duration_ms,peak_cores,peak_memory_bytes,sample_count,updated_at)
  VALUES (?,?,0,0,0,0,0,?) ON CONFLICT (pipeline,node_id) DO NOTHING`, pipeline, nodeID, time.Now().UnixNano()); err != nil {
