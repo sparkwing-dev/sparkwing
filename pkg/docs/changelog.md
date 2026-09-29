@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- **SDK:** Wait for launched children to stop when a spawn generator fails.
+
 - **daemon:** Record each run profile once through the host orchestrator.
   Clients using the daemon completion API must submit profile observations
   separately.
