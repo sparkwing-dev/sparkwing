@@ -166,6 +166,42 @@ func TestCanonicalBroadGateOwnsDashboardDependencyInstallation(t *testing.T) {
 	}
 }
 
+func TestCanonicalPreReleaseUsesItsPostgresService(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatal(err)
+	}
+	job := mappingValue(mappingValue(&doc, "jobs"), "gate")
+	image := mappingValue(mappingValue(mappingValue(job, "services"), "postgres"), "image")
+	if image == nil || image.Value != "${{ matrix.gate == 'pre-release' && 'postgres:17' || '' }}" {
+		t.Fatal("PostgreSQL service must start only for pre-release")
+	}
+	if mappingValue(mappingValue(job, "env"), "SPARKWING_TEST_PG_URL") != nil {
+		t.Fatal("PostgreSQL URL must be scoped to the pre-release step")
+	}
+	steps := mappingValue(job, "steps")
+	if steps == nil {
+		t.Fatal("canonical workflow has no steps")
+	}
+	found := false
+	for _, step := range steps.Content {
+		name := mappingValue(step, "name")
+		url := mappingValue(mappingValue(step, "env"), "SPARKWING_TEST_PG_URL")
+		if name != nil && name.Value == "Run canonical pre-release" {
+			found = true
+			if url == nil || url.Value != "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" {
+				t.Fatal("pre-release does not address its PostgreSQL service")
+			}
+		} else if url != nil {
+			t.Fatal("PostgreSQL URL escaped the pre-release step")
+		}
+	}
+	if !found {
+		t.Fatal("canonical workflow has no pre-release step")
+	}
+}
+
 func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	var doc yaml.Node
