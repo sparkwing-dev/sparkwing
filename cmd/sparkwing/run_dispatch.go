@@ -482,6 +482,7 @@ func setupRefWorktree(sparkwingDir, ref string) (worktreeDir, pipelineDirectory 
 		return "", "", nil, fmt.Errorf("mkdir tmp: %w", err)
 	}
 
+	// #nosec G702 -- the generated directory and resolved commit ID follow an explicit --.
 	out, err := exec.Command("git", "-C", repoRoot,
 		"worktree", "add", "--detach", "--quiet", "--", temporaryDir, string(commit)).CombinedOutput()
 	if err != nil {
