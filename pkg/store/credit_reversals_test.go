@@ -30,7 +30,7 @@ func TestReversePaymentTakesBackWhatThePaymentStillHas(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops")
+	first, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops", 0)
 	if err != nil {
 		t.Fatalf("reverse: %v", err)
 	}
@@ -38,18 +38,18 @@ func TestReversePaymentTakesBackWhatThePaymentStillHas(t *testing.T) {
 		first.PaidMicro != dollars(100) || first.ReversedMicro != dollars(100) || first.BalanceMicro != 0 {
 		t.Fatalf("reversal = %+v, grant %+v; want the remaining $70 taken back from acme", first, first.Grant)
 	}
-	again, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops")
+	again, err := s.ReversePayment(ctx, "pi_1", "refund:pi_1", "ops", 0)
 	if err != nil || again.Created || again.Grant == nil || again.Grant.ID != first.Grant.ID {
 		t.Fatalf("repeat = %+v, %v; want the first reversal back", again, err)
 	}
-	other, err := s.ReversePayment(ctx, "pi_1", "dp_1", "billing")
+	other, err := s.ReversePayment(ctx, "pi_1", "dp_1", "billing", 0)
 	if err != nil || other.Created || other.Grant != nil || other.ReversedMicro != dollars(100) {
 		t.Fatalf("a second reference for a payment already reversed = %+v, %v; want nothing written", other, err)
 	}
 	if got, err := acme.CreditBalanceMicro(ctx); err != nil || got != 0 {
 		t.Fatalf("balance = %d, %v; want 0", got, err)
 	}
-	if _, err := s.ReversePayment(ctx, "pi_unknown", "refund:pi_unknown", "ops"); !errors.Is(err, store.ErrUnknownPayment) {
+	if _, err := s.ReversePayment(ctx, "pi_unknown", "refund:pi_unknown", "ops", 0); !errors.Is(err, store.ErrUnknownPayment) {
 		t.Fatalf("an unknown payment = %v, want ErrUnknownPayment", err)
 	}
 }
@@ -63,7 +63,7 @@ func TestReversePaymentMayTakeTheBalanceBelowZero(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, claimant, "pod-1", time.Minute, nil); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	res, err := s.ReversePayment(ctx, "pay_run-spent", "refund:pay_run-spent", "ops")
+	res, err := s.ReversePayment(ctx, "pay_run-spent", "refund:pay_run-spent", "ops", 0)
 	if err != nil || res.Grant.AmountMicro != -granted || res.BalanceMicro >= 0 {
 		t.Fatalf("reversal = %+v, %v; want the whole payment back and a negative balance", res, err)
 	}
@@ -181,7 +181,7 @@ func TestADisputeIsBoundToOnePayment(t *testing.T) {
 	if _, err := s.HoldTeamForDispute(ctx, "globex", "dp_1", "pi_globex", "opened", now); !errors.Is(err, store.ErrDisputeConflict) {
 		t.Fatalf("the same dispute with another team's payment = %v, want ErrDisputeConflict", err)
 	}
-	if _, err := s.ReversePayment(ctx, "pi_globex", "dp_1", "billing"); !errors.Is(err, store.ErrDisputeConflict) {
+	if _, err := s.ReversePayment(ctx, "pi_globex", "dp_1", "billing", 0); !errors.Is(err, store.ErrDisputeConflict) {
 		t.Fatalf("a lost-dispute reversal of another payment under the dispute = %v, want ErrDisputeConflict", err)
 	}
 	if f, err := acme.CreditFreeze(ctx); err != nil || !f.Frozen || len(f.Disputes) != 1 {

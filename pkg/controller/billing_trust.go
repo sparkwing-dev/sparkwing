@@ -12,6 +12,11 @@ type billingTrustReq struct {
 	Trust      string `json:"trust"`
 	Reason     string `json:"reason"`
 	LimitCents int64  `json:"limit_cents,omitempty"`
+	// safety: zero keeps the level's default daily cap and rung, the debt
+	// at which the card is charged.
+	DailyCapCents int64 `json:"daily_cap_cents,omitempty"`
+	RungCents     int64 `json:"rung_cents,omitempty"`
+	RunnerCap     int64 `json:"runner_cap,omitempty"`
 }
 
 type billingTrustJSON struct {
@@ -84,6 +89,7 @@ func (s *Server) handleBillingTrustSet(w http.ResponseWriter, r *http.Request) {
 	}
 	_, after, err := t.SetBillingTrust(r.Context(), store.BillingTrustChange{
 		Trust: trust, Actor: actor, Reason: req.Reason, LimitCents: req.LimitCents,
+		DailyCapCents: req.DailyCapCents, RungCents: req.RungCents, RunnerCap: req.RunnerCap,
 	}, time.Now())
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):

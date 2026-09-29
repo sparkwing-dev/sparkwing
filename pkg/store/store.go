@@ -110,9 +110,6 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
-	runnerCapMu     sync.Mutex
-	runnerCapCache  map[Team]runnerCapEntry
-	runnerCapEpoch  uint64
 	launchResumeMu  sync.Mutex
 	launchResume    *launchCursor
 }
@@ -1066,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 86
+const expectedSchemaVersion = 87
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1862,6 +1859,7 @@ var migrationRequirements = map[int][]string{
 	73: {"trigger-credit-cursor-v1"},
 	75: {creditValueRequirement},
 	80: {billingTrustRequirement},
+	87: {cardBillingRequirement},
 }
 
 // safety: v48 renames two columns, so a binary predating it writes the names
@@ -2128,6 +2126,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, false)
+	case 87:
+		return applyCardBillingMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2581,6 +2581,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, true)
+	case 87:
+		return applyCardBillingMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

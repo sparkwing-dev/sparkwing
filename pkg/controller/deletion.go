@@ -469,5 +469,6 @@ func (s *Server) purgeTeamCache(ctx context.Context, team store.Team) error {
 
 // safety: An unsettled checkout or dispute hold blocks account deletion until money is resolved.
 func moneyInFlight(err error) bool {
-	return errors.Is(err, store.ErrOpenCheckout) || errors.Is(err, store.ErrTeamFrozen)
+	return errors.Is(err, store.ErrOpenCheckout) || errors.Is(err, store.ErrTeamFrozen) ||
+		errors.Is(err, store.ErrTeamOwes)
 }

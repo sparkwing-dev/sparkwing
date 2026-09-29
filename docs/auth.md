@@ -217,16 +217,44 @@ raise the limit to $5,000, and a revocation holds the team to the new-team
 limits even when it would earn trust; `automatic` returns it to the rule. Team -> Billing shows the limit and what
 remains of it.
 
-Purchases are final, so a refund is the operator's decision and is made by
-hand. The private `sparkwing-ops` refund command takes back what the
-purchase still has on the ledger, in the team it funded, through
-`POST /api/v1/credits/reversals`, and prints the Stripe dashboard page where
-the operator then issues the money back. The controller never moves money, and
-a refund issued in Stripe alone changes nothing on the ledger. The whole
-purchase is reversed even when its credits were spent, so the balance can go
-below zero and the team's metered claims stop until it is funded again. A
-reversal never takes back more than its payment paid, and running the refund
-twice reverses once.
+Purchases are final, so a refund is the operator's decision. The private
+`sparkwing-ops` refund command still takes back what a purchase has on the
+ledger and prints the Stripe dashboard page for the refund. A refund issued
+in Stripe also reaches the ledger: the checkout service answers
+`charge.refunded` by reversing exactly what each refund returned, under the
+refund's id, through `POST /api/v1/credits/reversals` with `amount_micro`. A
+reversal never takes back more than its payment has left, and replaying it
+reverses once. The balance can go below zero, and the team's metered claims
+then stop until it is funded again.
+
+Every team spends within limits, counted in daily buckets of gross usage at
+list price, promotional credit included. A new team may spend $50 over 30
+days and $25 in one UTC day; a trusted team $500 and $200. An owner may set a
+lower budget through `PUT /api/v1/team/billing/budget`, and owners are
+mailed at 50, 80 and 100% of it. A claim past any limit is refused with `402`
+and `"code": "spend_limit"`, and the run log's `credits_blocked` event names
+the limit. Limits stop new work; running jobs finish within about a minute.
+A refunded reservation counts against the day of its charge, so a refund
+never frees room today.
+
+A trusted team may add a card (`POST /api/v1/team/billing/card`, owners
+only), which opens a Stripe setup page that asks for 3-D Secure and shows the
+charge authorization. With a card on file the team buys no prepaid credit
+(`409`, `"code": "card_on_file"`), spends any prepaid balance first, and may
+then run up to twice its rung below zero. The controller's payment worker
+charges the card off-session when the debt reaches the rung ($100), on the
+first of the month for a smaller debt, and at once when trust is revoked.
+Each charge has one attempt in flight at a time, and the attempt id is both
+Stripe's idempotency key and the payment's `metadata.attempt_id`, so a retried
+attempt finds the payment already made. Stripe emails the receipt. A declined
+charge withdraws the card's credit, so new work waits, and is retried after
+1, 3 and 7 days; an owner can pay it at once through
+`POST /api/v1/team/billing/pay`, and a new card retries it at once. A team
+with debt or a charge open cannot be deleted.
+
+An early fraud warning holds the team under the warning's id, blocks the
+card's fingerprint for every team, and refunds the payment; the refund then
+reverses the credits as above.
 
 A chargeback holds the team. Holds are one per dispute, and a team is held
 while any of its holds stands: its metered claims are refused with `402` and
@@ -427,7 +455,7 @@ none behaves as it did before the guards existed.
 
 | Guard | Bounds | Measured against |
 |-------|--------|------------------|
-| `max_concurrent_runners` | cloud runners held at once | one principal |
+| `max_concurrent_runners` | cloud runners held at once | one team, across all its tokens |
 | `max_global_runners` | cloud runners the controller holds | every principal |
 | `runner_alarm` | cloud runner count that logs a warning, set below the ceiling | every principal |
 | `max_run_seconds` | wall-clock seconds a run may hold cloud runners for | one run |
@@ -436,9 +464,6 @@ none behaves as it did before the guards existed.
 | `max_global_nodes_per_run` | nodes a run may carry | every run |
 | `max_global_runs_per_hour` | runs created in the last hour | every run |
 | `min_cron_interval_seconds` | shortest interval a controller schedule may declare | every controller schedule |
-| `runner_scale_base` | runners one step of paid credit buys, at most a million; zero uses `max_concurrent_runners` | one principal |
-| `runner_scale_step_credits` | paid credit that earns one more base, at most 10 billion; zero turns scaling off | one team's grants |
-| `runner_scale_ceiling` | most a scaled cap may reach, at most a million; zero uses `max_global_runners` | one principal |
 
 A cloud runner is a claim a metered token holds, so the runner guards count
 exactly the work credits pay for. `max_nodes_per_run` and `max_runs_per_hour`
@@ -449,49 +474,18 @@ operator's own ceiling and counts every run whichever principal created it.
 The hourly window counts runs by their creation stamp, so a run that has
 already finished still occupies the budget until it ages out of the hour.
 
-### Scaling the per-principal runner cap
+### The team-wide runner count
 
-`max_concurrent_runners` scales with what the team loaded recently, so a
-customer that has paid for capacity gets it and one that has paid nothing
-cannot spawn a thousand pods. The cap is the base plus one more base for every
-`runner_scale_step_credits` of `paid` credit granted to that team in the last 30 days, held
-under `runner_scale_ceiling`. The base is `runner_scale_base`, or
-`max_concurrent_runners` when that is zero; the ceiling is
-`runner_scale_ceiling`, or `max_global_runners` when that is zero. With a base
-of 100, a step of 50,000 credits ($50) and 150,000 credits loaded, a principal
-is held to 400 runners.
-
-Every scaling setting is zero by default, which holds each principal to the
-static `max_concurrent_runners`, and the rule applies only while that guard is
-set. Scaling only ever raises that guard: a ceiling below it is ignored.
-`runner_scale_base` and `runner_scale_ceiling` are capped at a million runners
-and `runner_scale_step_credits` at 10 billion credits, ten million dollars, so
-a typo cannot mint a cap. The step is written in whole credits, so each change
-of credit restated it at the same dollar value: schema v59 multiplied a step
-written when a credit was a cent by 200, and schema v75 divides it by 20,
-rounding to the nearest credit and never below one.
-
-`free` credit earns nothing and a payment ages out after 30 days. A refund is a
-`reversal` grant naming the payment's reference, and it is matched to that
-payment rather than to its own date: a refund settled after the window still
-takes back the payment that bought the cap, and refunding a payment that has
-already aged out leaves this month's payments alone. Every metered principal
-within a team derives its cap from that team's grants. A grant or reversal in
-another team does not change it.
-
-The derivation is held for a minute so a claim costs no ledger query, and any
-grant or reversal retires it at once. A ledger the derivation
-cannot read holds the principal to the static `max_concurrent_runners` and
-names the failure in the controller log. `max_global_runners` is checked first,
-so the controller's own ceiling still refuses a claim a scaled cap would have
-allowed.
-
-`GET /api/v1/compute-limits` reports the request team's result as
-`usage.derived_runner_cap` with that team's `usage.recent_paid_micro`, which is
-the window's paid grants less their reversals. `sparkwing cluster limits show`
-prints it as `DERIVED RUNNER CAP` for the team of its credential. Only an
-operator sees the controller-wide runner count, per-principal counts and
-`runner_alarm` state; team readers receive none of those fields.
+`max_concurrent_runners` counts every cloud runner a team holds, whichever of
+its tokens claimed it, so minting more runner tokens gives a team no more
+concurrency than its spend limits assume. It always applies: unset or zero
+means 100 per team, never unlimited. An operator raises one granted team
+past it with `runner_cap` on `POST /api/v1/teams/{team}/trust`
+(`sparkwing-ops teams trust --runners N`), up to 10,000. Schema v87 replaced the
+per-principal cap that scaled with recent payments, and deleted its
+`runner_scale_*` settings. Only an operator sees the controller-wide runner
+count, per-principal counts and `runner_alarm` state; team readers receive
+none of those fields.
 
 Work a guard refuses answers `429` with `"code": "compute_limit"` naming the
 guard, its ceiling and what was measured, and a `Retry-After` saying how soon

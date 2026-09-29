@@ -16,6 +16,20 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Store).DueCardCharges": "the payment worker expires every team's stale pay-now attempts in one pass " +
+		"under the ledger lock",
+	"startDueAttemptsTx": "the payment worker starts the due attempts of every team's open charges; " +
+		"each row it touches is named by its global id",
+	"(*Store).SettleCardPayment": "a payment names its charge by global id, and the charge row it reads " +
+		"is checked against the team the payment names",
+	"(*Store).FailCardAttempt":     "a decline names its attempt by global id; the team is read from that row",
+	"(*Store).DropCardAttempt":     "an attempt that never reached Stripe is closed by its global id",
+	"(*Store).RecordAttemptIntent": "the worker binds a payment to the attempt it names by global id",
+	"(*Store).RecordPaymentWarning": "a warning names only its payment, so the team is what the payment's " +
+		"grant or attempt row says",
+	"(*Store).DueCardRefunds": "the payment worker lists every team's queued refunds in one pass",
+	"(*Store).ReportCardRefund": "Stripe names a refund by its payment and refund ids alone; the team is what " +
+		"the queued row says",
 	"globalRunnerRefusal":                    "the global concurrent runner cap counts live claims from every team",
 	"globalRunsPerHourRefusal":               "the global hourly cap counts runs from every team",
 	"(*Store).NodeClaimFenceNodeForRun":      "the run ID is global, and the query matches its exact claimant and generation",

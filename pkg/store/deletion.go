@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -39,6 +40,9 @@ var (
 	// ErrTeamFrozen refuses deleting a team held over a disputed payment,
 	// because the hold and the ledger it points at are the dispute's record.
 	ErrTeamFrozen = errors.New("store: the team is on hold over a disputed payment; contact support to delete it")
+	// ErrTeamOwes refuses deleting a team that owes for usage or has a card
+	// charge in flight; it is deleted once the charge is paid.
+	ErrTeamOwes = errors.New("store: the team owes for usage or has a card charge in progress; pay it before deleting the team")
 	// ErrTeamBeingDeleted refuses opening a checkout for a team whose deletion
 	// has begun, since the payment would land after the purge.
 	ErrTeamBeingDeleted = errors.New("store: the team is being deleted")
@@ -164,6 +168,9 @@ func (t *Tenant) RequestDeletion(ctx context.Context, actorID string, now time.T
 		return TeamDeletion{}, nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return TeamDeletion{}, nil, err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return TeamDeletion{}, nil, err
 	}
@@ -203,6 +210,9 @@ func (o *Operator) RequestTeamDeletion(ctx context.Context, team Team, now time.
 		return TeamDeletion{}, nil, err
 	}
 	defer rollbackOrLog(tx)
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return TeamDeletion{}, nil, err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return TeamDeletion{}, nil, err
 	}
@@ -236,6 +246,24 @@ func refuseDeletionWithMoneyInFlightTx(ctx context.Context, tx *storeTx, team Te
 	}
 	if freeze.Frozen {
 		return ErrTeamFrozen
+	}
+	// safety: a deleted team's card could no longer be charged, so a debt or
+	// an open charge keeps the team until it is paid.
+	balance, err := creditBalanceTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	charge, err := openCardChargeTx(ctx, tx, team)
+	if err != nil {
+		return err
+	}
+	if charge != nil {
+		return ErrTeamOwes
+	}
+	if balance < 0 {
+		if card, err := teamHasCardTx(ctx, tx, team); err != nil || card {
+			return cmp.Or(err, ErrTeamOwes)
+		}
 	}
 	return nil
 }
@@ -612,6 +640,9 @@ func (s *Store) DeleteAccount(ctx context.Context, accountID string, now time.Ti
 	defer rollbackOrLog(tx)
 	acct, err := accountTx(ctx, tx, accountID)
 	if err != nil {
+		return AccountDeletion{}, err
+	}
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
 		return AccountDeletion{}, err
 	}
 	if err := lockOwnedTeamsTx(ctx, tx, s, accountID); err != nil {

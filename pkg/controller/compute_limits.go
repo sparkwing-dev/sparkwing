@@ -37,12 +37,9 @@ type requestBudgetsJSON struct {
 }
 
 type computeUsageJSON struct {
-	Runners            *int64           `json:"runners,omitempty"`
-	ByPrincipal        map[string]int64 `json:"by_principal,omitempty"`
-	AlarmReached       *bool            `json:"alarm_reached,omitempty"`
-	DerivedRunnerCap   int64            `json:"derived_runner_cap,omitempty"`
-	RecentPaidMicro    int64            `json:"recent_paid_micro"`
-	ScaleWindowSeconds int64            `json:"scale_window_seconds,omitempty"`
+	Runners      *int64           `json:"runners,omitempty"`
+	ByPrincipal  map[string]int64 `json:"by_principal,omitempty"`
+	AlarmReached *bool            `json:"alarm_reached,omitempty"`
 }
 
 type setComputeLimitsReq struct {
@@ -134,21 +131,6 @@ func (s *Server) computeLimitsViewWith(r *http.Request, limits store.ComputeLimi
 	for _, name := range store.ComputeLimitNames() {
 		v, _ := limits.Value(name)
 		out.Limits[name] = v
-	}
-	if limits.ConcurrentRunners > 0 {
-		team, err := requestTeam(r)
-		if err != nil {
-			return computeLimitsJSON{}, err
-		}
-		derived, err := s.store.RunnerCapFor(r.Context(), team, time.Now())
-		if err != nil {
-			return computeLimitsJSON{}, err
-		}
-		out.Usage.DerivedRunnerCap = derived.Cap
-		out.Usage.RecentPaidMicro = derived.RecentPaidMicro
-		if limits.RunnerScaleStepCredits > 0 {
-			out.Usage.ScaleWindowSeconds = int64(store.RunnerScaleWindow.Seconds())
-		}
 	}
 	return out, nil
 }

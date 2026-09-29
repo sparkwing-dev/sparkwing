@@ -22,6 +22,28 @@ unlock.
 
 ### Added
 
+- **controller + store + web:** Trusted Cloud teams can put a card on file
+  (`POST /api/v1/team/billing/card`) and are then charged automatically at
+  $100 owed or on the 1st of the month; a declined charge stops new work
+  until it is paid, retried after 1, 3 and 7 days, or paid by an owner through
+  `POST /api/v1/team/billing/pay`. Every team now spends within a 30-day
+  limit, a daily limit and an optional owner budget
+  (`PUT /api/v1/team/billing/budget`); a claim past one is refused with `402`
+  and `"code": "spend_limit"`. The card a team pays with is held to the same
+  limits across every team it pays for. A declined charge holds the team back
+  at New until it is paid. A payment that drew an early fraud warning is
+  never granted, even when the warning arrives first, unless Stripe marks it
+  not actionable; the paying card, not the card on file, is what a warning is
+  judged against. Money that pays no open charge is refunded, and a refund that
+  fails is made again after 1, 6 and then every 24 hours
+  (`POST /api/v1/credits/card-refunds` reports its status under the refund's
+  queue key, and only that key's outcome moves the queue, even one that
+  arrives before the refund is recorded). Schema v87.
+- **controller + store:** `max_concurrent_runners` counts a team's cloud
+  runners across all its tokens, and an unset guard means 100 per team, never
+  unlimited; `runner_cap` on `POST /api/v1/teams/{team}/trust` raises one
+  granted team. The `runner_scale_*` settings, the scaled
+  per-principal cap and `usage.derived_runner_cap` are removed.
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that

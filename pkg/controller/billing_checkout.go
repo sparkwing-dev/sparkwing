@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // perf: Bound the Stripe-facing checkout call so an owner click cannot hang.
@@ -49,35 +51,13 @@ type checkoutSession struct {
 }
 
 func (c *billingCheckout) open(ctx context.Context, team string, cents int64) (checkoutSession, error) {
-	body, err := json.Marshal(map[string]any{"team": team, "amount_cents": cents})
-	if err != nil {
-		return checkoutSession{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/internal/checkout", bytes.NewReader(body))
-	if err != nil {
-		return checkoutSession{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return checkoutSession{}, fmt.Errorf("checkout service: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if err != nil {
-		return checkoutSession{}, fmt.Errorf("checkout service: read: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return checkoutSession{}, fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
-	}
 	var out struct {
 		URL       string `json:"url"`
 		ID        string `json:"id"`
 		ExpiresAt int64  `json:"expires_at"`
 	}
-	if err := json.Unmarshal(payload, &out); err != nil {
-		return checkoutSession{}, fmt.Errorf("checkout service: decode: %w", err)
+	if err := c.post(ctx, "/internal/checkout", map[string]any{"team": team, "amount_cents": cents}, &out); err != nil {
+		return checkoutSession{}, err
 	}
 	// safety: the browser is sent wherever this says, so only an https page
 	// is followed; a service answering anything else is misconfigured.
@@ -94,4 +74,79 @@ func (c *billingCheckout) open(ctx context.Context, team string, cents int64) (c
 		session.ExpiresAt = time.Unix(out.ExpiresAt, 0)
 	}
 	return session, nil
+}
+
+func (c *billingCheckout) post(ctx context.Context, path string, in, out any) error {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("checkout service: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return fmt.Errorf("checkout service: read: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: %d %s", errCheckoutRefused, resp.StatusCode, strings.TrimSpace(string(payload)))
+	}
+	if err := json.Unmarshal(payload, out); err != nil {
+		return fmt.Errorf("checkout service: decode: %w", err)
+	}
+	return nil
+}
+
+// safety: a hosted Stripe page is the only place a browser is sent, so an
+// answer naming anything else is refused.
+func (c *billingCheckout) hostedPage(ctx context.Context, path string, in any) (string, error) {
+	var out struct {
+		URL string `json:"url"`
+	}
+	if err := c.post(ctx, path, in, &out); err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(out.URL, "https://") {
+		return "", fmt.Errorf("%w: it answered a non-https page", errCheckoutRefused)
+	}
+	return out.URL, nil
+}
+
+type cardChargeResult struct {
+	PaymentIntent string `json:"payment_intent"`
+	Status        string `json:"status"`
+	DeclineCode   string `json:"decline_code"`
+	Fingerprint   string `json:"fingerprint"`
+}
+
+func (c *billingCheckout) charge(ctx context.Context, w store.CardChargeWork) (cardChargeResult, error) {
+	var out cardChargeResult
+	err := c.post(ctx, "/internal/charge", map[string]any{
+		"team": string(w.Team), "charge_id": w.ChargeID, "attempt_id": w.AttemptID,
+		"amount_cents": w.AmountCents, "customer": w.Customer, "payment_method": w.PaymentMethod,
+		"payment_intent": w.PaymentIntent,
+	}, &out)
+	return out, err
+}
+
+func (c *billingCheckout) refund(ctx context.Context, paymentIntent, key, reason string) (string, string, error) {
+	var out struct {
+		Refund string `json:"refund"`
+		Status string `json:"status"`
+	}
+	err := c.post(ctx, "/internal/refund", map[string]any{
+		"payment_intent": paymentIntent, "key": key, "reason": reason,
+	}, &out)
+	if err == nil && (out.Refund == "" || out.Status == "") {
+		err = fmt.Errorf("%w: it named no refund and status", errCheckoutRefused)
+	}
+	return out.Refund, out.Status, err
 }

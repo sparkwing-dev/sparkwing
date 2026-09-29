@@ -31,6 +31,19 @@ const billing = {
     },
   ],
   storage_charged_micro: 0,
+  card_billed: false,
+  can_add_card: false,
+  limits: {
+    ceiling_cents: 50_000,
+    daily_cap_cents: 20_000,
+    budget_cents: 50_000,
+    rung_cents: 10_000,
+    credit_limit_cents: 0,
+    spent_30d_cents: 1_200,
+    spent_today_cents: 300,
+    headroom_cents: 12,
+    binding: "balance",
+  },
   grants: [
     {
       id: "grant-1",
@@ -213,6 +226,47 @@ test("checkout stays hidden when the controller has no checkout service", async 
     page.getByText("Checkout was cancelled. Nothing was charged."),
   ).toBeVisible();
   await expect(page.getByText("1,230 credits", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Buy credits" })).toHaveCount(
+    0,
+  );
+});
+
+test("a card-billed team with a failed charge pays it by hand and buys no credits", async ({
+  page,
+}) => {
+  await mockController(page, {
+    billing: {
+      balance_micro: -15_000_000_000,
+      card_billed: true,
+      can_add_card: true,
+      card: { brand: "visa", last4: "4242", added_at: 1_790_000_000 },
+      open_charge: {
+        id: "cardcharge_1",
+        amount_cents: 15_000,
+        failures: 1,
+        decline_code: "insufficient_funds",
+      },
+      limits: {
+        ...billing.limits,
+        headroom_cents: -15_000,
+        binding: "charge_failed",
+      },
+    },
+  });
+  await page.goto("/team/billing");
+  await expect(page.getByText("$150.00 owed")).toBeVisible();
+  await expect(page.getByText("visa ending 4242")).toBeVisible();
+  await expect(
+    page.getByText(/A charge of \$150 failed \(insufficient_funds\)/),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "The last card charge failed. Pay it now or update the card.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Pay $150 now" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy credits" })).toHaveCount(
     0,
   );

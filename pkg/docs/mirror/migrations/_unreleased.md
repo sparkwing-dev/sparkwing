@@ -246,13 +246,21 @@ older build is covered for 60 once its pod first renews under the new one, and
 `sparkwing_node_seconds_total{placement="cloud"}` dips by 40 seconds for each
 such claim still open. No database migration is required.
 
-## Team runner cap
+## Schema 87: card billing and a team-wide runner count
 
-Pass the team to `Store.RunnerCapFor(ctx, team, now)`. Its paid total and cap
-now cover only that team's grants. `GET /api/v1/compute-limits` reports those
-figures for the request's team. Existing grants retain their stored team;
-grants created before teams were introduced remain in `default`. No database
-migration is required.
+`max_concurrent_runners` now counts a team's cloud runners across every token
+of the team, and applies even when unset: zero or unset means 100 per team,
+and `runner_cap` on the trust route raises one granted team. Schema 87 deletes the `runner_scale_base`,
+`runner_scale_step_credits` and `runner_scale_ceiling` settings.
+`Store.RunnerCapFor` is gone, and `GET /api/v1/compute-limits` no longer
+reports `usage.derived_runner_cap` or `usage.recent_paid_micro`. Schema 87 also
+adds card billing and the per-day spend buckets, backfilled from every past
+charge; the upgrade reads the whole credit ledger once, so run it inside the
+usual write freeze. The `card-billing-v1` requirement makes an older
+controller refuse the upgraded database. The checkout service checks that the
+controller reports the `card-billing-v1` capability before it saves a card,
+reports a card payment, records a fraud warning or reverses a refund, so the
+controller is upgraded first.
 
 ## Dashboard service probes
 

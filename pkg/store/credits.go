@@ -164,11 +164,29 @@ type InsufficientCreditsError struct {
 	// Frozen is set when the team's cloud usage is held while a payment
 	// dispute is open, whatever the balance reads.
 	Frozen bool
+	// Limit names the spend limit that refused the claim, one of the
+	// SpendLimit values; empty is the balance.
+	Limit string
 }
 
 func (e *InsufficientCreditsError) Error() string {
+	if e.Limit == SpendLimitChargeFailed {
+		return "spend limit: the charge to this team's card failed; an owner can pay it or update the card on the billing page"
+	}
 	if e.Frozen {
 		return "credits frozen: this team's cloud usage is held while a payment dispute is open; contact support"
+	}
+	switch e.Limit {
+	case SpendLimitCeiling:
+		return "spend limit: this team reached its 30-day spend ceiling; new work waits until older spend leaves the window"
+	case SpendLimitDailyCap:
+		return "spend limit: this team reached its daily spend cap; new work waits until the next UTC day"
+	case SpendLimitCardCeiling:
+		return "spend limit: the card this team pays with reached its 30-day spend ceiling across its teams"
+	case SpendLimitCardDailyCap:
+		return "spend limit: the card this team pays with reached its daily spend cap across its teams"
+	case SpendLimitBudget:
+		return "spend limit: this team reached the budget its owner set; an owner can raise it on the billing page"
 	}
 	return fmt.Sprintf("insufficient credits: balance %s, need %s",
 		FormatCredits(e.BalanceMicro), FormatCredits(e.RequiredMicro))
@@ -274,49 +292,12 @@ func applyTeamGrantReferenceMigration(ctx context.Context, tx *storeTx) error {
 	return err
 }
 
-// safety: these figures belong to v59, which restated the step from the cent credit in the
-// $0.00005 vCPU-second credit and clamped it at ten million dollars of that credit, and to
-// v75, which restated it in the $0.001 credit. Today's credit constants must not move them.
-const (
-	v59StepScale          = 200
-	v59StepCeiling        = 200_000_000_000
-	vcpuSecondCreditMicro = 5_000
-	v75StepDivisor        = MicroCreditsPerCredit / vcpuSecondCreditMicro
-)
+// safety: v59 and v75 restated the per-principal runner scale step in each new
+// credit. v87 deletes that setting, so a store upgraded through them no longer
+// needs the restatement and the steps write nothing.
+func applyCreditUnitMigration(context.Context, *storeTx) error { return nil }
 
-func applyCreditUnitMigration(ctx context.Context, tx *storeTx) error {
-	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
-		return min(step*v59StepScale, v59StepCeiling)
-	})
-}
-
-// safety: v75 restates runner_scale_step_credits from the vCPU-second credit in the $0.001
-// credit, twenty to one, so the step keeps its dollar value. It rounds to the nearest credit
-// and never below one, because a step of zero turns scaling off.
-func applyCreditValueMigration(ctx context.Context, tx *storeTx) error {
-	return rescaleRunnerScaleStep(ctx, tx, func(step int64) int64 {
-		return min(max((step+v75StepDivisor/2)/v75StepDivisor, 1), RunnerScaleMaxStepCredits)
-	})
-}
-
-func rescaleRunnerScaleStep(ctx context.Context, tx *storeTx, rescale func(int64) int64) error {
-	key := computeLimitKey(ComputeLimitRunnerScaleStepCredits)
-	var raw string
-	err := tx.QueryRowContext(ctx, selectCreditSettingSQL, key).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	// safety: a value the guard reader cannot parse reads as unset there, so
-	// it is left for the operator rather than guessed at.
-	step, parsed := wholeCreditSetting(raw)
-	if !parsed || step <= 0 {
-		return nil
-	}
-	return setCreditSettingTx(ctx, tx, key, formatCreditSetting(rescale(step)))
-}
+func applyCreditValueMigration(context.Context, *storeTx) error { return nil }
 
 func wholeCreditSetting(raw string) (int64, bool) {
 	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
@@ -840,6 +821,11 @@ func (s *Store) recordCreditGrant(
 				ErrReversalExceedsPayment, req.Reverses, reversed.AmountMicro, already, -req.AmountMicro)
 		}
 	}
+	if req.Kind == CreditGrantPaid {
+		if err := refuseWarnedPaymentTx(ctx, tx, req.Reference); err != nil {
+			return CreditGrantResult{}, err
+		}
+	}
 	// safety: a paid grant is money that already moved, so the cap was held
 	// when its checkout opened and is not held again here; refusing it would
 	// leave a payment with no credits. Only an operator's free grant meets the
@@ -876,7 +862,6 @@ func (s *Store) recordCreditGrant(
 	if err := tx.Commit(); err != nil {
 		return CreditGrantResult{}, err
 	}
-	s.invalidateRunnerCap()
 	return CreditGrantResult{Grant: grant, Created: true}, nil
 }
 
@@ -1835,8 +1820,8 @@ func reserveTriggerCreditsTx(
 	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, triggerID, ""); err != nil {
 		return err
 	}
-	if balance < required {
-		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: triggerID}
+	if err := refuseAboveHeadroomTx(ctx, tx, team, required, now, triggerID, ""); err != nil {
+		return err
 	}
 	principal, err := runPrincipalTx(ctx, tx, triggerID)
 	if err != nil {
@@ -1873,9 +1858,17 @@ func refuseFrozenTeamTx(
 	if err != nil || !freeze.Frozen {
 		return err
 	}
-	return &InsufficientCreditsError{
+	out := &InsufficientCreditsError{
 		BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID, Frozen: true,
 	}
+	// safety: a declined charge's hold is the owner's to lift by paying, so
+	// its refusal says so instead of pointing them at support.
+	if blocking, err := rowPresentTx(ctx, tx, blockingHoldSQL, string(team), FreezeCauseDecline); err != nil {
+		return err
+	} else if !blocking {
+		out.Limit = SpendLimitChargeFailed
+	}
+	return out
 }
 
 // safety: every path that ends a trigger claim settles here before its own write, in the same
@@ -1923,14 +1916,14 @@ func settleTriggerWindowTx(
 	if reservationID == "" {
 		return errors.New("credits: active trigger has no reservation id")
 	}
-	var tokenPrefix, principal string
+	var tokenPrefix, principal, card string
 	var class, rate int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, card_fingerprint
 		  FROM credit_charges
 		 WHERE team = ? AND id = ? AND run_id = ? AND node_id = ? AND kind = ?`,
 		string(team), reservationID, triggerID, triggerCreditNodeID, CreditChargeReservation,
-	).Scan(&tokenPrefix, &principal, &class, &rate); err != nil {
+	).Scan(&tokenPrefix, &principal, &class, &rate, &card); err != nil {
 		return err
 	}
 	w := chargeWindow{
@@ -1941,6 +1934,7 @@ func settleTriggerWindowTx(
 	elapsed := (settleNS - reservedAt) / int64(time.Second)
 	switch {
 	case refundAll:
+		w.SpendAtNS, w.SpendCard = reservedAt, card
 		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeRefund, -paidSeconds, -paidAmount); err != nil {
 			return err
 		}
@@ -1957,13 +1951,13 @@ func settleTriggerWindowTx(
 		amount := w.Rate * over
 		var exhausted error
 		if !final {
-			balance, err := creditBalanceTx(ctx, tx, team)
-			if err != nil {
-				return err
-			}
 			// safety: a dispute hold refuses new claims; admitted work keeps paying as it finishes.
-			if balance < amount {
-				exhausted = &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: amount, RunID: triggerID}
+			if err := refuseAboveHeadroomTx(ctx, tx, team, amount, time.Unix(0, settleNS), triggerID, ""); err != nil {
+				var short *InsufficientCreditsError
+				if !errors.As(err, &short) {
+					return err
+				}
+				exhausted = short
 			}
 		}
 		if _, err := insertCreditChargeTx(ctx, tx, w, CreditChargeUsage, over, amount); err != nil {
@@ -2044,10 +2038,11 @@ func (s *Store) reserveNodeCreditsTx(
 	if err := refuseFrozenTeamTx(ctx, tx, team, balance, required, runID, nodeID); err != nil {
 		return err
 	}
-	// safety: an empty balance is the refusal a runner already understands, so
-	// it is reported before a guard that would mask it with a different code.
-	if balance < required {
-		return &InsufficientCreditsError{BalanceMicro: balance, RequiredMicro: required, RunID: runID, NodeID: nodeID}
+	// safety: an empty balance or a spent limit is the refusal a runner
+	// already understands, so it is reported before a guard that would mask
+	// it with a different code.
+	if err := refuseAboveHeadroomTx(ctx, tx, team, required, now, runID, nodeID); err != nil {
+		return err
 	}
 	if unpriced != nil {
 		unpriced.RunID, unpriced.NodeID = runID, nodeID
@@ -2061,20 +2056,25 @@ func (s *Store) reserveNodeCreditsTx(
 	if err != nil {
 		return err
 	}
-	if limits.Any() {
-		if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
-			return err
-		}
+	if err := s.enforceClaimComputeLimitsTx(ctx, tx, team, limits, claimant, runID, now); err != nil {
+		return err
 	}
 	id, err := newCreditID("charge")
+	if err != nil {
+		return err
+	}
+	card, err := teamCardTx(ctx, tx, team)
 	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
 		string(team), id, runID, nodeID, claimant.TokenPrefix, principal, CreditChargeReservation,
 		int64(MinBillableSeconds), required, class.Cores, class.MicroPerSecond,
-		now.UnixNano()); err != nil {
+		now.UnixNano(), card); err != nil {
 		return fmt.Errorf("credits: reserve: %w", err)
+	}
+	if err := addSpendTx(ctx, tx, team, card, now.UnixNano(), required); err != nil {
+		return err
 	}
 	through := now.Add(MinBillableSeconds * time.Second).UnixNano()
 	billingFrom := int64(0)
@@ -2090,8 +2090,8 @@ func (s *Store) reserveNodeCreditsTx(
 
 const insertCreditChargeSQL = `
         INSERT INTO credit_charges (team, id, run_id, node_id, token_prefix, principal, kind, seconds, amount_micro,
-                cpu_class, rate_micro_per_second, charged_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                cpu_class, rate_micro_per_second, charged_at, card_fingerprint)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreditChargeResult is what one charge did to the ledger.
 type CreditChargeResult struct {
@@ -2263,8 +2263,14 @@ func (s *Store) chargeNodeTx(
 	if billingFrom == 0 && !final {
 		return out, nil
 	}
+	// safety: running work stops at a spent limit the way it stops at an
+	// empty balance, after the grace, so the overshoot past any cap is bounded.
+	room, err := headroomTx(ctx, tx, team, time.Unix(0, nowNS))
+	if err != nil {
+		return out, err
+	}
 	exhaustedFor, cancel, err := settleCreditExhaustionTx(ctx, tx, creditExhaustion{
-		Team: team, Balance: balance, NowNS: nowNS, Grace: grace,
+		Team: team, Balance: room, NowNS: nowNS, Grace: grace,
 		RunID: runID, NodeID: nodeID, Anchor: anchor,
 	})
 	if err != nil {
@@ -2300,6 +2306,11 @@ type chargeWindow struct {
 	Anchor, NowNS                         int64
 	Rate, Class, MaxCharge                int64
 	Final                                 bool
+	// safety: a refund counts on the day and card of the charge it refunds,
+	// so it frees no room today and none on a card that did not pay; zero
+	// counts the row on NowNS's day and the team's current card.
+	SpendAtNS int64
+	SpendCard string
 }
 
 // safety: the refund carries the reservation's terms, and the claim is
@@ -2308,15 +2319,15 @@ type chargeWindow struct {
 func refundClaimTx(
 	ctx context.Context, tx *storeTx, team Team, runID, nodeID string, nowNS int64,
 ) (*CreditCharge, error) {
-	var tokenPrefix, principal string
+	var tokenPrefix, principal, card string
 	var class, rate, reservedAt int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at
+		`SELECT token_prefix, principal, cpu_class, rate_micro_per_second, charged_at, card_fingerprint
 		  FROM credit_charges
 		 WHERE team = ? AND run_id = ? AND node_id = ? AND kind = ?
 		 ORDER BY charged_at DESC, id DESC LIMIT 1`,
 		string(team), runID, nodeID, CreditChargeReservation).Scan(
-		&tokenPrefix, &principal, &class, &rate, &reservedAt)
+		&tokenPrefix, &principal, &class, &rate, &reservedAt, &card)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -2335,7 +2346,7 @@ func refundClaimTx(
 	}
 	return insertCreditChargeTx(ctx, tx, chargeWindow{
 		Team: team, RunID: runID, NodeID: nodeID, TokenPrefix: tokenPrefix, Principal: principal,
-		NowNS: nowNS, Rate: rate, Class: class,
+		NowNS: nowNS, Rate: rate, Class: class, SpendAtNS: reservedAt, SpendCard: card,
 	}, CreditChargeRefund, -seconds.Int64, -amount.Int64)
 }
 
@@ -2397,10 +2408,19 @@ func insertCreditChargeTx(
 	if err != nil {
 		return nil, err
 	}
+	spendAt, card := w.NowNS, w.SpendCard
+	if w.SpendAtNS != 0 {
+		spendAt = w.SpendAtNS
+	} else if card, err = teamCardTx(ctx, tx, w.Team); err != nil {
+		return nil, err
+	}
 	if _, err := tx.ExecContext(ctx, insertCreditChargeSQL,
 		string(w.Team), id, w.RunID, w.NodeID, w.TokenPrefix, w.Principal, kind, seconds, amount,
-		w.Class, w.Rate, w.NowNS); err != nil {
+		w.Class, w.Rate, w.NowNS, card); err != nil {
 		return nil, fmt.Errorf("credits: insert charge: %w", err)
+	}
+	if err := addSpendTx(ctx, tx, w.Team, card, spendAt, amount); err != nil {
+		return nil, err
 	}
 	return &CreditCharge{
 		ID: id, Team: w.Team, RunID: w.RunID, NodeID: w.NodeID, TokenPrefix: w.TokenPrefix,

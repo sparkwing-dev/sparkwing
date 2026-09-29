@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -408,6 +409,12 @@ func (s *Server) handleCreditsGrant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
+	if errors.Is(err, store.ErrPaymentWarned) {
+		s.logger.Warn("billing alert: a warned payment was not granted", "alert", "payment_warned",
+			"team", string(tenant.Team()), "reference", req.Reference)
+		writeJSON(w, http.StatusConflict, codedErrorJSON{Error: err.Error(), Code: PaymentWarnedCode})
+		return
+	}
 	if s.writeBalanceCapRefusal(w, err) {
 		s.logger.Warn("credit grant refused at the team balance cap", "team", string(tenant.Team()),
 			"kind", req.Kind, "amount_micro", req.AmountMicro, "reference", req.Reference, "err", err)
@@ -513,6 +520,10 @@ type creditsRefusalJSON struct {
 // heartbeat the ledger refused.
 const CreditsRefusedCode = "insufficient_credits"
 
+// SpendLimitCode is the code on a 402 refusing a claim at a spend limit:
+// the 30-day ceiling, the daily cap, the owner's budget, or a failed charge.
+const SpendLimitCode = "spend_limit"
+
 // CreditsFrozenCode is the code on a 402 refusing a claim for a team whose
 // cloud usage is held while a payment dispute is open.
 const CreditsFrozenCode = "credits_frozen"
@@ -531,8 +542,10 @@ func (s *Server) writeCreditsRefusal(w http.ResponseWriter, r *http.Request, err
 	if errors.As(err, &shortfall) {
 		refusal.BalanceMicro = shortfall.BalanceMicro
 		refusal.RequiredMicro = shortfall.RequiredMicro
-		if shortfall.Frozen {
+		if shortfall.Frozen && shortfall.Limit != store.SpendLimitChargeFailed {
 			refusal.Error, refusal.Code = shortfall.Error(), CreditsFrozenCode
+		} else if shortfall.Limit != "" && shortfall.Limit != store.SpendLimitBalance {
+			refusal.Error, refusal.Code = shortfall.Error(), SpendLimitCode
 		}
 		s.noteCreditsBlocked(r, shortfall)
 	}
@@ -590,8 +603,8 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 		return
 	}
 	balance, required := shortfall.BalanceMicro, shortfall.RequiredMicro
-	payload, err := json.Marshal(map[string]int64{
-		"balance_micro": balance, "required_micro": required,
+	payload, err := json.Marshal(map[string]any{
+		"balance_micro": balance, "required_micro": required, "limit": cmp.Or(shortfall.Limit, store.SpendLimitBalance),
 	})
 	if err != nil {
 		return
@@ -603,8 +616,8 @@ func (s *Server) noteCreditsBlocked(r *http.Request, shortfall *store.Insufficie
 		return
 	}
 	if wrote {
-		s.logger.Warn("claim refused: the credit balance is spent",
-			"run_id", runID, "node_id", nodeID,
+		s.logger.Warn("claim refused: a spend limit or the balance is spent",
+			"run_id", runID, "node_id", nodeID, "limit", shortfall.Limit,
 			"balance_micro", balance, "required_micro", required)
 	}
 }

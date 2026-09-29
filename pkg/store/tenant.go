@@ -223,6 +223,9 @@ var tenantTables = []string{
 	"agent_loss_retry_node_sources",
 	"approvals",
 	"business_events",
+	"card_attempts",
+	"card_charges",
+	"card_refunds",
 	"child_invocations",
 	"claim_tokens",
 	"concurrency_cache",
@@ -270,6 +273,7 @@ var tenantTables = []string{
 	"storage_reservations",
 	"storage_run_usage",
 	"team_download_day",
+	"team_spend_days",
 	"team_storage",
 	"team_build_trust",
 	"uploads",
@@ -291,6 +295,7 @@ var keyedAtCreation = []string{
 	"claim_tokens", "child_invocations",
 	"business_events",
 	"repos",
+	"card_charges", "card_attempts", "card_refunds", "team_spend_days",
 }
 
 // safety: executors enroll with the deployment and take work from every team; sparkwing_meta is the
@@ -298,6 +303,7 @@ var keyedAtCreation = []string{
 // teams through tenant-owned memberships. signup_gate and signup_admissions gate new accounts deployment-wide.
 var operatorTables = []string{
 	"accounts",
+	"card_spend_days",
 	"egress_day",
 	"executors",
 	"github_app_connect_states",
@@ -310,6 +316,7 @@ var operatorTables = []string{
 	"sparkwing_meta",
 	"sparkwing_requirements",
 	"invitation_email_log",
+	"payment_warnings",
 	"sparkwing_schema_version",
 	"team_deletions",
 	"teams",

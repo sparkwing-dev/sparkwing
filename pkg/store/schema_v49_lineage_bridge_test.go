@@ -83,8 +83,10 @@ const v49MainScaleStepSQL = `INSERT INTO sparkwing_meta (key, value, updated_at)
 
 func assertV49MainCreditRestated(t *testing.T, st *store.Store) {
 	t.Helper()
-	if got := readStepSetting(t, st); got != "50000" {
-		t.Errorf("runner scale step after v59 and v75 = %q, want 50000 ($50)", got)
+	var steps int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM sparkwing_meta
+	    WHERE key = 'compute_limit_runner_scale_step_credits'`).Scan(&steps); err != nil || steps != 0 {
+		t.Errorf("runner scale step rows after v87 = %d, %v; want the setting deleted", steps, err)
 	}
 	requirements, err := st.Requirements(context.Background())
 	if err != nil || !slices.Contains(requirements, "credit-value-v1") {

@@ -150,8 +150,10 @@ func storageStandingTx(ctx context.Context, tx *storeTx, team Team) (StorageStan
 }
 
 func teamFundedTx(ctx context.Context, tx *storeTx, team Team) (bool, error) {
-	balance, err := creditBalanceTx(ctx, tx, team)
-	if err != nil || balance <= 0 {
+	// safety: a card-billed team is funded by its card's credit, not only by
+	// what it prepaid; a spent limit pauses its work but not its tier.
+	st, err := spendStandingTx(ctx, tx, team, time.Now())
+	if err != nil || st.BalanceMicro+st.CreditLimitMicro <= 0 {
 		return false, err
 	}
 	// safety: a team held over a disputed payment may not keep what that

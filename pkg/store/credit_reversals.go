@@ -26,12 +26,15 @@ type CreditReversal struct {
 }
 
 // ReversePayment takes back what a payment still has on the ledger: the paid
-// grant carrying paymentID, less what earlier reversals of it took back. It
+// grant carrying paymentID, less what earlier reversals of it took back, or
+// amountMicro of it when that is positive and smaller, as a partial refund. It
 // writes one reversal under reference, which makes the call idempotent: a
 // repeat returns the reversal already written. The team is the one the
 // payment funded, and the balance may go below zero, because the credits may
 // already be spent; the claim path then refuses the team's new metered work.
-func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, createdBy string) (_ CreditReversal, err error) {
+func (s *Store) ReversePayment(
+	ctx context.Context, paymentID, reference, createdBy string, amountMicro int64,
+) (_ CreditReversal, err error) {
 	paymentID, reference = strings.TrimSpace(paymentID), strings.TrimSpace(reference)
 	if paymentID == "" || reference == "" {
 		return CreditReversal{}, errors.New("credits: a reversal names the payment and its own reference")
@@ -79,8 +82,12 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 	}
 	if out.Grant == nil && already < paid.AmountMicro {
 		now := time.Now().UTC()
+		take := paid.AmountMicro - already
+		if amountMicro > 0 && amountMicro < take {
+			take = amountMicro
+		}
 		grant := CreditGrant{
-			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: already - paid.AmountMicro,
+			ID: id, Team: paid.Team, Kind: CreditGrantReversal, AmountMicro: -take,
 			Reference: reference, Reverses: paymentID, CreatedBy: createdBy, CreatedAt: now,
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -94,7 +101,7 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 			return CreditReversal{}, err
 		}
 		out.Grant, out.Created = &grant, true
-		already = paid.AmountMicro
+		already += take
 	}
 	out.ReversedMicro = already
 	if out.BalanceMicro, err = creditBalanceTx(ctx, tx, paid.Team); err != nil {
@@ -102,9 +109,6 @@ func (s *Store) ReversePayment(ctx context.Context, paymentID, reference, create
 	}
 	if err := tx.Commit(); err != nil {
 		return CreditReversal{}, err
-	}
-	if out.Created {
-		s.invalidateRunnerCap()
 	}
 	return out, nil
 }
