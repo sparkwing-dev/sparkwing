@@ -32,7 +32,7 @@ protects direct database access, not mixed-version HTTP readers.
 
 The database migration labels historical positive-CPU-time points as command
 reports. Historical zero-CPU-time points remain unknown because their kind
-cannot be recovered. Learned profile format 9 discards incompatible learned
+cannot be recovered. Learned profile format 10 discards incompatible learned
 estimates on access or update while preserving explicit pins and wait
 statistics. New observations rebuild estimates; leave resource pins in place
 until their replacement estimates have been verified for the workload.
@@ -48,3 +48,11 @@ Host and worker admission require that flag before using learned CPU or
 memory values, including demand floors and previous-version costs. Explicit
 pins retain precedence. Duration estimates displayed for existing profiles
 are separate from resource admission.
+
+## Controller run profiles
+
+The controller records a run resource observation only when one uncached node
+contributes measurements. For multiple uncached nodes it retains valid node
+profiles but withholds the run observation, including its duration contribution.
+Independent worker samples do not establish a simultaneous run total. Explicit
+pins remain unchanged; node profiles still supply worker and Kubernetes costs.

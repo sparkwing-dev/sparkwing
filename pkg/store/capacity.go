@@ -179,7 +179,7 @@ type profileSample struct {
 	S float64 `json:"s,omitempty"`
 }
 
-const profileSchemaCurrent = 9
+const profileSchemaCurrent = 10
 
 type profileWindowDoc struct {
 	Schema  int             `json:"schema"`

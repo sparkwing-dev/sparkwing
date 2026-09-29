@@ -28,6 +28,8 @@ unlock.
 
 ### Fixed
 
+- Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/_unreleased.md#controller-run-profiles).
+
 - **metrics:** Exclude unavailable CPU and RSS readings from learned costs; reject RSS conversion overflow and clamp CPU rates before integer conversion.
 
 - **tests:** Start Kubernetes runner deadlines after database setup.
