@@ -20,19 +20,20 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.65.0] - 2026-09-29
 ### Changed
 
 - **runs-store (Breaking):** Schema 51 requires metric sample kinds and process-tree
   accounting support. Stop all writers before upgrading; older writers cannot
-  reopen the database. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
+  reopen the database. See [migration guidance](docs/migrations/v0.65.0.md#metric-sample-kinds).
 
 - **metrics (Breaking):** Sample dedicated node process trees on Linux and macOS.
   Exclude incomplete executions from profile learning and prevent historical measurements
-  from rebuilding incompatible profiles. See [migration guidance](docs/migrations/_unreleased.md#local-process-measurements).
+  from rebuilding incompatible profiles. See [migration guidance](docs/migrations/v0.65.0.md#local-process-measurements).
 
-- **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/_unreleased.md#profile-observations).
+- **profile API (Breaking):** Require measured CPU before learning or admitting resource costs. See [migration guidance](docs/migrations/v0.65.0.md#profile-observations).
 
-- **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/_unreleased.md#metric-sample-kinds).
+- **metrics (Breaking):** Require explicit sample kinds for resource learning; keep command lifetime CPU out of sampled rates and discard incompatible learned estimates. Upgrade producers and readers together. See [migration guidance](docs/migrations/v0.65.0.md#metric-sample-kinds).
 
 ### Fixed
 
@@ -62,7 +63,7 @@ unlock.
 
 - Tests: declare measured inputs in admission and profile migration fixtures.
 
-- Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/_unreleased.md#controller-run-profiles).
+- Controller profiles: withhold multi-node run observations whose simultaneous CPU and memory totals cannot be established; retain valid node profiles. [Migration guide](docs/migrations/v0.65.0.md#controller-run-profiles).
 
 - **metrics:** Exclude unavailable CPU and RSS readings from learned costs; reject RSS conversion overflow and clamp CPU rates before integer conversion.
 
