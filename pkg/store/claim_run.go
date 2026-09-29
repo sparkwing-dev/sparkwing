@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -172,33 +173,178 @@ var ErrSlotUndeclared = errors.New("store: the run's accepted plan declares no s
 // scope names, with the declared policy, capacity and cost, or the node's
 // memoization under its coalescing key.
 func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy string, capacity, cost int) error {
-	var plan []byte
-	if err := s.queryRow(ctx, `SELECT plan_json FROM runs WHERE team = ? AND id = ?`,
-		string(tok.Team), tok.RunID).Scan(&plan); err != nil {
+	n, ok, err := s.declaredNode(ctx, tok.Team, tok.RunID, tok.NodeID)
+	if err != nil {
 		return err
 	}
-	var doc struct {
-		Nodes []struct {
-			ID        string             `json:"id"`
-			Modifiers submittedModifiers `json:"modifiers"`
-		} `json:"nodes"`
-	}
-	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
+	if !ok {
 		return ErrSlotUndeclared
 	}
-	for _, n := range doc.Nodes {
-		if n.ID != tok.NodeID {
-			continue
-		}
-		m := n.Modifiers
-		memo := m.Cache && strings.HasPrefix(key, memoSlotPrefix) && policy == OnLimitCoalesce && capacity == 1 && cost == 1
-		group := m.ConcGroup != "" && key == declaredSlotKey(m, tok.RunID) && policy == m.ConcOnLimit &&
-			capacity == m.ConcCapacity && cost == m.ConcCost
-		if memo || group {
-			return nil
-		}
+	m := n.Modifiers
+	memo := m.Cache && strings.HasPrefix(key, memoSlotPrefix) && policy == OnLimitCoalesce && capacity == 1 && cost == 1
+	group := m.ConcGroup != "" && key == declaredSlotKey(m, tok.RunID) && policy == m.ConcOnLimit &&
+		capacity == m.ConcCapacity && cost == m.ConcCost
+	if memo || group {
+		return nil
 	}
 	return ErrSlotUndeclared
+}
+
+type declaredPlanNode struct {
+	ID           string             `json:"id"`
+	Modifiers    submittedModifiers `json:"modifiers"`
+	PipelineRefs []PlanPipelineRef  `json:"pipeline_refs"`
+}
+
+// safety: a run with no stored plan, or a plan without the node, declares
+// nothing, so a claim on it reaches no slot or input.
+func (s *Store) declaredNode(ctx context.Context, team Team, runID, nodeID string) (declaredPlanNode, bool, error) {
+	var plan []byte
+	err := s.queryRow(ctx, `SELECT plan_json FROM runs WHERE team = ? AND id = ?`, string(team), runID).Scan(&plan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return declaredPlanNode{}, false, nil
+	}
+	if err != nil {
+		return declaredPlanNode{}, false, err
+	}
+	var doc struct {
+		Nodes []declaredPlanNode `json:"nodes"`
+	}
+	if len(plan) == 0 {
+		return declaredPlanNode{}, false, nil
+	}
+	if err := json.Unmarshal(plan, &doc); err != nil {
+		return declaredPlanNode{}, false, fmt.Errorf("read run %s's plan: %w", runID, err)
+	}
+	for _, n := range doc.Nodes {
+		if n.ID == nodeID {
+			return n, true, nil
+		}
+	}
+	return declaredPlanNode{}, false, nil
+}
+
+// PlanPipelineRef is one other pipeline's node a plan node declares it reads
+// the newest successful run of, as RefToLastRun does.
+type PlanPipelineRef struct {
+	Pipeline string `json:"pipeline"`
+	Node     string `json:"node"`
+}
+
+// ClaimInputKind names where a claimed node's input from another run comes
+// from.
+type ClaimInputKind string
+
+// The inputs a claimed node reads from another run.
+const (
+	ClaimInputCached    ClaimInputKind = "cached"
+	ClaimInputCoalesced ClaimInputKind = "coalesced"
+	ClaimInputLastRun   ClaimInputKind = "last_run"
+)
+
+// ClaimInputRequest names the reference a work claim's node reads through: its
+// memoized result by the cache key hash, for a cache hit or for the leader it
+// coalesced onto, or another pipeline's newest successful run by the pipeline
+// and node its plan declares. It never names the run it reads.
+type ClaimInputRequest struct {
+	Kind         ClaimInputKind `json:"kind"`
+	Key          string         `json:"key,omitempty"`
+	CacheKeyHash string         `json:"cache_key_hash,omitempty"`
+	Pipeline     string         `json:"pipeline,omitempty"`
+	Node         string         `json:"node,omitempty"`
+	MaxAgeMS     int64          `json:"max_age_ms,omitempty"`
+}
+
+// ClaimInput is the finished output a claim's input request resolved to and
+// the run and node it came from.
+type ClaimInput struct {
+	RunID      string     `json:"run_id"`
+	NodeID     string     `json:"node_id"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// Output grants a read of the node's output; an empty URL means it
+	// recorded none.
+	Output OutputReadGrant `json:"output"`
+}
+
+// ErrInputUndeclared refuses a claim an input its node's accepted plan does
+// not declare.
+var ErrInputUndeclared = errors.New("store: the run's accepted plan declares no such input for this node")
+
+// ResolveClaimInput resolves the output tok's node reads from another run of
+// its team. The store picks the source: for the node's declared memoization,
+// the leader its own coalesce waiter names or else the cache entry its leader
+// wrote; for a pipeline reference the node declares, that pipeline's newest
+// successful run. No other run is reachable through it.
+func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req ClaimInputRequest, now time.Time) (ClaimInput, error) {
+	n, ok, err := s.declaredNode(ctx, tok.Team, tok.RunID, tok.NodeID)
+	if err != nil {
+		return ClaimInput{}, err
+	}
+	if !ok {
+		return ClaimInput{}, ErrInputUndeclared
+	}
+	var runID, nodeID string
+	switch req.Kind {
+	case ClaimInputCached, ClaimInputCoalesced:
+		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != memoSlotPrefix+req.CacheKeyHash {
+			return ClaimInput{}, ErrInputUndeclared
+		}
+		found := false
+		if req.Kind == ClaimInputCoalesced {
+			// safety: the leader comes from this node's own waiter row, never
+			// from the claim; once the leader's release drains the row, the
+			// cache entry it wrote in the same transaction names it instead.
+			err := s.queryRow(ctx, `SELECT leader_run_id, leader_node_id FROM concurrency_waiters
+ WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND policy = ?`,
+				string(tok.Team), req.Key, tok.RunID, tok.NodeID, OnLimitCoalesce).Scan(&runID, &nodeID)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return ClaimInput{}, err
+			}
+			found = err == nil && runID != ""
+		}
+		if !found {
+			var expires int64
+			err := s.queryRow(ctx, `SELECT origin_run_id, origin_node_id, expires_at FROM concurrency_cache
+ WHERE team = ? AND key = ? AND cache_key_hash = ?`, string(tok.Team), req.Key, req.CacheKeyHash).Scan(&runID, &nodeID, &expires)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && expires <= now.UnixNano()) {
+				return ClaimInput{}, notFound("cache entry", req.Key)
+			}
+			if err != nil {
+				return ClaimInput{}, err
+			}
+		}
+	case ClaimInputLastRun:
+		if !slices.Contains(n.PipelineRefs, PlanPipelineRef{Pipeline: req.Pipeline, Node: req.Node}) {
+			return ClaimInput{}, ErrInputUndeclared
+		}
+		run, err := s.getLatestRun(ctx, oneTeam(tok.Team), req.Pipeline, []string{"success"},
+			time.Duration(max(req.MaxAgeMS, 0))*time.Millisecond)
+		if err != nil {
+			return ClaimInput{}, err
+		}
+		runID, nodeID = run.ID, req.Node
+	default:
+		return ClaimInput{}, fmt.Errorf("%w: input kind %q is not cached, coalesced or last_run", ErrInvalidInput, req.Kind)
+	}
+	in := ClaimInput{RunID: runID, NodeID: nodeID}
+	var status, outcome string
+	var finished sql.NullInt64
+	err = s.queryRow(ctx, `SELECT status, outcome, finished_at FROM nodes
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(tok.Team), runID, nodeID).Scan(&status, &outcome, &finished)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ClaimInput{}, notFound("node", runID+"/"+nodeID)
+	}
+	if err != nil {
+		return ClaimInput{}, err
+	}
+	if status != "done" || (req.Kind != ClaimInputLastRun && outcome != "success") {
+		return ClaimInput{}, notFound("finished output", runID+"/"+nodeID)
+	}
+	if finished.Valid && finished.Int64 > 0 {
+		t := time.Unix(0, finished.Int64)
+		in.FinishedAt = &t
+	}
+	return in, nil
 }
 
 const memoSlotPrefix = "memo:"

@@ -396,28 +396,6 @@ func ReadOutputFile(dir string, ref OutputRef) ([]byte, error) {
 	return data, nil
 }
 
-// CoalesceLeader names the leader a coalescing waiter follows under key.
-func (s *Store) CoalesceLeader(ctx context.Context, team Team, key, runID, nodeID string) (leaderRun, leaderNode string, err error) {
-	err = s.queryRow(ctx, `SELECT leader_run_id, leader_node_id FROM concurrency_waiters
- WHERE team = ? AND key = ? AND run_id = ? AND node_id = ? AND policy = ?`,
-		string(team), key, runID, nodeID, string(OnLimitCoalesce)).Scan(&leaderRun, &leaderNode)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", ErrNotFound
-	}
-	return leaderRun, leaderNode, err
-}
-
-// CacheOrigin names the node whose output a live cache entry holds.
-func (s *Store) CacheOrigin(ctx context.Context, team Team, key, cacheKeyHash string, now time.Time) (originRun, originNode string, err error) {
-	err = s.queryRow(ctx, `SELECT origin_run_id, origin_node_id FROM concurrency_cache
- WHERE team = ? AND key = ? AND cache_key_hash = ? AND expires_at > ?`,
-		string(team), key, cacheKeyHash, now.UnixNano()).Scan(&originRun, &originNode)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", ErrNotFound
-	}
-	return originRun, originNode, err
-}
-
 // OutputUploadGrant tells a node where to PUT exactly its declared output
 // bytes before it commits the upload and names Key in its report.
 type OutputUploadGrant struct {

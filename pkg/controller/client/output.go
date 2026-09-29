@@ -19,36 +19,6 @@ import (
 // perf: an output is at most 64 MiB, which a slow link can take minutes to move.
 const outputTransferTimeout = 10 * time.Minute
 
-// OutputSource names where a node's output is read from outside its own
-// run; the controller picks the row itself from the caller's node.
-type OutputSource struct {
-	// Kind is "coalesce", "cache" or "pipeline-ref".
-	Kind string
-	// Key is the concurrency key, for coalesce and cache.
-	Key string
-	// Hash is the cache key hash, for cache.
-	Hash string
-	// Pipeline, Node and MaxAge name a cross-pipeline ref.
-	Pipeline, Node string
-	MaxAge         time.Duration
-}
-
-func (s OutputSource) query() url.Values {
-	q := url.Values{"source": {s.Kind}}
-	switch s.Kind {
-	case "coalesce":
-		q.Set("key", s.Key)
-	case "cache":
-		q.Set("key", s.Key)
-		q.Set("hash", s.Hash)
-	case "pipeline-ref":
-		q.Set("pipeline", s.Pipeline)
-		q.Set("node", s.Node)
-		q.Set("max_age_seconds", fmt.Sprint(int64(s.MaxAge/time.Second)))
-	}
-	return q
-}
-
 // UploadNodeOutput stores a node's output bytes as a committed object and
 // returns the ref its finish or attempt report names.
 func (c *Client) UploadNodeOutput(ctx context.Context, runID, nodeID string, data []byte) (*store.OutputRef, error) {
@@ -99,17 +69,6 @@ func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byt
 // started, through the calling claim.
 func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error) {
 	return c.readOutput(ctx, c.baseURL+childPath(runID, childID)+"/nodes/"+url.PathEscape(nodeID)+"/output")
-}
-
-// GetResolvedOutput reads the output the controller resolves for the
-// caller's node from src, and reports the run it came from.
-func (c *Client) GetResolvedOutput(ctx context.Context, runID, nodeID string, src OutputSource) ([]byte, string, error) {
-	grant, err := c.outputGrant(ctx, c.baseURL+claimNodePath(runID, nodeID, "resolved-output")+"?"+src.query().Encode())
-	if err != nil {
-		return nil, "", err
-	}
-	data, err := c.fetchOutput(ctx, grant)
-	return data, grant.SourceRunID, err
 }
 
 func (c *Client) readOutput(ctx context.Context, u string) ([]byte, error) {

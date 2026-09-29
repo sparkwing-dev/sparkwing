@@ -157,6 +157,39 @@ func (s *Server) handleGetChildNodeOutput(w http.ResponseWriter, r *http.Request
 	s.handleGetNodeOutput(w, r)
 }
 
+// safety: a work claim reads another run's output only through a reference
+// its plan declares, resolved here, so it never names the run it reads; a
+// refused reference is recorded with the claim that asked.
+func (s *Server) handleClaimInput(w http.ResponseWriter, r *http.Request) {
+	tok, _ := claimTokenFromContext(r.Context())
+	var req store.ClaimInputRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	in, err := s.store.ResolveClaimInput(r.Context(), tok, req, time.Now())
+	switch {
+	case err == nil:
+		grant, ok := s.outputGrant(w, r, tok.Team, in.RunID, in.NodeID)
+		if !ok {
+			return
+		}
+		in.Output = grant
+		writeJSON(w, http.StatusOK, in)
+	case errors.Is(err, store.ErrInputUndeclared):
+		s.logger.WarnContext(r.Context(), "audit", append(requestLogAttrs(r), "event", "input_undeclared",
+			"principal_kind", "claim", "principal_id", tok.Prefix, "team", string(tok.Team),
+			"run_id", tok.RunID, "node_id", tok.NodeID, "input_kind", string(req.Kind))...)
+		writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "input_undeclared", Message: err.Error()})
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, store.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err)
+	default:
+		s.writeInternalError(w, r, "claim input", err)
+	}
+}
+
 const maxLauncherSyncJobs = 1000
 
 type launcherSyncReq struct {

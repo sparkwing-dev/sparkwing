@@ -146,6 +146,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `claim` or `logs.write` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
@@ -167,7 +168,6 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-commit` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/output-upload` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/resolved-output` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |

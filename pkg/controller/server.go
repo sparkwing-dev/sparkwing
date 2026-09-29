@@ -921,7 +921,6 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleUpdateNodeDeps))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNode)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNode)))))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleGetNodeOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleGetNodeOutput)))))
-	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/resolved-output", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleResolvedOutput)).orElse(requireScope(ScopeNodesClaim, s.readableRun(http.HandlerFunc(s.handleResolvedOutput)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputUpload)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputUpload)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(s.handleOutputCommit)).orElse(requireScope(ScopeRunsState, s.claimedBy(http.HandlerFunc(s.handleOutputCommit)))))
 	mux.Handle("POST /api/v1/runs/{id}/children", newClaimSensitiveRoute(claimWorkKinds, nil, http.HandlerFunc(s.handleEnqueueChildRun)))
@@ -1044,6 +1043,7 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim", requireScope(ScopeNodesClaim, s.claimBudgeted(http.HandlerFunc(s.handleClaimNamedNode))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-start", newClaimReportingRoute(claimSourceKinds, http.HandlerFunc(s.handleClaimExecutionStart)).orElse(requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleAcknowledgeNodeExecutionStart)))))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/execution-finish", requireScope(ScopeNodesClaim, s.claimedBy(http.HandlerFunc(s.handleFinishNodeExecutionAttempt))))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input", newClaimSensitiveRoute(claimWorkKinds, pathClaimBinding, http.HandlerFunc(s.handleClaimInput)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/claim/validate", newClaimReportingRoute(claimWorkKinds, http.HandlerFunc(handleValidateClaimLog)).orElse(requireScope(ScopeLogsWrite, http.HandlerFunc(s.handleValidateNodeLogClaim))))
 	mux.Handle("POST /api/v1/runs/{id}/heartbeat", requireScope(ScopeNodesClaim, s.claimedRunHeartbeat(http.HandlerFunc(s.handleTouchRunHeartbeat))))
 

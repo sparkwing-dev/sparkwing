@@ -96,6 +96,7 @@ const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
 const EgressStreamLimitCode = "egress_stream_limit"
 func EnsureBootstrapAdminToken(st *store.Store, raw string, now time.Time) (bool, error)
+const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 type FloodPolicy struct {
 	RunsPerPrincipalHour int
 

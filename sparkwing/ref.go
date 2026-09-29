@@ -289,6 +289,10 @@ func MaxAge(d time.Duration) RefOption {
 //
 // A pipeline's first run has no prior successful run to read, so read
 // the ref with TryGet unless a missing prior run should crash the step.
+//
+// A node the controller dispatches reads only the refs its job struct
+// holds as fields, which its plan declares; a ref built in a step body
+// is refused there.
 func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 	o := refOpts{}
 	for _, opt := range opts {
@@ -305,6 +309,11 @@ func jsonResolverFromContext(ctx context.Context) func(nodeID string) ([]byte, b
 	f, _ := ctx.Value(keyJSONRefResolver).(func(string) ([]byte, bool))
 	return f
 }
+
+// PipelineRefs returns the other pipelines' nodes this node's job holds a
+// RefToLastRun field for, in field order. A controller-dispatched node reads
+// only these, so a ref built elsewhere than a job field is refused there.
+func (n *JobNode) PipelineRefs() []RefTarget { return collectCrossPipelineRefs(n.job) }
 
 func collectCrossPipelineRefs(job any) []RefTarget {
 	t := reflect.TypeOf(job)

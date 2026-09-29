@@ -15,7 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/sparkwing-dev/sparkwing/internal/secretname"
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 const (

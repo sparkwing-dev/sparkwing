@@ -452,89 +452,40 @@ func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeOutputGrant(w http.ResponseWriter, r *http.Request, team store.Team, runID, nodeID string) {
+	grant, ok := s.outputGrant(w, r, team, runID, nodeID)
+	if ok {
+		writeJSON(w, http.StatusOK, grant)
+	}
+}
+
+// safety: a node whose output row is gone, because it recorded none or its
+// run passed retention, reads as no output rather than an error.
+func (s *Server) outputGrant(w http.ResponseWriter, r *http.Request, team store.Team, runID, nodeID string) (store.OutputReadGrant, bool) {
 	obj, err := s.store.NodeOutputObject(r.Context(), team, runID, nodeID)
 	if errors.Is(err, store.ErrNotFound) {
-		writeJSON(w, http.StatusOK, store.OutputReadGrant{SourceRunID: runID})
-		return
+		return store.OutputReadGrant{SourceRunID: runID}, true
 	}
 	if err != nil {
 		s.writeInternalError(w, r, "read node output", err)
-		return
+		return store.OutputReadGrant{}, false
 	}
 	outputs := s.outputs()
 	if outputs == nil {
 		writeError(w, http.StatusServiceUnavailable, errOutputsUnavailable)
-		return
+		return store.OutputReadGrant{}, false
 	}
 	signed, expires, err := outputs.resolve(r, obj)
 	if errors.Is(err, errSigningUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, err)
-		return
+		return store.OutputReadGrant{}, false
 	}
 	if err != nil {
 		s.writeInternalError(w, r, "sign node output", err)
-		return
+		return store.OutputReadGrant{}, false
 	}
-	writeJSON(w, http.StatusOK, store.OutputReadGrant{
+	return store.OutputReadGrant{
 		URL: signed, SHA256: obj.SHA256, Size: obj.Size, Expires: expires, SourceRunID: runID,
-	})
-}
-
-// Output sources a node reads from outside its own run. The controller
-// picks the source row itself, so the caller never names another run.
-const (
-	OutputSourceCoalesce    = "coalesce"
-	OutputSourceCache       = "cache"
-	OutputSourcePipelineRef = "pipeline-ref"
-)
-
-// safety: every source is resolved inside the caller's team, and a claim
-// asks only for its own node.
-func (s *Server) handleResolvedOutput(w http.ResponseWriter, r *http.Request) {
-	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-	if tok, ok := claimTokenFromContext(r.Context()); ok && nodeID != tok.NodeID {
-		writeAuthError(w, http.StatusForbidden, authErrorBody{
-			Code: "claim_mismatch", Message: "this claim token is bound to another node",
-		})
-		return
-	}
-	tn, err := s.tenantFor(r)
-	if err != nil {
-		writeError(w, http.StatusNotFound, runNotFound(runID))
-		return
-	}
-	team := tn.Team()
-	q := r.URL.Query()
-	var srcRun, srcNode string
-	switch q.Get("source") {
-	case OutputSourceCoalesce:
-		srcRun, srcNode, err = s.store.CoalesceLeader(r.Context(), team, q.Get("key"), runID, nodeID)
-	case OutputSourceCache:
-		srcRun, srcNode, err = s.store.CacheOrigin(r.Context(), team, q.Get("key"), q.Get("hash"), time.Now())
-	case OutputSourcePipelineRef:
-		maxAge, perr := strconv.ParseInt(q.Get("max_age_seconds"), 10, 64)
-		if perr != nil || maxAge < 0 || q.Get("pipeline") == "" || q.Get("node") == "" {
-			writeError(w, http.StatusBadRequest, errors.New("pipeline-ref needs pipeline, node and max_age_seconds"))
-			return
-		}
-		var run *store.Run
-		run, err = tn.GetLatestRun(r.Context(), q.Get("pipeline"), []string{"success"}, time.Duration(maxAge)*time.Second)
-		if err == nil {
-			srcRun, srcNode = run.ID, q.Get("node")
-		}
-	default:
-		writeError(w, http.StatusBadRequest, errors.New("source must be coalesce, cache or pipeline-ref"))
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-	if err != nil {
-		s.writeInternalError(w, r, "resolve output source", err)
-		return
-	}
-	s.writeOutputGrant(w, r, team, srcRun, srcNode)
+	}, true
 }
 
 // perf: one pass deletes at most this many runs, so a backlog drains over

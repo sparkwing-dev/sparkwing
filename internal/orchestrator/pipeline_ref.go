@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -30,37 +29,21 @@ func newPipelineRefResolver(
 	warnAudit func(ctx context.Context, node string, err error),
 ) sparkwing.PipelineResolverFunc {
 	return sparkwing.PipelineResolverFunc(func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-		currentNode := sparkwing.NodeFromContext(ctx)
-		var sourceRun string
-		var sourceFinished *time.Time
-		var output []byte
-		if resolved, ok := state.(resolvedOutputReader); ok && currentNode != "" {
-			data, runID, err := resolved.GetResolvedOutput(ctx, consumerRunID, currentNode, client.OutputSource{
-				Kind: "pipeline-ref", Pipeline: pipeline, Node: nodeID, MaxAge: maxAge,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("no matching output for pipeline %q node %q (maxAge=%s): %w",
-					pipeline, nodeID, maxAge, absentIfNotFound(err))
-			}
-			sourceRun, output = runID, data
-		} else {
-			run, err := state.GetLatestRun(ctx, pipeline, []string{"success"}, maxAge)
-			if err != nil {
-				return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, absentIfNotFound(err))
-			}
-			output, err = state.GetNodeOutput(ctx, run.ID, nodeID)
-			if err != nil {
-				return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, nodeID, absentIfNotFound(err))
-			}
-			sourceRun, sourceFinished = run.ID, run.FinishedAt
+		run, err := state.GetLatestRun(ctx, pipeline, []string{"success"}, maxAge)
+		if err != nil {
+			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, absentIfNotFound(err))
 		}
-		if currentNode != "" {
+		output, err := state.GetNodeOutput(ctx, run.ID, nodeID)
+		if err != nil {
+			return nil, fmt.Errorf("get node %s/%s output: %w", run.ID, nodeID, absentIfNotFound(err))
+		}
+		if currentNode := sparkwing.NodeFromContext(ctx); currentNode != "" {
 			payload, mErr := json.Marshal(map[string]any{
 				"pipeline":        pipeline,
 				"node_id":         nodeID,
-				"source_run_id":   sourceRun,
+				"source_run_id":   run.ID,
 				"max_age_seconds": int64(maxAge.Seconds()),
-				"source_finished": sourceFinished,
+				"source_finished": run.FinishedAt,
 			})
 			if mErr != nil {
 				warnAudit(ctx, currentNode, fmt.Errorf("marshal payload: %w", mErr))
@@ -69,7 +52,7 @@ func newPipelineRefResolver(
 				warnAudit(ctx, currentNode, evErr)
 			}
 		}
-		return &sparkwing.ResolvedPipelineRef{RunID: sourceRun, Data: output}, nil
+		return &sparkwing.ResolvedPipelineRef{RunID: run.ID, Data: output}, nil
 	})
 }
 

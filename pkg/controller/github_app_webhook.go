@@ -265,6 +265,7 @@ func githubAppIntakeFor(event string, env githubAppDelivery, body []byte) (githu
 		"GITHUB_EVENT_NAME":      event,
 		"GITHUB_ACTION":          env.Action,
 		envGitHubAppInstallation: strconv.FormatInt(env.Installation.ID, 10),
+		EnvDefaultBranch:         env.Repository.DefaultBranch,
 	}
 	if event == "push" {
 		var p githubAppPushPayload

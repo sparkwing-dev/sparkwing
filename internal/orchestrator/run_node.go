@@ -225,11 +225,15 @@ func RunNodeOnce(
 		ctx = sparkwingruntime.WithPipelineSecrets(ctx, sec)
 	}
 
-	ctx = sparkwingruntime.WithPipelineResolver(ctx, newPipelineRefResolver(stateClient, runID,
+	var pipelineRefs sparkwing.PipelineResolver = newPipelineRefResolver(stateClient, runID,
 		func(_ context.Context, node string, err error) {
 			logger.Warn("pipeline_ref audit event append failed",
 				"run_id", runID, "node", node, "err", err)
-		}))
+		})
+	if cfg.claim != nil {
+		pipelineRefs = cfg.claim.pipelineRefResolver()
+	}
+	ctx = sparkwingruntime.WithPipelineResolver(ctx, pipelineRefs)
 
 	childDiagnostics := podChildAwaitDiagnostics{logger: logger}
 	childAwait := childAwaitConfig{

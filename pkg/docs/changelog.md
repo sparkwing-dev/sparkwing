@@ -71,7 +71,20 @@ unlock.
   ID, and only with the key, policy, capacity and cost its accepted plan
   declares for the node; a slot's lease never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
-  not. On this path a node cannot start a child of another repository, and
+  not. A claim token's binary cache is scoped to its run's git ref, as
+  GitHub Actions scopes caches: it writes under its own ref and reads its
+  own, then its pull request's base branch, then the default branch, which
+  GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
+  first binary committed for an input and refuses a second, and a claim whose
+  run names no ref writes no cache. Other callers never read a claim's
+  binaries. Schema v87 adds `uploads.ref` and `data_objects.ref`. A work node reads another run's output only through
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
+  itself: the cache entry of the node's memoization, the leader its own
+  coalesce waiter names, or the newest successful run of a pipeline and node
+  its plan declares in the new per-node `pipeline_refs` field, which the SDK
+  fills from the `RefToLastRun` fields a job struct holds; an undeclared
+  reference is refused and audited, and a ref built in a step body is refused
+  on this path. On this path a node cannot start a child of another repository, and
   its OIDC token request is answered `422` naming the gap until Sparkwing
   Cloud OIDC is enabled for it.
 
@@ -961,9 +974,9 @@ unlock.
   the bytes must match. An output is at most 64 MiB, one run's outputs at most
   1 GiB, both counted toward the team's cache share, and outputs expire 30
   days after their run finishes, except each pipeline's newest successful
-  run. A claim token reads only its own node's transitive dependencies, and a
-  coalesce follower, a cache hit and a cross-pipeline ref read through
-  `resolved-output`. `sparkwing-controller migrate-outputs` moves stored
+  run. A claim token reads only its own node's transitive dependencies, and
+  `claim/input` answers a read grant instead of the bytes.
+  `sparkwing-controller migrate-outputs` moves stored
   outputs before the upgrade, and a laptop database moves its own on first
   open. See the
   [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).

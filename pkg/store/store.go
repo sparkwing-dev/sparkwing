@@ -2138,9 +2138,11 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, false)
-	// hack: v87 and v88 belong to migrations landing on other branches, and the
+	case 87:
+		return applyCacheRefMigration(ctx, tx, false)
+	// hack: v88 belongs to a migration landing on another branch, and the
 	// version loop needs every number.
-	case 87, 88:
+	case 88:
 		return nil
 	case 89:
 		return applyNodeOutputMigration(ctx, tx)
@@ -2597,9 +2599,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, true)
-	// hack: v87 and v88 belong to migrations landing on other branches, and the
+	case 87:
+		return applyCacheRefMigration(ctx, tx, true)
+	// hack: v88 belongs to a migration landing on another branch, and the
 	// version loop needs every number.
-	case 87, 88:
+	case 88:
 		return nil
 	case 89:
 		return applyNodeOutputMigration(ctx, tx)

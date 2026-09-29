@@ -254,6 +254,27 @@ type CacheKeyFn func(ctx context.Context) (CacheKey, error)
 ```
 
 
+### type Checkout
+
+Checkout is what a run's nodes ask of the source checkout a Sparkwing Cloud Job prepares before any pipeline code runs.
+
+```
+type Checkout struct {
+    // Depth is how many commits of history to fetch; zero fetches one.
+    Depth int
+    // FullHistory fetches every commit and overrides Depth.
+    FullHistory bool
+    // Tags fetches the repository's tags.
+    Tags bool
+    // Submodules checks out submodules, which must live in repositories the
+    // team's owner approved for the GitHub App.
+    Submodules bool
+    // LFS fetches Git LFS objects in place of their pointers.
+    LFS bool
+}
+```
+
+
 ### type Cmd
 
 Cmd is the chainable command builder returned by Bash and Exec.
@@ -826,6 +847,7 @@ type JobNode struct {
 - `func (n *JobNode) OutputGlobs() []string` -- OutputGlobs returns the artifact output globs declared via Outputs (the union across calls), or nil if the node declared none.
 - `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
 - `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
+- `func (n *JobNode) PipelineRefs() []RefTarget` -- PipelineRefs returns the other pipelines' nodes this node's job holds a RefToLastRun field for, in field order.
 - `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers boosts enrolled-executor offers within their priority ceiling when runner labels match.
 - `func (n *JobNode) PrefersLabels() []string`
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires records label terms used to filter runner claims for non-inline dispatched jobs.
@@ -1098,6 +1120,8 @@ type Plan struct {
 - `func NewPlan() *Plan`
 - `func (p *Plan) AdmissionClass(class AdmissionClass) *Plan` -- AdmissionClass sets the pipeline's local contention class.
 - `func (p *Plan) AdmissionClassValue() AdmissionClass` -- AdmissionClassValue returns the plan's explicit local contention class.
+- `func (p *Plan) Checkout(c Checkout) *Plan` -- Checkout sets the source checkout every node of a controller-dispatched Cloud run gets.
+- `func (p *Plan) CheckoutValue() *Checkout` -- CheckoutValue returns what Checkout set, or nil for the default.
 - `func (p *Plan) ClaimWait(d time.Duration) *Plan` -- ClaimWait bounds how long each of the run's ready nodes waits for an agent to claim it before the controller fails it as unclaimable.
 - `func (p *Plan) ClaimWaitValue() time.Duration` -- ClaimWaitValue returns the wait ClaimWait set, or zero for the default.
 - `func (p *Plan) Concurrency(g *ConcurrencyGroup, cost ...int) *Plan` -- Concurrency gates the whole run on concurrency group g: the run acquires each declared plan-level budget before any node dispatches and releases it when the run reaches a terminal status.

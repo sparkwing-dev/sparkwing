@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func (s *Server) handleDirectCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +84,48 @@ type directCaller struct {
 	principal      string
 	claimPrefix    string
 	provenance     string
+	ref            string
 	pendingTrigger bool
+}
+
+// EnvDefaultBranch carries, on a GitHub App trigger, the repository's default
+// branch, which a claim's cache reads fall back to.
+const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
+
+// safety: as GitHub Actions scopes caches, a claim writes under its run's ref
+// and reads its own, its pull request's base, then the default branch, so one
+// branch's binary never reaches another's runs; other callers use only the
+// unscoped objects, which no claim reads.
+func (s *Server) cacheRefs(ctx context.Context, grant authwire.CacheGrant) (string, []string, error) {
+	if grant.Claim == nil || grant.Claim.Kind != authwire.CacheClaimToken {
+		return "", []string{""}, nil
+	}
+	trigger, err := s.store.GetTrigger(ctx, grant.Run)
+	if err != nil {
+		return "", nil, err
+	}
+	if trigger.Team != store.Team(grant.Team) {
+		return "", nil, errors.New("the cache grant's run belongs to another team")
+	}
+	env := trigger.TriggerEnv
+	own := env["GITHUB_REF"]
+	if own == "" && trigger.GitBranch != "" {
+		own = "refs/heads/" + trigger.GitBranch
+	}
+	refs := []string{}
+	for _, ref := range []string{own, branchRef(env[sparkwing.EnvPRBaseRef]), branchRef(env[EnvDefaultBranch])} {
+		if ref != "" && !slices.Contains(refs, ref) {
+			refs = append(refs, ref)
+		}
+	}
+	return own, refs, nil
+}
+
+func branchRef(branch string) string {
+	if branch == "" {
+		return ""
+	}
+	return "refs/heads/" + branch
 }
 
 // safety: A signing grant must name an exact live claim so pooled token reuse cannot revive an old claimant.
@@ -126,9 +169,18 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if metered || grant.Claim.Kind == authwire.CacheClaimToken {
 		provenance = "cloud"
 	}
+	ref, _, err := s.cacheRefs(r.Context(), grant)
+	if err != nil {
+		writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no ref"))
+		return directCaller{}, false
+	}
+	if grant.Claim.Kind == authwire.CacheClaimToken && ref == "" {
+		writeError(w, http.StatusForbidden, errors.New("a claim's run names no git ref to write cache under"))
+		return directCaller{}, false
+	}
 	return directCaller{
 		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
-		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, pendingTrigger: pendingTrigger,
+		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, ref: ref, pendingTrigger: pendingTrigger,
 	}, true
 }
 
@@ -239,6 +291,7 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	u, err := s.store.ReserveUpload(r.Context(), store.UploadRequest{
 		Team: caller.team, RunID: caller.runID, Kind: store.StorageCache, Key: req.Key, Size: req.Size,
 		SHA256: req.SHA256, Principal: caller.principal, ClaimPrefix: caller.claimPrefix, Provenance: caller.provenance,
+		Ref: caller.ref,
 	})
 	if err != nil {
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {

@@ -113,9 +113,9 @@ storage refusal as the reason.
 A reader gets a one-minute URL and the SHA-256 the bytes must match. A
 claim token reads only the outputs of its own node's transitive dependencies
 in its own run, and the outputs of child runs it started. A coalesce
-follower, a cache hit and a cross-pipeline ref ask
-`GET /api/v1/runs/{id}/nodes/{nodeID}/resolved-output`, and the controller
-picks the source itself. An output whose run passed retention reads as
+follower, a cache hit and a cross-pipeline ref its plan declares ask
+`POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the source
+run itself and answers with the same kind of grant. An output whose run passed retention reads as
 absent: a cross-pipeline ref reports no value, and a cache entry that pointed
 at it is dropped, so the next run misses the cache and runs the node.
 

@@ -1,3 +1,5 @@
+// Package secretname holds the secret name grammar that secret storage,
+// sealed execution policies and accepted plans share.
 package secretname
 
 import (

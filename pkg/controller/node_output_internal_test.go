@@ -169,41 +169,6 @@ func TestOutputURLs_RefuseATamperedSignature(t *testing.T) {
 	}
 }
 
-func TestResolvedOutput_PicksTheSourceForTheCallersOwnNode(t *testing.T) {
-	f := newDispatchRouteFixture(t)
-	ctx := context.Background()
-	now := time.Now()
-	if err := f.st.CreateRun(ctx, store.Run{ID: "run-lib", Pipeline: "lib", Status: "running", StartedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.st.CreateNode(ctx, store.Node{RunID: "run-lib", NodeID: "build", Status: "running"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.st.FinishNode(ctx, "run-lib", "build", "success", "", []byte(`{"lib":1}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.st.FinishRun(ctx, "run-lib", "success", ""); err != nil {
-		t.Fatal(err)
-	}
-	plan := f.claim(t, store.PlanNodeID, store.ClaimTokenPlan)
-	wantPost(t, f, planPath, plan, `{"nodes":[{"id":"a","deps":[],`+dispatchHash+`},{"id":"c","deps":[],`+dispatchHash+`}]}`,
-		http.StatusOK, "accepted")
-	a := f.claim(t, "a", store.ClaimTokenWork)
-	ref := "?source=pipeline-ref&pipeline=lib&node=build&max_age_seconds=0"
-	if code, data := f.readOutput(t, "/api/v1/runs/run-d/nodes/a/resolved-output"+ref, a); code != http.StatusOK || string(data) != `{"lib":1}` {
-		t.Fatalf("a's cross-pipeline ref: %d %s", code, data)
-	}
-	if code, raw := f.do(t, http.MethodGet, "/api/v1/runs/run-d/nodes/c/resolved-output"+ref, a, nil); code != http.StatusForbidden {
-		t.Fatalf("a resolving for node c: %d %s", code, raw)
-	}
-	if code, raw := f.do(t, http.MethodGet, "/api/v1/runs/run-d/nodes/a/resolved-output?source=run&run=run-lib", a, nil); code != http.StatusBadRequest {
-		t.Fatalf("a naming a run itself: %d %s", code, raw)
-	}
-	if code, raw := f.do(t, http.MethodGet, "/api/v1/runs/run-d/nodes/a/resolved-output?source=pipeline-ref&pipeline=none&node=x&max_age_seconds=0", a, nil); code != http.StatusNotFound {
-		t.Fatalf("a ref to a pipeline with no run: %d %s", code, raw)
-	}
-}
-
 func TestFinishRoute_RefusesInlineOutputBytes(t *testing.T) {
 	f := newDispatchRouteFixture(t)
 	admin := f.admin(t)
