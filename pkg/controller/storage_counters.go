@@ -152,6 +152,8 @@ func (s *Server) handleStorageCommit(w http.ResponseWriter, r *http.Request) {
 	if req.NextBytes <= 0 {
 		err := s.store.CommitStorage(r.Context(), commit)
 		switch {
+		case errors.Is(err, store.ErrFreeStoragePaused):
+			writeError(w, http.StatusPaymentRequired, err)
 		case errors.Is(err, store.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, err)
 		case err != nil:

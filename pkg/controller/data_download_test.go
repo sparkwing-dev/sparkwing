@@ -404,9 +404,12 @@ func TestDataDownloadSignsOnlyGrantsTeamAndChargesAtSigning(t *testing.T) {
 	if body.Size != 4 || body.SHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("body=%+v", body)
 	}
-	second, _ := callDownload(t, s, grant, "bins/abc", false)
-	if second.Code != http.StatusTooManyRequests || second.Header().Get("Retry-After") == "" {
-		t.Fatalf("second=%d: %s", second.Code, second.Body.String())
+	if second, _ := callDownload(t, s, grant, "bins/abc", false); second.Code != http.StatusOK {
+		t.Fatalf("a download with 1 byte of the cap left = %d, want it signed and charged whole", second.Code)
+	}
+	third, _ := callDownload(t, s, grant, "bins/abc", false)
+	if third.Code != http.StatusTooManyRequests || third.Header().Get("Retry-After") == "" {
+		t.Fatalf("a download past the cap = %d: %s", third.Code, third.Body.String())
 	}
 }
 
@@ -429,9 +432,9 @@ func TestCommittedBinaryDownloadUsesTheSameDailyCap(t *testing.T) {
 	if first.Code != http.StatusOK || !strings.Contains(signed.URL, "/local/bin/"+input) {
 		t.Fatalf("first committed download = %d %+v", first.Code, signed)
 	}
-	second, _ := callDownload(t, s, grant, "bin/"+input, false)
-	if second.Code != http.StatusTooManyRequests {
-		t.Fatalf("second committed download = %d, want 429", second.Code)
+	callDownload(t, s, grant, "bin/"+input, false)
+	if third, _ := callDownload(t, s, grant, "bin/"+input, false); third.Code != http.StatusTooManyRequests {
+		t.Fatalf("a committed download past the cap = %d, want 429", third.Code)
 	}
 }
 
@@ -474,9 +477,13 @@ func TestStaleGrantCannotReserveOrCommitAfterSameTokenReclaimsRun(t *testing.T) 
 
 func TestDataDownloadIngressGetsExactExpiringCloudFrontPolicy(t *testing.T) {
 	s, grant, _ := downloadFixture(t)
+	signedBy := time.Now().Add(time.Minute).Unix()
 	rec, body := callDownload(t, s, grant, "bins/abc", true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d: %s", rec.Code, rec.Body.String())
+	}
+	if body.Expires.Unix() > signedBy+1 {
+		t.Fatalf("the CloudFront URL expires at %s, more than 60 seconds after it was minted", body.Expires)
 	}
 	u, err := url.Parse(body.URL)
 	if err != nil || u.Host != "cdn.example.test" || u.Query().Get("Key-Pair-Id") != "KPAIR" {
@@ -737,5 +744,34 @@ func TestS3OnlySignerAnnouncesOnlyInCluster(t *testing.T) {
 		if body.DataDownloadURL != tc.want {
 			t.Fatalf("ingress=%v route=%q want %q", tc.ingress, body.DataDownloadURL, tc.want)
 		}
+	}
+}
+
+// Log reads are never counted against the download cap: a team already at
+// its cap is refused a binary URL yet still gets log URLs, which add nothing.
+func TestATeamAtItsDownloadCapCanStillSignLogURLs(t *testing.T) {
+	s, grant, _ := logDownloadFixture(t)
+	team, err := s.store.ForTeam(t.Context(), "team-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, _, err := team.CreateToken(t.Context(), "logs-reader", store.TokenKindUser, []string{ScopeLogsRead}, time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 5, Now: time.Now(), FreeCapBytes: 5, FundedCapBytes: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if capped, _ := callDownload(t, s, grant, "bins/abc", false); capped.Code != http.StatusTooManyRequests {
+		t.Fatalf("a binary URL at the cap = %d, want 429", capped.Code)
+	}
+	for i := range 3 {
+		if got := callLogDownload(t, s, reader); got.Code != http.StatusOK {
+			t.Fatalf("log URL %d at the cap = %d: %s", i, got.Code, got.Body.String())
+		}
+	}
+	day, err := s.store.ChargeDownload(t.Context(), store.DownloadCharge{Team: "team-a", Bytes: 0, Now: time.Now(), FreeCapBytes: 0, FundedCapBytes: 0})
+	if err != nil || day.DayBytes != 5 {
+		t.Fatalf("the team's day after log reads = %+v, %v; want the 5 bytes charged before them", day, err)
 	}
 }

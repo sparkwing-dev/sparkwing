@@ -68,22 +68,18 @@ func TestTheProxyCapEvictsTheLeastRecentlyServedEntries(t *testing.T) {
 }
 
 // The registry proxy is cluster-internal and answers runner pods that carry
-// no credential, so it takes none; the daily egress cap is what bounds a
-// caller churning it, and past the cap the proxy refuses like every other
-// metered download.
-func TestTheRegistryProxyIsOpenAndBoundedByTheEgressCap(t *testing.T) {
-	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyCapBytes: 200})
-	if got := get(t, srv, "/proxy/no-such-registry/pkg", ""); got.status != http.StatusBadRequest {
-		t.Fatalf("an anonymous proxy request under the cap = %d, want the handler's 400", got.status)
-	}
+// no credential, so it takes none; past the daily egress alarm it answers
+// like every other download, because the alarm refuses nothing.
+func TestTheRegistryProxyIsOpenPastTheEgressAlarm(t *testing.T) {
+	srv := newBudgetedServer(t, "s3cret", egress.Config{GlobalDailyAlarmBytes: 150})
 	seedArtifact(t, "job1", "out.tar", 100)
 	for range 2 {
 		if got := get(t, srv, artifactDownloadPath, "s3cret"); got.status != http.StatusOK {
-			t.Fatalf("download under the cap = %d", got.status)
+			t.Fatalf("download = %d", got.status)
 		}
 	}
-	if got := get(t, srv, "/proxy/npm/left-pad", ""); got.status != http.StatusTooManyRequests {
-		t.Fatalf("an anonymous proxy request past the daily cap = %d, want 429", got.status)
+	if got := get(t, srv, "/proxy/no-such-registry/pkg", ""); got.status != http.StatusBadRequest {
+		t.Fatalf("an anonymous proxy request past the alarm = %d, want the handler's 400", got.status)
 	}
 }
 

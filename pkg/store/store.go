@@ -6993,9 +6993,6 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 }
 
 func createTriggerTx(ctx context.Context, tx *storeTx, team Team, t Trigger) error {
-	if err := admitFreeTeamRunTx(ctx, tx, team, time.Now()); err != nil {
-		return err
-	}
 	argsJSON, _ := json.Marshal(t.Args)
 	envJSON, _ := json.Marshal(t.TriggerEnv)
 	status := t.Status

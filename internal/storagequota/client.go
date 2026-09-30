@@ -28,6 +28,11 @@ import (
 	"time"
 )
 
+// ArchivedBytesDeletedHeader names, on the logs service's answer to a run
+// deletion, the bytes of the run's archived logs it removed from the object
+// store, which is what the controller takes off the team's count.
+const ArchivedBytesDeletedHeader = "X-Sparkwing-Archived-Bytes-Deleted"
+
 // Tier is what a team may store.
 type Tier string
 
@@ -177,7 +182,8 @@ func (c *Client) Commit(ctx context.Context, auth string, r Reservation, stored 
 // Renew commits stored bytes against r and reserves up to next bytes more
 // in the same round trip, for a writer that draws many small writes from
 // one block. The commit lands even when the next block is refused, which
-// returns the refusal. A controller that cannot answer leaves r uncommitted.
+// returns the refusal, unless the team has no free slot and cannot take one:
+// then both are refused. A controller that cannot answer leaves r uncommitted.
 func (c *Client) Renew(ctx context.Context, auth string, r Reservation, stored, next int64) (Reservation, error) {
 	if r.ID == "" {
 		return c.Reserve(ctx, auth, r.Team, r.Kind, next, true)

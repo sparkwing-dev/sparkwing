@@ -7,25 +7,13 @@
 // total, so an operator can see both who spent the month's egress and
 // how much left this process today.
 //
-// Four budgets act on those counters. A principal past its monthly byte
-// budget is refused before the next download starts, and a download
-// already under way stops at it, which is the cap that stops one tenant
-// turning a CI product into a file host. A principal at its concurrency
-// cap is refused one more simultaneous download or live log stream. The
-// global daily threshold refuses nothing; it raises an alarm the health
-// route reports and the log carries at warn level, because the bill an
-// operator needs to see early is the process's, not one principal's.
-// The global daily cap does refuse: past it every download on the process
-// is refused, and every one under way stops, until the UTC day rolls,
-// which is the backstop that bounds the bill when many principals each
-// stay inside their own budget. Every byte budget is charged as bytes are
-// written, so parallel downloads cannot carry a total past it.
-//
-// Enforcement needs a principal the meter can tell apart. A service that
-// authenticates one shared token, or that serves with auth off, resolves
-// every caller to the same name, so its callers share one budget; such a
-// service sets only the daily alarm and leaves refusals to the services
-// that know who is asking.
+// The meter refuses no byte. A principal at its concurrency cap is refused
+// one more simultaneous download or live log stream. The global daily
+// threshold raises an alarm the health route and the metrics report and the
+// log carries at warn level, because the bill an operator needs to see early
+// is the process's, not one principal's. What a team may download in a day
+// is the controller's per-team cap, which a service charges before a
+// response's first byte, so no download is cut off part way.
 //
 // Counting is in memory. [Meter.Flush] and [Meter.FlushDay] hand moved
 // totals to a caller's persistence operation and acknowledge them only
@@ -67,6 +55,15 @@ const (
 // so an open route cannot be spent anonymously past the cap.
 const AnonymousPrincipal = "anonymous"
 
+// TeamPrincipal names a caller to a meter by its team and its token's name,
+// because a token's name is free text that two teams may both choose.
+func TeamPrincipal(team, name string) string {
+	if team == "" {
+		return name
+	}
+	return team + "/" + name
+}
+
 // OverflowPrincipal labels bytes served to a principal the meter had no
 // room to track separately. They share one budget rather than an
 // unbudgeted one, so reaching the cardinality cap tightens the meter
@@ -85,55 +82,6 @@ const MaxPendingUsages = 2 * MaxPrincipals
 // above a real deployment's principal count and exists to bound memory
 // against a fleet that invents identities.
 const MaxPrincipals = 10000
-
-// ErrBudgetExceeded matches every *BudgetError under errors.Is.
-var ErrBudgetExceeded = errors.New("egress budget exceeded")
-
-// BudgetError refuses a download that would spend a principal's monthly
-// byte budget past its limit. The message names the limit, what is
-// already spent, and when the budget resets, so a client that prints it
-// needs nothing else to explain the refusal.
-type BudgetError struct {
-	Principal string
-	Class     Class
-	// LimitBytes is the monthly budget that refused this download.
-	LimitBytes int64
-	// UsedBytes is what the principal has already sent this month.
-	UsedBytes int64
-	// Month is the UTC month the budget covers, as "2006-01".
-	Month string
-	// RetryAfter is the wait until the budget resets.
-	RetryAfter time.Duration
-	// Flag names the flag that raises the budget on the refusing service.
-	Flag string
-	// ProcessWide marks a refusal by the global daily cap, which counts the
-	// whole process's bytes today rather than this principal's month, so
-	// UsedBytes and LimitBytes are the process's.
-	ProcessWide bool
-}
-
-func (e *BudgetError) Error() string {
-	if e.ProcessWide {
-		flag := e.Flag
-		if flag == "" {
-			flag = FlagDailyCapBytes
-		}
-		return fmt.Sprintf(
-			"egress daily cap reached: this service has sent %s today, its %s cap, so this %s download by %s is refused until the UTC day rolls, in %s. "+
-				"Raise it with %s on the serving process, or wait out the reset",
-			FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), e.Class, e.Principal, roundWait(e.RetryAfter), flag)
-	}
-	flag := e.Flag
-	if flag == "" {
-		flag = FlagMonthlyBytes
-	}
-	return fmt.Sprintf(
-		"egress budget exceeded: %s has downloaded %s of its %s monthly budget, so this %s download is refused until the budget resets at the start of the next UTC month, in %s. "+
-			"Raise it with %s on the serving process, or wait out the reset",
-		e.Principal, FormatBytes(e.UsedBytes), FormatBytes(e.LimitBytes), e.Class, roundWait(e.RetryAfter), flag)
-}
-
-func (e *BudgetError) Unwrap() error { return ErrBudgetExceeded }
 
 // Slot names a concurrency cap. Both slots bound how many responses one
 // principal may hold open at once; they are counted apart because a live
@@ -186,18 +134,9 @@ const SlotRetryAfter = 30 * time.Second
 // Config is a Meter's whole configuration. Every budget is off at zero,
 // which is what a Sparkwing that was never given one serves.
 type Config struct {
-	// PerPrincipalMonthlyBytes refuses a principal's downloads once its
-	// UTC-month total reaches this many bytes. Zero is unlimited, and a
-	// service whose callers all resolve to one principal leaves it there.
-	PerPrincipalMonthlyBytes int64
 	// GlobalDailyAlarmBytes raises the alarm once the process has sent
 	// this many bytes in a UTC day. It refuses nothing. Zero is off.
 	GlobalDailyAlarmBytes int64
-	// GlobalDailyCapBytes refuses every download on the process once it has
-	// sent this many bytes in a UTC day, whoever asks. It bounds a month's
-	// bill at thirty-one times this figure however many principals share it.
-	// Zero is off.
-	GlobalDailyCapBytes int64
 	// MaxStreamsPerPrincipal caps concurrent live log streams per
 	// principal. Zero is unlimited.
 	MaxStreamsPerPrincipal int
@@ -217,8 +156,7 @@ type Config struct {
 
 // Budgeted reports whether any budget in this configuration applies.
 func (c Config) Budgeted() bool {
-	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyAlarmBytes > 0 || c.GlobalDailyCapBytes > 0 ||
-		c.MaxStreamsPerPrincipal > 0 || c.MaxDownloadsPerPrincipal > 0
+	return c.GlobalDailyAlarmBytes > 0 || c.MaxStreamsPerPrincipal > 0 || c.MaxDownloadsPerPrincipal > 0
 }
 
 func (c Config) limitFor(slot Slot) int {
@@ -251,15 +189,12 @@ type PrincipalState struct {
 	DayBytes   int64  `json:"day_bytes"`
 	Streams    int    `json:"streams"`
 	Downloads  int    `json:"downloads"`
-	OverBudget bool   `json:"over_budget"`
 }
 
 // State is the whole meter at a point in time, as the health route and
 // the top-consumers view report it.
 type State struct {
-	MonthlyBytesPerPrincipal int64     `json:"monthly_bytes_per_principal"`
 	DailyAlarmBytes          int64     `json:"daily_alarm_bytes"`
-	DailyCapBytes            int64     `json:"daily_cap_bytes,omitempty"`
 	MaxStreamsPerPrincipal   int       `json:"max_streams_per_principal"`
 	MaxDownloadsPerPrincipal int       `json:"max_downloads_per_principal"`
 	Month                    string    `json:"month"`
@@ -318,9 +253,8 @@ func (st *principalCounters) hold(slot Slot, delta int) {
 	st.streams += delta
 }
 
-// Meter counts bytes sent per principal and for the process as a whole,
-// and refuses the downloads that would spend a principal past its
-// monthly budget. Safe for concurrent use.
+// Meter counts bytes sent per principal and for the process as a whole.
+// Safe for concurrent use.
 type Meter struct {
 	cfg    Config
 	logger *slog.Logger
@@ -384,167 +318,60 @@ func (m *Meter) WithPersistence() *Meter {
 // Config returns the budgets this meter was built on.
 func (m *Meter) Config() Config { return m.cfg }
 
-// Check reports whether principal may start another download. It
-// returns a *BudgetError when the process's daily cap or the principal's
-// monthly budget is spent and nil otherwise, including when no budget
-// applies.
-func (m *Meter) Check(principal string) error {
-	if m == nil || !m.cfg.bytesBounded() {
-		return nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := m.now().UTC()
-	key, st := m.counters(principal, now)
-	if m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes {
-		m.refused++
-		return m.dailyCapErrorLocked(key, now)
-	}
-	if m.cfg.PerPrincipalMonthlyBytes <= 0 || st.monthBytes < m.cfg.PerPrincipalMonthlyBytes {
-		return nil
-	}
-	m.refused++
-	return m.monthlyErrorLocked(key, st, now)
-}
-
-func (c Config) bytesBounded() bool {
-	return c.PerPrincipalMonthlyBytes > 0 || c.GlobalDailyCapBytes > 0
-}
-
-func (m *Meter) dailyCapErrorLocked(key string, now time.Time) *BudgetError {
-	return &BudgetError{
-		Principal:   key,
-		LimitBytes:  m.cfg.GlobalDailyCapBytes,
-		UsedBytes:   m.dayBytes,
-		Month:       m.month,
-		RetryAfter:  untilNextDay(now),
-		Flag:        m.cfg.Flags.orDefault().DailyCapBytes,
-		ProcessWide: true,
-	}
-}
-
-func (m *Meter) monthlyErrorLocked(key string, st *principalCounters, now time.Time) *BudgetError {
-	return &BudgetError{
-		Principal:  key,
-		LimitBytes: m.cfg.PerPrincipalMonthlyBytes,
-		UsedBytes:  st.monthBytes,
-		Month:      st.month,
-		RetryAfter: untilNextMonth(now),
-		Flag:       m.cfg.Flags.orDefault().MonthlyBytes,
-	}
-}
-
 // Record adds n bytes served to principal through class, whatever the
 // budgets say.
 func (m *Meter) Record(principal string, class Class, n int64) {
-	if m == nil {
+	if m == nil || n <= 0 {
 		return
-	}
-	m.charge(principal, class, n, false)
-}
-
-type charged struct {
-	allowed int64
-	refusal *BudgetError
-}
-
-// safety: the bytes are charged before they are written, so writers racing
-// for the last of a budget cannot each see room and together pass it.
-func (m *Meter) charge(principal string, class Class, n int64, bounded bool) charged {
-	if n <= 0 {
-		return charged{}
 	}
 	m.mu.Lock()
 	now := m.now().UTC()
 	key, st := m.counters(principal, now)
-	allowed := n
-	var refusal *BudgetError
-	if bounded && m.cfg.GlobalDailyCapBytes > 0 && m.cfg.GlobalDailyCapBytes-m.dayBytes < allowed {
-		allowed = max(m.cfg.GlobalDailyCapBytes-m.dayBytes, 0)
-		refusal = m.dailyCapErrorLocked(key, now)
-	}
-	if bounded && m.cfg.PerPrincipalMonthlyBytes > 0 && m.cfg.PerPrincipalMonthlyBytes-st.monthBytes < allowed {
-		allowed = max(m.cfg.PerPrincipalMonthlyBytes-st.monthBytes, 0)
-		refusal = m.monthlyErrorLocked(key, st, now)
-	}
-	if refusal != nil {
-		m.refused++
-	}
-	st.monthBytes += allowed
-	st.dayBytes += allowed
-	st.dirty = st.dirty || allowed > 0
-	m.monthBytes += allowed
-	m.dayBytes += allowed
-	m.dayDirty = m.dayDirty || allowed > 0
+	st.monthBytes += n
+	st.dayBytes += n
+	st.dirty = true
+	m.monthBytes += n
+	m.dayBytes += n
+	m.dayDirty = true
 	raised := m.raiseAlarmLocked(now)
-	capped := allowed > 0 && m.cfg.GlobalDailyCapBytes > 0 && m.dayBytes >= m.cfg.GlobalDailyCapBytes &&
-		m.dayBytes-allowed < m.cfg.GlobalDailyCapBytes
 	// safety: every value the log line needs is copied under the lock,
 	// because reading the principal map again after the unlock races the
 	// next charge's write to it.
-	day, total := m.day, m.dayBytes
-	principalDay := st.dayBytes
+	day, total, principalDay := m.day, m.dayBytes, st.dayBytes
 	m.mu.Unlock()
 
-	// safety: the cap refuses everyone, so the line that says it closed names
-	// the principal whose bytes crossed it and what that principal sent today.
-	if capped {
-		m.logger.Warn("egress daily cap reached",
-			"day", day,
-			"day_bytes", total,
-			"cap_bytes", m.cfg.GlobalDailyCapBytes,
-			"principal", key,
-			"principal_day_bytes", principalDay,
-			"class", string(class))
-	}
-
+	// safety: the line names the principal whose bytes crossed the threshold
+	// and what it sent today, because the alarm is all an operator gets.
 	if raised {
 		m.logger.Warn("egress daily alarm",
 			"day", day,
 			"day_bytes", total,
 			"threshold_bytes", m.cfg.GlobalDailyAlarmBytes,
 			"principal", key,
+			"principal_day_bytes", principalDay,
 			"class", string(class))
 	}
-	return charged{allowed: allowed, refusal: refusal}
 }
 
-// Serve returns a ResponseWriter that charges what the handler sends to
+// Serve returns a ResponseWriter that counts what the handler sends to
 // principal. Bytes count only on a 2xx response to a request whose method
 // carries a body, because net/http discards what a handler writes to a
-// HEAD and an error body is not the download the budget is for. A write
-// that would pass the daily cap or principal's monthly budget sends only
-// what is left and returns a *BudgetError, so a response already under way
-// stops at the budget rather than finishing past it. It preserves the
-// flush, hijack, and deadline control a streaming handler reaches for.
-//
-// A route serves through [Meter.Handle], which also aborts a response the
-// budget cut short.
+// HEAD and an error body is not a download. It preserves the flush, hijack,
+// and deadline control a streaming handler reaches for.
 func (m *Meter) Serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
 	if m == nil {
 		return w
 	}
-	_, out := m.serve(w, r, principal, class)
-	return out
+	return m.serve(w, r, principal, class)
 }
 
-// Handle runs next with a writer from [Meter.Serve]. When the budget cut
-// the response short it aborts the connection with [http.ErrAbortHandler],
-// so the client sees a failed transfer rather than a chunked body that
-// ends cleanly with bytes missing. A nil meter runs next unmetered.
+// Handle runs next with a writer from [Meter.Serve]. A nil meter runs next
+// uncounted.
 func (m *Meter) Handle(w http.ResponseWriter, r *http.Request, principal string, class Class, next http.Handler) {
-	if m == nil {
-		next.ServeHTTP(w, r)
-		return
-	}
-	counting, out := m.serve(w, r, principal, class)
-	next.ServeHTTP(out, r)
-	if counting.cut {
-		panic(http.ErrAbortHandler) //nolint:forbidigo // net/http recovers this sentinel and resets the connection; it is the only way a handler aborts a response
-	}
+	next.ServeHTTP(m.Serve(w, r, principal, class), r)
 }
 
-func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) (*countingWriter, http.ResponseWriter) {
+func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, class Class) http.ResponseWriter {
 	counting := &countingWriter{
 		ResponseWriter: w,
 		meter:          m,
@@ -560,13 +387,13 @@ func (m *Meter) serve(w http.ResponseWriter, r *http.Request, principal string, 
 	hijacker, canHijack := w.(http.Hijacker)
 	switch {
 	case canFlush && canHijack:
-		return counting, &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
+		return &flushingHijackingWriter{countingWriter: counting, flusher: flusher, hijacker: hijacker}
 	case canFlush:
-		return counting, &flushingWriter{countingWriter: counting, flusher: flusher}
+		return &flushingWriter{countingWriter: counting, flusher: flusher}
 	case canHijack:
-		return counting, &hijackingWriter{countingWriter: counting, hijacker: hijacker}
+		return &hijackingWriter{countingWriter: counting, hijacker: hijacker}
 	default:
-		return counting, counting
+		return counting
 	}
 }
 
@@ -788,9 +615,7 @@ func (m *Meter) State() State {
 	now := m.now().UTC()
 	m.rollGlobal(now)
 	out := State{
-		MonthlyBytesPerPrincipal: m.cfg.PerPrincipalMonthlyBytes,
 		DailyAlarmBytes:          m.cfg.GlobalDailyAlarmBytes,
-		DailyCapBytes:            m.cfg.GlobalDailyCapBytes,
 		MaxStreamsPerPrincipal:   m.cfg.MaxStreamsPerPrincipal,
 		MaxDownloadsPerPrincipal: m.cfg.MaxDownloadsPerPrincipal,
 		Month:                    m.month,
@@ -818,7 +643,6 @@ func (m *Meter) State() State {
 			DayBytes:   st.dayBytes,
 			Streams:    st.streams,
 			Downloads:  st.downloads,
-			OverBudget: m.cfg.PerPrincipalMonthlyBytes > 0 && st.monthBytes >= m.cfg.PerPrincipalMonthlyBytes,
 		})
 	}
 	slices.SortFunc(out.Top, func(a, b PrincipalState) int {
@@ -966,29 +790,6 @@ func (m *Meter) raiseAlarmLocked(now time.Time) bool {
 	return true
 }
 
-func untilNextDay(now time.Time) time.Duration {
-	next := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
-	if wait := next.Sub(now); wait > 0 {
-		return wait
-	}
-	return time.Second
-}
-
-func untilNextMonth(now time.Time) time.Duration {
-	next := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
-	if wait := next.Sub(now); wait > 0 {
-		return wait
-	}
-	return time.Second
-}
-
-func roundWait(d time.Duration) time.Duration {
-	if d >= time.Hour {
-		return d.Round(time.Hour)
-	}
-	return d.Round(time.Second)
-}
-
 // FormatBytes renders a byte count the way an operator reads a bill:
 // whole units, two significant places past a kilobyte.
 func FormatBytes(n int64) string {
@@ -1014,7 +815,6 @@ type countingWriter struct {
 	bodyless bool
 	status   int
 	wrote    bool
-	cut      bool
 }
 
 func (w *countingWriter) WriteHeader(code int) {
@@ -1027,23 +827,16 @@ func (w *countingWriter) WriteHeader(code int) {
 
 func (w *countingWriter) Write(p []byte) (int, error) {
 	w.wrote = true
-	if !w.charges() {
-		return w.ResponseWriter.Write(p)
-	}
-	c := w.meter.charge(w.principal, w.class, int64(len(p)), true)
-	n, err := w.ResponseWriter.Write(p[:c.allowed])
-	if c.refusal != nil {
-		w.cut = true
-		if err == nil {
-			return n, c.refusal
-		}
+	n, err := w.ResponseWriter.Write(p)
+	if w.charges() {
+		w.meter.Record(w.principal, w.class, int64(n))
 	}
 	return n, err
 }
 
-// safety: net/http drops a HEAD response body and an error body is not
-// the download the budget is for, so neither is charged; charging a HEAD
-// let eight of them latch the daily alarm with nothing on the wire.
+// safety: net/http drops a HEAD response body and an error body is not a
+// download, so neither is counted; counting a HEAD let eight of them latch
+// the daily alarm with nothing on the wire.
 func (w *countingWriter) charges() bool {
 	return !w.bodyless && w.status >= 200 && w.status < 300
 }

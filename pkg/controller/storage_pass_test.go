@@ -2,6 +2,8 @@ package controller_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
+	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -43,11 +46,14 @@ type passBuckets struct {
 	hook        *listHook
 	cache, logs *teamblob.Store
 	now         time.Time
+	written     gofakes3.TimeSourceAdvancer
 }
 
 func newPassBuckets(t *testing.T) *passBuckets {
 	t.Helper()
-	fake := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
+	written := gofakes3.FixedTimeSource(time.Now())
+	fake := httptest.NewServer(gofakes3.New(s3mem.New(s3mem.WithTimeSource(written)),
+		gofakes3.WithTimeSource(written), gofakes3.WithTimeSkewLimit(0)).Server())
 	t.Cleanup(fake.Close)
 	raw := s3.New(s3.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String(fake.URL), UsePathStyle: true,
@@ -56,7 +62,7 @@ func newPassBuckets(t *testing.T) *passBuckets {
 	if _, err := raw.CreateBucket(context.Background(), &s3.CreateBucketInput{Bucket: aws.String(passBucket)}); err != nil {
 		t.Fatal(err)
 	}
-	b := &passBuckets{raw: raw, hook: &listHook{Client: raw}, now: time.Now()}
+	b := &passBuckets{raw: raw, hook: &listHook{Client: raw}, now: time.Now(), written: written}
 	open := func(prefix string, maxAge func(string) time.Duration) *teamblob.Store {
 		s, err := teamblob.New(teamblob.Options{
 			Bucket: passBucket, Prefix: prefix, Client: b.hook, TeamObjectMaxAge: maxAge,
@@ -181,6 +187,9 @@ func TestTheStoragePassReconcilesAndKeepsWritesInFlight(t *testing.T) {
 			t.Fatalf("%s's run = %d", team, code)
 		}
 	}
+	if err := f.store.GrantFreeSlot(t.Context(), "alpha", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	b.put(t, "cache/teams/alpha/bins/one", 300)
 	b.put(t, "logs/teams/alpha/runs/r1/build.log", 40)
 	commitStorage(t, f.store, "beta", store.StorageCache, 999)
@@ -220,6 +229,9 @@ func TestTheStoragePassExpiresOldCacheObjects(t *testing.T) {
 	f.srv.WithStoragePass(b.cache, b.logs)
 	if code := f.trigger(freeTeamToken(t, f.store, "alpha")); code != 202 {
 		t.Fatal(code)
+	}
+	if err := f.store.GrantFreeSlot(t.Context(), "alpha", time.Now()); err != nil {
+		t.Fatal(err)
 	}
 	b.put(t, "cache/teams/alpha/bins/old", 300)
 	b.put(t, "cache/teams/default/bins/operator", 10)
@@ -269,5 +281,175 @@ func TestAFailedStoragePassKeepsTheCounts(t *testing.T) {
 	f.call("GET", "/api/v1/health", "", nil, &health)
 	if !strings.Contains(strings.Join(health.Problems, "\n"), "storage pass") {
 		t.Errorf("health problems = %v, want the failed storage pass", health.Problems)
+	}
+}
+
+func (b *passBuckets) archiveRun(t *testing.T, team, runID string, n int) {
+	t.Helper()
+	b.put(t, "logs/teams/"+team+"/runs/"+runID+"/build.log", n)
+	index := fmt.Sprintf(`{"team":%q,"last_write":%q,"files":[{"rel":"build.log","size":%d}]}`,
+		team, time.Now().UTC().Format(time.RFC3339), n)
+	if _, err := b.raw.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String(passBucket), Key: aws.String("logs/index/runs/" + runID + ".json"), Body: strings.NewReader(index),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b.written.Advance(time.Minute)
+}
+
+// A free team whose log writes carried it past its share is pruned back
+// under it by the hourly pass, through a real logs service and the
+// controller's log-deletion credential: its least recently written finished
+// runs go first, and a run still going or one no run row records is left for
+// retention. Only the bytes the logs service confirms are taken off the count.
+func TestTheStoragePassPrunesAFreeTeamsFinishedLogsBackUnderItsShare(t *testing.T) {
+	f := freeTierFixture(t, 5)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv, err := logs.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv.WithControllerAuth(f.url, 0).WithArchive(logs.ArchiveOptions{Store: b.logs})
+	logsHTTP := httptest.NewServer(logsSrv.Handler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
+	allowance := int64(16 << 10)
+	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+		t.Fatal(err)
+	}
+	freeTeamToken(t, f.store, "first")
+	if err := f.store.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []struct{ id, status string }{{"r-unrecorded", ""}, {"r-live", "running"}, {"r-old", "success"}, {"r-new", "failed"}} {
+		if run.status != "" {
+			if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		b.archiveRun(t, "first", run.id, 1000)
+	}
+	if _, err := f.srv.RunStoragePass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string]bool{"r-unrecorded": true, "r-live": true, "r-old": false, "r-new": true} {
+		if got := b.has(t, "logs/teams/first/runs/"+run+"/build.log"); got != want {
+			t.Errorf("%s present = %t, want %t", run, got, want)
+		}
+	}
+	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
+		t.Fatalf("logs after the prune = %d, want the 4000 listed less the 1000 the logs service deleted", got)
+	}
+}
+
+// A logs service that refuses the deletion frees nothing: the team keeps the
+// count the listing found, and the pass reports the refusal.
+func TestARefusedLogDeletionFreesNothing(t *testing.T) {
+	f := freeTierFixture(t, 5)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsHTTP := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
+	allowance := int64(4 << 10)
+	if _, err := f.store.SetCreditSettings(t.Context(), store.CreditSettingsUpdate{StorageFreeAllowanceBytes: &allowance}); err != nil {
+		t.Fatal(err)
+	}
+	freeTeamToken(t, f.store, "first")
+	if err := f.store.GrantFreeSlot(t.Context(), "first", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tenant, err := f.store.ForTeam(t.Context(), "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tenant.CreateRun(t.Context(), store.Run{ID: "r-old", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b.archiveRun(t, "first", "r-old", 3000)
+	if _, err := f.srv.RunStoragePass(t.Context()); err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("pass = %v, want the logs service's 404", err)
+	}
+	if got := held(t, f.store, "first", store.StorageLogs); got != 3000 {
+		t.Fatalf("logs after a refused prune = %d, want the 3000 listed", got)
+	}
+}
+
+// A team whose log writes landed before another team took the last slot has
+// no slot and no credits, so its share is zero: the pass prunes its finished
+// runs' logs through the logs service and leaves a run still going. A team
+// whose credits lapsed keeps its logs to retention.
+func TestTheStoragePassPrunesASlotlessTeamsFinishedLogs(t *testing.T) {
+	f := freeTierFixture(t, 1)
+	b := newPassBuckets(t)
+	deleter, _, err := f.store.CreateToken("controller-logs", store.TokenKindService, []string{controller.ScopeLogsDelete}, 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv, err := logs.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logsSrv.WithControllerAuth(f.url, 0).WithArchive(logs.ArchiveOptions{Store: b.logs})
+	logsHTTP := httptest.NewServer(logsSrv.Handler())
+	t.Cleanup(logsHTTP.Close)
+	f.srv.WithStoragePass(b.cache, b.logs).WithTeamStorage(controller.TeamStorage{LogsURL: logsHTTP.URL, LogsToken: deleter})
+	freeTeamToken(t, f.store, "slotted")
+	freeTeamToken(t, f.store, "slotless")
+	freeTeamToken(t, f.store, "lapsed")
+	if err := f.store.GrantFreeSlot(t.Context(), "slotted", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	lapsed, err := f.store.ForTeam(t.Context(), "lapsed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paid, err := lapsed.GrantCredits(t.Context(), store.CreditGrantPaid, 500, "pay-1", "billing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lapsed.RecordCreditGrant(t.Context(), store.CreditGrantRequest{
+		Kind: store.CreditGrantReversal, AmountMicro: -500, Reverses: paid.Reference, Reference: "refund-1", CreatedBy: "billing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := lapsed.CreateRun(t.Context(), store.Run{ID: "r-lapsed", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b.archiveRun(t, "lapsed", "r-lapsed", 1000)
+	tenant, err := f.store.ForTeam(t.Context(), "slotless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []struct{ id, status string }{{"r-done", "success"}, {"r-live", "running"}} {
+		if err := tenant.CreateRun(t.Context(), store.Run{ID: run.id, Pipeline: "p", Status: run.status, StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		b.archiveRun(t, "slotless", run.id, 1000)
+	}
+	if _, err := f.srv.RunStoragePass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for run, want := range map[string]bool{"r-done": false, "r-live": true} {
+		if got := b.has(t, "logs/teams/slotless/runs/"+run+"/build.log"); got != want {
+			t.Errorf("%s present = %t, want %t", run, got, want)
+		}
+	}
+	if got := held(t, f.store, "slotless", store.StorageLogs); got != 1000 {
+		t.Fatalf("slotless team's logs after the prune = %d, want the running run's 1000", got)
+	}
+	if !b.has(t, "logs/teams/lapsed/runs/r-lapsed/build.log") || held(t, f.store, "lapsed", store.StorageLogs) != 1000 {
+		t.Fatal("the pass pruned a team whose credits lapsed")
 	}
 }

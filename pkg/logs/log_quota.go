@@ -95,6 +95,13 @@ type logDraw struct {
 	stored int64
 }
 
+func (d *logDraw) tier() (storagequota.Tier, bool) {
+	if d.block == nil || d.block.res.Tier == "" {
+		return "", false
+	}
+	return d.block.res.Tier, true
+}
+
 // safety: a draw the append did not write goes back to the block, so a
 // refused or failed write costs the team nothing.
 func (d *logDraw) finish() {
@@ -160,12 +167,10 @@ func (s *Server) drawLocked(ctx context.Context, b *logBlock, auth string, n int
 		return nil, err
 	}
 	b.adopt(next)
-	if b.take(n) {
-		return &logDraw{block: b, n: n}, nil
+	if !b.take(n) {
+		return nil, fmt.Errorf("%w: the controller granted %d bytes for an append of %d", storagequota.ErrUnavailable, next.Granted, n)
 	}
-	return nil, &storagequota.QuotaError{Message: fmt.Sprintf(
-		"free storage allowance exceeded: team %s has %d bytes of its log share left and this append stores %d; "+
-			"add credits to store more", b.key.team, b.left, n)}
+	return &logDraw{block: b, n: n}, nil
 }
 
 // safety: a run that drew nothing since the last settle, or every run when
@@ -202,12 +207,17 @@ func (s *Server) settleLocked(ctx context.Context, b *logBlock, final bool) erro
 	// safety: a block granted while the controller could not answer carries
 	// no reservation, so it is dropped at the next settle and the run asks again.
 	if final || !b.active || b.res.ID == "" {
-		if err := s.counter.Commit(ctx, b.auth, b.res, b.used); err != nil {
+		// safety: a commit refused because the team cannot take a free slot is
+		// refused again on every retry, so the block is dropped and the storage
+		// pass counts what it wrote.
+		var quota *storagequota.QuotaError
+		err := s.counter.Commit(ctx, b.auth, b.res, b.used)
+		if err != nil && !errors.As(err, &quota) {
 			return err
 		}
 		b.closed = true
 		s.logBlocks.drop(b)
-		return nil
+		return err
 	}
 	if b.used == 0 {
 		return nil
@@ -250,8 +260,6 @@ func (s *Server) writeQuotaRefusal(w http.ResponseWriter, err error) {
 	switch {
 	case errors.As(err, &quota) && quota.Paused:
 		http.Error(w, err.Error(), http.StatusPaymentRequired)
-	case errors.As(err, &quota):
-		http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
 	case errors.Is(err, storagequota.ErrUnavailable):
 		s.logger.Error("logs storage count", "err", err)
 		w.Header().Set("Retry-After", "30")

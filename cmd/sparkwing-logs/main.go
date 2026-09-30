@@ -63,8 +63,8 @@ func run(args []string) error {
 			"0 disables the floor (env: SPARKWING_LOGS_MIN_FREE_BYTES)")
 	retention := fs.Duration("retention", defaults.Retention,
 		"how long a run's logs survive after their last write; 0 keeps them forever. The default is "+
-			"0, or 720h (30 days) with --archive-store, which a multi-team deployment runs with "+
-			"(env: SPARKWING_LOGS_RETENTION)")
+			"0, or 2160h (90 days) with --archive-store, which a multi-team deployment runs with. A run of a "+
+			"team without credits keeps its archived logs 720h (30 days) at most (env: SPARKWING_LOGS_RETENTION)")
 	sweepInterval := fs.Duration("sweep-interval", defaults.SweepInterval,
 		"how often the retention sweeper runs (env: SPARKWING_LOGS_SWEEP_INTERVAL)")
 	searchMaxBytes := fs.Int64("search-max-bytes", defaults.SearchMaxBytes,
@@ -216,7 +216,7 @@ func run(args []string) error {
 }
 
 // safety: an archive holds every team's logs past the volume, so a service
-// with one prunes them after 30 days unless the operator named a retention,
+// with one prunes them after 90 days unless the operator named a retention,
 // zero included; a free team's log share is then a window, not a lifetime.
 func archiveRetention(retention time.Duration, named bool, archiveStore string) time.Duration {
 	if archiveStore == "" || named {

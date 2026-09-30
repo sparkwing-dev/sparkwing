@@ -45,22 +45,19 @@ type Completeness struct {
 func (c Completeness) SyntheticLine() string
 const DefaultArchiveIdle = 10 * time.Minute
 const DefaultArchiveInterval = time.Minute
-const DefaultArchiveRetention = 30 * 24 * time.Hour
+const DefaultArchiveRetention = 90 * 24 * time.Hour
 func DefaultLimits() Limits
 const DefaultPruneInterval = time.Hour
-const EgressBudgetCode = "egress_budget_exceeded"
 const EgressDownloadLimitCode = "egress_download_limit"
 type EgressRefusalBody struct {
-	Error      string
-	Code       string
-	Principal  string
-	LimitBytes int64
-	UsedBytes  int64
-	Month      string
+	Error     string
+	Code      string
+	Principal string
 }
 const EgressStreamLimitCode = "egress_stream_limit"
 var ErrClaimConflict = errors.New("logs append claim is no longer current")
 var ErrSealRefused = errors.New("logs seal refused")
+const FreeArchiveRetention = 30 * 24 * time.Hour
 type Gap struct {
 	From int64
 	To   int64

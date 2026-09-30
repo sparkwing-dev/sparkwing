@@ -40,8 +40,9 @@ var reviewedUnscopedSQL = map[string]string{
 		"for every team after a successful bucket listing; scoping this delete to one team would leave another team's old rows visible",
 	"(*Store).expiredReservationRows": "the sweep finds which teams hold expired reservations; each release " +
 		"then runs under that team's own row lock",
-	"(*Store).StorageMarks": "the storage pass reconciles every team's count of one store from one bucket listing",
-	"lockCommittedTx":       "the storage pass reconciles every team's count of one store from one bucket listing",
+	"(*Store).StorageMarks":          "the storage pass reconciles every team's count of one store from one bucket listing",
+	"(*Store).TeamsOverFreeLogShare": "the storage pass finds every team whose logs are past its share, slot or no slot",
+	"lockCommittedTx":                "the storage pass reconciles every team's count of one store from one bucket listing",
 	"applyAgentNameIndexMigration": "the schema migration retires expired agent tokens and refuses duplicate agent names in every team " +
 		"before it builds the index that spans them",
 	"(*Store).PruneDownloadDays": "drops every team's download days past the window, which is a deployment-wide " +
@@ -133,6 +134,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Store).PruneSpentIdentity": "deletes every team's invitations, tokens and runner credentials that stopped " +
 		"admitting anyone, because a sweep that pruned one team would leave the rest to grow",
 	"(*Store).FreeSlots": "the free tier is bounded by how many teams hold a slot, so it counts every team's",
+	"freeSlotOpenTx":     "a reservation asks whether any slot is left, so it counts every team's",
 	"(*Operator).ListCronSchedulesAcrossTeams": "the controller's tick evaluates every team's schedules and resolves and " +
 		"launches each one through its own team's handle",
 	"disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
@@ -212,7 +214,6 @@ var unportedSQL = []string{
 	"(*Store).ListStorageQuotas",
 	"(*Store).ListTokens",
 	"(*Store).ListUsers",
-	"(*Store).LookupToken",
 	"(*Store).NodeClaimFenceIsLive",
 	"(*Store).NodeExecutionAttemptBelongsToLiveClaim",
 	"(*Store).NodeExecutionAttemptIsLive",
@@ -355,7 +356,7 @@ var unportedSQL = []string{
 }
 
 // safety: pins the backlog's length so it can only shrink.
-const unportedSQLSize = 207
+const unportedSQLSize = 206
 
 // safety: matches only after FROM, JOIN, INTO and UPDATE, because a
 // table name appearing inside a column name or a comment is not a read

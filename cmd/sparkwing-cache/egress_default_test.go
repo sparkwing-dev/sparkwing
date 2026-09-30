@@ -7,18 +7,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 )
 
-// A cache that verifies grants starts with a finite daily egress cap; a cap
+// A cache that verifies grants starts with a daily egress alarm; an alarm
 // the operator named, zero included, wins, and a single-team cache keeps
 // what it was given.
-func TestAMultiTeamCacheStartsWithAFiniteEgressCap(t *testing.T) {
+func TestAMultiTeamCacheStartsWithAnEgressAlarm(t *testing.T) {
 	multi := cache.Config{GrantKey: "grant-key"}
-	if got := egressDailyCap(multi, egress.Config{}, egress.Named{}); got != cache.DefaultMultiTeamEgressDailyCapBytes {
-		t.Fatalf("multi-team, cap unnamed = %d, want the default", got)
+	if got := egressDailyAlarm(multi, egress.Config{}, egress.Named{}); got != cache.DefaultMultiTeamEgressDailyAlarmBytes {
+		t.Fatalf("multi-team, alarm unnamed = %d, want the default", got)
 	}
-	if got := egressDailyCap(multi, egress.Config{GlobalDailyCapBytes: 0}, egress.Named{DailyCapBytes: true}); got != 0 {
-		t.Fatalf("multi-team, cap named 0 = %d, want 0", got)
+	if got := egressDailyAlarm(multi, egress.Config{GlobalDailyAlarmBytes: 0}, egress.Named{DailyAlarmBytes: true}); got != 0 {
+		t.Fatalf("multi-team, alarm named 0 = %d, want 0", got)
 	}
-	if got := egressDailyCap(cache.Config{}, egress.Config{}, egress.Named{}); got != 0 {
-		t.Fatalf("single-team, cap unnamed = %d, want off", got)
+	if got := egressDailyAlarm(cache.Config{}, egress.Config{}, egress.Named{}); got != 0 {
+		t.Fatalf("single-team, alarm unnamed = %d, want off", got)
 	}
 }
