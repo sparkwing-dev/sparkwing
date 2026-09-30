@@ -20,6 +20,10 @@ unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **local execution:** Queued nodes execute their registered pipeline instead of attempting remote compilation when the trigger records a repository URL.
+
 ## [v0.65.0] - 2026-09-29
 ### Changed
 

@@ -102,7 +102,8 @@ func RunNodeOnce(
 		}
 		return runNodeIsolatedFn(ctx, controllerURL, logsURL, runID, nodeID, token, logger)
 	}
-	if shouldRunRemote(trigger, cfg.brokeredChild) {
+	// safety: coordinated nodes use the same pipeline binary as their local dispatcher.
+	if !cfg.coordinated && shouldRunRemote(trigger, cfg.brokeredChild) {
 		if controllerURL == "" {
 			return runner.Result{}, fmt.Errorf(
 				"run %s node %s dispatches to a remote runner, which cannot reach this machine's admission daemon socket; set SPARKWING_CONTROLLER_URL to a controller the runner can reach",
