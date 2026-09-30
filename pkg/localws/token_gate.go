@@ -33,12 +33,10 @@ const (
 	maxExchangeRequest = 4 << 10
 )
 
-// safety: loopback is not a user boundary, so every other account on this
-// machine reaches the listener. The serve token file is readable only by the
-// account that started the dashboard, and a browser session is a MAC under
-// that token, so each credential traces back to the file. No credential
-// rides a cookie: another program on another loopback port shares the host
-// a cookie is scoped to.
+// safety: loopback is not a user boundary, so every account on this machine reaches the listener. The serve token
+// file is readable only by the account that started the dashboard, and a browser session is a MAC under that token,
+// so each credential traces back to the file. No credential rides a cookie: another program on another loopback
+// port shares the host a cookie is scoped to.
 type serveGate struct {
 	token []byte
 
