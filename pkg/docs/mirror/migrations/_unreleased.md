@@ -750,23 +750,24 @@ key on the TCP peer, so browsers behind one proxy share its budget.
 ## Job outputs are objects
 
 A node's output no longer travels inline in its finish or attempt report.
-Nodes and agents from this release upload it first, so upgrade the controller
-and every node binary together; a node from an earlier release has its finish
-refused with `400`.
+Nodes and agents from this release upload it first. After the write freeze and
+output move below, start the new controller before resuming new node binaries;
+an older node's finish is refused with `400`.
 
-Before the upgrade, move the outputs the controller already holds:
+Stop the old controller and every node or agent that can still write inline
+output. Take a fresh database backup, then move the stored outputs before
+starting the new controller:
 
 ```sh
 sparkwing-controller migrate-outputs --cache-blob-store s3://bucket/cache
 ```
 
 Leave out `--cache-blob-store` on a controller that keeps outputs on its own
-disk. The command runs in batches, can be stopped and run again, and skips a
-node that already names a newer output. It repeats whole passes until one
-moves nothing, so the first run can happen while the old controller serves.
-Run it once more during the cutover's write freeze, after the old controller
-stops and before the new one starts, so an output written inline after the
-first run's last pass moves too. It moves the outputs of runs that finished
+disk. This candidate command opens the store and upgrades it to schema 90
+before moving outputs, so an older writer cannot resume afterward. Keep the
+writers stopped throughout. The command runs in batches, can be stopped and
+run again, and skips a node that already names a newer output. Run it again
+until it reports zero outputs moved. It moves the outputs of runs that finished
 more than 30 days ago only for each pipeline's newest successful run, because
 older ones would expire at once. A laptop's `state.db` moves its outputs into
 `~/.sparkwing/outputs/` the first time the new release opens it.

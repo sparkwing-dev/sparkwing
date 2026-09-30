@@ -738,9 +738,10 @@ unlock.
   run. A read checks the recorded SHA-256, and a cache hit whose bytes are
   missing or do not match runs the node as a miss. A claim token reads only its own node's transitive dependencies, and
   `claim/input` answers a read grant instead of the bytes.
-  `sparkwing-controller migrate-outputs` moves stored
-  outputs before the upgrade, and a laptop database moves its own on first
-  open. See the
+  After old writers stop and a fresh database backup is taken,
+  `sparkwing-controller migrate-outputs` upgrades the store and moves stored
+  outputs before the new controller starts. A laptop database moves its own on
+  first open. See the
   [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).
 - **cloud:** Cloud builds fetch packages from the upstream registries. The
   Cloud cache runs with `--disable-proxy` and its runners with
