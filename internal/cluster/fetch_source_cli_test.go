@@ -49,6 +49,7 @@ func TestFetchSource_ChecksOutAndDownloadsWithTheIssuedToken(t *testing.T) {
 	) error {
 		got.cred, got.o, got.subs = cred, o, subs
 		return errors.Join(os.MkdirAll(filepath.Join(d, ".git"), 0o755),
+			os.MkdirAll(filepath.Join(d, ".sparkwing"), 0o755),
 			os.WriteFile(filepath.Join(d, ".git", "config"), []byte("[remote \"origin\"]\n\turl = "+repoURL+"\n"), 0o644),
 			os.WriteFile(filepath.Join(d, "go.mod"), []byte("module github.com/acme/widgets\n"), 0o644))
 	}
@@ -88,7 +89,7 @@ func TestFetchSource_FailsWhenTheTokenIsLeftOnTheVolume(t *testing.T) {
 		dest, cache := filepath.Join(volume, "src"), filepath.Join(volume, "go-mod")
 		path := plant(dest, cache)
 		checkout := func(_ context.Context, _, _, _, d string, _ bincache.DirectCredential, _ bincache.SourceOptions, _ []string) error {
-			return errors.Join(os.MkdirAll(filepath.Join(d, ".git"), 0o755), os.MkdirAll(filepath.Dir(path), 0o755),
+			return errors.Join(os.MkdirAll(filepath.Join(d, ".git"), 0o755), os.MkdirAll(filepath.Join(d, ".sparkwing"), 0o755), os.MkdirAll(filepath.Dir(path), 0o755),
 				os.WriteFile(filepath.Join(d, "go.mod"), []byte("module x\n"), 0o644),
 				os.WriteFile(path, []byte(strings.Repeat("x", (1<<20)-3)+fetchTok+"\n"), 0o644))
 		}
@@ -107,11 +108,52 @@ func TestFetchSource_DownloadsNothingWithoutAListedRepository(t *testing.T) {
 	called := false
 	err := fetchSource(context.Background(), fakeSourceCredentials{sc}, "run-1", filepath.Join(t.TempDir(), "src"), t.TempDir(),
 		func(_ context.Context, _, _, _, d string, _ bincache.DirectCredential, _ bincache.SourceOptions, _ []string) error {
-			return os.MkdirAll(d, 0o755)
+			return os.MkdirAll(filepath.Join(d, ".sparkwing"), 0o755)
 		},
 		func(context.Context, string, []string) error { called = true; return nil })
 	if err != nil || called {
 		t.Fatalf("err = %v, downloaded = %v", err, called)
+	}
+}
+
+func TestFetchSource_RejectsSymlinkedModuleSourcesBeforeDownload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		link string
+	}{
+		{"pipeline directory", ".sparkwing"},
+		{"root module", "go.mod"},
+		{"pipeline module", filepath.Join(".sparkwing", "go.mod")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			volume := t.TempDir()
+			dest := filepath.Join(volume, "src")
+			outside := filepath.Join(t.TempDir(), "outside")
+			checkout := func(_ context.Context, _, _, _, d string, _ bincache.DirectCredential, _ bincache.SourceOptions, _ []string) error {
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					return err
+				}
+				if tc.link != ".sparkwing" {
+					if err := os.MkdirAll(filepath.Join(d, ".sparkwing"), 0o755); err != nil {
+						return err
+					}
+				}
+				if tc.link == ".sparkwing" {
+					if err := os.Mkdir(outside, 0o755); err != nil {
+						return err
+					}
+				} else if err := os.WriteFile(outside, []byte("module outside\n"), 0o644); err != nil {
+					return err
+				}
+				return os.Symlink(outside, filepath.Join(d, tc.link))
+			}
+			called := false
+			err := fetchSource(context.Background(), fakeSourceCredentials{sourceCredential()}, "run-1", dest, filepath.Join(volume, "go-mod"),
+				checkout, func(context.Context, string, []string) error { called = true; return nil })
+			if err == nil || !strings.Contains(err.Error(), tc.link) || called {
+				t.Fatalf("err = %v, downloaded = %v", err, called)
+			}
+		})
 	}
 }
 

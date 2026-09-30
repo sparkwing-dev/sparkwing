@@ -108,11 +108,32 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 	if err := checkout(ctx, sc.RepoURL, sc.SHA, sc.Branch, dest, cred, o, ids); err != nil {
 		return err
 	}
+	sparkwingDir := filepath.Join(dest, ".sparkwing")
+	info, err := os.Lstat(sparkwingDir)
+	if err != nil {
+		return fmt.Errorf("fetch-source: inspect .sparkwing: %w", err)
+	}
+	if !info.IsDir() {
+		return errors.New("fetch-source: .sparkwing must be a real directory")
+	}
+	for _, dir := range []string{dest, sparkwingDir} {
+		path := filepath.Join(dir, "go.mod")
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("fetch-source: inspect %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("fetch-source: %s must not be a symlink", path)
+		}
+	}
 	// safety: a private module can only live in a listed repository, so a run
 	// with none downloads nothing here and its public modules come later.
 	if len(ids) > 0 {
 		env := privateModuleEnv(os.Environ(), ids, sc.Token)
-		for _, dir := range []string{dest, filepath.Join(dest, ".sparkwing")} {
+		for _, dir := range []string{dest, sparkwingDir} {
 			// #nosec G703 -- dir is under the SPARKWING_SOURCE_DIR the launcher Job set
 			if _, err := os.Lstat(filepath.Join(dir, "go.mod")); err != nil {
 				continue

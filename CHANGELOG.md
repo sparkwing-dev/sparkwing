@@ -1748,6 +1748,10 @@ unlock.
 
 ### Security
 
+- **Cloud source fetch:** A checkout with a symlinked `.sparkwing`, root
+  `go.mod`, or `.sparkwing/go.mod` now fails before private module download or
+  pipeline build. Cloud pipelines require a real `.sparkwing` directory. See
+  [Cloud source](docs/github-app.md#source-for-cloud-runners).
 - **controller:** `GET /metrics` on the API listener of a controller with
   authentication on requires an `admin` bearer. Its run counters name every
   team's pipelines, and the `sparkwing-full` chart's default `metricsPort: 0`

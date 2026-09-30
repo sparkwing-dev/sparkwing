@@ -113,6 +113,12 @@ A pull request whose head repository is not its base repository, or whose head r
 
 ## Source for cloud runners
 
+Cloud source fetches require a real `.sparkwing` directory in the checkout.
+A symlink at `.sparkwing`, the repository's `go.mod`, or
+`.sparkwing/go.mod` fails the source fetch before private modules are
+downloaded or the pipeline is built. Put pipeline files and module manifests
+in the repository itself.
+
 A runner without the git cache asks `POST /api/v1/runs/{id}/git-credential` before it fetches a run's source. The controller answers a caller that holds a live claim on the run, with a token of the run's own team, and resolves the credential in a fixed order:
 
 1. When the run's repository is on github.com and an installation bound to the run's team, and not suspended, covers it, the answer is `{kind: "github_app", host, token, expires_at, repository, extra_repositories}`: an installation token restricted to that repository, and to the extra repositories a team owner listed for it, with `contents: read`. GitHub issues it for at most an hour. The route reads nothing from the request body, so neither the runner nor anything in the fetched tree widens the token.
