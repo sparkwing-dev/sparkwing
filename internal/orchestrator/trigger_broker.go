@@ -32,6 +32,7 @@ type TriggerBroker struct {
 	capability    string
 	upstreamToken string
 	runID         string
+	retryOf       string
 	pipeline      string
 	controller    *httputil.ReverseProxy
 	logs          *httputil.ReverseProxy
@@ -39,6 +40,7 @@ type TriggerBroker struct {
 
 	mu       sync.Mutex
 	children map[string]bool
+	refRuns  map[string]bool
 }
 
 // StartTriggerBroker serves the controller and logs routes trigger's handler
@@ -62,9 +64,9 @@ func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *s
 	}
 	b := &TriggerBroker{
 		listener: listener, capability: base64.RawURLEncoding.EncodeToString(raw),
-		upstreamToken: upstreamToken, runID: trigger.ID, pipeline: trigger.Pipeline,
+		upstreamToken: upstreamToken, runID: trigger.ID, retryOf: trigger.RetryOf, pipeline: trigger.Pipeline,
 		controller: brokerProxy(controllerTarget, logger), logger: logger,
-		children: map[string]bool{},
+		children: map[string]bool{}, refRuns: map[string]bool{},
 	}
 	b.logs = b.controller
 	if logsURL != "" {
@@ -74,7 +76,7 @@ func StartTriggerBroker(controllerURL, logsURL, upstreamToken string, trigger *s
 		}
 		b.logs = brokerProxy(logsTarget, logger)
 	}
-	b.controller.ModifyResponse = b.recordChild
+	b.controller.ModifyResponse = b.recordRuns
 	// safety: a trigger handler holds event streams and awaits child runs for
 	// as long as its run lasts, so no write deadline cuts a response short.
 	b.server = &http.Server{Handler: b, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute}
@@ -173,7 +175,14 @@ func (b *TriggerBroker) allowController(r *http.Request) bool {
 		case strings.HasPrefix(path, "/api/v1/secrets/"):
 			return r.URL.Query().Get("run") == b.runID
 		case path == "/api/v1/triggers/spawned-child":
-			return r.URL.Query().Get("parent_run_id") == b.runID
+			// safety: a retry reuses the child its source attempt spawned, and
+			// the controller answers only children of the named parent.
+			parent := r.URL.Query().Get("parent_run_id")
+			return parent == b.runID || (b.retryOf != "" && parent == b.retryOf)
+		case latestRunLookup(path):
+			return true
+		case b.refOutput(path):
+			return true
 		}
 		if b.child(path) {
 			return true
@@ -235,9 +244,39 @@ func (b *TriggerBroker) child(path string) bool {
 	return false
 }
 
-func (b *TriggerBroker) recordChild(resp *http.Response) error {
-	if resp.Request.Method != http.MethodPost || resp.Request.URL.Path != "/api/v1/triggers" ||
-		resp.StatusCode < 200 || resp.StatusCode > 299 {
+// safety: a cross-pipeline Ref reads the latest run of a pipeline in the
+// same team, which the controller scopes; only a run that lookup returned,
+// and only its node outputs, is readable afterwards, never a run the
+// pipeline names itself.
+func latestRunLookup(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/v1/pipelines/")
+	name, ok2 := strings.CutSuffix(rest, "/latest")
+	return ok && ok2 && name != "" && !strings.Contains(name, "/")
+}
+
+func (b *TriggerBroker) refOutput(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/api/v1/runs/")
+	if !ok {
+		return false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 4 || parts[1] != "nodes" || parts[3] != "output" {
+		return false
+	}
+	runID, err := url.PathUnescape(parts[0])
+	if err != nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.refRuns[runID]
+}
+
+func (b *TriggerBroker) recordRuns(resp *http.Response) error {
+	req := resp.Request
+	child := req.Method == http.MethodPost && req.URL.Path == "/api/v1/triggers"
+	ref := req.Method == http.MethodGet && latestRunLookup(req.URL.EscapedPath())
+	if (!child && !ref) || resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -246,13 +285,20 @@ func (b *TriggerBroker) recordChild(resp *http.Response) error {
 	if err != nil {
 		return err
 	}
-	var created struct {
+	var named struct {
 		RunID string `json:"run_id"`
+		ID    string `json:"id"`
 	}
-	if json.Unmarshal(raw, &created) == nil && created.RunID != "" {
-		b.mu.Lock()
-		b.children[created.RunID] = true
-		b.mu.Unlock()
+	if json.Unmarshal(raw, &named) != nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if child && named.RunID != "" {
+		b.children[named.RunID] = true
+	}
+	if ref && named.ID != "" {
+		b.refRuns[named.ID] = true
 	}
 	return nil
 }

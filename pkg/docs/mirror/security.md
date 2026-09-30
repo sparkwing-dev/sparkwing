@@ -38,8 +38,10 @@ administrative routes. A claimed trigger's pipeline binary, which plans the
 run, gets the same kind of loopback capability, limited to its own run and
 the child runs it spawns, from a runner using the in-process node runner.
 The broker names the run on every route it forwards, so a runner holding two
-runs never lets one read the other; a cross-pipeline `Ref` of another
-pipeline's latest run is refused there. A runner using the Kubernetes or
+runs never lets one read the other. Two lookups reach beyond it, both scoped
+to the team by the controller: a cross-pipeline `Ref` reads another
+pipeline's latest run and then only that run's node outputs, and a retry
+asks which child its source attempt spawned so it reuses that child. A runner using the Kubernetes or
 warm node runner still hands its token to the trigger's binary, because the
 Jobs that binary creates need it; controller dispatch (`sparkwing-runner
 launch`), which gives each Job its own claim token as its only credential,

@@ -119,7 +119,6 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 		{"GET", "/api/v1/runs/run-a", "runner-token", "", http.StatusUnauthorized},
 		{"GET", "/api/v1/runs/run-b", capability, "", http.StatusForbidden},
 		{"GET", "/api/v1/runs/run-b/nodes/build/output", capability, "", http.StatusForbidden},
-		{"GET", "/api/v1/pipelines/build/latest", capability, "", http.StatusForbidden},
 		{"GET", "/api/v1/pipelines/other/profile", capability, "", http.StatusForbidden},
 		{"GET", "/api/v1/triggers/spawned-child?parent_run_id=run-b", capability, "", http.StatusForbidden},
 		{"POST", "/api/v1/runs/run-b/cancel", capability, "", http.StatusForbidden},
@@ -147,6 +146,66 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 	for _, line := range forwarded {
 		if !strings.HasSuffix(line, "Bearer runner-token") || strings.Contains(line, "run-b") {
 			t.Errorf("upstream saw %q, want only run-a routes under the runner token", line)
+		}
+	}
+}
+
+// A cross-pipeline Ref reads the latest run of another pipeline in the team
+// and then that run's outputs; a retry looks up the child its source attempt
+// spawned. Neither opens a run the pipeline names on its own.
+func TestTriggerBrokerFollowsRefsAndRetryChildrenOnly(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/pipelines/deploy/latest":
+			_, _ = w.Write([]byte(`{"id":"deploy-run-7","pipeline":"deploy","status":"success"}`))
+		case "/api/v1/pipelines/other-teams-pipe/latest":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer upstream.Close()
+	broker, err := orchestrator.StartTriggerBroker(upstream.URL, "", "runner-token",
+		&store.Trigger{ID: "run-a", Pipeline: "build", RetryOf: "run-prev"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broker.Close(context.Background())
+	get := func(path string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, broker.URL()+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+broker.Capability())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	steps := []struct {
+		path string
+		want int
+	}{
+		{"/api/v1/runs/deploy-run-7/nodes/build/output", http.StatusForbidden},
+		{"/api/v1/pipelines/deploy/latest", http.StatusOK},
+		{"/api/v1/runs/deploy-run-7/nodes/build/output", http.StatusOK},
+		{"/api/v1/runs/deploy-run-7", http.StatusForbidden},
+		{"/api/v1/runs/deploy-run-7/events", http.StatusForbidden},
+		{"/api/v1/runs/run-z/nodes/build/output", http.StatusForbidden},
+		{"/api/v1/pipelines/other-teams-pipe/latest", http.StatusNotFound},
+		{"/api/v1/runs/other-teams-run/nodes/build/output", http.StatusForbidden},
+		{"/api/v1/triggers/spawned-child?parent_run_id=run-a&parent_node_id=n&pipeline=child", http.StatusOK},
+		{"/api/v1/triggers/spawned-child?parent_run_id=run-prev&parent_node_id=n&pipeline=child", http.StatusOK},
+		{"/api/v1/triggers/spawned-child?parent_run_id=run-z&parent_node_id=n&pipeline=child", http.StatusForbidden},
+		{"/api/v1/runs/run-prev", http.StatusForbidden},
+	}
+	for _, step := range steps {
+		if got := get(step.path); got != step.want {
+			t.Errorf("GET %s = %d, want %d", step.path, got, step.want)
 		}
 	}
 }

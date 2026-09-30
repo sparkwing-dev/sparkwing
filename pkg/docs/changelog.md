@@ -1632,7 +1632,8 @@ unlock.
   binary. The runner serves that binary a loopback broker that admits only
   the claimed run's routes, and those of child runs it spawns, under a
   per-run capability, as node execution already did. A cross-pipeline
-  `Ref` read of another pipeline's latest run is refused there. The Kubernetes and warm node runners keep handing the token to
+  `Ref` still reads another pipeline's latest run in the team and that run's
+  node outputs, and a retry still finds the child its source attempt spawned. The Kubernetes and warm node runners keep handing the token to
   the binary, since the Jobs it creates need it. The self-hosted runner
   documentation now says plainly that pipeline code runs as the runner's OS
   user and can read that user's files, the agent's `config.yaml` included.
