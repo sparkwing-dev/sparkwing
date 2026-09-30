@@ -688,9 +688,6 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 		fmt.Fprintln(w, p.color("Tips", ansiBold))
 		fmt.Fprintln(w, "  "+p.color("status ", ansiDim)+" "+p.color("sparkwing runs status --run "+runID, ansiCyan))
 		fmt.Fprintln(w, "  "+p.color("logs   ", ansiDim)+" "+p.color("sparkwing runs logs --run "+runID, ansiCyan))
-		if status == "failed" {
-			fmt.Fprintln(w, "  "+p.color("retry  ", ansiDim)+" "+p.color("sparkwing runs retry --failed --run "+runID, ansiCyan))
-		}
 	}
 
 	fmt.Fprintln(w, p.sectionRule(""))

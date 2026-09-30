@@ -643,14 +643,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			attrs["error"] = runErr.Error()
 		}
 		if runID != "" {
-			hints := map[string]string{
+			attrs["hints"] = map[string]string{
 				"status": "sparkwing runs status --run " + runID,
 				"logs":   "sparkwing runs logs --run " + runID,
 			}
-			if finalStatus == "failed" {
-				hints["retry"] = "sparkwing runs retry --failed --run " + runID
-			}
-			attrs["hints"] = hints
 		}
 		opts.Delegate.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),

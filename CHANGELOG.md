@@ -1311,6 +1311,10 @@ unlock.
 
 ### Fixed
 
+- **cli:** A failed local run's closing tips and its `run_finish` hints no
+  longer suggest `sparkwing runs retry --failed`, which refuses every local
+  run. Submit a new run from the intended checkout instead.
+
 - **sdk:** A job struct field holding `sw.RefTo[T](node)` now makes the job
   depend on that node, so `pipeline explain` and the plan show the edge and the
   consumer no longer races the producer (`Ref[...].Get: node "produce" has not

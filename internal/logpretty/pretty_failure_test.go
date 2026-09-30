@@ -80,3 +80,15 @@ func TestRunSummary_SkippedDistinctFromCancelled(t *testing.T) {
 		t.Errorf("want 1 skipped in tally:\n%s", out)
 	}
 }
+
+func TestRunSummary_FailedRunTipsOmitRetry(t *testing.T) {
+	out := renderRunFailure(t, []any{
+		map[string]any{"id": "deploy", "outcome": "failed", "duration_ms": int64(900)},
+	})
+	if strings.Contains(out, "runs retry") {
+		t.Errorf("a local failed run must not suggest runs retry, which refuses local runs:\n%s", out)
+	}
+	if !strings.Contains(out, "sparkwing runs logs --run run-xyz") {
+		t.Errorf("tips lost the logs command:\n%s", out)
+	}
+}
