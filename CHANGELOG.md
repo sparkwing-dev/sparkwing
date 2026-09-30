@@ -58,8 +58,9 @@ unlock.
 - **controller + store (Breaking):** `max_concurrent_runners` counts Cloud runners
   across a team's tokens and defaults to 100 per team when unset. `runner_cap` on the
   trust route can raise one team's cap. `Store.RunnerCapFor`, the `runner_scale_*`
-  settings, scaled per-principal cap, `usage.derived_runner_cap` and
-  `usage.recent_paid_micro` are removed. See [Schema 87: card
+  settings and scaled per-principal cap are removed. The `ComputeUsage`
+  response (`components.schemas.ComputeUsage`) loses `derived_runner_cap`,
+  `recent_paid_micro`, and `scale_window_seconds`. See [Schema 87: card
   billing and a team-wide runner
   count](docs/migrations/_unreleased.md#schema-87-card-billing-and-a-team-wide-runner-count).
 
@@ -729,9 +730,11 @@ unlock.
   rows. A node reserves its output with `output-upload`, puts the bytes to the
   URL it gets, commits them with `output-commit`, and its finish or attempt
   report names the committed object; inline output bytes are refused. A read
-  of `GET .../nodes/{nodeID}/output` returns a one-minute URL and the SHA-256
-  the bytes must match. An output is at most 64 MiB, one run's outputs at most
-  1 GiB, both counted toward the team's cache share. An output of up to
+  of `GET /api/v1/runs/{id}/nodes/{nodeID}/output` returns a one-minute URL and
+  the SHA-256 the bytes must match. `Node.output`
+  (`components.schemas.Node.properties.output`) is removed from node JSON.
+  An output is at most 64 MiB, one run's outputs at most 1 GiB, both counted
+  toward the team's cache share. An output of up to
   1 MiB needs no share room or free slot until such outputs put the team
   64 MiB past its share. Outputs expire 30
   days after their run finishes, except each pipeline's newest successful

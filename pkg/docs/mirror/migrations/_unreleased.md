@@ -357,7 +357,8 @@ of the team, and applies even when unset: zero or unset means 100 per team,
 and `runner_cap` on the trust route raises one granted team. Schema 87 deletes the `runner_scale_base`,
 `runner_scale_step_credits` and `runner_scale_ceiling` settings.
 `Store.RunnerCapFor` is gone, and `GET /api/v1/compute-limits` no longer
-reports `usage.derived_runner_cap` or `usage.recent_paid_micro`. Schema 87 also
+reports `ComputeUsage` (`components.schemas.ComputeUsage`) members `derived_runner_cap`,
+`recent_paid_micro`, or `scale_window_seconds`. Schema 87 also
 adds card billing and the per-day spend buckets, backfilled from every past
 charge; the upgrade reads the whole credit ledger once, so run it inside the
 usual write freeze. The `card-billing-v1` requirement makes an older
@@ -750,6 +751,8 @@ key on the TCP peer, so browsers behind one proxy share its budget.
 ## Job outputs are objects
 
 A node's output no longer travels inline in its finish or attempt report.
+`Node.output` (`components.schemas.Node.properties.output`) is removed from node JSON;
+read `GET /api/v1/runs/{id}/nodes/{nodeID}/output` for its URL and SHA-256 instead.
 Nodes and agents from this release upload it first. After the write freeze and
 output move below, start the new controller before resuming new node binaries;
 an older node's finish is refused with `400`.
