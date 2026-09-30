@@ -68,10 +68,9 @@ type Options struct {
 	NoLocalStore bool
 
 	// AllowRemote lets the server bind a non-loopback Addr and answer
-	// requests whose Host is not loopback. The API carries no
-	// authentication, so this hands every reachable network the power
-	// to run pipelines and read secrets. Off by default; Run refuses a
-	// non-loopback Addr without it.
+	// requests whose Host is not loopback. Hosts holding the serve token
+	// can run pipelines and access local secrets. Off by default; Run
+	// refuses a non-loopback Addr without it.
 	AllowRemote bool
 
 	// AllowOrigins lists browser origins ("https://dash.example") whose
@@ -112,7 +111,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		opts.Addr = "127.0.0.1:4343"
 	}
 	if !opts.AllowRemote && !LoopbackBind(opts.Addr) {
-		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
+		return fmt.Errorf("addr %s is not loopback: set AllowRemote to allow network access", opts.Addr)
 	}
 	if opts.AllowRemote && !LoopbackBind(opts.Addr) {
 		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so every host that reaches it can try "+

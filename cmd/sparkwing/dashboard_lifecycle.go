@@ -105,7 +105,7 @@ func runDashboardLaunch(args []string, restart bool) error {
 		}
 	}
 	if !o.AllowRemote && !localws.LoopbackBind(o.Addr) {
-		return fmt.Errorf("--addr %s is not loopback; pass --allow-remote to accept unauthenticated remote access", o.Addr)
+		return fmt.Errorf("--addr %s is not loopback; pass --allow-remote to allow network access", o.Addr)
 	}
 	if err = web.VerifyBundleEmbedded(); err != nil {
 		return err

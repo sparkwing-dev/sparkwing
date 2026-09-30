@@ -287,6 +287,25 @@ server at port 3100 is no longer trusted implicitly: start the dashboard with
 host and port changed to `localhost:3100`, since the session belongs to the
 origin that opened it. No database migration is required.
 
+## Remote local dashboards expose secrets
+
+- **Before:** A remote dashboard had no local-secrets API to expose.
+- **After:** `sparkwing serve --allow-remote` lets remote hosts holding the
+  serve token list, overwrite and delete the local install's secrets. Restrict
+  access to that listener before starting the dashboard remotely. Masked
+  secret values are never returned. A browser on another loopback port needs
+  that origin in `--allow-origin`, and browser writes with a body must send
+  `application/json`. No database migration is required.
+
+## Tag push subscriptions
+
+- **Before:** A GitHub App subscription could use `tags: true`.
+- **After:** Replace it with an explicit pattern list, such as
+  `tags: ["v*"]`. An empty list selects no tags, and existing boolean
+  subscriptions stop matching after the schema v66 upgrade. Operator GitHub
+  webhooks ignore tag pushes. Tag-triggered runs expose the full ref and tag
+  name; OIDC subjects use `refs/tags/<tag>`.
+
 ## Controller /metrics on the API listener needs an admin bearer
 
 A controller with authentication on answers `401` to an unauthenticated
@@ -662,6 +681,14 @@ direct-source runner fetched `git.repo_url`, so such a trigger showed one
 repository and ran another. Send only the fields that name the repository you
 mean, or make them agree; `https://github.com/acme/app.git`,
 `git@github.com:acme/app.git` and `acme/app` agree.
+
+## Operator-only GitHub webhook bindings
+
+- **Before:** A team `team.admin` token could create or delete a binding.
+- **After:** `POST` and `DELETE /api/v1/webhooks/github/bindings` require an
+  operator `admin` token. Move binding automation to an operator credential.
+  Bindings stored outside the operator's team post no commit status and open
+  no Git cache mirror. No database migration is required.
 
 ## Execution attribution
 
