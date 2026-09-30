@@ -75,18 +75,20 @@ func (c *Client) GetChildRun(ctx context.Context, runID, childID string) (*store
 	return &run, nil
 }
 
-// GetChildNodeOutput reads the output of nodeID in childID, a child run
-// runID started.
-func (c *Client) GetChildNodeOutput(ctx context.Context, runID, childID, nodeID string) ([]byte, error) {
-	var out json.RawMessage
-	err := c.getJSON(ctx, c.baseURL+childPath(runID, childID)+"/nodes/"+url.PathEscape(nodeID)+"/output", &out)
-	return out, err
-}
-
 // ClaimInput reads, with runID/nodeID's claim token, the output the node
 // takes from another run through a reference its plan declares; the
-// controller picks the run.
-func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, error) {
+// controller picks the run. It returns the output's bytes, JSON null when
+// the node recorded none.
+func (c *Client) ClaimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, []byte, error) {
+	in, err := c.claimInput(ctx, runID, nodeID, req)
+	if err != nil {
+		return in, nil, err
+	}
+	data, err := c.fetchOutput(ctx, in.Output)
+	return in, data, err
+}
+
+func (c *Client) claimInput(ctx context.Context, runID, nodeID string, req store.ClaimInputRequest) (store.ClaimInput, error) {
 	var out store.ClaimInput
 	body, err := json.Marshal(req)
 	if err != nil {

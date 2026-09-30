@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -102,11 +103,14 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
 	plan := "Bearer " + f.launchedRun(olga, "run-parent", "acme", "widgets")
-	doc := map[string]any{"nodes": []map[string]any{{"id": "a", "deps": []string{}, "spec_hash": specA}}}
+	doc := map[string]any{"nodes": []map[string]any{
+		{"id": "a", "deps": []string{}, "spec_hash": specA}, {"id": "b", "deps": []string{}, "spec_hash": specA},
+	}}
 	if code := f.call("POST", "/api/v1/runs/run-parent/plan", plan, doc, nil); code != http.StatusOK {
 		t.Fatalf("accept plan = %d", code)
 	}
 	work := "Bearer " + f.launchNode("run-parent", "a")
+	sibling := "Bearer " + f.launchNode("run-parent", "b")
 	f.secretArg("run-parent")
 	var own store.Run
 	if code := f.call("GET", "/api/v1/runs/run-parent?include=secret_values", work, nil, &own); code != http.StatusOK || own.Args["token"] != "s3cret" {
@@ -150,6 +154,11 @@ func TestClaimRun_ChildRunsInheritTheParentAndAnswerOnlyIt(t *testing.T) {
 		t.Fatalf("read child = %d %+v", code, got)
 	}
 	f.launchedRun(olga, "run-stranger", "acme", "widgets")
+	for _, path := range []string{"/api/v1/runs/run-parent/children/" + childID, "/api/v1/runs/run-parent/children/" + childID + "/nodes/plan/output"} {
+		if code := f.call("GET", path, sibling, nil, nil); code != http.StatusNotFound {
+			t.Fatalf("a sibling node reading %s = %d, want 404", path, code)
+		}
+	}
 	if code := f.call("GET", "/api/v1/runs/run-parent/children/run-stranger", work, nil, nil); code != http.StatusNotFound {
 		t.Fatalf("read a run that is not a child = %d, want 404", code)
 	}
@@ -425,9 +434,13 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	finished := func(runID, nodeID string, modifiers map[string]any, output string) {
 		t.Helper()
 		accept(runID, map[string]any{"id": nodeID, "modifiers": modifiers})
-		work := "Bearer " + f.launchNode(runID, nodeID)
-		if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/"+nodeID+"/attempt", work,
-			map[string]any{"outcome": "success", "output": json.RawMessage(output)}, nil); code != http.StatusOK {
+		raw := f.launchNode(runID, nodeID)
+		ref, err := client.NewWithToken(f.url, nil, raw).UploadNodeOutput(t.Context(), runID, nodeID, []byte(output))
+		if err != nil {
+			t.Fatalf("upload %s/%s's output: %v", runID, nodeID, err)
+		}
+		if code := f.call("POST", "/api/v1/runs/"+runID+"/nodes/"+nodeID+"/attempt", "Bearer "+raw,
+			map[string]any{"outcome": "success", "output": ref}, nil); code != http.StatusOK {
 			t.Fatalf("finish %s/%s = %d", runID, nodeID, code)
 		}
 	}
@@ -476,9 +489,10 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	cache(olga.team, ns("m", "h5"), "h5", "run-node", "x")
 	cache(olga.team, ns("m", "h6"), "h6", "run-pipeline", "m")
 	cache(olga.team, ns("m", "h7"), "h7", "run-repo", "m")
-	tokens := map[string]string{}
+	tokens, raws := map[string]string{}, map[string]string{}
 	for _, n := range []string{"m", "c", "r"} {
-		tokens[n] = "Bearer " + f.launchNode("run-in", n)
+		raws[n] = f.launchNode("run-in", n)
+		tokens[n] = "Bearer " + raws[n]
 	}
 	input := func(node string, req store.ClaimInputRequest) (int, store.ClaimInput) {
 		t.Helper()
@@ -500,8 +514,9 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		{"c", memoIn(store.ClaimInputCoalesced, "c", "h1"), "run-leader", `{"from":"leader"}`},
 		{"r", lastRun, "run-last", `{"from":"last"}`},
 	} {
-		if code, in := input(c.node, c.req); code != http.StatusOK || in.RunID != c.run || string(in.Output) != c.output {
-			t.Errorf("node %s's %s input %s = %d %s %s, want %s %s", c.node, c.req.Kind, c.req.Key, code, in.RunID, in.Output, c.run, c.output)
+		in, data, err := client.NewWithToken(f.url, nil, raws[c.node]).ClaimInput(ctx, "run-in", c.node, c.req)
+		if err != nil || in.RunID != c.run || string(data) != c.output {
+			t.Errorf("node %s's %s input %s = %v %s %s, want %s %s", c.node, c.req.Kind, c.req.Key, err, in.RunID, data, c.run, c.output)
 		}
 	}
 	bare, otherRef := memoIn(store.ClaimInputCached, "m", "h1"), lastRun
@@ -526,8 +541,22 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		"another team's cache entry":                           {"m", memoIn(store.ClaimInputCached, "m", "h4"), http.StatusNotFound},
 	} {
 		if code, in := input(c.node, c.req); code != c.want {
-			t.Errorf("%s = %d %s, want %d", what, code, in.Output, c.want)
+			t.Errorf("%s = %d from %s, want %d", what, code, in.RunID, c.want)
 		}
+	}
+	copied := func(node string, from store.ClaimInputRequest) (int, *store.Node) {
+		t.Helper()
+		code := f.call("POST", "/api/v1/runs/run-in/nodes/"+node+"/attempt", tokens[node],
+			map[string]any{"outcome": "cached", "output_from": from}, nil)
+		n, _ := f.store.GetNode(ctx, "run-in", node)
+		return code, n
+	}
+	if code, _ := copied("r", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusUnprocessableEntity {
+		t.Errorf("a report copying an input its node does not declare = %d, want 422", code)
+	}
+	origin, _ := f.store.GetNode(ctx, "run-origin", "m")
+	if code, n := copied("m", memoIn(store.ClaimInputCached, "m", "h1")); code != http.StatusOK || n.OutputRef == nil || *n.OutputRef != *origin.OutputRef {
+		t.Errorf("a cache hit's report = %d with ref %+v, want the origin's %+v", code, n.OutputRef, origin.OutputRef)
 	}
 	if !strings.Contains(f.logs.String(), "event=input_undeclared") {
 		t.Error("a refused input was not audited")

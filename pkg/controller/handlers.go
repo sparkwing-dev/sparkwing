@@ -607,11 +607,11 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 }
 
 type finishNodeReq struct {
-	Outcome       string `json:"outcome"`
-	Error         string `json:"error,omitempty"`
-	Output        []byte `json:"output,omitempty"`
-	FailureReason string `json:"failure_reason,omitempty"`
-	ExitCode      *int   `json:"exit_code,omitempty"`
+	Outcome       string           `json:"outcome"`
+	Error         string           `json:"error,omitempty"`
+	Output        *store.OutputRef `json:"output,omitempty"`
+	FailureReason string           `json:"failure_reason,omitempty"`
+	ExitCode      *int             `json:"exit_code,omitempty"`
 }
 
 func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
@@ -626,7 +626,11 @@ func (s *Server) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("outcome is required"))
 		return
 	}
-	if err := s.store.FinishNodeWithReason(r.Context(), runID, nodeID, body.Outcome, body.Error, body.Output, body.FailureReason, body.ExitCode); err != nil {
+	if err := s.store.FinishNodeWithOutputRef(r.Context(), runID, nodeID, body.Outcome, body.Error, body.Output, body.FailureReason, body.ExitCode); err != nil {
+		if errors.Is(err, store.ErrInvalidInput) {
+			writeError(w, http.StatusUnprocessableEntity, err)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -1634,31 +1638,6 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, public[0])
-}
-
-func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
-	runID := r.PathValue("id")
-	nodeID := r.PathValue("nodeID")
-	n, err := s.store.GetNode(r.Context(), runID, nodeID)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, err)
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if n.Status != "done" {
-		writeError(w, http.StatusConflict, fmt.Errorf("node %s/%s not finished (status=%s)", runID, nodeID, n.Status))
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if len(n.Output) > 0 {
-		_, _ = w.Write(n.Output)
-	} else {
-		_, _ = w.Write([]byte("null"))
-	}
 }
 
 func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,8 @@
 package receipt_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,14 @@ func fixedRun() *store.Run {
 	}
 }
 
+func outputRef(output []byte) *store.OutputRef {
+	if len(output) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(output)
+	return &store.OutputRef{Key: "outputs/r/n/a", Size: int64(len(output)), SHA256: hex.EncodeToString(sum[:])}
+}
+
 func node(id, outcome string, started time.Time, dur time.Duration, output []byte, deps ...string) *store.Node {
 	finished := started.Add(dur)
 	return &store.Node{
@@ -33,7 +43,7 @@ func node(id, outcome string, started time.Time, dur time.Duration, output []byt
 		Deps:       deps,
 		StartedAt:  &started,
 		FinishedAt: &finished,
-		Output:     output,
+		OutputRef:  outputRef(output),
 	}
 }
 

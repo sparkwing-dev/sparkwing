@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -28,14 +29,27 @@ func TestNodeTerminal(t *testing.T) {
 	}
 }
 
+type outputsFunc func(ctx context.Context, runID, nodeID string) ([]byte, error)
+
+func (f outputsFunc) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
+	return f(ctx, runID, nodeID)
+}
+
 func TestResultFromNode_CarriesOutcomeErrorAndRawOutput(t *testing.T) {
 	raw := []byte(`{"digest":"abc"}`)
-	res := ResultFromNode(&store.Node{
-		Status:  "done",
-		Outcome: string(sparkwing.Failed),
-		Error:   "boom",
-		Output:  raw,
-	})
+	res := ResultFromNode(context.Background(), &store.Node{
+		RunID:     "r",
+		NodeID:    "n",
+		Status:    "done",
+		Outcome:   string(sparkwing.Failed),
+		Error:     "boom",
+		OutputRef: &store.OutputRef{Key: "outputs/r/n/a"},
+	}, outputsFunc(func(_ context.Context, runID, nodeID string) ([]byte, error) {
+		if runID != "r" || nodeID != "n" {
+			return nil, store.ErrNotFound
+		}
+		return raw, nil
+	}))
 	if res.Outcome != sparkwing.Failed {
 		t.Errorf("Outcome = %q", res.Outcome)
 	}
@@ -53,7 +67,7 @@ func TestResultFromNode_CarriesOutcomeErrorAndRawOutput(t *testing.T) {
 }
 
 func TestResultFromNode_CleanSuccessHasNoErrorOrOutput(t *testing.T) {
-	res := ResultFromNode(&store.Node{Status: "done", Outcome: string(sparkwing.Success)})
+	res := ResultFromNode(context.Background(), &store.Node{Status: "done", Outcome: string(sparkwing.Success)}, nil)
 	if res.Err != nil {
 		t.Errorf("Err = %v, want nil", res.Err)
 	}

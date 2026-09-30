@@ -94,7 +94,9 @@ type AttemptReport struct {
 	Error         string
 	FailureReason string
 
-	Output json.RawMessage
+	Output *OutputRef
+
+	OutputFrom *ClaimInputRequest
 
 	Failure          json.RawMessage
 	ArtifactManifest string
@@ -245,7 +247,8 @@ type ClaimInput struct {
 	RunID      string
 	NodeID     string
 	FinishedAt *time.Time
-	Output     json.RawMessage
+
+	Output OutputReadGrant
 }
 const ClaimInputCached ClaimInputKind = "cached"
 const ClaimInputCoalesced ClaimInputKind = "coalesced"
@@ -816,6 +819,7 @@ var ErrLastOwner = errors.New("store: a team keeps at least one owner")
 var ErrLastSignInMethod = errors.New("store: an account keeps at least one sign-in method")
 var ErrLockHeld = errors.New("held by another holder")
 var ErrMeteredInProcessNodes = errors.New("a metered credential must run a trigger's nodes through node claims")
+var ErrNoOutputDir = errors.New("store: this store keeps no output bytes; upload the output instead")
 var ErrNoPayableCharge = errors.New("card billing: no charge is waiting for payment")
 var ErrNoTeam = errors.New("store: team is required")
 var ErrNoTokenCandidates = errors.New("unknown token")
@@ -827,6 +831,8 @@ var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
+var ErrOutputLimit = errors.New("output limit exceeded")
+var ErrOutputNotStored = errors.New("the node's output was not stored")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")
 var ErrPlanAccepted = errors.New("store: the run's plan was accepted from its planning claim")
 var ErrPlanInvalid = errors.New("store: plan refused")
@@ -1013,6 +1019,10 @@ type ExecutorSchedulingSummary struct {
 	RequiredLocation      string
 }
 func ExpectedSchemaVersion() int
+type ExpiredOutputRun struct {
+	Team  Team
+	RunID string
+}
 const FailureAgentLost = "agent_lost"
 const FailureComputeLimit = "compute_limit"
 const FailureCreditsExhausted = "credits_exhausted"
@@ -1261,6 +1271,16 @@ type LegacyAgentClaim struct {
 	StartedAt   time.Time
 	LastSeen    time.Time
 }
+type LegacyOutput struct {
+	Team   Team
+	RunID  string
+	NodeID string
+	Data   []byte
+
+	Recorded *OutputRef
+}
+func (o LegacyOutput) Moved() bool
+func (o LegacyOutput) Ref() OutputRef
 const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
 var Maintenance = storeMaintenanceFns{
@@ -1282,7 +1302,6 @@ var Maintenance = storeMaintenanceFns{
 	ReconcileConcurrencyKeys:      (*Store).reconcileConcurrencyKeys,
 }
 const MaxAnnotationBytes = 64 << 10
-const MaxAttemptOutputBytes = 1 << 20
 const MaxCLITokensPerMember = 10
 const MaxClaimTokenLifetime = 6 * time.Hour
 const MaxCreatedTeams = 3
@@ -1304,6 +1323,7 @@ const MaxNodeIDBytes = 200
 const MaxNodeMetricSamples = 10_000
 const MaxNodeRetries = 10
 const MaxOpenInvitations = 50
+const MaxOutputBytes int64 = 64 << 20
 const MaxPlanBytes = MaxNodeDispatchEnvelope
 const MaxPlanNodes = 1000
 const MaxPurchaseLimitCents = MaxTeamBalanceMicro / MicroCreditsPerCent
@@ -1311,12 +1331,15 @@ const MaxRetryBackoff = 5 * time.Minute
 const MaxRunAnnotationBytes = 4 << 20
 const MaxRunAnnotations = 1000
 const MaxRunListLimit = 1000
+const MaxRunOutputBytes int64 = 1 << 30
 const MaxRunnerTokensPerTeam = 100
 const MaxSecretValueBytes = 128 << 10
 const MaxSecretsPerTeam = 100
+const MaxSmallOutputOverage int64 = 64 << 20
 const MaxSourceMints = 3
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
+const MaxUnpaidOutputBytes int64 = 1 << 20
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -1344,12 +1367,17 @@ func (sample MetricSample) ValidateResourceValues() error
 const MetricUnknown MetricKind = ""
 const MicroCreditsPerCent = MicroCreditsPerCredit * CreditsPerDollar / 100
 const MicroCreditsPerCredit = 100_000
+func MigratedOutputKey(runID, nodeID string) string
 const MinBillableSeconds = 60
 const MinCardChargeCents = 50
 const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second) + 1
 const MinLaunchLifetime = 90 * time.Second
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
+type MoveStats struct {
+	Outputs int64
+	Bytes   int64
+}
 type NamedClaimOptions struct {
 	SizesToClass bool
 
@@ -1359,6 +1387,7 @@ func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 func NewClaimResultCommit(tok ClaimToken, digest string) ClaimResultCommit
 const NewDailyCapCents = 2_500
+func NewOutputKey(runID, nodeID string, attempt, generation int64) (string, error)
 const NewPurchaseLimitCents = 5_000
 const NewPurchaseMaxCents = 5_000
 const NewSpendCeilingCents = 5_000
@@ -1369,7 +1398,7 @@ type Node struct {
 	Outcome    string
 	Deps       []string
 	Error      string
-	Output     []byte
+	OutputRef  *OutputRef
 	StartedAt  *time.Time
 	FinishedAt *time.Time
 
@@ -1535,6 +1564,29 @@ func (o *Operator) UsageMetrics(ctx context.Context, now time.Time, weeks int, e
 func (o *Operator) WithdrawOtherGitHubCronBindings(ctx context.Context, team Team, installationID, repositoryID int64, now time.Time) (int64, error)
 const OperatorHoldPrefix = "operator-"
 const OperatorScope = "admin"
+func OutputKeyPrefix(runID, nodeID string) string
+func OutputPath(dir, key string) string
+type OutputReadGrant struct {
+	URL     string
+	SHA256  string
+	Size    int64
+	Expires time.Time
+
+	SourceRunID string
+}
+type OutputRef struct {
+	Key    string
+	Size   int64
+	SHA256 string
+}
+const OutputRetention = 30 * 24 * time.Hour
+type OutputUploadGrant struct {
+	UploadID  string
+	Key       string
+	URL       string
+	Headers   map[string]string
+	ExpiresAt time.Time
+}
 var PaidTierQuota = StorageQuota{
 	Tier:             StorageTierPaid,
 	MaxBytesPerRun:   1 << 30,
@@ -1663,6 +1715,7 @@ const QueueStateReady = "ready"
 const QueueStateRunning = "running"
 const QueueStateWaiting = "waiting"
 func QueueStates() []string
+func ReadOutputFile(dir string, ref OutputRef) ([]byte, error)
 func RecordBusinessEvent(tx *storeTx, ev BusinessEvent) error
 func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
@@ -2042,6 +2095,8 @@ type StorageReserve struct {
 
 	TTL time.Duration
 	Now time.Time
+
+	SmallOutput bool
 }
 type StorageSettings struct {
 	EventRetentionDays      int64
@@ -2215,6 +2270,7 @@ func (s *Store) ExecutorForCredential(ctx context.Context, claimant ClaimIdentit
 func (s *Store) ExecutorNameForTokenPrefix(ctx context.Context, tokenPrefix string) (string, error)
 func (s *Store) ExpireRetainedRuns(ctx context.Context, now time.Time) ([]TeamRetentionExpiry, error)
 func (s *Store) ExpireSessions(now time.Time) (int64, error)
+func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int) (out []ExpiredOutputRun, err error)
 func (s *Store) FailCardAttempt(
 	ctx context.Context, attemptID, paymentIntent, declineCode string, now time.Time,
 ) (team Team, first bool, err error)
@@ -2228,8 +2284,10 @@ func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key s
 func (s *Store) FindTriggerByWebhookReplay(ctx context.Context, replayKey, delivery string) (*Trigger, error)
 func (s *Store) FinishLapsedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
+func (s *Store) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason, srcRun, srcNode string) error
 func (s *Store) FinishNodeExecutionAttempt(ctx context.Context, runID, nodeID string, claimant ClaimIdentity, finish ExecutionAttemptFinish) error
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
+func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
 func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error)
@@ -2239,6 +2297,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
+func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
@@ -2249,6 +2308,7 @@ func (s *Store) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo stri
 func (s *Store) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error)
 func (s *Store) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*NodeDispatch, error)
+func (s *Store) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (s *Store) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error)
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
@@ -2276,7 +2336,8 @@ func (s *Store) HoldTeamForDispute(
 func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error)
 func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error)
 func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
-func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, childID string) (bool, error)
+func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, parentNodeID, childID string) (bool, error)
+func (s *Store) LegacyOutputs(ctx context.Context, afterRun, afterNode string, limit int, retainedSince time.Time) (out []LegacyOutput, err error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
 func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState, error)
@@ -2324,18 +2385,25 @@ func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
 	kind ClaimTokenKind, expiresAt, now time.Time,
 ) (string, error)
+func (s *Store) MoveLegacyOutputs(ctx context.Context, retainedSince time.Time, batch int, provenance string, verifyMoved bool,
+	write func(context.Context, LegacyOutput) error,
+) (MoveStats, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
 func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (principal, holder, runner string, metered bool, err error)
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
+func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
+func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error)
+func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error)
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)
 func (s *Store) OldestWaitingReadyNodeForPrincipal(
 	ctx context.Context, principal string,
 ) (runID, nodeID string, err error)
 func (s *Store) OpenInvitationsForEmail(ctx context.Context, email string, now time.Time) (_ []Invitation, err error)
+func (s *Store) OutputDir() string
 func (s *Store) PaidGrantTeam(ctx context.Context, reference string) (Team, bool, error)
 func (s *Store) PaymentTeam(ctx context.Context, paymentID string) (Team, error)
 func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
@@ -2372,6 +2440,8 @@ func (s *Store) RecordCronTick(ctx context.Context, tick CronTick) error
 func (s *Store) RecordEgressTotals(ctx context.Context, t EgressTotals) (_ EgressTotals, err error)
 func (s *Store) RecordEgressUsage(ctx context.Context, usages []EgressUsage) (err error)
 func (s *Store) RecordGitHubAppDelivery(ctx context.Context, digest, delivery string, now time.Time) error
+func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref OutputRef, now time.Time) (err error)
+func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, provenance string, now time.Time) (err error)
 func (s *Store) RecordPaymentWarning(ctx context.Context, w PaymentWarning, now time.Time) (_ Team, err error)
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error
 func (s *Store) RecordWaitObservation(ctx context.Context, pipeline string, wait time.Duration) error
@@ -2381,6 +2451,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
+func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error
@@ -2446,6 +2517,7 @@ func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) er
 func (s *Store) SetOperatorCreditSettings(
 	ctx context.Context, up CreditSettingsUpdate,
 ) (_ CreditSettings, err error)
+func (s *Store) SetOutputDir(dir string)
 func (s *Store) SetProfilePin(ctx context.Context, pipeline, nodeID string, cores float64, memoryBytes int64) error
 func (s *Store) SetRetriedAs(ctx context.Context, runID, newID string) error
 func (s *Store) SetSignUpLimits(ctx context.Context, limits SignUpLimits) (SignUpGate, error)
@@ -2965,6 +3037,7 @@ func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Contex
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context
+func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

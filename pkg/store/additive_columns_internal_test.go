@@ -176,6 +176,9 @@ var additiveColumnSources = map[int][]map[string]string{
 	85: nil,
 	// safety: v86 adds defaulted columns an older binary never names.
 	86: {sourceMintCols, extraRepoIDCols},
+	// safety: v90 adds tables and no column, so an older binary keeps reading
+	// and writing the migrated database.
+	90: nil,
 }
 
 func columnSpecMaps() []map[string]string {

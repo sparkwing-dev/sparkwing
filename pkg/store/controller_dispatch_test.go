@@ -453,7 +453,8 @@ func TestReportAttempt_AnEndedClaimReplaysOnlyItsReport(t *testing.T) {
 	f := newDispatchRun(t, "run-replay-attempt")
 	f.mustAccept(t, planOf("a", "b:a"))
 	tok := f.claim(t, "a", store.ClaimTokenWork)
-	rep := store.AttemptReport{Outcome: "success", Output: json.RawMessage(`{"v":1}`)}
+	ref := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"v":1}`))
+	rep := store.AttemptReport{Outcome: "success", Output: &ref}
 	if _, err := f.report(tok, rep); err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +465,8 @@ func TestReportAttempt_AnEndedClaimReplaysOnlyItsReport(t *testing.T) {
 		t.Fatalf("differing report after the claim ended: err = %v", err)
 	}
 	f.wantOutcome(t, "a", "success")
-	if a := f.node(t, "a"); string(a.Output) != `{"v":1}` {
-		t.Fatalf("output = %s", a.Output)
+	if a := f.node(t, "a"); a.OutputRef == nil || *a.OutputRef != ref {
+		t.Fatalf("output = %+v", a.OutputRef)
 	}
 	if _, err := f.report(tok, store.AttemptReport{Outcome: "bogus"}); !errors.Is(err, store.ErrAttemptInvalid) {
 		t.Fatalf("unknown outcome: err = %v", err)

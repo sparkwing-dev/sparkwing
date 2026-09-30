@@ -359,7 +359,7 @@ func storeOutcome(res runner.Result) string {
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
 	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
-	if r.claimCacheMiss(ctx, err) {
+	if cacheOutputMiss(ctx, err) {
 		result, _ := r.runNodeWithCache(withNoCache(ctx), req)
 		return result
 	}
@@ -377,7 +377,10 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, pa
 	})
 	noteEvent(ctx, r.backends.State, req.RunID, req.Node.ID(), "cache_hit", payload)
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), originRun, originNode)
-	if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.Cached), "", output); err != nil {
+	if err := r.finishCopied(ctx, req, string(sparkwing.Cached), store.FailureUnknown, output, copiedOutput{
+		runID: originRun, nodeID: originNode,
+		input: store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: parameters.key, CacheKeyHash: parameters.cacheHash},
+	}); err != nil {
 		noteLostStateWrite(ctx, "finish node", req.RunID, err)
 	}
 
@@ -771,14 +774,15 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	r.copyArtifactManifest(ctx, req.RunID, req.Node.ID(), leaderRunID, leaderNodeID)
 
 	outcome := followerOutcomeFromLeader(leaderOutcome)
+	reason := store.FailureUnknown
 	if outcome == sparkwing.Failed {
-		if err := r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(), string(outcome), "", output, leaderFailureReason, nil); err != nil {
-			noteLostStateWrite(ctx, "finish node", req.RunID, err)
-		}
-	} else {
-		if err := r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(outcome), "", output); err != nil {
-			noteLostStateWrite(ctx, "finish node", req.RunID, err)
-		}
+		reason = leaderFailureReason
+	}
+	if err := r.finishCopied(ctx, req, string(outcome), reason, output, copiedOutput{
+		runID: leaderRunID, nodeID: leaderNodeID,
+		input: store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash},
+	}); err != nil {
+		noteLostStateWrite(ctx, "finish node", req.RunID, err)
 	}
 
 	if nodeLog, err := r.backends.Logs.OpenNodeLog(ctx, req.RunID, req.Node.ID(), req.Delegate); err == nil {
@@ -800,12 +804,11 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-// safety: a claimed node whose cache entry the controller no longer answers,
-// such as one another repository wrote under a reused name, runs as on a miss;
+// safety: a cache hit whose entry or bytes are gone, or whose bytes fail
+// their recorded digest, runs as on a miss rather than hand on a wrong value;
 // the rerun skips the cache read, so it cannot loop.
-func (r *NodeExecutor) claimCacheMiss(ctx context.Context, err error) bool {
-	_, claim := r.backends.State.(*claimState)
-	return claim && errors.Is(err, store.ErrNotFound) && !noCacheFromContext(ctx)
+func cacheOutputMiss(ctx context.Context, err error) bool {
+	return (errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrOutputCorrupt)) && !noCacheFromContext(ctx)
 }
 
 // safety: a claimed node reads another run only through the reference its
@@ -824,6 +827,24 @@ func (r *NodeExecutor) fetchLeaderOutput(ctx context.Context, parameters coordin
 		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
 	}
 	return r.backends.State.GetNodeOutput(ctx, leaderRun, leaderNode)
+}
+
+type copiedOutput struct {
+	runID, nodeID string
+	input         store.ClaimInputRequest
+}
+
+// perf: a state that can name the origin's stored object records a ref to it
+// instead of storing the same bytes a second time.
+type outputCopier interface {
+	FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason string, src copiedOutput) error
+}
+
+func (r *NodeExecutor) finishCopied(ctx context.Context, req runner.Request, outcome, reason string, output []byte, src copiedOutput) error {
+	if c, ok := r.backends.State.(outputCopier); ok && len(output) > 0 {
+		return c.FinishNodeCopyingOutput(ctx, req.RunID, req.Node.ID(), outcome, reason, src)
+	}
+	return r.backends.State.FinishNodeWithReason(ctx, req.RunID, req.Node.ID(), outcome, "", output, reason, nil)
 }
 
 func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {

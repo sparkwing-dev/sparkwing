@@ -438,7 +438,7 @@ func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cm
 			"run_id", req.RunID, "node_id", req.NodeID, "err", err)
 	}
 	if err == nil && runner.NodeTerminal(n) {
-		res := runner.ResultFromNode(n)
+		res := runner.ResultFromNode(readCtx, n, r.ctrl)
 		res.Usage = usage
 		return res
 	}

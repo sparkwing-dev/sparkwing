@@ -255,8 +255,8 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	if childRow.Outcome != string(sparkwing.Success) {
 		t.Errorf("child outcome = %q (err=%q), want success", childRow.Outcome, childRow.Error)
 	}
-	if got := string(childRow.Output); got != `{"findings":7}` {
-		t.Errorf("child output = %s, want {\"findings\":7}", got)
+	if got, err := st.GetNodeOutput(ctx, runID, "parent/scan"); err != nil || string(got) != `{"findings":7}` {
+		t.Errorf("child output = %s, %v, want {\"findings\":7}", got, err)
 	}
 
 	events, err := st.ListEventsAfter(ctx, runID, 0, 500)

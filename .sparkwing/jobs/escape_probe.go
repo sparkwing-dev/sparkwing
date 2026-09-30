@@ -32,6 +32,7 @@ type EscapeProbeArgs struct {
 	RDS      string `flag:"rds" desc:"The RDS endpoint as host:port; required, and sparkwing.yaml sets the Cloud's."`
 	APIHosts string `flag:"api-hosts" desc:"Comma-separated API server endpoint IPs behind the kubernetes Service VIP; required, and sparkwing.yaml sets the Cloud's."`
 	Nodes    string `flag:"nodes" desc:"Comma-separated node IPs whose kubelet (10250) a pod must not reach, beyond its own node."`
+	OtherRun string `flag:"other-run" desc:"An earlier escape-probe run in the same team, whose output-sibling output the pod must not read; required."`
 }
 
 // EscapeProbe checks that a customer-code pod cannot reach the credentials and
@@ -52,7 +53,8 @@ func (EscapeProbe) Help() string {
 		"credential-named environment variables other than the pod's own claim token, Kubernetes API " +
 		"authorization at the Service VIP and each endpoint (SelfSubjectRulesReview, a dry-run Job mounting " +
 		"sparkwing-database, GET secrets), a controller admin route with the pod's own token, IMDSv2, the " +
-		"kubelet on its own and named nodes, and TCP to dind, RDS, argocd, loki and tempo. It also requires " +
+		"kubelet on its own and named nodes, TCP to dind, RDS, argocd, loki and tempo, and the output of a " +
+		"node it does not depend on and of another run (--other-run). It also requires " +
 		"the public internet: HTTPS to github.com and TCP to a public resolver's port 53 must succeed. " +
 		"It prints a verdict per probe, never a value, and fails the run if a fenced probe succeeds, a " +
 		"public one fails, or a required target is missing. Run it in a throwaway team with no credit or secrets."
@@ -61,7 +63,7 @@ func (EscapeProbe) Help() string {
 func (EscapeProbe) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
 		Comment: "Probe from a plan and a node pod",
-		Command: "sparkwing run escape-probe --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130",
+		Command: "sparkwing run escape-probe --rds db.example:5432 --api-hosts 10.0.36.1,10.0.65.130 --other-run <earlier run>",
 	}}
 }
 
@@ -131,14 +133,18 @@ type prober struct {
 	readFile   func(string) ([]byte, error)
 	dial       func(network, address string, timeout time.Duration) (net.Conn, error)
 	httpClient *http.Client
+	// perf: the output probe waits this long for the sibling it reads to
+	// finish, since the two run side by side.
+	siblingWait time.Duration
 }
 
 func defaultProber(args EscapeProbeArgs) prober {
 	return prober{
-		args:     args,
-		env:      os.Environ(),
-		readFile: os.ReadFile,
-		dial:     net.DialTimeout,
+		args:        args,
+		env:         os.Environ(),
+		readFile:    os.ReadFile,
+		dial:        net.DialTimeout,
+		siblingWait: 2 * time.Minute,
 		httpClient: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
 			// #nosec G402 -- the probe asks whether the API answers at all; trusting its certificate would add nothing
 			TLSClientConfig: insecureTLS(),
@@ -487,6 +493,57 @@ func reportProbes(ctx context.Context, where string, results []probeResult) erro
 	return nil
 }
 
+// safety: the probe node does not depend on this node, so its output is one
+// the probe's claim must not read.
+const outputSibling = "output-sibling"
+
+type siblingOut struct {
+	Marker string `json:"marker"`
+}
+
+type escapeProbeSibling struct {
+	sparkwing.Base
+	sparkwing.Produces[siblingOut]
+}
+
+func (escapeProbeSibling) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "produce", func(context.Context) (siblingOut, error) {
+		return siblingOut{Marker: "escape-probe"}, nil
+	}), nil
+}
+
+// safety: a claim reads only its own node's dependencies, so both the
+// sibling's output and another run's must be refused. A read still waiting
+// on an unfinished sibling settles nothing and fails the gate.
+func (p prober) outputProbes() []probeResult {
+	base, run := strings.TrimRight(p.getenv("SPARKWING_CONTROLLER_URL"), "/"), p.getenv("SPARKWING_RUN_ID")
+	if base == "" || run == "" {
+		return []probeResult{missingTarget("controller outputs", "SPARKWING_CONTROLLER_URL and SPARKWING_RUN_ID")}
+	}
+	outputPath := func(runID string) string {
+		return base + "/api/v1/runs/" + url.PathEscape(runID) + "/nodes/" + outputSibling + "/output"
+	}
+	var code int
+	var err error
+	for deadline := time.Now().Add(p.siblingWait); ; time.Sleep(2 * time.Second) {
+		code, err = p.status(http.MethodGet, outputPath(run), p.getenv(ownTokenEnv), nil, nil)
+		if err != nil || code != http.StatusConflict || time.Now().After(deadline) {
+			break
+		}
+	}
+	out := []probeResult{{
+		name: "controller non-ancestor output", verdict: httpVerdict(code, err),
+		detail: "reads a finished node it does not depend on with the pod's claim token",
+	}}
+	return append(out, p.required("controller other run output", p.args.OtherRun, func(other string) probeResult {
+		code, err := p.status(http.MethodGet, outputPath(other), p.getenv(ownTokenEnv), nil, nil)
+		return probeResult{
+			name: "controller other run output", verdict: httpVerdict(code, err),
+			detail: "reads another run's output with the pod's claim token",
+		}
+	})...)
+}
+
 type escapeProbeNode struct {
 	sparkwing.Base
 	args EscapeProbeArgs
@@ -494,7 +551,8 @@ type escapeProbeNode struct {
 
 func (j *escapeProbeNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "probe", func(ctx context.Context) error {
-		return reportProbes(ctx, "node", defaultProber(j.args).run())
+		p := defaultProber(j.args)
+		return reportProbes(ctx, "node", append(p.run(), p.outputProbes()...))
 	}), nil
 }
 
@@ -502,6 +560,7 @@ func (p *EscapeProbe) Plan(ctx context.Context, plan *sparkwing.Plan, in EscapeP
 	if err := reportProbes(ctx, "plan", defaultProber(in).run()); err != nil {
 		return err
 	}
+	sparkwing.Job(plan, outputSibling, escapeProbeSibling{})
 	sparkwing.Job(plan, "probe-node", &escapeProbeNode{args: in})
 	return nil
 }

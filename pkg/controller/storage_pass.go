@@ -82,6 +82,9 @@ func (s *Server) storagePassOnce(ctx context.Context, p *storagePass) error {
 	if _, err := s.store.PruneExpiredUploads(ctx, now); err != nil {
 		errs = append(errs, fmt.Errorf("prune expired uploads: %w", err))
 	}
+	if err := s.pruneExpiredOutputs(ctx, now); err != nil {
+		errs = append(errs, fmt.Errorf("prune expired outputs: %w", err))
+	}
 	for kind, bucket := range p.stores {
 		if kind == store.StorageCache {
 			expired, err := s.store.ClaimExpiredSourceBundles(ctx, now)

@@ -245,12 +245,15 @@ func TestEnqueueChildRun_RoutesAChildByItsRepository(t *testing.T) {
 		t.Fatalf("the opted-out child's run = %+v, %v", run, err)
 	}
 	for id, want := range map[string]bool{"child-probe": true, "run-parent": false} {
-		if got, err := st.IsChildRunOf(ctx, alpha.Team(), "run-parent", id); err != nil || got != want {
+		if got, err := st.IsChildRunOf(ctx, alpha.Team(), "run-parent", tok.NodeID, id); err != nil || got != want {
 			t.Fatalf("IsChildRunOf(%s) = %v, %v; want %v", id, got, err, want)
 		}
 	}
-	if got, err := st.IsChildRunOf(ctx, store.DefaultTeam, "run-parent", "child-probe"); err != nil || got {
+	if got, err := st.IsChildRunOf(ctx, store.DefaultTeam, "run-parent", tok.NodeID, "child-probe"); err != nil || got {
 		t.Fatalf("another team reads the child as run-parent's: %v %v", got, err)
+	}
+	if got, err := st.IsChildRunOf(ctx, alpha.Team(), "run-parent", tok.NodeID+"-sibling", "child-probe"); err != nil || got {
+		t.Fatalf("a sibling node reads the child as its own: %v %v", got, err)
 	}
 	if _, err := f.report(tok, store.AttemptReport{Outcome: "failed"}); err != nil {
 		t.Fatal(err)

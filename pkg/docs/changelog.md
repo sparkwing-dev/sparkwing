@@ -22,28 +22,6 @@ unlock.
 
 ### Added
 
-- **controller + store + web:** Trusted Cloud teams can put a card on file
-  (`POST /api/v1/team/billing/card`) and are then charged automatically at
-  $100 owed or on the 1st of the month; a declined charge stops new work
-  until it is paid, retried after 1, 3 and 7 days, or paid by an owner through
-  `POST /api/v1/team/billing/pay`. Every team now spends within a 30-day
-  limit, a daily limit and an optional owner budget
-  (`PUT /api/v1/team/billing/budget`); a claim past one is refused with `402`
-  and `"code": "spend_limit"`. The card a team pays with is held to the same
-  limits across every team it pays for. A declined charge holds the team back
-  at New until it is paid. A payment that drew an early fraud warning is
-  never granted, even when the warning arrives first, unless Stripe marks it
-  not actionable; the paying card, not the card on file, is what a warning is
-  judged against. Money that pays no open charge is refunded, and a refund that
-  fails is made again after 1, 6 and then every 24 hours
-  (`POST /api/v1/credits/card-refunds` reports its status under the refund's
-  queue key, and only that key's outcome moves the queue, even one that
-  arrives before the refund is recorded). Schema v87.
-- **controller + store:** `max_concurrent_runners` counts a team's cloud
-  runners across all its tokens, and an unset guard means 100 per team, never
-  unlimited; `runner_cap` on `POST /api/v1/teams/{team}/trust` raises one
-  granted team. The `runner_scale_*` settings, the scaled
-  per-principal cap and `usage.derived_runner_cap` are removed.
 - **controller + store + runner + SDK:** A run of an opted-in repository runs
   end to end on the controller-dispatch path. A Job's pipeline container is
   trusted code that renews its claim every 5 seconds, records the execution
@@ -127,6 +105,28 @@ unlock.
   its OIDC token request is answered `422` naming the gap until Sparkwing
   Cloud OIDC is enabled for it.
 
+- **controller + store + web:** Trusted Cloud teams can put a card on file
+  (`POST /api/v1/team/billing/card`) and are then charged automatically at
+  $100 owed or on the 1st of the month; a declined charge stops new work
+  until it is paid, retried after 1, 3 and 7 days, or paid by an owner through
+  `POST /api/v1/team/billing/pay`. Every team now spends within a 30-day
+  limit, a daily limit and an optional owner budget
+  (`PUT /api/v1/team/billing/budget`); a claim past one is refused with `402`
+  and `"code": "spend_limit"`. The card a team pays with is held to the same
+  limits across every team it pays for. A declined charge holds the team back
+  at New until it is paid. A payment that drew an early fraud warning is
+  never granted, even when the warning arrives first, unless Stripe marks it
+  not actionable; the paying card, not the card on file, is what a warning is
+  judged against. Money that pays no open charge is refunded, and a refund that
+  fails is made again after 1, 6 and then every 24 hours
+  (`POST /api/v1/credits/card-refunds` reports its status under the refund's
+  queue key, and only that key's outcome moves the queue, even one that
+  arrives before the refund is recorded). Schema v87.
+- **controller + store:** `max_concurrent_runners` counts a team's cloud
+  runners across all its tokens, and an unset guard means 100 per team, never
+  unlimited; `runner_cap` on `POST /api/v1/teams/{team}/trust` raises one
+  granted team. The `runner_scale_*` settings, the scaled
+  per-principal cap and `usage.derived_runner_cap` are removed.
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that
@@ -463,7 +463,8 @@ unlock.
   credits takes one of `--free-team-slots` (200) with the first byte it
   commits, in that commit's transaction, and keeps it until the team is
   deleted; a commit that cannot take a slot is refused with `402`, so no team
-  without a slot commits a byte. A team with
+  without a slot commits a byte beyond small outputs of up to 1 MiB each, 64
+  MiB in all. A team with
   neither a slot nor credits is refused its storage writes with `402` "free
   storage is paused; buy credits or join the waitlist". Runs are never refused
   for billing: its own machines run them, and a metered claim still needs
@@ -1025,6 +1026,23 @@ unlock.
   upgrading it. v0.65.1 and older refuse the upgraded database. A database
   v0.65.0 or v0.65.1 wrote, whose v50 and v51 were metric migrations, gains the
   team migrations those numbers hold here. See the [migration guide](docs/migrations/_unreleased.md#upgrading-a-local-install).
+- **controller + store (Breaking):** Job outputs are objects, not database
+  rows. A node reserves its output with `output-upload`, puts the bytes to the
+  URL it gets, commits them with `output-commit`, and its finish or attempt
+  report names the committed object; inline output bytes are refused. A read
+  of `GET .../nodes/{nodeID}/output` returns a one-minute URL and the SHA-256
+  the bytes must match. An output is at most 64 MiB, one run's outputs at most
+  1 GiB, both counted toward the team's cache share. An output of up to
+  1 MiB needs no share room or free slot until such outputs put the team
+  64 MiB past its share. Outputs expire 30
+  days after their run finishes, except each pipeline's newest successful
+  run. A read checks the recorded SHA-256, and a cache hit whose bytes are
+  missing or do not match runs the node as a miss. A claim token reads only its own node's transitive dependencies, and
+  `claim/input` answers a read grant instead of the bytes.
+  `sparkwing-controller migrate-outputs` moves stored
+  outputs before the upgrade, and a laptop database moves its own on first
+  open. See the
+  [migration guide](docs/migrations/_unreleased.md#job-outputs-are-objects).
 - **cloud:** Cloud builds fetch packages from the upstream registries. The
   Cloud cache runs with `--disable-proxy` and its runners with
   `--dependency-proxy=off`, because the proxy takes no credential and its

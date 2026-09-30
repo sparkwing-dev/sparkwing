@@ -182,6 +182,13 @@ func (t *storeTx) forUpdate() string {
 	return ""
 }
 
+func (t *storeTx) forShare() string {
+	if t.dialect == DialectPostgres {
+		return " FOR SHARE"
+	}
+	return ""
+}
+
 // safety: FOR UPDATE also blocks the key-share lock an event insert's foreign
 // key takes on its run while holding the run's sequence lock, so a transaction
 // that locks its run and then appends an event deadlocks with that insert.

@@ -90,6 +90,7 @@ type OutboxKind string
 const OutboxKindArtifact OutboxKind = "artifact"
 const OutboxKindLog OutboxKind = "log"
 const OutboxKindState OutboxKind = "state"
+func ReadNodeOutput(ctx context.Context, art storage.ArtifactStore, runID string, ref store.OutputRef) ([]byte, error)
 func RunIDFromStateKey(key string) (string, bool)
 func WithBufferThreshold(n int) Option
 func WithFlushInterval(d time.Duration) Option

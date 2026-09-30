@@ -368,8 +368,12 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 			continue
 		}
 		var out refBuildOut
-		if err := json.Unmarshal(n.Output, &out); err != nil {
-			t.Fatalf("unmarshal build output: %v (%s)", err, n.Output)
+		raw, err := st.GetNodeOutput(context.Background(), res.RunID, n.NodeID)
+		if err != nil {
+			t.Fatalf("read build output: %v", err)
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal build output: %v (%s)", err, raw)
 		}
 		if out.Tag != "v9" {
 			t.Fatalf("build output %q, want v9", out.Tag)
@@ -402,8 +406,8 @@ func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
 	if err != nil || build == nil {
 		t.Fatalf("get build node: %v", err)
 	}
-	if string(build.Output) != `{"tag":"v9"}` {
-		t.Fatalf("build output = %s, want the marshaled output the ref resolves from", build.Output)
+	if out, err := st.GetNodeOutput(context.Background(), res.RunID, "build"); err != nil || string(out) != `{"tag":"v9"}` {
+		t.Fatalf("build output = %s, %v, want the marshaled output the ref resolves from", out, err)
 	}
 }
 

@@ -300,7 +300,7 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 		return err
 	}
 	for _, dep := range deps {
-		n, err := st.GetNode(ctx, runID, dep)
+		body, err := st.GetNodeOutput(ctx, runID, dep)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				fmt.Fprintf(os.Stderr, "warning: dep %s not found, skipping ref file\n", dep)
@@ -308,7 +308,6 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 			}
 			return err
 		}
-		body := n.Output
 		if len(body) == 0 {
 			body = []byte("null")
 		}

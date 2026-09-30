@@ -284,10 +284,12 @@ type ClaimInputRequest struct {
 // ClaimInput is the finished output a claim's input request resolved to and
 // the run and node it came from.
 type ClaimInput struct {
-	RunID      string          `json:"run_id"`
-	NodeID     string          `json:"node_id"`
-	FinishedAt *time.Time      `json:"finished_at,omitempty"`
-	Output     json.RawMessage `json:"output"`
+	RunID      string     `json:"run_id"`
+	NodeID     string     `json:"node_id"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	// Output grants a read of the node's output; an empty URL means it
+	// recorded none.
+	Output OutputReadGrant `json:"output"`
 }
 
 // ErrInputUndeclared refuses a claim an input its node's accepted plan does
@@ -314,6 +316,8 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 		if err != nil {
 			return ClaimInput{}, err
 		}
+		// safety: the hash is the claim's own; any entry it can name was written
+		// by this same repository's pipeline node, whose code sets the key anyway.
 		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != prefix+req.CacheKeyHash {
 			return ClaimInput{}, ErrInputUndeclared
 		}
@@ -361,10 +365,9 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	}
 	in := ClaimInput{RunID: runID, NodeID: nodeID}
 	var status, outcome string
-	var output []byte
 	var finished sql.NullInt64
-	err = s.queryRow(ctx, `SELECT status, outcome, output_json, finished_at FROM nodes
- WHERE team = ? AND run_id = ? AND node_id = ?`, string(tok.Team), runID, nodeID).Scan(&status, &outcome, &output, &finished)
+	err = s.queryRow(ctx, `SELECT status, outcome, finished_at FROM nodes
+ WHERE team = ? AND run_id = ? AND node_id = ?`, string(tok.Team), runID, nodeID).Scan(&status, &outcome, &finished)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ClaimInput{}, notFound("node", runID+"/"+nodeID)
 	}
@@ -377,10 +380,6 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	if finished.Valid && finished.Int64 > 0 {
 		t := time.Unix(0, finished.Int64)
 		in.FinishedAt = &t
-	}
-	in.Output = json.RawMessage("null")
-	if len(output) > 0 {
-		in.Output = output
 	}
 	return in, nil
 }

@@ -9,10 +9,11 @@ import (
 	"time"
 )
 
-// Attempt report limits: a larger output is refused, a longer error is cut.
+// safety: a longer error is cut and a larger failure record refused, so one
+// report cannot bloat its node's row.
 const (
-	MaxAttemptOutputBytes = 1 << 20
-	maxAttemptErrorBytes  = 16 << 10
+	maxAttemptErrorBytes   = 16 << 10
+	maxAttemptFailureBytes = 64 << 10
 )
 
 // ErrAttemptInvalid refuses an attempt report the store will not record; the
@@ -27,8 +28,12 @@ type AttemptReport struct {
 	Outcome       string `json:"outcome"`
 	Error         string `json:"error,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
-	// Output is the node's JSON output, stored for its dependents.
-	Output json.RawMessage `json:"output,omitempty"`
+	// Output names the node's committed output object, which its dependents read.
+	Output *OutputRef `json:"output,omitempty"`
+	// OutputFrom names, in place of Output, the input a cache hit or a
+	// coalesce follower took from another run; the node's ref then names
+	// that input's object rather than a copy of its bytes.
+	OutputFrom *ClaimInputRequest `json:"output_from,omitempty"`
 	// Failure is the failure record an OnFailure recovery node receives.
 	Failure          json.RawMessage `json:"failure,omitempty"`
 	ArtifactManifest string          `json:"artifact_manifest,omitempty"`
@@ -36,6 +41,8 @@ type AttemptReport struct {
 	// safety: set only by the expired-claim reaper, never decoded from a
 	// request, so a claimant cannot pass its own failure off as a lost claim.
 	leaseLost bool
+	// safety: set only from the store's own resolution of OutputFrom.
+	copyRun, copyNode string
 }
 
 func attemptRefused(format string, args ...any) error {
@@ -52,13 +59,11 @@ func (r *AttemptReport) validate(kind ClaimTokenKind) error {
 	default:
 		return attemptRefused("outcome %q is not a node outcome", r.Outcome)
 	}
-	if len(r.Output) > MaxAttemptOutputBytes {
-		return attemptRefused("output is %d bytes; the limit is %d", len(r.Output), MaxAttemptOutputBytes)
+	if len(r.Failure) > maxAttemptFailureBytes {
+		return attemptRefused("failure is %d bytes; the limit is %d", len(r.Failure), maxAttemptFailureBytes)
 	}
-	for name, raw := range map[string]json.RawMessage{"output": r.Output, "failure": r.Failure} {
-		if len(raw) > 0 && !json.Valid(raw) {
-			return attemptRefused("%s is not JSON", name)
-		}
+	if len(r.Failure) > 0 && !json.Valid(r.Failure) {
+		return attemptRefused("failure is not JSON")
 	}
 	if len(r.Error) > maxAttemptErrorBytes {
 		r.Error = r.Error[:maxAttemptErrorBytes]
@@ -79,6 +84,18 @@ func (s *Store) ReportAttempt(ctx context.Context, commit ClaimResultCommit, rep
 	tok := commit.Token()
 	if err := report.validate(tok.Kind); err != nil {
 		return false, err
+	}
+	if report.OutputFrom != nil {
+		if report.Output != nil {
+			return false, attemptRefused("a report names its output or where it came from, not both")
+		}
+		// safety: the store picks the source exactly as claim/input does, so a
+		// report can copy only an output its node could read.
+		in, err := s.ResolveClaimInput(ctx, tok, *report.OutputFrom, now)
+		if err != nil {
+			return false, attemptRefused("output_from: %v", err)
+		}
+		report.copyRun, report.copyNode = in.RunID, in.NodeID
 	}
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -133,6 +150,11 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 	if n.kind != string(tok.Kind) {
 		return fmt.Errorf("%w: a %s claim cannot report for a %q node", ErrClaimResultConflict, tok.Kind, n.kind)
 	}
+	if report.Output != nil {
+		if err := checkOutputRefTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, n.consumed+1, tok.Generation, report.Output); err != nil {
+			return attemptRefused("%v", err)
+		}
+	}
 	if err := insertAttemptRowTx(ctx, tx, tok, n, report, now); err != nil {
 		return err
 	}
@@ -152,7 +174,7 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 	if retry {
 		readyAt := now.Add(retryBackoff(time.Duration(n.backoffMS)*time.Millisecond, int(ordinal))).UnixNano()
 		_, err = tx.ExecContext(ctx, `UPDATE nodes
-   SET status = ?, outcome = '', error = ?, failure_reason = ?, output_json = NULL, failure_json = NULL,
+   SET status = ?, outcome = '', error = ?, failure_reason = ?, failure_json = NULL,
        started_at = NULL, finished_at = NULL, attempts_consumed = ?,
        ready_at = ?, placement_hold_from = ?, offer_started_at = NULL,
        `+endClaimSet+`
@@ -161,15 +183,29 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 			string(tok.Team), tok.RunID, tok.NodeID)
 	} else {
 		_, err = tx.ExecContext(ctx, `UPDATE nodes
-   SET status = ?, outcome = ?, error = ?, failure_reason = ?, output_json = ?, failure_json = ?,
+   SET status = ?, outcome = ?, error = ?, failure_reason = ?, failure_json = ?,
        artifact_manifest = ?, finished_at = ?, attempts_consumed = ?,
        `+endClaimSet+`
  WHERE team = ? AND run_id = ? AND node_id = ?`,
-			nodeStatusDone, report.Outcome, report.Error, report.FailureReason, nullableJSON(report.Output),
+			nodeStatusDone, report.Outcome, report.Error, report.FailureReason,
 			nullableJSON(report.Failure), report.ArtifactManifest, now.UnixNano(), ordinal,
 			string(tok.Team), tok.RunID, tok.NodeID)
 	}
 	if err != nil {
+		return err
+	}
+	// safety: a retried attempt drops the failed attempt's output, and its
+	// object stays under its own key until the run's outputs expire.
+	var output *OutputRef
+	if !retry {
+		output = report.Output
+		if report.copyRun != "" {
+			if output, err = sourceOutputRefTx(ctx, tx, tok.Team, report.copyRun, report.copyNode); err != nil {
+				return err
+			}
+		}
+	}
+	if err := writeNodeOutputTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, ordinal, output); err != nil {
 		return err
 	}
 	if err := settleTx(ctx, tx, tok.Team, tok.RunID, now); err != nil {

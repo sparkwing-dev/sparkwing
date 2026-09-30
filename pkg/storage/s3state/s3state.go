@@ -25,6 +25,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +106,11 @@ type Backend struct {
 
 	mu   sync.Mutex
 	runs map[string]*runState
+
+	// safety: counts every output object this process wrote per run, each
+	// attempt's included, so the run limit holds as it does on a controller.
+	outputMu    sync.Mutex
+	outputBytes map[string]int64
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -962,11 +969,15 @@ func (b *Backend) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg
 }
 
 func (b *Backend) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	ref, err := b.putNodeOutput(ctx, runID, nodeID, output)
+	if err != nil {
+		return fmt.Errorf("%w: %w", store.ErrOutputNotStored, err)
+	}
 	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) {
 		n.Status = "done"
 		n.Outcome = outcome
 		n.Error = errMsg
-		n.Output = output
+		n.OutputRef = ref
 		now := time.Now().UTC()
 		n.FinishedAt = &now
 		n.FailureReason = reason
@@ -986,7 +997,7 @@ func (b *Backend) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID strin
 		n.Status = "pending"
 		n.Outcome = ""
 		n.Error = ""
-		n.Output = nil
+		n.OutputRef = nil
 		n.StartedAt = nil
 		n.FinishedAt = nil
 		n.ReadyAt = nil
@@ -1069,7 +1080,10 @@ func cloneNodeRecord(node *nodeRecord) *nodeRecord {
 	clone.Deps = append([]string(nil), node.Deps...)
 	clone.NeedsLabels = append([]string(nil), node.NeedsLabels...)
 	clone.PrefersLabels = append([]string(nil), node.PrefersLabels...)
-	clone.Output = append([]byte(nil), node.Output...)
+	if node.OutputRef != nil {
+		ref := *node.OutputRef
+		clone.OutputRef = &ref
+	}
 	clone.Annotations = append([]string(nil), node.Annotations...)
 	clone.ExecutionAttempts = append([]store.ExecutionAttempt(nil), node.ExecutionAttempts...)
 	executionpolicy.CopyCarrier(&clone, node)
@@ -1246,13 +1260,92 @@ func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, p
 	return b.appendEnvelope(ctx, runID, env)
 }
 
-// GetNodeOutput returns the finished node's raw output bytes.
+// GetNodeOutput returns the finished node's raw output bytes, read from the
+// object beside the run's state and checked against the recorded digest.
 func (b *Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	n, err := b.GetNode(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}
-	return n.Output, nil
+	if n.OutputRef == nil {
+		return nil, nil
+	}
+	return ReadNodeOutput(ctx, b.art, runID, *n.OutputRef)
+}
+
+// ReadNodeOutput reads the output object ref names beside a run's state and
+// checks it against the recorded digest.
+func ReadNodeOutput(ctx context.Context, art storage.ArtifactStore, runID string, ref store.OutputRef) ([]byte, error) {
+	rc, err := art.Get(ctx, outputObjectKey(runID, ref.Key))
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, store.ErrNotFound
+		}
+		return nil, fmt.Errorf("s3state: read output %s: %w", ref.Key, err)
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(io.LimitReader(rc, store.MaxOutputBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(data)
+	if int64(len(data)) != ref.Size || hex.EncodeToString(sum[:]) != ref.SHA256 {
+		return nil, fmt.Errorf("s3state: output %s: %w", ref.Key, store.ErrOutputCorrupt)
+	}
+	return data, nil
+}
+
+// safety: each attempt writes a fresh key, so a retry never overwrites the
+// object an earlier reader was handed.
+func (b *Backend) putNodeOutput(ctx context.Context, runID, nodeID string, output []byte) (*store.OutputRef, error) {
+	if len(output) == 0 {
+		return nil, nil
+	}
+	if int64(len(output)) > store.MaxOutputBytes {
+		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", store.ErrOutputLimit, len(output), store.MaxOutputBytes)
+	}
+	if err := b.takeRunOutputRoom(ctx, runID, int64(len(output))); err != nil {
+		return nil, err
+	}
+	key, err := store.NewOutputKey(runID, nodeID, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.art.Put(ctx, outputObjectKey(runID, key), bytes.NewReader(output)); err != nil {
+		return nil, fmt.Errorf("s3state: write output %s: %w", key, err)
+	}
+	sum := sha256.Sum256(output)
+	return &store.OutputRef{Key: key, Size: int64(len(output)), SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+func (b *Backend) takeRunOutputRoom(ctx context.Context, runID string, size int64) error {
+	b.outputMu.Lock()
+	defer b.outputMu.Unlock()
+	used, seen := b.outputBytes[runID]
+	if !seen {
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		for _, n := range nodes {
+			if n.OutputRef != nil {
+				used += n.OutputRef.Size
+			}
+		}
+	}
+	if used+size > store.MaxRunOutputBytes {
+		return fmt.Errorf("%w: the run's outputs would reach %d bytes; the limit is %d (1 GiB)",
+			store.ErrOutputLimit, used+size, store.MaxRunOutputBytes)
+	}
+	if b.outputBytes == nil {
+		b.outputBytes = map[string]int64{}
+	}
+	b.outputBytes[runID] = used + size
+	return nil
+}
+
+func outputObjectKey(runID, key string) string {
+	return "runs/" + runID + "/outputs/" + strings.TrimPrefix(key, "outputs/"+runID+"/")
 }
 
 // RunIDFromStateKey extracts "abc" from "runs/abc/state.ndjson",

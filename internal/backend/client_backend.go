@@ -29,6 +29,11 @@ var _ Backend = (*ClientBackend)(nil)
 
 func (b *ClientBackend) SetCapabilities(c Capabilities) { b.caps = c }
 
+// GetNodeOutput reads a node's output through the controller.
+func (b *ClientBackend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
+	return b.c.GetNodeOutput(ctx, runID, nodeID)
+}
+
 func (b *ClientBackend) Capabilities(context.Context) (Capabilities, error) {
 	if b.caps.Mode == "" {
 		return Capabilities{

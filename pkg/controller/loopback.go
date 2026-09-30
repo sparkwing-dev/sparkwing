@@ -120,6 +120,7 @@ type Loopback struct {
 	runID         string
 	token         string
 	logger        *slog.Logger
+	outputs       *loopbackOutputs
 }
 
 // NewLoopback binds a loopback controller to one run's state surface.
@@ -134,7 +135,10 @@ func NewLoopback(state LoopbackState, runID, token string, logger *slog.Logger) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Loopback{state: state, runID: runID, token: token, logger: logger}
+	return &Loopback{
+		state: state, runID: runID, token: token, logger: logger,
+		outputs: &loopbackOutputs{signer: newOutputSigner(), staged: map[string]*stagedOutput{}},
+	}
 }
 
 // WithConcurrency binds the run's concurrency backend so a node
@@ -180,6 +184,8 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/output", requireScope(ScopeNodesClaim, http.HandlerFunc(l.handleGetNodeOutput)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/start", requireScope(ScopeRunsState, l.ownRun(l.handleStartNode)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/finish", requireScope(ScopeRunsState, l.ownRun(l.handleFinishNode)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-upload", requireScope(ScopeRunsState, l.ownRun(l.handleOutputUpload)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/output-commit", requireScope(ScopeRunsState, l.ownRun(l.handleOutputCommit)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/deps", requireScope(ScopeRunsState, l.ownRun(l.handleUpdateNodeDeps)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeRunsState, l.ownRun(l.handleSetNodeStatus)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/activity", requireScope(ScopeNodesClaim, l.ownRun(l.handleUpdateNodeActivity)))
@@ -237,6 +243,9 @@ func (l *Loopback) Handler() http.Handler {
 	router.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	// safety: these carry a URL signature this process minted, not a bearer.
+	router.HandleFunc("PUT /api/v1/outputs/uploads/{id}", l.handleOutputBlobPut)
+	router.HandleFunc("GET /api/v1/outputs/objects/{run}/{node}", l.handleOutputBlobGet)
 	router.Handle("/", l.authenticate(unsupportedRouteFallback(mux)))
 	// safety: preserve the server wrapper order while the Warn-level loopback
 	// logger suppresses per-request Info lines from node state writes.
@@ -482,31 +491,6 @@ func (l *Loopback) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.PublicNode(n))
 }
 
-func (l *Loopback) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
-	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
-	n, err := l.state.GetNode(r.Context(), runID, nodeID)
-	if err != nil {
-		writeStateError(w, err)
-		return
-	}
-	if n.Status != "done" {
-		writeError(w, http.StatusConflict, fmt.Errorf("node %s/%s not finished (status=%s)", runID, nodeID, n.Status))
-		return
-	}
-	out, err := l.state.GetNodeOutput(r.Context(), runID, nodeID)
-	if err != nil {
-		writeStateError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if len(out) > 0 {
-		_, _ = w.Write(out)
-	} else {
-		_, _ = w.Write([]byte("null"))
-	}
-}
-
 func (l *Loopback) handleStartNode(w http.ResponseWriter, r *http.Request) {
 	if err := l.state.StartNode(r.Context(), r.PathValue("id"), r.PathValue("nodeID")); err != nil {
 		writeStateError(w, err)
@@ -525,8 +509,17 @@ func (l *Loopback) handleFinishNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("outcome is required"))
 		return
 	}
+	var output []byte
+	if body.Output != nil {
+		data, ok := l.outputs.take(body.Output)
+		if !ok {
+			writeError(w, http.StatusUnprocessableEntity, fmt.Errorf("%w: output %s is not committed", store.ErrInvalidInput, body.Output.Key))
+			return
+		}
+		output = data
+	}
 	if err := l.state.FinishNodeWithReason(r.Context(), r.PathValue("id"), r.PathValue("nodeID"),
-		body.Outcome, body.Error, body.Output, body.FailureReason, body.ExitCode); err != nil {
+		body.Outcome, body.Error, output, body.FailureReason, body.ExitCode); err != nil {
 		writeStateError(w, err)
 		return
 	}

@@ -36,7 +36,12 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	run := run
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "migrate-outputs" {
+		run = func(args []string) error { return runMigrateOutputs(args[1:], os.Stdout) }
+	}
+	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "sparkwing-controller:", err)
 		os.Exit(1)
 	}
@@ -604,6 +609,10 @@ func run(args []string) error {
 			return fmt.Errorf("--cache-blob-store: direct uploads: %w", err)
 		}
 		srv = srv.WithDirectUploads(client, bucket, prefix)
+	} else if st.OutputDir() == "" {
+		// safety: without the cache bucket, node outputs live on this
+		// replica's disk, which the filesystem output store serves alone.
+		st.SetOutputDir(p.Root)
 	}
 	if err := checkRequireAuth(st, *requireAuth); err != nil {
 		return err

@@ -168,6 +168,19 @@ type ConcurrencyBackend interface {
 	CancelWaiter(ctx context.Context, key, runID, nodeID string) (bool, error)
 }
 
+// ErrSharedStateOutputs refuses a run whose state is a shared database this
+// machine opened itself: its outputs would land on this machine's disk, where
+// no other machine sharing the database could read them.
+var ErrSharedStateOutputs = errors.New("this profile's state is a shared database with no output store; " +
+	"run against the controller that serves it (state type controller) or a local sqlite state")
+
+func localOutputsReady(st *store.Store) error {
+	if st.OutputDir() == "" {
+		return ErrSharedStateOutputs
+	}
+	return nil
+}
+
 func LocalBackends(paths Paths, st *store.Store, art storage.ArtifactStore) Backends {
 	return Backends{
 		State:             localState{st: st},
@@ -460,12 +473,12 @@ func (l localState) GetLatestRun(ctx context.Context, pipeline string, statuses 
 	return l.st.GetLatestRun(ctx, pipeline, statuses, maxAge)
 }
 
+func (l localState) FinishNodeCopyingOutput(ctx context.Context, runID, nodeID, outcome, reason string, src copiedOutput) error {
+	return l.st.FinishNodeCopyingOutput(ctx, runID, nodeID, outcome, reason, src.runID, src.nodeID)
+}
+
 func (l localState) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
-	n, err := l.st.GetNode(ctx, runID, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	return n.Output, nil
+	return l.st.GetNodeOutput(ctx, runID, nodeID)
 }
 
 func (l localState) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error) {

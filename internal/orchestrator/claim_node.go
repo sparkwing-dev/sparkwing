@@ -43,11 +43,27 @@ func (s *claimState) FinishNode(ctx context.Context, runID, nodeID, outcome, err
 	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, "", nil)
 }
 
-func (s *claimState) FinishNodeWithReason(_ context.Context, _, _, outcome, errMsg string, output []byte, reason string, _ *int) error {
+// safety: the output is uploaded while the claim is live and the report
+// names only the committed object; an upload that fails records nothing, so
+// the node executor's failed finish becomes the attempt's report.
+func (s *claimState) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, _ *int) error {
+	ref, err := s.UploadNodeOutput(ctx, runID, nodeID, output)
+	if err != nil {
+		return fmt.Errorf("%w: %w", store.ErrOutputNotStored, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.finished = true
-	s.report = store.AttemptReport{Outcome: outcome, Error: errMsg, FailureReason: reason, Output: output}
+	s.report = store.AttemptReport{Outcome: outcome, Error: errMsg, FailureReason: reason, Output: ref}
+	return nil
+}
+
+func (s *claimState) FinishNodeCopyingOutput(_ context.Context, _, _, outcome, reason string, src copiedOutput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finished = true
+	input := src.input
+	s.report = store.AttemptReport{Outcome: outcome, FailureReason: reason, OutputFrom: &input}
 	return nil
 }
 
@@ -92,24 +108,21 @@ func (s *claimState) memoKey(ctx context.Context, hash string) (string, error) {
 }
 
 func (s *claimState) input(ctx context.Context, req store.ClaimInputRequest) ([]byte, error) {
-	in, err := s.ClaimInput(ctx, s.runID, s.nodeID, req)
-	if err != nil {
-		return nil, err
-	}
-	return in.Output, nil
+	_, data, err := s.ClaimInput(ctx, s.runID, s.nodeID, req)
+	return data, err
 }
 
 // safety: a claim reads another pipeline's newest successful run only through
 // the reference the node's plan declares, and the controller picks the run.
 func (s *claimState) pipelineRefResolver() sparkwing.PipelineResolverFunc {
 	return func(ctx context.Context, pipeline, nodeID string, maxAge time.Duration) (*sparkwing.ResolvedPipelineRef, error) {
-		in, err := s.ClaimInput(ctx, s.runID, s.nodeID, store.ClaimInputRequest{
+		in, data, err := s.ClaimInput(ctx, s.runID, s.nodeID, store.ClaimInputRequest{
 			Kind: store.ClaimInputLastRun, Pipeline: pipeline, Node: nodeID, MaxAgeMS: maxAge.Milliseconds(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("no matching run for pipeline %q (maxAge=%s): %w", pipeline, maxAge, absentIfNotFound(err))
 		}
-		return &sparkwing.ResolvedPipelineRef{RunID: in.RunID, Data: in.Output}, nil
+		return &sparkwing.ResolvedPipelineRef{RunID: in.RunID, Data: data}, nil
 	}
 }
 

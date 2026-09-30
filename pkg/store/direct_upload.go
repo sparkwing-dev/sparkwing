@@ -132,7 +132,8 @@ func validUploadKey(key string) bool {
 			return false
 		}
 	}
-	return strings.HasPrefix(key, "bin/") || strings.HasPrefix(key, "artifacts/") || strings.HasPrefix(key, "sources/")
+	return strings.HasPrefix(key, "bin/") || strings.HasPrefix(key, "artifacts/") || strings.HasPrefix(key, "sources/") ||
+		strings.HasPrefix(key, "outputs/")
 }
 
 func validSHA256(raw string) bool {
@@ -159,8 +160,10 @@ func SourceKeyDigest(key string) (string, bool) {
 // in the same transaction. No object is visible through CommittedObject yet.
 func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload, err error) {
 	source := strings.HasPrefix(req.Key, "sources/")
+	output := strings.HasPrefix(req.Key, "outputs/")
 	sourceDigest, validSource := SourceKeyDigest(req.Key)
 	if (!source && req.RunID == "") ||
+		(output && !strings.HasPrefix(req.Key, runOutputPrefix(req.RunID))) ||
 		req.Kind != StorageCache ||
 		(source && (!validSource || req.RunID != "" || sourceDigest != req.SHA256 || req.Provenance != "local" || req.ClaimPrefix == "")) ||
 		!validUploadKey(req.Key) || !validSHA256(req.SHA256) || req.Size <= 0 || req.Size > DirectUploadMaxSize ||
@@ -191,10 +194,15 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 		return Upload{}, err
 	}
 	res, err := reserveStorageTx(ctx, tx, StorageReserve{
-		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now,
+		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now, SmallOutput: output,
 	})
 	if err != nil {
 		return Upload{}, err
+	}
+	if output {
+		if err := checkRunOutputRoomTx(ctx, tx, req.Team, req.RunID, req.Size, req.Now); err != nil {
+			return Upload{}, err
+		}
 	}
 	// safety: reserveStorageTx holds the team's cache storage row, and every
 	// upload is cache, so concurrent reservations count one after another.
@@ -443,7 +451,9 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 	}
 	defer rollbackUnlessDone(tx, &err)
 	if err := takeStorageSlotTx(ctx, tx, team, u.Size, now); err != nil {
-		return err
+		if small, serr := smallOutputWithoutSlotTx(ctx, tx, team, u); serr != nil || !small {
+			return errors.Join(err, serr)
+		}
 	}
 	if _, _, err := lockTeamStorageTx(ctx, tx, team, u.Kind, now); err != nil {
 		return err
@@ -485,6 +495,22 @@ func (s *Store) CommitUpload(ctx context.Context, team Team, id, recordedUploade
 	return tx.Commit()
 }
 
+// safety: a small output needs no slot while the team's small outputs stay
+// within the overage its reservation was granted under, so the commit keeps
+// what the reservation promised.
+func smallOutputWithoutSlotTx(ctx context.Context, tx *storeTx, team Team, u Upload) (bool, error) {
+	if !strings.HasPrefix(u.Key, "outputs/") || u.Size > MaxUnpaidOutputBytes {
+		return false, nil
+	}
+	var used int64
+	err := tx.QueryRowContext(ctx, `SELECT used_bytes FROM team_storage WHERE team = ? AND store = ?`,
+		string(team), string(u.Kind)).Scan(&used)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	return used+u.Size <= MaxSmallOutputOverage, nil
+}
+
 // PruneExpiredUploads removes upload records after the pending lifecycle
 // window; committed objects remain in data_objects.
 func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, error) {
@@ -496,10 +522,11 @@ func (s *Store) PruneExpiredUploads(ctx context.Context, now time.Time) (int64, 
 }
 
 // PruneExpiredCacheObjects removes direct cache rows only after the cache
-// bucket's successful retention listing has removed their bytes.
+// bucket's successful retention listing has removed their bytes. Outputs
+// expire with their run instead; see [Store.ExpiredOutputRuns].
 func (s *Store) PruneExpiredCacheObjects(ctx context.Context, now time.Time) (int64, error) {
 	cutoff := now.Add(-DirectCacheMaxAge).UnixNano()
-	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND committed_at <= ?`,
+	res, err := s.exec(ctx, `DELETE FROM data_objects WHERE store = ? AND key NOT LIKE 'sources/%' AND key NOT LIKE 'outputs/%' AND committed_at <= ?`,
 		string(StorageCache), cutoff)
 	if err != nil {
 		return 0, err

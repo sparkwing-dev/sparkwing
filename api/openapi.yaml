@@ -467,7 +467,11 @@ paths:
     post:
       x-sparkwing-scope: runs.state
       tags: [nodes]
-      summary: Mark a node terminal with outcome + optional output / error.
+      summary: Mark a node terminal with outcome + optional output ref / error.
+      description: |
+        A node's output is uploaded through `output-upload` and
+        `output-commit` first; the finish names the committed object.
+        Inline output bytes are refused.
       requestBody:
         required: true
         content:
@@ -476,6 +480,7 @@ paths:
       responses:
         "204": {description: Finished.}
         "400": {$ref: "#/components/responses/BadRequest"}
+        "422": {description: The output ref names no committed output of this node.}
         "500": {$ref: "#/components/responses/InternalError"}
 
   /api/v1/runs/{id}/nodes/{nodeID}/deps:
@@ -508,20 +513,22 @@ paths:
     get:
       x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
-      summary: Read the raw output JSON for one node.
+      summary: Grant a short-lived read of one node's output.
       description: |
-        Returns the exact bytes the orchestrator wrote -- opaque to
-        the controller. Empty body when the node hasn't completed
-        with output.
+        Returns a one-minute URL for the node's output object and the
+        SHA-256 its bytes must match; the caller fetches the URL without
+        its bearer and checks the digest. An empty `url` means the node
+        recorded no output. A claim token reads only a finished
+        transitive dependency of its own node.
       responses:
         "200":
-          description: Raw JSON output.
+          description: The output grant.
           content:
             application/json:
-              schema:
-                type: string
-                format: byte
+              schema: {$ref: "#/components/schemas/OutputReadGrant"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The node has not finished.}
 
   /api/v1/runs/{id}/nodes/{nodeID}/dispatch:
     parameters:
@@ -2332,13 +2339,13 @@ paths:
     get:
       x-sparkwing-scope: claim
       tags: [runs]
-      summary: Read a finished node's output from a child run.
+      summary: Grant a short-lived read of a finished node's output in a child run.
       responses:
         "200":
-          description: The node's JSON output, `null` when it produced none.
+          description: The output grant; an empty `url` when the node produced none.
           content:
             application/json:
-              schema: {}
+              schema: {$ref: "#/components/schemas/OutputReadGrant"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The node has not finished.}
@@ -3513,7 +3520,7 @@ paths:
                 max_age_ms: {type: integer, format: int64}
       responses:
         "200":
-          description: The finished output and the run and node it came from.
+          description: A read grant for the finished output, and the run and node it came from.
           content:
             application/json:
               schema:
@@ -3524,7 +3531,7 @@ paths:
                   run_id: {type: string}
                   node_id: {type: string}
                   finished_at: {type: string, format: date-time}
-                  output: {}
+                  output: {$ref: "#/components/schemas/OutputReadGrant"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {description: "The token is not this node's work claim, or the plan declares no such input (`input_undeclared`)."}
         "404": {description: No finished output matches the reference.}
@@ -7475,7 +7482,10 @@ paths:
                 outcome: {type: string}
                 error: {type: string}
                 failure_reason: {type: string}
-                output: {description: The node's JSON output.}
+                output: {$ref: "#/components/schemas/OutputRef"}
+                output_from:
+                  type: object
+                  description: In place of `output`, the declared input a cache hit or coalesce follower took from another run, in the `claim/input` request shape; the node's ref then names that input's stored object.
                 failure: {description: The failure record an OnFailure recovery node receives.}
                 artifact_manifest: {type: string}
       responses:
@@ -7838,6 +7848,128 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: The run records no commit.}
 
+  /api/v1/outputs/objects/{key}:
+    parameters:
+      - in: path
+        name: key
+        required: true
+        schema: {type: string}
+    get:
+      x-sparkwing-scope: public
+      summary: Read one output object through a URL this controller signed.
+      description: |
+        Served by a controller that keeps outputs on its own disk. The
+        `team`, `exp` and `sig` query parameters come from an output grant;
+        the URL is good for one minute and carries no bearer.
+      responses:
+        "200":
+          description: The output bytes.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/outputs/uploads/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+    put:
+      x-sparkwing-scope: public
+      summary: Upload one output's bytes through a URL this controller signed.
+      description: |
+        Served by a controller that keeps outputs on its own disk. The body
+        must be exactly the size and SHA-256 the upload reserved; anything
+        else is refused and not kept.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "200": {description: "Stored, awaiting commit."}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: The upload is unknown or already committed.}
+        "422": {description: The bytes do not match the reservation.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/output-commit:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim or runs.state
+      tags: [nodes]
+      summary: Commit an uploaded output after checking its size and digest.
+      description: |
+        Only the caller that reserved the upload, for this node, commits it.
+        A committed output counts toward the team's cache storage until the
+        run's outputs expire, 30 days after the run finishes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.outputCommitRequest
+              type: object
+              required: [upload_id]
+              properties:
+                upload_id: {type: string}
+      responses:
+        "204": {description: Committed.}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The pending upload is absent.}
+        "422": {description: The uploaded bytes do not match the reservation.}
+
+  /api/v1/runs/{id}/nodes/{nodeID}/output-upload:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: {type: string}
+      - in: path
+        name: nodeID
+        required: true
+        schema: {type: string}
+    post:
+      x-sparkwing-scope: claim or runs.state
+      tags: [nodes]
+      summary: Reserve room for a node's output and get a URL to upload it.
+      description: |
+        Reserves exactly `size` bytes against the team's cache storage and
+        returns a 15-minute URL for the bytes. An output is at most 64 MiB,
+        and one run's outputs at most 1 GiB. A claim token uploads only for
+        its own node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.outputUploadRequest
+              type: object
+              required: [size, sha256]
+              properties:
+                size: {type: integer, format: int64}
+                sha256: {type: string}
+      responses:
+        "200":
+          description: The upload grant.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OutputUploadGrant"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {description: "Past the output or run limit, or past the team's storage share."}
+        "429": {description: The team holds too many uncommitted uploads.}
+
 components:
   securitySchemes:
     bearerToken:
@@ -8161,10 +8293,7 @@ components:
           type: array
           items: {type: string}
         error: {type: string}
-        output:
-          type: string
-          format: byte
-          description: Raw JSON of the job's run output. Opaque to the controller.
+        output_ref: {$ref: "#/components/schemas/OutputRef"}
         started_at: {type: string, format: date-time, nullable: true}
         finished_at: {type: string, format: date-time, nullable: true}
         ready_at: {type: string, format: date-time, nullable: true}
@@ -9345,12 +9474,39 @@ components:
       properties:
         outcome: {type: string}
         error: {type: string}
-        output:
-          type: string
-          format: byte
-          description: JSON-encoded raw output bytes.
+        output: {$ref: "#/components/schemas/OutputRef"}
         failure_reason: {type: string}
         exit_code: {type: integer, nullable: true}
+    OutputRef:
+      x-sparkwing-go-type: pkg/store.OutputRef
+      type: object
+      description: A node's committed output object, at most 64 MiB.
+      required: [key, size, sha256]
+      properties:
+        key: {type: string, description: "`outputs/<run>/<node>/<attempt>`."}
+        size: {type: integer, format: int64}
+        sha256: {type: string, description: Lowercase hex digest of the bytes.}
+    OutputUploadGrant:
+      x-sparkwing-go-type: pkg/store.OutputUploadGrant
+      type: object
+      required: [upload_id, key, url, expires_at]
+      properties:
+        upload_id: {type: string}
+        key: {type: string, description: The key the finish or attempt report names once committed.}
+        url: {type: string, description: "PUT exactly the declared bytes here within 15 minutes; a path is on this controller."}
+        headers:
+          type: object
+          additionalProperties: {type: string}
+        expires_at: {type: string, format: date-time}
+    OutputReadGrant:
+      x-sparkwing-go-type: pkg/store.OutputReadGrant
+      type: object
+      properties:
+        url: {type: string, description: "A one-minute URL for the bytes; a path is on this controller. Empty when there is no output."}
+        sha256: {type: string}
+        size: {type: integer, format: int64}
+        expires: {type: string, format: date-time}
+        source_run_id: {type: string, description: The run the output was read from.}
     PoolListResponse:
       x-sparkwing-go-type: none
       type: object

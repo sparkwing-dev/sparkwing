@@ -122,6 +122,7 @@ type Store struct {
 	launchResumeMu  sync.Mutex
 	launchResume    *launchCursor
 	backupDir       string
+	outputDir       string
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -189,6 +190,10 @@ func Open(path string) (*Store, error) {
 	st, err := openSQLAt("sqlite", dsn, DialectSQLite, backupDir)
 	if err != nil {
 		return nil, err
+	}
+	st.outputDir = filepath.Dir(path)
+	if err := st.convertLegacyOutputs(context.Background()); err != nil {
+		return nil, errors.Join(fmt.Errorf("move node outputs out of %s: %w", path, err), st.Close())
 	}
 	return st, nil
 }
@@ -301,7 +306,11 @@ func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
 	dsn, err := sqliteReadOnlyDSN(path)
-	return openReadOnlyDSN(dsn, err)
+	st, err := openReadOnlyDSN(dsn, err)
+	if err == nil {
+		st.outputDir = filepath.Dir(path)
+	}
+	return st, err
 }
 
 // OpenReadOnlySnapshot copies a stable database-and-WAL pair from an existing
@@ -330,6 +339,7 @@ func OpenReadOnlySnapshot(path string) (*Store, error) {
 		return nil, err
 	}
 	st.cleanup = cleanup
+	st.outputDir = filepath.Dir(path)
 	return st, nil
 }
 
@@ -1122,7 +1132,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 89
+const expectedSchemaVersion = 90
 
 var nodeMetricKindCols = map[string]string{"kind": "TEXT NOT NULL DEFAULT ''"}
 
@@ -2237,6 +2247,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 			return err
 		}
 		return applyMetricSampleKindMigration(ctx, tx)
+	case 90:
+		return applyNodeOutputMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2699,6 +2711,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return applyMetricSampleKindMigration(ctx, tx)
+	case 90:
+		return applyNodeOutputMigration(ctx, tx)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -4575,7 +4589,7 @@ type Node struct {
 	Outcome    string     `json:"outcome,omitempty"`
 	Deps       []string   `json:"deps"`
 	Error      string     `json:"error,omitempty"`
-	Output     []byte     `json:"output,omitempty"` // raw JSON of the job's Run output
+	OutputRef  *OutputRef `json:"output_ref,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
@@ -4894,8 +4908,26 @@ func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 	return s.FinishNodeWithReason(ctx, runID, nodeID, outcome, errMsg, output, FailureUnknown, nil)
 }
 
-// FinishNodeWithReason additionally records a Failure* code + exit.
+// FinishNodeWithReason additionally records a Failure* code + exit. Output
+// bytes are written to the store's own output directory, so only a store
+// with one ([Store.OutputDir]) accepts them.
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error {
+	ref, err := s.writeLocalOutput(ctx, runID, nodeID, output)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrOutputNotStored, err)
+	}
+	return s.FinishNodeWithOutputRef(ctx, runID, nodeID, outcome, errMsg, ref, reason, exitCode)
+}
+
+// FinishNodeWithOutputRef finishes a node whose output, when there is one,
+// is already a committed object named by ref.
+func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, reason string, exitCode *int) error {
+	return s.finishNode(ctx, runID, nodeID, outcome, errMsg, output, nil, reason, exitCode)
+}
+
+func (s *Store) finishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output *OutputRef, copied *copySource,
+	reason string, exitCode *int,
+) error {
 	var code any
 	if exitCode != nil {
 		code = *exitCode
@@ -4911,13 +4943,24 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	if err := s.assertNodeMutationFenceTx(ctx, tx, runID, nodeID); err != nil {
 		return err
 	}
-	var executorName string
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName)
+	var executorName, team string
+	var generation, consumed int64
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if output != nil {
+		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, consumed+1, generation, output); err != nil {
+			return err
+		}
+	}
+	if copied != nil {
+		if output, err = sourceOutputRefTx(ctx, tx, Team(team), copied.run, copied.node); err != nil {
+			return err
+		}
 	}
 	if executorName != "" {
 		if err := lockExecutorRowsCanonicalTx(ctx, tx, executorName); err != nil {
@@ -4926,16 +4969,23 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	}
 	res, err := tx.ExecContext(ctx, `
 UPDATE nodes
-	   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
+	   SET status = ?, outcome = ?, error = ?, finished_at = ?,
 	       failure_reason = ?, exit_code = ?
 	 WHERE run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
-		nodeStatusDone, outcome, errMsg, output, time.Now().UnixNano(), reason, code,
+		nodeStatusDone, outcome, errMsg, time.Now().UnixNano(), reason, code,
 		runID, nodeID, nodeStatusDone)
 	if err != nil {
 		return err
 	}
 	if err := fencedRows(res, hasClaimFence(ctx)); err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 1 {
+		if err := writeNodeOutputTx(ctx, tx, Team(team), runID, nodeID, generation, output); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -5077,7 +5127,11 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	return &record.Node, nil
 }
 
-const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
+const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error,
+       (SELECT o.key FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.size FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       (SELECT o.sha256 FROM node_outputs o WHERE o.run_id = nodes.run_id AND o.node_id = nodes.node_id),
+       started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, prefers_labels,
        requested_cores, requested_memory_bytes, requested_slots,
        offer_started_at, offer_priority_target, claim_base_priority, claim_priority,
@@ -5095,7 +5149,9 @@ const nodeSelectColumns = `run_id, node_id, status, outcome, deps_json, error, o
 	   (SELECT pipeline FROM runs WHERE id = nodes.run_id)`
 
 func scanNodeRow(rs rowScanner, n *nodeRecord) error {
-	var depsJSON, outputJSON, labelsJSON, prefersJSON, annotationsJSON []byte
+	var depsJSON, labelsJSON, prefersJSON, annotationsJSON []byte
+	var outputKey, outputSHA sql.NullString
+	var outputSize sql.NullInt64
 	var policyJSON, supervisorRequirementsJSON, bodyRequirementsJSON []byte
 	var policyHash, supervisorRequirementsHash, bodyRequirementsHash, pipeline string
 	var policyVersion, bodyProtocol int
@@ -5104,7 +5160,7 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 	var claimedBy sql.NullString
 	var exitCode sql.NullInt64
 	err := rs.Scan(&n.RunID, &n.NodeID, &n.Status, &n.Outcome,
-		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
+		&depsJSON, &n.Error, &outputKey, &outputSize, &outputSHA, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON, &prefersJSON,
 		&n.RequestedCores, &n.RequestedMemoryBytes, &n.RequestedSlots,
 		&offerStartedNS, &n.OfferPriorityTarget, &n.ClaimBasePriority, &n.ClaimPriority,
@@ -5127,7 +5183,9 @@ func scanNodeRow(rs rowScanner, n *nodeRecord) error {
 		return err
 	}
 	_ = json.Unmarshal(depsJSON, &n.Deps)
-	n.Output = outputJSON
+	if outputKey.Valid {
+		n.OutputRef = &OutputRef{Key: outputKey.String, Size: outputSize.Int64, SHA256: outputSHA.String}
+	}
 	if len(labelsJSON) > 0 {
 		_ = json.Unmarshal(labelsJSON, &n.NeedsLabels)
 	}
@@ -5757,8 +5815,11 @@ func (s *Store) ResetNodeForAutoRetry(ctx context.Context, runID, nodeID string)
 		string(team), runID, nodeID); err != nil {
 		return err
 	}
+	if err := clearNodeOutputTx(ctx, tx, team, runID, nodeID); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE nodes
-   SET status = ?, outcome = '', error = '', output_json = NULL,
+   SET status = ?, outcome = '', error = '',
        started_at = NULL, finished_at = NULL, ready_at = NULL, placement_hold_from = NULL, offer_started_at = NULL,
        offer_priority_target = 0, claimed_by = NULL, claim_principal = '', claim_token_prefix = '',
        claim_base_priority = 0, claim_priority = 0, claim_worker_id = '', claim_executor_kind = '',

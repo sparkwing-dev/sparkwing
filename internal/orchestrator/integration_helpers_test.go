@@ -77,6 +77,7 @@ func openIntegrationPostgres(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatalf("OpenPostgres against schema %s: %v", schema, err)
 	}
+	st.SetOutputDir(t.TempDir())
 
 	t.Cleanup(func() {
 		_ = st.Close()
@@ -102,6 +103,7 @@ func openIntegrationPostgresAt(t *testing.T, src *store.Store) *store.Store {
 	if err != nil {
 		t.Fatalf("OpenPostgres at schema %s: %v", schema, err)
 	}
+	st.SetOutputDir(src.OutputDir())
 	t.Cleanup(func() { _ = st.Close() })
 	return st
 }

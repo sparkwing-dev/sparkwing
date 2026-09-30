@@ -4,13 +4,13 @@
 
 The first command that opens `state.db` after the upgrade (`sparkwing run`,
 `sparkwing secrets`, `sparkwing serve` or the daemon) moves it from the schema
-v0.65.1 or an earlier release wrote to schema 89. Before it changes anything it
+v0.65.1 or an earlier release wrote to schema 90. Before it changes anything it
 copies the database to `$SPARKWING_HOME/backups/state-v<old>-<UTC time>-<suffix>.db`,
 owner-only, and prints one line naming the copy. Stop the running daemon,
 `serve`, runs consumer and crons first (`sparkwing daemon stop`), because a
 process of the older release refuses the database once it is upgraded.
 
-The upgrade is one-way: v0.65.1 and older refuse schema 89 and name the
+The upgrade is one-way: v0.65.1 and older refuse schema 90 and name the
 requirements they lack. To go back, stop every sparkwing process, reinstall the
 older release, and copy the backup over `state.db` after deleting
 `state.db-wal` and `state.db-shm`. A controller on Postgres takes no automatic
@@ -704,6 +704,33 @@ passes the flag fails.
 
 Until then, login throttling, the bearer failure budget and audit `client_ip`
 key on the TCP peer, so browsers behind one proxy share its budget.
+
+## Job outputs are objects
+
+A node's output no longer travels inline in its finish or attempt report.
+Nodes and agents from this release upload it first, so upgrade the controller
+and every node binary together; a node from an earlier release has its finish
+refused with `400`.
+
+Before the upgrade, move the outputs the controller already holds:
+
+```sh
+sparkwing-controller migrate-outputs --cache-blob-store s3://bucket/cache
+```
+
+Leave out `--cache-blob-store` on a controller that keeps outputs on its own
+disk. The command runs in batches, can be stopped and run again, and skips a
+node that already names a newer output. It repeats whole passes until one
+moves nothing, so the first run can happen while the old controller serves.
+Run it once more during the cutover's write freeze, after the old controller
+stops and before the new one starts, so an output written inline after the
+first run's last pass moves too. It moves the outputs of runs that finished
+more than 30 days ago only for each pipeline's newest successful run, because
+older ones would expire at once. A laptop's `state.db` moves its outputs into
+`~/.sparkwing/outputs/` the first time the new release opens it.
+
+A pipeline pinned to an SDK from an earlier release still sends inline output;
+move its pin to this release.
 
 ## Egress monthly budget removed
 

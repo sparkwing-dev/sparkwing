@@ -54,6 +54,7 @@ type coordinator interface {
 	UpdateNodeActivity(context.Context, string, string, string) error
 	TouchNodeHeartbeat(context.Context, string, string) error
 	ListNodes(context.Context, string) ([]*store.Node, error)
+	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 	RevokeNodeReady(context.Context, string, string) (bool, error)
 	FinalizeNodeReady(context.Context, string, string) (store.ExecutorClaimRoundResult, error)
 }
@@ -132,7 +133,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 				continue
 			}
 			if n.Status == "done" {
-				return resultFromNode(n)
+				return resultFromNode(ctx, n, r.ctrl)
 			}
 			if n.Claimed {
 				if !claimedSeen {
@@ -391,15 +392,9 @@ func heartbeatLoop(
 	}
 }
 
-func resultFromNode(n *store.Node) runner.Result {
-	oc := sparkwing.Outcome(n.Outcome)
-	res := runner.Result{Outcome: oc}
-	if n.Error != "" {
-		res.Err = errors.New(n.Error)
-	}
-	if len(n.Output) > 0 {
-		res.Output = n.Output
-	}
+func resultFromNode(ctx context.Context, n *store.Node, outputs runner.OutputReader) runner.Result {
+	res := runner.ResultFromNode(ctx, n, outputs)
+	oc := res.Outcome
 	// safety: empty outcome means the agent wrote done without an outcome; treat as Failed
 	if oc == "" {
 		res.Outcome = sparkwing.Failed

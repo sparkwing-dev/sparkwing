@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -133,6 +134,9 @@ func localTriggerBackends(ctx context.Context, paths Paths, profileName string) 
 	st, err := openLocalTriggerStore(ctx, paths, profileName)
 	if err != nil {
 		return Backends{}, sel, func() {}, err
+	}
+	if err := localOutputsReady(st); err != nil {
+		return Backends{}, sel, func() {}, errors.Join(err, st.Close())
 	}
 	return LocalBackends(paths, st, nil), sel, func() { _ = st.Close() }, nil
 }

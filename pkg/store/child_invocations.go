@@ -153,12 +153,13 @@ func childRequestDigest(t Trigger) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// IsChildRunOf reports whether childID is a run that parentRunID started
-// through [Store.EnqueueChildRun].
-func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, childID string) (bool, error) {
+// IsChildRunOf reports whether childID is a run that parentNodeID of
+// parentRunID started through [Store.EnqueueChildRun].
+func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, parentNodeID, childID string) (bool, error) {
 	var one int
-	err := s.queryRow(ctx, `SELECT 1 FROM child_invocations WHERE team = ? AND parent_run_id = ? AND child_run_id = ? LIMIT 1`,
-		string(team), parentRunID, childID).Scan(&one)
+	err := s.queryRow(ctx, `SELECT 1 FROM child_invocations
+ WHERE team = ? AND parent_run_id = ? AND parent_node_id = ? AND child_run_id = ? LIMIT 1`,
+		string(team), parentRunID, parentNodeID, childID).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
