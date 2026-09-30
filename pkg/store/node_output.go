@@ -78,12 +78,16 @@ func (r *OutputRef) valid(runID, nodeID string) bool {
 		r.Size > 0 && r.Size <= MaxOutputBytes && validSHA256(r.SHA256)
 }
 
-// safety: the key must be this node's own and committed for this team with
-// exactly this size and digest, so a report cannot name another node's
-// object, one still uploading, or one whose bytes differ from the claim.
-func checkOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, ref *OutputRef) error {
+// safety: the key must be this node's own attempt's and committed for this
+// team with exactly this size and digest, so a report cannot name another
+// node's object, an earlier attempt's, one still uploading, or one whose
+// bytes differ from the claim.
+func checkOutputRefTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID string, attempt, generation int64, ref *OutputRef) error {
 	if !ref.valid(runID, nodeID) {
 		return fmt.Errorf("%w: output ref does not name this node's output", ErrInvalidInput)
+	}
+	if !strings.HasPrefix(ref.Key, outputAttemptPrefix(runID, nodeID, attempt, generation)) {
+		return fmt.Errorf("%w: output %s is not this attempt's", ErrInvalidInput, ref.Key)
 	}
 	var size int64
 	var sha string
@@ -318,13 +322,34 @@ func (s *Store) SetOutputDir(dir string) { s.outputDir = dir }
 // OutputPath is where an output object lives under an output directory.
 func OutputPath(dir, key string) string { return filepath.Join(dir, filepath.FromSlash(key)) }
 
-// NewOutputKey returns a fresh key for one attempt's output of a node.
-func NewOutputKey(runID, nodeID string) (string, error) {
+// NewOutputKey returns a fresh key for one attempt's output of a node. The
+// attempt ordinal and claim generation lead the final segment, so a report
+// can be held to its own attempt's object.
+func NewOutputKey(runID, nodeID string, attempt, generation int64) (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
-	return OutputKeyPrefix(runID, nodeID) + hex.EncodeToString(b[:]), nil
+	return outputAttemptPrefix(runID, nodeID, attempt, generation) + hex.EncodeToString(b[:]), nil
+}
+
+func outputAttemptPrefix(runID, nodeID string, attempt, generation int64) string {
+	return OutputKeyPrefix(runID, nodeID) + fmt.Sprintf("a%d-g%d-", attempt, generation)
+}
+
+// NodeOutputKey returns a fresh key for the output of a node's current
+// attempt.
+func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error) {
+	var consumed, generation int64
+	err := s.queryRow(ctx, `SELECT attempts_consumed, claim_generation FROM nodes WHERE run_id = ? AND node_id = ?`,
+		runID, nodeID).Scan(&consumed, &generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", notFound("node", runID+"/"+nodeID)
+	}
+	if err != nil {
+		return "", err
+	}
+	return NewOutputKey(runID, nodeID, consumed+1, generation)
 }
 
 // ErrNoOutputDir refuses output bytes a store has nowhere to keep.
@@ -340,7 +365,7 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 	if int64(len(data)) > MaxOutputBytes {
 		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", ErrOutputLimit, len(data), MaxOutputBytes)
 	}
-	key, err := NewOutputKey(runID, nodeID)
+	key, err := s.NodeOutputKey(ctx, runID, nodeID)
 	if err != nil {
 		return nil, err
 	}

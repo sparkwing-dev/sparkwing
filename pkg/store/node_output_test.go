@@ -14,7 +14,7 @@ import (
 
 func commitOutput(ctx context.Context, t *testing.T, s *store.Store, team store.Team, runID, nodeID string, data []byte) store.OutputRef {
 	t.Helper()
-	key, err := store.NewOutputKey(runID, nodeID)
+	key, err := s.NodeOutputKey(ctx, runID, nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,10 +35,10 @@ func commitOutput(ctx context.Context, t *testing.T, s *store.Store, team store.
 func TestReportAttempt_RecordsOnlyItsOwnCommittedOutput(t *testing.T) {
 	f := newDispatchRun(t, "run-output-ref")
 	f.mustAccept(t, planOf("a", "b"))
+	tok := f.claim(t, "a", store.ClaimTokenWork)
 	own := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"v":1}`))
 	other := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "b", []byte(`{"v":2}`))
-	uncommitted, _ := store.NewOutputKey(f.run, "a")
-	tok := f.claim(t, "a", store.ClaimTokenWork)
+	uncommitted, _ := f.s.NodeOutputKey(t.Context(), f.run, "a")
 
 	refused := map[string]store.OutputRef{
 		"another node's object": other,
@@ -102,12 +102,20 @@ func TestReportAttempt_ARetryDropsTheFailedAttemptsOutput(t *testing.T) {
 	if a.OutputRef != nil {
 		t.Fatalf("a retried node kept its failed attempt's output: %+v", a.OutputRef)
 	}
+	retry := f.claim(t, "a", store.ClaimTokenWork)
+	if _, err := f.report(retry, store.AttemptReport{Outcome: "success", Output: &ref}); !errors.Is(err, store.ErrAttemptInvalid) {
+		t.Fatalf("a retry naming the failed attempt's object: err = %v, want refused", err)
+	}
+	fresh := commitOutput(t.Context(), t, f.s, store.DefaultTeam, f.run, "a", []byte(`{"try":2}`))
+	if _, err := f.report(retry, store.AttemptReport{Outcome: "success", Output: &fresh}); err != nil {
+		t.Fatalf("a retry naming its own object: %v", err)
+	}
 }
 
 func TestReserveUpload_EnforcesOutputLimits(t *testing.T) {
 	s := storetest.Open(t)
 	req := func(run string, size int64) error {
-		key, _ := store.NewOutputKey(run, "n")
+		key, _ := store.NewOutputKey(run, "n", 1, 0)
 		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
 			Team: store.DefaultTeam, RunID: run, Kind: store.StorageCache, Key: key, Size: size,
 			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
@@ -128,7 +136,7 @@ func TestReserveUpload_EnforcesOutputLimits(t *testing.T) {
 	if err := req("run-other", store.MaxOutputBytes); err != nil {
 		t.Fatalf("another run is charged for the first run's outputs: %v", err)
 	}
-	key, _ := store.NewOutputKey("run-other", "n")
+	key, _ := store.NewOutputKey("run-other", "n", 1, 0)
 	if _, err := s.ReserveUpload(t.Context(), store.UploadRequest{
 		Team: store.DefaultTeam, RunID: "run-limit", Kind: store.StorageCache, Key: key, Size: 1,
 		SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
@@ -142,7 +150,7 @@ func TestReserveUpload_OutputsCountTowardTheTeamShare(t *testing.T) {
 	setFreeAllowance(t, s, 16<<10)
 	freeTeam(t, s, "team-out")
 	reserve := func(size int64) error {
-		key, _ := store.NewOutputKey("run-share", "n")
+		key, _ := store.NewOutputKey("run-share", "n", 1, 0)
 		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
 			Team: "team-out", RunID: "run-share", Kind: store.StorageCache, Key: key, Size: size,
 			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",

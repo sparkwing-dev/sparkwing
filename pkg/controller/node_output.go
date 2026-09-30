@@ -337,7 +337,7 @@ func (s *Server) handleOutputUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	key, err := store.NewOutputKey(runID, nodeID)
+	key, err := s.store.NodeOutputKey(r.Context(), runID, nodeID)
 	if err != nil {
 		s.writeInternalError(w, r, "output key", err)
 		return

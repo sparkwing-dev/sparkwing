@@ -1370,7 +1370,7 @@ func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 func NewClaimResultCommit(tok ClaimToken, digest string) ClaimResultCommit
 const NewDailyCapCents = 2_500
-func NewOutputKey(runID, nodeID string) (string, error)
+func NewOutputKey(runID, nodeID string, attempt, generation int64) (string, error)
 const NewPurchaseLimitCents = 5_000
 const NewPurchaseMaxCents = 5_000
 const NewSpendCeilingCents = 5_000
@@ -2314,7 +2314,7 @@ func (s *Store) HoldTeamForDispute(
 func (s *Store) IdentityLinkStateKey(ctx context.Context) ([]byte, error)
 func (s *Store) ImportMark(ctx context.Context, key string) (string, bool, error)
 func (s *Store) ImportSecrets(ctx context.Context, rows []Secret, markKey, mark string, now time.Time) (err error)
-func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, childID string) (bool, error)
+func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, parentNodeID, childID string) (bool, error)
 func (s *Store) LegacyOutputs(ctx context.Context, afterRun, afterNode string, limit int, retainedSince time.Time) (out []LegacyOutput, err error)
 func (s *Store) LinkIdentity(ctx context.Context, accountID string, p SignInProfile, now time.Time) (Identity, error)
 func (s *Store) ListApprovalsForRun(ctx context.Context, runID string) ([]*Approval, error)
@@ -2370,6 +2370,7 @@ func (s *Store) NodeClaimOrigin(ctx context.Context, runID, nodeID string) (prin
 func (s *Store) NodeExecutionAttemptBelongsToLiveClaim(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeExecutionAttemptIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, ordinal int, now time.Time) (bool, error)
 func (s *Store) NodeIsAncestor(ctx context.Context, team Team, runID, ancestor, node string) (_ bool, err error)
+func (s *Store) NodeOutputKey(ctx context.Context, runID, nodeID string) (string, error)
 func (s *Store) NodeOutputObject(ctx context.Context, team Team, runID, nodeID string) (Upload, error)
 func (s *Store) NodeSettlement(ctx context.Context, runID, nodeID string) (NodeSettlement, error)
 func (s *Store) OfferExecutorClaim(ctx context.Context, claimant ClaimIdentity, offer ExecutorClaimOffer) (ExecutorClaimOfferResult, error)

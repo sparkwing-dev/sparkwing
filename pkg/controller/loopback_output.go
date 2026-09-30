@@ -59,7 +59,7 @@ func (l *Loopback) handleOutputUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, fmt.Errorf("%w: an output is 1 byte to %d bytes (64 MiB)", store.ErrOutputLimit, store.MaxOutputBytes))
 		return
 	}
-	key, err := store.NewOutputKey(r.PathValue("id"), r.PathValue("nodeID"))
+	key, err := store.NewOutputKey(r.PathValue("id"), r.PathValue("nodeID"), 0, 0)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

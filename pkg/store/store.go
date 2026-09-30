@@ -4826,8 +4826,8 @@ func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outc
 		return err
 	}
 	var executorName, team string
-	var generation int64
-	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &team, &generation)
+	var generation, consumed int64
+	err = tx.QueryRowContext(ctx, `SELECT claim_executor, team, claim_generation, attempts_consumed FROM nodes WHERE run_id = ? AND node_id = ?`+tx.forUpdate(), runID, nodeID).Scan(&executorName, &team, &generation, &consumed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -4835,7 +4835,7 @@ func (s *Store) FinishNodeWithOutputRef(ctx context.Context, runID, nodeID, outc
 		return err
 	}
 	if output != nil {
-		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, output); err != nil {
+		if err := checkOutputRefTx(ctx, tx, Team(team), runID, nodeID, consumed+1, generation, output); err != nil {
 			return err
 		}
 	}

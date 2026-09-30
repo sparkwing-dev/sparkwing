@@ -133,7 +133,7 @@ func (s *Store) commitAttemptBilledTx(ctx context.Context, tx *storeTx, tok Clai
 		return fmt.Errorf("%w: a %s claim cannot report for a %q node", ErrClaimResultConflict, tok.Kind, n.kind)
 	}
 	if report.Output != nil {
-		if err := checkOutputRefTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, report.Output); err != nil {
+		if err := checkOutputRefTx(ctx, tx, tok.Team, tok.RunID, tok.NodeID, n.consumed+1, tok.Generation, report.Output); err != nil {
 			return attemptRefused("%v", err)
 		}
 	}

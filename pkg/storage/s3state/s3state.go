@@ -1293,7 +1293,7 @@ func (b *Backend) putNodeOutput(ctx context.Context, runID, nodeID string, outpu
 	if int64(len(output)) > store.MaxOutputBytes {
 		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", store.ErrOutputLimit, len(output), store.MaxOutputBytes)
 	}
-	key, err := store.NewOutputKey(runID, nodeID)
+	key, err := store.NewOutputKey(runID, nodeID, 0, 0)
 	if err != nil {
 		return nil, err
 	}
