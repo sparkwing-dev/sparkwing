@@ -51,34 +51,36 @@ type claimCache struct {
 	entries map[[sha256.Size]byte]claimEntry
 }
 
-// safety: a claim token's entry keeps the team the controller bound it to,
-// so a write served from the cache is still labeled and counted.
+// safety: a claim token's entry keeps the team the controller bound it to and
+// the attempt it names, so a write served from the cache is still labeled and
+// still lands in that attempt's own stream.
 type claimEntry struct {
-	until time.Time
-	team  string
+	until   time.Time
+	team    string
+	attempt appendIdentity
 }
 
-func (c *claimCache) valid(key [sha256.Size]byte, now time.Time) (string, bool) {
+func (c *claimCache) valid(key [sha256.Size]byte, now time.Time) (claimEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.entries[key]
-	return e.team, now.Before(e.until)
+	return e, now.Before(e.until)
 }
 
-func (c *claimCache) remember(key [sha256.Size]byte, until time.Time, team string) {
+func (c *claimCache) remember(key [sha256.Size]byte, e claimEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil || len(c.entries) >= maxClaimCacheEntries {
 		now := time.Now()
 		kept := map[[sha256.Size]byte]claimEntry{}
-		for k, e := range c.entries {
-			if now.Before(e.until) && len(kept) < maxClaimCacheEntries/2 {
-				kept[k] = e
+		for k, old := range c.entries {
+			if now.Before(old.until) && len(kept) < maxClaimCacheEntries/2 {
+				kept[k] = old
 			}
 		}
 		c.entries = kept
 	}
-	c.entries[key] = claimEntry{until: until, team: team}
+	c.entries[key] = e
 }
 
 // safety: a service that caches no credential caches no claim either.

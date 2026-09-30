@@ -360,6 +360,7 @@ func TestClaimRun_LogValidationBindsTheClaimsOwnAttempt(t *testing.T) {
 		t.Fatalf("accept plan = %d", code)
 	}
 	work := "Bearer " + f.launchNode("run-log", "a")
+	var lastHeader http.Header
 	validate := func(headers map[string]string) (int, string) {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodPost, f.url+"/api/v1/runs/run-log/nodes/a/claim/validate", nil)
@@ -375,10 +376,14 @@ func TestClaimRun_LogValidationBindsTheClaimsOwnAttempt(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
+		lastHeader = resp.Header
 		return resp.StatusCode, resp.Header.Get(store.ClaimTeamHeader)
 	}
 	if code, team := validate(nil); code != http.StatusNoContent || team != olga.team {
 		t.Fatalf("own attempt's validation = %d team %q, want 204 team %q", code, team, olga.team)
+	}
+	if gen, ord := lastHeader.Get(store.ClaimGenerationHeader), lastHeader.Get(store.AttemptOrdinalHeader); gen == "" || gen == "0" || ord != "1" {
+		t.Fatalf("own attempt's validation names generation %q ordinal %q, want the claim's generation and ordinal 1", gen, ord)
 	}
 	for what, headers := range map[string]map[string]string{
 		"an attempt ordinal": {store.AttemptOrdinalHeader: "2"},

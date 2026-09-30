@@ -425,3 +425,15 @@ func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, runID, nod
 	}
 	return nil
 }
+
+// ClaimAttemptOrdinal is the attempt ordinal tok's live claim will report,
+// under which its node's durable log is written.
+func (s *Store) ClaimAttemptOrdinal(ctx context.Context, tok ClaimToken) (int, error) {
+	var consumed int
+	err := s.queryRow(ctx, `SELECT attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ?`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&consumed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrLockHeld
+	}
+	return consumed + 1, err
+}

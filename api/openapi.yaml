@@ -3553,7 +3553,9 @@ paths:
         bypass claim validation. A controller-dispatched node's work claim
         token is its own attempt and names none: it validates only its own
         run and node while its claim has not ended, the answer names the
-        claim's team in `X-Sparkwing-Claim-Team`, and a request carrying any
+        claim's team in `X-Sparkwing-Claim-Team` and the attempt its log is
+        written to in `X-Sparkwing-Claim-Generation` and
+        `X-Sparkwing-Attempt-Ordinal`, and a request carrying any
         claim, trigger or attempt header is refused `403` `attempt_unbound`.
       responses:
         "204": {description: The claim that opened the attempt is live. Empty body.}

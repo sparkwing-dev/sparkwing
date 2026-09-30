@@ -63,8 +63,9 @@ unlock.
   refused. A work node writes its own node's durable log to the logs
   service with its claim token, which the service checks against the
   controller at most once every 5 seconds per token, run and node, so a
-  revoked claim stops writing within 5 seconds, and answers on no other
-  route; a write naming another attempt or trigger stream is refused,
+  revoked claim stops writing within 5 seconds, writes each claim to its own
+  attempt's stream, so a revoked claim inside that window never reaches its
+  successor's log, and answers on no other route; a write naming another attempt or trigger stream is refused,
   and a write the controller names no team for is answered `502`. A work
   node takes, renews, observes and releases concurrency slots with its claim
   token, for its own run and node in its own team, under its node's holder

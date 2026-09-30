@@ -1,8 +1,11 @@
 package logs
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +19,7 @@ type claimController struct {
 	mu          sync.Mutex
 	status      int
 	team        string
+	noAttempt   bool
 	validations int
 }
 
@@ -49,6 +53,14 @@ func newClaimController(t *testing.T) *claimController {
 		if c.team != "" {
 			w.Header().Set(store.ClaimTeamHeader, c.team)
 		}
+		generation := "1"
+		if strings.HasSuffix(r.Header.Get("Authorization"), "2") {
+			generation = "2"
+		}
+		if !c.noAttempt {
+			w.Header().Set(store.ClaimGenerationHeader, generation)
+			w.Header().Set(store.AttemptOrdinalHeader, "1")
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(ts.Close)
@@ -58,7 +70,12 @@ func newClaimController(t *testing.T) *claimController {
 
 func claimAppend(t *testing.T, h http.Handler, token, path string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{\"msg\":\"x\"}\n"))
+	return claimAppendLine(t, h, token, path, "x")
+}
+
+func claimAppendLine(t *testing.T, h http.Handler, token, path, msg string) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{\"msg\":\""+msg+"\"}\n"))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -144,5 +161,67 @@ func TestClaimTokenAppend_ARevokedClaimIsRefusedOnceItsEntryLapses(t *testing.T)
 	s.claims.mu.Unlock()
 	if code := claimAppend(t, h, "swc_claim", "/api/v1/logs/run-1/a"); code != http.StatusUnauthorized {
 		t.Fatalf("a revoked claim's append %v after it was cached = %d, want 401", MaxClaimTokenCacheTTL, code)
+	}
+}
+
+// A claim's write lands in the stream of the attempt the controller named for
+// it, so a revoked claim still inside its cached confirmation appends only to
+// its own attempt's log, never to its successor's or to the shared node log.
+func TestClaimTokenAppend_WritesOnlyItsOwnAttemptStream(t *testing.T) {
+	ctrl := newClaimController(t)
+	ctrl.set(http.StatusNoContent, "acme")
+	root := t.TempDir()
+	s, err := New(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.WithControllerAuth(ctrl.url, MaxClaimCacheTTL).Handler()
+	for _, w := range []struct{ token, msg string }{{"swc_claim", "first"}, {"swc_claim2", "successor"}} {
+		if code := claimAppendLine(t, h, w.token, "/api/v1/logs/run-1/a", w.msg); code != http.StatusNoContent {
+			t.Fatalf("%s's append = %d", w.token, code)
+		}
+	}
+	ctrl.set(http.StatusUnauthorized, "acme")
+	if code := claimAppendLine(t, h, "swc_claim", "/api/v1/logs/run-1/a", "late"); code != http.StatusNoContent {
+		t.Fatalf("the revoked claim's cached append = %d, want 204 inside its window", code)
+	}
+	ctrl.mu.Lock()
+	ctrl.status, ctrl.noAttempt = http.StatusNoContent, true
+	ctrl.mu.Unlock()
+	if code := claimAppendLine(t, h, "swc_claim3", "/api/v1/logs/run-1/a", "unplaced"); code != http.StatusBadGateway {
+		t.Fatalf("an append the controller named no attempt for = %d, want 502", code)
+	}
+	seal := httptest.NewRequest(http.MethodPost, "/api/v1/logs/run-1/a/seal", strings.NewReader(`{"stream":"main","final_seq":0,"lines":1,"bytes":1}`))
+	seal.Header.Set("Authorization", "Bearer swc_claim2")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, seal)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("the successor's seal = %d", rec.Code)
+	}
+	logs := map[string]string{}
+	runs := filepath.Join(root, "runs")
+	if err := filepath.WalkDir(runs, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		rel, _ := filepath.Rel(runs, path)
+		logs[rel] = string(body)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := sealFileRel("run-1", nodeAttemptPath("run-1", "a", 2, 1)); !strings.Contains(logs[filepath.Join("run-1", ".seals", "a.log")], `"file":"`+want+`"`) {
+		t.Errorf("the successor's seal = %q, want it to name its attempt stream %s", logs[filepath.Join("run-1", ".seals", "a.log")], want)
+	}
+	first, successor := logs[nodeAttemptPath("run-1", "a", 1, 1)], logs[nodeAttemptPath("run-1", "a", 2, 1)]
+	if !strings.Contains(first, "first") || !strings.Contains(first, "late") || strings.Contains(first, "successor") {
+		t.Errorf("the first claim's attempt log = %q, want its own two lines", first)
+	}
+	if !strings.Contains(successor, "successor") || strings.Contains(successor, "late") {
+		t.Errorf("the successor's attempt log = %q, want only its own line", successor)
+	}
+	if node, ok := logs[nodePath("run-1", "a")]; ok {
+		t.Errorf("a claim wrote the shared node log: %q", node)
 	}
 }

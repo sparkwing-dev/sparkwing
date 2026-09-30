@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -266,7 +267,7 @@ func (s *Server) handleClaimSecret(w http.ResponseWriter, r *http.Request) {
 // safety: the logs service asks this with the pod's own claim token, so the
 // answer binds a durable log write to the claim's run, node and team. A claim
 // token is its attempt, so a write naming any other attempt is refused.
-func handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
 	tok, _ := claimTokenFromContext(r.Context())
 	if node, trigger := claimIdentityShape(r); node || trigger || r.Header.Get(store.AttemptOrdinalHeader) != "" {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{
@@ -275,7 +276,16 @@ func handleValidateClaimLog(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// safety: the answer names the claim's own attempt, so the logs service
+	// writes it to that attempt's stream, which no later claim of the node shares.
+	ordinal, err := s.store.ClaimAttemptOrdinal(r.Context(), tok)
+	if err != nil {
+		writeClaimRefusal(w, r, s, err)
+		return
+	}
 	w.Header().Set(store.ClaimTeamHeader, string(tok.Team))
+	w.Header().Set(store.ClaimGenerationHeader, strconv.FormatInt(tok.Generation, 10))
+	w.Header().Set(store.AttemptOrdinalHeader, strconv.Itoa(ordinal))
 	w.WriteHeader(http.StatusNoContent)
 }
 
