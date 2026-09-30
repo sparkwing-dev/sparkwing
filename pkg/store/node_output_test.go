@@ -325,7 +325,9 @@ func TestLegacyOutputs_MovesRetainedOutputsOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, o := range batch {
-				ids = append(ids, o.RunID)
+				if !o.Moved() {
+					ids = append(ids, o.RunID)
+				}
 				after = o.RunID
 			}
 			if len(batch) < 2 {
@@ -337,23 +339,31 @@ func TestLegacyOutputs_MovesRetainedOutputsOnce(t *testing.T) {
 	if want := "run-a-recent,run-c-old-newest-success,run-e-unfinished"; got != want {
 		t.Fatalf("outputs to move = %s, want %s", got, want)
 	}
-	batch, err := s.LegacyOutputs(ctx, "", "", 10, time.Now().Add(-store.OutputRetention))
+	var written []string
+	// safety: a write behind the cursor lands while the move runs, as a live
+	// controller's would: the next pass moves it.
+	moved, err := s.MoveLegacyOutputs(ctx, time.Now().Add(-store.OutputRetention), 2, "cloud", false,
+		func(_ context.Context, o store.LegacyOutput) error {
+			written = append(written, o.RunID)
+			if o.RunID == "run-e-unfinished" && len(written) == 3 {
+				setInlineOutput(t, s, "run-a-recent", "n", []byte(`"rewritten"`))
+			}
+			return nil
+		})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, o := range batch {
-		if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
-			t.Fatal(err)
-		}
-		if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
-			t.Fatalf("recording %s again: %v", o.RunID, err)
-		}
+	if got := strings.Join(written, ","); got != "run-a-recent,run-c-old-newest-success,run-e-unfinished,run-a-recent" {
+		t.Fatalf("writes = %s, want each retained output once and the rewrite caught by a second pass", got)
+	}
+	if moved.Outputs != 4 {
+		t.Fatalf("moved %d outputs, want 4", moved.Outputs)
 	}
 	if left := listed(); len(left) != 0 {
 		t.Fatalf("outputs left after the move: %v", left)
 	}
 	obj, err := s.NodeOutputObject(ctx, store.DefaultTeam, "run-a-recent", "n")
-	if err != nil || obj.Key != store.MigratedOutputKey("run-a-recent", "n") || obj.Size != int64(len(`"run-a-recent"`)) {
+	if err != nil || obj.Key != store.MigratedOutputKey("run-a-recent", "n") || obj.Size != int64(len(`"rewritten"`)) {
 		t.Fatalf("moved output = %+v, %v", obj, err)
 	}
 	if n, _ := s.GetNode(ctx, "run-f-has-ref", "n"); n.OutputRef == nil || *n.OutputRef != ref {
@@ -385,6 +395,28 @@ func TestOpen_MovesALaptopsInlineOutputsIntoItsOutputDir(t *testing.T) {
 	out, err := reopened.GetNodeOutput(ctx, "run-inline", "n")
 	if err != nil || string(out) != `{"kept":true}` {
 		t.Fatalf("output after the move = %s, %v", out, err)
+	}
+
+	// safety: a crash after the ref committed but before the move was recorded done
+	// can leave a damaged file; the next open repairs it from the inline bytes.
+	path := store.OutputPath(reopened.OutputDir(), store.MigratedOutputKey("run-inline", "n"))
+	for name, damage := range map[string]func() error{
+		"truncated": func() error { return os.WriteFile(path, []byte(`{"ke`), 0o600) },
+		"missing":   func() error { return os.Remove(path) },
+	} {
+		if err := damage(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reopened.DB().Exec(`DELETE FROM sparkwing_meta WHERE key = 'outputs_converted'`); err != nil {
+			t.Fatal(err)
+		}
+		if err := reopened.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened = target.Open(t)
+		if out, err := reopened.GetNodeOutput(ctx, "run-inline", "n"); err != nil || string(out) != `{"kept":true}` {
+			t.Fatalf("a %s file after the next open = %s, %v", name, out, err)
+		}
 	}
 }
 

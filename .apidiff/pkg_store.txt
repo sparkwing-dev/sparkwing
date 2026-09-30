@@ -1273,7 +1273,10 @@ type LegacyOutput struct {
 	RunID  string
 	NodeID string
 	Data   []byte
+
+	Recorded *OutputRef
 }
+func (o LegacyOutput) Moved() bool
 func (o LegacyOutput) Ref() OutputRef
 const LogsDeleteScope = "logs.delete"
 func LooksLikeEmail(email string) bool
@@ -1362,6 +1365,10 @@ const MinCreditMaxChargeSeconds = int64(DispatchedHeartbeatInterval/time.Second)
 const MinLaunchLifetime = 90 * time.Second
 const MinSuppliedTokenLen = 32
 func MissingRequirements(known, listed []string) []string
+type MoveStats struct {
+	Outputs int64
+	Bytes   int64
+}
 type NamedClaimOptions struct {
 	SizesToClass bool
 
@@ -2366,6 +2373,9 @@ func (s *Store) MinBinaryVersion(ctx context.Context) string
 func (s *Store) MintClaimToken(ctx context.Context, team Team, runID, nodeID string, generation int64,
 	kind ClaimTokenKind, expiresAt, now time.Time,
 ) (string, error)
+func (s *Store) MoveLegacyOutputs(ctx context.Context, retainedSince time.Time, batch int, provenance string, verifyMoved bool,
+	write func(context.Context, LegacyOutput) error,
+) (MoveStats, error)
 func (s *Store) NewestWaitlisted(ctx context.Context, limit, offset int) ([]WaitlistedAccount, error)
 func (s *Store) NodeClaimFenceIsLive(ctx context.Context, runID, nodeID string, fence NodeClaimFence, now time.Time) (bool, error)
 func (s *Store) NodeClaimFenceNodeForRun(ctx context.Context, runID string, fence NodeClaimFence, now time.Time) (string, error)
@@ -3006,6 +3016,7 @@ func WithQueueRunners(ctx context.Context, live []RunnerPresence) context.Contex
 func WithTriggerClaimFence(ctx context.Context, fence TriggerClaimFence) context.Context
 func WithoutClaimFences(ctx context.Context) context.Context
 func WithoutCreditMetering(ctx context.Context) context.Context
+func WriteOutputFileDurably(path string, data []byte) error
 
 # methods on un-declared receiver types (likely a bug)
 func (e storeExecer) ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)

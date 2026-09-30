@@ -650,7 +650,11 @@ sparkwing-controller migrate-outputs --cache-blob-store s3://bucket/cache
 
 Leave out `--cache-blob-store` on a controller that keeps outputs on its own
 disk. The command runs in batches, can be stopped and run again, and skips a
-node that already names an output. It moves the outputs of runs that finished
+node that already names a newer output. It repeats whole passes until one
+moves nothing, so the first run can happen while the old controller serves.
+Run it once more during the cutover's write freeze, after the old controller
+stops and before the new one starts, so an output written inline after the
+first run's last pass moves too. It moves the outputs of runs that finished
 more than 30 days ago only for each pipeline's newest successful run, because
 older ones would expire at once. A laptop's `state.db` moves its outputs into
 `~/.sparkwing/outputs/` the first time the new release opens it.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,9 +23,11 @@ store: the cache bucket when --cache-blob-store names one, and the output
 directory beside the state database otherwise. Outputs of runs that finished
 more than 30 days ago move only for each pipeline's newest successful run.
 
-Each output takes a fixed key, and a node that already names an output is
-skipped, so the command can be stopped and run again, and run while the
-controller serves.`
+Each output takes a fixed key, and a node that already names another
+output is skipped, so the command can be stopped and run again. It repeats
+whole passes until one moves nothing, so it can run while the old
+controller serves; an output written inline after the last pass is not
+moved, so the cutover runs it once more with the old controller stopped.`
 
 func runMigrateOutputs(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("migrate-outputs", flag.ContinueOnError)
@@ -59,33 +60,11 @@ func runMigrateOutputs(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cutoff := time.Now().Add(-store.OutputRetention)
-	var moved, bytesMoved int64
-	afterRun, afterNode := "", ""
-	for {
-		outputs, err := st.LegacyOutputs(ctx, afterRun, afterNode, *batch, cutoff)
-		if err != nil {
-			return fmt.Errorf("list inline outputs: %w", err)
-		}
-		for _, o := range outputs {
-			if err := put(ctx, o); err != nil {
-				return fmt.Errorf("write output %s/%s: %w", o.RunID, o.NodeID, err)
-			}
-			if err := st.RecordMigratedOutput(ctx, o, provenance, time.Now()); err != nil {
-				return fmt.Errorf("record output %s/%s: %w", o.RunID, o.NodeID, err)
-			}
-			moved++
-			bytesMoved += int64(len(o.Data))
-			afterRun, afterNode = o.RunID, o.NodeID
-		}
-		if len(outputs) > 0 {
-			fmt.Fprintf(stdout, "moved %d outputs (%d bytes); last %s/%s\n", moved, bytesMoved, afterRun, afterNode)
-		}
-		if len(outputs) < *batch {
-			break
-		}
+	moved, err := st.MoveLegacyOutputs(ctx, time.Now().Add(-store.OutputRetention), *batch, provenance, false, put)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(stdout, "done: %d outputs, %d bytes\n", moved, bytesMoved)
+	fmt.Fprintf(stdout, "done: %d outputs, %d bytes\n", moved.Outputs, moved.Bytes)
 	return nil
 }
 
@@ -108,10 +87,6 @@ func outputWriter(ctx context.Context, st *store.Store, p paths.Paths, cacheBlob
 		dir = p.Root
 	}
 	return func(_ context.Context, o store.LegacyOutput) error {
-		path := store.OutputPath(dir, o.Ref().Key)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return err
-		}
-		return os.WriteFile(path, o.Data, 0o600)
+		return store.WriteOutputFileDurably(store.OutputPath(dir, o.Ref().Key), o.Data)
 	}, "local", nil
 }
