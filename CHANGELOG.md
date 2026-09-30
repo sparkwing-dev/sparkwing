@@ -454,7 +454,8 @@ unlock.
   credits takes one of `--free-team-slots` (200) with the first byte it
   commits, in that commit's transaction, and keeps it until the team is
   deleted; a commit that cannot take a slot is refused with `402`, so no team
-  without a slot commits a byte. A team with
+  without a slot commits a byte beyond small outputs of up to 1 MiB each, 64
+  MiB in all. A team with
   neither a slot nor credits is refused its storage writes with `402` "free
   storage is paused; buy credits or join the waitlist". Runs are never refused
   for billing: its own machines run them, and a metered claim still needs
@@ -1022,10 +1023,12 @@ unlock.
   report names the committed object; inline output bytes are refused. A read
   of `GET .../nodes/{nodeID}/output` returns a one-minute URL and the SHA-256
   the bytes must match. An output is at most 64 MiB, one run's outputs at most
-  1 GiB, both counted toward the team's cache share (an output of up to
-  1 MiB is always accepted), and outputs expire 30
+  1 GiB, both counted toward the team's cache share. An output of up to
+  1 MiB needs no share room or free slot until such outputs put the team
+  64 MiB past its share. Outputs expire 30
   days after their run finishes, except each pipeline's newest successful
-  run. A claim token reads only its own node's transitive dependencies, and
+  run. A read checks the recorded SHA-256, and a cache hit whose bytes are
+  missing or do not match runs the node as a miss. A claim token reads only its own node's transitive dependencies, and
   `claim/input` answers a read grant instead of the bytes.
   `sparkwing-controller migrate-outputs` moves stored
   outputs before the upgrade, and a laptop database moves its own on first

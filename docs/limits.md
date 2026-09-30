@@ -137,7 +137,10 @@ follower, a cache hit and a cross-pipeline ref its plan declares ask
 `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the source
 run itself and answers with the same kind of grant. An output whose run passed retention reads as
 absent: a cross-pipeline ref reports no value, and a cache entry that pointed
-at it is dropped, so the next run misses the cache and runs the node.
+at it is dropped, so the next run misses the cache and runs the node. Every
+read checks the bytes against the recorded SHA-256: a direct read of missing
+or changed bytes fails with an error, and a cache hit on them runs the node
+as a miss.
 
 A controller without `--cache-blob-store` keeps outputs in `outputs/` under
 its data directory and serves them through URLs it signs itself, which only
@@ -154,11 +157,14 @@ of `--free-team-slots` (default 200) with the first byte it commits, in the
 transaction that counts it, and keeps it until the team is deleted. A
 reservation takes no slot, so one nobody commits costs the tier nothing; it is
 refused only once every slot is taken. A commit whose team cannot take a slot
-is refused with `402`, so no team without a slot commits a byte. A writer puts
-its bytes before it commits them, so teams whose reservations raced for the
-last slot can each leave one write behind: a direct upload's object is
-deleted when its commit is refused, while a cache object or a log block stays
-until the hourly pass counts it and the team's next reservation is refused.
+is refused with `402`, so no team without a slot commits a byte beyond the
+small outputs above: up to 1 MiB each and 64 MiB in all. A writer puts its
+bytes before it commits them, so teams whose reservations raced for the last
+slot can each leave one write behind. A refused commit records nothing and
+leaves its bytes in place, because a retry of the same upload may still
+commit them; the storage pass's age expiry reclaims a direct upload's object, a
+refused output's object stays, and a cache object or a log block stays until
+the hourly pass counts it and the team's next reservation is refused.
 The free bytes a deployment holds are therefore at most slots times the
 allowance, plus those in-flight writes. A team with a slot
 keeps writing inside its shares after the slots run out; a team with neither a
