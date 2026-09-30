@@ -20,6 +20,11 @@ unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **scaffold:** `const FallbackSDKVersion` pins v0.65.0, so a fresh scaffold compiles against that release.
+
+
 ### Fixed
 
 - **local execution:** Queued nodes execute their registered pipeline instead of attempting remote compilation when the trigger records a repository URL.
