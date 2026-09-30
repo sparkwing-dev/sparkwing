@@ -173,6 +173,29 @@ func TestSyncLaunchJobs_ReleasesOnlyAnUnstartedClaim(t *testing.T) {
 	}
 }
 
+// The launcher deletes a cancelled run's Job, whose pod may never report, so
+// the sync that tells it to ends the claim as cancelled and the run settles
+// without waiting out the lease.
+func TestSyncLaunchJobs_ACancelledRunSettlesWhenItsJobIsDeleted(t *testing.T) {
+	f := newDispatchRun(t, "run-sync-cancel")
+	f.mustAccept(t, planOf("a", "b:a"))
+	f.claim(t, "a", store.ClaimTokenWork)
+	job := store.LaunchJob{RunID: f.run, NodeID: "a", Generation: f.node(t, "a").ClaimGeneration}
+	if err := f.s.RequestCancel(context.Background(), f.run); err != nil {
+		t.Fatal(err)
+	}
+	f.wantRun(t, "running")
+	if got := syncOne(t, f.s, job); got != store.LaunchJobDelete {
+		t.Fatalf("a cancelled run's Job: %s, want delete", got)
+	}
+	f.wantOutcome(t, "a", "cancelled")
+	f.wantOutcome(t, "b", "cancelled")
+	f.wantRun(t, "cancelled")
+	if got := syncOne(t, f.s, job); got != store.LaunchJobDelete {
+		t.Fatalf("the Job again after the claim ended: %s, want delete", got)
+	}
+}
+
 func syncOne(t *testing.T, s *store.Store, job store.LaunchJob) store.LaunchJobState {
 	t.Helper()
 	res, err := s.SyncLaunchJobs(context.Background(), launcherIdentity, []store.LaunchJob{job}, time.Now())
