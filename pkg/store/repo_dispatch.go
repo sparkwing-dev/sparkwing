@@ -14,8 +14,9 @@ type RepoDispatch string
 
 const (
 	// RepoDispatchTrigger is every repository's default: a runner claims the
-	// run's trigger and dispatches its nodes.
-	RepoDispatchTrigger RepoDispatch = ""
+	// run's trigger and dispatches its nodes. A repository with no setting,
+	// or one stored empty, takes it too.
+	RepoDispatchTrigger RepoDispatch = "trigger"
 	// RepoDispatchController starts each run with a planning node, and the
 	// launcher runs every node in a Job it builds itself.
 	RepoDispatchController RepoDispatch = "controller"
@@ -62,7 +63,7 @@ func (t *Tenant) SetRepoDispatch(ctx context.Context, owner, name string, dispat
 	switch dispatch {
 	case RepoDispatchTrigger, RepoDispatchController:
 	default:
-		return fmt.Errorf("%w: dispatch %q is neither %q nor empty", ErrInvalidInput, dispatch, RepoDispatchController)
+		return fmt.Errorf("%w: dispatch %q is neither %q nor %q", ErrInvalidInput, dispatch, RepoDispatchTrigger, RepoDispatchController)
 	}
 	if owner == "" || name == "" || strings.Contains(owner+name, "/") {
 		return fmt.Errorf("%w: a repository is a GitHub owner and name", ErrInvalidInput)
@@ -84,7 +85,7 @@ func routeRunDispatchTx(ctx context.Context, tx *storeTx, team Team, t Trigger, 
 	var dispatch string
 	err := tx.QueryRowContext(ctx, `SELECT dispatch FROM repos WHERE team = ? AND repo = ?`,
 		string(team), RepoKey(t.GithubOwner, t.GithubRepo)).Scan(&dispatch)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && dispatch == string(RepoDispatchTrigger)) {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && dispatch != string(RepoDispatchController)) {
 		return nil
 	}
 	if err != nil {
