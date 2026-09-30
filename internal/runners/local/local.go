@@ -196,6 +196,9 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 	wall := time.Since(spawnedAt)
 	forwarders.Wait()
 	closeAll(stdout, stderr)
+	// safety: the pid names a process that is gone now, and a finished node
+	// shows its detail line forever.
+	_ = r.ctrl.UpdateNodeActivity(context.WithoutCancel(ctx), req.RunID, req.NodeID, "")
 
 	usage := usageFrom(cmd.ProcessState)
 	if usage != nil {

@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **orchestrator + store:** A cancelled node's step rows settle with it. A step
+  still `running` when its node finishes now ends `cancelled` (or `failed` for
+  any other outcome) with a finish time, and the local runner clears the
+  `running, pid N` detail once the node's process exits, so `runs status` no
+  longer shows a finished node with a running step and a dead pid.
+
 - **orchestrator:** A sub-second, failed or retried local run no longer prints
   `run resource measurements are incomplete or exceed the supported range` to
   stderr. The warning now fires only for a reading outside the supported range,

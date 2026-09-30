@@ -213,3 +213,30 @@ func mustCreateRunWithNode(t *testing.T, s *store.Store, runID, nodeID string) {
 		t.Fatalf("CreateNode: %v", err)
 	}
 }
+
+func TestFinishNode_SettlesStepsStillRunning(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	mustCreateRunWithNode(t, s, "run-1", "node-a")
+	for _, step := range []string{"done", "cut-off"} {
+		if err := s.StartNodeStep(ctx, "run-1", "node-a", step); err != nil {
+			t.Fatalf("StartNodeStep %s: %v", step, err)
+		}
+	}
+	if err := s.FinishNodeStep(ctx, "run-1", "node-a", "done", store.StepPassed); err != nil {
+		t.Fatalf("FinishNodeStep: %v", err)
+	}
+	if err := s.FinishNode(ctx, "run-1", "node-a", "cancelled", "cancelled by user", nil); err != nil {
+		t.Fatalf("FinishNode: %v", err)
+	}
+	steps, err := s.ListNodeSteps(ctx, "run-1")
+	if err != nil {
+		t.Fatalf("ListNodeSteps: %v", err)
+	}
+	want := map[string]string{"done": store.StepPassed, "cut-off": store.StepCancelled}
+	for _, st := range steps {
+		if st.Status != want[st.StepID] || st.FinishedAt == nil {
+			t.Errorf("step %s = %s finished %v, want %s with a finish time", st.StepID, st.Status, st.FinishedAt, want[st.StepID])
+		}
+	}
+}

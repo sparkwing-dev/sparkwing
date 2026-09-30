@@ -4986,8 +4986,25 @@ UPDATE nodes
 		if err := writeNodeOutputTx(ctx, tx, Team(team), runID, nodeID, generation, output); err != nil {
 			return err
 		}
+		if err := settleRunningStepsTx(ctx, tx, Team(team), runID, nodeID, outcome); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
+}
+
+// safety: a node killed mid-step never writes that step's end, so a step
+// still running when its node finishes ends with the node.
+func settleRunningStepsTx(ctx context.Context, tx *storeTx, team Team, runID, nodeID, outcome string) error {
+	status := StepFailed
+	if outcome == outcomeCancelled {
+		status = StepCancelled
+	}
+	_, err := tx.ExecContext(ctx, `
+UPDATE node_steps SET status = ?, finished_at = ?
+ WHERE team = ? AND run_id = ? AND node_id = ? AND status = ?`,
+		status, time.Now().UnixNano(), team, runID, nodeID, StepRunning)
+	return err
 }
 
 // SetNodeArtifactManifest records the content-addressed digest of a
