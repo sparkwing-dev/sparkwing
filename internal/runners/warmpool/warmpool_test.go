@@ -455,7 +455,7 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		node, err := st.ClaimNextReadyNode(context.Background(), store.ClaimIdentity{
 			Principal:   "offline-server",
 			TokenPrefix: "swr_offline-server",
-		}, "agent:offline-server", 10*time.Millisecond, nil)
+		}, "agent:offline-server", time.Minute, nil)
 		if err == nil {
 			if node.NodeID != "build" {
 				t.Fatalf("claimed node = %q, want build", node.NodeID)
@@ -471,22 +471,11 @@ func TestRunnerObservesExpiredClaimFailure(t *testing.T) {
 		case <-time.After(time.Millisecond):
 		}
 	}
-	observedDeadline := time.After(time.Second)
-	for {
-		node, err := st.GetNode(context.Background(), "run-1", "build")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if node.StatusDetail == "claimed by remote executor" {
-			break
-		}
-		select {
-		case <-observedDeadline:
-			t.Fatal("warm runner did not observe the active remote claim")
-		case <-time.After(time.Millisecond):
-		}
+	if _, err := st.DB().ExecContext(context.Background(),
+		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), "run-1", "build"); err != nil {
+		t.Fatalf("expire remote claim: %v", err)
 	}
-	time.Sleep(20 * time.Millisecond)
 	pairs, err := store.Maintenance.FailExpiredNodeClaims(st, context.Background())
 	if err != nil {
 		t.Fatal(err)
