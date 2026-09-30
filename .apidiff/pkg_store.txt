@@ -831,6 +831,7 @@ var ErrObjectExists = errors.New("object already committed")
 var ErrOnlyTeam = errors.New("store: this is your only team; delete your account instead")
 var ErrOpenCheckout = errors.New("store: the team has a credit checkout in progress; " +
 	"wait for the checkout to expire or complete, then delete the team")
+var ErrOutputCorrupt = errors.New("output bytes do not match their recorded sha256")
 var ErrOutputLimit = errors.New("output limit exceeded")
 var ErrOutputNotStored = errors.New("the node's output was not stored")
 var ErrPaymentWarned = errors.New("credits: the payment drew an early fraud warning and is refunded, not granted")

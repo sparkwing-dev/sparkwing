@@ -4,13 +4,13 @@
 
 The first command that opens `state.db` after the upgrade (`sparkwing run`,
 `sparkwing secrets`, `sparkwing serve` or the daemon) moves it from the schema
-v0.65.1 or an earlier release wrote to schema 89. Before it changes anything it
+v0.65.1 or an earlier release wrote to schema 90. Before it changes anything it
 copies the database to `$SPARKWING_HOME/backups/state-v<old>-<UTC time>-<suffix>.db`,
 owner-only, and prints one line naming the copy. Stop the running daemon,
 `serve`, runs consumer and crons first (`sparkwing daemon stop`), because a
 process of the older release refuses the database once it is upgraded.
 
-The upgrade is one-way: v0.65.1 and older refuse schema 89 and name the
+The upgrade is one-way: v0.65.1 and older refuse schema 90 and name the
 requirements they lack. To go back, stop every sparkwing process, reinstall the
 older release, and copy the backup over `state.db` after deleting
 `state.db-wal` and `state.db-shm`. A controller on Postgres takes no automatic

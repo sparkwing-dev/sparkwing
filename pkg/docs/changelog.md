@@ -1021,7 +1021,7 @@ unlock.
 
 ### Changed
 
-- **store (Breaking):** The local state database moves to schema 89, and the
+- **store (Breaking):** The local state database moves to schema 90, and the
   first open copies it to `$SPARKWING_HOME/backups/` and prints where before
   upgrading it. v0.65.1 and older refuse the upgraded database. A database
   v0.65.0 or v0.65.1 wrote, whose v50 and v51 were metric migrations, gains the
