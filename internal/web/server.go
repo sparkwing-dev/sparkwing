@@ -203,10 +203,11 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	}
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      guardUnauthenticatedLoopback(opts, serveAddr, HandlerFromOptions(opts)),
+		Handler:      HandlerFromOptions(opts),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+	srv.Handler = guardUnauthenticatedLoopback(opts, serveAddr, srv.Handler)
 	trusted := &http.Server{
 		Addr:         opts.TrustedProxyAddr,
 		Handler:      ratelimit.TrustedListener(srv.Handler),

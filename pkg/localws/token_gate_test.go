@@ -29,7 +29,11 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 		}
 	}
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	send := func(method, path, auth string, cookies ...*http.Cookie) *http.Response {
+	type reply struct {
+		StatusCode int
+		cookies    []*http.Cookie
+	}
+	send := func(method, path, auth string, cookies ...*http.Cookie) reply {
 		t.Helper()
 		req, err := http.NewRequest(method, base+path, strings.NewReader(`{"name":"STOLEN","value":"x","shared":true}`))
 		if err != nil {
@@ -46,9 +50,9 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer func() { _ = resp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-		return resp
+		return reply{StatusCode: resp.StatusCode, cookies: resp.Cookies()}
 	}
 
 	for _, tc := range []struct{ method, path, auth string }{
@@ -59,8 +63,8 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 		{http.MethodGet, SignInPath + "?token=wrong", ""},
 	} {
 		resp := send(tc.method, tc.path, tc.auth)
-		if resp.StatusCode != http.StatusUnauthorized || len(resp.Cookies()) != 0 {
-			t.Errorf("%s %s without the token = %d cookies %v, want 401 and none", tc.method, tc.path, resp.StatusCode, resp.Cookies())
+		if resp.StatusCode != http.StatusUnauthorized || len(resp.cookies) != 0 {
+			t.Errorf("%s %s without the token = %d cookies %v, want 401 and none", tc.method, tc.path, resp.StatusCode, resp.cookies)
 		}
 	}
 	if resp := send(http.MethodGet, "/api/v1/secrets", token); resp.StatusCode != http.StatusOK {
@@ -71,10 +75,10 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 	}
 
 	signedIn := send(http.MethodGet, SignInPath+"?token="+token, "")
-	if signedIn.StatusCode != http.StatusSeeOther || len(signedIn.Cookies()) != 1 || !signedIn.Cookies()[0].HttpOnly {
-		t.Fatalf("sign-in = %d cookies %v, want 303 and one HttpOnly cookie", signedIn.StatusCode, signedIn.Cookies())
+	if signedIn.StatusCode != http.StatusSeeOther || len(signedIn.cookies) != 1 || !signedIn.cookies[0].HttpOnly {
+		t.Fatalf("sign-in = %d cookies %v, want 303 and one HttpOnly cookie", signedIn.StatusCode, signedIn.cookies)
 	}
-	session := signedIn.Cookies()[0]
+	session := signedIn.cookies[0]
 	for _, path := range []string{"/", "/api/v1/runs"} {
 		if resp := send(http.MethodGet, path, "", session); resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s with the session cookie = %d, want 200", path, resp.StatusCode)

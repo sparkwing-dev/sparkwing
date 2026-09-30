@@ -24,7 +24,7 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 		if err := f.st.FinishNode(ctx, f.runA, "n1", "success", "", nil); err != nil {
 			t.Fatal(err)
 		}
-		claimSeq := f.claimRun(ctx, f.runnerB, "run-by-b", "")
+		claimSeq := f.claimRun(f.runnerB, "run-by-b", "")
 
 		leaderB := "leader-b"
 		seedRun(t, f.teamB, leaderB, "build-b")
@@ -79,9 +79,10 @@ func TestTeamBoundary_ResolveWaiterDoesNotReadAnotherTeamsLeader(t *testing.T) {
 	})
 }
 
-func (f *tenancyFixture) claimRun(ctx context.Context, auth, runID, extraRunJSON string) int64 {
+func (f *tenancyFixture) claimRun(auth, runID, extraRunJSON string) int64 {
 	t := f.t
 	t.Helper()
+	ctx := context.Background()
 	if err := f.teamB.CreateTrigger(ctx, store.Trigger{
 		ID: runID, Pipeline: "build-b", TriggerSource: "api", CreatedAt: time.Now(),
 	}); err != nil {
@@ -128,7 +129,7 @@ func TestTeamBoundary_TriggerAncestryStaysInTheCallersTeam(t *testing.T) {
 			t.Fatal(err)
 		}
 		spawner := "Bearer " + raw
-		claimSeq := f.claimRun(ctx, spawner, "child-b", `"parent_run_id":"`+f.runA+`",`)
+		claimSeq := f.claimRun(spawner, "child-b", `"parent_run_id":"`+f.runA+`",`)
 
 		trigger := func(pipeline string) (int, string) {
 			t.Helper()

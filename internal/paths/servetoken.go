@@ -41,8 +41,8 @@ func (p Paths) ServeToken() (string, error) {
 // EnsureServeToken returns the local dashboard's bearer, creating it on
 // first use. It stays the same across restarts, so a browser keeps the
 // session cookie it was given.
-func (p Paths) EnsureServeToken() (string, error) {
-	token, err := p.ServeToken()
+func (p Paths) EnsureServeToken() (token string, err error) {
+	token, err = p.ServeToken()
 	if !errors.Is(err, os.ErrNotExist) {
 		return token, err
 	}
@@ -57,7 +57,11 @@ func (p Paths) EnsureServeToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() {
+		if rerr := os.Remove(tmp.Name()); rerr != nil && err == nil {
+			err = rerr
+		}
+	}()
 	_, werr := tmp.WriteString(hex.EncodeToString(raw) + "\n")
 	if cerr := tmp.Close(); werr == nil {
 		werr = cerr
