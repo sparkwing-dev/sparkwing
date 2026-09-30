@@ -19,12 +19,18 @@ type identityCapture struct {
 	seen map[string][]string
 }
 
-func newIdentityCapture() (*identityCapture, *httptest.Server) {
+// safety: the loop stops once three claims on path are seen, so a loaded host
+// stretches the test instead of failing it for want of a claim.
+func newIdentityCapture(path string, stop context.CancelFunc) (*identityCapture, *httptest.Server) {
 	c := &identityCapture{seen: map[string][]string{}}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		c.seen[r.URL.Path] = append(c.seen[r.URL.Path], r.Header.Get(store.RunnerIdentityHeader))
+		enough := len(c.seen[path]) >= 3
 		c.mu.Unlock()
+		if enough {
+			stop()
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	return c, ts
@@ -54,11 +60,10 @@ func (c *identityCapture) stable(path string) bool {
 // constructor and holds still across polls, so these assertions run the
 // shipped entry points rather than a client built for the test.
 func TestRunPoolLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
-	capture, ts := newIdentityCapture()
-	defer ts.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	capture, ts := newIdentityCapture("/api/v1/nodes/claim", cancel)
+	defer ts.Close()
 	err := RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL: ts.URL,
 		HolderPrefix:  "runner:pool-host",
@@ -86,11 +91,10 @@ func TestRunPoolLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
 }
 
 func TestRunTriggerLoop_NamesItsRunnerOnEveryClaim(t *testing.T) {
-	capture, ts := newIdentityCapture()
-	defer ts.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	capture, ts := newIdentityCapture("/api/v1/triggers/claim", cancel)
+	defer ts.Close()
 	err := RunTriggerLoop(ctx, TriggerLoopOptions{
 		ControllerURL: ts.URL,
 		GitcacheURL:   ts.URL,
