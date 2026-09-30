@@ -109,6 +109,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 		return err
 	}
 	sparkwingDir := filepath.Join(dest, ".sparkwing")
+	// #nosec G703 -- Lstat inspects the checkout entry itself so symlinks are refused
 	info, err := os.Lstat(sparkwingDir)
 	if err != nil {
 		return fmt.Errorf("fetch-source: inspect .sparkwing: %w", err)
@@ -118,6 +119,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 	}
 	for _, dir := range []string{dest, sparkwingDir} {
 		path := filepath.Join(dir, "go.mod")
+		// #nosec G703 -- Lstat inspects the module entry itself so symlinks are refused
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
