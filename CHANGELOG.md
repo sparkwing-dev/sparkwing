@@ -978,8 +978,8 @@ unlock.
   machine's local secrets: every host that reaches the address can list,
   overwrite and delete them, and the server warns about it at startup. The
   local server never serves a masked value. A browser
-  origin on another loopback port is refused unless it is the dev server's
-  port 3100, and a browser write with a body must send `application/json`.
+  origin on another loopback port is refused unless `--allow-origin` names
+  it, and a browser write with a body must send `application/json`.
 - **controller:** A metered node or trigger claim now pays at least 60 seconds
   at its class's rate, up from 20. Billing stays per second past the minimum.
   A claim reserves the 60 seconds up front, so a balance below one minute at
@@ -1653,7 +1653,11 @@ unlock.
   `0600` on first start. The CLI sends it for commands that reach the local
   dashboard, and the browser signs in once through the dashboard link
   `sparkwing serve start` and `sparkwing serve status` print, now also
-  reported as `login_url` in `-o json`. See
+  reported as `login_url` in `-o json`. That link's `#code=` fragment is a
+  single-use code the page trades for a session it keeps in its origin's
+  `localStorage` and sends as a bearer; no credential rides a cookie or a URL
+  a server sees. A loopback origin on port 3100 is no longer trusted without
+  `--allow-origin http://localhost:3100`. See
   [migration guide](docs/migrations/_unreleased.md#the-local-dashboard-requires-its-token).
 
 - **web:** `sparkwing-web` without `--require-login` on a loopback address

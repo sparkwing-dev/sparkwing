@@ -1,6 +1,7 @@
 "use client";
 
 
+import { openEventStream } from "@/lib/eventStream";
 import {
   Suspense,
   memo,
@@ -4159,7 +4160,7 @@ function StreamingLogs({
 
   useEffect(() => {
     const url = getNodeStreamUrl(runID, nodeID);
-    const es = new EventSource(url, { withCredentials: true });
+    const es = openEventStream(url);
     es.onmessage = (e) => {
       const incoming = (e.data as string).split("\n").filter((s) => s !== "");
       setLines((prev) => [...prev, ...incoming]);

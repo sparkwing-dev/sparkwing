@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -245,12 +246,12 @@ func inspectDashboard(dp dashboardPaths, action string) (dashboardResult, dashbo
 		}
 		out.URL = "http://" + net.JoinHostPort(host, port)
 		out.API = out.URL + "/api/v1"
-		if token, err := orchestrator.PathsAt(dp.home).ServeToken(); err == nil {
-			out.LoginURL = out.URL + localws.SignInPath + "?token=" + token
-		}
 		out.Endpoints = []dashboardEndpoint{{"ui", scope, out.URL}, {"api", scope, out.API}}
 		if version, ok := getDashboardVersion(dashboardHTTPClient(), out.URL); ok && version.PID == record.PID && version.Instance == record.Instance {
 			out.Readiness = "ready"
+			if code, err := mintDashboardSignInCode(dashboardHTTPClient(), out.URL, dp.home); err == nil {
+				out.LoginURL = out.URL + "/#code=" + code
+			}
 		}
 	}
 	return out, record, nil
@@ -331,4 +332,31 @@ func dashboardLegacyPID(path string) (int, bool, error) {
 		return 0, false, errors.New("invalid legacy dashboard PID; no process was changed")
 	}
 	return pid, processAlive(pid), nil
+}
+
+// safety: the link carries a single-use code in its fragment, which a
+// browser never sends to a server, so neither the serve token nor a
+// reusable credential lands in a URL, a history entry or an access log.
+func mintDashboardSignInCode(client *http.Client, base, home string) (string, error) {
+	token, err := orchestrator.PathsAt(home).ServeToken()
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequest(http.MethodPost, base+localws.SignInCodePath, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var body struct {
+		Code string `json:"code"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&body) != nil || body.Code == "" {
+		return "", fmt.Errorf("mint a dashboard sign-in code: %s", resp.Status)
+	}
+	return body.Code, nil
 }

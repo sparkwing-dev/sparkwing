@@ -85,7 +85,9 @@ serve start` mounts the controller API and the dashboard on one listener
 and requires the token in `serve-token` under the Sparkwing home, a `0600`
 file, so another account on the machine that reaches the loopback port is
 refused. The CLI sends the token as a bearer; a browser signs in once
-through the link `sparkwing serve status` prints. The process refuses a
+through the link `sparkwing serve status` prints, whose single-use code the
+page trades for a session it keeps in `localStorage` and sends as a bearer.
+No credential rides a cookie, which every port on `127.0.0.1` would receive. The process refuses a
 non-loopback `--addr` unless the operator passes `--allow-remote`, and a
 browser request carrying a foreign `Origin` is refused unless the operator
 named that origin in `--allow-origin`. See

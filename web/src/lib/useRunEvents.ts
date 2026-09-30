@@ -1,6 +1,7 @@
 
 import { useEffect, useRef } from "react";
 import { getRunEventsStreamUrl, type RunEvent } from "./api";
+import { openEventStream } from "./eventStream";
 
 export type RunEventKind =
   | "node_started"
@@ -39,7 +40,7 @@ export function useRunEvents(
   useEffect(() => {
     if (!runID) return;
     const url = getRunEventsStreamUrl(runID);
-    const es = new EventSource(url, { withCredentials: true });
+    const es = openEventStream(url);
 
     const handle = (e: MessageEvent) => {
       if (!e.data) return;

@@ -23,22 +23,20 @@ type Policy struct {
 	// where the request Host is the caller's to choose.
 	BindHost string
 	// LoopbackPorts are the ports whose loopback origins count as this
-	// server's own: the port it serves and the dashboard dev server's.
-	// Another server on this machine shares the loopback host.
+	// server's own. Another server on this machine shares the loopback
+	// host, so a dev server on another port is named in AllowOrigins.
 	LoopbackPorts []string
 	// AllowOrigins lists further browser origins ("https://dash.example"),
-	// such as the public name of a proxy in front of the server.
+	// such as the public name of a proxy in front of the server or a
+	// dashboard dev server on another loopback port.
 	AllowOrigins []string
 }
 
-// DevServerPort is where pnpm dev in web/ serves the dashboard.
-const DevServerPort = "3100"
-
-// NewPolicy builds the policy for a server bound to addr: its own port and
-// the dev server's are its loopback origins, and a non-wildcard bind
-// anchors the Origin check.
+// NewPolicy builds the policy for a server bound to addr: the port it
+// serves is its only loopback origin, and a non-wildcard bind anchors the
+// Origin check.
 func NewPolicy(addr string, allowRemote bool, allowOrigins []string) Policy {
-	ports := []string{DevServerPort}
+	var ports []string
 	if _, port, err := net.SplitHostPort(addr); err == nil {
 		ports = append(ports, port)
 	}
@@ -132,12 +130,12 @@ func (p Policy) originAllowed(origin string) bool {
 	if !ok {
 		return false
 	}
-	// safety: `next dev` serves the dashboard on its own loopback port and
-	// forwards that Origin; any other loopback port is another program.
-	if LoopbackHost(host) {
-		return slices.Contains(p.LoopbackPorts, originPort(scheme, host))
+	// safety: another loopback port is another program, which may belong to
+	// another account on this machine.
+	if LoopbackHost(host) && slices.Contains(p.LoopbackPorts, originPort(scheme, host)) {
+		return true
 	}
-	if p.BindHost != "" && strings.EqualFold(host, p.BindHost) {
+	if !LoopbackHost(host) && p.BindHost != "" && strings.EqualFold(host, p.BindHost) {
 		return true
 	}
 	for _, allowed := range p.AllowOrigins {

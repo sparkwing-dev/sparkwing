@@ -29,8 +29,13 @@ func TestGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 			origin: "http://127.0.0.1:4343", secFetch: "same-origin", want: http.StatusOK,
 		},
 		{
-			name: "next dev on another loopback port", method: http.MethodPost, host: "localhost:4343",
-			origin: "http://localhost:3100", secFetch: "same-site", want: http.StatusOK,
+			name: "next dev on another loopback port without the allow list", method: http.MethodPost, host: "localhost:4343",
+			origin: "http://localhost:3100", secFetch: "same-site", want: http.StatusForbidden,
+		},
+		{
+			name: "next dev named on the allow list", method: http.MethodPost, host: "localhost:4343",
+			origin: "http://localhost:3100", secFetch: "same-site", allowOrigins: []string{"http://localhost:3100"},
+			want: http.StatusOK,
 		},
 		{
 			name: "ipv6 loopback", method: http.MethodGet, host: "[::1]:4343",
@@ -156,7 +161,7 @@ func TestGuard_AllowsLocalCallersRejectsForeignSites(t *testing.T) {
 			}), Policy{
 				AllowRemote:   tc.allowRemote,
 				BindHost:      tc.bindHost,
-				LoopbackPorts: []string{"4343", DevServerPort},
+				LoopbackPorts: []string{"4343"},
 				AllowOrigins:  tc.allowOrigins,
 			})
 

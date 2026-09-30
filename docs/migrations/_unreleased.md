@@ -152,8 +152,8 @@ create the machine's key; point `SPARKWING_SECRETS_KEY_FILE` inside the home.
 **`sparkwing serve --allow-remote`.** The dashboard now manages local secrets
 without an account, so a remote bind lets every host that reaches it list,
 overwrite and delete them; the server warns at startup. It never serves a
-masked value. A browser origin on
-another loopback port is refused unless it is the dev server's port 3100.
+masked value, and it answers only a holder of the serve token. A browser
+origin on another loopback port is refused unless `--allow-origin` names it.
 
 **What the key protects.** It keeps a copied or backed-up `state.db` sealed.
 Code running as your account, pipeline steps included, can read the key file
@@ -241,16 +241,17 @@ required.
 
 ## The local dashboard requires its token
 
-`sparkwing serve` answers `401` to a request that carries neither the token
-in `serve-token` under the Sparkwing home nor the session cookie its sign-in
-link sets. Open the `dashboard:` link `sparkwing serve status` prints once
-per browser; a bookmark of `http://127.0.0.1:4343` keeps working after that.
-A script that called the local API sends
+`sparkwing serve` answers `401` to an API request that carries neither the
+token in `serve-token` under the Sparkwing home nor a browser session as a
+bearer. Open the `dashboard:` link `sparkwing serve status` prints once per
+browser; a bookmark of `http://127.0.0.1:4343` keeps working after that,
+across dashboard restarts. A script that called the local API sends
 `Authorization: Bearer $(cat ~/.sparkwing/serve-token)`, with the path under
-its own `SPARKWING_HOME`. The `sparkwing` CLI does this itself. A browser on
-the `pnpm dev` server at port 3100 signs in through
-`http://localhost:4343/auth/local?token=...`, because the cookie follows the
-host name. No database migration is required.
+its own `SPARKWING_HOME`. The `sparkwing` CLI does this itself. The `pnpm dev`
+server at port 3100 is no longer trusted implicitly: start the dashboard with
+`--allow-origin http://localhost:3100` and open the printed link with its
+host and port changed to `localhost:3100`, since the session belongs to the
+origin that opened it. No database migration is required.
 
 ## GitHub App picker carries no binding state
 

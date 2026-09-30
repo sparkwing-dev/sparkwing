@@ -1806,22 +1806,24 @@ A running instance is left unchanged, including its effective options.
 Use serve restart for replacement. Build identity is reported separately
 from readiness; missing artifact evidence is unknown.
 
-The listener accepts loopback Host headers and the host of each
---allow-origin entry, and rejects a browser Origin
-that is neither a loopback origin on the served port or the dashboard's
-dev-server port 3100, the --addr host, nor listed in --allow-origin. A
-browser write with a body must send application/json. --allow-remote
-widens the Host check only.
+Every API request except GET /api/v1/version and signed POST /webhooks/
+needs a bearer: the token in serve-token under the Sparkwing home, which
+only your account can read, or a browser session derived from it. The CLI
+sends the token. A browser opens the dashboard link start and status
+print once; its #code= fragment is a single-use sign-in code the page
+trades for a session kept in that origin's localStorage. No credential
+rides a cookie or a URL a server sees.
 
-Every request except GET /api/v1/version and signed POST /webhooks/
-needs the token in serve-token under the Sparkwing home, which only
-your account can read. The CLI sends it as a bearer. A browser signs in
-once through the dashboard link start and status print
-(/auth/local?token=...), which sets a session cookie for that port.`,
+The listener accepts loopback Host headers and the host of each
+--allow-origin entry, and rejects a browser Origin that is neither a
+loopback origin on the served port, the --addr host, nor listed in
+--allow-origin; a pnpm dev server on port 3100 needs --allow-origin
+http://localhost:3100. A browser write with a body must send
+application/json. --allow-remote widens the Host check only.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
-		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
+		{Name: "allow-remote", Desc: "Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value.", Group: "Bind"},
 		{Name: "allow-origin", Argument: "ORIGINS", Desc: "Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host.", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "profile", Argument: "PROFILE", Desc: "Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces)", Group: "Storage"},

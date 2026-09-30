@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { parseLogLines } from "@/lib/logParser";
 import LogBucketView from "@/components/LogBucketView";
 import { getControllerUrl } from "@/lib/api";
+import { openEventStream, type EventStream } from "@/lib/eventStream";
 
 function getToken(): string {
   if (typeof window === "undefined") return "";
@@ -38,7 +39,7 @@ export default function LiveLogs({
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let es: EventSource | null = null;
+    let es: EventStream | null = null;
     let retryCount = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
@@ -46,7 +47,7 @@ export default function LiveLogs({
     function connect() {
       if (cancelled) return;
       const url = buildLogSSEUrl(jobId, logsUrl);
-      es = new EventSource(url);
+      es = openEventStream(url);
       setSource(logsUrl ? "sparkwing-logs" : "controller");
 
       es.onopen = () => {

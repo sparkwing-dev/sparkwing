@@ -919,15 +919,22 @@ one process. Loopback is not a user boundary, because every account on the
 machine can connect to `127.0.0.1`, so the listener requires the token in
 `serve-token` under the Sparkwing home. The file is created `0600` on first
 start and stays the same across restarts. The CLI reads it and sends it as a
-bearer; the browser signs in once through the dashboard link that
-`sparkwing serve start` and `sparkwing serve status` print, which sets a
-session cookie. `GET /api/v1/version` and `POST /webhooks/`, which checks the
+bearer. A browser signs in once through the dashboard link that
+`sparkwing serve start` and `sparkwing serve status` print: its `#code=`
+fragment is a single-use code, valid for five minutes, which never reaches a
+server or its logs. The page trades it for a session credential derived from
+the token and keeps that in its origin's `localStorage`, which is scoped to
+the port, and sends it as a bearer. No credential rides a cookie, because
+cookies are shared by every port on `127.0.0.1`, including another
+account's. `GET /api/v1/version` and `POST /webhooks/`, which checks the
 sender's signature, need no token. Deleting the file and restarting the
 dashboard signs every browser out.
 
 The listener binds `127.0.0.1:4343` and refuses a non-loopback `--addr`
 unless you pass `--allow-remote`; a browser request whose `Origin` is
-neither loopback nor named in `--allow-origin` is refused too. Passing
+neither the served loopback port nor named in `--allow-origin` is refused
+too. A `pnpm dev` server on port 3100 needs
+`--allow-origin http://localhost:3100`. Passing
 `--allow-remote` hands every host that holds the token the authority of your
 account.
 

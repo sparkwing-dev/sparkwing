@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
               source: "/api/:path*",
               destination: `${apiProxyTarget}/api/:path*`,
             },
+            {
+              source: "/auth/local/session",
+              destination: `${apiProxyTarget}/auth/local/session`,
+            },
           ];
         },
       }

@@ -115,8 +115,8 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
 	}
 	if opts.AllowRemote && !LoopbackBind(opts.Addr) {
-		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so anyone who reaches it can list, "+
-			"overwrite and delete this machine's local secrets and runs without signing in\n", opts.Addr)
+		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so every host that reaches it can try "+
+			"the serve token, and anyone holding it can list, overwrite and delete this machine's local secrets and runs\n", opts.Addr)
 	}
 	bundle := opts.Bundle
 	if bundle == nil {
@@ -221,7 +221,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           requireServeToken(handler, serveToken, opts.Addr),
+		Handler:           requireServeToken(handler, serveToken),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,

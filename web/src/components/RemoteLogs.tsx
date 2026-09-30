@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { LogBucketViewFromRaw } from "@/components/LogBucketView";
+import { localAuthHeaders, signedIn } from "@/lib/localSession";
 
 interface Props {
   jobId: string;
@@ -18,7 +19,8 @@ export default function RemoteLogs({ jobId, logsUrl }: Props) {
     (async () => {
       try {
         const url = `${logsUrl}?offset=0&limit=${2 * 1024 * 1024}`;
-        const res = await fetch(url);
+        await signedIn();
+        const res = await fetch(url, { headers: localAuthHeaders() });
         if (!res.ok) {
           throw new Error(`logs service returned ${res.status}`);
         }
