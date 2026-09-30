@@ -90,10 +90,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 		rep.Created = append(rep.Created, rel)
 	}
 
-	if err := ensureGitignoreEntry(sparkwingDir, "sparkwing-pipeline"); err != nil {
-		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add sparkwing-pipeline to an ignore file: %v\n", err)
-	}
-
 	return rep, nil
 }
 

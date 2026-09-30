@@ -411,6 +411,9 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 }
 
 func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger string) error {
+	if err := ensureGitignoreEntry(sparkwingDir, "sparkwing-pipeline"); err != nil {
+		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add sparkwing-pipeline to an ignore file: %v\n", err)
+	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
 		rel = file
