@@ -198,7 +198,9 @@ func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-c
 	closeAll(stdout, stderr)
 	// safety: the pid names a process that is gone now, and a finished node
 	// shows its detail line forever.
-	_ = r.ctrl.UpdateNodeActivity(context.WithoutCancel(ctx), req.RunID, req.NodeID, "")
+	if err := r.ctrl.UpdateNodeActivity(context.WithoutCancel(ctx), req.RunID, req.NodeID, ""); err != nil {
+		r.cfg.Logger.Debug("local runner: clear node activity", "node", req.NodeID, "err", err)
+	}
 
 	usage := usageFrom(cmd.ProcessState)
 	if usage != nil {

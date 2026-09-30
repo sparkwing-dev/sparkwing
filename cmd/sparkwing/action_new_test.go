@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/mod/module"
+
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-	"golang.org/x/mod/module"
 )
 
 func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
