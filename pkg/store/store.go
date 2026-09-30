@@ -1751,9 +1751,14 @@ func (s *Store) backupBeforeUpgrade(ctx context.Context) error {
 	if err := os.MkdirAll(s.backupDir, 0o700); err != nil {
 		return fmt.Errorf("create backup directory %s: %w", s.backupDir, err)
 	}
-	target := filepath.Join(s.backupDir, fmt.Sprintf("state-v%d-%s.db", current, time.Now().UTC().Format("20060102T150405Z")))
-	if err := preparePrivateSQLite(target); err != nil {
-		return err
+	// safety: two openers can upgrade the same database in one second, and VACUUM INTO needs an empty target.
+	f, err := os.CreateTemp(s.backupDir, fmt.Sprintf("state-v%d-%s-*.db", current, time.Now().UTC().Format("20060102T150405Z")))
+	if err != nil {
+		return fmt.Errorf("create the state database backup: %w", err)
+	}
+	target := f.Name()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("create the state database backup: %w", err)
 	}
 	if _, err := s.exec(ctx, `VACUUM INTO ?`, target); err != nil {
 		return fmt.Errorf("back up the state database to %s before upgrading it: %w", target, err)

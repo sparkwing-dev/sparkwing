@@ -237,8 +237,9 @@ pipelines:
 // rather than silently ignored.
 func TestPipelineSourceExtraReposIsNotAConfigField(t *testing.T) {
 	_, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n    source:\n      extra_repos: [acme/secrets]\n"))
-	if err == nil || !strings.Contains(err.Error(), `unknown field "source"`) {
-		t.Fatalf("a source block = %v, want an unknown-field refusal", err)
+	// safety: source names the pipeline's git ref, a string, so a block of repositories fails to parse.
+	if err == nil || !strings.Contains(err.Error(), "cannot unmarshal !!map into string") {
+		t.Fatalf("a source block = %v, want a refusal", err)
 	}
 	if _, err := pipelines.Parse(strings.NewReader("pipelines:\n  - name: build\n    entrypoint: Build\n")); err != nil {
 		t.Fatalf("control: the same entry without it = %v", err)

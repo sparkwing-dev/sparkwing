@@ -5,7 +5,7 @@
 The first command that opens `state.db` after the upgrade (`sparkwing run`,
 `sparkwing secrets`, `sparkwing serve` or the daemon) moves it from the schema
 v0.65.1 or an earlier release wrote to schema 89. Before it changes anything it
-copies the database to `$SPARKWING_HOME/backups/state-v<old>-<UTC time>.db`,
+copies the database to `$SPARKWING_HOME/backups/state-v<old>-<UTC time>-<suffix>.db`,
 owner-only, and prints one line naming the copy. Stop the running daemon,
 `serve`, runs consumer and crons first (`sparkwing daemon stop`), because a
 process of the older release refuses the database once it is upgraded.
