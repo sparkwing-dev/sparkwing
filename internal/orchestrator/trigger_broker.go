@@ -181,6 +181,10 @@ func (b *TriggerBroker) allowController(r *http.Request) bool {
 			return parent == b.runID || (b.retryOf != "" && parent == b.retryOf)
 		case latestRunLookup(path):
 			return true
+		// safety: a retry copies its source attempt's finished nodes, and the
+		// controller named that source on the trigger, never the pipeline.
+		case b.retryOf != "" && b.underRun(path, b.retryOf):
+			return true
 		case b.refOutput(path):
 			return true
 		}

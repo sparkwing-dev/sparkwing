@@ -151,8 +151,9 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 }
 
 // A cross-pipeline Ref reads the latest run of another pipeline in the team
-// and then that run's outputs; a retry looks up the child its source attempt
-// spawned. Neither opens a run the pipeline names on its own.
+// and then that run's outputs; a retry reads its source attempt's nodes and
+// looks up the child that attempt spawned. Neither opens a run the pipeline
+// names on its own.
 func TestTriggerBrokerFollowsRefsAndRetryChildrenOnly(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -201,7 +202,9 @@ func TestTriggerBrokerFollowsRefsAndRetryChildrenOnly(t *testing.T) {
 		{"/api/v1/triggers/spawned-child?parent_run_id=run-a&parent_node_id=n&pipeline=child", http.StatusOK},
 		{"/api/v1/triggers/spawned-child?parent_run_id=run-prev&parent_node_id=n&pipeline=child", http.StatusOK},
 		{"/api/v1/triggers/spawned-child?parent_run_id=run-z&parent_node_id=n&pipeline=child", http.StatusForbidden},
-		{"/api/v1/runs/run-prev", http.StatusForbidden},
+		{"/api/v1/runs/run-prev", http.StatusOK},
+		{"/api/v1/runs/run-prev/nodes/build", http.StatusOK},
+		{"/api/v1/runs/run-prev/nodes/build/output", http.StatusOK},
 	}
 	for _, step := range steps {
 		if got := get(step.path); got != step.want {

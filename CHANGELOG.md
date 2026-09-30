@@ -1311,6 +1311,10 @@ unlock.
 
 ### Fixed
 
+- **runner:** `sparkwing runs retry --failed` on a controller runner no longer
+  fails with `rehydrate retry ... read source node ...: controller 403: trigger
+  capability does not allow this route`. The trigger broker now lets the retry
+  read its source attempt's run, nodes and outputs.
 - **controller:** A runner holding an `admin` token no longer fails every node
   it runs for a claimed trigger with `acknowledge execution attempt 1:
   controller 400: attempt_ordinal and an exact execution identity are
