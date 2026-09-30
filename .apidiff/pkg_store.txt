@@ -1022,6 +1022,8 @@ const FailureNoProgressTimeout = "no_progress_timeout"
 const FailureOOMKilled = "oom_killed"
 const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"
+const FailureSourceFetch = "source_fetch"
+const FailureSourceUnavailable = "source_unavailable"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureUnpricedCPUClass = "unpriced_cpu_class"
@@ -1677,7 +1679,7 @@ type RegisteredAgent struct {
 const ReleaseBackoff = 5 * time.Minute
 type RepoDispatch string
 const RepoDispatchController RepoDispatch = "controller"
-const RepoDispatchTrigger RepoDispatch = ""
+const RepoDispatchTrigger RepoDispatch = "trigger"
 type RepoFilter = match.RepoFilter
 func RepoIdentityFromPath(repoPath string) string
 func RepoIdentityFromURL(remote string) string
