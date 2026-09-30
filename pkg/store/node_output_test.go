@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -562,5 +563,55 @@ func TestReserveUpload_AFullShareStillTakesSmallOutputs(t *testing.T) {
 	}
 	if err := reserve("artifacts/blobs/"+strings.Repeat("d", 64), 1); !errors.Is(err, store.ErrStorageQuota) {
 		t.Fatalf("a one-byte artifact with a full share: err = %v, want the storage refusal", err)
+	}
+}
+
+func TestRecordMigratedOutput_ARewriteSurvivesAStoragePass(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	if err := s.CreateRun(ctx, store.Run{ID: "run-rw", Pipeline: "p", Status: "success", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run-rw", NodeID: "n", Status: "done", Outcome: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	o := store.LegacyOutput{Team: store.DefaultTeam, RunID: "run-rw", NodeID: "n", Data: []byte(`"small"`)}
+	if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	listed := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes
+	marks, err := s.StorageMarks(ctx, store.StorageCache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Data = []byte(`"a much larger rewrite"`)
+	if err := s.RecordMigratedOutput(ctx, o, "cloud", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcileStorage(ctx, store.StorageCache, map[store.Team]int64{store.DefaultTeam: listed}, marks, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes, int64(len(o.Data)); got != want {
+		t.Fatalf("storage after a pass that listed before the rewrite = %d, want %d", got, want)
+	}
+}
+
+func TestWriteOutputFileDurably_KeepsAMatchingFileAndReplacesAnother(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out")
+	if err := os.WriteFile(path, []byte(`"same"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.Stat(path)
+	if err := store.WriteOutputFileDurably(path, []byte(`"same"`)); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.Stat(path); !os.SameFile(before, after) {
+		t.Fatal("a file that already matched was replaced instead of synced in place")
+	}
+	if err := store.WriteOutputFileDurably(path, []byte(`"other"`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != `"other"` {
+		t.Fatalf("a mismatched file = %s, want it replaced", got)
 	}
 }

@@ -112,8 +112,11 @@ func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, proven
  WHERE team = ? AND key = ? AND provenance = ?`, ref.Size, ref.SHA256, now.UnixNano(), string(o.Team), ref.Key, provenance); err != nil {
 			return err
 		}
+		// safety: the committed total moves with the count, so a storage pass
+		// that took its marks before this rewrite keeps the change.
 		if _, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = CASE WHEN used_bytes + ? > 0 THEN used_bytes + ? ELSE 0 END,
-       updated_at = ? WHERE team = ? AND store = ?`, ref.Size-prior, ref.Size-prior, now.UnixNano(), string(o.Team), string(StorageCache)); err != nil {
+       committed_bytes = committed_bytes + ?, updated_at = ? WHERE team = ? AND store = ?`,
+			ref.Size-prior, ref.Size-prior, ref.Size-prior, now.UnixNano(), string(o.Team), string(StorageCache)); err != nil {
 			return err
 		}
 	}
@@ -181,21 +184,16 @@ func (s *Store) MoveLegacyOutputs(ctx context.Context, retainedSince time.Time, 
 }
 
 // WriteOutputFileDurably leaves exactly data at path: an existing file that
-// already matches is kept, and anything else is replaced through a synced
-// temporary file, so a crash leaves either the old file or the whole new one.
+// already matches is synced and kept, and anything else is replaced through a
+// synced temporary file, so a crash leaves either the old file or the whole
+// new one.
 func WriteOutputFileDurably(path string, data []byte) error {
-	want := sha256.Sum256(data)
-	if f, err := os.Open(path); err == nil {
-		h := sha256.New()
-		n, cerr := io.Copy(h, f)
-		if closeErr := f.Close(); cerr == nil {
-			cerr = closeErr
-		}
-		if cerr == nil && n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]) {
-			return nil
-		}
-	}
 	dir := filepath.Dir(path)
+	if matched, err := syncIfMatches(path, data); err != nil {
+		return err
+	} else if matched {
+		return syncDir(dir)
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -216,6 +214,34 @@ func WriteOutputFileDurably(path string, data []byte) error {
 	if err != nil {
 		return errors.Join(err, os.Remove(tmp.Name()))
 	}
+	return syncDir(dir)
+}
+
+// safety: a file found from an earlier run may still sit only in the page
+// cache, so it is synced before anything records it done, and its digest is
+// read back from the synced file.
+func syncIfMatches(path string, data []byte) (bool, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Sync(); err != nil {
+		return false, err
+	}
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return false, err
+	}
+	want := sha256.Sum256(data)
+	return n == int64(len(data)) && string(h.Sum(nil)) == string(want[:]), nil
+}
+
+func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
