@@ -1748,6 +1748,9 @@ unlock.
 
 ### Security
 
+- **pipeline scaffold:** The generated binary ignore entry now lives in
+  `.sparkwing/.gitignore`. Scaffolding leaves the repository's root `.gitignore`
+  untouched and warns when the local ignore file points outside `.sparkwing/`.
 - **controller:** `GET /metrics` on the API listener of a controller with
   authentication on requires an `admin` bearer. Its run counters name every
   team's pipelines, and the `sparkwing-full` chart's default `metricsPort: 0`
