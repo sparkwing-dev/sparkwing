@@ -21,20 +21,25 @@ import (
 )
 
 func TestNativeProcessCountersMatchGetrusage(t *testing.T) {
-	before := checkedNativeCPU(t)
+	before, beforeLower, beforeUpper := sampleNativeCPU(t)
 	consumeCPU(t, 150*time.Millisecond)
-	after := checkedNativeCPU(t)
+	after, afterLower, afterUpper := sampleNativeCPU(t)
 	measured := after.cpu - before.cpu
 	if !before.valid || !after.valid || after.birth != before.birth {
 		t.Fatalf("native measurements unavailable or identity changed: before=%+v after=%+v", before, after)
 	}
-	if measured < 150*time.Millisecond-nativeCPUPrecision(t) {
+	precision := nativeCPUPrecision(t)
+	lower, upper := afterLower-beforeUpper-precision, afterUpper-beforeLower+precision
+	if measured < lower || measured > upper {
+		t.Fatalf("native CPU delta %s outside getrusage delta bracket [%s, %s]", measured, lower, upper)
+	}
+	if measured < 150*time.Millisecond-precision {
 		t.Fatalf("native CPU delta %s omitted independently measured 150ms of work", measured)
 	}
-	t.Logf("native CPU delta %s; both reads inside independent OS brackets; RSS %d bytes", measured, after.rss)
+	t.Logf("native CPU delta %s; independent OS delta bracket [%s, %s]; RSS %d bytes", measured, lower, upper, after.rss)
 }
 
-func checkedNativeCPU(t *testing.T) processSample {
+func sampleNativeCPU(t *testing.T) (processSample, time.Duration, time.Duration) {
 	t.Helper()
 	var before, after unix.Rusage
 	if err := unix.Getrusage(unix.RUSAGE_SELF, &before); err != nil {
@@ -48,13 +53,9 @@ func checkedNativeCPU(t *testing.T) processSample {
 	if err := unix.Getrusage(unix.RUSAGE_SELF, &after); err != nil {
 		t.Fatal(err)
 	}
-	lower := time.Duration(before.Utime.Nano()+before.Stime.Nano()) - nativeCPUPrecision(t)
-	upper := time.Duration(after.Utime.Nano()+after.Stime.Nano()) + 2*time.Microsecond
-	if !p.valid || p.cpu < lower || p.cpu > upper {
-		t.Fatalf("native CPU %s outside getrusage bracket [%s, %s]", p.cpu, lower, upper)
-	}
-	t.Logf("native CPU %s; independent bracket [%s, %s]", p.cpu, lower, upper)
-	return p
+	lower := time.Duration(before.Utime.Nano() + before.Stime.Nano())
+	upper := time.Duration(after.Utime.Nano() + after.Stime.Nano())
+	return p, lower, upper
 }
 
 func TestNativeResidentChild(t *testing.T) {
