@@ -25,9 +25,10 @@ more than 30 days ago move only for each pipeline's newest successful run.
 
 Each output takes a fixed key, and a node that already names another
 output is skipped, so the command can be stopped and run again. It repeats
-whole passes until one moves nothing, so it can run while the old
-controller serves; an output written inline after the last pass is not
-moved, so the cutover runs it once more with the old controller stopped.`
+whole passes until one moves nothing. Stop the old controller and inline-output
+writers, take a fresh database backup, then run this command before the new
+controller starts. Opening the store upgrades its schema, so an older writer
+cannot resume afterward.`
 
 func runMigrateOutputs(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("migrate-outputs", flag.ContinueOnError)
