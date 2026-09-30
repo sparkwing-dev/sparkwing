@@ -1627,6 +1627,11 @@ unlock.
 
 ### Security
 
+- **store:** Opening an existing SQLite store narrows the database and its
+  `-wal`, `-shm` and `-journal` sidecars to `0600` when any of them grants
+  group or other access. A file the process cannot chmod fails the open with
+  the file named.
+
 - **controller + store:** `GET /api/v1/concurrency/{key}/resolve` reads a
   coalesce leader only inside the caller's team. A `leader_run_id` naming
   another team's node answers `cancelled`, the same as a missing node, instead

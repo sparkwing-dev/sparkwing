@@ -51,6 +51,44 @@ func TestOpenCreatesPrivateSQLiteFiles(t *testing.T) {
 	}
 }
 
+func TestOpenTightensExistingSQLiteFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	first, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Close() }()
+	if err := first.CreateRun(t.Context(), store.Run{
+		ID: "run-before", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{path, path + "-wal", path + "-shm"}
+	for _, name := range files {
+		if err := os.Chmod(name, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	second, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = second.Close() }()
+	for _, name := range files {
+		info, err := os.Stat(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %04o after reopening, want 0600", name, got)
+		}
+	}
+	if _, err := second.GetRun(t.Context(), "run-before"); err != nil {
+		t.Fatalf("reopened store lost its run: %v", err)
+	}
+}
+
 func TestOpenReadOnlyDoesNotCreateOrTouchSQLiteFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.db")
 	st, err := store.Open(path)

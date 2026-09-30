@@ -168,6 +168,8 @@ func Open(path string) (*Store, error) {
 		if err := preparePrivateSQLite(path); err != nil {
 			return nil, err
 		}
+	} else if err := tightenExistingSQLite(path); err != nil {
+		return nil, err
 	}
 	dsn, err := sqliteDSN(path)
 	if err != nil {
@@ -191,6 +193,29 @@ func preparePrivateSQLite(path string) error {
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+	}
+	return nil
+}
+
+// safety: SQLite creates the -wal and -shm sidecars with the database's own
+// mode, and a database or sidecar written before the store created files
+// 0600 keeps whatever mode it had, so every one that exists is narrowed to
+// its owner before the store reads run data from it.
+func tightenExistingSQLite(path string) error {
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		info, err := os.Stat(name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect sqlite file %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		if err := os.Chmod(name, info.Mode().Perm()&0o700); err != nil {
+			return fmt.Errorf("secure sqlite file %s: %w", name, err)
+		}
 	}
 	return nil
 }
