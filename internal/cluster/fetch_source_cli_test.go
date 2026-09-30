@@ -153,3 +153,42 @@ func TestAskSourceCredential_RetriesOnlyTransientFailures(t *testing.T) {
 		}
 	}
 }
+
+type recordingReporter struct{ reports []store.AttemptReport }
+
+func (r *recordingReporter) ReportAttempt(_ context.Context, _, _ string, report store.AttemptReport) error {
+	r.reports = append(r.reports, report)
+	return nil
+}
+
+// A failed fetch reports its attempt at once: a refused credential as a failure
+// no attempt can get past, and anything else as one a retry may.
+func TestFetchSource_ReportsAFailedFetchByWhetherARetryCanPass(t *testing.T) {
+	refused := &flakySourceCredentials{errs: []error{errors.New("controller 404: no_source_credential")}}
+	checkoutFailed := func(context.Context, string, string, string, string, bincache.DirectCredential,
+		bincache.SourceOptions, []string,
+	) error {
+		return errors.New("git fetch: connection reset")
+	}
+	for name, tc := range map[string]struct {
+		creds  sourceCredentials
+		reason string
+	}{
+		"refused credential": {refused, store.FailureSourceUnavailable},
+		"checkout failure":   {fakeSourceCredentials{sourceCredential()}, store.FailureSourceFetch},
+	} {
+		dest := filepath.Join(t.TempDir(), "src")
+		cause := fetchSource(context.Background(), tc.creds, "run-1", dest, t.TempDir(), checkoutFailed,
+			func(context.Context, string, []string) error { return nil })
+		if cause == nil {
+			t.Fatalf("%s: the fetch succeeded", name)
+		}
+		rep := &recordingReporter{}
+		if err := reportFetchFailure(context.Background(), rep, "run-1", "plan", cause); !errors.Is(err, cause) {
+			t.Fatalf("%s: err = %v, want the fetch's own error", name, err)
+		}
+		if len(rep.reports) != 1 || rep.reports[0].Outcome != "failed" || rep.reports[0].FailureReason != tc.reason {
+			t.Fatalf("%s: reports = %+v, want one failed attempt with reason %q", name, rep.reports, tc.reason)
+		}
+	}
+}

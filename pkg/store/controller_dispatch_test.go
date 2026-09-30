@@ -428,6 +428,27 @@ func TestReportAttempt_APlanClaimReportsOnlyItsFailure(t *testing.T) {
 	f.wantRun(t, "failed")
 }
 
+// A fetch that may pass on a later attempt is retried within the budget, a
+// planning node's included; a refused source credential is never retried.
+func TestReportAttempt_SourceFailuresRetryByWhetherALaterAttemptCanPass(t *testing.T) {
+	f := newDispatchRun(t, "run-plan-fetch")
+	fetch := store.AttemptReport{Outcome: "failed", FailureReason: store.FailureSourceFetch}
+	if _, err := f.report(f.claim(t, store.PlanNodeID, store.ClaimTokenPlan), fetch); err != nil {
+		t.Fatal(err)
+	}
+	f.wantReleased(t, store.PlanNodeID, true)
+	f.wantRun(t, "pending")
+
+	g := newDispatchRunOn(t, f.s, "run-work-refused")
+	g.mustAccept(t, planOf(`a|"modifiers":{"retry":2,"retry_auto":true}`))
+	refused := store.AttemptReport{Outcome: "failed", FailureReason: store.FailureSourceUnavailable}
+	if _, err := g.report(g.claim(t, "a", store.ClaimTokenWork), refused); err != nil {
+		t.Fatal(err)
+	}
+	g.wantOutcome(t, "a", "failed")
+	g.wantRun(t, "failed")
+}
+
 func TestReportAttempt_AnEndedClaimReplaysOnlyItsReport(t *testing.T) {
 	f := newDispatchRun(t, "run-replay-attempt")
 	f.mustAccept(t, planOf("a", "b:a"))
