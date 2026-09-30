@@ -65,7 +65,9 @@ unlock.
   `GET /api/v1/runs/{id}/children/{childID}`; a child of an opted-in
   repository is planned by the controller as well. The launcher reconciles its
   Jobs through `POST /api/v1/launcher/sync` every 5 seconds: it deletes the
-  running Job of a claim that ended or whose run is being cancelled, leaves a
+  running Job of a claim that ended or whose run is being cancelled, ends a
+  cancelled run's claim as a cancelled attempt so the run settles as its Job
+  goes, leaves a
   finished Job and its pod log to the Job's TTL, and hands back the
   claim of a Job that waited 4 minutes for a machine, so its node returns to
   the queue unbilled with no attempt spent and is claimable again 5 minutes
@@ -76,7 +78,8 @@ unlock.
   running, counted as it creates each and from the Jobs it lists at every
   sync, and resumes as they start or are handed back. A
   planning node whose `.sparkwing` pins a
-  sparkwing release before v0.65.0 fails before its build, naming the pin. The
+  sparkwing release before v0.66.0, or a commit not based on v0.66.0 or
+  later, fails before its build, naming the pin. The
   opt-in's audit record names the repository. Opting a repository in is
   accepted. A work node reads a secret its pipeline declares through
   `GET /api/v1/secrets/{name}?run=` with its claim token, each read recorded
@@ -127,7 +130,9 @@ unlock.
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that
-  repository with a planning node instead of a claimable trigger. The new
+  repository with a planning node instead of a claimable trigger, and
+  `{"dispatch":"trigger"}` moves it back; any other value is refused with
+  `400`. The new
   `sparkwing-runner launch` claims those nodes through
   `POST /api/v1/launcher/claim`, which needs the new operator-only
   `claims.launch` scope, and runs each one as a Kubernetes Job it builds
@@ -160,7 +165,11 @@ unlock.
   left on the shared volume, and never reaches the pipeline's container,
   which runs with `GOFLAGS=-mod=mod`. A claim gets at most three credentials,
   so a failed mint can be asked for again, and none once its attempt has
-  started, and each issue is recorded as a git credential release. Schema v86
+  started, and each issue is recorded as a git credential release. A failed
+  fetch reports its attempt at once: a refused source credential fails the
+  node with `source_unavailable` and is never retried, and any other fetch
+  failure is `source_fetch`, retried within the node's budget, a planning
+  node's one retry included. Schema v86
   adds `claim_tokens.source_mints` and `github_app_extra_repos.extra_repo_id`;
   an extra repository approved before it gets no token until an owner saves
   the list again. Cloud fetches source only through
