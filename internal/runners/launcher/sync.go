@@ -23,6 +23,10 @@ const (
 	// SyncInterval is how often the launcher reconciles its Jobs with the
 	// controller.
 	SyncInterval = 5 * time.Second
+	// MaxUnplacedJobs is how many of its Jobs may wait for a machine before
+	// the launcher stops claiming more, so a full pool does not pile up
+	// Pending Jobs until each is handed back.
+	MaxUnplacedJobs = 5
 	// safety: under the controller's per-request cap, so any number of Jobs
 	// syncs.
 	syncBatch = 500
@@ -70,6 +74,10 @@ func (l *Launcher) Sync(ctx context.Context) error {
 		results = append(results, batch...)
 	}
 	var errs []error
+	kept := map[string]bool{}
+	for name := range unplaced {
+		kept[name] = true
+	}
 	for _, r := range results {
 		key := store.LaunchJob{RunID: r.RunID, NodeID: r.NodeID, Generation: r.Generation}
 		name := names[key]
@@ -82,8 +90,16 @@ func (l *Launcher) Sync(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
+		delete(kept, name)
 		l.Logger.Info("launcher: job deleted", "job", name, "run_id", key.RunID, "node_id", key.NodeID)
 	}
+	live := 0
+	for _, name := range names {
+		if kept[name] {
+			live++
+		}
+	}
+	l.unplaced = live
 	return errors.Join(errs...)
 }
 
