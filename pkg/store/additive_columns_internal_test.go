@@ -176,9 +176,8 @@ var additiveColumnSources = map[int][]map[string]string{
 	85: nil,
 	// safety: v86 adds defaulted columns an older binary never names.
 	86: {sourceMintCols, extraRepoIDCols},
-	// safety: v87 adds a defaulted column an older binary never names.
-	87: {cacheRefCols},
-	88: nil,
+	// safety: v87 is an empty step held for the billing migration.
+	87: nil,
 	// safety: v89 adds tables and no column, so an older binary keeps reading
 	// and writing the migrated database.
 	89: nil,

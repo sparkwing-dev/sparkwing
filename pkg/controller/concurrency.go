@@ -121,6 +121,14 @@ func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holde
 		writeError(w, http.StatusInternalServerError, err)
 		return "", r, false
 	}
+	// safety: a claim moves only its own node's holder, not a sibling's in the
+	// same run.
+	if tok, claim := claimTokenFromContext(r.Context()); claim && holder.NodeID != tok.NodeID {
+		writeAuthError(w, http.StatusForbidden, authErrorBody{
+			Code: "claim_mismatch", Message: "this claim token is bound to another node",
+		})
+		return "", r, false
+	}
 	return holder.RunID, r, true
 }
 

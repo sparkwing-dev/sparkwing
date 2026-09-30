@@ -49,8 +49,10 @@ unlock.
   the queue unbilled with no attempt spent and is claimable again 5 minutes
   later. A launched node's billing opens when its pod first renews the claim,
   at the start of the source fetch, not at the claim. A handed-back node
-  shows `waiting for Cloud capacity` with a `capacity_wait` event, and no
-  Job that cannot get a machine stops the launcher claiming other work. A
+  shows `waiting for Cloud capacity` with a `capacity_wait` event. The
+  launcher claims no new node while five of its own Jobs wait for a machine,
+  counted from the Jobs it already lists, and resumes as they start or are
+  handed back. A
   planning node whose `.sparkwing` pins a
   sparkwing release before v0.65.0 fails before its build, naming the pin. The
   opt-in's audit record names the repository. Opting a repository in is
@@ -63,24 +65,32 @@ unlock.
   refused. A work node writes its own node's durable log to the logs
   service with its claim token, which the service checks against the
   controller at most once every 5 seconds per token, run and node, so a
-  revoked claim stops writing within 5 seconds, and answers on no other
-  route; a write naming another attempt or trigger stream is refused,
+  revoked claim stops writing within 5 seconds, writes each claim to its own
+  attempt's stream, so a revoked claim inside that window never reaches its
+  successor's log, and answers on no other route; a write naming another attempt or trigger stream is refused,
   and a write the controller names no team for is answered `502`. A work
   node takes, renews, observes and releases concurrency slots with its claim
   token, for its own run and node in its own team, under its node's holder
   ID, and only with the key, policy, capacity and cost its accepted plan
-  declares for the node; a slot's lease never outlives the claim token, a
+  declares for the node, a memoized node only under its own repository,
+  pipeline and node, and it moves no sibling node's holder; a slot's lease
+  never outlives the claim token, a
   new acquire is refused once the run is being cancelled, and a release is
-  not. A claim token's binary cache is scoped to its run's git ref, as
+  not. A claim token's binary cache is scoped to its run's GitHub repository ID
+  and git ref, both read from the run, as
   GitHub Actions scopes caches: it writes under its own ref and reads its
   own, then its pull request's base branch, then the default branch, which
   GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
   first binary committed for an input and refuses a second, and a claim whose
-  run names no ref writes no cache. Other callers never read a claim's
-  binaries. Schema v87 adds `uploads.ref` and `data_objects.ref`. A work node reads another run's output only through
+  run names no repository or ref writes no binary but still writes artifacts. Other callers never read a
+  claim's binaries. Schema v88 adds `ref` and `repo` to `uploads` and
+  `data_objects` and stamps
+  the `claim-cache-scope-v1` requirement, so an older controller refuses the
+  store rather than read a claim's binaries unscoped. A work node reads another run's output only through
   `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
   itself: the cache entry of the node's memoization, the leader its own
-  coalesce waiter names, or the newest successful run of a pipeline and node
+  coalesce waiter names, both only under the node's own memo key and from a
+  run of its repository, pipeline and node, or the newest successful run of a pipeline and node
   its plan declares in the new per-node `pipeline_refs` field, which the SDK
   fills from the `RefToLastRun` fields a job struct holds; an undeclared
   reference is refused and audited, and a ref built in a step body is refused

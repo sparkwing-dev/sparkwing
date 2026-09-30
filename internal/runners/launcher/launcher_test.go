@@ -355,3 +355,48 @@ func TestSync_LeavesAFinishedJobForItsTTL(t *testing.T) {
 		t.Fatalf("the finished Job was deleted: %v", names)
 	}
 }
+
+// While MaxUnplacedJobs of its own Jobs wait for a machine, the launcher claims
+// no more ready nodes; with one fewer waiting, or one handed back, it claims
+// the next.
+func TestRun_PausesClaimsWhileItsJobsWaitForMachines(t *testing.T) {
+	for _, c := range []struct {
+		name              string
+		waiting, released int
+		want              int
+	}{
+		{"all waiting", launcher.MaxUnplacedJobs, 0, launcher.MaxUnplacedJobs},
+		{"one fewer waiting", launcher.MaxUnplacedJobs - 1, 0, launcher.MaxUnplacedJobs + 1},
+		{"one handed back", launcher.MaxUnplacedJobs - 1, 1, launcher.MaxUnplacedJobs},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newLaunchFixture(t)
+			f.optedInRun(t, "run-0")
+			for i := 1; i <= launcher.MaxUnplacedJobs; i++ {
+				f.intake(t, fmt.Sprintf("run-%d", i), "korey/probe")
+			}
+			l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+			for range launcher.MaxUnplacedJobs {
+				if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+					t.Fatalf("launch: %v %v", launched, err)
+				}
+			}
+			jobs := f.jobNames(t)
+			for _, job := range jobs[:c.waiting] {
+				f.unplacedPod(t, job, 30*time.Second)
+			}
+			for _, job := range jobs[c.waiting : c.waiting+c.released] {
+				f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
+			}
+			runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			if err := l.Run(runCtx); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(f.jobNames(t)); got != c.want {
+				t.Fatalf("the launcher holds %d Jobs, want %d", got, c.want)
+			}
+		})
+	}
+}

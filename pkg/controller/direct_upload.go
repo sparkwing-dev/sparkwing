@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -84,7 +85,8 @@ type directCaller struct {
 	principal      string
 	claimPrefix    string
 	provenance     string
-	ref            string
+	claim          bool
+	repo, ref      string
 	pendingTrigger bool
 }
 
@@ -92,20 +94,27 @@ type directCaller struct {
 // branch, which a claim's cache reads fall back to.
 const EnvDefaultBranch = "GITHUB_DEFAULT_BRANCH"
 
-// safety: as GitHub Actions scopes caches, a claim writes under its run's ref
-// and reads its own, its pull request's base, then the default branch, so one
-// branch's binary never reaches another's runs; other callers use only the
-// unscoped objects, which no claim reads.
-func (s *Server) cacheRefs(ctx context.Context, grant authwire.CacheGrant) (string, []string, error) {
+// safety: a claim's cache scope is its run's repository and ref, both read
+// here and never from the caller; as GitHub Actions scopes caches, it writes
+// under its own ref and reads its own, its pull request's base, then the
+// default branch, and other callers use only the unscoped objects.
+func (s *Server) cacheScope(ctx context.Context, grant authwire.CacheGrant) (repo, write string, read []string, err error) {
 	if grant.Claim == nil || grant.Claim.Kind != authwire.CacheClaimToken {
-		return "", []string{""}, nil
+		return "", "", []string{""}, nil
 	}
 	trigger, err := s.store.GetTrigger(ctx, grant.Run)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	if trigger.Team != store.Team(grant.Team) {
-		return "", nil, errors.New("the cache grant's run belongs to another team")
+		return "", "", nil, errors.New("the cache grant's run belongs to another team")
+	}
+	repoID, err := s.store.TriggerRepoID(ctx, trigger.Team, grant.Run)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if repoID > 0 {
+		repo = "github:" + strconv.FormatInt(repoID, 10)
 	}
 	env := trigger.TriggerEnv
 	own := env["GITHUB_REF"]
@@ -118,7 +127,7 @@ func (s *Server) cacheRefs(ctx context.Context, grant authwire.CacheGrant) (stri
 			refs = append(refs, ref)
 		}
 	}
-	return own, refs, nil
+	return repo, own, refs, nil
 }
 
 func branchRef(branch string) string {
@@ -169,18 +178,15 @@ func (s *Server) directCaller(w http.ResponseWriter, r *http.Request, runID stri
 	if metered || grant.Claim.Kind == authwire.CacheClaimToken {
 		provenance = "cloud"
 	}
-	ref, _, err := s.cacheRefs(r.Context(), grant)
+	repo, ref, _, err := s.cacheScope(r.Context(), grant)
 	if err != nil {
-		writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no ref"))
-		return directCaller{}, false
-	}
-	if grant.Claim.Kind == authwire.CacheClaimToken && ref == "" {
-		writeError(w, http.StatusForbidden, errors.New("a claim's run names no git ref to write cache under"))
+		writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no cache scope"))
 		return directCaller{}, false
 	}
 	return directCaller{
 		team: store.Team(grant.Team), runID: grant.Run, principal: grant.Claim.Principal,
-		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, ref: ref, pendingTrigger: pendingTrigger,
+		claimPrefix: grant.Claim.TokenPrefix, provenance: provenance, pendingTrigger: pendingTrigger,
+		claim: grant.Claim.Kind == authwire.CacheClaimToken, repo: repo, ref: ref,
 	}, true
 }
 
@@ -279,6 +285,13 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("direct uploads carry at least one byte; an empty object needs no upload"))
 		return
 	}
+	// safety: an artifact key names its own content, so a claim writes one
+	// with no scope; a binary is found by its input hash, so a claim writes one
+	// only inside its run's repository and ref.
+	if caller.claim && req.Kind == "binary" && (caller.repo == "" || caller.ref == "") {
+		writeError(w, http.StatusForbidden, errors.New("a claim's run names no repository and git ref to write a binary under"))
+		return
+	}
 	if !validDirectKey(req.Kind, req.Key, req.SHA256) {
 		writeError(w, http.StatusBadRequest, errors.New("the upload needs a content-addressed key"))
 		return
@@ -291,7 +304,7 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	u, err := s.store.ReserveUpload(r.Context(), store.UploadRequest{
 		Team: caller.team, RunID: caller.runID, Kind: store.StorageCache, Key: req.Key, Size: req.Size,
 		SHA256: req.SHA256, Principal: caller.principal, ClaimPrefix: caller.claimPrefix, Provenance: caller.provenance,
-		Ref: caller.ref,
+		Repo: caller.repo, Ref: caller.ref,
 	})
 	if err != nil {
 		if s.writeComputeLimitRefusal(w, r, "", "", err) {

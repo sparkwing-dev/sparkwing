@@ -181,7 +181,11 @@ func (s *Store) CheckClaimSlot(ctx context.Context, tok ClaimToken, key, policy 
 		return ErrSlotUndeclared
 	}
 	m := n.Modifiers
-	memo := m.Cache && strings.HasPrefix(key, memoSlotPrefix) && policy == OnLimitCoalesce && capacity == 1 && cost == 1
+	prefix, err := s.claimMemoPrefix(ctx, tok)
+	if err != nil {
+		return err
+	}
+	memo := m.Cache && strings.HasPrefix(key, prefix) && len(key) > len(prefix) && policy == OnLimitCoalesce && capacity == 1 && cost == 1
 	group := m.ConcGroup != "" && key == declaredSlotKey(m, tok.RunID) && policy == m.ConcOnLimit &&
 		capacity == m.ConcCapacity && cost == m.ConcCost
 	if memo || group {
@@ -286,7 +290,11 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	var runID, nodeID string
 	switch req.Kind {
 	case ClaimInputCached, ClaimInputCoalesced:
-		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != memoSlotPrefix+req.CacheKeyHash {
+		prefix, err := s.claimMemoPrefix(ctx, tok)
+		if err != nil {
+			return ClaimInput{}, err
+		}
+		if !n.Modifiers.Cache || req.CacheKeyHash == "" || req.Key != prefix+req.CacheKeyHash {
 			return ClaimInput{}, ErrInputUndeclared
 		}
 		found := false
@@ -326,6 +334,11 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 	default:
 		return ClaimInput{}, fmt.Errorf("%w: input kind %q is not cached, coalesced or last_run", ErrInvalidInput, req.Kind)
 	}
+	if req.Kind != ClaimInputLastRun {
+		if err := s.sameMemoIdentity(ctx, tok, runID, nodeID); err != nil {
+			return ClaimInput{}, err
+		}
+	}
 	in := ClaimInput{RunID: runID, NodeID: nodeID}
 	var status, outcome string
 	var finished sql.NullInt64
@@ -349,6 +362,31 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 
 const memoSlotPrefix = "memo:"
 
+// ClaimMemoKey is the concurrency key a controller-dispatched node memoizes
+// under: its repository, pipeline and node, then the content hash, so a claim
+// reaches only its own node's memoized results.
+func ClaimMemoKey(repo, pipeline, node, hash string) string {
+	return memoSlotPrefix + "c/" + lengthPrefixed(repo) + lengthPrefixed(pipeline) + lengthPrefixed(node) + hash
+}
+
+// ClaimRepoSlug names a run's repository in [ClaimMemoKey].
+func ClaimRepoSlug(owner, repo string) string {
+	return strings.ToLower(owner) + "/" + strings.ToLower(repo)
+}
+
+func lengthPrefixed(s string) string { return strconv.Itoa(len(s)) + ":" + s }
+
+// safety: the prefix is built from the claim's own run and node, so no field
+// of the request can move a claim into another node's memoized results.
+func (s *Store) claimMemoPrefix(ctx context.Context, tok ClaimToken) (string, error) {
+	var pipeline, owner, repo string
+	if err := s.queryRow(ctx, `SELECT pipeline, COALESCE(github_owner, ''), COALESCE(github_repo, '') FROM runs WHERE team = ? AND id = ?`,
+		string(tok.Team), tok.RunID).Scan(&pipeline, &owner, &repo); err != nil {
+		return "", err
+	}
+	return ClaimMemoKey(ClaimRepoSlug(owner, repo), pipeline, tok.NodeID, ""), nil
+}
+
 // safety: the SDK's key for a node's group: a run-scoped group is qualified
 // by its run, so a claim can name no other run's run-scoped key.
 func declaredSlotKey(m submittedModifiers, runID string) string {
@@ -356,4 +394,43 @@ func declaredSlotKey(m submittedModifiers, runID string) string {
 		return "r:" + strconv.Itoa(len(runID)) + ":" + runID + m.ConcGroup
 	}
 	return "g:" + m.ConcGroup
+}
+
+// safety: a memoized result reaches a claim only from its own team,
+// repository, pipeline and node, whoever wrote the entry under its key, so a
+// hash known from elsewhere in the team discloses nothing.
+func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, runID, nodeID string) error {
+	identity := func(id string) (pipeline string, repoID int64, err error) {
+		err = s.queryRow(ctx, `SELECT r.pipeline, COALESCE(t.github_repo_id, 0) FROM runs r
+  JOIN triggers t ON t.team = r.team AND t.id = r.id
+ WHERE r.team = ? AND r.id = ?`, string(tok.Team), id).Scan(&pipeline, &repoID)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = ErrInputUndeclared
+		}
+		return pipeline, repoID, err
+	}
+	ownPipeline, ownRepo, err := identity(tok.RunID)
+	if err != nil {
+		return err
+	}
+	pipeline, repo, err := identity(runID)
+	if err != nil {
+		return err
+	}
+	if nodeID != tok.NodeID || pipeline != ownPipeline || ownRepo == 0 || repo != ownRepo {
+		return ErrInputUndeclared
+	}
+	return nil
+}
+
+// ClaimAttemptOrdinal is the attempt ordinal tok's live claim will report,
+// under which its node's durable log is written.
+func (s *Store) ClaimAttemptOrdinal(ctx context.Context, tok ClaimToken) (int, error) {
+	var consumed int
+	err := s.queryRow(ctx, `SELECT attempts_consumed FROM nodes WHERE team = ? AND run_id = ? AND node_id = ? AND claim_generation = ?`,
+		string(tok.Team), tok.RunID, tok.NodeID, tok.Generation).Scan(&consumed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrLockHeld
+	}
+	return consumed + 1, err
 }

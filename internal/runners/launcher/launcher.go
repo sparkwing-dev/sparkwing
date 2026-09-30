@@ -26,11 +26,16 @@ type Launcher struct {
 	Holder string
 	Poll   time.Duration
 	Logger *slog.Logger
+
+	// safety: Sync writes the count of live Jobs waiting for a machine and
+	// Run reads it, both on Run's goroutine, so it needs no lock.
+	unplaced int
 }
 
 // Run claims and launches until ctx ends. An idle queue is polled every
 // l.Poll; a claim is followed at once by the next. Every [SyncInterval] it
-// reconciles its Jobs. A failed claim backs off exponentially, and a revoked
+// reconciles its Jobs, and it claims nothing while [MaxUnplacedJobs] of them
+// wait for a machine. A failed claim backs off exponentially, and a revoked
 // or expired token parks the launcher, asking once an hour, until a claim is
 // answered.
 func (l *Launcher) Run(ctx context.Context) error {
@@ -38,6 +43,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		return err
 	}
 	var lastSync time.Time
+	braked := false
 	pacer := client.NewPacer(l.Poll)
 	for ctx.Err() == nil {
 		if time.Since(lastSync) >= SyncInterval {
@@ -46,6 +52,18 @@ func (l *Launcher) Run(ctx context.Context) error {
 			}
 			lastSync = time.Now()
 		}
+		if l.unplaced >= MaxUnplacedJobs {
+			if !braked {
+				l.Logger.Warn("launcher: Jobs are waiting for machines; pausing claims", "waiting", l.unplaced)
+			}
+			braked = true
+			select {
+			case <-ctx.Done():
+			case <-time.After(l.Poll):
+			}
+			continue
+		}
+		braked = false
 		launched, err := l.LaunchOne(ctx)
 		wait := l.Poll
 		switch {

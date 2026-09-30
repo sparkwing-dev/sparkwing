@@ -11,7 +11,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A claim token writes cache under its run's own ref and reads its own ref,
+// A claim token's cache scope is its run's repository ID and ref: it writes
+// under its own ref and reads its own ref,
 // then its pull request's base branch, then the default branch; any other
 // grant writes and reads only the unscoped objects, and a grant naming a run
 // of another team gets no refs.
@@ -32,6 +33,9 @@ func TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes(t *testing.T) {
 		"run-none":   {},
 	} {
 		trig.ID, trig.Pipeline, trig.CreatedAt = id, "build", time.Now()
+		if id != "run-manual" && id != "run-none" {
+			trig.GithubRepoID = 41
+		}
 		if err := st.CreateTrigger(ctx, trig); err != nil {
 			t.Fatal(err)
 		}
@@ -41,24 +45,24 @@ func TestCacheRefs_FollowTheRunsRefAsGitHubActionsDoes(t *testing.T) {
 		return authwire.CacheGrant{Team: string(store.DefaultTeam), Run: run, Claim: &authwire.CacheClaim{Kind: kind}}
 	}
 	for _, c := range []struct {
-		run, kind, write string
-		read             []string
+		run, kind, repo, write string
+		read                   []string
 	}{
-		{"run-main", authwire.CacheClaimToken, "refs/heads/main", []string{"refs/heads/main"}},
-		{"run-feat", authwire.CacheClaimToken, "refs/heads/feat", []string{"refs/heads/feat", "refs/heads/main"}},
-		{"run-pr", authwire.CacheClaimToken, "refs/pull/7/head", []string{"refs/pull/7/head", "refs/heads/release", "refs/heads/main"}},
-		{"run-manual", authwire.CacheClaimToken, "refs/heads/hotfix", []string{"refs/heads/hotfix"}},
-		{"run-none", authwire.CacheClaimToken, "", []string{}},
-		{"run-feat", "node", "", []string{""}},
+		{"run-main", authwire.CacheClaimToken, "github:41", "refs/heads/main", []string{"refs/heads/main"}},
+		{"run-feat", authwire.CacheClaimToken, "github:41", "refs/heads/feat", []string{"refs/heads/feat", "refs/heads/main"}},
+		{"run-pr", authwire.CacheClaimToken, "github:41", "refs/pull/7/head", []string{"refs/pull/7/head", "refs/heads/release", "refs/heads/main"}},
+		{"run-manual", authwire.CacheClaimToken, "", "refs/heads/hotfix", []string{"refs/heads/hotfix"}},
+		{"run-none", authwire.CacheClaimToken, "", "", []string{}},
+		{"run-feat", "node", "", "", []string{""}},
 	} {
-		write, read, err := srv.cacheRefs(ctx, grant(c.run, c.kind))
-		if err != nil || write != c.write || !slices.Equal(read, c.read) {
-			t.Errorf("%s %s grant refs = %q %q %v, want %q %q", c.kind, c.run, write, read, err, c.write, c.read)
+		repo, write, read, err := srv.cacheScope(ctx, grant(c.run, c.kind))
+		if err != nil || repo != c.repo || write != c.write || !slices.Equal(read, c.read) {
+			t.Errorf("%s %s grant scope = %q %q %q %v, want %q %q %q", c.kind, c.run, repo, write, read, err, c.repo, c.write, c.read)
 		}
 	}
 	other := grant("run-main", authwire.CacheClaimToken)
 	other.Team = "other-team"
-	if _, _, err := srv.cacheRefs(ctx, other); err == nil {
+	if _, _, _, err := srv.cacheScope(ctx, other); err == nil {
 		t.Error("a grant naming another team's run got refs")
 	}
 }

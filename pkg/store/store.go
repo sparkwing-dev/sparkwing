@@ -1872,7 +1872,13 @@ var migrationRequirements = map[int][]string{
 	73: {"trigger-credit-cursor-v1"},
 	75: {creditValueRequirement},
 	80: {billingTrustRequirement},
+	88: {claimCacheScopeRequirement},
 }
+
+// safety: v88 scopes a claim token's binaries by repository and git ref, and a
+// binary predating it reads them unscoped, so a feature branch's binary could
+// reach main; the requirement makes that binary refuse the store instead.
+const claimCacheScopeRequirement = "claim-cache-scope-v1"
 
 // safety: v48 renames two columns, so a binary predating it writes the names
 // that are gone; both halves are declared rather than left additive.
@@ -2138,12 +2144,12 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, false)
+	// safety: v87 belongs to the billing migration another line of work
+	// lands; a merge takes it in place of this empty step.
 	case 87:
-		return applyCacheRefMigration(ctx, tx, false)
-	// hack: v88 belongs to a migration landing on another branch, and the
-	// version loop needs every number.
-	case 88:
 		return nil
+	case 88:
+		return applyCacheRefMigration(ctx, tx, false)
 	case 89:
 		return applyNodeOutputMigration(ctx, tx)
 	default:
@@ -2599,12 +2605,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, true)
+	// safety: v87 belongs to the billing migration another line of work
+	// lands; a merge takes it in place of this empty step.
 	case 87:
-		return applyCacheRefMigration(ctx, tx, true)
-	// hack: v88 belongs to a migration landing on another branch, and the
-	// version loop needs every number.
-	case 88:
 		return nil
+	case 88:
+		return applyCacheRefMigration(ctx, tx, true)
 	case 89:
 		return applyNodeOutputMigration(ctx, tx)
 	default:
