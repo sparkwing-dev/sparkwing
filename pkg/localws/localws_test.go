@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -105,7 +106,7 @@ func TestRun_ReadOnly_BlocksWrites(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost,
 		"http://"+addr+"/api/v1/runs", strings.NewReader("{}"))
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := authedDo(req)
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -202,7 +203,7 @@ func TestRun_S3OnlyMode_ServesRuns(t *testing.T) {
 
 	cancelReq, _ := http.NewRequest(http.MethodPost,
 		"http://"+addr+"/api/v1/runs/abc/cancel", nil)
-	resp4, err := http.DefaultClient.Do(cancelReq)
+	resp4, err := authedDo(cancelReq)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
@@ -317,6 +318,11 @@ func startLocalws(t *testing.T, opts Options) string {
 		resp, err := client.Get("http://" + addr + "/api/v1/health")
 		if err == nil {
 			resp.Body.Close()
+			token, err := orchestrator.PathsAt(opts.Home).ServeToken()
+			if err != nil {
+				t.Fatalf("read the serve token: %v", err)
+			}
+			serveTokens.Store(addr, token)
 			return addr
 		}
 		select {
@@ -340,13 +346,35 @@ func pickListener(t *testing.T) net.Listener {
 	return ln
 }
 
+var serveTokens sync.Map
+
 func mustGet(t *testing.T, url string) *http.Response {
 	t.Helper()
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := authedDo(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	return resp
+}
+
+func authedPost(url string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return authedDo(req)
+}
+
+func authedDo(req *http.Request) (*http.Response, error) {
+	if token, ok := serveTokens.Load(req.URL.Host); ok {
+		req.Header.Set("Authorization", "Bearer "+token.(string))
+	}
+	return http.DefaultClient.Do(req)
 }
 
 func readerOf(s string) io.Reader { return strings.NewReader(s) }

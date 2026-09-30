@@ -228,6 +228,19 @@ the upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
 `errors.Is` on `store.ErrAccountExists` detects the refusal. No database
 migration is required.
 
+## The local dashboard requires its token
+
+`sparkwing serve` answers `401` to a request that carries neither the token
+in `serve-token` under the Sparkwing home nor the session cookie its sign-in
+link sets. Open the `dashboard:` link `sparkwing serve status` prints once
+per browser; a bookmark of `http://127.0.0.1:4343` keeps working after that.
+A script that called the local API sends
+`Authorization: Bearer $(cat ~/.sparkwing/serve-token)`, with the path under
+its own `SPARKWING_HOME`. The `sparkwing` CLI does this itself. A browser on
+the `pnpm dev` server at port 3100 signs in through
+`http://localhost:4343/auth/local?token=...`, because the cookie follows the
+host name. No database migration is required.
+
 ## GitHub App picker carries no binding state
 
 `POST /api/v1/team/github-app/connect/available` drops the

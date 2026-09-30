@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+	"github.com/sparkwing-dev/sparkwing/pkg/localws"
 )
 
 type dashboardOptions struct {
@@ -70,6 +72,7 @@ type dashboardResult struct {
 	Log       string              `json:"log"`
 	Home      string              `json:"home"`
 	URL       string              `json:"url,omitempty"`
+	LoginURL  string              `json:"login_url,omitempty"`
 	API       string              `json:"api,omitempty"`
 	Readiness string              `json:"readiness"`
 	Build     dashboardBuild      `json:"build"`
@@ -242,6 +245,9 @@ func inspectDashboard(dp dashboardPaths, action string) (dashboardResult, dashbo
 		}
 		out.URL = "http://" + net.JoinHostPort(host, port)
 		out.API = out.URL + "/api/v1"
+		if token, err := orchestrator.PathsAt(dp.home).ServeToken(); err == nil {
+			out.LoginURL = out.URL + localws.SignInPath + "?token=" + token
+		}
 		out.Endpoints = []dashboardEndpoint{{"ui", scope, out.URL}, {"api", scope, out.API}}
 		if version, ok := getDashboardVersion(dashboardHTTPClient(), out.URL); ok && version.PID == record.PID && version.Instance == record.Instance {
 			out.Readiness = "ready"
@@ -259,7 +265,9 @@ func renderDashboard(out dashboardResult, mode string) error {
 		return err
 	default:
 		var b strings.Builder
-		if out.URL != "" {
+		if out.LoginURL != "" {
+			fmt.Fprintf(&b, "dashboard: %s\napi:       %s\n", out.LoginURL, out.API)
+		} else if out.URL != "" {
 			fmt.Fprintf(&b, "dashboard: %s\napi:       %s\n", out.URL, out.API)
 		}
 		fmt.Fprintf(&b, "%s (%s); readiness: %s; build: %s\n", out.State, out.Outcome, out.Readiness, out.Build.Status)

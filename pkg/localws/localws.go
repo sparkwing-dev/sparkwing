@@ -135,6 +135,10 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure %s: %w", paths.Root, err)
 	}
+	serveToken, err := paths.EnsureServeToken()
+	if err != nil {
+		return fmt.Errorf("serve token: %w", err)
+	}
 
 	useS3OnlyReader := opts.NoLocalStore && opts.LogStore != nil && opts.ArtifactStore != nil
 
@@ -217,7 +221,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           handler,
+		Handler:           requireServeToken(handler, serveToken, opts.Addr),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,

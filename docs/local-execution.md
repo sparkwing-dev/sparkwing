@@ -902,14 +902,21 @@ private.
 Laptop mode trusts the user account on the machine, and nothing narrower.
 
 `sparkwing serve start` serves the controller API and the dashboard from
-one process with no bearer check, so every caller that reaches the listener
-can trigger pipelines, overwrite secrets, and delete runs. It binds
-`127.0.0.1:4343` and refuses a non-loopback `--addr` unless you pass
-`--allow-remote`; a browser request whose `Origin` is neither loopback nor
-named in `--allow-origin` is refused too. Those checks are the whole
-boundary. Passing `--allow-remote` hands every host that can reach the port
-the authority of your account, which is why the flag exists rather than a
-quieter default.
+one process. Loopback is not a user boundary, because every account on the
+machine can connect to `127.0.0.1`, so the listener requires the token in
+`serve-token` under the Sparkwing home. The file is created `0600` on first
+start and stays the same across restarts. The CLI reads it and sends it as a
+bearer; the browser signs in once through the dashboard link that
+`sparkwing serve start` and `sparkwing serve status` print, which sets a
+session cookie. `GET /api/v1/version` and `POST /webhooks/`, which checks the
+sender's signature, need no token. Deleting the file and restarting the
+dashboard signs every browser out.
+
+The listener binds `127.0.0.1:4343` and refuses a non-loopback `--addr`
+unless you pass `--allow-remote`; a browser request whose `Origin` is
+neither loopback nor named in `--allow-origin` is refused too. Passing
+`--allow-remote` hands every host that holds the token the authority of your
+account.
 
 The admission daemon draws the same line. `wingd` listens on a unix socket
 whose path is a function of `SPARKWING_HOME`, and everything running as your

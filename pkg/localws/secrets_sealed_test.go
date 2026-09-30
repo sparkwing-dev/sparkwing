@@ -27,7 +27,7 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 	home := t.TempDir()
 	addr := startLocalws(t, Options{Home: home})
 
-	resp, err := http.Post("http://"+addr+"/api/v1/secrets", "application/json",
+	resp, err := authedPost("http://"+addr+"/api/v1/secrets",
 		strings.NewReader(`{"name":"TOKEN","value":"abc123","shared":true}`))
 	if err != nil {
 		t.Fatalf("create secret: %v", err)
@@ -54,10 +54,7 @@ func TestLocalwsSealsTheSecretsItStores(t *testing.T) {
 		t.Fatalf("stored value %q is not a sealed envelope", sec.Value)
 	}
 
-	got, err := http.Get("http://" + addr + "/api/v1/secrets/TOKEN")
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := mustGet(t, "http://"+addr+"/api/v1/secrets/TOKEN")
 	body, _ := io.ReadAll(got.Body)
 	_ = got.Body.Close()
 	if got.StatusCode == http.StatusOK || strings.Contains(string(body), "abc123") {
@@ -74,7 +71,7 @@ func TestLocalwsLeavesCreatingTheKeyToTheDaemon(t *testing.T) {
 	t.Setenv(localsecrets.KeyEnv, "")
 	addr := startLocalws(t, Options{Home: t.TempDir()})
 
-	resp, err := http.Post("http://"+addr+"/api/v1/secrets", "application/json",
+	resp, err := authedPost("http://"+addr+"/api/v1/secrets",
 		strings.NewReader(`{"name":"TOKEN","value":"abc123","shared":true}`))
 	if err != nil {
 		t.Fatalf("create secret: %v", err)

@@ -24,6 +24,28 @@ func ResolveDevEnvURL(key string) string {
 	return devEnvFile()[key]
 }
 
+// LocalServeToken returns the local dashboard's bearer when url is an
+// address that dashboard wrote to dev.env, and "" for any other URL, so the
+// token never travels to a server the dashboard did not name.
+func LocalServeToken(url string) string {
+	if url == "" || os.Getenv(DevEnvDisableEnv) != "" {
+		return ""
+	}
+	env := devEnvFile()
+	if url != env["SPARKWING_CONTROLLER_URL"] && url != env["SPARKWING_LOGS_URL"] {
+		return ""
+	}
+	paths, err := DefaultPaths()
+	if err != nil {
+		return ""
+	}
+	token, err := paths.ServeToken()
+	if err != nil {
+		return ""
+	}
+	return token
+}
+
 var (
 	devEnvOnce sync.Once
 	devEnvMap  map[string]string

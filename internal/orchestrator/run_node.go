@@ -367,6 +367,9 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	if token == "" {
+		token = LocalServeToken(*controllerURL)
+	}
 	var runOpts []RunNodeOption
 	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
 	if brokeredChild {

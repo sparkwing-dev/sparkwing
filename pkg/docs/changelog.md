@@ -1627,6 +1627,16 @@ unlock.
 
 ### Security
 
+- **cli + dashboard (Breaking):** `sparkwing serve` requires the token in
+  `serve-token` under the Sparkwing home on every request except
+  `GET /api/v1/version` and signed `POST /webhooks/`, so another account on
+  the machine can no longer drive the loopback API. The file is created
+  `0600` on first start. The CLI sends it for commands that reach the local
+  dashboard, and the browser signs in once through the dashboard link
+  `sparkwing serve start` and `sparkwing serve status` print, now also
+  reported as `login_url` in `-o json`. See
+  [migration guide](docs/migrations/_unreleased.md#the-local-dashboard-requires-its-token).
+
 - **web:** `sparkwing-web` without `--require-login` on a loopback address
   refuses DNS-rebound requests and cross-site writes. It answers only loopback
   `Host` names and the hosts of the new `--allow-origin` list, and applies the

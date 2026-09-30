@@ -1811,8 +1811,13 @@ The listener accepts loopback Host headers and the host of each
 that is neither a loopback origin on the served port or the dashboard's
 dev-server port 3100, the --addr host, nor listed in --allow-origin. A
 browser write with a body must send application/json. --allow-remote
-widens the Host check only, and lets every host that reaches the address
-list, overwrite and delete this machine's local secrets.`,
+widens the Host check only.
+
+Every request except GET /api/v1/version and signed POST /webhooks/
+needs the token in serve-token under the Sparkwing home, which only
+your account can read. The CLI sends it as a bearer. A browser signs in
+once through the dashboard link start and status print
+(/auth/local?token=...), which sets a session cookie for that port.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "pretty|json|plain", Desc: "Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped.", Group: "Output"},
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},

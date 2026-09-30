@@ -68,7 +68,7 @@ In another, start the dashboard:
 sparkwing serve start
 ```
 
-Point your browser at `http://127.0.0.1:4343`. Both runs stream live; when they finish, status flips to `passed` or `failed`.
+Open the dashboard link it prints, `http://127.0.0.1:4343/auth/local?token=...`; the browser then stays signed in to `http://127.0.0.1:4343`. Both runs stream live; when they finish, status flips to `passed` or `failed`.
 
 ## What lives in the controller instead
 

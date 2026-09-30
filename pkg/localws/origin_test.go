@@ -34,7 +34,7 @@ func TestRun_RejectsCrossSiteAndReboundRequests(t *testing.T) {
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := authedDo(req)
 		if err != nil {
 			t.Fatalf("post: %v", err)
 		}

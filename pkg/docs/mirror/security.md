@@ -67,13 +67,15 @@ view. Argument values the pipeline declared `secret:"true"` are masked;
 nothing else is. Give `runs.read` to a principal you would show the whole
 deployment's history.
 
-**The laptop dashboard serves an unauthenticated controller.** `sparkwing
-serve start` mounts the controller API and the dashboard on one
-listener with no token check, so anything that reaches the port can trigger
-pipelines and read secrets. The boundary is the bind address: the process
-refuses a non-loopback `--addr` unless the operator passes `--allow-remote`,
-and a browser request carrying a foreign `Origin` is refused unless the
-operator named that origin in `--allow-origin`. See
+**The laptop dashboard admits the account that started it.** `sparkwing
+serve start` mounts the controller API and the dashboard on one listener
+and requires the token in `serve-token` under the Sparkwing home, a `0600`
+file, so another account on the machine that reaches the loopback port is
+refused. The CLI sends the token as a bearer; a browser signs in once
+through the link `sparkwing serve status` prints. The process refuses a
+non-loopback `--addr` unless the operator passes `--allow-remote`, and a
+browser request carrying a foreign `Origin` is refused unless the operator
+named that origin in `--allow-origin`. See
 [local-execution.md](local-execution.md#the-laptop-boundary). The
 cluster-mode controller is the authenticated deployment; laptop mode is a
 single-user tool on a single-user machine.
