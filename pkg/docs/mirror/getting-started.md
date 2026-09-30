@@ -142,6 +142,14 @@ sparkwing run release
 sparkwing serve start    # detached local dashboard + API on :4343
 ```
 
+The scaffold adds `sparkwing-pipeline` to `.sparkwing/.gitignore` so Git
+ignores an untracked generated binary. Git does not untrack a binary already
+in its index; remove that with `git rm --cached .sparkwing/sparkwing-pipeline`.
+The scaffold preserves other entries in the local ignore file and leaves the
+repository's root `.gitignore` untouched. If `.sparkwing/.gitignore` points
+outside `.sparkwing/`, it prints a note asking you to add the binary to an
+ignore file.
+
 For a build/test/deploy DAG instead of a single node, pass
 `--template build-test-deploy`:
 

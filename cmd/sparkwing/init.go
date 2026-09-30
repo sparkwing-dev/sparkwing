@@ -90,10 +90,6 @@ func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport,
 		rep.Created = append(rep.Created, rel)
 	}
 
-	if err := ensureGitignoreEntry(filepath.Dir(sparkwingDir), ".sparkwing/sparkwing-pipeline"); err != nil {
-		fmt.Fprintf(os.Stderr, "init: note: could not update .gitignore: %v\n", err)
-	}
-
 	return rep, nil
 }
 
@@ -173,6 +169,7 @@ func renderInitReadme() string {
 		"\n" +
 		"```\n" +
 		".sparkwing/\n" +
+		"  .gitignore          ignores the cached pipeline binary\n" +
 		"  sparkwing.yaml      registry of every pipeline (name -> entrypoint)\n" +
 		"  jobs/               Go package holding pipeline definitions; scaffold lands one .go file per pipeline\n" +
 		"  main.go             thin entrypoint; delegates to runner.Main\n" +
@@ -201,15 +198,20 @@ pipelines:
 `
 }
 
-func ensureGitignoreEntry(repoRoot, entry string) error {
-	path := filepath.Join(repoRoot, ".gitignore")
-	// #nosec G703 -- the .gitignore of the repository this command was invoked in
-	body, err := os.ReadFile(path)
+func ensureGitignoreEntry(sparkwingDir, entry string) error {
+	root, err := os.OpenRoot(sparkwingDir)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		body = nil
+		return err
+	}
+	defer root.Close()
+	f, err := root.OpenFile(".gitignore", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	body, err := io.ReadAll(f)
+	if err != nil {
+		return err
 	}
 	for _, line := range strings.Split(string(body), "\n") {
 		if strings.TrimSpace(line) == entry {
@@ -218,15 +220,14 @@ func ensureGitignoreEntry(repoRoot, entry string) error {
 	}
 	var b strings.Builder
 	if len(body) > 0 {
-		b.Write(body)
 		if !strings.HasSuffix(string(body), "\n") {
 			b.WriteByte('\n')
 		}
 	}
-	b.WriteString("\n# sparkwing: cached pipeline binary, regenerated on each `sparkwing run` invocation\n")
 	b.WriteString(entry)
 	b.WriteByte('\n')
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	_, err = f.WriteString(b.String())
+	return err
 }
 
 func dirExists(p string) bool {
