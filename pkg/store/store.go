@@ -1807,11 +1807,12 @@ func (s *Store) backupBeforeUpgrade(ctx context.Context) error {
 		return fmt.Errorf("create the state database backup: %w", err)
 	}
 	target := f.Name()
+	// safety: an interrupted VACUUM INTO leaves an incomplete copy, which would hold disk and read as a restore point.
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("create the state database backup: %w", err)
+		return errors.Join(fmt.Errorf("create the state database backup: %w", err), os.Remove(target))
 	}
 	if _, err := s.exec(ctx, `VACUUM INTO ?`, target); err != nil {
-		return fmt.Errorf("back up the state database to %s before upgrading it: %w", target, err)
+		return errors.Join(fmt.Errorf("back up the state database before upgrading it: %w", err), os.Remove(target))
 	}
 	fmt.Fprintf(os.Stderr, "sparkwing: upgrading the state database from schema v%d to v%d; a copy of it is at %s\n",
 		current, expectedSchemaVersion, target)
