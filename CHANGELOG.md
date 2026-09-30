@@ -1627,6 +1627,15 @@ unlock.
 
 ### Security
 
+- **runner (Breaking):** A runner or agent with an `--allow-repo` /
+  `allow_repos` list refuses a run that names no repository and a
+  `--working-tree` snapshot, before fetching anything. The controller
+  supplies a snapshot's code, so the list could not vouch for it and a
+  compromised controller could run chosen code as the machine's user. The new
+  `accept_working_tree: true` agent key and `sparkwing-runner runner
+  --accept-working-tree` flag accept snapshots of listed repositories. See
+  [migration guide](docs/migrations/_unreleased.md#allow-listed-runners-refuse-working-tree-snapshots).
+
 - **cli + dashboard (Breaking):** `sparkwing serve` requires the token in
   `serve-token` under the Sparkwing home on every request except
   `GET /api/v1/version` and signed `POST /webhooks/`, so another account on

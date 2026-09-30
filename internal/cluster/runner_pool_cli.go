@@ -417,6 +417,9 @@ func runRunnerCLI(args []string, version string) error {
 			"(repeatable, e.g. --allow-repo 'github.com/acme/*'); without --gitcache it also lets the runner fetch "+
 			"with this machine's own git credentials when the controller releases none, so name only the "+
 			"repositories you trust: the runner compiles and runs their pipeline code as the user running it")
+	acceptWorkingTree := fs.Bool("accept-working-tree", false,
+		"with --allow-repo (or --github-actions), also build working-tree snapshots of the listed repositories; "+
+			"the controller supplies a snapshot's code, which no listed repository holds")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
 	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
@@ -542,7 +545,14 @@ func runRunnerCLI(args []string, version string) error {
 			"expires_at", time.Unix(cred.ExpiresAt, 0).UTC(), "claim_until", claimUntil.UTC())
 	}
 
+	if *acceptWorkingTree {
+		if allow.Empty() {
+			return errors.New("--accept-working-tree needs --allow-repo or --github-actions; a runner without a list builds what the controller sends")
+		}
+		allow = allow.AcceptingWorkingTree()
+	}
 	slog.Default().Info("runner repository allowlist", "allow_repo", allow.String(), "direct_source", *gitcacheURL == "",
+		"accept_working_tree", allow.AcceptsWorkingTree(),
 		"owner_credentials", *gitcacheURL == "" && !allow.Empty())
 
 	identity := buildinfo.Read("sparkwing-runner", version)

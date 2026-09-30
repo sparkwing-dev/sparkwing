@@ -576,6 +576,14 @@ team, decides what the machine builds:
 - The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
   and `github_owner`/`github_repo` name different repositories, so the run page
   always shows the repository the runner fetched.
+- A runner with a list refuses a run that names no repository, since the
+  list has nothing to check, and a `--working-tree` snapshot. A snapshot's
+  code comes from the controller's copy of someone's uncommitted edits, not
+  from a listed repository, so a controller that is compromised or
+  misconfigured could hand the runner any code under a listed name. Pass
+  `--accept-working-tree`, or set `accept_working_tree: true` in the agent
+  section, to build snapshots of the listed repositories anyway; a snapshot
+  still has to name a listed repository.
 
 Allow only repositories whose every committer you would trust to run code under
 your account. Only an allowlist stands between a run and your files: the
@@ -633,7 +641,9 @@ agent:
 Such an agent claims only runs of those repositories, sending the list with
 every claim, and fetches each one's source directly: with the credential the
 controller releases for the run, else with the machine owner's own git
-credentials. The list follows the rules in
+credentials. It refuses `--working-tree` snapshots unless the section
+also sets `accept_working_tree: true`, which you want when you send your own
+`sparkwing pipeline trigger --working-tree` runs to this machine. The list follows the rules in
 [What a laptop runner trusts](#what-a-laptop-runner-trusts).
 `sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
 An agent section without `allow_repos` keeps the proxy, as before.

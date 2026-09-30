@@ -228,6 +228,17 @@ the upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
 `errors.Is` on `store.ErrAccountExists` detects the refusal. No database
 migration is required.
 
+## Allow-listed runners refuse working-tree snapshots
+
+A runner started with `--allow-repo`, a `--github-actions` runner, and an
+agent whose section sets `allow_repos` now fail a `--working-tree` run with
+`repository not allowed on this machine` before fetching it, and fail a run
+that names no repository the same way. To keep building your own snapshots on
+such a machine, add `accept_working_tree: true` to the agent section of
+`config.yaml`, or pass `--accept-working-tree` to `sparkwing-runner runner`.
+The snapshot must still name a listed repository. No database migration is
+required.
+
 ## The local dashboard requires its token
 
 `sparkwing serve` answers `401` to a request that carries neither the token

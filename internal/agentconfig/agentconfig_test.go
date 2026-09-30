@@ -250,3 +250,14 @@ func TestConfig_RefusesASecondDocumentInAPreConfigYAMLAgentFile(t *testing.T) {
 		t.Fatalf("legacy agent file with two documents = %v, want it refused", err)
 	}
 }
+
+func TestValidate_AcceptWorkingTreeNeedsAnAllowlist(t *testing.T) {
+	if _, err := Validate(Config{Controller: "https://c.example", AcceptWorkingTree: true}); err == nil ||
+		!strings.Contains(err.Error(), "accept_working_tree needs allow_repos") {
+		t.Fatalf("Validate without allow_repos = %v, want the refusal", err)
+	}
+	cfg, err := Validate(Config{Controller: "https://c.example", AllowRepos: []string{"github.com/acme/*"}, AcceptWorkingTree: true})
+	if err != nil || !cfg.AcceptWorkingTree {
+		t.Fatalf("Validate with allow_repos = %+v, %v", cfg, err)
+	}
+}
