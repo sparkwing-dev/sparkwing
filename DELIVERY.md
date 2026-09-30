@@ -151,10 +151,11 @@ file. Other syntax and workflow checks remain active.
   collapses: at four CPUs a shared host runs one thread and a single-tenant
   host runs two. The race suite keeps `GOMAXPROCS=1`
   on four CPUs either way.
-  On a hosted four-CPU runner, run 202014 finished full Go in 23m18s before
-  PostgreSQL began. Three measured PostgreSQL store runs took 16m24s, 16m45s
-  and 20m15s: the serial floor is 39m42s to 43m33s before build, lint and
-  cleanup. Fifty minutes is a budget to verify, not a measured passing run.
+  A local four-CPU `CI=1` run using the hosted schedule (202014, source
+  f314ad61) finished full Go in 23m18s before PostgreSQL began. Three measured
+  PostgreSQL store runs took 16m24s, 16m45s and 20m15s. Those two serial
+  checks alone project to 39m42s–43m33s, excluding build, lint and cleanup.
+  Fifty minutes is a budget to verify, not a measured passing run.
   That boundary remains a liveness limit rather than a completion
   guarantee. That publication path
   stops at the parent runner rather than
