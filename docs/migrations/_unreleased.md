@@ -32,7 +32,8 @@ What else changes on a local machine:
   list, overwrite and delete this machine's local secrets.
 - Node metric reads are paged; see
   [Node metric reads are paged](#node-metric-reads-are-paged).
-- Pipelines pinned to an older SDK keep running; no pin bump is needed.
+- Update pipeline SDK pins for job outputs and Cloud planning; see
+  [Job outputs are objects](#job-outputs-are-objects).
 
 ## One config.yaml for machine settings
 
