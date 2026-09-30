@@ -28,8 +28,11 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	if hints := nodes[0].ResourceHints(); hints != nil {
 		t.Fatalf("node resource pin = %#v, want measured admission", hints)
 	}
-	if got := testGoCommand(hostShape{cpus: 14}); got != "GOMAXPROCS=6 go test -p 6 ./..." {
+	if got := testGoCommand(hostShape{cpus: 14}); got != "GOMAXPROCS=6 go test -p 6 -timeout 25m ./..." {
 		t.Fatalf("bounded command = %q", got)
+	}
+	if got := testGoCommand(hostShape{cpus: 4, singleTenant: true}); got != "GOMAXPROCS=2 go test -p 2 -timeout 25m ./..." {
+		t.Fatalf("hosted four-core command = %q", got)
 	}
 
 	file, err := parser.ParseFile(token.NewFileSet(), "test.go", nil, 0)
