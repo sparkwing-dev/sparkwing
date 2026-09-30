@@ -774,3 +774,33 @@ func TestReleaseRunOutputs_NeverDeletesAnObjectACopyNames(t *testing.T) {
 		}
 	}
 }
+
+// A read of an output whose file was changed or lost is an error a cache hit
+// can recognize, never the wrong bytes.
+func TestGetNodeOutput_ReportsBadOrMissingBytes(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	if err := s.CreateRun(ctx, store.Run{ID: "run-a", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run-a", NodeID: "n", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishNode(ctx, "run-a", "n", "success", "", []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := s.GetNode(ctx, "run-a", "n")
+	path := store.OutputPath(s.OutputDir(), n.OutputRef.Key)
+	if err := os.WriteFile(path, []byte(`{"v":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := s.GetNodeOutput(ctx, "run-a", "n"); !errors.Is(err, store.ErrOutputCorrupt) {
+		t.Fatalf("a changed output file = %s, %v; want it refused as corrupt", out, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := s.GetNodeOutput(ctx, "run-a", "n"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a lost output file = %s, %v; want not found", out, err)
+	}
+}

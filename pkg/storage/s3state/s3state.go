@@ -1284,7 +1284,7 @@ func ReadNodeOutput(ctx context.Context, art storage.ArtifactStore, runID string
 	}
 	sum := sha256.Sum256(data)
 	if int64(len(data)) != ref.Size || hex.EncodeToString(sum[:]) != ref.SHA256 {
-		return nil, fmt.Errorf("s3state: output %s does not match its recorded digest", ref.Key)
+		return nil, fmt.Errorf("s3state: output %s: %w", ref.Key, store.ErrOutputCorrupt)
 	}
 	return data, nil
 }

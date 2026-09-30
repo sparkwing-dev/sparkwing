@@ -46,6 +46,10 @@ var ErrOutputLimit = errors.New("output limit exceeded")
 // the output its dependents read.
 var ErrOutputNotStored = errors.New("the node's output was not stored")
 
+// ErrOutputCorrupt refuses output bytes whose size or digest differs from
+// what their commit recorded.
+var ErrOutputCorrupt = errors.New("output bytes do not match their recorded sha256")
+
 const nodeOutputTablesSQL = `CREATE TABLE IF NOT EXISTS node_outputs (
     team TEXT NOT NULL,
     run_id TEXT NOT NULL,
@@ -677,7 +681,7 @@ func ReadOutputFile(dir string, ref OutputRef) ([]byte, error) {
 	}
 	sum := sha256.Sum256(data)
 	if int64(len(data)) != ref.Size || hex.EncodeToString(sum[:]) != ref.SHA256 {
-		return nil, fmt.Errorf("output %s does not match its recorded digest", ref.Key)
+		return nil, fmt.Errorf("output %s: %w", ref.Key, ErrOutputCorrupt)
 	}
 	return data, nil
 }

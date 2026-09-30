@@ -112,7 +112,7 @@ func (c *Client) fetchOutput(ctx context.Context, grant store.OutputReadGrant) (
 	}
 	sum := sha256.Sum256(data)
 	if int64(len(data)) != grant.Size || hex.EncodeToString(sum[:]) != grant.SHA256 {
-		return nil, fmt.Errorf("download output: the bytes do not match the recorded sha256")
+		return nil, fmt.Errorf("download output: %w", store.ErrOutputCorrupt)
 	}
 	return data, nil
 }
