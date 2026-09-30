@@ -356,37 +356,52 @@ func TestSync_LeavesAFinishedJobForItsTTL(t *testing.T) {
 	}
 }
 
-// While MaxUnplacedJobs of its own Jobs wait for a machine, the launcher claims
-// no more ready nodes; with one fewer waiting, or one handed back, it claims
-// the next.
-func TestRun_PausesClaimsWhileItsJobsWaitForMachines(t *testing.T) {
+func (f launchFixture) runningPod(t *testing.T, job string) {
+	t.Helper()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job + "-pod", Namespace: "sparkwing-jobs", Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "sparkwing-launcher", launcher.JobLabel: job,
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	if _, err := f.kube.CoreV1().Pods("sparkwing-jobs").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The launcher counts the Jobs it created that are not yet running, as it
+// creates each and at every sync, and claims nothing while MaxPendingJobs of
+// them are pending: a burst of ready nodes stops at the brake between syncs,
+// and a Job that starts running, or is handed back, lets it claim the next.
+func TestRun_PausesClaimsWhileItsJobsAreNotYetRunning(t *testing.T) {
 	for _, c := range []struct {
-		name              string
-		waiting, released int
-		want              int
+		name                     string
+		launched, running, freed int
+		want                     int
 	}{
-		{"all waiting", launcher.MaxUnplacedJobs, 0, launcher.MaxUnplacedJobs},
-		{"one fewer waiting", launcher.MaxUnplacedJobs - 1, 0, launcher.MaxUnplacedJobs + 1},
-		{"one handed back", launcher.MaxUnplacedJobs - 1, 1, launcher.MaxUnplacedJobs},
+		{"a burst between syncs", 0, 0, 0, launcher.MaxPendingJobs},
+		{"all pending", launcher.MaxPendingJobs, 0, 0, launcher.MaxPendingJobs},
+		{"one running", launcher.MaxPendingJobs, 1, 0, launcher.MaxPendingJobs + 1},
+		{"one handed back", launcher.MaxPendingJobs, 0, 1, launcher.MaxPendingJobs},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newLaunchFixture(t)
 			f.optedInRun(t, "run-0")
-			for i := 1; i <= launcher.MaxUnplacedJobs; i++ {
+			for i := 1; i <= launcher.MaxPendingJobs+2; i++ {
 				f.intake(t, fmt.Sprintf("run-%d", i), "korey/probe")
 			}
 			l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
-			for range launcher.MaxUnplacedJobs {
+			for range c.launched {
 				if launched, err := l.LaunchOne(ctx); !launched || err != nil {
 					t.Fatalf("launch: %v %v", launched, err)
 				}
 			}
 			jobs := f.jobNames(t)
-			for _, job := range jobs[:c.waiting] {
-				f.unplacedPod(t, job, 30*time.Second)
+			for _, job := range jobs[:c.running] {
+				f.runningPod(t, job)
 			}
-			for _, job := range jobs[c.waiting : c.waiting+c.released] {
+			for _, job := range jobs[c.running : c.running+c.freed] {
 				f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
 			}
 			runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)

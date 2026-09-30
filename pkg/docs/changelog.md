@@ -50,9 +50,9 @@ unlock.
   later. A launched node's billing opens when its pod first renews the claim,
   at the start of the source fetch, not at the claim. A handed-back node
   shows `waiting for Cloud capacity` with a `capacity_wait` event. The
-  launcher claims no new node while five of its own Jobs wait for a machine,
-  counted from the Jobs it already lists, and resumes as they start or are
-  handed back. A
+  launcher claims no new node while five of the Jobs it created are not yet
+  running, counted as it creates each and from the Jobs it lists at every
+  sync, and resumes as they start or are handed back. A
   planning node whose `.sparkwing` pins a
   sparkwing release before v0.65.0 fails before its build, naming the pin. The
   opt-in's audit record names the repository. Opting a repository in is
