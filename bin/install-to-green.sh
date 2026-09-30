@@ -166,6 +166,8 @@ for bound in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR \
   unset "$bound"
 done
 
+# The start load probe runs before the demo PATH is pinned, and macOS keeps sysctl here.
+export PATH="$PATH:/usr/sbin:/sbin"
 cores="$(core_count)"
 load_start="$(load_average)"
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
