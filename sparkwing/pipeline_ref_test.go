@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -102,7 +103,7 @@ func TestRefToLastRun_NoOptions(t *testing.T) {
 	}
 }
 
-func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
+func TestCollectRefs_DiscoversFilledRefFields(t *testing.T) {
 	type JobNode struct {
 		Build    Ref[buildOut]
 		NotARef  string
@@ -113,12 +114,10 @@ func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
 		Build: RefToLastRun[buildOut]("build", "artifact", MaxAge(1*time.Hour)),
 		InRun: Ref[buildOut]{NodeID: "sibling"},
 	}
-	pairs := collectCrossPipelineRefs(job)
-	if len(pairs) != 1 {
-		t.Fatalf("got %d pairs: %+v", len(pairs), pairs)
-	}
-	if pairs[0].Pipeline != "build" || pairs[0].NodeID != "artifact" {
-		t.Fatalf("pair: %+v", pairs[0])
+	got := collectRefs(job)
+	want := []RefTarget{{Pipeline: "build", NodeID: "artifact"}, {NodeID: "sibling"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("collectRefs = %+v, want %+v", got, want)
 	}
 }
 

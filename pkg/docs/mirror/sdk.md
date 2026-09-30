@@ -604,7 +604,7 @@ field. The constructor in `Plan()` carries the routing detail:
 
 | Routing | Constructor | What it does |
 |---|---|---|
-| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. A typed handle only: it does NOT create a dependency edge, so pair it with `.Needs(node)` on the consumer. |
+| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. Held in an exported job struct field, it makes the consumer depend on that node. A Ref captured by a closure still needs `.Needs(node)`. |
 | Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
 | Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
 
@@ -629,7 +629,7 @@ sw.Job(plan, "fictional-deploy", &Deploy{
     Build:    sw.RefTo[BuildOut](build),
     Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
                   sw.MaxAge(24*time.Hour)),
-}).Needs(build)
+}) // depends on fictional-build through its Build field
 b := j.Build.Get(ctx)
 m := j.Manifest.Get(ctx)
 ```

@@ -821,7 +821,7 @@ type JobNode struct {
 - `func (n *JobNode) ConsumeEdges() []ConsumeEdge` -- ConsumeEdges returns the artifact edges declared via Consumes, in declaration order, or nil if the node consumes nothing.
 - `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
-- `func (n *JobNode) DepIDs() []string` -- DepIDs returns the node IDs this node depends on.
+- `func (n *JobNode) DepIDs() []string` -- DepIDs returns the node IDs this node depends on: explicit Needs entries and the in-run Ref fields its job struct held at registration.
 - `func (n *JobNode) DirCaches() []DirCache` -- DirCaches returns the node's declared dependency-directory caches, in declaration order.
 - `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
 - `func (n *JobNode) EnvMap() map[string]string` -- EnvMap returns the node's declared environment.
@@ -1314,7 +1314,7 @@ type RefOption func(*refOpts)
 
 ### type RefTarget
 
-RefTarget is one (pipeline, node) pair discovered on a job struct via collectCrossPipelineRefs.
+RefTarget is one (pipeline, node) pair discovered on a job struct via collectRefs.
 
 ```
 type RefTarget struct {

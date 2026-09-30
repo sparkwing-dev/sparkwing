@@ -1311,6 +1311,13 @@ unlock.
 
 ### Fixed
 
+- **sdk:** A job struct field holding `sw.RefTo[T](node)` now makes the job
+  depend on that node, so `pipeline explain` and the plan show the edge and the
+  consumer no longer races the producer (`Ref[...].Get: node "produce" has not
+  completed`). A `RefToLastRun` field adds no edge, and a Ref captured by a
+  closure still needs `.Needs(node)`. A pipeline that relied on the missing
+  edge gets a new capacity fingerprint and re-measures once.
+
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.
