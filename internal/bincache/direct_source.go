@@ -550,13 +550,19 @@ func directEvict(mirror string, git func(...string) (string, error)) bool {
 
 func directDirSize(dir string) (int64, error) {
 	var total int64
-	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
+			if path != dir && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if d.Type().IsRegular() {
 			info, infoErr := d.Info()
 			if infoErr != nil {
+				if errors.Is(infoErr, fs.ErrNotExist) {
+					return nil
+				}
 				return infoErr
 			}
 			total += info.Size()
