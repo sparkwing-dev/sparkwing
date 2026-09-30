@@ -29,7 +29,8 @@ type Options struct {
 	Bundle fs.FS
 }
 func Run(ctx context.Context, opts Options) (retErr error)
-const SignInPath = "/auth/local"
+const SessionExchangePath = "/auth/local/session"
+const SignInCodePath = "/api/v1/local/sign-in-code"
 type VersionInfo struct {
 	Version  string
 	Schema   int
