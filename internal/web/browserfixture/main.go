@@ -214,8 +214,8 @@ func (s *controllerState) handler(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(w).Encode(map[string]any{
 			"authorization": "picker-proof",
 			"installations": []map[string]any{
-				{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization", "connected_elsewhere": false},
-				{"installation_id": 43, "account_login": "bound-org", "account_type": "Organization", "connected_elsewhere": true},
+				{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization"},
+				{"installation_id": 43, "account_login": "bound-org", "account_type": "Organization"},
 			},
 		}); err != nil {
 			log.Printf("browser fixture available: %v", err)

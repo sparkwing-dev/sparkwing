@@ -941,11 +941,6 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	repoInherited := body.ParentRunID != "" && body.Git.Repo == ""
 
 	if body.ParentRunID != "" {
-		ancestors, err := s.store.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Errorf("ancestor walk: %w", err))
-			return
-		}
 		parent, perr := tenant.GetRun(r.Context(), body.ParentRunID)
 		if perr != nil {
 			if errors.Is(perr, store.ErrNotFound) {
@@ -953,6 +948,11 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeError(w, http.StatusInternalServerError, fmt.Errorf("get parent run: %w", perr))
+			return
+		}
+		ancestors, err := tenant.GetRunAncestorPipelines(r.Context(), body.ParentRunID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Errorf("ancestor walk: %w", err))
 			return
 		}
 		chain := append([]string{parent.Pipeline}, ancestors...)

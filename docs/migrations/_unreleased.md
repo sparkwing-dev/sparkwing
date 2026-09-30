@@ -186,8 +186,8 @@ create the machine's key; point `SPARKWING_SECRETS_KEY_FILE` inside the home.
 **`sparkwing serve --allow-remote`.** The dashboard now manages local secrets
 without an account, so a remote bind lets every host that reaches it list,
 overwrite and delete them; the server warns at startup. It never serves a
-masked value. A browser origin on
-another loopback port is refused unless it is the dev server's port 3100.
+masked value, and it answers only a holder of the serve token. A browser
+origin on another loopback port is refused unless `--allow-origin` names it.
 
 **What the key protects.** It keeps a copied or backed-up `state.db` sealed.
 Code running as your account, pipeline steps included, can read the key file
@@ -261,6 +261,42 @@ links the second from **Account -> Linked sign-ins**. Sign-ins attached before
 the upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
 `errors.Is` on `store.ErrAccountExists` detects the refusal. No database
 migration is required.
+
+## Allow-listed runners refuse working-tree snapshots
+
+A runner started with `--allow-repo`, a `--github-actions` runner, and an
+agent whose section sets `allow_repos` now fail a `--working-tree` run with
+`repository not allowed on this machine` before fetching it, and fail a run
+that names no repository the same way. To keep building your own snapshots on
+such a machine, add `accept_working_tree: true` to the agent section of
+`config.yaml`, or pass `--accept-working-tree` to `sparkwing-runner runner`.
+The snapshot must still name a listed repository. No database migration is
+required.
+
+## The local dashboard requires its token
+
+`sparkwing serve` answers `401` to an API request that carries neither the
+token in `serve-token` under the Sparkwing home nor a browser session as a
+bearer. Open the `dashboard:` link `sparkwing serve status` prints once per
+browser; a bookmark of `http://127.0.0.1:4343` keeps working after that,
+across dashboard restarts. A script that called the local API sends
+`Authorization: Bearer $(cat ~/.sparkwing/serve-token)`, with the path under
+its own `SPARKWING_HOME`. The `sparkwing` CLI does this itself. The `pnpm dev`
+server at port 3100 is no longer trusted implicitly: start the dashboard with
+`--allow-origin http://localhost:3100` and open the printed link with its
+host and port changed to `localhost:3100`, since the session belongs to the
+origin that opened it. No database migration is required.
+
+## GitHub App picker carries no binding state
+
+`POST /api/v1/team/github-app/connect/available` drops the
+`connected_elsewhere` field from each installation, because it told a team
+owner whether another team had bound that installation. A client that hid or
+disabled bound installations lists them all and handles the `409` that
+`POST /api/v1/team/github-app/connect/select` answers for one another team
+holds. The `409` from `select` and from `connect/complete` now reads "this
+installation is unavailable to this team; contact the operator if you
+expected to connect it". No database migration is required.
 
 ## Node metric reads are paged
 

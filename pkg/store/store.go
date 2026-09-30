@@ -167,6 +167,8 @@ func Open(path string) (*Store, error) {
 		if err := preparePrivateSQLite(path); err != nil {
 			return nil, err
 		}
+	} else if err := tightenExistingSQLite(path); err != nil {
+		return nil, err
 	}
 	dsn, err := sqliteDSN(path)
 	if err != nil {
@@ -194,6 +196,44 @@ func preparePrivateSQLite(path string) error {
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+	}
+	return nil
+}
+
+// safety: SQLite creates the -wal and -shm sidecars with the database's own
+// mode, and a database or sidecar written before the store created files
+// 0600 keeps whatever mode it had, so every one that exists is narrowed to
+// its owner before the store reads run data from it.
+func tightenExistingSQLite(path string) error {
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		if err := tightenSQLiteFile(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// safety: the mode is read and changed through one open descriptor, so a
+// file swapped in at the path between the check and the change is never
+// the one narrowed or skipped.
+func tightenSQLiteFile(name string) error {
+	f, err := os.OpenFile(name, os.O_RDONLY|sqliteTightenFlags, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open sqlite file %s: %w", name, err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect sqlite file %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := f.Chmod(info.Mode().Perm() & 0o700); err != nil {
+		return fmt.Errorf("secure sqlite file %s: %w", name, err)
 	}
 	return nil
 }
@@ -7517,6 +7557,13 @@ ORDER BY parent_node_id, created_at`, runID)
 // data cycles terminate cleanly; partial chains are still useful for
 // cycle detection.
 func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
+	return s.defaultTenant().GetRunAncestorPipelines(ctx, runID)
+}
+
+// GetRunAncestorPipelines walks parent_run_id links inside t's team; an
+// ancestor in another team ends the walk as a missing one does. See
+// [Store.GetRunAncestorPipelines].
+func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error) {
 	if runID == "" {
 		return nil, nil
 	}
@@ -7526,9 +7573,9 @@ func (s *Store) GetRunAncestorPipelines(ctx context.Context, runID string) ([]st
 	for range maxDepth {
 		var parent sql.NullString
 		var pipeline string
-		err := s.queryRow(
+		err := t.s.queryRow(
 			ctx,
-			`SELECT pipeline, parent_run_id FROM runs WHERE id = ?`, cur,
+			`SELECT pipeline, parent_run_id FROM runs WHERE team = ? AND id = ?`, string(t.team), cur,
 		).Scan(&pipeline, &parent)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {

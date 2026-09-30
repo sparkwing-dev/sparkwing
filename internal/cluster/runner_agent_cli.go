@@ -80,6 +80,7 @@ func runAgentOnce(ctx context.Context, configPath string, allowRepos []string) e
 		"max_concurrent", cfg.MaxConcurrent,
 		"spawn_policy", cfg.SpawnPolicy,
 		"allow_repo", pool.AllowRepos.String(),
+		"accept_working_tree", pool.AllowRepos.AcceptsWorkingTree(),
 		"direct_source", pool.GitcacheURL == "",
 		"observed_platform", executorinfo.DetectObservedPlatform(),
 	)
@@ -90,6 +91,9 @@ func agentPoolConfig(cfg agentconfig.Config) (PoolLoopConfig, error) {
 	allow, err := sourceurl.ParseRepoAllowlist(cfg.AllowRepos)
 	if err != nil {
 		return PoolLoopConfig{}, fmt.Errorf("allow_repos: %w", err)
+	}
+	if cfg.AcceptWorkingTree {
+		allow = allow.AcceptingWorkingTree()
 	}
 	prefix := cfg.HolderPrefix
 	if prefix == "" {

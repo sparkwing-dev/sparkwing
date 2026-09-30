@@ -670,7 +670,7 @@ func tipDashboardNotRunning() (InfoTip, bool) {
 		ID:      "dashboard",
 		Title:   "Local dashboard is not running",
 		Command: "sparkwing serve start",
-		Note:    "runs at http://127.0.0.1:4343",
+		Note:    "runs at http://127.0.0.1:4343; open the link it prints",
 	}, true
 }
 

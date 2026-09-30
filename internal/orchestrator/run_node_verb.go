@@ -66,6 +66,9 @@ func RunNodeCommand(args []string) error {
 	if isClaimToken(token) && apiSocket == "" {
 		return runLaunchedNode(ctx, *controllerURL, runID, nodeID, token, slog.Default())
 	}
+	if token == "" {
+		token = LocalServeToken(*controllerURL)
+	}
 	var runOpts []RunNodeOption
 	if apiSocket != "" {
 		runOpts = append(runOpts, OverAPISocket(apiSocket))

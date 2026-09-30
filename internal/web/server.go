@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/api"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
@@ -115,6 +116,11 @@ type HandlerOptions struct {
 	// callers must opt in explicitly.
 	AllowUnauthenticatedRemote bool
 
+	// AllowOrigins lists browser origins ("https://dash.example") that a
+	// loopback dashboard without RequireLogin answers besides its own
+	// loopback ones, such as the public name of a proxy in front of it.
+	AllowOrigins []string
+
 	// InsecureCookies drops Secure from the session and CSRF cookies so
 	// a browser keeps a session over plain HTTP. ServeWithOptions
 	// accepts it only on a loopback listener unless
@@ -191,12 +197,17 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	if err := opts.Paths.EnsureRoot(); err != nil {
 		return err
 	}
+	serveAddr := addr
+	if opts.Listener != nil {
+		serveAddr = opts.Listener.Addr().String()
+	}
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      HandlerFromOptions(opts),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
+	srv.Handler = guardUnauthenticatedLoopback(opts, serveAddr, srv.Handler)
 	trusted := &http.Server{
 		Addr:         opts.TrustedProxyAddr,
 		Handler:      ratelimit.TrustedListener(srv.Handler),
@@ -409,6 +420,17 @@ func validateAuthOptions(opts HandlerOptions) error {
 	return nil
 }
 
+// safety: without sign-in a loopback listener has no credential of its own, so
+// a page on another site that rebinds its name to 127.0.0.1 would read the
+// dashboard and drive the controller token behind it; the guard admits only
+// loopback or allow-listed hosts and refuses cross-site writes.
+func guardUnauthenticatedLoopback(opts HandlerOptions, addr string, next http.Handler) http.Handler {
+	if opts.RequireLogin || !loopbackBind(addr) {
+		return next
+	}
+	return originguard.Guard(next, originguard.NewPolicy(addr, false, opts.AllowOrigins))
+}
+
 // safety: an unauthenticated dashboard that holds a service bearer hands the
 // controller to everyone who can reach a non-loopback listener.
 func validateRemoteExposure(opts HandlerOptions, addr string) error {
@@ -437,15 +459,10 @@ func loopbackBind(addr string) bool {
 	if err != nil {
 		host = addr
 	}
-	host = strings.Trim(host, "[]")
 	if host == "" {
 		return false
 	}
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return originguard.LoopbackHost(host)
 }
 
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {

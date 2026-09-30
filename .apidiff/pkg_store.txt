@@ -2621,6 +2621,7 @@ func (t *Tenant) GetGitHubWebhookBinding(ctx context.Context, pipeline, repo str
 func (t *Tenant) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*Run, error)
 func (t *Tenant) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*PipelineProfile, error)
 func (t *Tenant) GetRun(ctx context.Context, runID string) (*Run, error)
+func (t *Tenant) GetRunAncestorPipelines(ctx context.Context, runID string) ([]string, error)
 func (t *Tenant) GetSecret(name string) (*Secret, error)
 func (t *Tenant) GetSecretForPipeline(name, pipeline string) (*Secret, error)
 func (t *Tenant) GetSecretForRun(name, pipeline string) (*Secret, error)

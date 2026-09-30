@@ -18,6 +18,14 @@ Scopes narrow what a token may do; they do not partition the deployment by
 repository, team, or environment. Two projects that must not read each
 other's runs need two controllers, not two tokens in one.
 
+**A self-hosted runner runs pipeline code as its own OS user; give it a
+dedicated one.** Pipeline code on a runner or agent can read every file that
+user can: the agent's `config.yaml` and the runner token in it, ssh keys,
+cloud profiles and other repositories' secrets. No Sparkwing setting changes
+that, the same as GitHub's self-hosted runners. Run each runner as a
+dedicated OS user that holds nothing else, or in a container or VM, and list
+only repositories whose every committer may act as that user.
+
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
 compiles and executes. Enrolling a workstation or gateway authorizes that
 code to execute as the agent service's OS user. Assisted execution keeps the
@@ -26,9 +34,29 @@ gets a process-lifetime loopback capability limited to its exact run and node,
 with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
 and its capability cannot claim or renew work, manage the fleet, or call
-administrative routes. This is not an OS sandbox: the pipeline keeps every
-file, network, and process permission of the agent OS user. Use a dedicated
-account whose reach every enrolled repository may have. Sparkwing does not
+administrative routes. A claimed trigger's pipeline binary, which plans the
+run, gets the same kind of loopback capability, limited to its own run and
+the child runs it spawns, from a runner using the in-process node runner.
+The broker names the run on every route it forwards, so a runner holding two
+runs never lets one read the other. Two lookups reach beyond it, both scoped
+to the team by the controller: a cross-pipeline `Ref` reads another
+pipeline's latest run and then only that run's node outputs, and a retry
+asks which child its source attempt spawned so it reuses that child. The latest-run lookup
+admits any pipeline in the team, not only a declared `Ref`; that is the trust
+the pipeline's own code already has, since it can reference any team
+pipeline's latest run. A runner using the Kubernetes or
+warm node runner still hands its token to the trigger's binary, because the
+Jobs that binary creates need it; controller dispatch (`sparkwing-runner
+launch`), which gives each Job its own claim token as its only credential,
+replaces that path.
+
+This is not an OS sandbox: the pipeline keeps every file, network, and
+process permission of the agent OS user. It can read the agent's
+`config.yaml`, which holds the runner token, and every other credential in
+that user's home, such as ssh keys and cloud profiles. GitHub gives the same
+warning for its self-hosted runners. Run the agent as a dedicated OS user
+that holds nothing else, or in a container or VM, and admit only repositories
+whose every committer may act as that user. Sparkwing does not
 join a tailnet or configure host networking.
 [threat-model.md](threat-model.md) states what that boundary isolates, what it
 does not, and what an operator does about the rest when a teammate's branch
@@ -67,13 +95,17 @@ view. Argument values the pipeline declared `secret:"true"` are masked;
 nothing else is. Give `runs.read` to a principal you would show the whole
 deployment's history.
 
-**The laptop dashboard serves an unauthenticated controller.** `sparkwing
-serve start` mounts the controller API and the dashboard on one
-listener with no token check, so anything that reaches the port can trigger
-pipelines and read secrets. The boundary is the bind address: the process
-refuses a non-loopback `--addr` unless the operator passes `--allow-remote`,
-and a browser request carrying a foreign `Origin` is refused unless the
-operator named that origin in `--allow-origin`. See
+**The laptop dashboard admits the account that started it.** `sparkwing
+serve start` mounts the controller API and the dashboard on one listener
+and requires the token in `serve-token` under the Sparkwing home, a `0600`
+file, so another account on the machine that reaches the loopback port is
+refused. The CLI sends the token as a bearer; a browser signs in once
+through the link `sparkwing serve status` prints, whose single-use code the
+page trades for a session it keeps in `localStorage` and sends as a bearer.
+No credential rides a cookie, which every port on `127.0.0.1` would receive. The process refuses a
+non-loopback `--addr` unless the operator passes `--allow-remote`, and a
+browser request carrying a foreign `Origin` is refused unless the operator
+named that origin in `--allow-origin`. See
 [local-execution.md](local-execution.md#the-laptop-boundary). The
 cluster-mode controller is the authenticated deployment; laptop mode is a
 single-user tool on a single-user machine.

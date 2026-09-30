@@ -575,10 +575,18 @@ SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
 
 #### What a laptop runner trusts
 
+**Run a runner as a dedicated OS user, or in a container or VM.** Pipeline
+code runs as the runner's user and reads everything that user can, the runner
+token in the agent's `config.yaml` included; no Sparkwing setting stops a
+process from reading its own user's files.
+
 A runner compiles the pipeline code it fetches and runs it as the user who
-started the runner. That code reads what that user can read: ssh keys,
-`~/.aws`, other tokens in the home directory, and the runner token itself,
-which it receives to report its run. Any team member who can trigger a run
+started the runner. The pipeline process reaches the controller through a
+loopback broker in the runner that admits only its own run's routes, so the
+runner token is not in its environment. That does not stop code running as the
+same OS user: it reads what that user can read, including ssh keys, `~/.aws`,
+other tokens in the home directory, and the runner token in the agent's
+`config.yaml`. Any team member who can trigger a run
 chooses which repository and commit that is. So the machine's owner, not the
 team, decides what the machine builds:
 
@@ -610,6 +618,14 @@ team, decides what the machine builds:
 - The controller refuses a trigger whose `git.repo_url`, `GITHUB_REPOSITORY`
   and `github_owner`/`github_repo` name different repositories, so the run page
   always shows the repository the runner fetched.
+- A runner with a list refuses a run that names no repository, since the
+  list has nothing to check, and a `--working-tree` snapshot. A snapshot's
+  code comes from the controller's copy of someone's uncommitted edits, not
+  from a listed repository, so a controller that is compromised or
+  misconfigured could hand the runner any code under a listed name. Pass
+  `--accept-working-tree`, or set `accept_working_tree: true` in the agent
+  section, to build snapshots of the listed repositories anyway; a snapshot
+  still has to name a listed repository.
 
 Allow only repositories whose every committer you would trust to run code under
 your account. Only an allowlist stands between a run and your files: the
@@ -667,7 +683,9 @@ agent:
 Such an agent claims only runs of those repositories, sending the list with
 every claim, and fetches each one's source directly: with the credential the
 controller releases for the run, else with the machine owner's own git
-credentials. The list follows the rules in
+credentials. It refuses `--working-tree` snapshots unless the section
+also sets `accept_working_tree: true`, which you want when you send your own
+`sparkwing pipeline trigger --working-tree` runs to this machine. The list follows the rules in
 [What a laptop runner trusts](#what-a-laptop-runner-trusts).
 `sparkwing cluster runners add --allow-repo 'github.com/acme/*'` writes it.
 An agent section without `allow_repos` keeps the proxy, as before.
@@ -936,14 +954,28 @@ private.
 Laptop mode trusts the user account on the machine, and nothing narrower.
 
 `sparkwing serve start` serves the controller API and the dashboard from
-one process with no bearer check, so every caller that reaches the listener
-can trigger pipelines, overwrite secrets, and delete runs. It binds
-`127.0.0.1:4343` and refuses a non-loopback `--addr` unless you pass
-`--allow-remote`; a browser request whose `Origin` is neither loopback nor
-named in `--allow-origin` is refused too. Those checks are the whole
-boundary. Passing `--allow-remote` hands every host that can reach the port
-the authority of your account, which is why the flag exists rather than a
-quieter default.
+one process. Loopback is not a user boundary, because every account on the
+machine can connect to `127.0.0.1`, so the listener requires the token in
+`serve-token` under the Sparkwing home. The file is created `0600` on first
+start and stays the same across restarts. The CLI reads it and sends it as a
+bearer. A browser signs in once through the dashboard link that
+`sparkwing serve start` and `sparkwing serve status` print: its `#code=`
+fragment is a single-use code, valid for five minutes, which never reaches a
+server or its logs. The page trades it for a session credential derived from
+the token and keeps that in its origin's `localStorage`, which is scoped to
+the port, and sends it as a bearer. No credential rides a cookie, because
+cookies are shared by every port on `127.0.0.1`, including another
+account's. `GET /api/v1/version` and `POST /webhooks/`, which checks the
+sender's signature, need no token. Deleting the file and restarting the
+dashboard signs every browser out.
+
+The listener binds `127.0.0.1:4343` and refuses a non-loopback `--addr`
+unless you pass `--allow-remote`; a browser request whose `Origin` is
+neither the served loopback port nor named in `--allow-origin` is refused
+too. A `pnpm dev` server on port 3100 needs
+`--allow-origin http://localhost:3100`. Passing
+`--allow-remote` hands every host that holds the token the authority of your
+account.
 
 The admission daemon draws the same line. `wingd` listens on a unix socket
 whose path is a function of `SPARKWING_HOME`, and everything running as your

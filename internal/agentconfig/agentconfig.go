@@ -36,16 +36,20 @@ type Config struct {
 	// patterns. Given without a gitcache, the agent fetches each run's source
 	// directly: with the credential the controller releases, else with the
 	// machine owner's own git credentials.
-	AllowRepos    []string      `yaml:"allow_repos"`
-	Profile       string        `yaml:"profile"`
-	Token         string        `yaml:"token"`
-	MaxConcurrent int           `yaml:"max_concurrent"`
-	Labels        []string      `yaml:"labels"`
-	SpawnPolicy   string        `yaml:"spawn_policy"`
-	HolderPrefix  string        `yaml:"holder_prefix"`
-	Poll          time.Duration `yaml:"poll"`
-	Lease         time.Duration `yaml:"lease"`
-	Heartbeat     time.Duration `yaml:"heartbeat"`
+	AllowRepos []string `yaml:"allow_repos"`
+	// AcceptWorkingTree lets an agent with AllowRepos build working-tree
+	// snapshots of the listed repositories. The controller supplies a
+	// snapshot's code, so the list alone cannot vouch for it.
+	AcceptWorkingTree bool          `yaml:"accept_working_tree"`
+	Profile           string        `yaml:"profile"`
+	Token             string        `yaml:"token"`
+	MaxConcurrent     int           `yaml:"max_concurrent"`
+	Labels            []string      `yaml:"labels"`
+	SpawnPolicy       string        `yaml:"spawn_policy"`
+	HolderPrefix      string        `yaml:"holder_prefix"`
+	Poll              time.Duration `yaml:"poll"`
+	Lease             time.Duration `yaml:"lease"`
+	Heartbeat         time.Duration `yaml:"heartbeat"`
 
 	LocalAdmission *bool `yaml:"local_admission"`
 
@@ -133,6 +137,9 @@ func Validate(in Config) (Config, error) {
 	}
 	if !allow.Empty() {
 		out.AllowRepos = allow.Patterns()
+	}
+	if out.AcceptWorkingTree && allow.Empty() {
+		return out, errors.New("agent: accept_working_tree needs allow_repos; an agent without the list builds what the controller sends")
 	}
 	// safety: an agent with no list keeps the proxy, since without one it
 	// would fetch whatever a run names with its owner's credentials.

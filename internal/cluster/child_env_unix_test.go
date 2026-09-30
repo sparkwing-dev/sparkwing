@@ -33,7 +33,7 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 
 	opts := TriggerLoopOptions{
 		ControllerURL: "https://controller.example", LogsURL: "https://logs.example",
-		GitcacheURL: "http://cache.internal", Token: "runner-a",
+		GitcacheURL: "http://cache.internal", Token: "runner-a-agent-token",
 	}
 	child := triggerChildEnvOf(t, opts)
 
@@ -43,6 +43,7 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 	secrets := []string{
 		operatorCacheToken, "operator-api-token", "operator-aws-secret",
 		"operator-github-token", "operator-db-password", "launcher-only-value", "another-runs-grant",
+		"runner-a-agent-token",
 	}
 	for _, secret := range secrets {
 		for name, value := range child {
@@ -51,13 +52,19 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 			}
 		}
 	}
+	for _, name := range []string{"SPARKWING_CONTROLLER_URL", "SPARKWING_LOGS_URL"} {
+		if !strings.HasPrefix(child[name], "http://127.0.0.1:") {
+			t.Errorf("child %s = %q, want the runner's loopback broker", name, child[name])
+		}
+	}
+	if len(child["SPARKWING_AGENT_TOKEN"]) < 32 {
+		t.Errorf("child SPARKWING_AGENT_TOKEN = %q, want the broker capability", child["SPARKWING_AGENT_TOKEN"])
+	}
 	want := map[string]string{
-		"SPARKWING_CACHE_GRANT":    "swcg1.run-a-grant",
-		"SPARKWING_AGENT_TOKEN":    "runner-a",
-		"SPARKWING_CONTROLLER_URL": "https://controller.example",
-		"SPARKWING_GITCACHE_URL":   "http://cache.internal",
-		"GOFLAGS":                  "-mod=mod",
-		"PATH":                     os.Getenv("PATH"),
+		"SPARKWING_CACHE_GRANT":  "swcg1.run-a-grant",
+		"SPARKWING_GITCACHE_URL": "http://cache.internal",
+		"GOFLAGS":                "-mod=mod",
+		"PATH":                   os.Getenv("PATH"),
 	}
 	for name, value := range want {
 		if child[name] != value {
@@ -70,7 +77,7 @@ func TestTriggerChildStartsWithOnlyTheRunsCredentials(t *testing.T) {
 // source the same way, so no git cache URL from the launcher's shell reaches it.
 func TestDirectSourceTriggerChildGetsNoGitcache(t *testing.T) {
 	t.Setenv("SPARKWING_GITCACHE_URL", "https://operator-cache.example")
-	child := triggerChildEnvOf(t, TriggerLoopOptions{ControllerURL: "https://controller.example", Token: "runner-a"})
+	child := triggerChildEnvOf(t, TriggerLoopOptions{ControllerURL: "https://controller.example", Token: "runner-a-agent-token"})
 	if got, ok := child["SPARKWING_GITCACHE_URL"]; ok {
 		t.Fatalf("SPARKWING_GITCACHE_URL=%q reached a direct-source child", got)
 	}

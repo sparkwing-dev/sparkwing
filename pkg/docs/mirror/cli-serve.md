@@ -71,8 +71,8 @@ Stops the verified owned instance, then starts the invoked binary. Preserves eff
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
-| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
-| `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
+| `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
+| `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |
@@ -101,12 +101,20 @@ A running instance is left unchanged, including its effective options.
 Use serve restart for replacement. Build identity is reported separately
 from readiness; missing artifact evidence is unknown.
 
-The listener accepts loopback Host headers and rejects a browser Origin
-that is neither a loopback origin on the served port or the dashboard's
-dev-server port 3100, the --addr host, nor listed in --allow-origin. A
-browser write with a body must send application/json. --allow-remote
-widens the Host check only, and lets every host that reaches the address
-list, overwrite and delete this machine's local secrets.
+Every API request except GET /api/v1/version and signed POST /webhooks/
+needs a bearer: the token in serve-token under the Sparkwing home, which
+only your account can read, or a browser session derived from it. The CLI
+sends the token. A browser opens the dashboard link start and status
+print once; its #code= fragment is a single-use sign-in code the page
+trades for a session kept in that origin's localStorage. No credential
+rides a cookie or a URL a server sees.
+
+The listener accepts loopback Host headers and the host of each
+--allow-origin entry, and rejects a browser Origin that is neither a
+loopback origin on the served port, the --addr host, nor listed in
+--allow-origin; a pnpm dev server on port 3100 needs --allow-origin
+http://localhost:3100. A browser write with a body must send
+application/json. --allow-remote widens the Host check only.
 
 ### Flags
 
@@ -114,8 +122,8 @@ list, overwrite and delete this machine's local secrets.
 |---|---|
 | `-o, --output pretty\|json\|plain` | Pretty on a terminal, NDJSON otherwise. Plain prints running or stopped. |
 | `--addr HOST:PORT` | Bind address (default: 127.0.0.1:4343) |
-| `--allow-remote` | Serve a non-loopback --addr. The API has no authentication, so every host that reaches it can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
-| `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones. Needed when --allow-remote serves the dashboard under a name that is not the --addr host. |
+| `--allow-remote` | Serve a non-loopback --addr. Every host that reaches it can try the serve token, and a holder of the token can run pipelines and list, overwrite and delete this machine's local secrets. It never serves a masked value. |
+| `--allow-origin ORIGINS` | Comma-separated browser origins (`https://dash.example`) allowed alongside loopback ones, as Origin and as Host. Needed when a same-host proxy or --allow-remote serves the dashboard under a name that is not the --addr host. |
 | `--home DIR` | State directory (default: $SPARKWING_HOME or ~/.sparkwing) |
 | `--profile PROFILE` | Profile from ~/.config/sparkwing/config.yaml (uses its logs + cache surfaces) |
 | `--log-store URL` | Pluggable log backend URL (fs:///abs/path, s3://bucket/prefix). Overrides --profile. |

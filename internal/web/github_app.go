@@ -211,10 +211,9 @@ func githubAppCallbackHandler(opts HandlerOptions) http.HandlerFunc {
 type githubAppAvailableResp struct {
 	Authorization string `json:"authorization"`
 	Installations []struct {
-		InstallationID     int64  `json:"installation_id"`
-		AccountLogin       string `json:"account_login"`
-		AccountType        string `json:"account_type"`
-		ConnectedElsewhere bool   `json:"connected_elsewhere"`
+		InstallationID int64  `json:"installation_id"`
+		AccountLogin   string `json:"account_login"`
+		AccountType    string `json:"account_type"`
 	} `json:"installations"`
 }
 
@@ -276,7 +275,7 @@ func githubAppAvailableHandler(opts HandlerOptions) http.HandlerFunc {
 
 var githubAppEmptyPickerTmpl = template.Must(template.New("github-app-empty-picker").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>No existing installations</title></head><body><main><h1>No existing installations</h1><p>Install the App on GitHub to connect a team.</p><form method="post" action="/github/app/connect"><input type="hidden" name="csrf_token" value="{{.}}"><button type="submit">Connect GitHub</button></form></main></body></html>`))
 
-var githubAppPickerTmpl = template.Must(template.New("github-app-picker").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Connect an existing installation</title></head><body><main><h1>Connect an existing installation</h1><ul>{{range .Installations}}<li>{{.AccountLogin}} ({{.AccountType}}) {{if .ConnectedElsewhere}}Connected to another team{{else}}<form method="post" action="/github/app/select"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="installation_id" value="{{.InstallationID}}"><button type="submit">Connect</button></form>{{end}}</li>{{end}}</ul><a href="/team/github">Back to GitHub settings</a></main></body></html>`))
+var githubAppPickerTmpl = template.Must(template.New("github-app-picker").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Connect an existing installation</title></head><body><main><h1>Connect an existing installation</h1><ul>{{range .Installations}}<li>{{.AccountLogin}} ({{.AccountType}}) <form method="post" action="/github/app/select"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="installation_id" value="{{.InstallationID}}"><button type="submit">Connect</button></form></li>{{end}}</ul><a href="/team/github">Back to GitHub settings</a></main></body></html>`))
 
 func githubAppSelectHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -414,8 +413,8 @@ func renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 		page.Title = "Installation not found"
 		page.Message = orDefault(refused.Message, "GitHub reports no installation of the App by that id.")
 	case refused.Status == http.StatusConflict:
-		page.Title = "Connected to another team"
-		page.Message = "This installation is connected to another team. Its owner disconnects it there, or the operator moves it."
+		page.Title = "Installation unavailable"
+		page.Message = "This installation is unavailable to this team. Contact the operator if you expected to connect it."
 	case refused.Status == http.StatusBadRequest:
 		page.Title = "GitHub was not connected"
 		page.Message = orDefault(refused.Message, "The controller refused the request. Start again.")

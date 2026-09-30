@@ -1806,11 +1806,13 @@ func coalesceFollowersCanInherit(outcome string) bool {
 	return outcome == "success"
 }
 
-func txNodeOutcome(ctx context.Context, tx *storeTx, runID, nodeID string) (outcome, failureReason string, found bool, err error) {
+// safety: a leader outside team reads as not found, so a follower cannot
+// learn another team's node outcome through coalescing.
+func txNodeOutcome(ctx context.Context, tx *storeTx, team Team, runID, nodeID string) (outcome, failureReason string, found bool, err error) {
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT outcome, failure_reason FROM nodes WHERE run_id = ? AND node_id = ?`,
-		runID, nodeID,
+		`SELECT outcome, failure_reason FROM nodes WHERE team = ? AND run_id = ? AND node_id = ?`,
+		string(team), runID, nodeID,
 	).Scan(&outcome, &failureReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", false, nil
@@ -2044,7 +2046,7 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 		if waiter.Policy == OnLimitCoalesce {
 			leaderRun := waiter.LeaderRunID
 			leaderNode := waiter.LeaderNodeID
-			leaderOutcome, leaderReason, _, err := txNodeOutcome(ctx, tx, leaderRun, leaderNode)
+			leaderOutcome, leaderReason, _, err := txNodeOutcome(ctx, tx, t.team, leaderRun, leaderNode)
 			if err != nil {
 				return WaiterResolution{}, err
 			}
@@ -2150,11 +2152,11 @@ func (t *Tenant) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKey
 	}
 
 	if leaderRunID != "" {
-		leaderOutcome, leaderReason, _, err := txNodeOutcome(ctx, tx, leaderRunID, leaderNodeID)
+		leaderOutcome, leaderReason, found, err := txNodeOutcome(ctx, tx, t.team, leaderRunID, leaderNodeID)
 		if err != nil {
 			return WaiterResolution{}, err
 		}
-		if !coalesceFollowersCanInherit(leaderOutcome) {
+		if !found || !coalesceFollowersCanInherit(leaderOutcome) {
 			if err := tx.Commit(); err != nil {
 				return WaiterResolution{}, err
 			}

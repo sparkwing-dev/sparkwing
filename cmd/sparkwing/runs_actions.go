@@ -40,9 +40,9 @@ func resolveRunsClient(onFlag, cmd string) (c *client.Client, logc storage.LogSt
 		return nil, nil, fmt.Errorf("%s: no --profile profile and no local dashboard running "+
 			"(start it with `sparkwing serve start`, or pass --profile <profile>)", cmd)
 	}
-	c = client.New(ctrlURL, nil)
+	c = client.NewWithToken(ctrlURL, nil, orchestrator.LocalServeToken(ctrlURL))
 	if logsURL := orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"); logsURL != "" {
-		logc = sparkwinglogs.New(logsURL, nil, "").
+		logc = sparkwinglogs.New(logsURL, nil, orchestrator.LocalServeToken(logsURL)).
 			WithRunnerIdentity(logs.ProcessIdentity("cli"))
 	}
 	return c, logc, nil

@@ -86,3 +86,51 @@ func TestRunNodeRemoteRefusesARepositoryOutsideTheAllowlistBeforeFetching(t *tes
 		t.Fatalf("a refused node still reached the fetch: %v", statErr)
 	}
 }
+
+// A compromised controller chooses a working-tree snapshot's code, and a
+// trigger naming no repository gives the list nothing to check, so an owner's
+// list refuses both unless the owner accepts snapshots of listed repositories.
+func TestRunNodeRemoteRefusesUncheckableSourcesBeforeFetching(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	snapshot := func(repo string) *store.Trigger {
+		return &store.Trigger{
+			ID: "run-1", RepoURL: repo, GitSHA: sha, TriggerSource: "pipeline-working-tree@laptop",
+			TriggerEnv: map[string]string{"SPARKWING_SOURCE_BUNDLE_OBJECT": "sources/" + strings.Repeat("a", 64) + "/" + strings.Repeat("b", 32)},
+		}
+	}
+	allow := mustAllow(t, "github.com/acme/*")
+	for _, tc := range []struct {
+		name    string
+		trigger *store.Trigger
+		allow   sourceurl.RepoAllowlist
+	}{
+		{"snapshot naming no repository", snapshot(""), allow},
+		{"snapshot naming no repository with snapshots accepted", snapshot(""), allow.AcceptingWorkingTree()},
+		{"snapshot of a listed repository", snapshot("https://github.com/acme/app.git"), allow},
+		{"snapshot of an unlisted repository with snapshots accepted", snapshot("https://github.com/evil/app.git"), allow.AcceptingWorkingTree()},
+		{"trigger naming no repository", &store.Trigger{ID: "run-1", GitSHA: sha}, allow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("SPARKWING_HOME", home)
+			t.Setenv("SPARKWING_CACHE_URL", "")
+			_, err := runNodeRemote(context.Background(), tc.trigger, &store.Run{ID: "run-1", Pipeline: "demo"},
+				"http://controller.invalid", "", "", "grant", "run-1", "node-1", "", &tc.allow,
+				slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if !errors.Is(err, ErrRepoNotAllowed) {
+				t.Fatalf("runNodeRemote = %v, want ErrRepoNotAllowed", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(home, "node-runner")); !os.IsNotExist(statErr) {
+				t.Fatalf("a refused node still prepared its fetch: %v", statErr)
+			}
+		})
+	}
+
+	fetch, err := TriggerSourceURL(snapshot("https://github.com/acme/app.git"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AdmitTriggerSource(allow.AcceptingWorkingTree(), snapshot("https://github.com/acme/app.git"), fetch); err != nil {
+		t.Fatalf("a snapshot of a listed repository with snapshots accepted = %v, want admitted", err)
+	}
+}

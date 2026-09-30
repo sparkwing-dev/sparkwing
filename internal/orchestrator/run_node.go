@@ -402,6 +402,9 @@ func runNodeCLI(args []string) error {
 	if isClaimToken(token) && apiSocket == "" {
 		return runClaimedNode(ctx, *controllerURL, *logsURL, runID, nodeID, token)
 	}
+	if token == "" {
+		token = LocalServeToken(*controllerURL)
+	}
 	var runOpts []RunNodeOption
 	brokeredChild := os.Getenv(remoteExecutionCapabilityInputEnv) == "1"
 	if brokeredChild {

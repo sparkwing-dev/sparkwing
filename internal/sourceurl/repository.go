@@ -108,7 +108,8 @@ func TriggerRepository(repoURL, githubRepository, githubOwner, githubRepo string
 // "github.com/acme/*" admits github.com/acme/app but not github.com/acme/app/sub
 // or github.com/other/app. The zero value admits nothing.
 type RepoAllowlist struct {
-	patterns []string
+	patterns    []string
+	workingTree bool
 }
 
 var repoPatternRE = regexp.MustCompile(`^[a-z0-9._*/:-]+$`)
@@ -156,6 +157,19 @@ func ParseRepoAllowlist(patterns []string) (RepoAllowlist, error) {
 	}
 	return out, nil
 }
+
+// AcceptingWorkingTree returns the list with the owner's consent to build
+// working-tree snapshots the controller supplies. A snapshot carries
+// uncommitted code no repository holds, so the list cannot vouch for it.
+func (a RepoAllowlist) AcceptingWorkingTree() RepoAllowlist {
+	a.patterns = append([]string{}, a.patterns...)
+	a.workingTree = true
+	return a
+}
+
+// AcceptsWorkingTree reports whether the owner consented to build
+// controller-supplied working-tree snapshots; see [RepoAllowlist.AcceptingWorkingTree].
+func (a RepoAllowlist) AcceptsWorkingTree() bool { return a.workingTree }
 
 // Empty reports an allowlist that admits nothing.
 func (a RepoAllowlist) Empty() bool { return len(a.patterns) == 0 }

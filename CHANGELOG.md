@@ -1098,8 +1098,8 @@ unlock.
   machine's local secrets: every host that reaches the address can list,
   overwrite and delete them, and the server warns about it at startup. The
   local server never serves a masked value. A browser
-  origin on another loopback port is refused unless it is the dev server's
-  port 3100, and a browser write with a body must send `application/json`.
+  origin on another loopback port is refused unless `--allow-origin` names
+  it, and a browser write with a body must send `application/json`.
 - **controller:** A metered node or trigger claim now pays at least 60 seconds
   at its class's rate, up from 20. Billing stays per second past the minimum.
   A claim reserves the 60 seconds up front, so a balance below one minute at
@@ -1653,6 +1653,69 @@ unlock.
 
 
 ### Security
+
+- **runner:** A trigger loop using the in-process node runner no longer puts
+  its runner token in the environment of the trigger's compiled pipeline
+  binary. The runner serves that binary a loopback broker that admits only
+  the claimed run's routes, and those of child runs it spawns, under a
+  per-run capability, as node execution already did. A cross-pipeline
+  `Ref` still reads another pipeline's latest run in the team and that run's
+  node outputs, and a retry still finds the child its source attempt spawned. The Kubernetes and warm node runners keep handing the token to
+  the binary, since the Jobs it creates need it. The self-hosted runner
+  documentation now says plainly that pipeline code runs as the runner's OS
+  user and can read that user's files, the agent's `config.yaml` included.
+
+- **runner (Breaking):** A runner or agent with an `--allow-repo` /
+  `allow_repos` list refuses a run that names no repository and a
+  `--working-tree` snapshot, before fetching anything. The controller
+  supplies a snapshot's code, so the list could not vouch for it and a
+  compromised controller could run chosen code as the machine's user. The new
+  `accept_working_tree: true` agent key and `sparkwing-runner runner
+  --accept-working-tree` flag accept snapshots of listed repositories. See
+  [migration guide](docs/migrations/_unreleased.md#allow-listed-runners-refuse-working-tree-snapshots).
+
+- **cli + dashboard (Breaking):** `sparkwing serve` requires the token in
+  `serve-token` under the Sparkwing home on every request except
+  `GET /api/v1/version` and signed `POST /webhooks/`, so another account on
+  the machine can no longer drive the loopback API. The file is created
+  `0600` on first start. The CLI sends it for commands that reach the local
+  dashboard, and the browser signs in once through the dashboard link
+  `sparkwing serve start` and `sparkwing serve status` print, now also
+  reported as `login_url` in `-o json`. That link's `#code=` fragment is a
+  single-use code the page trades for a session it keeps in its origin's
+  `localStorage` and sends as a bearer; no credential rides a cookie or a URL
+  a server sees. A loopback origin on port 3100 is no longer trusted without
+  `--allow-origin http://localhost:3100`. See
+  [migration guide](docs/migrations/_unreleased.md#the-local-dashboard-requires-its-token).
+
+- **web:** `sparkwing-web` without `--require-login` on a loopback address
+  refuses DNS-rebound requests and cross-site writes. It answers only loopback
+  `Host` names and the hosts of the new `--allow-origin` list, and applies the
+  Origin, `Sec-Fetch-Site` and JSON-body checks `sparkwing serve` already
+  applied. A same-host proxy that publishes such a dashboard under another
+  name needs `--allow-origin`. `sparkwing serve --allow-origin` now admits
+  those hosts as `Host` too.
+
+- **store:** Opening an existing SQLite store narrows the database and its
+  `-wal`, `-shm` and `-journal` sidecars to `0600` when any of them grants
+  group or other access. A file the process cannot chmod fails the open with
+  the file named.
+
+- **controller + store:** `GET /api/v1/concurrency/{key}/resolve` reads a
+  coalesce leader only inside the caller's team. A `leader_run_id` naming
+  another team's node answers `cancelled`, the same as a missing node, instead
+  of reporting that node's outcome.
+
+- **controller + store:** `POST /api/v1/triggers` resolves `parent_run_id`
+  through the caller's team before walking its ancestry for cycle detection,
+  and the walk stops at a run outside the team.
+
+- **controller + dashboard (Breaking):** `POST
+  /api/v1/team/github-app/connect/available` no longer returns
+  `connected_elsewhere`, and connecting an installation another team holds
+  answers `409` with a generic "unavailable to this team" message. See
+  [migration guide](docs/migrations/_unreleased.md#github-app-picker-carries-no-binding-state).
+  The dashboard's picker offers every installation the user administers.
 
 - **controller + store (Breaking):** Annotations and node metric samples are
   bounded, and node metric reads are paged. See [migration guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An

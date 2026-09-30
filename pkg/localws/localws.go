@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/originguard"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
@@ -74,9 +75,9 @@ type Options struct {
 	AllowRemote bool
 
 	// AllowOrigins lists browser origins ("https://dash.example") whose
-	// requests the API answers in addition to loopback ones. Only useful
-	// with AllowRemote, where the request Host no longer proves the caller
-	// reached this process over the loopback interface.
+	// requests the API answers in addition to loopback ones, as Origin and
+	// as Host: the public name of a proxy on this host, or under
+	// AllowRemote a name that is not the Addr host.
 	AllowOrigins []string
 
 	// Version is rendered as a small pill in the dashboard nav. The
@@ -114,8 +115,8 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		return fmt.Errorf("addr %s is not loopback: set AllowRemote to serve the unauthenticated API to other hosts", opts.Addr)
 	}
 	if opts.AllowRemote && !LoopbackBind(opts.Addr) {
-		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so anyone who reaches it can list, "+
-			"overwrite and delete this machine's local secrets and runs without signing in\n", opts.Addr)
+		fmt.Fprintf(os.Stderr, "sparkwing serve: WARNING: %s is not loopback, so every host that reaches it can try "+
+			"the serve token, and anyone holding it can list, overwrite and delete this machine's local secrets and runs\n", opts.Addr)
 	}
 	bundle := opts.Bundle
 	if bundle == nil {
@@ -133,6 +134,10 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 	}
 	if err := paths.EnsureRoot(); err != nil {
 		return fmt.Errorf("ensure %s: %w", paths.Root, err)
+	}
+	serveToken, err := paths.EnsureServeToken()
+	if err != nil {
+		return fmt.Errorf("serve token: %w", err)
 	}
 
 	useS3OnlyReader := opts.NoLocalStore && opts.LogStore != nil && opts.ArtifactStore != nil
@@ -216,7 +221,7 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           handler,
+		Handler:           requireServeToken(handler, serveToken),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -314,20 +319,8 @@ func buildHandler(
 	if opts.ReadOnly {
 		handler = readOnlyMiddleware(handler)
 	}
-	return web.SecurityHeadersMiddleware(webOpts, originGuard(handler, opts.originPolicy()))
-}
-
-func (o Options) originPolicy() originPolicy {
-	ports := []string{devServerPort}
-	if _, port, err := net.SplitHostPort(o.Addr); err == nil {
-		ports = append(ports, port)
-	}
-	return originPolicy{
-		allowRemote:   o.AllowRemote,
-		bindHost:      bindOriginHost(o.Addr),
-		loopbackPorts: ports,
-		allowOrigins:  o.AllowOrigins,
-	}
+	return web.SecurityHeadersMiddleware(webOpts,
+		originguard.Guard(handler, originguard.NewPolicy(opts.Addr, opts.AllowRemote, opts.AllowOrigins)))
 }
 
 func localPaths(home string) (orchestrator.Paths, error) {
