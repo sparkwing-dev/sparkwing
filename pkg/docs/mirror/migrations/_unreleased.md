@@ -28,8 +28,8 @@ What else changes on a local machine:
   use; see [One config.yaml for machine settings](#one-configyaml-for-machine-settings).
 - Local secrets move from `secrets.env` and `config.env` into `state.db`; see
   [Local secrets in state.db](#local-secrets-in-statedb).
-- `sparkwing serve --allow-remote` now exposes this machine's local secrets to
-  every host that reaches the address.
+- `sparkwing serve --allow-remote` lets remote hosts holding the serve token
+  list, overwrite and delete this machine's local secrets.
 - Node metric reads are paged; see
   [Node metric reads are paged](#node-metric-reads-are-paged).
 - Pipelines pinned to an older SDK keep running; no pin bump is needed.
@@ -336,7 +336,11 @@ more follow. A client that read the whole list in one request passes
 `limit=10000`, which covers every sample a node can hold, or passes each
 `next_cursor` back as `cursor` until the answer carries none. An older
 `sparkwing` binary reading a node with more than 1,000 samples sees only the
-first page. No database migration is required.
+first page. Pagination needs no database migration.
+
+Upgrade the controller before runners. A new runner sends the `kind` field in
+node metric samples, which an older controller's strict decoder rejects. The
+upgraded controller accepts kind-less samples from older runners.
 
 ## 60-second minimum billable duration
 
