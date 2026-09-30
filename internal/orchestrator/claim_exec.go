@@ -90,7 +90,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	if nodeID == store.PlanNodeID {
 		args = []string{"plan", "--json"}
 	}
-	// #nosec G204 -- the pipeline binary this process built, run as argv without a shell
+	// #nosec G204 G702 -- the pipeline binary this process built, run as argv without a shell
 	cmd := exec.Command(binary.path, args...)
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
@@ -129,6 +129,7 @@ const sdkModule = "github.com/sparkwing-dev/sparkwing"
 // one based on MinPlanSDK or later is known to plan; a local replacement is
 // judged by the plan itself, and a missing module by the build.
 func planSDKGap(goMod string) error {
+	// #nosec G703 -- the checkout under the SPARKWING_SOURCE_DIR the launcher Job set
 	raw, err := os.ReadFile(goMod)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -198,6 +199,7 @@ func beatClaim(ctx context.Context, c *client.Client, runID, nodeID string, aban
 // safety: the init container wrote this before any pipeline code ran, and
 // only the module settings it may name are read back from it.
 func applyGoEnvFile(path string) error {
+	// #nosec G703 -- beside the SPARKWING_SOURCE_DIR the launcher Job set
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

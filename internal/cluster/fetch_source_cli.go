@@ -113,6 +113,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 	if len(ids) > 0 {
 		env := privateModuleEnv(os.Environ(), ids, sc.Token)
 		for _, dir := range []string{dest, filepath.Join(dest, ".sparkwing")} {
+			// #nosec G703 -- dir is under the SPARKWING_SOURCE_DIR the launcher Job set
 			if _, err := os.Lstat(filepath.Join(dir, "go.mod")); err != nil {
 				continue
 			}
@@ -123,6 +124,7 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 		// safety: the pipeline's build finds these modules in the cache and
 		// must not ask a public proxy or checksum database about them.
 		goEnv := "GOPRIVATE=" + strings.Join(ids, ",") + "\n"
+		// #nosec G703 -- beside the SPARKWING_SOURCE_DIR the launcher Job set
 		if err := os.WriteFile(filepath.Join(filepath.Dir(dest), orchestrator.GoEnvFile), []byte(goEnv), 0o644); err != nil {
 			return fmt.Errorf("fetch-source: %w", err)
 		}
@@ -193,6 +195,7 @@ func goModDownload(ctx context.Context, dir string, env []string) error {
 func tokenAbsent(token, root string) error {
 	needle := []byte(token)
 	buf := make([]byte, 1<<20)
+	// #nosec G703 -- root is the scratch volume this container wrote
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return err
