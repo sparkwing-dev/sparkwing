@@ -99,14 +99,15 @@ func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		respond triggerHeartbeatTransport
+		want    triggerClaimOutcome
 	}{
 		{"conflict", func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "claim stopped", http.StatusConflict)
-		}},
+		}, triggerClaimReaped},
 		{"cancel request", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"cancel_requested":true}`))
-		}},
+		}, triggerClaimCancelled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -114,7 +115,7 @@ func TestTriggerClaimHeartbeat_StopsChildOnClaimSignal(t *testing.T) {
 				httpClient := &http.Client{Transport: tc.respond}
 				got := triggerClaimHeartbeat(t.Context(), client.New("http://controller.test", httpClient),
 					"trig-x", func() { killed = true }, discardSlog())
-				if got != triggerClaimReaped || !killed {
+				if got != tc.want || !killed {
 					t.Fatalf("%s left child running: outcome=%v killed=%v", tc.name, got, killed)
 				}
 			})

@@ -476,3 +476,67 @@ func TestRunTriggerLoop_DirectSourceRefusesARepositoryOutsideTheAllowlist(t *tes
 		t.Fatalf("a refused run still reached the fetch: %v", statErr)
 	}
 }
+
+// A cancel request kills the child, and the run it stopped is the operator's
+// cancellation, so the loop finishes it cancelled rather than failed with the
+// kill's error.
+func TestRunTriggerLoop_CancelRequestFinishesTheRunCancelled(t *testing.T) {
+	withFastTriggerHeartbeat(t, 5*time.Millisecond, time.Second, time.Minute)
+	oldAttempts := triggerFetchMaxAttempts
+	triggerFetchMaxAttempts = 1
+	t.Cleanup(func() { triggerFetchMaxAttempts = oldAttempts })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var claimed atomic.Bool
+	askedToCancel := make(chan struct{})
+	var once sync.Once
+	var finishStatus atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			if claimed.Swap(true) {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID: "stopped", Pipeline: "demo", RepoURL: "https://git.example.invalid/acme/repo",
+				Status: "claimed", ClaimSeq: 3,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/stopped/heartbeat":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"cancel_requested":true}`))
+			once.Do(func() { close(askedToCancel) })
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs/stopped/finish":
+			var body struct {
+				Status string `json:"status"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			finishStatus.Store(body.Status)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/stopped/done":
+			w.WriteHeader(http.StatusNoContent)
+			cancel()
+		case r.URL.Path == "/api/v1/capabilities":
+			http.NotFound(w, r)
+		default:
+			// safety: the source fetch waits for the cancel so the heartbeat,
+			// not a fetch error, is what ends the run.
+			select {
+			case <-askedToCancel:
+			case <-r.Context().Done():
+			}
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	if err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL, GitcacheURL: srv.URL, WorkRoot: t.TempDir(),
+		Poll: 5 * time.Millisecond, MaxConcurrent: 1, Logger: discardSlog(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := finishStatus.Load().(string); got != "cancelled" {
+		t.Fatalf("a run stopped by a cancel request finished %q, want cancelled", got)
+	}
+}

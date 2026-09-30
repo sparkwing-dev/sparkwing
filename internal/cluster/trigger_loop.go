@@ -161,8 +161,12 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			if err != nil {
 				logger.Error("trigger loop: trigger failed",
 					"run_id", trigger.ID, "err", err)
+				status := "failed"
+				if errors.Is(err, errTriggerCancelled) {
+					status = "cancelled"
+				}
 				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(claimCtx), 5*time.Second)
-				ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error())
+				ferr := cli.FinishRun(finishCtx, trigger.ID, status, err.Error())
 				canFinish := ferr == nil
 				if ferr != nil {
 					logger.Warn("trigger loop: FinishRun failed",
@@ -220,9 +224,16 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		outcomeCh <- triggerClaimHeartbeat(childCtx, cli, trigger.ID, cancelChild, logger)
 	}()
 
+	cancelled := false
+	defer func() {
+		if cancelled && err != nil {
+			err = fmt.Errorf("%w: %w", errTriggerCancelled, err)
+		}
+	}()
 	awaitHeartbeat := func() bool {
 		cancelChild()
 		outcome := <-outcomeCh
+		cancelled = outcome == triggerClaimCancelled
 		return outcome == triggerClaimSilenced
 	}
 
@@ -662,7 +673,13 @@ const (
 	triggerClaimReaped
 
 	triggerClaimSilenced
+
+	triggerClaimCancelled
 )
+
+// errTriggerCancelled marks a run whose child was killed because someone
+// asked the controller to cancel it, so the run finishes cancelled, not failed.
+var errTriggerCancelled = errors.New("cancelled on request")
 
 var (
 	maxTriggerHeartbeatSilence = 3 * time.Minute
@@ -688,7 +705,7 @@ func triggerClaimHeartbeat(ctx context.Context, cli *client.Client, triggerID st
 				if status != nil && status.CancelRequested {
 					logger.Warn("trigger loop: cancellation requested; killing child", "trigger_id", triggerID)
 					killChild()
-					return triggerClaimReaped
+					return triggerClaimCancelled
 				}
 				lastOK = time.Now()
 				continue

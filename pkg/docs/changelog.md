@@ -1311,6 +1311,9 @@ unlock.
 
 ### Fixed
 
+- **runner:** A run cancelled while a controller runner's trigger loop holds it
+  now finishes `cancelled`. Before, the loop killed the pipeline child and then
+  recorded the run `failed` with `child pipeline binary: signal: killed`.
 - **runner:** `sparkwing runs retry --failed` on a controller runner no longer
   fails with `rehydrate retry ... read source node ...: controller 403: trigger
   capability does not allow this route`. The trigger broker now lets the retry
