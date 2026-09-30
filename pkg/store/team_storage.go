@@ -135,6 +135,9 @@ type StorageReserve struct {
 	// TTL defaults to [DefaultStorageReservationTTL].
 	TTL time.Duration
 	Now time.Time
+	// SmallOutput reserves a job output of at most [MaxUnpaidOutputBytes],
+	// which a team with neither credits nor a free slot may still store.
+	SmallOutput bool
 }
 
 // StorageReservation is room a writer holds until it commits or releases.
@@ -251,7 +254,7 @@ func reserveStorageTx(ctx context.Context, tx *storeTx, req StorageReserve) (Sto
 	if err != nil {
 		return StorageReservation{}, err
 	}
-	if standing.Tier == TeamTierNone {
+	if standing.Tier == TeamTierNone && !(req.SmallOutput && req.Bytes <= MaxUnpaidOutputBytes) {
 		return StorageReservation{}, freeStoragePaused(team)
 	}
 	used, reserved, err := lockTeamStorageTx(ctx, tx, team, req.Kind, now)

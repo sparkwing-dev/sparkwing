@@ -199,7 +199,7 @@ func (s *Store) ReserveUpload(ctx context.Context, req UploadRequest) (_ Upload,
 		return Upload{}, err
 	}
 	res, err := reserveStorageTx(ctx, tx, StorageReserve{
-		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now,
+		Team: req.Team, Kind: req.Kind, Bytes: req.Size, TTL: DirectUploadTTL, Now: req.Now, SmallOutput: output,
 	})
 	if err != nil {
 		return Upload{}, err

@@ -420,15 +420,6 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 	f := newAppFixture(t)
 	olga := f.ghUser(501, "olga")
 	f.connect(olga, 501, 7, acmeAdmin)
-	tn, err := f.store.ForTeam(ctx, store.Team(olga.team))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// safety: outputs count toward the team's storage, which a team with no
-	// credits and no free slot cannot hold.
-	if _, err := tn.GrantCredits(ctx, store.CreditGrantPaid, 1000*store.MicroCreditsPerCent, "pay_outputs", "root"); err != nil {
-		t.Fatal(err)
-	}
 	accept := func(runID string, nodes ...map[string]any) {
 		t.Helper()
 		for _, n := range nodes {

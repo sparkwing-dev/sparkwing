@@ -438,3 +438,28 @@ func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
 		t.Fatalf("a byte past the run's 1 GiB: err = %v, want the run limit", err)
 	}
 }
+
+func TestReserveUpload_ASlotlessTeamStoresOnlySmallOutputs(t *testing.T) {
+	s := storetest.Open(t)
+	teamHandle(t, s, "team-slotless")
+	reserve := func(size int64) error {
+		key, _ := store.NewOutputKey("run-slotless", "n", 1, 0)
+		_, err := s.ReserveUpload(t.Context(), store.UploadRequest{
+			Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: key, Size: size,
+			SHA256: strings.Repeat("a", 64), Principal: "p", Provenance: "cloud",
+		})
+		return err
+	}
+	if err := reserve(store.MaxUnpaidOutputBytes); err != nil {
+		t.Fatalf("a 1 MiB output: %v", err)
+	}
+	if err := reserve(store.MaxUnpaidOutputBytes + 1); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("an output past 1 MiB: err = %v, want free storage paused", err)
+	}
+	if _, err := s.ReserveUpload(t.Context(), store.UploadRequest{
+		Team: "team-slotless", RunID: "run-slotless", Kind: store.StorageCache, Key: "artifacts/blobs/" + strings.Repeat("b", 64),
+		Size: 1, SHA256: strings.Repeat("b", 64), Principal: "p", Provenance: "cloud",
+	}); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("a one-byte artifact: err = %v, want free storage paused", err)
+	}
+}

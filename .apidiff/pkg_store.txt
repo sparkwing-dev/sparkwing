@@ -1333,6 +1333,7 @@ const MaxSecretsPerTeam = 100
 const MaxSourceMints = 3
 const MaxStorageRateMicroPerGBDay = 1_000_000_000_000
 const MaxTeamBalanceMicro = 5_000 * 100 * MicroCreditsPerCent
+const MaxUnpaidOutputBytes int64 = 1 << 20
 type Membership struct {
 	Team        Team
 	DisplayName string
@@ -2078,6 +2079,8 @@ type StorageReserve struct {
 
 	TTL time.Duration
 	Now time.Time
+
+	SmallOutput bool
 }
 type StorageSettings struct {
 	EventRetentionDays      int64
