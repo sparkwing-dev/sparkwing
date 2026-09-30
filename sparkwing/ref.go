@@ -16,8 +16,8 @@ import (
 // One field type covers two routings:
 //
 //  1. In-run sibling -- Ref points at a node in the same DAG.
-//     Construct via RefTo[T](node). Implies a Needs() edge that
-//     the orchestrator picks up.
+//     Construct via RefTo[T](node). A job struct field holding one
+//     makes the node depend on the referenced node.
 //
 //  2. Cross-pipeline, passive -- Ref points at a node in another
 //     pipeline's most recent successful run. Construct via
@@ -227,7 +227,11 @@ func (r Ref[T]) getCrossPipeline(ctx context.Context) (T, bool, error) {
 //
 //	build := sw.Job(plan, "build", &Build{}) // Build embeds Produces[BuildOut]
 //	buildRef := sw.RefTo[BuildOut](build)
-//	sw.Job(plan, "deploy", &Deploy{Build: buildRef}).Needs(build)
+//	sw.Job(plan, "deploy", &Deploy{Build: buildRef}) // depends on build
+//
+// Only a Ref held in an exported job struct field adds the edge; a Ref
+// captured by a closure (a SkipIf predicate, a func job) needs an
+// explicit Needs.
 //
 // RefTo[T] panics when the job does not embed Produces[T] or T does
 // not match the marker's declared type.
@@ -313,54 +317,49 @@ func jsonResolverFromContext(ctx context.Context) func(nodeID string) ([]byte, b
 // PipelineRefs returns the other pipelines' nodes this node's job holds a
 // RefToLastRun field for, in field order. A controller-dispatched node reads
 // only these, so a ref built elsewhere than a job field is refused there.
-func (n *JobNode) PipelineRefs() []RefTarget { return collectCrossPipelineRefs(n.job) }
-
-func collectCrossPipelineRefs(job any) []RefTarget {
-	t := reflect.TypeOf(job)
-	v := reflect.ValueOf(job)
-	if t == nil {
-		return nil
+func (n *JobNode) PipelineRefs() []RefTarget {
+	var out []RefTarget
+	for _, r := range collectRefs(n.job) {
+		if r.Pipeline != "" {
+			out = append(out, r)
+		}
 	}
-	for t.Kind() == reflect.Pointer {
+	return out
+}
+
+func (r Ref[T]) target() RefTarget { return RefTarget{Pipeline: r.Pipeline, NodeID: r.NodeID} }
+
+type refField interface{ target() RefTarget }
+
+func collectRefs(job any) []RefTarget {
+	v := reflect.ValueOf(job)
+	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return nil
 		}
-		t = t.Elem()
 		v = v.Elem()
 	}
-	if t.Kind() != reflect.Struct {
+	if v.Kind() != reflect.Struct {
 		return nil
 	}
 	var out []RefTarget
-	for i := range t.NumField() {
-		f := t.Field(i)
-		if !f.IsExported() {
+	for i := range v.NumField() {
+		if !v.Type().Field(i).IsExported() {
 			continue
 		}
-		ft := f.Type
-		if ft.Kind() != reflect.Struct {
+		r, ok := v.Field(i).Interface().(refField)
+		if !ok {
 			continue
 		}
-		if _, ok := ft.FieldByName("NodeID"); !ok {
-			continue
+		if t := r.target(); t.NodeID != "" {
+			out = append(out, t)
 		}
-		pf, ok := ft.FieldByName("Pipeline")
-		if !ok || pf.Type.Kind() != reflect.String {
-			continue
-		}
-		fv := v.Field(i)
-		pipe := fv.FieldByName("Pipeline").String()
-		node := fv.FieldByName("NodeID").String()
-		if pipe == "" || node == "" {
-			continue
-		}
-		out = append(out, RefTarget{Pipeline: pipe, NodeID: node})
 	}
 	return out
 }
 
 // RefTarget is one (pipeline, node) pair discovered on a job struct
-// via collectCrossPipelineRefs. Dashboard / audit code uses it to
+// via collectRefs. Dashboard / audit code uses it to
 // annotate cross-pipeline dependencies.
 type RefTarget struct {
 	Pipeline string

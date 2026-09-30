@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -601,5 +602,40 @@ func TestWantsHelpStopsAtTheTerminator(t *testing.T) {
 	}
 	if !wantsHelp([]string{"--help", "--", "x"}) {
 		t.Error("--help before -- is still a help request")
+	}
+}
+
+func TestExamplesUseOnlyDeclaredFlags(t *testing.T) {
+	flagRE := regexp.MustCompile(`(?:^|\s)--([a-z][a-z0-9-]*)`)
+	byPath := map[string]*Command{}
+	for _, command := range allCommands {
+		byPath[command.Path] = command
+	}
+	for _, command := range allCommands {
+		for _, example := range command.Examples {
+			line := example.Command
+			if i := strings.IndexAny(line, "|;&"); i >= 0 {
+				line = line[:i]
+			}
+			var owner *Command
+			path := ""
+			for p, c := range byPath {
+				if len(p) > len(path) && (line == p || strings.HasPrefix(line, p+" ")) {
+					owner, path = c, p
+				}
+			}
+			if path == "" || owner.UsageSuffix != "" {
+				continue
+			}
+			declared := map[string]bool{"help": true}
+			for _, spec := range owner.Flags {
+				declared[spec.Name] = true
+			}
+			for _, m := range flagRE.FindAllStringSubmatch(strings.TrimPrefix(line, path), -1) {
+				if !declared[m[1]] {
+					t.Errorf("%s example %q uses undeclared --%s", owner.Path, example.Command, m[1])
+				}
+			}
+		}
 	}
 }

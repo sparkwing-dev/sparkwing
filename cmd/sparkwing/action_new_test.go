@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/mod/module"
+
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -452,5 +454,39 @@ func TestScaffoldRollsBackJobWhenConfigCannotBeUpdated(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "jobs", "sample.go")); !os.IsNotExist(statErr) {
 		t.Fatalf("orphan job remains: %v", statErr)
+	}
+}
+
+func TestScaffoldModuleName_IsAValidModulePath(t *testing.T) {
+	for dir, want := range map[string]string{
+		"my repo":   "my-repo-pipelines",
+		"api":       "api-pipelines",
+		".hidden!":  "hidden-pipelines",
+		"  ":        "sparkwing-pipelines",
+		"svc_v2.go": "svc_v2.go-pipelines",
+		"CON.foo":   "CON-foo-pipelines",
+		"foo~1.bar": "foo~1-bar-pipelines",
+	} {
+		got := scaffoldModuleName(dir)
+		if got != want {
+			t.Errorf("scaffoldModuleName(%q) = %q, want %q", dir, got, want)
+		}
+		if err := module.CheckImportPath(got); err != nil {
+			t.Errorf("scaffoldModuleName(%q) = %q is not a valid module path: %v", dir, got, err)
+		}
+	}
+}
+
+func TestFinishScaffold_FailsWhenGoModTidyFails(t *testing.T) {
+	if !goOnPath() {
+		t.Skip("go is not on PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("not a go.mod\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := finishScaffold(dir, filepath.Join(dir, "jobs", "sample.go"), "sample", false, "")
+	if err == nil || !strings.Contains(err.Error(), "go mod tidy") {
+		t.Fatalf("finishScaffold = %v, want the go mod tidy failure", err)
 	}
 }

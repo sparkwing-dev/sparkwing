@@ -227,11 +227,18 @@ to run and the checkout is exactly what the pin exists to ignore.
 
 ## The tick model
 
-Install writes one OS timer for the whole host -- a systemd user timer on
+Install writes one OS timer for the sparkwing home -- a systemd user timer on
 Linux, a launchd agent on macOS -- that runs `sparkwing crons tick` every
-minute. One timer serves every armed schedule, because sparkwing evaluates
-the cron expressions itself rather than translating them into a service
-manager's own calendar syntax.
+minute. One timer serves every armed schedule in that home, because sparkwing
+evaluates the cron expressions itself rather than translating them into a
+service manager's own calendar syntax. The default home (`~/.sparkwing`) uses
+`sparkwing-crons.timer` and `dev.sparkwing.crons`; any other `SPARKWING_HOME`
+gets names with a short hash of its path appended
+(`sparkwing-crons-1a2b3c4d.timer`, `dev.sparkwing.crons.1a2b3c4d`), so each
+home's timer survives installs from the others.
+When upgrading a custom home that used the bare timer name, install retires
+that managed timer after enabling the custom home's named timer. Uninstall
+also retires a matching managed legacy timer. Timers for other homes remain.
 
 Each tick takes an exclusive lock on `crons.lock` under the sparkwing home, so
 two ticks never resolve the same instant. It re-reads the declaration of every
@@ -347,9 +354,13 @@ to do depends on what it reports:
 
 - **timer not installed**: run `sparkwing crons install` on this host.
 - **installed, not running**: the service manager has the files but is not
-  firing them. On Linux, `systemctl --user status sparkwing-crons.timer` says
-  why; a user without a login session needs `loginctl enable-linger` for its
+  firing them. On Linux, `systemctl --user status sparkwing-crons.timer` (the
+  name `crons status` prints, for a home other than the default) says why; a user without a login session needs `loginctl enable-linger` for its
   timers to run while logged out.
+- **ticks another Sparkwing home**: a timer installed by an older sparkwing
+  from another `SPARKWING_HOME` replaced this home's. `sparkwing crons install`
+  from this home takes it back; reinstall from the other home to give it its
+  own timer.
 - **it runs another sparkwing**: the binary moved, usually after an upgrade
   that installed elsewhere. `sparkwing crons install` repoints the unit.
 - **stale with the timer enabled**: the tick is firing and failing. Read

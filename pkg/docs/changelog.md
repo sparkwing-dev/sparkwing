@@ -1329,6 +1329,55 @@ unlock.
   includes a starting daemon's socket between its bind and listen. The scan
   now only reads; a killed daemon's socket directory stays in `/tmp` until that
   home's next daemon starts.
+- **orchestrator + store:** A cancelled node's step rows settle with it. A step
+  still `running` when its node finishes now ends with the node's outcome
+  (`passed`, `failed`, or `cancelled`) and a finish time. The local runner clears
+  the `running, pid N` detail once the node's process exits, so `runs status` no
+  longer shows a finished node with a running step and a dead pid.
+
+- **orchestrator:** A sub-second, failed or retried local run no longer prints
+  `run resource measurements are incomplete or exceed the supported range` to
+  stderr. The warning now fires only for a reading outside the supported range,
+  and it names the pipeline as `repo/pipeline` rather than the internal
+  length-prefixed key (`4:repofeat`).
+
+- **cli:** The `sparkwing secrets set --help` example for scoping a secret uses
+  `--pipeline` instead of a `--repo` flag the command does not have.
+
+- **cli + controller:** `sparkwing secrets set` shows why the local secrets key
+  was refused -- a key file outside the `SPARKWING_HOME` in use, a process that
+  may not create the key, or values sealed under a key this process lacks --
+  as a `409` naming the remedy, instead of a bare `controller 500`. Other seal
+  failures stay masked as internal errors.
+
+- **crons:** `sparkwing crons install` from a `SPARKWING_HOME` other than
+  `~/.sparkwing` no longer replaces the default home's timer. On macOS both
+  homes shared the launchd label `dev.sparkwing.crons` and on Linux the
+  `sparkwing-crons` units, so the second install silently took over the first
+  home's timer while its `crons status` still reported it loaded. A non-default
+  home now gets names with a short hash of its path appended; the default home
+  keeps the names existing installs use. Installing or uninstalling a custom
+  home's timer retires its managed legacy timer under the bare name, if present.
+  `crons status` reports a timer that ticks another home instead of calling it
+  enabled.
+
+- **cli:** `sparkwing pipeline new` exits non-zero with the `go mod tidy`
+  output when tidy fails, instead of printing the failure and exiting 0. The
+  pipeline files stay written. A repository directory whose name holds spaces
+  or other characters a module path refuses (`my repo`) now scaffolds a valid
+  module path (`my-repo-pipelines`).
+
+- **cli:** A failed local run's closing tips and its `run_finish` hints no
+  longer suggest `sparkwing runs retry --failed`, which refuses every local
+  run. Submit a new run from the intended checkout instead.
+
+- **sdk:** A job struct field holding `sw.RefTo[T](node)` now makes the job
+  depend on that node, so `pipeline explain` and the plan show the edge and the
+  consumer no longer races the producer (`Ref[...].Get: node "produce" has not
+  completed`). A `RefToLastRun` field adds no edge, and a Ref captured by a
+  closure still needs `.Needs(node)`. A pipeline that relied on the missing
+  edge gets a new capacity fingerprint and re-measures once.
+
 - **orchestrator:** A node whose parallel commands finish on the same clock
   reading no longer fails with `record node accounting: controller 500`; each
   of a node's resource samples now takes a timestamp after the one before it.
@@ -1705,6 +1754,12 @@ unlock.
   served them to anyone who reached the API. A `--metrics-addr` listener still
   serves the endpoint without a bearer. See
   [the migration note](docs/migrations/_unreleased.md#controller-metrics-on-the-api-listener-needs-an-admin-bearer).
+- **serve:** The dashboard's sign-in exchange (`POST /auth/local/session`)
+  and sign-in-code mint now pass the same Host and Origin checks as the rest of
+  `sparkwing serve`, and a browser exchange must send `application/json`. A page
+  reached through a rebound DNS name or another origin can no longer trade a
+  sign-in code for a session.
+
 - **runner:** A trigger loop using the in-process node runner no longer puts
   its runner token in the environment of the trigger's compiled pipeline
   binary. The runner serves that binary a loopback broker that admits only

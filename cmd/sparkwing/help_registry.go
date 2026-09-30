@@ -3301,7 +3301,7 @@ shared with every pipeline.`,
 		{"Set a local masked secret", "sparkwing secrets set --name API_TOKEN --value abc123"},
 		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod"},
 		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod"},
-		{"Scope a secret to one repository", "sparkwing secrets set --name DEPLOY_KEY --file ./key --repo acme/web --profile prod"},
+		{"Scope a secret to one pipeline", "sparkwing secrets set --name DEPLOY_KEY --file ./key --pipeline deploy --profile prod"},
 		{"Let every run read one secret", "sparkwing secrets set --name NPM_TOKEN --file ./npmrc --shared --profile prod"},
 	},
 }

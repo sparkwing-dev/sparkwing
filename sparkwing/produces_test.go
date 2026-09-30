@@ -196,3 +196,26 @@ func TestLintWarning_NoneWhenAligned(t *testing.T) {
 		t.Fatalf("expected 0 lint warnings, got %+v", warns)
 	}
 }
+
+type refConsumerJob struct {
+	sparkwing.Base
+	Build sparkwing.Ref[buildOut]
+	Prev  sparkwing.Ref[buildOut]
+}
+
+func (j *refConsumerJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", func(ctx context.Context) error { return nil })
+	return nil, nil
+}
+
+func TestRefToField_AddsDependencyEdge(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	produce := sparkwing.Job(plan, "produce", &producedJob{})
+	consume := sparkwing.Job(plan, "consume", &refConsumerJob{
+		Build: sparkwing.RefTo[buildOut](produce),
+		Prev:  sparkwing.RefToLastRun[buildOut]("other-pipeline", "artifact"),
+	})
+	if got := consume.DepIDs(); len(got) != 1 || got[0] != "produce" {
+		t.Fatalf("DepIDs = %v, want [produce]; a cross-pipeline ref is not an edge", got)
+	}
+}

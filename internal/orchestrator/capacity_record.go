@@ -58,7 +58,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 		err = st.SetPipelinePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
 	}
 	if err != nil {
-		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", pipeline, "err", err)
+		slog.WarnContext(ctx, "record pipeline resource pin failed", "pipeline", store.DisplayProfileKey(pipeline), "err", err)
 	}
 	dominant := cacheDominant(nodes)
 	bucket := nodemetrics.Interval()
@@ -66,9 +66,12 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 	var cpuIntegral int64
 	var peakNodeMemory int64
 	runValid := true
+	// safety: a short, failed or retried run is simply not measured, which is
+	// routine; only a reading outside the arithmetic range is worth a warning.
+	outOfRange := false
 	add := func(total *int64, value int64) {
 		if *total < 0 || value < 0 || *total > math.MaxInt64-value {
-			runValid = false
+			runValid, outOfRange = false, true
 			return
 		}
 		*total += value
@@ -118,7 +121,7 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 				hasNodeCPU, hasRunCPU, total.hasCPU = true, true, true
 				observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
 				if s.CPUMillicores < 0 || s.MemoryBytes < 0 {
-					unknown, runValid = true, false
+					unknown, runValid, outOfRange = true, false, true
 				}
 				total.cpuMillicores = max(total.cpuMillicores, s.CPUMillicores)
 				total.memoryBytes = max(total.memoryBytes, s.MemoryBytes)
@@ -156,8 +159,10 @@ func recordRunProfile(ctx context.Context, st RunCoordination, pipeline, runID s
 			PlanHash:        planHash,
 		})
 	}
+	if outOfRange {
+		slog.WarnContext(ctx, "run resource measurements exceed the supported range", "pipeline", store.DisplayProfileKey(pipeline), "run_id", runID)
+	}
 	if !runValid {
-		slog.WarnContext(ctx, "run resource measurements are incomplete or exceed the supported range", "pipeline", pipeline, "run_id", runID)
 		return
 	}
 	if dominant || !measured || (!hasRunCPU && cpuIntegral == 0) {
@@ -293,7 +298,7 @@ func capLocalPeakCores(ctx context.Context, pipeline, node string, observedCores
 	hostCores := float64(runtime.NumCPU())
 	if hostCores > 0 && observedCores > hostCores {
 		sparkwing.Debug(ctx, "capacity: %s node %q observed %.1f cores over host %.1f; recording host capacity",
-			pipeline, node, observedCores, hostCores)
+			store.DisplayProfileKey(pipeline), node, observedCores, hostCores)
 		return hostCores
 	}
 	return observedCores

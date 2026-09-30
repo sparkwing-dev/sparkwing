@@ -203,6 +203,11 @@ func newNode(caller, id string, job Workable) *JobNode {
 		outType:    outType,
 	}
 	applyWorkableLabels(n, job)
+	for _, r := range collectRefs(job) {
+		if r.Pipeline == "" {
+			n.addNeed(r.NodeID)
+		}
+	}
 	return n
 }
 
@@ -596,9 +601,8 @@ func (n *JobNode) addNeed(id string) {
 	n.needs = append(n.needs, id)
 }
 
-// DepIDs returns the node IDs this node depends on. Includes both
-// explicit Needs entries and Ref-derived edges (populated at plan
-// finalization by the orchestrator).
+// DepIDs returns the node IDs this node depends on: explicit Needs
+// entries and the in-run [Ref] fields its job struct held at registration.
 func (n *JobNode) DepIDs() []string {
 	out := make([]string, len(n.needs))
 	copy(out, n.needs)

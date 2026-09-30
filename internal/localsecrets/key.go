@@ -213,10 +213,10 @@ func (k *Keyring) ensure(ctx context.Context, st *store.Store) (*secrets.Cipher,
 	if !k.mayCreate {
 		return nil, fmt.Errorf("%w: %s does not exist, and only the sparkwing daemon creates it. Store the first "+
 			"local secret with `sparkwing secrets set`, which starts the daemon; if the daemon runs with %s, "+
-			"set it for this process too", ErrNoKeyToCreate, k.path, KeyEnv)
+			"set it for this process too%.0w", ErrNoKeyToCreate, k.path, KeyEnv, secrets.ErrKeyRefused)
 	}
 	if err := configguard.GuardWrite("the local secrets key", KeyFileEnv, k.path); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w%.0w", err, secrets.ErrKeyRefused)
 	}
 	key, err := k.create()
 	if err != nil {
@@ -324,6 +324,6 @@ func (k *Keyring) missingLocked(ctx context.Context, st *store.Store) error {
 	}
 	return fmt.Errorf("%w: the local secrets store holds values sealed under a key this process does not have, "+
 		"so it will not create a new one. Restore that key to %s, or set %s to it (base64 of its 32 bytes) "+
-		"in the environment the sparkwing daemon starts in, then run `sparkwing daemon restart`",
-		ErrNoKey, k.path, KeyEnv)
+		"in the environment the sparkwing daemon starts in, then run `sparkwing daemon restart`%.0w",
+		ErrNoKey, k.path, KeyEnv, secrets.ErrKeyRefused)
 }

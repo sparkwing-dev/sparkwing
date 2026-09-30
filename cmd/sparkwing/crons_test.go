@@ -87,7 +87,7 @@ func TestCronsInstallArmsTheRepoAndInstallsTheTimer(t *testing.T) {
 	if !strings.Contains(out, "armed "+filepath.Base(repo)+"/every-minute") {
 		t.Fatalf("install output:\n%s", out)
 	}
-	if !strings.Contains(out, "timer: ") || !strings.Contains(out, crontimer.TimerName) {
+	if !strings.Contains(out, "timer: ") || !strings.Contains(out, "sparkwing-crons") {
 		t.Errorf("install did not report the timer:\n%s", out)
 	}
 
@@ -115,7 +115,7 @@ func TestCronsInstallOnARepoDeclaringNoScheduleInstallsNoTimer(t *testing.T) {
 	if !strings.Contains(out, "nothing to arm") {
 		t.Fatalf("install output:\n%s", out)
 	}
-	if strings.Contains(out, crontimer.TimerName) {
+	if strings.Contains(out, "sparkwing-crons") {
 		t.Errorf("a repo with no schedule installed a timer:\n%s", out)
 	}
 }

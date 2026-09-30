@@ -29,6 +29,12 @@ const boundAADLabel = "sparkwing/secret/v3\x00"
 // one, and the controller calls that once, to reseal it at startup.
 var ErrLegacyEnvelope = errors.New("secrets cipher: envelope predates team binding and must be resealed")
 
+// ErrKeyRefused marks a seal that failed because the key's owner refused to
+// load or create the key for a reason the caller can act on, such as a key
+// file outside the sparkwing home. The controller returns its message to the
+// client instead of masking it as an internal error.
+var ErrKeyRefused = errors.New("secrets key refused")
+
 const KeySize = chacha20poly1305.KeySize
 
 type Cipher struct {
