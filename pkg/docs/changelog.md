@@ -1627,6 +1627,22 @@ unlock.
 
 ### Security
 
+- **controller + store:** `GET /api/v1/concurrency/{key}/resolve` reads a
+  coalesce leader only inside the caller's team. A `leader_run_id` naming
+  another team's node answers `cancelled`, the same as a missing node, instead
+  of reporting that node's outcome.
+
+- **controller + store:** `POST /api/v1/triggers` resolves `parent_run_id`
+  through the caller's team before walking its ancestry for cycle detection,
+  and the walk stops at a run outside the team.
+
+- **controller + dashboard (Breaking):** `POST
+  /api/v1/team/github-app/connect/available` no longer returns
+  `connected_elsewhere`, and connecting an installation another team holds
+  answers `409` with a generic "unavailable to this team" message. See
+  [migration guide](docs/migrations/_unreleased.md#github-app-picker-carries-no-binding-state).
+  The dashboard's picker offers every installation the user administers.
+
 - **controller + store (Breaking):** Annotations and node metric samples are
   bounded, and node metric reads are paged. See [migration guide](docs/migrations/_unreleased.md#node-metric-reads-are-paged). An
   annotation holds at most 64 KiB, and a run at most 1,000 annotations and

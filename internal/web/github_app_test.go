@@ -91,8 +91,8 @@ func (c *githubAppController) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"authorization": "sealed-proof", "installations": []map[string]any{
-			{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization", "connected_elsewhere": false},
-			{"installation_id": 43, "account_login": "other-org", "account_type": "Organization", "connected_elsewhere": true},
+			{"installation_id": 42, "account_login": "octo-org", "account_type": "Organization"},
+			{"installation_id": 43, "account_login": "other-org", "account_type": "Organization"},
 		}})
 	case "/api/v1/team/github-app/connect/select":
 		w.WriteHeader(http.StatusCreated)
@@ -130,7 +130,7 @@ func TestGitHubAppExistingPickerAuthorizesAndSelects(t *testing.T) {
 	}
 	flow = flowFrom(t, callback)
 	listed := githubAppReturn(handler, "/github/app/available", nil, &flow, true)
-	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), "octo-org") || !strings.Contains(listed.Body.String(), "Connected to another team") {
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), "octo-org") || strings.Contains(listed.Body.String(), "another team") {
 		t.Fatalf("picker = %d %s", listed.Code, listed.Body)
 	}
 	flow = flowFrom(t, listed)
@@ -450,8 +450,8 @@ func TestGitHubAppCompleteExplainsEachRefusal(t *testing.T) {
 			http.StatusNotFound, "no installation of the App",
 		},
 		{
-			http.StatusConflict, `{"error":"this installation is connected to another team"}`,
-			http.StatusConflict, "connected to another team",
+			http.StatusConflict, `{"error":"this installation is unavailable to this team; contact the operator if you expected to connect it"}`,
+			http.StatusConflict, "unavailable to this team",
 		},
 		{
 			http.StatusBadGateway, `{"error":"internal server error"}`,

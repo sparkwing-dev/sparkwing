@@ -5933,12 +5933,11 @@ paths:
                     items:
                       x-sparkwing-go-type: pkg/controller.githubAppAvailableInstallation
                       type: object
-                      required: [installation_id, account_login, account_type, connected_elsewhere]
+                      required: [installation_id, account_login, account_type]
                       properties:
                         installation_id: {type: integer, format: int64}
                         account_login: {type: string}
                         account_type: {type: string}
-                        connected_elsewhere: {type: boolean}
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}

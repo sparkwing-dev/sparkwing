@@ -180,8 +180,7 @@ func TestGitHubAppExistingInstallationPicker(t *testing.T) {
 	var available struct {
 		Authorization string `json:"authorization"`
 		Installations []struct {
-			InstallationID     int64 `json:"installation_id"`
-			ConnectedElsewhere bool  `json:"connected_elsewhere"`
+			InstallationID int64 `json:"installation_id"`
 		} `json:"installations"`
 	}
 	if code := f.call("POST", "/api/v1/team/github-app/connect/available", olga.auth, map[string]any{
@@ -275,26 +274,25 @@ func TestGitHubAppExistingPickerRefusesForeignIdentityAndBoundInstallation(t *te
 		t.Fatalf("foreign linked identity = %d, want 403", code)
 	}
 	f.app.IssueCode("admin-existing", githubapp.User{ID: 501, Login: "olga"}, start.Verifier, appCallback, acmeAdmin)
-	var available struct {
-		Authorization string `json:"authorization"`
-		Installations []struct {
-			InstallationID     int64 `json:"installation_id"`
-			ConnectedElsewhere bool  `json:"connected_elsewhere"`
-		} `json:"installations"`
-	}
+	var available map[string]any
 	if code := request("admin-existing", &available); code != http.StatusOK {
 		t.Fatalf("available = %d", code)
 	}
-	if len(available.Installations) != 1 || !available.Installations[0].ConnectedElsewhere {
-		t.Fatalf("bound installation = %+v, want connected_elsewhere", available.Installations)
+	installations, _ := available["installations"].([]any)
+	if len(installations) != 1 {
+		t.Fatalf("bound installation = %+v, want it listed", available)
+	}
+	want := map[string]any{"installation_id": float64(7), "account_login": "acme", "account_type": "Organization"}
+	if !reflect.DeepEqual(installations[0], want) {
+		t.Fatalf("listed installation = %+v, want %+v with no binding state", installations[0], want)
 	}
 	var refused map[string]any
 	if code := f.call("POST", "/api/v1/team/github-app/connect/select", olga.auth, map[string]any{
-		"state": start.State, "verifier": start.Verifier, "authorization": available.Authorization, "installation_id": 7,
+		"state": start.State, "verifier": start.Verifier, "authorization": available["authorization"], "installation_id": 7,
 	}, &refused); code != http.StatusConflict {
 		t.Fatalf("bound selection = %d, want 409", code)
 	}
-	if strings.Contains(strings.ToLower(refused["error"].(string)), "bob") {
+	if msg := strings.ToLower(refused["error"].(string)); strings.Contains(msg, "bob") || strings.Contains(msg, "another team") {
 		t.Fatalf("conflict names another team: %+v", refused)
 	}
 }

@@ -32,10 +32,10 @@ test("an owner authorizes and picks an installation without visiting install set
   await page.getByRole("button", { name: "Already installed the app? Connect an existing installation" }).click();
   await expect(page.getByRole("heading", { name: "Connect an existing installation" })).toBeVisible();
   await expect(page.getByText("bound-org")).toBeVisible();
-  await expect(page.getByText("Connected to another team")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(1);
+  await expect(page.getByText("another team")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toHaveCount(2);
   expect(visitedInstall).toBe(false);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByRole("listitem").filter({ hasText: "octo-org" }).getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page).toHaveURL(/\/team\/github\?connected=octo-org/);
   } finally {
     await dashboard.close();

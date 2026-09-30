@@ -228,6 +228,17 @@ the upgrade keep working. Code that read `store.SignInResult.Linked` drops it;
 `errors.Is` on `store.ErrAccountExists` detects the refusal. No database
 migration is required.
 
+## GitHub App picker carries no binding state
+
+`POST /api/v1/team/github-app/connect/available` drops the
+`connected_elsewhere` field from each installation, because it told a team
+owner whether another team had bound that installation. A client that hid or
+disabled bound installations lists them all and handles the `409` that
+`POST /api/v1/team/github-app/connect/select` answers for one another team
+holds. The `409` from `select` and from `connect/complete` now reads "this
+installation is unavailable to this team; contact the operator if you
+expected to connect it". No database migration is required.
+
 ## Node metric reads are paged
 
 `GET /api/v1/runs/{id}/nodes/{nodeID}/metrics` answers at most 1,000 samples

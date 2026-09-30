@@ -211,6 +211,10 @@ var errGitHubUserMismatch = errors.New("the GitHub user who authorized is not th
 
 var errGitHubInstallationAccess = errors.New("your GitHub account does not administer the account this installation belongs to")
 
+// safety: the refusal is the same whatever holds the installation, so a
+// team owner cannot learn another team's GitHub bindings from it.
+var errGitHubInstallationUnavailable = errors.New("this installation is unavailable to this team; contact the operator if you expected to connect it")
+
 func (s *Server) githubAppAdministers(ctx context.Context, token string, user githubapp.User, inst githubapp.Installation) (bool, error) {
 	switch inst.Account.Type {
 	case "User":
@@ -231,10 +235,9 @@ type githubAppAvailableReq struct {
 }
 
 type githubAppAvailableInstallation struct {
-	InstallationID     int64  `json:"installation_id"`
-	AccountLogin       string `json:"account_login"`
-	AccountType        string `json:"account_type"`
-	ConnectedElsewhere bool   `json:"connected_elsewhere"`
+	InstallationID int64  `json:"installation_id"`
+	AccountLogin   string `json:"account_login"`
+	AccountType    string `json:"account_type"`
 }
 
 type githubAppAvailableResp struct {
@@ -343,13 +346,8 @@ func (s *Server) handleGitHubAppAvailable(w http.ResponseWriter, r *http.Request
 				if !admin {
 					continue
 				}
-				bound, err := s.store.AsOperator().GitHubAppInstallationTeam(ctx, inst.ID)
-				if err != nil && !errors.Is(err, store.ErrNotFound) {
-					return err
-				}
 				out.Installations = append(out.Installations, githubAppAvailableInstallation{
 					InstallationID: inst.ID, AccountLogin: inst.Account.Login, AccountType: inst.Account.Type,
-					ConnectedElsewhere: err == nil && bound.Team != p.Team,
 				})
 			}
 			ids := make([]int64, 0, len(out.Installations))
@@ -450,7 +448,7 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 		ConnectedBy: p.AccountID, GitHubUserID: proof.UserID,
 	}, now)
 	if errors.Is(err, store.ErrInstallationBoundElsewhere) {
-		writeError(w, http.StatusConflict, errors.New("this installation is connected to another team"))
+		writeError(w, http.StatusConflict, errGitHubInstallationUnavailable)
 		return
 	}
 	if err != nil {
@@ -543,8 +541,7 @@ func (s *Server) handleGitHubAppConnectComplete(w http.ResponseWriter, r *http.R
 		ConnectedBy: p.AccountID, GitHubUserID: user.ID,
 	}, time.Now())
 	if errors.Is(err, store.ErrInstallationBoundElsewhere) {
-		writeError(w, http.StatusConflict, errors.New(
-			"this installation is connected to another team; its owner disconnects it, or the operator moves it"))
+		writeError(w, http.StatusConflict, errGitHubInstallationUnavailable)
 		return
 	}
 	if err != nil {
