@@ -58,7 +58,7 @@ func (a *cronsAPI) overview(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), cronRequestTimeout)
 	defer cancel()
 
-	health, err := svc.Health(ctx, dashboardTimerHost())
+	health, err := svc.Health(ctx, dashboardTimerHost(a.paths.Root))
 	if err != nil {
 		http.Error(w, "read cron health: "+err.Error(), http.StatusBadGateway)
 		return
@@ -248,7 +248,7 @@ func execCronRunNow(ctx context.Context, home, scheduleID string) (string, error
 
 // safety: a machine whose home cannot be resolved is described as no platform, which
 // [crontimer.Status] reports as unsupported rather than failing the whole health read.
-func dashboardTimerHost() crontimer.Host {
+func dashboardTimerHost(sparkwingHome string) crontimer.Host {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return crontimer.Host{}
@@ -268,6 +268,8 @@ func dashboardTimerHost() crontimer.Host {
 		Binary:     binary,
 		UID:        os.Getuid(),
 		Exec:       crontimer.DefaultExec,
+
+		SparkwingHome: sparkwingHome,
 	}
 }
 

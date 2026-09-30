@@ -1,7 +1,7 @@
-// Package crontimer installs the one per-user OS timer that runs
-// `sparkwing crons tick` every minute: a systemd user timer on Linux, a
-// launchd agent on macOS. A single timer serves every armed schedule on the
-// host because sparkwing evaluates the cron expressions itself.
+// Package crontimer installs the per-user OS timer that runs
+// `sparkwing crons tick` every minute for one Sparkwing home: a systemd user
+// timer on Linux, a launchd agent on macOS. A single timer serves every armed
+// schedule in that home because sparkwing evaluates the cron expressions itself.
 //
 // Every managed file carries [Marker], so status and uninstall can tell a
 // file sparkwing wrote from one a person wrote by hand; a file without the
@@ -12,6 +12,8 @@
 package crontimer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -52,6 +54,12 @@ type Host struct {
 
 	// Env carries extra environment into the tick, on top of PATH.
 	Env map[string]string
+
+	// SparkwingHome is the Sparkwing home whose schedules the tick fires. The
+	// timer carries it as SPARKWING_HOME, and a home other than ~/.sparkwing
+	// gets a timer name of its own, so installing from one home never replaces
+	// another home's timer.
+	SparkwingHome string
 
 	// LogPath receives the tick's stdout and stderr, appended.
 	LogPath string
@@ -244,9 +252,32 @@ func notLoaded(out string) bool {
 	return false
 }
 
+const homeEnv = "SPARKWING_HOME"
+
+// instance tells this home's timer apart from other homes' timers. The
+// default home keeps the bare name that existing installs carry.
+func (h Host) instance() string {
+	if h.SparkwingHome == "" || filepath.Clean(h.SparkwingHome) == filepath.Join(h.Home, ".sparkwing") {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(h.SparkwingHome)))
+	return hex.EncodeToString(sum[:4])
+}
+
+// safety: a timer installed before each home had its own name can tick
+// another home, and reporting it loaded would tell this home its schedules fire.
+func servesOtherHome(h Host, body, homeEntry string) bool {
+	return h.SparkwingHome != "" && !strings.Contains(body, homeEntry)
+}
+
+func otherHomeDetail(h Host, path string) string {
+	return fmt.Sprintf("%s ticks another Sparkwing home, not %s; run `sparkwing crons install` from this home to replace it",
+		path, h.SparkwingHome)
+}
+
 // safety: merging and sorting keep the generated file byte-identical across runs.
 func envPairs(h Host) [][2]string {
-	merged := make(map[string]string, len(h.Env)+1)
+	merged := make(map[string]string, len(h.Env)+2)
 	if h.PathEnv != "" {
 		merged["PATH"] = h.PathEnv
 	}
@@ -255,6 +286,9 @@ func envPairs(h Host) [][2]string {
 			continue
 		}
 		merged[k] = v
+	}
+	if h.SparkwingHome != "" {
+		merged[homeEnv] = h.SparkwingHome
 	}
 	pairs := make([][2]string, 0, len(merged))
 	for _, k := range slices.Sorted(maps.Keys(merged)) {

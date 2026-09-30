@@ -1311,6 +1311,15 @@ unlock.
 
 ### Fixed
 
+- **crons:** `sparkwing crons install` from a `SPARKWING_HOME` other than
+  `~/.sparkwing` no longer replaces the default home's timer. On macOS both
+  homes shared the launchd label `dev.sparkwing.crons` and on Linux the
+  `sparkwing-crons` units, so the second install silently took over the first
+  home's timer while its `crons status` still reported it loaded. A non-default
+  home now gets names with a short hash of its path appended; the default home
+  keeps the names existing installs use. `crons status` reports a timer that
+  ticks another home instead of calling it enabled.
+
 - **cli:** `sparkwing pipeline new` exits non-zero with the `go mod tidy`
   output when tidy fails, instead of printing the failure and exiting 0. The
   pipeline files stay written. A repository directory whose name holds spaces

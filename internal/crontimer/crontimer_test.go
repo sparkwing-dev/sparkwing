@@ -46,10 +46,11 @@ func linuxHost(t *testing.T, e *fakeExec) Host {
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     "/usr/local/bin/sparkwing",
 		PathEnv:    "/usr/local/bin:/usr/bin:/bin",
-		Env:        map[string]string{"SPARKWING_HOME": filepath.Join(root, ".sparkwing")},
 		LogPath:    filepath.Join(root, ".sparkwing", "crons.log"),
 		UID:        1000,
 		Exec:       e.run,
+
+		SparkwingHome: filepath.Join(root, ".sparkwing"),
 	}
 }
 
@@ -62,10 +63,11 @@ func darwinHost(t *testing.T, e *fakeExec) Host {
 		ConfigHome: filepath.Join(root, ".config"),
 		Binary:     "/opt/homebrew/bin/sparkwing",
 		PathEnv:    "/opt/homebrew/bin:/usr/bin:/bin",
-		Env:        map[string]string{"SPARKWING_HOME": filepath.Join(root, ".sparkwing")},
 		LogPath:    filepath.Join(root, ".sparkwing", "crons.log"),
 		UID:        501,
 		Exec:       e.run,
+
+		SparkwingHome: filepath.Join(root, ".sparkwing"),
 	}
 }
 
@@ -86,8 +88,8 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	servicePath := filepath.Join(UnitDir(h), ServiceName)
-	timerPath := filepath.Join(UnitDir(h), TimerName)
+	servicePath := filepath.Join(UnitDir(h), h.serviceName())
+	timerPath := filepath.Join(UnitDir(h), h.timerName())
 	if state.Path != timerPath {
 		t.Errorf("State.Path = %q, want the timer at %q", state.Path, timerPath)
 	}
@@ -121,7 +123,7 @@ func TestInstallLinuxWritesBothUnitsAndEnablesTheTimer(t *testing.T) {
 		"OnCalendar=*-*-* *:*:00",
 		"AccuracySec=1s",
 		"Persistent=true",
-		"Unit=" + ServiceName,
+		"Unit=" + h.serviceName(),
 		"WantedBy=timers.target",
 	} {
 		if !strings.Contains(timer, want) {
@@ -252,7 +254,7 @@ func TestInstallDarwinWritesThePlistAndBootstrapsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	path := filepath.Join(AgentDir(h), PlistName)
+	path := filepath.Join(AgentDir(h), h.plistName())
 	if state.Path != path {
 		t.Errorf("State.Path = %q, want %q", state.Path, path)
 	}
@@ -310,7 +312,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		if _, err := Install(h); err != nil {
 			t.Fatalf("Install: %v", err)
 		}
-		body := read(t, filepath.Join(AgentDir(h), PlistName))
+		body := read(t, filepath.Join(AgentDir(h), h.plistName()))
 		if strings.Contains(body, "& toys") {
 			t.Errorf("plist carries a raw ampersand:\n%s", body)
 		}
@@ -339,11 +341,11 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		h := linuxHost(t, exec)
 		h.Binary = "/opt/my tools/sparkwing"
 		h.PathEnv = "/opt/my tools:/usr/bin"
-		h.Env = map[string]string{"SPARKWING_HOME": "/srv/100% sparkwing"}
+		h.SparkwingHome = "/srv/100% sparkwing"
 		if _, err := Install(h); err != nil {
 			t.Fatalf("Install: %v", err)
 		}
-		service := read(t, filepath.Join(UnitDir(h), ServiceName))
+		service := read(t, filepath.Join(UnitDir(h), h.serviceName()))
 		for _, want := range []string{
 			`ExecStart="/opt/my tools/sparkwing" crons tick`,
 			`Environment="PATH=/opt/my tools:/usr/bin"`,
@@ -377,20 +379,20 @@ func TestAForeignFileBlocksInstallAndSurvivesUninstall(t *testing.T) {
 		{
 			name:     "linux service",
 			goos:     "linux",
-			foreign:  func(h Host) string { return filepath.Join(UnitDir(h), ServiceName) },
-			reported: func(h Host) string { return filepath.Join(UnitDir(h), TimerName) },
+			foreign:  func(h Host) string { return filepath.Join(UnitDir(h), h.serviceName()) },
+			reported: func(h Host) string { return filepath.Join(UnitDir(h), h.timerName()) },
 		},
 		{
 			name:     "linux timer",
 			goos:     "linux",
-			foreign:  func(h Host) string { return filepath.Join(UnitDir(h), TimerName) },
-			reported: func(h Host) string { return filepath.Join(UnitDir(h), TimerName) },
+			foreign:  func(h Host) string { return filepath.Join(UnitDir(h), h.timerName()) },
+			reported: func(h Host) string { return filepath.Join(UnitDir(h), h.timerName()) },
 		},
 		{
 			name:     "darwin plist",
 			goos:     "darwin",
-			foreign:  func(h Host) string { return filepath.Join(AgentDir(h), PlistName) },
-			reported: func(h Host) string { return filepath.Join(AgentDir(h), PlistName) },
+			foreign:  func(h Host) string { return filepath.Join(AgentDir(h), h.plistName()) },
+			reported: func(h Host) string { return filepath.Join(AgentDir(h), h.plistName()) },
 		},
 	}
 	for _, tc := range tests {
@@ -460,7 +462,7 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 		{
 			goos: "linux",
 			files: func(h Host) []string {
-				return []string{filepath.Join(UnitDir(h), ServiceName), filepath.Join(UnitDir(h), TimerName)}
+				return []string{filepath.Join(UnitDir(h), h.serviceName()), filepath.Join(UnitDir(h), h.timerName())}
 			},
 			wantCalls: []string{
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
@@ -470,7 +472,7 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 		},
 		{
 			goos:      "darwin",
-			files:     func(h Host) []string { return []string{filepath.Join(AgentDir(h), PlistName)} },
+			files:     func(h Host) []string { return []string{filepath.Join(AgentDir(h), h.plistName())} },
 			wantCalls: []string{"launchctl bootout gui/501/dev.sparkwing.crons"},
 		},
 	}
@@ -544,7 +546,7 @@ func TestUninstallIgnoresAServiceManagerThatNeverLoadedTheJob(t *testing.T) {
 			if _, err := Uninstall(h); err != nil {
 				t.Fatalf("Uninstall: %v", err)
 			}
-			if _, err := os.Stat(filepath.Join(UnitDir(h), TimerName)); tc.goos == "linux" && !errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(filepath.Join(UnitDir(h), h.timerName())); tc.goos == "linux" && !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("timer survived an ignorable failure (%v)", err)
 			}
 		})
@@ -563,13 +565,13 @@ func TestEnableFailureIsReportedAndTheFilesStay(t *testing.T) {
 			goos: "linux", prefix: "systemctl --user enable",
 			out:     "Failed to connect to bus: No medium found",
 			wantErr: "No medium found",
-			file:    func(h Host) string { return filepath.Join(UnitDir(h), TimerName) },
+			file:    func(h Host) string { return filepath.Join(UnitDir(h), h.timerName()) },
 		},
 		{
 			goos: "darwin", prefix: "launchctl bootstrap",
 			out:     "Bootstrap failed: 5: Input/output error",
 			wantErr: "Input/output error",
-			file:    func(h Host) string { return filepath.Join(AgentDir(h), PlistName) },
+			file:    func(h Host) string { return filepath.Join(AgentDir(h), h.plistName()) },
 		},
 	}
 	for _, tc := range tests {
@@ -681,7 +683,77 @@ func TestLinuxStatusAndUninstallLeaveAStrangersUnitAlone(t *testing.T) {
 	if !strings.Contains(st.Detail, "left alone") {
 		t.Fatalf("detail = %q", st.Detail)
 	}
-	if _, err := os.Stat(filepath.Join(UnitDir(h), TimerName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(UnitDir(h), h.timerName())); !os.IsNotExist(err) {
 		t.Fatalf("our timer file should be removed: %v", err)
+	}
+}
+
+func TestASecondHomeGetsItsOwnTimerAndLeavesTheDefaultHomesAlone(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		host func(*testing.T, *fakeExec) Host
+	}{
+		{"linux", linuxHost},
+		{"darwin", darwinHost},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			exec := &fakeExec{}
+			first := tc.host(t, exec)
+			second := first
+			second.SparkwingHome = filepath.Join(first.Home, "work-home")
+			if _, err := Install(first); err != nil {
+				t.Fatalf("Install default home: %v", err)
+			}
+			secondState, err := Install(second)
+			if err != nil {
+				t.Fatalf("Install second home: %v", err)
+			}
+			firstState, err := Status(first)
+			if err != nil {
+				t.Fatalf("Status default home: %v", err)
+			}
+			if firstState.Path == secondState.Path {
+				t.Fatalf("both homes installed to %s", firstState.Path)
+			}
+			if !firstState.Enabled || strings.Contains(firstState.Detail, "another Sparkwing home") {
+				t.Errorf("default home after a second install = %+v, want its own timer still enabled", firstState)
+			}
+			if !strings.Contains(firstState.Path, "sparkwing-crons.timer") && !strings.HasSuffix(firstState.Path, "dev.sparkwing.crons.plist") {
+				t.Errorf("default home path = %s, want the name existing installs use", firstState.Path)
+			}
+		})
+	}
+}
+
+func TestStatusRefusesATimerThatTicksAnotherHome(t *testing.T) {
+	for _, tc := range []struct {
+		goos string
+		host func(*testing.T, *fakeExec) Host
+	}{
+		{"linux", linuxHost},
+		{"darwin", darwinHost},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			exec := &fakeExec{}
+			h := tc.host(t, exec)
+			other := h
+			other.Home = t.TempDir()
+			other.SparkwingHome = filepath.Join(other.Home, ".sparkwing")
+			// A timer written before homes had their own names sits at the
+			// default path but ticks another home.
+			writeAt := h
+			writeAt.SparkwingHome = ""
+			writeAt.Env = map[string]string{homeEnv: other.SparkwingHome}
+			if _, err := Install(writeAt); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			state, err := Status(h)
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if state.Enabled || !strings.Contains(state.Detail, "another Sparkwing home") {
+				t.Errorf("Status = %+v, want it reported as another home's timer", state)
+			}
+		})
 	}
 }

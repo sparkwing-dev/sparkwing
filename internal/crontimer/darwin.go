@@ -9,13 +9,20 @@ import (
 	"strings"
 )
 
-const (
-	// Label is the launchd label of the sparkwing cron agent.
-	Label = "dev.sparkwing.crons"
+const defaultLabel = "dev.sparkwing.crons"
 
-	// PlistName is the file launchd reads the agent from.
-	PlistName = Label + ".plist"
-)
+func (h Host) label() string {
+	if i := h.instance(); i != "" {
+		return defaultLabel + "." + i
+	}
+	return defaultLabel
+}
+
+func (h Host) plistName() string { return h.label() + ".plist" }
+
+func plistHomeEntry(h Host) string {
+	return fmt.Sprintf("<key>%s</key>\n    <string>%s</string>", homeEnv, xmlText(h.SparkwingHome))
+}
 
 // AgentDir reports the LaunchAgents directory for a host.
 func AgentDir(h Host) string {
@@ -26,10 +33,10 @@ func darwinPlistPath(h Host) (string, error) {
 	if h.Home == "" {
 		return "", errors.New("crontimer: Host.Home is required on darwin")
 	}
-	return filepath.Join(AgentDir(h), PlistName), nil
+	return filepath.Join(AgentDir(h), h.plistName()), nil
 }
 
-func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, Label) }
+func (h Host) serviceTarget() string { return fmt.Sprintf("gui/%d/%s", h.UID, h.label()) }
 
 func (h Host) domainTarget() string { return fmt.Sprintf("gui/%d", h.UID) }
 
@@ -64,7 +71,7 @@ func installDarwin(h Host) (State, error) {
 			h.domainTarget(), path, err, strings.TrimSpace(out), stale)
 	}
 	state.Enabled = true
-	state.Detail = fmt.Sprintf("%s is loaded and runs %s crons tick every minute", Label, h.Binary)
+	state.Detail = fmt.Sprintf("%s is loaded and runs %s crons tick every minute", h.label(), h.Binary)
 	return state, nil
 }
 
@@ -101,13 +108,17 @@ func statusDarwin(h Host) (State, error) {
 	state.Installed = true
 	state.Binary = plistBinary([]byte(plist.body))
 	state.Stale = staleAgainst(h, state.Binary)
+	if servesOtherHome(h, plist.body, plistHomeEntry(h)) {
+		state.Detail = otherHomeDetail(h, path)
+		return state, nil
+	}
 
 	out, err := h.run("launchctl", "print", h.serviceTarget())
 	if err == nil {
 		state.Enabled = true
-		state.Detail = fmt.Sprintf("%s is loaded and runs %s crons tick every minute", Label, state.Binary)
+		state.Detail = fmt.Sprintf("%s is loaded and runs %s crons tick every minute", h.label(), state.Binary)
 	} else {
-		state.Detail = fmt.Sprintf("%s is installed but launchd does not report it loaded: %s", Label, joinOutput(out))
+		state.Detail = fmt.Sprintf("%s is installed but launchd does not report it loaded: %s", h.label(), joinOutput(out))
 	}
 	if state.Stale {
 		state.Detail += fmt.Sprintf("; it runs %s, not %s", state.Binary, h.Binary)
@@ -150,7 +161,7 @@ func agentPlist(h Host) string {
 	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
 	fmt.Fprintf(&b, "<!-- %s -->\n", Marker)
 	b.WriteString("<plist version=\"1.0\">\n<dict>\n")
-	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", xmlText(Label))
+	fmt.Fprintf(&b, "  <key>Label</key>\n  <string>%s</string>\n\n", xmlText(h.label()))
 	b.WriteString("  <key>ProgramArguments</key>\n  <array>\n")
 	for _, arg := range []string{h.Binary, "crons", "tick"} {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", xmlText(arg))

@@ -7,13 +7,20 @@ import (
 	"strings"
 )
 
-const (
-	// ServiceName is the systemd user unit that runs one tick.
-	ServiceName = "sparkwing-crons.service"
+func (h Host) unitBase() string {
+	if i := h.instance(); i != "" {
+		return "sparkwing-crons-" + i
+	}
+	return "sparkwing-crons"
+}
 
-	// TimerName is the systemd user timer that starts [ServiceName] each minute.
-	TimerName = "sparkwing-crons.timer"
-)
+func (h Host) serviceName() string { return h.unitBase() + ".service" }
+
+func (h Host) timerName() string { return h.unitBase() + ".timer" }
+
+func unitHomeEntry(h Host) string {
+	return "Environment=" + systemdAssignment(homeEnv, h.SparkwingHome) + "\n"
+}
 
 // UnitDir reports the systemd user unit directory for a host.
 func UnitDir(h Host) string {
@@ -25,7 +32,7 @@ func linuxPaths(h Host) (service, timer string, err error) {
 		return "", "", errors.New("crontimer: Host.ConfigHome is required on linux")
 	}
 	dir := UnitDir(h)
-	return filepath.Join(dir, ServiceName), filepath.Join(dir, TimerName), nil
+	return filepath.Join(dir, h.serviceName()), filepath.Join(dir, h.timerName()), nil
 }
 
 func installLinux(h Host) (State, error) {
@@ -59,12 +66,12 @@ func installLinux(h Host) (State, error) {
 		state.Detail = "the timer's files are written but systemd did not reload them"
 		return state, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out))
 	}
-	if out, err := h.run("systemctl", "--user", "enable", "--now", TimerName); err != nil {
+	if out, err := h.run("systemctl", "--user", "enable", "--now", h.timerName()); err != nil {
 		state.Detail = "the timer's files are written but systemd did not enable them"
-		return state, fmt.Errorf("crontimer: systemctl --user enable --now %s: %w: %s", TimerName, err, strings.TrimSpace(out))
+		return state, fmt.Errorf("crontimer: systemctl --user enable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 	}
 	state.Enabled = true
-	state.Detail = fmt.Sprintf("%s is enabled and runs %s crons tick every minute", TimerName, h.Binary)
+	state.Detail = fmt.Sprintf("%s is enabled and runs %s crons tick every minute", h.timerName(), h.Binary)
 	return state, nil
 }
 
@@ -81,18 +88,22 @@ func statusLinux(h Host) (State, error) {
 	if !state.Installed {
 		return state, nil
 	}
-	if loaded := loadedElsewhere(h, timerPath); loaded != "" {
-		state.Detail = fmt.Sprintf("systemd runs %s from %s, not from %s", TimerName, loaded, timerPath)
+	if servesOtherHome(h, service.body, unitHomeEntry(h)) {
+		state.Detail = otherHomeDetail(h, servicePath)
 		return state, nil
 	}
-	enabledOut, enabledErr := h.run("systemctl", "--user", "is-enabled", TimerName)
-	activeOut, activeErr := h.run("systemctl", "--user", "is-active", TimerName)
+	if loaded := loadedElsewhere(h, timerPath); loaded != "" {
+		state.Detail = fmt.Sprintf("systemd runs %s from %s, not from %s", h.timerName(), loaded, timerPath)
+		return state, nil
+	}
+	enabledOut, enabledErr := h.run("systemctl", "--user", "is-enabled", h.timerName())
+	activeOut, activeErr := h.run("systemctl", "--user", "is-active", h.timerName())
 	switch {
 	case enabledErr == nil && activeErr == nil:
 		state.Enabled = true
-		state.Detail = fmt.Sprintf("%s is enabled and active, running %s crons tick every minute", TimerName, state.Binary)
+		state.Detail = fmt.Sprintf("%s is enabled and active, running %s crons tick every minute", h.timerName(), state.Binary)
 	default:
-		state.Detail = fmt.Sprintf("%s is installed but systemd does not report it running: %s", TimerName,
+		state.Detail = fmt.Sprintf("%s is installed but systemd does not report it running: %s", h.timerName(),
 			joinOutput(enabledOut, activeOut))
 	}
 	if state.Stale {
@@ -120,8 +131,8 @@ func uninstallLinux(h Host) (State, error) {
 	var disableErr error
 	loaded := loadedElsewhere(h, timerPath)
 	if loaded == "" {
-		if out, err := h.run("systemctl", "--user", "disable", "--now", TimerName); err != nil && !notLoaded(out) {
-			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", TimerName, err, strings.TrimSpace(out))
+		if out, err := h.run("systemctl", "--user", "disable", "--now", h.timerName()); err != nil && !notLoaded(out) {
+			disableErr = fmt.Errorf("crontimer: systemctl --user disable --now %s: %w: %s", h.timerName(), err, strings.TrimSpace(out))
 		}
 	}
 	if err := removeManaged(service, timer); err != nil {
@@ -129,7 +140,7 @@ func uninstallLinux(h Host) (State, error) {
 	}
 	state := State{Path: timerPath, Detail: "the sparkwing cron timer is removed"}
 	if loaded != "" {
-		state.Detail = fmt.Sprintf("the files under %s are removed; systemd still runs %s from %s, which is left alone", filepath.Dir(timerPath), TimerName, loaded)
+		state.Detail = fmt.Sprintf("the files under %s are removed; systemd still runs %s from %s, which is left alone", filepath.Dir(timerPath), h.timerName(), loaded)
 	}
 	if out, err := h.run("systemctl", "--user", "daemon-reload"); err != nil {
 		return state, errors.Join(disableErr, fmt.Errorf("crontimer: systemctl --user daemon-reload: %w: %s", err, strings.TrimSpace(out)))
@@ -222,7 +233,7 @@ func timerUnit(h Host) string {
 	b.WriteString("OnCalendar=*-*-* *:*:00\n")
 	b.WriteString("AccuracySec=1s\n")
 	b.WriteString("Persistent=true\n")
-	fmt.Fprintf(&b, "Unit=%s\n\n", ServiceName)
+	fmt.Fprintf(&b, "Unit=%s\n\n", h.serviceName())
 	b.WriteString("[Install]\nWantedBy=timers.target\n")
 	return b.String()
 }
@@ -288,7 +299,7 @@ func firstSystemdWord(s string) string {
 // safety: systemctl addresses units by name, so a ConfigHome that is not the session's would
 // otherwise be asked about, enabled, and disabled against a stranger's file.
 func loadedElsewhere(h Host, timerPath string) string {
-	out, err := h.run("systemctl", "--user", "show", "-p", "FragmentPath", "--value", TimerName)
+	out, err := h.run("systemctl", "--user", "show", "-p", "FragmentPath", "--value", h.timerName())
 	if err != nil {
 		return ""
 	}
