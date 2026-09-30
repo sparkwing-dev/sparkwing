@@ -1036,15 +1036,19 @@ any increase in the closure counter, on the warning counter, on
 
 Routes registered on the controller's outer router are matched before
 the auth middleware runs, so they are open regardless of auth config:
-the health and metrics probes (k8s httpGet probes and Prometheus
-scrapes can't carry `Authorization`), the service-discovery endpoint
+the health probe (k8s httpGet probes can't carry `Authorization`), the
+service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
 the dashboard uses to establish, validate, and end a session (login,
 logout, session, and the Google sign-in start and exchange), the
 capabilities report a signed-out dashboard draws its sign-in page from,
 the bootstrap probe, and the GitHub webhook, which
-is HMAC-verified instead of bearer-authenticated. The logs service
-opens its health and metrics probes the same way. Every registered
+is HMAC-verified instead of bearer-authenticated. The controller's
+`/metrics` is not among them: its run counters name every team's
+pipelines, so on the API listener it needs an `admin` bearer, and
+`--metrics-addr` moves it to a listener of its own that serves it open.
+The logs service opens its health and metrics probes the same way as the
+controller's health probe. Every registered
 route is listed in
 [api-reference.md](api-reference.md).
 
