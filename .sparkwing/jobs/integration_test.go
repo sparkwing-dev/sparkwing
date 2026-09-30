@@ -33,6 +33,7 @@ func TestEnvironment(t *testing.T) {
 	} {
 		if got := os.Getenv(name); got != want { t.Errorf("%s = %q, want %q", name, got, want) }
 	}
+	if os.Getenv("GOMAXPROCS") == "" { t.Error("go test has no CPU bound") }
 	if got := os.Getenv("SPARKWING_HOME"); got == "" || got == "parent-home" {
 		t.Errorf("test home = %q, want its own home", got)
 	}

@@ -140,7 +140,8 @@ func goTest(ctx context.Context, root string, env, args []string) (string, error
 	}
 	var output string
 	err := withProductTestHome(func(home string) error {
-		script := productTestScript("go test -timeout "+productGoTestTimeout+" "+strings.Join(quoted, " "), home)
+		command := boundedGoCommand(currentHost(), "test", "-timeout "+productGoTestTimeout+" "+strings.Join(quoted, " "))
+		script := productTestScript(command, home)
 		cmd := exec.CommandContext(ctx, "bash", "-c", script)
 		cmd.Dir = root
 		cmd.Env = env
