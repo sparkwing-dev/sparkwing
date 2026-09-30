@@ -104,15 +104,21 @@ func (o fsOutputs) grant(_ context.Context, u store.Upload) (string, map[string]
 
 func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
 	pending := o.pendingPath(u.ID)
-	if err := checkOutputFile(pending, u.Size, u.SHA256); err != nil {
-		return err
-	}
 	final := store.OutputPath(o.dir, u.Key)
-	if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
-		return err
-	}
-	if err := os.Rename(pending, final); err != nil {
-		return err
+	// safety: the key is this upload's own, so a final file with its size and
+	// digest is one an earlier try moved there, and a retry commits it or
+	// finishes the cleanup that try left undone.
+	if err := checkOutputFile(pending, u.Size, u.SHA256); err != nil {
+		if !errors.Is(err, errUploadConflict) || checkOutputFile(final, u.Size, u.SHA256) != nil {
+			return err
+		}
+	} else {
+		if err := os.MkdirAll(filepath.Dir(final), 0o700); err != nil {
+			return err
+		}
+		if err := os.Rename(pending, final); err != nil {
+			return err
+		}
 	}
 	err := o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
 	if errors.Is(err, store.ErrFreeStoragePaused) {

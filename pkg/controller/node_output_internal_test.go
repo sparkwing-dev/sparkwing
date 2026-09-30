@@ -234,3 +234,55 @@ func TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention(t *testing.T) {
 		t.Fatalf("the pipeline's newest success lost its output: %s, %v", out, err)
 	}
 }
+
+// A filesystem commit refused a slot removes the file it moved into place,
+// and a retry after a cleanup that failed still finds that file and removes
+// it, as the S3 store's retry deletes its earlier copy.
+func TestFsOutputCommitRefusedASlotRetriesItsCleanup(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := t.Context()
+	if err := st.SetFreeTeamSlots(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, team := range []store.Team{"team-a", "team-b"} {
+		if err := st.AsOperator().CreateTeam(ctx, team); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := bytes.Repeat([]byte("x"), int(store.MaxUnpaidOutputBytes)+1)
+	sum := sha256.Sum256(data)
+	key := store.OutputKeyPrefix("run-a", "n") + "a1-g0-" + strings.Repeat("0", 32)
+	u, err := st.ReserveUpload(ctx, store.UploadRequest{
+		Team: "team-a", RunID: "run-a", Kind: store.StorageCache, Key: key, Size: int64(len(data)),
+		SHA256: hex.EncodeToString(sum[:]), Principal: "run-a/n", Provenance: "cloud",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.GrantFreeSlot(ctx, "team-b", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	o := fsOutputs{s: New(st, nil), dir: t.TempDir()}
+	final := store.OutputPath(o.dir, key)
+	for _, try := range []struct{ name, path string }{
+		{"a first try", o.pendingPath(u.ID)},
+		{"a retry after its cleanup failed", final},
+	} {
+		if err := os.MkdirAll(filepath.Dir(try.path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(try.path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.commit(ctx, u); !errors.Is(err, store.ErrFreeStoragePaused) {
+			t.Fatalf("%s: commit without a slot = %v, want free storage paused", try.name, err)
+		}
+		if _, err := os.Stat(final); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s left the refused output in place: %v", try.name, err)
+		}
+	}
+}
