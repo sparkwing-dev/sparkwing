@@ -677,8 +677,6 @@ const (
 	triggerClaimCancelled
 )
 
-// errTriggerCancelled marks a run whose child was killed because someone
-// asked the controller to cancel it, so the run finishes cancelled, not failed.
 var errTriggerCancelled = errors.New("cancelled on request")
 
 var (

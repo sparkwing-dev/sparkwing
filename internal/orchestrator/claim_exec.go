@@ -90,7 +90,7 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 	if nodeID == store.PlanNodeID {
 		args = []string{"plan", "--json"}
 	}
-	// #nosec G204 G702 -- the pipeline binary this process built, run as argv without a shell
+	// #nosec G204,G702 -- the pipeline binary this process built, run as argv without a shell
 	cmd := exec.Command(binary.path, args...)
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), authwire.CacheGrantEnv+"="+grant, SpecHashEnv+"="+specHash)
