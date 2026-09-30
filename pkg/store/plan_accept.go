@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 )
 
 // PlanNodeID is the node every controller-dispatched run starts with. Its
@@ -29,6 +31,7 @@ const (
 	MaxRetryBackoff   = 5 * time.Minute
 	maxNodeLabels     = 32
 	maxNodeLabelBytes = 128
+	maxPipelineRefs   = 32
 )
 
 // ErrPlanInvalid refuses a submitted plan the controller will not run; the
@@ -47,17 +50,23 @@ type submittedPlan struct {
 	PlanConc  *json.RawMessage  `json:"plan_concurrency"`
 	PlanConcs []json.RawMessage `json:"plan_concurrency_groups"`
 	Source    *plannedSource    `json:"source"`
+	Secrets   []struct {
+		Name     string `json:"name"`
+		Required bool   `json:"required"`
+		Optional bool   `json:"optional"`
+	} `json:"secrets"`
 }
 
 type submittedNode struct {
-	ID           string           `json:"id"`
-	Deps         []string         `json:"deps"`
-	OptionalDeps []string         `json:"optional_deps"`
-	SpecHash     string           `json:"spec_hash"`
-	Dynamic      bool             `json:"dynamic"`
-	Approval     *json.RawMessage `json:"approval"`
-	OnFailureOf  string           `json:"on_failure_of"`
-	Modifiers    json.RawMessage  `json:"modifiers"`
+	ID           string            `json:"id"`
+	Deps         []string          `json:"deps"`
+	OptionalDeps []string          `json:"optional_deps"`
+	SpecHash     string            `json:"spec_hash"`
+	Dynamic      bool              `json:"dynamic"`
+	Approval     *json.RawMessage  `json:"approval"`
+	OnFailureOf  string            `json:"on_failure_of"`
+	Modifiers    json.RawMessage   `json:"modifiers"`
+	PipelineRefs []PlanPipelineRef `json:"pipeline_refs"`
 }
 
 // safety: decoded strictly, so a modifier this store does not know is refused
@@ -280,6 +289,17 @@ func validatePlan(body []byte) ([]plannedNode, error) {
 	if plan.PlanConc != nil || len(plan.PlanConcs) > 0 {
 		return nil, planRefused("plan-level concurrency groups are not supported; declare concurrency on nodes")
 	}
+	// safety: the plan's secrets are the names its work claims may read, so
+	// they are held to the storage name grammar and to no more than a team
+	// can hold.
+	if len(plan.Secrets) > MaxSecretsPerTeam {
+		return nil, planRefused("the plan declares %d secrets; the limit is %d", len(plan.Secrets), MaxSecretsPerTeam)
+	}
+	for _, sec := range plan.Secrets {
+		if err := secretname.Validate(sec.Name); err != nil {
+			return nil, planRefused("%v", err)
+		}
+	}
 	if len(plan.Nodes) > MaxPlanNodes {
 		return nil, planRefused("the plan has %d nodes; the limit is %d", len(plan.Nodes), MaxPlanNodes)
 	}
@@ -342,6 +362,16 @@ func planNode(n submittedNode, known map[string]bool, requires []string) (planne
 		return plannedNode{}, errors.New(`spec_hash must be "sha256:" and 64 lowercase hex digits`)
 	}
 	p := plannedNode{id: n.ID, kind: nodeKindWork, specHash: n.SpecHash, onFailureOf: n.OnFailureOf}
+	// safety: a declared reference is what a work claim may read of another
+	// pipeline's newest successful run, so it is held to a short named list.
+	if len(n.PipelineRefs) > maxPipelineRefs {
+		return plannedNode{}, fmt.Errorf("more than %d pipeline references", maxPipelineRefs)
+	}
+	for _, ref := range n.PipelineRefs {
+		if ref.Pipeline == "" || ref.Node == "" || len(ref.Pipeline) > maxNodeLabelBytes || len(ref.Node) > maxNodeLabelBytes {
+			return plannedNode{}, fmt.Errorf("pipeline reference %q/%q is empty or longer than %d bytes", ref.Pipeline, ref.Node, maxNodeLabelBytes)
+		}
+	}
 	seen := map[string]bool{}
 	for _, dep := range n.Deps {
 		if !known[dep] {

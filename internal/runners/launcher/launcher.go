@@ -26,18 +26,45 @@ type Launcher struct {
 	Holder string
 	Poll   time.Duration
 	Logger *slog.Logger
+
+	// safety: LaunchOne adds each Job it creates, Sync rebuilds the set from
+	// the Jobs and pods it lists, and Run reads it before every claim, all on
+	// Run's goroutine, so it needs no lock.
+	pending map[string]bool
 }
 
 // Run claims and launches until ctx ends. An idle queue is polled every
-// l.Poll; a claim is followed at once by the next. A failed claim backs off
-// exponentially, and a revoked or expired token parks the launcher, asking
-// once an hour, until a claim is answered.
+// l.Poll; a claim is followed at once by the next. Every [SyncInterval] it
+// reconciles its Jobs, and it claims nothing while [MaxPendingJobs] of them
+// are not yet running. A failed claim backs off exponentially, and a revoked
+// or expired token parks the launcher, asking once an hour, until a claim is
+// answered.
 func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.Config.Validate(); err != nil {
 		return err
 	}
+	var lastSync time.Time
+	braked := false
 	pacer := client.NewPacer(l.Poll)
 	for ctx.Err() == nil {
+		if time.Since(lastSync) >= SyncInterval {
+			if err := l.Sync(ctx); err != nil && ctx.Err() == nil {
+				l.Logger.Warn("launcher: sync failed", "err", err)
+			}
+			lastSync = time.Now()
+		}
+		if len(l.pending) >= MaxPendingJobs {
+			if !braked {
+				l.Logger.Warn("launcher: Jobs are not yet running; pausing claims", "pending", len(l.pending))
+			}
+			braked = true
+			select {
+			case <-ctx.Done():
+			case <-time.After(l.Poll):
+			}
+			continue
+		}
+		braked = false
 		launched, err := l.LaunchOne(ctx)
 		wait := l.Poll
 		switch {
@@ -100,6 +127,10 @@ func (l *Launcher) LaunchOne(ctx context.Context) (bool, error) {
 		err = nil
 	}
 	if err == nil {
+		if l.pending == nil {
+			l.pending = map[string]bool{}
+		}
+		l.pending[job.Name] = true
 		l.Logger.Info("launcher: job created", "job", job.Name, "team", claim.Team,
 			"run_id", claim.RunID, "node_id", claim.NodeID, "generation", claim.Generation)
 	}

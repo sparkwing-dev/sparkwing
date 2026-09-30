@@ -72,3 +72,16 @@ binaries unless the team owner sets
 `trust_local_builds` with `PUT /api/v1/team/build-trust`. The default is
 false. `GET /api/v1/team/build-trust` reports the team's choice. Runners
 verify the committed digest while reading.
+
+A controller-dispatched node's claim token writes cache under its run's
+GitHub repository ID and git ref, which the controller reads from the run and
+never from the request, as GitHub Actions scopes caches: `GITHUB_REF` for a
+GitHub App trigger, otherwise the run's branch. Its binary reads take the
+first binary its repository holds under its own ref, then its pull request's
+base branch, then the repository's default branch, so another repository's
+binary, or a feature branch's, never reaches `main`. A repository's ref holds
+one binary per input hash: the first committed wins, and a second is refused
+`409`. A claim whose run names no repository or ref writes no binary, and
+still writes artifacts. Every other caller
+writes and reads only binaries no claim wrote, and a claim never reads theirs.
+Artifact keys name their content hash exactly, so they are not scoped.

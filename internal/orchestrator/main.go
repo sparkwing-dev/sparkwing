@@ -54,6 +54,15 @@ func Main() {
 		}
 		return
 	}
+	// safety: only the exact form is the verb, so a pipeline named plan still
+	// runs under its own flags.
+	if len(os.Args) == 3 && os.Args[1] == "plan" && os.Args[2] == "--json" {
+		if err := runPlanCLI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "plan:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "replay-node" {
 		if err := runReplayNodeCLI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "replay-node:", err)

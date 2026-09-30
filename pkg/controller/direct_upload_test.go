@@ -23,6 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/sparkwing-dev/sparkwing/internal/authwire"
+	"github.com/sparkwing-dev/sparkwing/internal/teamblob"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -562,5 +563,92 @@ func TestDirectUploadRefusesEmptyAndCapsPendingReservations(t *testing.T) {
 	}
 	if code, msg := reserve(store.DirectUploadMaxPending+1, 1); code != http.StatusTooManyRequests || !strings.Contains(msg, "uncommitted uploads") {
 		t.Fatalf("reserve past the pending cap = %d %q", code, msg)
+	}
+}
+
+type claimHead struct{ teamblob.Client }
+
+func (claimHead) HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	return &s3.HeadObjectOutput{ContentLength: aws.Int64(4), Metadata: map[string]string{"sha256": strings.Repeat("a", 64)}}, nil
+}
+
+// A claim token's binary upload is reserved under its run's git ref, a claim
+// whose run names no ref or repository writes no binary but still writes a
+// content-addressed artifact, and a claim's binary
+// download signs its own ref's binary, never a newer one of another branch.
+func TestClaimBinaryUploadIsReservedUnderTheRunsRef(t *testing.T) {
+	client, _ := directS3(t)
+	bucket, err := teamblob.New(teamblob.Options{Bucket: "bucket", Prefix: "cache", Client: claimHead{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newAppFixture(t, func(s *controller.Server) *controller.Server {
+		if err := s.WithSignedDownloads(bucket, nil, client, "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		return s.WithDirectUploads(client, "bucket", "cache")
+	})
+	t.Setenv(authwire.CacheGrantKeyEnv, "claim-grant-signing-key")
+	olga := f.ghUser(501, "olga")
+	tn, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tn.GrantCredits(t.Context(), store.CreditGrantPaid, 1000*store.MicroCreditsPerCredit, "pay_1", "root"); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	grants := map[string]string{}
+	reserve := func(runID, tok string) (int, string) {
+		t.Helper()
+		var out controller.CacheGrantResponse
+		if code := f.call("POST", "/api/v1/runs/"+runID+"/cache-grant", "Bearer "+tok, map[string]any{}, &out); code != http.StatusOK {
+			t.Fatalf("cache grant = %d", code)
+		}
+		grants[runID] = "Bearer " + out.Grant
+		var reserved controller.DirectUploadResponse
+		code := f.call("POST", "/api/v1/data/upload", "Bearer "+out.Grant,
+			map[string]any{"kind": "binary", "key": "bin/01234567-89abcdef/" + digest, "size": 4, "sha256": digest, "run_id": runID}, &reserved)
+		return code, reserved.UploadID
+	}
+	code, id := reserve("run-main", f.launchedRun(olga, "run-main", "acme", "widgets"))
+	if code != http.StatusOK {
+		t.Fatalf("a claim's binary reserve = %d", code)
+	}
+	var repo, ref string
+	if err := f.store.DB().QueryRowContext(t.Context(), `SELECT repo, ref FROM uploads WHERE id = ?`, id).Scan(&repo, &ref); err != nil ||
+		repo != "github:701" || ref != "refs/heads/main" {
+		t.Fatalf("the reservation's scope = %q %q %v, want github:701 refs/heads/main", repo, ref, err)
+	}
+	now := time.Now().UnixNano()
+	for ref, sha := range map[string]string{"refs/heads/main": strings.Repeat("a", 64), "refs/heads/feat": strings.Repeat("e", 64)} {
+		if _, err := f.store.DB().ExecContext(t.Context(), `INSERT INTO data_objects
+ (team, key, store, size, sha256, principal, provenance, repo, ref, committed_at) VALUES (?, ?, 'cache', 4, ?, 'claim', 'cloud', 'github:701', ?, ?)`,
+			olga.team, "bin/76543210-fedcba98/"+sha, sha, ref, now); err != nil {
+			t.Fatal(err)
+		}
+		now++
+	}
+	var signed controller.DataDownloadResponse
+	if code := f.call("POST", "/api/v1/data/download", grants["run-main"], map[string]any{"kind": "binary", "key": "bin/76543210-fedcba98"}, &signed); code != http.StatusOK || signed.SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("main's binary download = %d %q, want its own ref's binary", code, signed.SHA256)
+	}
+	refless := f.launchedRun(olga, "run-refless", "acme", "widgets")
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET git_branch = '' WHERE id = 'run-refless'`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := reserve("run-refless", refless); code != http.StatusForbidden {
+		t.Fatalf("a claim whose run names no ref reserved a binary: %d, want 403", code)
+	}
+	if code := f.call("POST", "/api/v1/data/upload", grants["run-refless"],
+		map[string]any{"kind": "artifact", "key": "artifacts/blobs/" + digest, "size": 4, "sha256": digest, "run_id": "run-refless"}, nil); code != http.StatusOK {
+		t.Fatalf("a claim whose run names no ref reserving a content-addressed artifact = %d, want 200", code)
+	}
+	repoless := f.launchedRun(olga, "run-repoless", "acme", "widgets")
+	if _, err := f.store.DB().ExecContext(t.Context(), `UPDATE triggers SET github_repo_id = 0 WHERE id = 'run-repoless'`); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := reserve("run-repoless", repoless); code != http.StatusForbidden {
+		t.Fatalf("a claim whose run names no repository reserved a binary: %d, want 403", code)
 	}
 }

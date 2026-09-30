@@ -188,11 +188,11 @@ func (s *Server) WithControllerAuth(controllerURL string, cacheTTL time.Duration
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleAppend)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleRead))))))
 	mux.Handle("GET /api/v1/logs/{runID}", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.metered(egress.ClassLog, http.HandlerFunc(s.handleReadRun))))))
 	mux.Handle("DELETE /api/v1/logs/{runID}", s.requireScope(scopeLogsDelete, http.HandlerFunc(s.handleDeleteRun)))
-	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal))))
+	mux.Handle("POST /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsWrite, s.withRun(pathRunID, http.HandlerFunc(s.handleSeal)), scopeLogsClaim))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/seal", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, http.HandlerFunc(s.handleReadSeals)))))
 	mux.Handle("GET /api/v1/logs/{runID}/{nodeID}/stream", s.requireScope(scopeLogsRead, s.readableRun(pathRunID, s.withRun(pathRunID, s.meteredStream(egress.ClassLogStream, http.HandlerFunc(s.handleStream))))))
 
@@ -210,8 +210,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 const (
-	scopeLogsRead   = "logs.read"
-	scopeLogsWrite  = "logs.write"
+	scopeLogsRead  = "logs.read"
+	scopeLogsWrite = "logs.write"
+	// safety: held only by a claim token, which the controller binds to one
+	// run and node on every append and seal; no other route answers it.
+	scopeLogsClaim  = "logs.claim"
 	scopeAdmin      = "admin"
 	scopeLogsDelete = "logs.delete"
 )
@@ -268,6 +271,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				Error:   "unauthenticated",
 				Message: err.Error(),
 			})
+			return
+		}
+		if strings.HasPrefix(raw, "Bearer "+store.ClaimTokenPrefix+"_") {
+			p := &logsPrincipal{Name: "claim", Kind: "claim", Scopes: []string{scopeLogsClaim}, credential: raw}
+			next.ServeHTTP(w, r.WithContext(contextWithLogsPrincipal(r.Context(), p)))
 			return
 		}
 		p, err := s.authenticate(r.Context(), raw)
@@ -667,10 +675,13 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	lock := s.appendNodeLock(runID, nodeID)
 	lock.Lock()
 	defer lock.Unlock()
-	_, status, err := s.validateAppendClaim(r, runID, nodeID)
+	claimed, status, err := s.validateAppendClaim(r, runID, nodeID)
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
+	}
+	if claimed.claimGeneration > 0 {
+		name = claimed.path(runID, nodeID)
 	}
 	if numbered && seq.end > seq.seq {
 		state := s.numberedRangeState(runID, nodeID, seq)
@@ -814,28 +825,44 @@ func (s *Server) appendNodeLock(runID, nodeID string) *sync.Mutex {
 	return s.appendLock(nodePath(runID, nodeID))
 }
 
-func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (http.Header, int, error) {
+// safety: a claim token's write goes to the attempt the controller named for
+// it, returned here; any other caller gets the zero identity.
+func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (appendIdentity, int, error) {
+	var none appendIdentity
 	if s.authDisabled() {
-		return nil, 0, nil
+		return none, 0, nil
 	}
 	p, _ := logsPrincipalFromContext(r.Context())
 	if p != nil && p.hasScope(scopeAdmin) {
-		return nil, 0, nil
+		return none, 0, nil
 	}
 	credential, err := extractCredential(r)
 	if err != nil {
-		return nil, http.StatusUnauthorized, err
+		return none, http.StatusUnauthorized, err
 	}
-	key, cacheable := claimCacheKey(r, runID, nodeID, credential)
-	if cacheable && s.claims.valid(key, time.Now()) {
-		return nil, 0, nil
+	// safety: a claim token's confirmation is trusted for no more than
+	// MaxClaimTokenCacheTTL, so its revocation takes effect within it, and the
+	// entry keeps the claim's team, so a write served from it is labeled too.
+	claimToken := p != nil && p.Kind == "claim"
+	ttl := s.claimCacheTTL()
+	if claimToken {
+		ttl = min(ttl, MaxClaimTokenCacheTTL)
+	}
+	key, cacheable := claimCacheKey(r, runID, nodeID, credential, claimToken)
+	if cacheable {
+		if e, ok := s.claims.valid(key, time.Now()); ok {
+			if claimToken {
+				p.Team = e.team
+			}
+			return e.attempt, 0, nil
+		}
 	}
 	u := strings.TrimRight(s.controllerURL, "/") + "/api/v1/runs/" + url.PathEscape(runID) +
 		"/nodes/" + url.PathEscape(nodeID) + "/claim/validate"
 	// #nosec G704 -- the origin is operator configuration; caller values are escaped path segments
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, u, nil)
 	if err != nil {
-		return nil, http.StatusBadGateway, err
+		return none, http.StatusBadGateway, err
 	}
 	req.Header.Set("Authorization", credential)
 	for _, name := range claimHeaders {
@@ -844,21 +871,34 @@ func (s *Server) validateAppendClaim(r *http.Request, runID, nodeID string) (htt
 	// #nosec G704 -- the validated request retains the same operator-configured origin
 	resp, err := s.authHTTP.Do(req)
 	if err != nil {
-		return nil, http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
+		return none, http.StatusBadGateway, fmt.Errorf("validate log claim: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		if cacheable && s.claimCacheTTL() > 0 {
-			s.claims.remember(key, time.Now().Add(s.claimCacheTTL()))
+		entry := claimEntry{until: time.Now().Add(ttl)}
+		// safety: a claim's run is labeled with the team the controller
+		// bound the claim to, and its write goes to the attempt the
+		// controller named, never one the pod names.
+		if claimToken {
+			generation, genErr := strconv.ParseInt(resp.Header.Get(store.ClaimGenerationHeader), 10, 64)
+			ordinal, ordErr := strconv.Atoi(resp.Header.Get(store.AttemptOrdinalHeader))
+			if p.Team = resp.Header.Get(store.ClaimTeamHeader); p.Team == "" || genErr != nil || ordErr != nil || generation < 1 || ordinal < 1 {
+				return none, http.StatusBadGateway, errors.New("validate log claim: the controller named no team or attempt")
+			}
+			entry.team = p.Team
+			entry.attempt = appendIdentity{claimGeneration: generation, attemptOrdinal: ordinal}
 		}
-		return resp.Header, 0, nil
+		if cacheable && ttl > 0 {
+			s.claims.remember(key, entry)
+		}
+		return entry.attempt, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		message = http.StatusText(resp.StatusCode)
 	}
-	return nil, resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
+	return none, resp.StatusCode, fmt.Errorf("validate log claim: %s", message)
 }
 
 type appendIdentity struct {

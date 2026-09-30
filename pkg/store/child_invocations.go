@@ -67,27 +67,39 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 	}
 	// safety: a child is reused only on evidence it will still succeed: a run
 	// that succeeded, or one queued or running with no cancel request on it or
-	// its trigger. A trigger no run row backs counts only while it is queued or
-	// claimed, so one finished or cancelled before dispatch starts a new child.
+	// its trigger. A trigger-path child also needs its trigger queued or
+	// claimed, so one finished or failed before its run did starts a new child;
+	// a controller-dispatched child's trigger is done from its intake.
 	err = tx.QueryRowContext(ctx, `SELECT c.child_run_id FROM child_invocations c
   JOIN triggers t ON t.team = c.team AND t.id = c.child_run_id
-  LEFT JOIN runs r ON r.team = c.team AND r.id = c.child_run_id
+  JOIN runs r ON r.team = c.team AND r.id = c.child_run_id
  WHERE c.team = ? AND c.parent_run_id = ? AND c.parent_node_id = ? AND c.ordinal = ? AND c.request_digest = ?
    AND c.claim_generation < ?
-   AND (r.status = ? OR (t.cancel_requested_at IS NULL AND (
-        (r.id IS NULL AND t.status IN (?, ?)) OR (r.status IN (?, ?) AND r.cancel_requested_at IS NULL))))
+   AND (r.status = ? OR (t.cancel_requested_at IS NULL AND r.cancel_requested_at IS NULL AND r.status IN (?, ?)
+        AND (r.dispatch != '' OR t.status IN (?, ?))))
  ORDER BY c.claim_generation DESC LIMIT 1`,
 		string(tok.Team), tok.RunID, tok.NodeID, ordinal, request, tok.Generation,
-		runStatusSuccess, triggerStatusPending, triggerStatusClaimed, runStatusPending, runStatusRunning).Scan(&childID)
+		runStatusSuccess, runStatusPending, runStatusRunning, triggerStatusPending, triggerStatusClaimed).Scan(&childID)
 	if errors.Is(err, sql.ErrNoRows) {
 		t.ParentRunID, t.ParentNodeID, t.Status = tok.RunID, tok.NodeID, ""
 		if t.CreatedAt.IsZero() {
 			t.CreatedAt = now
 		}
+		if err := inheritRepoIDTx(ctx, tx, tok, &t); err != nil {
+			return "", err
+		}
 		// safety: only a new child is admitted, so a replay at the team's
 		// daily cap still answers; admission's free-tier lock follows the run
 		// and node locks above, in the order lockTeamRunRowTx names.
 		if err := createTriggerTx(ctx, tx, tok.Team, t); err != nil {
+			return "", err
+		}
+		if err := s.createRunTx(ctx, tx, tok.Team, childRun(t)); err != nil {
+			return "", err
+		}
+		// safety: a child of an opted-in repository is planned by the
+		// controller like any other run of it, never claimed as a trigger.
+		if err := routeRunDispatchTx(ctx, tx, tok.Team, t, now); err != nil {
 			return "", err
 		}
 		childID, err = t.ID, nil
@@ -104,6 +116,31 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	return childID, tx.Commit()
 }
 
+// safety: a Cloud source credential reads a repository by its GitHub ID, so a
+// child of its parent's repository carries the ID its parent's trigger holds.
+func inheritRepoIDTx(ctx context.Context, tx *storeTx, tok ClaimToken, t *Trigger) error {
+	var id int64
+	var owner, repo string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(github_repo_id, 0), github_owner, github_repo FROM triggers WHERE team = ? AND id = ?`,
+		string(tok.Team), tok.RunID).Scan(&id, &owner, &repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err == nil && t.GithubRepoID == 0 && RepoKey(owner, repo) == RepoKey(t.GithubOwner, t.GithubRepo) {
+		t.GithubRepoID = id
+	}
+	return err
+}
+
+func childRun(t Trigger) Run {
+	return Run{
+		ID: t.ID, Pipeline: t.Pipeline, Status: runStatusPending, TriggerSource: t.TriggerSource,
+		GitBranch: t.GitBranch, GitSHA: t.GitSHA, Args: t.Args, ParentRunID: t.ParentRunID,
+		DeclaredRepo: t.Repo, RepoURL: t.RepoURL, GithubOwner: t.GithubOwner, GithubRepo: t.GithubRepo,
+		CreatedAt: t.CreatedAt, StartedAt: t.CreatedAt,
+	}
+}
+
 // safety: encoding/json writes map keys sorted, so equal arguments always
 // digest the same.
 func childRequestDigest(t Trigger) (string, error) {
@@ -116,4 +153,16 @@ func childRequestDigest(t Trigger) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// IsChildRunOf reports whether childID is a run that parentRunID started
+// through [Store.EnqueueChildRun].
+func (s *Store) IsChildRunOf(ctx context.Context, team Team, parentRunID, childID string) (bool, error) {
+	var one int
+	err := s.queryRow(ctx, `SELECT 1 FROM child_invocations WHERE team = ? AND parent_run_id = ? AND child_run_id = ? LIMIT 1`,
+		string(team), parentRunID, childID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }

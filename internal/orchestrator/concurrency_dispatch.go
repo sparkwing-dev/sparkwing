@@ -168,9 +168,9 @@ func concurrencyParametersFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyG
 	}
 }
 
-func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordinationParameters {
+func memoParamsFor(key, cacheHash string, cacheTTL time.Duration) coordinationParameters {
 	return coordinationParameters{
-		key:       memoKeyFor(cacheHash),
+		key:       key,
 		capacity:  1,
 		cost:      1,
 		policy:    store.OnLimitCoalesce,
@@ -209,12 +209,21 @@ func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
 	}
 	hasMemo := cacheHash != ""
+	memoKey := memoKeyFor(cacheHash)
+	// safety: a claimed node memoizes under its own repository, pipeline and
+	// node, the only memo keys the controller lets its claim take.
+	if c, ok := r.backends.State.(*claimState); ok && hasMemo {
+		if memoKey, err = c.memoKey(ctx, cacheHash); err != nil {
+			r.markFailedIfUnfinished(ctx, req.RunID, node.ID(), err)
+			return runner.Result{Outcome: sparkwing.Failed, Err: err}, true
+		}
+	}
 
 	switch {
 	case hasMemo && group != nil:
-		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL), true
+		return r.runMemoizedUnderConcurrency(ctx, req, group, memoKey, cacheHash, cacheTTL), true
 	case hasMemo:
-		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL)), true
+		return r.acquireAndRun(ctx, req, memoParamsFor(memoKey, cacheHash, cacheTTL)), true
 	case group != nil:
 		return r.runUnderGroup(ctx, req, group), true
 	default:
@@ -289,9 +298,9 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, pa
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
-func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
+func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, memoKey, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
-	memoParameters := memoParamsFor(cacheHash, cacheTTL)
+	memoParameters := memoParamsFor(memoKey, cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {
@@ -349,7 +358,11 @@ func storeOutcome(res runner.Result) string {
 }
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
-	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
+	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
+	if r.claimCacheMiss(ctx, err) {
+		result, _ := r.runNodeWithCache(withNoCache(ctx), req)
+		return result
+	}
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -741,7 +754,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 }
 
 func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, parameters coordinationParameters, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
-	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
+	output, err := r.fetchLeaderOutput(ctx, parameters, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -787,8 +800,30 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
+// safety: a claimed node whose cache entry the controller no longer answers,
+// such as one another repository wrote under a reused name, runs as on a miss;
+// the rerun skips the cache read, so it cannot loop.
+func (r *NodeExecutor) claimCacheMiss(ctx context.Context, err error) bool {
+	_, claim := r.backends.State.(*claimState)
+	return claim && errors.Is(err, store.ErrNotFound) && !noCacheFromContext(ctx)
+}
+
+// safety: a claimed node reads another run only through the reference its
+// plan declares, so it names the cache entry and the controller picks the run.
+func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, parameters coordinationParameters, originRun, originNode string) ([]byte, error) {
+	if c, ok := r.backends.State.(*claimState); ok {
+		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCached, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
+	}
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
+}
+
+// safety: a claimed follower names only its own memoization; the controller
+// finds the leader from the follower's waiter row or the entry it wrote.
+func (r *NodeExecutor) fetchLeaderOutput(ctx context.Context, parameters coordinationParameters, leaderRun, leaderNode string) ([]byte, error) {
+	if c, ok := r.backends.State.(*claimState); ok {
+		return c.input(ctx, store.ClaimInputRequest{Kind: store.ClaimInputCoalesced, Key: parameters.key, CacheKeyHash: parameters.cacheHash})
+	}
+	return r.backends.State.GetNodeOutput(ctx, leaderRun, leaderNode)
 }
 
 func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {

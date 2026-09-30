@@ -728,7 +728,11 @@ func (s *Server) handleSeal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "seal counts must not be negative", http.StatusBadRequest)
 		return
 	}
-	if _, status, err := s.validateAppendClaim(r, runID, nodeID); err != nil {
+	claimed, status, err := s.validateAppendClaim(r, runID, nodeID)
+	if claimed.claimGeneration > 0 {
+		identity = claimed
+	}
+	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
 	}

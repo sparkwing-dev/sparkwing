@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -32,6 +33,11 @@ func runFetchSourceCLI(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctrl := client.NewWithToken(os.Getenv("SPARKWING_CONTROLLER_URL"), nil, os.Getenv("SPARKWING_AGENT_TOKEN"))
+	// safety: the pod's first beat opens its node's billing, so the fetch is
+	// billed; the lease outlasts the fetch until the node's container beats.
+	if _, err := ctrl.HeartbeatClaim(ctx, args[0], args[1], store.MaxLeaseDuration); err != nil {
+		return fmt.Errorf("fetch-source: renew the claim: %w", err)
+	}
 	return fetchSource(ctx, ctrl, args[0], os.Getenv("SPARKWING_SOURCE_DIR"), os.Getenv("GOMODCACHE"),
 		bincache.CheckoutSource, goModDownload)
 }
@@ -87,6 +93,12 @@ func fetchSource(ctx context.Context, ctrl sourceCredentials, runID, dest, modCa
 			if err := download(ctx, dir, env); err != nil {
 				return fmt.Errorf("fetch-source: download modules in %s: %w", dir, err)
 			}
+		}
+		// safety: the pipeline's build finds these modules in the cache and
+		// must not ask a public proxy or checksum database about them.
+		goEnv := "GOPRIVATE=" + strings.Join(ids, ",") + "\n"
+		if err := os.WriteFile(filepath.Join(filepath.Dir(dest), orchestrator.GoEnvFile), []byte(goEnv), 0o644); err != nil {
+			return fmt.Errorf("fetch-source: %w", err)
 		}
 	}
 	// safety: everything under the scratch volume's root was written by this

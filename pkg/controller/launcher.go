@@ -57,8 +57,6 @@ func (s *Server) handleSetRepoDispatch(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, store.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
-	case errors.Is(err, store.ErrControllerDispatchIncomplete):
-		writeError(w, http.StatusConflict, err)
 	case err != nil:
 		s.writeInternalError(w, r, "repository dispatch", err)
 	default:

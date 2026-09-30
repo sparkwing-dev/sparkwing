@@ -44,6 +44,86 @@ unlock.
   unlimited; `runner_cap` on `POST /api/v1/teams/{team}/trust` raises one
   granted team. The `runner_scale_*` settings, the scaled
   per-principal cap and `usage.derived_runner_cap` are removed.
+- **controller + store + runner + SDK:** A run of an opted-in repository runs
+  end to end on the controller-dispatch path. A Job's pipeline container is
+  trusted code that renews its claim every 5 seconds, records the execution
+  start before any pipeline code runs, builds the pipeline from the checkout
+  the init container prepared (with `GOPRIVATE` set for the listed
+  repositories), and runs it with the claim token as its only credential. The
+  planning node runs the pipeline binary's new `plan --json`, which plans the
+  run and writes the document `POST /api/v1/runs/{id}/plan` accepts, each
+  node carrying its spec hash; a node's pod plans again and refuses a node
+  whose hash differs (`plan-drift`); planning reads secret arguments as
+  `***`. The new `Plan.Checkout` sets the depth,
+  tags, submodules and LFS a run's checkout gets. A claim token now reads its
+  own run, trigger and nodes, beats its claim (answered with `cancel` when the
+  run is being cancelled), records node, step and live-log progress, and
+  reports its attempt; the pipeline process renews its cache grant through the
+  claim every 2 minutes. `RunAndAwait` from such a node starts a child of the
+  same repository and commit through `POST /api/v1/runs/{id}/children`, one
+  child per call however often it is retried, and reads it through
+  `GET /api/v1/runs/{id}/children/{childID}`; a child of an opted-in
+  repository is planned by the controller as well. The launcher reconciles its
+  Jobs through `POST /api/v1/launcher/sync` every 5 seconds: it deletes the
+  running Job of a claim that ended or whose run is being cancelled, leaves a
+  finished Job and its pod log to the Job's TTL, and hands back the
+  claim of a Job that waited 4 minutes for a machine, so its node returns to
+  the queue unbilled with no attempt spent and is claimable again 5 minutes
+  later. A launched node's billing opens when its pod first renews the claim,
+  at the start of the source fetch, not at the claim. A handed-back node
+  shows `waiting for Cloud capacity` with a `capacity_wait` event. The
+  launcher claims no new node while five of the Jobs it created are not yet
+  running, counted as it creates each and from the Jobs it lists at every
+  sync, and resumes as they start or are handed back. A
+  planning node whose `.sparkwing` pins a
+  sparkwing release before v0.65.0 fails before its build, naming the pin. The
+  opt-in's audit record names the repository. Opting a repository in is
+  accepted. A work node reads a secret its pipeline declares through
+  `GET /api/v1/secrets/{name}?run=` with its claim token, each read recorded
+  as a `secret_released` event on the node; a planning node reads none, and
+  an undeclared name, including one `sparkwing.Secret` asks for ad hoc, is
+  refused and audited with the claim's token prefix. A plan whose `secrets`
+  name breaks the secret-name grammar or lists more than 100 names is
+  refused. A work node writes its own node's durable log to the logs
+  service with its claim token, which the service checks against the
+  controller at most once every 5 seconds per token, run and node, so a
+  revoked claim stops writing within 5 seconds, writes each claim to its own
+  attempt's stream, so a revoked claim inside that window never reaches its
+  successor's log, and answers on no other route; a write naming another attempt or trigger stream is refused,
+  and a write the controller names no team for is answered `502`. A work
+  node takes, renews, observes and releases concurrency slots with its claim
+  token, for its own run and node in its own team, under its node's holder
+  ID, and only with the key, policy, capacity and cost its accepted plan
+  declares for the node, a memoized node only under its own repository,
+  pipeline and node; every concurrency route, cancel-waiter, resolve,
+  notify and state included, lets it act only on its own node's holders and
+  waiters under a key its node declares, and it joins no other holder at
+  no cost; a slot's lease
+  never outlives the claim token, a
+  new acquire is refused once the run is being cancelled, and a release is
+  not. A claim token's binary cache is scoped to its run's GitHub repository ID
+  and git ref, both read from the run, as
+  GitHub Actions scopes caches: it writes under its own ref and reads its
+  own, then its pull request's base branch, then the default branch, which
+  GitHub App triggers now record as `GITHUB_DEFAULT_BRANCH`; a ref keeps the
+  first binary committed for an input and refuses a second, and a claim whose
+  run names no repository or ref writes no binary but still writes artifacts. Other callers never read a
+  claim's binaries. Schema v88 adds `ref` and `repo` to `uploads` and
+  `data_objects` and stamps
+  the `claim-cache-scope-v1` requirement, so an older controller refuses the
+  store rather than read a claim's binaries unscoped. A work node reads another run's output only through
+  `POST /api/v1/runs/{id}/nodes/{nodeID}/claim/input`, which picks the run
+  itself: the cache entry of the node's memoization, the leader its own
+  coalesce waiter names, both only under the node's own memo key and from a
+  run of its repository, pipeline and node (a cache entry another repository
+  wrote under a reused name reads as a miss, and the node runs), or the newest successful run of a pipeline and node
+  its plan declares in the new per-node `pipeline_refs` field, which the SDK
+  fills from the `RefToLastRun` fields a job struct holds; an undeclared
+  reference is refused and audited, and a ref built in a step body is refused
+  on this path. On this path a node cannot start a child of another repository, and
+  its OIDC token request is answered `422` naming the gap until Sparkwing
+  Cloud OIDC is enabled for it.
+
 - **controller + store + runner:** A repository can take the controller-dispatch
   path: `PUT /api/v1/teams/{team}/repos/{owner}/{name}/dispatch` with
   `{"dispatch":"controller"}` (admin only) starts each new run of that
@@ -60,9 +140,7 @@ unlock.
   a team that cannot pay never holds the queue. Every other repository keeps
   the trigger path, a manual retry follows its repository's path, and no other
   claim path, executor offers included, takes a controller-dispatched node.
-  Opting a repository in answers `409` until pods can fetch source and report
-  through claim tokens. Schema v84 adds the `repos` table, `runs.dispatch`
-  and `nodes.timeout_ms`.
+  Schema v84 adds the `repos` table, `runs.dispatch` and `nodes.timeout_ms`.
 
 - **controller + store + runner:** A controller-dispatched Job fetches its
   run's source in the Job's own pod, and the controller never fetches a

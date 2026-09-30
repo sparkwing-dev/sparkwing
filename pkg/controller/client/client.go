@@ -1948,6 +1948,9 @@ func classifyHTTPError(resp *http.Response) error {
 		if json.Unmarshal(body, &refusal) == nil && refusal.Code == meteredInProcessNodesCode {
 			return fmt.Errorf("%w: %s", store.ErrMeteredInProcessNodes, bytes.TrimSpace(body))
 		}
+		if refusal.Code == claimCancelledCode {
+			return fmt.Errorf("%w: %s", store.ErrClaimCancelRequested, bytes.TrimSpace(body))
+		}
 	}
 	// safety: a spent credit balance is a standing condition, not a transport
 	// failure, so the caller can tell it apart and keep polling.
@@ -1987,6 +1990,8 @@ func classifyHTTPError(resp *http.Response) error {
 // safety: the controller's own code string, repeated here so the client does
 // not import the controller package it is a client of.
 const computeLimitRefusedCode = "compute_limit"
+
+const claimCancelledCode = "claim_cancelled"
 
 type computeLimitRefusalWire struct {
 	Code     string `json:"code"`

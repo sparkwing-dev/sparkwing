@@ -80,15 +80,27 @@ func TestAuditRecordNamesThePrincipalAndNeverTheRawPath(t *testing.T) {
 	f.call("POST", "/api/v1/tokens", "Bearer "+f.admin, map[string]any{
 		"principal": "svc", "kind": "service", "scopes": []string{"runs.read"},
 	}, nil)
+	f.call("PUT", "/api/v1/teams/"+owner.team+"/repos/Acme/Widgets/dispatch", "Bearer "+f.admin,
+		map[string]string{"dispatch": "controller"}, nil)
 
-	var deleted, minted map[string]any
+	var deleted, minted, optIn map[string]any
 	for _, rec := range logs.records(t, "audit") {
 		switch rec["route"] {
 		case "/api/v1/secrets/{name}":
 			deleted = rec
 		case "/api/v1/tokens":
 			minted = rec
+		case "/api/v1/teams/{team}/repos/{owner}/{name}/dispatch":
+			optIn = rec
 		}
+	}
+	if optIn == nil || optIn["repo_owner"] != "Acme" || optIn["repo_name"] != "Widgets" ||
+		optIn["target_team"] != owner.team || optIn["status"] != float64(http.StatusOK) ||
+		!strings.HasPrefix(f.admin, optIn["principal_id"].(string)) {
+		t.Errorf("opt-in audit record = %v, want the repository, its team and the admin token", optIn)
+	}
+	if deleted["repo_name"] != nil {
+		t.Errorf("a secret route's {name} reached the record as a repository: %v", deleted)
 	}
 	if deleted == nil || minted == nil {
 		t.Fatalf("audit records missing: %s", logs.String())

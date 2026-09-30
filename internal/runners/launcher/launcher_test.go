@@ -2,6 +2,7 @@ package launcher_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -26,7 +29,7 @@ type launchFixture struct {
 	kube *fake.Clientset
 }
 
-func newLaunchFixture(t *testing.T) launchFixture {
+func newLaunchFixture(t *testing.T, wrap ...func(http.Handler) http.Handler) launchFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -38,7 +41,11 @@ func newLaunchFixture(t *testing.T) launchFixture {
 	if _, _, err := st.CreateToken("operator", store.TokenKindService, []string{controller.ScopeAdmin}, 0, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	h := controller.New(st, nil).EnableAuthFromStore().Handler()
+	for _, w := range wrap {
+		h = w(h)
+	}
+	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	return launchFixture{st: st, url: srv.URL, kube: fake.NewSimpleClientset()}
 }
@@ -108,14 +115,8 @@ func TestLaunchOne_RunsAnOptedInRepoAsOneJobWithAClaimToken(t *testing.T) {
 		t.Fatalf("unknown dispatch answered %d, want 400", code)
 	}
 	if code := f.requestBody(t, http.MethodPut, "/api/v1/teams/default/repos/korey/probe/dispatch", admin,
-		`{"dispatch":"controller"}`); code != http.StatusConflict {
-		t.Fatalf("opting in before the path is complete answered %d, want 409", code)
-	}
-	// safety: the setter refuses controller dispatch until the path can run, so
-	// the test writes the row it will write once it accepts it.
-	if _, err := f.st.DB().ExecContext(ctx, `INSERT INTO repos (team, repo, dispatch, updated_at) VALUES (?, ?, ?, ?)`,
-		string(store.DefaultTeam), store.RepoKey("korey", "probe"), string(store.RepoDispatchController), time.Now().UnixNano()); err != nil {
-		t.Fatal(err)
+		`{"dispatch":"controller"}`); code != http.StatusOK {
+		t.Fatalf("opting in answered %d, want 200", code)
 	}
 	f.intake(t, "run-old", "korey/other")
 	f.intake(t, "run-new", "korey/probe")
@@ -187,5 +188,230 @@ func TestLaunchOne_CreatesNoJobForATokenUnderTheFloor(t *testing.T) {
 	}
 	if actions := f.kube.Actions(); len(actions) != 0 {
 		t.Fatalf("kubernetes actions = %v, want none for a claim under the floor", actions)
+	}
+}
+
+func (f launchFixture) optedInRun(t *testing.T, runID string) {
+	t.Helper()
+	tn, err := f.st.ForTeam(context.Background(), store.DefaultTeam)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.SetRepoDispatch(context.Background(), "korey", "probe", store.RepoDispatchController, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.intake(t, runID, "korey/probe")
+}
+
+func (f launchFixture) unplacedPod(t *testing.T, job string, waited time.Duration) {
+	t.Helper()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job + "-pod", Namespace: "sparkwing-jobs", Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "sparkwing-launcher", launcher.JobLabel: job,
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+			Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
+			LastTransitionTime: metav1.NewTime(time.Now().Add(-waited)),
+		}}},
+	}
+	if _, err := f.kube.CoreV1().Pods("sparkwing-jobs").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f launchFixture) jobNames(t *testing.T) []string {
+	t.Helper()
+	jobs, err := f.kube.BatchV1().Jobs("sparkwing-jobs").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, j := range jobs.Items {
+		names = append(names, j.Name)
+	}
+	return names
+}
+
+// A Job that has waited past the release point for a machine is deleted and
+// its node goes back to the queue unbilled, marked as waiting, while other
+// work is still claimed. A Job that just started waiting stays.
+func TestSync_HandsBackAJobThatNeverGotAMachine(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-wait")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	job := f.jobNames(t)[0]
+	f.unplacedPod(t, job, 30*time.Second)
+	if err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of a fresh Job: %v", err)
+	}
+	if names := f.jobNames(t); len(names) != 1 {
+		t.Fatalf("a Job waiting 30s was deleted: %v", names)
+	}
+	if err := f.kube.CoreV1().Pods("sparkwing-jobs").Delete(ctx, job+"-pod", metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
+	f.intake(t, "run-next", "korey/probe")
+	if err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of a stuck Job: %v", err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("the stuck Job was kept: %v", names)
+	}
+	n, err := f.st.GetNode(ctx, "run-wait", store.PlanNodeID)
+	if err != nil || n.ClaimedBy != "" || n.AttemptsConsumed != 0 || n.StatusDetail != store.CapacityWaitDetail ||
+		n.ReadyAt == nil || n.ReadyAt.Before(time.Now().Add(store.ReleaseBackoff-time.Minute)) {
+		t.Fatalf("node after release = %+v %v, want it queued behind the backoff", n, err)
+	}
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch after the release: %v %v", launched, err)
+	}
+	if launched, err := l.LaunchOne(ctx); launched || err != nil {
+		t.Fatalf("the released node was claimed again inside its backoff: %v %v", launched, err)
+	}
+	if names := f.jobNames(t); len(names) != 1 || !strings.Contains(names[0], "plan") {
+		t.Fatalf("jobs after the release = %v, want run-next's plan alone", names)
+	}
+}
+
+// Any number of Jobs syncs, however many the controller takes in one request.
+func TestSync_PagesPastTheControllersRequestCap(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	for i := range 1001 {
+		job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("gone-%d", i), Namespace: "sparkwing-jobs",
+			Labels: map[string]string{"app.kubernetes.io/managed-by": "sparkwing-launcher"},
+			Annotations: map[string]string{
+				launcher.RunAnnotation: "run-gone", launcher.NodeAnnotation: fmt.Sprintf("n%d", i), launcher.GenerationAnnotation: "1",
+			},
+		}}
+		if _, err := f.kube.BatchV1().Jobs("sparkwing-jobs").Create(ctx, job, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.Sync(ctx); err != nil {
+		t.Fatalf("sync of 1001 Jobs: %v", err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("%d Jobs of ended claims survived", len(names))
+	}
+}
+
+// A cancelled run's Job is deleted on the next sync, which is what stops a
+// pod that is not heartbeating.
+func TestSync_DeletesACancelledRunsJob(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-cancel")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	if err := l.Sync(ctx); err != nil || len(f.jobNames(t)) != 1 {
+		t.Fatalf("sync of a live claim: %v, jobs %v", err, f.jobNames(t))
+	}
+	if err := f.st.RequestCancel(ctx, "run-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if names := f.jobNames(t); len(names) != 0 {
+		t.Fatalf("the cancelled run's Job survived: %v", names)
+	}
+}
+
+// A finished Job keeps its pod, and with it the pod's log, until the Job's
+// TTL removes it, even once its claim has ended.
+func TestSync_LeavesAFinishedJobForItsTTL(t *testing.T) {
+	ctx := context.Background()
+	f := newLaunchFixture(t)
+	f.optedInRun(t, "run-done")
+	l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+	if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+		t.Fatalf("launch: %v %v", launched, err)
+	}
+	job, err := f.kube.BatchV1().Jobs("sparkwing-jobs").Get(ctx, f.jobNames(t)[0], metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Conditions = []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}}
+	if _, err := f.kube.BatchV1().Jobs("sparkwing-jobs").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.RequestCancel(ctx, "run-done"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if names := f.jobNames(t); len(names) != 1 {
+		t.Fatalf("the finished Job was deleted: %v", names)
+	}
+}
+
+func (f launchFixture) runningPod(t *testing.T, job string) {
+	t.Helper()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: job + "-pod", Namespace: "sparkwing-jobs", Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "sparkwing-launcher", launcher.JobLabel: job,
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	if _, err := f.kube.CoreV1().Pods("sparkwing-jobs").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The launcher counts the Jobs it created that are not yet running, as it
+// creates each and at every sync, and claims nothing while MaxPendingJobs of
+// them are pending: a burst of ready nodes stops at the brake between syncs,
+// and a Job that starts running, or is handed back, lets it claim the next.
+func TestRun_PausesClaimsWhileItsJobsAreNotYetRunning(t *testing.T) {
+	for _, c := range []struct {
+		name                     string
+		launched, running, freed int
+		want                     int
+	}{
+		{"a burst between syncs", 0, 0, 0, launcher.MaxPendingJobs},
+		{"all pending", launcher.MaxPendingJobs, 0, 0, launcher.MaxPendingJobs},
+		{"one running", launcher.MaxPendingJobs, 1, 0, launcher.MaxPendingJobs + 1},
+		{"one handed back", launcher.MaxPendingJobs, 0, 1, launcher.MaxPendingJobs},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newLaunchFixture(t)
+			f.optedInRun(t, "run-0")
+			for i := 1; i <= launcher.MaxPendingJobs+2; i++ {
+				f.intake(t, fmt.Sprintf("run-%d", i), "korey/probe")
+			}
+			l := f.launcher(f.token(t, controller.ScopeClaimsLaunch))
+			for range c.launched {
+				if launched, err := l.LaunchOne(ctx); !launched || err != nil {
+					t.Fatalf("launch: %v %v", launched, err)
+				}
+			}
+			jobs := f.jobNames(t)
+			for _, job := range jobs[:c.running] {
+				f.runningPod(t, job)
+			}
+			for _, job := range jobs[c.running : c.running+c.freed] {
+				f.unplacedPod(t, job, launcher.UnschedulableRelease+time.Second)
+			}
+			runCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			if err := l.Run(runCtx); err != nil {
+				t.Fatal(err)
+			}
+			if got := len(f.jobNames(t)); got != c.want {
+				t.Fatalf("the launcher holds %d Jobs, want %d", got, c.want)
+			}
+		})
 	}
 }

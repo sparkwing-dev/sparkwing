@@ -690,6 +690,17 @@ name the same repository and it means nothing either way.
   run's pipeline, falling back to an unscoped row only when that row is shared.
   A caller holding no claim reads nothing. A caller holding claims in one
   pipeline may omit `?run`; holding claims in two, it must name the run.
+- A controller-dispatched work node's claim token names its own run with
+  `?run=<id>` and reads only a name its accepted plan declares, resolved like
+  the row above. The pipeline's code declares its secrets, as in GitHub
+  Actions, so push access to the repository is the trust boundary; fork pull
+  requests never run on this path. A plan is refused when a declared name
+  breaks the secret-name grammar or it declares more than 100 names, and a
+  read of an undeclared name is answered `403` `secret_undeclared` and logged
+  as an `audit` record with `event=secret_undeclared` and the claim's token
+  prefix. A team-shared secret is readable by any of the team's opted-in
+  repositories whose pipeline declares its name; scoping a shared secret to
+  chosen repositories is a future feature.
 
 So one runner token cannot lift another pipeline's deploy credential by asking
 for it by name, and a token working two runs cannot read the wrong one's

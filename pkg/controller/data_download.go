@@ -280,7 +280,14 @@ func (s *Server) handleDataDownload(w http.ResponseWriter, r *http.Request) {
 		objectSize, digest = obj.Size, obj.SHA256
 		objectKey, err = bucket.Key(string(team), obj.Provenance+"/"+obj.Key)
 	case req.Kind == "binary" && strings.HasPrefix(req.Key, "bin/"):
-		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader)
+		repo, refs := "", []string{""}
+		if grant != nil {
+			if repo, _, refs, err = s.cacheScope(r.Context(), *grant); err != nil {
+				writeError(w, http.StatusForbidden, errors.New("the cache grant's run names no cache scope"))
+				return
+			}
+		}
+		obj, findErr := s.store.BinaryObject(r.Context(), team, strings.TrimPrefix(req.Key, "bin/"), cloudReader, repo, refs)
 		if errors.Is(findErr, store.ErrNotFound) {
 			http.NotFound(w, r)
 			return

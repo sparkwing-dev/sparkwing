@@ -16,6 +16,10 @@ import (
 // ClaimTokenPrefix marks a claim token; raw is `swc_<entropy>`.
 const ClaimTokenPrefix = "swc"
 
+// ClaimTeamHeader names the team a claim token's claim belongs to on the
+// controller's answer to a log-claim validation.
+const ClaimTeamHeader = "X-Sparkwing-Claim-Team"
+
 // MaxClaimTokenLifetime bounds a claim token's hard expiry, which is the
 // deadline of the Job that carries it.
 const MaxClaimTokenLifetime = 6 * time.Hour

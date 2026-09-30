@@ -28,15 +28,15 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/capabilities` | `public` |
 | `GET` | `/api/v1/compute-limits` | `runs.read` |
 | `PUT` | `/api/v1/compute-limits` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/acquire` | `runs.state` |
-| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `runs.state` |
+| `POST` | `/api/v1/concurrency/{key}/acquire` | `claim` or `runs.state` |
+| `POST` | `/api/v1/concurrency/{key}/cancel-waiter` | `claim` or `runs.state` |
 | `POST` | `/api/v1/concurrency/{key}/force-release` | `admin` |
-| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/holder` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/notify` | `runs.read` |
-| `POST` | `/api/v1/concurrency/{key}/release` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/resolve` | `runs.state` |
-| `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `POST` | `/api/v1/concurrency/{key}/heartbeat` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/holder` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/notify` | `claim` or `runs.read` |
+| `POST` | `/api/v1/concurrency/{key}/release` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/resolve` | `claim` or `runs.state` |
+| `GET` | `/api/v1/concurrency/{key}/state` | `claim` or `runs.read` |
 | `GET` | `/api/v1/credits` | `runs.read` |
 | `POST` | `/api/v1/credits/card-payments` | `credits.grant` |
 | `POST` | `/api/v1/credits/card-refunds` | `credits.grant` |
@@ -75,6 +75,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/invitations/{id}/accept` | `authenticated` |
 | `POST` | `/api/v1/launcher/claim` | `ScopeClaimsLaunch` |
+| `POST` | `/api/v1/launcher/sync` | `ScopeClaimsLaunch` |
 | `POST` | `/api/v1/maintenance/reconcile-orphans` | `admin` |
 | `DELETE` | `/api/v1/me` | `authenticated` |
 | `GET` | `/api/v1/me` | `authenticated` |
@@ -113,7 +114,7 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs` | `runs.read` |
 | `POST` | `/api/v1/runs` | `runs.state` |
 | `DELETE` | `/api/v1/runs/{id}` | `admin` |
-| `GET` | `/api/v1/runs/{id}` | `runs.read` or `nodes.claim` or `triggers.claim` |
+| `GET` | `/api/v1/runs/{id}` | `claim` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/approvals` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/approvals/{nodeID}` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/approvals/{nodeID}` | `approvals.write` |
@@ -121,6 +122,9 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/attempts` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/cache-grant` | `claim` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/cancel` | `runs.control` |
+| `POST` | `/api/v1/runs/{id}/children` | `claim` |
+| `GET` | `/api/v1/runs/{id}/children/{childID}` | `claim` |
+| `GET` | `/api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output` | `claim` |
 | `GET` | `/api/v1/runs/{id}/debug-pauses` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/debug-pauses` | `admin` |
 | `GET` | `/api/v1/runs/{id}/events` | `runs.read` |
@@ -134,47 +138,48 @@ Every route the controller and logs service register, with the scope each requir
 | `GET` | `/api/v1/runs/{id}/log-access` | `logs.read` or `logs.write` or `runs.read` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes` | `runs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes` | `runs.state` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/activity` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/annotations` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/artifact-manifest` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/attempt` | `claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/auto-retry/reset` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/bounce/consume` | `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `logs.write` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/input` | `claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/claim/validate` | `claim` or `logs.write` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/debug-pause` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/deps` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatch` | `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/dispatches` | `runs.read` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-finish` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/execution-start` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finalize-ready` | `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/finish` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/heartbeat` | `claim` or `nodes.claim` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `runs.state` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/logs` | `claim` or `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/logs/stream` | `runs.read` or `logs.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/mark-ready` | `runs.state` |
 | `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `runs.read` or `nodes.claim` or `triggers.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `nodes.claim` |
-| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/metrics` | `claim` or `nodes.claim` |
+| `GET` | `/api/v1/runs/{id}/nodes/{nodeID}/output` | `claim` or `nodes.claim` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/release` | `runs.control` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/revoke-ready` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `runs.state` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/start` | `claim` or `runs.state` |
 | `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/status` | `runs.state` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `nodes.claim` |
-| `POST` | `/api/v1/runs/{id}/oidc-token` | `nodes.claim` or `triggers.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/annotations` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/finish` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/skip` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/start` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/steps/summary` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/summary` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/touch` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/nodes/{nodeID}/usage` | `claim` or `nodes.claim` |
+| `POST` | `/api/v1/runs/{id}/oidc-token` | `claim` or `nodes.claim` or `triggers.claim` |
 | `GET` | `/api/v1/runs/{id}/paused` | `runs.read` |
 | `GET` | `/api/v1/runs/{id}/pending-triggers` | `triggers.read` or `nodes.claim` or `triggers.claim` |
 | `POST` | `/api/v1/runs/{id}/plan` | `claim` or `runs.state` |
@@ -187,7 +192,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/secrets` | `admin` or `team.admin` |
 | `POST` | `/api/v1/secrets/rotate` | `admin` |
 | `DELETE` | `/api/v1/secrets/{name}` | `admin` or `team.admin` |
-| `GET` | `/api/v1/secrets/{name}` | `secrets.read` or `team.admin` |
+| `GET` | `/api/v1/secrets/{name}` | `claim` or `secrets.read` or `team.admin` |
 | `GET` | `/api/v1/services` | `authenticated` |
 | `GET` | `/api/v1/signups` | `admin` |
 | `PUT` | `/api/v1/signups` | `admin` |
@@ -283,9 +288,9 @@ Every route the controller and logs service register, with the scope each requir
 | `DELETE` | `/api/v1/logs/{runID}` | `logs.delete` |
 | `GET` | `/api/v1/logs/{runID}` | `logs.read` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` |
+| `POST` | `/api/v1/logs/{runID}/{nodeID}` | `logs.write` or `logs.claim` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.read` |
-| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` |
+| `POST` | `/api/v1/logs/{runID}/{nodeID}/seal` | `logs.write` or `logs.claim` |
 | `GET` | `/api/v1/logs/{runID}/{nodeID}/stream` | `logs.read` |
 | `DELETE` | `/api/v1/teams/{team}/logs` | `admin` or `logs.delete` |
 | `GET` | `/metrics` | `public` |

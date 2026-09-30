@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_grants_kind_amount
 CREATE INDEX IF NOT EXISTS idx_credit_charges_kind_amount
     ON credit_charges(kind, amount_micro, seconds);`
 
-const expectedSchemaVersion = 87
+const expectedSchemaVersion = 88
 
 var nodeExecutionPolicyCols = map[string]string{
 	"execution_policy_json":                  "BLOB",
@@ -1860,7 +1860,13 @@ var migrationRequirements = map[int][]string{
 	75: {creditValueRequirement},
 	80: {billingTrustRequirement},
 	87: {cardBillingRequirement},
+	88: {claimCacheScopeRequirement},
 }
+
+// safety: v88 scopes a claim token's binaries by repository and git ref, and a
+// binary predating it reads them unscoped, so a feature branch's binary could
+// reach main; the requirement makes that binary refuse the store instead.
+const claimCacheScopeRequirement = "claim-cache-scope-v1"
 
 // safety: v48 renames two columns, so a binary predating it writes the names
 // that are gone; both halves are declared rather than left additive.
@@ -2128,6 +2134,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return applySourceMintMigration(ctx, tx, false)
 	case 87:
 		return applyCardBillingMigration(ctx, tx, false)
+	case 88:
+		return applyCacheRefMigration(ctx, tx, false)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2583,6 +2591,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return applySourceMintMigration(ctx, tx, true)
 	case 87:
 		return applyCardBillingMigration(ctx, tx, true)
+	case 88:
+		return applyCacheRefMigration(ctx, tx, true)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}

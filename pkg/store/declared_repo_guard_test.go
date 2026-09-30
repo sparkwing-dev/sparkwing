@@ -27,6 +27,7 @@ var declaredRepoReaders = map[string]string{
 	"internal/orchestrator/replay.go":            "copies the replayed run's repository onto the replay",
 	"internal/orchestrator/backends.go":          "copies a parent run's repository onto a child trigger",
 	"internal/orchestrator/run_node.go":          "stamps the repository into the node's environment",
+	"pkg/store/child_invocations.go":             "copies a child trigger's repository onto the child's run row",
 	"internal/orchestrator/dispatch_snapshot.go": "stamps SPARKWING_REPO into a dispatch snapshot",
 	"cmd/sparkwing/jobs_verbs.go":                "passes the operator's --repo filter through",
 	"cmd/sparkwing/repos.go":                     "groups runs by repository for display",

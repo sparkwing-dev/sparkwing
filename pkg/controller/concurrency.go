@@ -16,7 +16,9 @@ import (
 // move only a slot belonging to a run it holds a live claim on. The run comes
 // out of the request the caller sends, either named outright or through the
 // holder row it names; admin bypasses, as it does on every other claim fence.
-type slotRunResolver func(http.ResponseWriter, *http.Request) (string, *http.Request, bool)
+type slotRunResolver func(http.ResponseWriter, *http.Request) (slotOwner, *http.Request, bool)
+
+type slotOwner struct{ runID, nodeID string }
 
 func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,11 +28,19 @@ func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Ha
 			next.ServeHTTP(w, r)
 			return
 		}
-		runID, r, ok := resolve(w, r)
+		owner, r, ok := resolve(w, r)
 		if !ok {
 			return
 		}
-		held, err := s.ownsRun(ctx, runID, claimIdentity(r))
+		if tok, claim := claimTokenFromContext(ctx); claim {
+			if err := s.claimOwnsSlot(r, tok, owner); err != nil {
+				writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "claim_mismatch", Message: err.Error()})
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		held, err := s.ownsRun(ctx, owner.runID, claimIdentity(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -38,7 +48,7 @@ func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Ha
 		if !held {
 			writeAuthError(w, http.StatusForbidden, authErrorBody{
 				Code: "claim_required", Principal: p.label(),
-				Message: "run " + runID + " is not claimed by this principal",
+				Message: "run " + owner.runID + " is not claimed by this principal",
 			})
 			return
 		}
@@ -46,55 +56,73 @@ func (s *Server) claimedSlot(resolve slotRunResolver, next http.Handler) http.Ha
 	})
 }
 
-func (s *Server) slotRunFromBody(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+// safety: the one ownership rule for every concurrency route a claim reaches:
+// the holder or waiter it acts on is its own node's in its own run, under a
+// key its node's accepted plan declares, and requestTenant holds it to its team.
+func (s *Server) claimOwnsSlot(r *http.Request, tok store.ClaimToken, owner slotOwner) error {
+	if owner.runID != tok.RunID || owner.nodeID != tok.NodeID {
+		return errors.New("this claim token acts only on its own node's holders and waiters")
+	}
+	return s.store.CheckClaimKey(r.Context(), tok, r.PathValue("key"))
+}
+
+func (s *Server) slotRunFromBody(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
 	var body struct {
-		RunID string `json:"run_id"`
+		RunID  string `json:"run_id"`
+		NodeID string `json:"node_id"`
 	}
 	r, ok := peekJSONBody(w, r, &body)
 	if !ok {
-		return "", r, false
+		return slotOwner{}, r, false
 	}
 	if body.RunID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
-		return "", r, false
+		return slotOwner{}, r, false
 	}
-	return body.RunID, r, true
+	return slotOwner{body.RunID, body.NodeID}, r, true
 }
 
-func (s *Server) slotRunFromBodyHolder(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+func (s *Server) slotRunFromBodyHolder(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
 	var body struct {
 		HolderID string `json:"holder_id"`
 	}
 	r, ok := peekJSONBody(w, r, &body)
 	if !ok {
-		return "", r, false
+		return slotOwner{}, r, false
 	}
 	return s.slotRunFromHolder(w, r, body.HolderID)
 }
 
-func (s *Server) slotRunFromQueryHolder(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
+func (s *Server) slotRunFromQueryHolder(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
 	return s.slotRunFromHolder(w, r, r.URL.Query().Get("holder_id"))
 }
 
-func (s *Server) slotRunFromQueryRun(w http.ResponseWriter, r *http.Request) (string, *http.Request, bool) {
-	runID := r.URL.Query().Get("run_id")
-	if runID == "" {
+func (s *Server) slotRunFromQueryRun(w http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
+	q := r.URL.Query()
+	if q.Get("run_id") == "" {
 		writeError(w, http.StatusBadRequest, errors.New("run_id is required"))
-		return "", r, false
+		return slotOwner{}, r, false
 	}
-	return runID, r, true
+	return slotOwner{q.Get("run_id"), q.Get("node_id")}, r, true
+}
+
+// safety: a key's state names no holder of its own, so a claim reads it as
+// its own node, under the same key rule as every other route.
+func (s *Server) slotOwnKey(_ http.ResponseWriter, r *http.Request) (slotOwner, *http.Request, bool) {
+	tok, _ := claimTokenFromContext(r.Context())
+	return slotOwner{tok.RunID, tok.NodeID}, r, true
 }
 
 // safety: a holder whose lease has lapsed names no run the caller can prove it
 // owns, so the request is refused rather than resolved against a stale row.
-func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holderID string) (string, *http.Request, bool) {
+func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holderID string) (slotOwner, *http.Request, bool) {
 	tenant, ok := s.requestTenant(w, r)
 	if !ok {
-		return "", r, false
+		return slotOwner{}, r, false
 	}
 	if holderID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id is required"))
-		return "", r, false
+		return slotOwner{}, r, false
 	}
 	holder, err := tenant.ConcurrencyHolder(r.Context(), r.PathValue("key"), holderID, time.Now())
 	if err != nil {
@@ -104,12 +132,12 @@ func (s *Server) slotRunFromHolder(w http.ResponseWriter, r *http.Request, holde
 				Code: "claim_required", Principal: p.label(),
 				Message: "holder " + holderID + " does not hold this key",
 			})
-			return "", r, false
+			return slotOwner{}, r, false
 		}
 		writeError(w, http.StatusInternalServerError, err)
-		return "", r, false
+		return slotOwner{}, r, false
 	}
-	return holder.RunID, r, true
+	return slotOwner{holder.RunID, holder.NodeID}, r, true
 }
 
 func peekJSONBody(w http.ResponseWriter, r *http.Request, v any) (*http.Request, bool) {
@@ -174,6 +202,12 @@ func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 	if body.HolderID == "" || body.RunID == "" {
 		writeError(w, http.StatusBadRequest, errors.New("holder_id and run_id are required"))
 		return
+	}
+	if tok, claim := claimTokenFromContext(r.Context()); claim {
+		if err := s.checkClaimAcquire(r, tok, key, &body); err != nil {
+			writeAuthError(w, http.StatusForbidden, authErrorBody{Code: "slot_undeclared", Message: err.Error()})
+			return
+		}
 	}
 	req := store.AcquireSlotRequest{
 		Key:               key,
@@ -256,6 +290,9 @@ func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lease := time.Duration(body.LeaseSecs) * time.Second
+	if tok, claim := claimTokenFromContext(r.Context()); claim {
+		lease = claimSlotLease(tok, lease)
+	}
 	expires, superseded, err := tenant.HeartbeatConcurrencySlot(r.Context(), key, body.HolderID, lease)
 	if err != nil {
 		if errors.Is(err, store.ErrLockHeld) {
@@ -623,4 +660,34 @@ func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// safety: a claim takes only a slot its node's plan declares, under its own
+// node's holder ID, joins no holder, and holds it no longer than
+// its claim token lives, so it cannot supersede, renew or block another run's
+// holder beyond what the declared policy allows.
+func (s *Server) checkClaimAcquire(r *http.Request, tok store.ClaimToken, key string, body *acquireSlotReq) error {
+	// safety: an acquire naming a live holder's ID renews that holder, so a
+	// claim names only the ID the SDK gives its own node.
+	if body.HolderID != tok.RunID+"/"+tok.NodeID {
+		return errors.New("a claim acquires under its own node's holder ID only")
+	}
+	if err := s.store.CheckClaimSlot(r.Context(), tok, key, body.Policy, body.Max, body.Cost); err != nil {
+		return err
+	}
+	// safety: joining a holder takes its slot at no cost, and only a runner's
+	// remote broker joins one; a claimed node never does, and its own earlier
+	// holder already carries its holder ID.
+	if body.InheritedHolderID != "" {
+		return errors.New("a claim does not join another holder")
+	}
+	body.LeaseSecs = int(claimSlotLease(tok, time.Duration(body.LeaseSecs)*time.Second) / time.Second)
+	return nil
+}
+
+func claimSlotLease(tok store.ClaimToken, lease time.Duration) time.Duration {
+	if lease <= 0 {
+		lease = store.DefaultConcurrencyLease
+	}
+	return max(min(lease, time.Until(tok.ExpiresAt)), time.Second)
 }

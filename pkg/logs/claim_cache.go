@@ -14,6 +14,11 @@ import (
 // controller confirmed before it asks again.
 const MaxClaimCacheTTL = 30 * time.Second
 
+// MaxClaimTokenCacheTTL bounds how long a claim token's confirmation is
+// trusted, so a revoked or cancelled claim stops writing within it while the
+// controller is asked once per claim per interval rather than once per write.
+const MaxClaimTokenCacheTTL = 5 * time.Second
+
 const maxClaimCacheEntries = 4096
 
 var claimHeaders = []string{
@@ -28,9 +33,10 @@ var claimHeaders = []string{
 // safety: only an append naming its claim generation or trigger generation
 // is cached, because it writes to a substream keyed by that generation; a
 // stale holder served from the cache writes only to its own attempt, never
-// to the one that replaced it.
-func claimCacheKey(r *http.Request, runID, nodeID, credential string) ([sha256.Size]byte, bool) {
-	if r.Header.Get(store.ClaimGenerationHeader) == "" && r.Header.Get(store.TriggerGenerationHeader) == "" {
+// to the one that replaced it. A claim token is its own attempt, so the whole
+// token keys its entry.
+func claimCacheKey(r *http.Request, runID, nodeID, credential string, claimToken bool) ([sha256.Size]byte, bool) {
+	if !claimToken && r.Header.Get(store.ClaimGenerationHeader) == "" && r.Header.Get(store.TriggerGenerationHeader) == "" {
 		return [sha256.Size]byte{}, false
 	}
 	parts := []string{runID, nodeID, credential}
@@ -42,29 +48,39 @@ func claimCacheKey(r *http.Request, runID, nodeID, credential string) ([sha256.S
 
 type claimCache struct {
 	mu      sync.Mutex
-	expires map[[sha256.Size]byte]time.Time
+	entries map[[sha256.Size]byte]claimEntry
 }
 
-func (c *claimCache) valid(key [sha256.Size]byte, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return now.Before(c.expires[key])
+// safety: a claim token's entry keeps the team the controller bound it to and
+// the attempt it names, so a write served from the cache is still labeled and
+// still lands in that attempt's own stream.
+type claimEntry struct {
+	until   time.Time
+	team    string
+	attempt appendIdentity
 }
 
-func (c *claimCache) remember(key [sha256.Size]byte, until time.Time) {
+func (c *claimCache) valid(key [sha256.Size]byte, now time.Time) (claimEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.expires == nil || len(c.expires) >= maxClaimCacheEntries {
+	e := c.entries[key]
+	return e, now.Before(e.until)
+}
+
+func (c *claimCache) remember(key [sha256.Size]byte, e claimEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil || len(c.entries) >= maxClaimCacheEntries {
 		now := time.Now()
-		kept := map[[sha256.Size]byte]time.Time{}
-		for k, t := range c.expires {
-			if now.Before(t) && len(kept) < maxClaimCacheEntries/2 {
-				kept[k] = t
+		kept := map[[sha256.Size]byte]claimEntry{}
+		for k, old := range c.entries {
+			if now.Before(old.until) && len(kept) < maxClaimCacheEntries/2 {
+				kept[k] = old
 			}
 		}
-		c.expires = kept
+		c.entries = kept
 	}
-	c.expires[key] = until
+	c.entries[key] = e
 }
 
 // safety: a service that caches no credential caches no claim either.

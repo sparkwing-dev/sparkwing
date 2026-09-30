@@ -195,7 +195,7 @@ paths:
   /api/v1/runs/{id}:
     parameters: [{$ref: "#/components/parameters/RunID"}]
     get:
-      x-sparkwing-scope: runs.read or nodes.claim or triggers.claim
+      x-sparkwing-scope: claim or runs.read or nodes.claim or triggers.claim
       tags: [runs]
       summary: Fetch a single run, optionally with its nodes.
       description: |
@@ -437,7 +437,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     get:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Fetch one node.
       responses:
@@ -453,7 +453,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [nodes]
       summary: Mark a node `running`.
       responses:
@@ -506,7 +506,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     get:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Read the raw output JSON for one node.
       description: |
@@ -580,7 +580,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Update the node's phase string for the dashboard.
       requestBody:
@@ -600,7 +600,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Update the node's last-heartbeat timestamp.
       responses:
@@ -611,7 +611,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Append one annotation string to the node.
       requestBody:
@@ -634,7 +634,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Overwrite the node-scoped run summary markdown.
       requestBody:
@@ -655,7 +655,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Record the node's published-artifact manifest digest.
       requestBody:
@@ -676,7 +676,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Append one metric sample to a node.
       requestBody:
@@ -754,12 +754,16 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Extend the holding runner's claim lease.
       description: |
         `lease_secs` is clamped to the server cap of 10 minutes, so a
         heartbeat cannot extend a claim past the claim's own bound.
+        A launcher Job's claim token renews its own claim here with no
+        `holder_id`, bills the node's seconds since the last beat, and is
+        answered `200` with `cancel` set once the run is being cancelled;
+        a lost claim, or one its team can no longer pay for, is `409`.
       requestBody:
         required: true
         content:
@@ -962,7 +966,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [node-steps]
       summary: Mark a step within a node as running.
       requestBody:
@@ -983,7 +987,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [node-steps]
       summary: Transition a step to passed / failed.
       requestBody:
@@ -1007,7 +1011,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [node-steps]
       summary: Record a step as skipped (SkipIf hit).
       requestBody:
@@ -1028,7 +1032,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [node-steps]
       summary: Append one annotation to a step.
       requestBody:
@@ -1052,7 +1056,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [node-steps]
       summary: Overwrite the step-scoped run-summary markdown.
       requestBody:
@@ -1466,7 +1470,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Try to acquire a slot under a concurrency key.
       description: |
@@ -1503,7 +1507,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Extend a holder's lease.
       requestBody:
@@ -1538,7 +1542,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Release a slot. Idempotent.
       requestBody:
@@ -1565,7 +1569,7 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: claim or runs.read
       tags: [concurrency]
       summary: Inspect capacity + holders + waiters under a key.
       responses:
@@ -1591,7 +1595,7 @@ paths:
         required: false
         schema: {type: string}
     get:
-      x-sparkwing-scope: runs.read
+      x-sparkwing-scope: claim or runs.read
       tags: [concurrency]
       summary: Server-sent event stream of waiter resolution events.
       description: |
@@ -1636,7 +1640,7 @@ paths:
   /api/v1/concurrency/{key}/holder:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Read one holder's slot.
       parameters:
@@ -1658,7 +1662,7 @@ paths:
   /api/v1/concurrency/{key}/resolve:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     get:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Resolve one waiter's standing in a single read.
       description: |
@@ -1698,7 +1702,7 @@ paths:
   /api/v1/concurrency/{key}/cancel-waiter:
     parameters: [{$ref: "#/components/parameters/ConcurrencyKey"}]
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [concurrency]
       summary: Drop one waiter from a key's queue.
       requestBody:
@@ -2191,7 +2195,7 @@ paths:
       tags: [teams]
       summary: Choose the path a repository's new runs take.
       description: >-
-        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds; it is refused with `409` until pods can fetch source and report through claim tokens. Runs already started keep their path.
+        Empty keeps the trigger path, where a runner claims the run's trigger. `controller` starts each new run with a planning node that the launcher runs in a Job it builds, and a child such a run starts takes the same path. Runs already started keep their path.
       requestBody:
         required: true
         content:
@@ -2219,6 +2223,125 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: Controller dispatch cannot run a pipeline yet.}
+
+  /api/v1/launcher/sync:
+    post:
+      x-sparkwing-scope: ScopeClaimsLaunch
+      tags: [nodes]
+      summary: Reconcile a launcher's Jobs with their claims.
+      description: >-
+        The launcher names the claim each of its Jobs was built for and hears `delete` for a claim that ended or whose run is being cancelled, and `keep` otherwise. A job with `release` set hands back a claim whose pod never renewed it: the node returns to the queue with no attempt spent and its reservation refunded, and is claimable again 5 minutes later, showing `waiting for Cloud capacity` with a `capacity_wait` event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.launcherSyncReq
+              type: object
+              required: [jobs]
+              properties:
+                jobs:
+                  type: array
+                  maxItems: 1000
+                  items: {$ref: "#/components/schemas/LaunchJob"}
+      responses:
+        "200":
+          description: What to do with each Job.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.launcherSyncResp
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      x-sparkwing-go-type: pkg/store.LaunchJobResult
+                      type: object
+                      properties:
+                        run_id: {type: string}
+                        node_id: {type: string}
+                        generation: {type: integer, format: int64}
+                        state: {type: string, enum: [keep, delete]}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /api/v1/runs/{id}/children:
+    parameters: [{$ref: "#/components/parameters/RunID"}]
+    post:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Start a child run from a controller-dispatched node.
+      description: >-
+        Answers only a live, uncancelled work claim token of the run. The child builds the parent's own repository and commit; naming another repository or branch is `422`, and a pipeline already in the run's ancestry is `409`. `ordinal` numbers the call within the node's attempt, so repeating a call returns the child it started, and a later attempt reuses the child at the same ordinal while that child is queued, running or succeeded. A child of an opted-in repository is planned by the controller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/controller.childRunReq
+              type: object
+              required: [ordinal, pipeline]
+              properties:
+                ordinal: {type: integer, format: int64, minimum: 0}
+                pipeline: {type: string}
+                args: {type: object, additionalProperties: {type: string}}
+                repo: {type: string}
+                branch: {type: string}
+      responses:
+        "202":
+          description: The child run.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/controller.triggerResp
+                type: object
+                properties:
+                  run_id: {type: string}
+                  status: {type: string}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: "A cycle, or the same call with other inputs."}
+        "422": {description: The child names another repository or branch.}
+
+  /api/v1/runs/{id}/children/{childID}:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {name: childID, in: path, required: true, schema: {type: string}}
+    get:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Read a child run the claim's run started.
+      description: >-
+        Answers only a live, uncancelled work claim token of the parent run, with the child's redacted run; any run the parent did not start is `404`.
+      responses:
+        "200":
+          description: The child run.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Run"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /api/v1/runs/{id}/children/{childID}/nodes/{nodeID}/output:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {name: childID, in: path, required: true, schema: {type: string}}
+      - {$ref: "#/components/parameters/NodeID"}
+    get:
+      x-sparkwing-scope: claim
+      tags: [runs]
+      summary: Read a finished node's output from a child run.
+      responses:
+        "200":
+          description: The node's JSON output, `null` when it produced none.
+          content:
+            application/json:
+              schema: {}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: The node has not finished.}
 
   /api/v1/launcher/claim:
     post:
@@ -2524,7 +2647,7 @@ paths:
         required: true
         schema: {type: string}
     get:
-      x-sparkwing-scope: secrets.read or team.admin
+      x-sparkwing-scope: claim or secrets.read or team.admin
       tags: [secrets]
       summary: Read one secret (value included).
       description: |
@@ -2532,6 +2655,10 @@ paths:
         a runner reading through the run it has claimed. Every other caller,
         a dashboard session or a team owner's token included, gets `403`
         with error `write_only`; it may still read an unmasked variable.
+        A controller-dispatched node's work claim token reads with `?run=` set
+        to its own run, and only a secret its run's accepted plan declares
+        (`403 secret_undeclared` otherwise); each read is recorded as a
+        `secret_released` event on the node. A planning claim reads none.
         Every secrets response carries `Cache-Control: no-store`.
       responses:
         "200":
@@ -3119,7 +3246,7 @@ paths:
       - {$ref: "#/components/parameters/RunID"}
       - {$ref: "#/components/parameters/NodeID"}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Fold a finished process's accounting into a node row.
       description: |
@@ -3359,6 +3486,50 @@ paths:
         "409": {description: Stale generation or node state cannot be reset.}
         "500": {$ref: "#/components/responses/InternalError"}
 
+  /api/v1/runs/{id}/nodes/{nodeID}/claim/input:
+    parameters:
+      - {$ref: "#/components/parameters/RunID"}
+      - {$ref: "#/components/parameters/NodeID"}
+    post:
+      x-sparkwing-scope: claim
+      tags: [nodes]
+      summary: Read a controller-dispatched node's input from another run of its team.
+      description: >-
+        A work claim token reads, for its own run and node only, the output its node takes from another run through a reference the run's accepted plan declares for the node, and the controller picks the run: `cached` reads the cache entry of the node's declared memoization, `coalesced` reads the leader the node's own coalesce waiter names or else the cache entry that leader wrote, and `last_run` reads the newest successful run of a pipeline and node the node declares in `pipeline_refs`, as `RefToLastRun` does. A memoized read names the node's own memo key, its repository, pipeline and node before the hash, and answers only from a run of the same repository, pipeline and node. The request never names the run it reads. An undeclared reference is refused `403` `input_undeclared` and recorded as an audit record naming the claim.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              x-sparkwing-go-type: pkg/store.ClaimInputRequest
+              type: object
+              required: [kind]
+              properties:
+                kind: {type: string, enum: [cached, coalesced, last_run]}
+                key: {type: string}
+                cache_key_hash: {type: string}
+                pipeline: {type: string}
+                node: {type: string}
+                max_age_ms: {type: integer, format: int64}
+      responses:
+        "200":
+          description: The finished output and the run and node it came from.
+          content:
+            application/json:
+              schema:
+                x-sparkwing-go-type: pkg/store.ClaimInput
+                type: object
+                required: [run_id, node_id, output]
+                properties:
+                  run_id: {type: string}
+                  node_id: {type: string}
+                  finished_at: {type: string, format: date-time}
+                  output: {}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {description: "The token is not this node's work claim, or the plan declares no such input (`input_undeclared`)."}
+        "404": {description: No finished output matches the reference.}
+        "500": {$ref: "#/components/responses/InternalError"}
+
   /api/v1/runs/{id}/nodes/{nodeID}/claim/validate:
     parameters:
       - in: path
@@ -3370,7 +3541,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: logs.write
+      x-sparkwing-scope: claim or logs.write
       tags: [nodes]
       summary: Validate a log writer's exact execution attempt.
       description: |
@@ -3382,11 +3553,18 @@ paths:
         must still hold the claim that opened the named attempt; the attempt
         itself may already have finished, because a node writes its closing
         lines after closing the attempt. Trusted controller-internal calls
-        bypass claim validation.
+        bypass claim validation. A controller-dispatched node's work claim
+        token is its own attempt and names none: it validates only its own
+        run and node while its claim has not ended, the answer names the
+        claim's team in `X-Sparkwing-Claim-Team` and the attempt its log is
+        written to in `X-Sparkwing-Claim-Generation` and
+        `X-Sparkwing-Attempt-Ordinal`, and a request carrying any
+        claim, trigger or attempt header is refused `403` `attempt_unbound`.
       responses:
         "204": {description: The claim that opened the attempt is live. Empty body.}
         "400": {description: Node and trigger identities were combined.}
         "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: "A claim token named an attempt (`attempt_unbound`), or its claim is not live."}
         "409": {description: "Missing, malformed, stale, or expired identity."}
         "500": {$ref: "#/components/responses/InternalError"}
 
@@ -3450,7 +3628,7 @@ paths:
         required: true
         schema: {type: string}
     post:
-      x-sparkwing-scope: nodes.claim
+      x-sparkwing-scope: claim or nodes.claim
       tags: [nodes]
       summary: Start one exact node execution attempt.
       description: |
@@ -3458,6 +3636,10 @@ paths:
         or, with `executor_kind: local`, for a node the calling process runs
         itself with no claim behind it. Repeating the same exact start is
         idempotent; another identity or ordinal conflicts.
+        A launcher Job's claim token takes no body: it records that the pod
+        is about to run pipeline code, after which the claim gets no source
+        credential, and is answered `200` with the `spec_hash` the run's
+        accepted plan holds for the node. A cancelled run's claim is `403`.
       requestBody:
         required: true
         content:
@@ -3781,7 +3963,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {$ref: "#/components/responses/NotFound"}
     post:
-      x-sparkwing-scope: runs.state
+      x-sparkwing-scope: claim or runs.state
       tags: [nodes]
       summary: Add one batch of a running node's log lines to the live ring.
       description: >
@@ -6445,11 +6627,11 @@ paths:
     parameters:
       - {$ref: "#/components/parameters/RunID"}
     post:
-      x-sparkwing-scope: nodes.claim or triggers.claim
+      x-sparkwing-scope: claim or nodes.claim or triggers.claim
       tags: [runs]
       summary: Sign an OIDC ID token for a run the caller holds a claim on.
       description: >-
-        Returns an RS256 ID token whose sub is team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. See docs/oidc.md.
+        Returns an RS256 ID token whose sub is team:<team>:pipeline:<pipeline>:trigger:<trigger>:runner:<runner_kind>:ref:<ref>, for exchange with a cloud provider. Every claim but aud comes from the run's rows. A caller holding no live claim on the run gets 404, as does a controller with no signing key. A pipeline or branch holding ':', '*', '?' or whitespace answers 422. Each claim may mint 30 tokens per run, refilled over five minutes. A controller-dispatched node's work claim token is answered 422: such nodes get no OIDC token until Sparkwing Cloud OIDC is enabled for them. See docs/oidc.md.
       requestBody:
         required: true
         content:
@@ -7738,6 +7920,15 @@ components:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
   schemas:
+    LaunchJob:
+      x-sparkwing-go-type: pkg/store.LaunchJob
+      type: object
+      required: [run_id, node_id, generation]
+      properties:
+        run_id: {type: string}
+        node_id: {type: string}
+        generation: {type: integer, format: int64}
+        release: {type: boolean}
     GitCredential:
       x-sparkwing-go-type: pkg/controller.GitCredentialJSON
       type: object
