@@ -435,7 +435,7 @@ func TestClaimRun_InputsFromAnotherRunFollowTheAcceptedPlan(t *testing.T) {
 		t.Helper()
 		accept(runID, map[string]any{"id": nodeID, "modifiers": modifiers})
 		raw := f.launchNode(runID, nodeID)
-		ref, err := client.NewWithToken(f.url, nil, raw).UploadNodeOutput(ctx, runID, nodeID, []byte(output))
+		ref, err := client.NewWithToken(f.url, nil, raw).UploadNodeOutput(t.Context(), runID, nodeID, []byte(output))
 		if err != nil {
 			t.Fatalf("upload %s/%s's output: %v", runID, nodeID, err)
 		}
