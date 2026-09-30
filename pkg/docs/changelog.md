@@ -717,6 +717,8 @@ unlock.
 
 ### Changed
 
+- **scaffold:** Fresh pipelines use the published v0.65.1 SDK.
+
 - **store (Breaking):** The local state database moves to schema 90, and the
   first open copies it to `$SPARKWING_HOME/backups/` and prints where before
   upgrading it. v0.65.1 and older refuse the upgraded database. A database
@@ -992,6 +994,9 @@ unlock.
   [migration guide](docs/migrations/_unreleased.md#runners-carry-a-cache-grant-instead-of-the-cache-token).
 
 ### Fixed
+
+- **source:** A file removed during a source mirror size scan no longer fails
+  the fetch. A missing mirror or other filesystem error still fails.
 
 - **runner:** A run cancelled while a controller runner's trigger loop holds it
   now finishes `cancelled`. Before, the loop killed the pipeline child and then
