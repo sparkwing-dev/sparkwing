@@ -355,7 +355,7 @@ func (s *Store) ResolveClaimInput(ctx context.Context, tok ClaimToken, req Claim
 		return ClaimInput{}, fmt.Errorf("%w: input kind %q is not cached, coalesced or last_run", ErrInvalidInput, req.Kind)
 	}
 	if req.Kind != ClaimInputLastRun {
-		if err := s.sameMemoIdentity(ctx, tok, runID, nodeID); err != nil {
+		if err := s.sameMemoIdentity(ctx, tok, req.Kind, runID, nodeID); err != nil {
 			return ClaimInput{}, err
 		}
 	}
@@ -424,7 +424,7 @@ func declaredSlotKey(m submittedModifiers, runID string) string {
 // safety: a memoized result reaches a claim only from its own team,
 // repository, pipeline and node, whoever wrote the entry under its key, so a
 // hash known from elsewhere in the team discloses nothing.
-func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, runID, nodeID string) error {
+func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, kind ClaimInputKind, runID, nodeID string) error {
 	identity := func(id string) (pipeline string, repoID int64, err error) {
 		err = s.queryRow(ctx, `SELECT r.pipeline, COALESCE(t.github_repo_id, 0) FROM runs r
   JOIN triggers t ON t.team = r.team AND t.id = r.id
@@ -442,7 +442,16 @@ func (s *Store) sameMemoIdentity(ctx context.Context, tok ClaimToken, runID, nod
 	if err != nil {
 		return err
 	}
-	if nodeID != tok.NodeID || pipeline != ownPipeline || ownRepo == 0 || repo != ownRepo {
+	if nodeID != tok.NodeID || pipeline != ownPipeline || ownRepo == 0 {
+		return ErrInputUndeclared
+	}
+	// safety: a cache entry another repository wrote under a name this one now
+	// uses reads as a miss, so the node runs rather than fail; a coalesce
+	// leader's is refused, as a missing leader output would pass for success.
+	if repo != ownRepo {
+		if kind == ClaimInputCached {
+			return notFound("cache entry of this repository", runID+"/"+nodeID)
+		}
 		return ErrInputUndeclared
 	}
 	return nil

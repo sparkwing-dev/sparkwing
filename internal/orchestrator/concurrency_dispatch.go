@@ -359,6 +359,10 @@ func storeOutcome(res runner.Result) string {
 
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, parameters coordinationParameters, originRun, originNode string) runner.Result {
 	output, err := r.fetchCachedOutput(ctx, parameters, originRun, originNode)
+	if r.claimCacheMiss(ctx, err) {
+		result, _ := r.runNodeWithCache(withNoCache(ctx), req)
+		return result
+	}
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -794,6 +798,14 @@ func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Requ
 		slog.Error("open node log failed", "run", req.RunID, "node", req.Node.ID(), "err", err)
 	}
 	return runner.Result{Outcome: outcome, Output: output}
+}
+
+// safety: a claimed node whose cache entry the controller no longer answers,
+// such as one another repository wrote under a reused name, runs as on a miss;
+// the rerun skips the cache read, so it cannot loop.
+func (r *NodeExecutor) claimCacheMiss(ctx context.Context, err error) bool {
+	_, claim := r.backends.State.(*claimState)
+	return claim && errors.Is(err, store.ErrNotFound) && !noCacheFromContext(ctx)
 }
 
 // safety: a claimed node reads another run only through the reference its
