@@ -2247,7 +2247,6 @@ func (s *Store) DeleteCronSchedule(ctx context.Context, id string) error
 func (s *Store) DeleteCronSchedulesForRepo(ctx context.Context, repoPath string) (int, error)
 func (s *Store) DeleteGitHubWebhookBinding(ctx context.Context, pipeline, repo string) (bool, error)
 func (s *Store) DeleteRun(ctx context.Context, runID string) error
-func (s *Store) DeleteRunOutputs(ctx context.Context, team Team, runID string) (err error)
 func (s *Store) DeleteSecret(name, pipeline string) error
 func (s *Store) DeleteSession(rawSession string) error
 func (s *Store) DeleteSourceBundleRows(ctx context.Context, u Upload) (err error)
@@ -2290,6 +2289,7 @@ func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error)
 func (s *Store) ForTeam(ctx context.Context, team Team) (*Tenant, error)
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
+func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error)
 func (s *Store) FreeSlots(ctx context.Context) (taken, limit int64, err error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
 func (s *Store) GetApproval(ctx context.Context, runID, nodeID string) (*Approval, error)
@@ -2443,6 +2443,7 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 func (s *Store) ReleaseCreditFreezes(ctx context.Context, team Team, disputeID string, now time.Time) (int64, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) ReleaseExpiredStorage(ctx context.Context, now time.Time) (int, error)
+func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error)
 func (s *Store) ReleaseStorage(ctx context.Context, team Team, id string, now time.Time) (err error)
 func (s *Store) RenewStorage(ctx context.Context, c StorageCommit, next StorageReserve) (_ StorageReservation, err error)
 func (s *Store) ReplayClaimResult(ctx context.Context, tok ClaimToken, digest string) error

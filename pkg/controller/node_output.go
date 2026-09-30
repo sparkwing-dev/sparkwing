@@ -26,7 +26,7 @@ type outputStore interface {
 	grant(ctx context.Context, u store.Upload) (string, map[string]string, error)
 	commit(ctx context.Context, u store.Upload) error
 	resolve(r *http.Request, obj store.Upload) (string, time.Time, error)
-	deleteRun(ctx context.Context, team store.Team, runID string) error
+	deleteObjects(ctx context.Context, team store.Team, objs []store.Upload) error
 }
 
 var errOutputsUnavailable = errors.New("this controller has no output store")
@@ -70,14 +70,14 @@ func (o s3Outputs) resolve(r *http.Request, obj store.Upload) (string, time.Time
 	return o.s.signObjectURL(r, bucket, key)
 }
 
-func (o s3Outputs) deleteRun(ctx context.Context, team store.Team, runID string) error {
+func (o s3Outputs) deleteObjects(ctx context.Context, team store.Team, objs []store.Upload) error {
 	bucket := o.s.downloadStores[store.StorageCache]
 	if bucket == nil {
 		return errOutputsUnavailable
 	}
 	var errs []error
-	for _, provenance := range []string{"cloud", "local"} {
-		if _, err := bucket.DeletePrefix(ctx, string(team), provenance+"/outputs/"+runID+"/"); err != nil {
+	for _, obj := range objs {
+		if err := bucket.Delete(ctx, string(team), obj.Provenance+"/"+obj.Key); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -147,8 +147,14 @@ func (o fsOutputs) sweepPending(now time.Time) error {
 	return errors.Join(errs...)
 }
 
-func (o fsOutputs) deleteRun(_ context.Context, _ store.Team, runID string) error {
-	return os.RemoveAll(store.OutputPath(o.dir, "outputs/"+runID))
+func (o fsOutputs) deleteObjects(_ context.Context, _ store.Team, objs []store.Upload) error {
+	var errs []error
+	for _, obj := range objs {
+		if err := os.Remove(store.OutputPath(o.dir, obj.Key)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func checkOutputFile(path string, size int64, sha string) error {
@@ -492,8 +498,9 @@ func (s *Server) outputGrant(w http.ResponseWriter, r *http.Request, team store.
 // several passes rather than holding one.
 const outputRetentionBatch = 500
 
-// safety: objects go first, then their rows, so a row names bytes already
-// gone for at most one pass.
+// safety: the refs go first, so nothing new can name a released object; then
+// its bytes, then its row, and a run whose bytes could not be deleted keeps
+// its retention row and is released again on the next pass.
 func (s *Server) pruneExpiredOutputs(ctx context.Context, now time.Time) error {
 	outputs := s.outputs()
 	if outputs == nil {
@@ -508,11 +515,16 @@ func (s *Server) pruneExpiredOutputs(ctx context.Context, now time.Time) error {
 		return errors.Join(append(errs, err)...)
 	}
 	for _, run := range expired {
-		if err := outputs.deleteRun(ctx, run.Team, run.RunID); err != nil {
+		objs, err := s.store.ReleaseRunOutputs(ctx, run.Team, run.RunID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("release outputs of %s: %w", run.RunID, err))
+			continue
+		}
+		if err := outputs.deleteObjects(ctx, run.Team, objs); err != nil {
 			errs = append(errs, fmt.Errorf("delete outputs of %s: %w", run.RunID, err))
 			continue
 		}
-		if err := s.store.DeleteRunOutputs(ctx, run.Team, run.RunID); err != nil {
+		if err := s.store.ForgetRunOutputs(ctx, run.Team, run.RunID, objs); err != nil {
 			errs = append(errs, fmt.Errorf("drop output rows of %s: %w", run.RunID, err))
 		}
 	}

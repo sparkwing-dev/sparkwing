@@ -208,7 +208,7 @@ func TestExpiredOutputRuns_KeepsTheNewestSuccessPerPipeline(t *testing.T) {
 			t.Errorf("%s is listed for deletion: %v", keep, got)
 		}
 	}
-	if err := s.DeleteRunOutputs(ctx, store.DefaultTeam, "run-old-success"); err != nil {
+	if _, err := expireRun(t, s, "run-old-success"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.NodeOutputObject(ctx, store.DefaultTeam, "run-old-success", "n"); !errors.Is(err, store.ErrNotFound) {
@@ -272,6 +272,19 @@ func TestFinishNode_KeepsLocalOutputBytesBesideTheStore(t *testing.T) {
 	if err := s.FinishNode(ctx, "run-local", "n", "success", "", []byte(`1`)); !errors.Is(err, store.ErrNoOutputDir) {
 		t.Fatalf("output bytes on a store with no output dir: err = %v", err)
 	}
+}
+
+func expireRun(t *testing.T, s *store.Store, runID string) ([]string, error) {
+	t.Helper()
+	objs, err := s.ReleaseRunOutputs(t.Context(), store.DefaultTeam, runID)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, o := range objs {
+		keys = append(keys, o.Key)
+	}
+	return keys, s.ForgetRunOutputs(t.Context(), store.DefaultTeam, runID, objs)
 }
 
 func setInlineOutput(t *testing.T, s *store.Store, runID, nodeID string, data []byte) {
@@ -439,7 +452,7 @@ func TestDeleteRunOutputs_GivesTheTeamItsStorageBack(t *testing.T) {
 	if want := int64(len(`"run-gone"`) + len(`"run-kept"`)); held != want {
 		t.Fatalf("storage after two outputs = %d, want %d", held, want)
 	}
-	if err := s.DeleteRunOutputs(ctx, store.DefaultTeam, "run-gone"); err != nil {
+	if _, err := expireRun(t, s, "run-gone"); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes, int64(len(`"run-kept"`)); got != want {
@@ -523,7 +536,7 @@ func TestFinishNodeCopyingOutput_NamesTheOriginsObject(t *testing.T) {
 	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != held {
 		t.Fatalf("storage after the copy = %d, want %d: a copy stores nothing", got, held)
 	}
-	if err := s.DeleteRunOutputs(ctx, store.DefaultTeam, "run-hit"); err != nil {
+	if _, err := expireRun(t, s, "run-hit"); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := s.GetNodeOutput(ctx, "run-origin", "n"); err != nil || string(out) != `{"built":1}` {
@@ -634,5 +647,47 @@ func TestReserveUpload_SmallOutputsStopAtTheOverage(t *testing.T) {
 	}
 	if err := reserve(1); !errors.Is(err, store.ErrFreeStoragePaused) {
 		t.Fatalf("a small output past the overage: err = %v, want a storage refusal", err)
+	}
+}
+
+func TestReleaseRunOutputs_KeepsAnObjectANewerRunStillNames(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	for _, run := range []string{"run-origin", "run-hit"} {
+		if err := s.CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.FinishNode(ctx, "run-origin", "n", "success", "", []byte(`{"built":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishNodeCopyingOutput(ctx, "run-hit", "n", "cached", "", "run-origin", "n"); err != nil {
+		t.Fatal(err)
+	}
+	origin, _ := s.GetNode(ctx, "run-origin", "n")
+	for _, run := range []string{"run-origin", "run-hit"} {
+		if err := store.FinishRunAtForTest(ctx, s, run, "failed", time.Now().Add(-store.OutputRetention-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expired, err := s.ExpiredOutputRuns(ctx, time.Now(), 10)
+	if err != nil || len(expired) != 2 {
+		t.Fatalf("expired runs = %+v, %v; want both, the hit included though it stored nothing", expired, err)
+	}
+	if released, err := expireRun(t, s, "run-origin"); err != nil || len(released) != 0 {
+		t.Fatalf("the origin's retention released %v, %v; want nothing while the hit names its object", released, err)
+	}
+	if out, err := s.GetNodeOutput(ctx, "run-hit", "n"); err != nil || string(out) != `{"built":1}` {
+		t.Fatalf("the hit's output after the origin expired = %s, %v", out, err)
+	}
+	released, err := expireRun(t, s, "run-hit")
+	if err != nil || len(released) != 1 || released[0] != origin.OutputRef.Key {
+		t.Fatalf("the hit's retention released %v, %v; want the origin's object once nothing names it", released, err)
+	}
+	if got := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes; got != 0 {
+		t.Fatalf("storage after both runs expired = %d, want 0", got)
 	}
 }

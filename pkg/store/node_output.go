@@ -137,6 +137,12 @@ func writeNodeOutputTx(ctx context.Context, tx *storeTx, team Team, runID, nodeI
 	if ref == nil {
 		return clearNodeOutputTx(ctx, tx, team, runID, nodeID)
 	}
+	// safety: a run whose ref names another run's object still needs its own
+	// retention row, or that object would outlive every run naming it.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
+		string(team), runID); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO node_outputs (team, run_id, node_id, attempt, key, size, sha256)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (team, run_id, node_id) DO UPDATE SET attempt = excluded.attempt, key = excluded.key,
@@ -338,42 +344,150 @@ func (s *Store) ExpiredOutputRuns(ctx context.Context, now time.Time, limit int)
 	return out, rows.Err()
 }
 
-// DeleteRunOutputs drops a run's output rows once its objects are deleted.
-// A ref to one reads as absent from then on.
-func (s *Store) DeleteRunOutputs(ctx context.Context, team Team, runID string) (err error) {
+// ReleaseRunOutputs drops a run's output refs and cache entries, and returns
+// the objects no remaining ref names: its own, and those of already expired
+// runs its refs copied. The caller deletes their bytes and then calls
+// [Store.ForgetRunOutputs]. An object a newer run's ref still names stays,
+// and goes when the last run naming it expires.
+func (s *Store) ReleaseRunOutputs(ctx context.Context, team Team, runID string) (_ []Upload, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	pattern := likePrefix(runOutputPrefix(runID))
-	var freed int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM data_objects WHERE team = ? AND key LIKE ? ESCAPE '\'`,
-		string(team), pattern).Scan(&freed); err != nil {
-		return err
-	}
-	// safety: a filesystem store has no bucket listing to correct the count,
-	// so the bytes retention removes leave the team's storage here.
-	now := time.Now()
-	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageCache, now); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = CASE WHEN used_bytes > ? THEN used_bytes - ? ELSE 0 END,
-       updated_at = ? WHERE team = ? AND store = ?`, freed, freed, now.UnixNano(), string(team), string(StorageCache)); err != nil {
-		return err
+	copied, err := copiedKeysOfExpiredRunsTx(ctx, tx, team, runID)
+	if err != nil {
+		return nil, err
 	}
 	// safety: a cache entry whose origin's output is gone reads as a miss
 	// rather than as a hit with nothing to hand over.
 	for _, q := range []string{
 		`DELETE FROM node_outputs WHERE team = ? AND run_id = ?`,
-		`DELETE FROM output_runs WHERE team = ? AND run_id = ?`,
 		`DELETE FROM concurrency_cache WHERE team = ? AND origin_run_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, string(team), runID); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM data_objects WHERE team = ? AND key LIKE ? ESCAPE '\'`, string(team), pattern); err != nil {
+	rows, err := tx.QueryContext(ctx, `SELECT d.key, d.size, d.provenance FROM data_objects d
+ WHERE d.team = ? AND d.key LIKE ? ESCAPE '\'
+   AND NOT EXISTS (SELECT 1 FROM node_outputs o WHERE o.team = d.team AND o.key = d.key)`,
+		string(team), likePrefix(runOutputPrefix(runID)))
+	if err != nil {
+		return nil, err
+	}
+	out, err := scanOutputObjects(rows, team)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range copied {
+		more, err := unreferencedObjectTx(ctx, tx, team, key)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, more...)
+	}
+	return out, tx.Commit()
+}
+
+// safety: an object another run owns is released here only once that run
+// has itself expired, so an object a live run may still report is never
+// taken.
+func copiedKeysOfExpiredRunsTx(ctx context.Context, tx *storeTx, team Team, runID string) (_ []string, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT o.key FROM node_outputs o WHERE o.team = ? AND o.run_id = ?`, string(team), runID)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		keys = append(keys, key)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, key := range keys {
+		owner, ok := strings.CutPrefix(key, "outputs/")
+		owner, _, _ = strings.Cut(owner, "/")
+		if !ok || owner == runID {
+			continue
+		}
+		var live int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM output_runs WHERE team = ? AND run_id = ?`, string(team), owner).Scan(&live)
+		if errors.Is(err, sql.ErrNoRows) {
+			out = append(out, key)
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func unreferencedObjectTx(ctx context.Context, tx *storeTx, team Team, key string) ([]Upload, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.key, d.size, d.provenance FROM data_objects d
+ WHERE d.team = ? AND d.key = ?
+   AND NOT EXISTS (SELECT 1 FROM node_outputs o WHERE o.team = d.team AND o.key = d.key)`, string(team), key)
+	if err != nil {
+		return nil, err
+	}
+	return scanOutputObjects(rows, team)
+}
+
+func scanOutputObjects(rows *sql.Rows, team Team) (_ []Upload, err error) {
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	var out []Upload
+	for rows.Next() {
+		u := Upload{Team: team, Kind: StorageCache}
+		if err := rows.Scan(&u.Key, &u.Size, &u.Provenance); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ForgetRunOutputs drops the rows of objects the caller deleted after
+// [Store.ReleaseRunOutputs], gives their bytes back to the team, and ends the
+// run's retention. An object a ref names again by now keeps its row.
+func (s *Store) ForgetRunOutputs(ctx context.Context, team Team, runID string, deleted []Upload) (err error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackUnlessDone(tx, &err)
+	now := time.Now()
+	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageCache, now); err != nil {
+		return err
+	}
+	var freed int64
+	for _, obj := range deleted {
+		res, err := tx.ExecContext(ctx, `DELETE FROM data_objects WHERE team = ? AND key = ? AND provenance = ?
+   AND NOT EXISTS (SELECT 1 FROM node_outputs o WHERE o.team = data_objects.team AND o.key = data_objects.key)`,
+			string(team), obj.Key, obj.Provenance)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 1 {
+			freed += obj.Size
+		}
+	}
+	// safety: a filesystem store has no bucket listing to correct the count,
+	// so the bytes retention removes leave the team's storage here.
+	if _, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = CASE WHEN used_bytes > ? THEN used_bytes - ? ELSE 0 END,
+       updated_at = ? WHERE team = ? AND store = ?`, freed, freed, now.UnixNano(), string(team), string(StorageCache)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM output_runs WHERE team = ? AND run_id = ?`, string(team), runID); err != nil {
 		return err
 	}
 	return tx.Commit()
