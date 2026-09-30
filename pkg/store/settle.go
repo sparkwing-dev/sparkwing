@@ -289,13 +289,10 @@ func lockDispatchRunTx(ctx context.Context, tx *storeTx, team Team, runID string
 	return err
 }
 
-// safety: lock order is executor eligibility, trigger, run, node rows, free
-// tier, team_storage rows, credit ledger, team row, card charge and attempt
-// rows, so siblings serialize on the run and nothing deadlocks. A charged event
-// locks its node before free-tier admission; a trigger insert admitting first
-// locks only rows it creates. Lock a node's run before the node. Checkout, card
-// saving, deletion, the billing pass and settlement all take the ledger before
-// the team row, because the claim path updates the team row under the ledger.
+// safety: lock order is executor eligibility, trigger, run, node, free tier, team_storage, credit ledger, team row,
+// card charge and attempt rows, so siblings serialize on the run. A charged event locks its node before free-tier
+// admission; a trigger insert admitting first locks only rows it creates. Checkout, card saving, deletion, billing and
+// settlement take the ledger before the team row, because the claim path updates the team row under the ledger.
 func lockTeamRunRowTx(ctx context.Context, tx *storeTx, team Team, runID string) (bool, error) {
 	var id string
 	err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE team = ? AND id = ?`+tx.forNoKeyUpdate(),

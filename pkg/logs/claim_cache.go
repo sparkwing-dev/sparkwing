@@ -30,11 +30,9 @@ var claimHeaders = []string{
 	store.TriggerGenerationHeader,
 }
 
-// safety: only an append naming its claim generation or trigger generation
-// is cached, because it writes to a substream keyed by that generation; a
-// stale holder served from the cache writes only to its own attempt, never
-// to the one that replaced it. A claim token is its own attempt, so the whole
-// token keys its entry.
+// safety: only an append naming its claim or trigger generation is cached, because it writes to a substream keyed by
+// that generation, so a stale holder served from the cache writes only to its own attempt, never its replacement's.
+// A claim token is its own attempt, so the whole token keys its entry.
 func claimCacheKey(r *http.Request, runID, nodeID, credential string, claimToken bool) ([sha256.Size]byte, bool) {
 	if !claimToken && r.Header.Get(store.ClaimGenerationHeader) == "" && r.Header.Get(store.TriggerGenerationHeader) == "" {
 		return [sha256.Size]byte{}, false

@@ -9,14 +9,9 @@ import (
 	"time"
 )
 
-// The free tier is bounded by counting teams rather than sampling bytes. A
-// team without credits takes one of [DefaultFreeTeamSlots] slots the first
-// time it stores anything, and a slot is released only when its team is
-// deleted, so the free bytes a deployment holds never pass slots times the
-// allowance. Each store holds a slotted team to its own share of that
-// allowance where it writes; the controller's share is the run events. Runs
-// themselves are never refused here: a team without credits runs on its own
-// machines, and a metered claim refuses it for want of credits.
+// safety: the free tier counts teams, not bytes: a team without credits takes a slot on its first store, released only
+// when the team is deleted, so free bytes never pass slots times the allowance. Each store holds a slotted team to its
+// share where it writes (the controller's is run events). Runs are never refused here; a metered claim refuses them.
 
 // DefaultFreeTeamSlots is how many teams without credits may hold a free-tier
 // slot when the operator has set no other number.

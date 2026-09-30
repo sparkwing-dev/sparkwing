@@ -65,11 +65,9 @@ func (s *Store) EnqueueChildRun(ctx context.Context, tok ClaimToken, ordinal int
 	case !errors.Is(err, sql.ErrNoRows):
 		return "", err
 	}
-	// safety: a child is reused only on evidence it will still succeed: a run
-	// that succeeded, or one queued or running with no cancel request on it or
-	// its trigger. A trigger-path child also needs its trigger queued or
-	// claimed, so one finished or failed before its run did starts a new child;
-	// a controller-dispatched child's trigger is done from its intake.
+	// safety: a child is reused only on evidence it will still succeed: a run that succeeded, or one queued or running
+	// with no cancel request on it or its trigger. A trigger-path child also needs its trigger queued or claimed, so one
+	// that ended before its run starts a new child; a controller-dispatched child's trigger is done from its intake.
 	err = tx.QueryRowContext(ctx, `SELECT c.child_run_id FROM child_invocations c
   JOIN triggers t ON t.team = c.team AND t.id = c.child_run_id
   JOIN runs r ON r.team = c.team AND r.id = c.child_run_id
