@@ -100,8 +100,8 @@ file. Other syntax and workflow checks remain active.
   0.11 s. `gate`
   and `pre-release` are the heavier classes: they carry no performance budget
   and run asynchronously, on demand and in hosted CI. The broad gate declares
-  a 40-minute execution deadline, which gives the dispatcher 41 minutes with
-  its drain margin, inside a 45-minute hosted job. Pre-release declares a
+  a 50-minute execution deadline, which gives the dispatcher 51 minutes with
+  its drain margin, inside a 60-minute hosted job. Pre-release declares a
   120-minute execution deadline inside a 130-minute hosted job, leaving ten
   minutes beyond the node deadline for setup and cleanup.
   These are liveness boundaries, not claims that either check normally takes
@@ -140,7 +140,7 @@ file. Other syntax and workflow checks remain active.
   timeout with different active tests running for 1s to 6s. The new 80-minute
   shard timeout is a hypothesis to verify on hosted runners, not a measured
   passing budget. Later checks remain under the 120-minute node deadline and a
-  130-minute hosted job deadline. The hosted `gate` job keeps its 45-minute
+  130-minute hosted job deadline. The hosted `gate` job keeps its 60-minute
   deadline.
   A Go step's own parallelism depends on who else holds the
   box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
@@ -151,7 +151,11 @@ file. Other syntax and workflow checks remain active.
   collapses: at four CPUs a shared host runs one thread and a single-tenant
   host runs two. The race suite keeps `GOMAXPROCS=1`
   on four CPUs either way.
-  The 40-minute boundary remains a liveness limit rather than a completion
+  On a hosted four-CPU runner, run 202014 finished full Go in 23m18s before
+  PostgreSQL began. Three measured PostgreSQL store runs took 16m24s, 16m45s
+  and 20m15s: the serial floor is 39m42s to 43m33s before build, lint and
+  cleanup. Fifty minutes is a budget to verify, not a measured passing run.
+  That boundary remains a liveness limit rather than a completion
   guarantee. That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own

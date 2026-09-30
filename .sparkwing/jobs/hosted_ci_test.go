@@ -238,7 +238,7 @@ func TestCanonicalWorkflowLeavesRoomAroundDeclaredDeadlines(t *testing.T) {
 	}
 	want := fmt.Sprintf("${{ matrix.gate == 'pre-release' && %d || %d }}",
 		int((preReleaseRunTimeout+10*time.Minute)/time.Minute),
-		int((gateRunTimeout+5*time.Minute)/time.Minute))
+		int((gateRunTimeout+10*time.Minute)/time.Minute))
 	if minutesNode.Value != want {
 		t.Fatalf("canonical workflow timeout = %q, want %q to allow setup and cleanup", minutesNode.Value, want)
 	}
