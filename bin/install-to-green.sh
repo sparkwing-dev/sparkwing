@@ -345,17 +345,7 @@ case "$mode" in
 esac
 
 previous="$mark"
-# In build mode the scaffold resolves the candidate's graph, not the published
-# release's: GOPROXY=off leaves `pipeline new` to write the skeleton while its
-# own dependency resolution finds nothing to download, the replace then points
-# the module at this worktree, and the tidy that follows resolves what the
-# candidate actually needs. Without that tidy a candidate that adds a
-# dependency fails the compile on a missing go.sum entry.
-scaffold_proxy=("GOPROXY=$goproxy")
-if [[ "$mode" == build ]]; then
-  scaffold_proxy=("GOPROXY=off")
-fi
-env "${scaffold_proxy[@]}" sparkwing pipeline new --name demo --template "$template" -C "$REPO" \
+sparkwing pipeline new --name demo --template "$template" -C "$REPO" \
   >"$WORK/scaffold.log" 2>&1 || {
   cat "$WORK/scaffold.log" >&2
   if download_unavailable "$WORK/scaffold.log"; then

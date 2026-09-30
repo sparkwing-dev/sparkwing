@@ -509,23 +509,26 @@ func TestInstallToGreenFailsAnExplicitTargetAndNamesTheDominantPhase(t *testing.
 	}
 }
 
-func TestInstallToGreenPointsACandidateBuildAtTheWorktreeSDK(t *testing.T) {
+func TestInstallToGreenBuildUsesPublicScaffoldAndCandidateSDK(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds the CLI, downloads the published SDK, then compiles the candidate pipeline")
+	}
 	root := installToGreenRoot(t)
-	harness, err := os.ReadFile(filepath.Join(root, "bin", "install-to-green.sh"))
-	if err != nil {
-		t.Fatal(err)
+	cmd := exec.Command("bash", filepath.Join(root, "bin", "install-to-green.sh"), "--build", "--output", "json")
+	cmd.Dir = root
+	cmd.Env = append(environWithoutGitBindings(), "GOWORK=off", "XDG_CONFIG_HOME="+filepath.Join(t.TempDir(), "config"))
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("candidate install-to-green failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(string(harness), `mod edit -replace "github.com/sparkwing-dev/sparkwing=$ROOT"`) {
-		t.Error("a candidate build must scaffold against this worktree's SDK, not the released module its tag names")
+	var report installToGreenReport
+	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
+		t.Fatalf("candidate report: %v\n%s", err, stdout.String())
 	}
-	if !strings.Contains(string(harness), `mod tidy`) {
-		t.Error("a candidate build must resolve the scaffolded module after the replace, or an added dependency fails the compile")
-	}
-	if !strings.Contains(string(harness), `scaffold_proxy=("GOPROXY=off")`) {
-		t.Error("a candidate build must not pay to download the published SDK its compile discards")
-	}
-	if !strings.Contains(string(harness), `grep -E '^v0\.[0-9]+\.[0-9]+$'`) {
-		t.Error("candidate tag selection must exclude prerelease and local candidate tags")
+	if !report.Green || report.Mode != "build" || report.GoProxy != "https://proxy.golang.org,direct" ||
+		!strings.Contains(report.SDKSource, "candidate source at "+root+" via a replace pin") {
+		t.Errorf("candidate report did not prove the public scaffold and local SDK compile: %+v", report)
 	}
 }
 
