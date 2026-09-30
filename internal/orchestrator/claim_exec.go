@@ -120,13 +120,14 @@ func runLaunchedNode(ctx context.Context, controllerURL, runID, nodeID, token st
 
 // MinPlanSDK is the first sparkwing release whose pipeline binaries answer
 // `plan --json`, which a controller-dispatched run plans with.
-const MinPlanSDK = "v0.65.0"
+const MinPlanSDK = "v0.66.0"
 
 const sdkModule = "github.com/sparkwing-dev/sparkwing"
 
-// perf: a released pin too old to plan fails before the build, the longest
-// billed step. A commit or local pin is judged by the plan itself, and a
-// missing module by the build.
+// perf: a pin too old to plan fails before the build, the longest billed step.
+// A pseudo-version names a commit whose history this pod cannot read, so only
+// one based on MinPlanSDK or later is known to plan; a local replacement is
+// judged by the plan itself, and a missing module by the build.
 func planSDKGap(goMod string) error {
 	raw, err := os.ReadFile(goMod)
 	if errors.Is(err, os.ErrNotExist) {
@@ -145,9 +146,18 @@ func planSDKGap(goMod string) error {
 		}
 	}
 	for _, r := range mf.Require {
+		if r.Mod.Path != sdkModule {
+			continue
+		}
 		v := r.Mod.Version
-		if r.Mod.Path == sdkModule && !module.IsPseudoVersion(v) && semver.Compare(v, MinPlanSDK) < 0 {
-			return fmt.Errorf("this repository's .sparkwing pins sparkwing %s, which lacks `plan --json`; pin %s or later to run on controller dispatch", v, MinPlanSDK)
+		if !module.IsPseudoVersion(v) {
+			if semver.Compare(v, MinPlanSDK) < 0 {
+				return fmt.Errorf("this repository's .sparkwing pins sparkwing %s, which lacks `plan --json`; pin %s or later to run on controller dispatch", v, MinPlanSDK)
+			}
+			return nil
+		}
+		if base, err := module.PseudoVersionBase(v); err != nil || semver.Compare(base, MinPlanSDK) < 0 {
+			return fmt.Errorf("this repository's .sparkwing pins sparkwing commit %s, which cannot be checked for `plan --json` before the build; pin %s or later, or a commit after it, to run on controller dispatch", v, MinPlanSDK)
 		}
 	}
 	return nil

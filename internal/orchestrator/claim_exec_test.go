@@ -29,13 +29,16 @@ func TestApplyGoEnvFile_ReadsOnlyTheModuleSettings(t *testing.T) {
 	}
 }
 
-// A released pin too old to plan is refused before the build; a newer pin, a
-// commit pin and a local replacement are left to the plan itself.
-func TestPlanSDKGap_RefusesOnlyAReleasedPinBeforePlanJSON(t *testing.T) {
+// A released pin before MinPlanSDK, and a commit pin the pod cannot show
+// descends from it, are refused before the build; a later release, a commit
+// based on one and a local replacement are left to the plan itself.
+func TestPlanSDKGap_RefusesAPinNotKnownToPlan(t *testing.T) {
 	for pin, refused := range map[string]bool{
-		"require github.com/sparkwing-dev/sparkwing v0.64.0":                                                       true,
+		"require github.com/sparkwing-dev/sparkwing v0.65.1":                                                       true,
+		"require github.com/sparkwing-dev/sparkwing v0.65.2-0.20260929071058-2ebabeade660":                         true,
+		"require github.com/sparkwing-dev/sparkwing v0.0.0-20260929071058-2ebabeade660":                            true,
 		"require github.com/sparkwing-dev/sparkwing " + MinPlanSDK:                                                 false,
-		"require github.com/sparkwing-dev/sparkwing v0.64.1-0.20260929070000-2ebabeade000":                         false,
+		"require github.com/sparkwing-dev/sparkwing v0.66.1-0.20261001000000-abcdefabcdef":                         false,
 		"require github.com/sparkwing-dev/sparkwing v0.60.0\nreplace github.com/sparkwing-dev/sparkwing => ../sdk": false,
 	} {
 		path := filepath.Join(t.TempDir(), "go.mod")
