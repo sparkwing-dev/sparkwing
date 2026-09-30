@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -33,6 +34,9 @@ import (
 // pipeline and runs it. The pipeline itself finds the key file gone, and the
 // controller recorded the release.
 func TestCloudRunnerFetchesWithTheTeamsDeployKey(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("cloud SSH deploy keys require a Linux tmpfs key root")
+	}
 	if testing.Short() {
 		t.Skip("slow: fetches over a stand-in ssh transport and compiles a pipeline")
 	}
