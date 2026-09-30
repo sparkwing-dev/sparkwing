@@ -1311,6 +1311,11 @@ unlock.
 
 ### Fixed
 
+- **controller:** A runner holding an `admin` token no longer fails every node
+  it runs for a claimed trigger with `acknowledge execution attempt 1:
+  controller 400: attempt_ordinal and an exact execution identity are
+  required`. The admin bypass of the claim check dropped the trigger generation
+  the execution-attempt routes read; it now carries it through.
 - **wingd + doctor:** A daemon no longer fails to start with `wingd: restrict
   socket ...: chmod ...: no such file` when `sparkwing doctor` runs at the same
   moment. The doctor's peer scan unlinked any socket that refused a dial, which

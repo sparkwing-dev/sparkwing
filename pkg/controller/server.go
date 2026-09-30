@@ -579,6 +579,22 @@ func (s *Server) claimedBy(next http.Handler) http.Handler {
 	})
 }
 
+// safety: admin skips the claim check, but a trigger-owned execution still
+// names its generation, and the handlers route on that fence.
+func adminTriggerFence(r *http.Request) *http.Request {
+	nodeClaim, triggerClaim := claimIdentityShape(r)
+	if nodeClaim || !triggerClaim {
+		return r
+	}
+	generation, err := strconv.ParseInt(r.Header.Get(store.TriggerGenerationHeader), 10, 64)
+	if err != nil || generation < 1 {
+		return r
+	}
+	return r.WithContext(store.WithTriggerClaimFence(r.Context(), store.TriggerClaimFence{
+		Claimant: claimIdentity(r), ClaimGeneration: generation,
+	}))
+}
+
 func claimIdentityShape(r *http.Request) (node, trigger bool) {
 	for _, name := range []string{
 		store.ClaimHolderHeader,
@@ -596,7 +612,7 @@ func (s *Server) nodeTargetWriteRequest(
 ) (*http.Request, bool) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.HasScope(ScopeAdmin) {
-		return r, true
+		return adminTriggerFence(r), true
 	}
 	claimRequired := func() bool {
 		writeAuthError(w, http.StatusForbidden, authErrorBody{

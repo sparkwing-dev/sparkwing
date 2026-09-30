@@ -1316,3 +1316,33 @@ func TestRunnerScopes_AReleasedTriggerDropsItsClaimant(t *testing.T) {
 		t.Errorf("run status = %q, want running: a principal holding nothing finished it", run.Status)
 	}
 }
+
+// An admin token skips the claim check, and the execution-start handler finds
+// a trigger-owned attempt only through the fence that check would attach, so
+// an admin runner's every node answered 400 until the fence survived.
+func TestRunnerScopes_AdminRunnerAcknowledgesATriggerOwnedAttempt(t *testing.T) {
+	f, raw := newScopedFixture(t, []string{controller.ScopeAdmin})
+	ctx := context.Background()
+	c := client.NewWithToken(f.url, nil, raw)
+	seedRepoTrigger(t, f.store, "run-admin", "acme/web")
+
+	trig, err := c.ClaimTrigger(ctx)
+	if err != nil || trig == nil {
+		t.Fatalf("ClaimTrigger = %+v, %v", trig, err)
+	}
+	ctx = store.WithTriggerClaimFence(ctx, store.TriggerClaimFence{ClaimGeneration: trig.ClaimSeq})
+	if err := c.CreateRun(ctx, store.Run{
+		ID: trig.ID, Pipeline: "deploy", Status: "running", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := c.CreateNode(ctx, store.Node{RunID: trig.ID, NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := c.StartNode(ctx, trig.ID, "build"); err != nil {
+		t.Fatalf("StartNode: %v", err)
+	}
+	if err := c.AcknowledgeNodeExecutionStart(ctx, trig.ID, "build", store.ExecutionStart{AttemptOrdinal: 1}); err != nil {
+		t.Fatalf("an admin runner's execution start was refused: %v", err)
+	}
+}
