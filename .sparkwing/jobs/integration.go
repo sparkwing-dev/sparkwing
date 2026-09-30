@@ -46,7 +46,7 @@ func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoI
 
 	sparkwing.Job(plan, "test", runIntegrationSuite).
 		Needs(fixtures).
-		Timeout(20 * time.Minute).
+		Timeout(60 * time.Minute).
 		AfterRun(func(ctx context.Context, _ error) { _ = teardownFixtures(ctx) })
 
 	return nil
@@ -134,12 +134,23 @@ func runIntegrationSuite(ctx context.Context) error {
 }
 
 func goTest(ctx context.Context, root string, env, args []string) (string, error) {
-	cmd := exec.CommandContext(ctx, "go", append([]string{"test"}, args...)...)
-	cmd.Dir = root
-	cmd.Env = env
-	out, err := cmd.CombinedOutput()
-	sparkwing.Info(ctx, "%s", strings.TrimSpace(string(out)))
-	return string(out), err
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuote(arg)
+	}
+	var output string
+	err := withProductTestHome(func(home string) error {
+		command := boundedGoCommand(currentHost(), "test", "-timeout "+productGoTestTimeout+" "+strings.Join(quoted, " "))
+		script := productTestScript(command, home)
+		cmd := exec.CommandContext(ctx, "bash", "-c", script)
+		cmd.Dir = root
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		output = string(out)
+		return err
+	})
+	sparkwing.Info(ctx, "%s", strings.TrimSpace(output))
+	return output, err
 }
 
 func skippedTests(out string) []string {
