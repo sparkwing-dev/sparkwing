@@ -19,6 +19,9 @@ import (
 const (
 	MaxOutputBytes    int64 = 64 << 20
 	MaxRunOutputBytes int64 = 1 << 30
+	// MaxUnpaidOutputBytes is the largest output a team with neither credits
+	// nor a free slot may store; a larger one needs storage room.
+	MaxUnpaidOutputBytes int64 = 1 << 20
 )
 
 // OutputRetention is how long a run's outputs outlive the run, matching its logs.
@@ -167,16 +170,41 @@ func (s *Store) RecordLocalOutput(ctx context.Context, runID, nodeID string, ref
 	if !ref.valid(runID, nodeID) {
 		return fmt.Errorf("%w: output ref does not name this node's output", ErrInvalidInput)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
-VALUES (?, ?, ?, ?, ?, 'local', 'local', ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
-		team, ref.Key, string(StorageCache), ref.Size, ref.SHA256, now.UnixNano()); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
-		team, runID); err != nil {
+	if err := recordOutputObjectTx(ctx, tx, Team(team), runID, ref, "local", "local", true, now); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// safety: an object stored without an upload still counts toward its run's
+// limit, when checked, and its team's cache storage, as an uploaded one does,
+// so retention's decrement finds what it removes counted.
+func recordOutputObjectTx(ctx context.Context, tx *storeTx, team Team, runID string, ref OutputRef,
+	principal, provenance string, checkLimit bool, now time.Time,
+) error {
+	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageCache, now); err != nil {
+		return err
+	}
+	if checkLimit {
+		if err := checkRunOutputRoomTx(ctx, tx, team, runID, ref.Size, now); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
+		string(team), runID); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
+		string(team), ref.Key, string(StorageCache), ref.Size, ref.SHA256, principal, provenance, now.UnixNano())
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = used_bytes + ?, committed_bytes = committed_bytes + ?, updated_at = ?
+ WHERE team = ? AND store = ?`, ref.Size, ref.Size, now.UnixNano(), string(team), string(StorageCache))
+	return err
 }
 
 // NodeOutputObject returns the committed object behind a node's output, or
@@ -294,6 +322,21 @@ func (s *Store) DeleteRunOutputs(ctx context.Context, team Team, runID string) (
 	}
 	defer rollbackUnlessDone(tx, &err)
 	pattern := likePrefix(runOutputPrefix(runID))
+	var freed int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM data_objects WHERE team = ? AND key LIKE ? ESCAPE '\'`,
+		string(team), pattern).Scan(&freed); err != nil {
+		return err
+	}
+	// safety: a filesystem store has no bucket listing to correct the count,
+	// so the bytes retention removes leave the team's storage here.
+	now := time.Now()
+	if _, _, err := lockTeamStorageTx(ctx, tx, team, StorageCache, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE team_storage SET used_bytes = CASE WHEN used_bytes > ? THEN used_bytes - ? ELSE 0 END,
+       updated_at = ? WHERE team = ? AND store = ?`, freed, freed, now.UnixNano(), string(team), string(StorageCache)); err != nil {
+		return err
+	}
 	// safety: a cache entry whose origin's output is gone reads as a miss
 	// rather than as a hit with nothing to hand over.
 	for _, q := range []string{
@@ -379,7 +422,7 @@ func (s *Store) writeLocalOutput(ctx context.Context, runID, nodeID string, data
 		return nil, err
 	}
 	if err := s.RecordLocalOutput(ctx, runID, nodeID, *ref, time.Now()); err != nil {
-		return nil, err
+		return nil, errors.Join(err, os.Remove(path))
 	}
 	return ref, nil
 }

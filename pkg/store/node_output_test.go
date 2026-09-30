@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -384,5 +385,56 @@ func TestOpen_MovesALaptopsInlineOutputsIntoItsOutputDir(t *testing.T) {
 	out, err := reopened.GetNodeOutput(ctx, "run-inline", "n")
 	if err != nil || string(out) != `{"kept":true}` {
 		t.Fatalf("output after the move = %s, %v", out, err)
+	}
+}
+
+func TestDeleteRunOutputs_GivesTheTeamItsStorageBack(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := t.Context()
+	for _, run := range []string{"run-gone", "run-kept"} {
+		if err := s.CreateRun(ctx, store.Run{ID: run, Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.CreateNode(ctx, store.Node{RunID: run, NodeID: "n", Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.FinishNode(ctx, run, "n", "success", "", []byte(`"`+run+`"`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes
+	if want := int64(len(`"run-gone"`) + len(`"run-kept"`)); held != want {
+		t.Fatalf("storage after two outputs = %d, want %d", held, want)
+	}
+	if err := s.DeleteRunOutputs(ctx, store.DefaultTeam, "run-gone"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := usageOf(t, s, store.DefaultTeam, store.StorageCache).UsedBytes, int64(len(`"run-kept"`)); got != want {
+		t.Fatalf("storage after retention = %d, want %d: only the deleted run's bytes leave", got, want)
+	}
+}
+
+func TestFinishNode_HoldsALocalRunToItsOutputLimit(t *testing.T) {
+	s := storetest.Open(t)
+	s.SetOutputDir(t.TempDir())
+	ctx := t.Context()
+	if err := s.CreateRun(ctx, store.Run{ID: "run-full", Pipeline: "p", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"big", "last"} {
+		if err := s.CreateNode(ctx, store.Node{RunID: "run-full", NodeID: n, Status: "running"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range store.MaxRunOutputBytes / store.MaxOutputBytes {
+		key, _ := s.NodeOutputKey(ctx, "run-full", "big")
+		ref := store.OutputRef{Key: key, Size: store.MaxOutputBytes, SHA256: fmt.Sprintf("%064x", i)}
+		if err := s.RecordLocalOutput(ctx, "run-full", "big", ref, time.Now()); err != nil {
+			t.Fatalf("output %d within the run's 1 GiB: %v", i, err)
+		}
+	}
+	err := s.FinishNode(ctx, "run-full", "last", "success", "", []byte(`1`))
+	if !errors.Is(err, store.ErrOutputLimit) || !errors.Is(err, store.ErrOutputNotStored) {
+		t.Fatalf("a byte past the run's 1 GiB: err = %v, want the run limit", err)
 	}
 }

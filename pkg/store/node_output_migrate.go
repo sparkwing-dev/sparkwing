@@ -79,18 +79,12 @@ func (s *Store) RecordMigratedOutput(ctx context.Context, o LegacyOutput, proven
 		return err
 	}
 	defer rollbackUnlessDone(tx, &err)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO data_objects (team, key, store, size, sha256, principal, provenance, committed_at)
-VALUES (?, ?, ?, ?, ?, 'migrate-outputs', ?, ?) ON CONFLICT (team, key, provenance) DO NOTHING`,
-		string(o.Team), ref.Key, string(StorageCache), ref.Size, ref.SHA256, provenance, now.UnixNano()); err != nil {
+	if err := recordOutputObjectTx(ctx, tx, o.Team, o.RunID, ref, "migrate-outputs", provenance, false, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO node_outputs (team, run_id, node_id, attempt, key, size, sha256)
 VALUES (?, ?, ?, 0, ?, ?, ?) ON CONFLICT (team, run_id, node_id) DO NOTHING`,
 		string(o.Team), o.RunID, o.NodeID, ref.Key, ref.Size, ref.SHA256); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO output_runs (team, run_id) VALUES (?, ?) ON CONFLICT (team, run_id) DO NOTHING`,
-		string(o.Team), o.RunID); err != nil {
 		return err
 	}
 	return tx.Commit()

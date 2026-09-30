@@ -107,6 +107,11 @@ type Backend struct {
 	mu   sync.Mutex
 	runs map[string]*runState
 
+	// safety: counts every output object this process wrote per run, each
+	// attempt's included, so the run limit holds as it does on a controller.
+	outputMu    sync.Mutex
+	outputBytes map[string]int64
+
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
@@ -1293,6 +1298,9 @@ func (b *Backend) putNodeOutput(ctx context.Context, runID, nodeID string, outpu
 	if int64(len(output)) > store.MaxOutputBytes {
 		return nil, fmt.Errorf("%w: an output is %d bytes; the limit is %d (64 MiB)", store.ErrOutputLimit, len(output), store.MaxOutputBytes)
 	}
+	if err := b.takeRunOutputRoom(ctx, runID, int64(len(output))); err != nil {
+		return nil, err
+	}
 	key, err := store.NewOutputKey(runID, nodeID, 0, 0)
 	if err != nil {
 		return nil, err
@@ -1302,6 +1310,32 @@ func (b *Backend) putNodeOutput(ctx context.Context, runID, nodeID string, outpu
 	}
 	sum := sha256.Sum256(output)
 	return &store.OutputRef{Key: key, Size: int64(len(output)), SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+func (b *Backend) takeRunOutputRoom(ctx context.Context, runID string, size int64) error {
+	b.outputMu.Lock()
+	defer b.outputMu.Unlock()
+	used, seen := b.outputBytes[runID]
+	if !seen {
+		nodes, err := b.ListNodes(ctx, runID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		for _, n := range nodes {
+			if n.OutputRef != nil {
+				used += n.OutputRef.Size
+			}
+		}
+	}
+	if used+size > store.MaxRunOutputBytes {
+		return fmt.Errorf("%w: the run's outputs would reach %d bytes; the limit is %d (1 GiB)",
+			store.ErrOutputLimit, used+size, store.MaxRunOutputBytes)
+	}
+	if b.outputBytes == nil {
+		b.outputBytes = map[string]int64{}
+	}
+	b.outputBytes[runID] = used + size
+	return nil
 }
 
 func outputObjectKey(runID, key string) string {
