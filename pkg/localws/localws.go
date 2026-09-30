@@ -217,11 +217,12 @@ func Run(ctx context.Context, opts Options) (retErr error) {
 		ctrl:         ctrl,
 		logs:         logsSrv,
 		s3OnlyReader: useS3OnlyReader,
+		serveToken:   serveToken,
 	}, bundle)
 
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           requireServeToken(handler, serveToken),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -262,6 +263,7 @@ type handlerParts struct {
 	ctrl         *controller.Server
 	logs         *logs.Server
 	s3OnlyReader bool
+	serveToken   string
 }
 
 func buildHandler(
@@ -318,6 +320,11 @@ func buildHandler(
 	}
 	if opts.ReadOnly {
 		handler = readOnlyMiddleware(handler)
+	}
+	// safety: the sign-in exchange lives in the token gate, so the gate sits
+	// inside the Host and Origin guard or a rebound page could trade a code.
+	if parts.serveToken != "" {
+		handler = requireServeToken(handler, parts.serveToken)
 	}
 	return web.SecurityHeadersMiddleware(webOpts,
 		originguard.Guard(handler, originguard.NewPolicy(opts.Addr, opts.AllowRemote, opts.AllowOrigins)))

@@ -124,3 +124,55 @@ func TestRun_AdmitsOnlyTheServeTokenHolder(t *testing.T) {
 		t.Errorf("the session after a restart on the same home = %d, want 200", got.status)
 	}
 }
+
+// A DNS-rebound or cross-origin page must not trade a leaked sign-in code
+// for a session.
+func TestRun_SessionExchangeSitsBehindTheHostAndOriginGuard(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	addr := startLocalws(t, Options{Home: home})
+	base := "http://" + addr
+	token, err := orchestrator.PathsAt(home).ServeToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	minted := gateSend(t, base, http.MethodPost, SignInCodePath, token, "")
+	var code struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal([]byte(minted.body), &code) != nil || code.Code == "" {
+		t.Fatalf("mint = %d %s", minted.status, minted.body)
+	}
+	body := `{"code":"` + code.Code + `"}`
+	for _, tc := range []struct {
+		name, host, origin, contentType string
+		want                            int
+	}{
+		{"rebound host", "rebind.example:4343", "", "application/json", http.StatusForbidden},
+		{"foreign origin", "", "http://evil.example", "application/json", http.StatusForbidden},
+		{"browser form post", "", "http://" + addr, "text/plain", http.StatusUnsupportedMediaType},
+	} {
+		req, err := http.NewRequest(http.MethodPost, base+SessionExchangePath, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.host != "" {
+			req.Host = tc.host
+		}
+		if tc.origin != "" {
+			req.Header.Set("Origin", tc.origin)
+		}
+		req.Header.Set("Content-Type", tc.contentType)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s: exchange = %d, want %d", tc.name, resp.StatusCode, tc.want)
+		}
+	}
+	if ok := gateSend(t, base, http.MethodPost, SessionExchangePath, "", body); ok.status != http.StatusOK {
+		t.Errorf("refused requests must not spend the code; exchange = %d %s", ok.status, ok.body)
+	}
+}

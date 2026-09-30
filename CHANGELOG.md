@@ -1692,6 +1692,12 @@ unlock.
 
 ### Security
 
+- **serve:** The dashboard's sign-in exchange (`POST /auth/local/session`)
+  and sign-in-code mint now pass the same Host and Origin checks as the rest of
+  `sparkwing serve`, and a browser exchange must send `application/json`. A page
+  reached through a rebound DNS name or another origin can no longer trade a
+  sign-in code for a session.
+
 - **runner:** A trigger loop using the in-process node runner no longer puts
   its runner token in the environment of the trigger's compiled pipeline
   binary. The runner serves that binary a loopback broker that admits only
