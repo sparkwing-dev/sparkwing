@@ -143,8 +143,8 @@ func TestKeyring_RefusesToCreateAKeyOverRowsSealedUnderAnother(t *testing.T) {
 	lost := keyFileIn(t, t.TempDir())
 	ring := loadRing(t)
 	_, err := ring.For(st).Seal("new")
-	if !errors.Is(err, localsecrets.ErrNoKey) {
-		t.Fatalf("seal with the key file gone = %v, want ErrNoKey", err)
+	if !errors.Is(err, localsecrets.ErrNoKey) || !errors.Is(err, secrets.ErrKeyRefused) {
+		t.Fatalf("seal with the key file gone = %v, want ErrNoKey marked as a key refusal", err)
 	}
 	for _, want := range []string{lost, localsecrets.KeyEnv} {
 		if !strings.Contains(err.Error(), want) {
@@ -257,7 +257,7 @@ func TestKeyring_OnlyACreatingProcessMakesTheKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = ring.For(st).Seal("value")
-	if !errors.Is(err, localsecrets.ErrNoKeyToCreate) || !strings.Contains(err.Error(), localsecrets.KeyEnv) {
+	if !errors.Is(err, localsecrets.ErrNoKeyToCreate) || !errors.Is(err, secrets.ErrKeyRefused) || !strings.Contains(err.Error(), localsecrets.KeyEnv) {
 		t.Fatalf("seal in a non-creating process = %v, want ErrNoKeyToCreate naming %s", err, localsecrets.KeyEnv)
 	}
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {

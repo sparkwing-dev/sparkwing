@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **cli + controller:** `sparkwing secrets set` shows why the local secrets key
+  was refused -- a key file outside the `SPARKWING_HOME` in use, a process that
+  may not create the key, or values sealed under a key this process lacks --
+  as a `409` naming the remedy, instead of a bare `controller 500`. Other seal
+  failures stay masked as internal errors.
+
 - **crons:** `sparkwing crons install` from a `SPARKWING_HOME` other than
   `~/.sparkwing` no longer replaces the default home's timer. On macOS both
   homes shared the launchd label `dev.sparkwing.crons` and on Linux the

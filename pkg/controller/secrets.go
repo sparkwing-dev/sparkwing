@@ -61,6 +61,10 @@ func (s *Server) handleCreateSecret(w http.ResponseWriter, r *http.Request) {
 	if s.secretsCipher != nil {
 		binding := secretBinding{Team: tn.Team(), Name: req.Name, Scope: req.Pipeline, Shared: req.Shared, Masked: masked}
 		sealed, sErr := sealSecret(s.secretsCipher, binding, req.Value)
+		if errors.Is(sErr, secrets.ErrKeyRefused) {
+			writeError(w, http.StatusConflict, sErr)
+			return
+		}
 		if sErr != nil {
 			writeError(w, http.StatusInternalServerError, sErr)
 			return

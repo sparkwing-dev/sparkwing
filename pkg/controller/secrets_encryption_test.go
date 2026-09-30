@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -378,3 +380,28 @@ func TestSecrets_NoCipherStoresPlaintext(t *testing.T) {
 }
 
 var _ = context.Background
+
+type failingSealCipher struct{ err error }
+
+func (c failingSealCipher) Seal(string) (string, error) { return "", c.err }
+func (c failingSealCipher) Open(string) (string, error) { return "", c.err }
+
+func TestSecrets_KeyRefusalReachesTheClientAndOtherSealFailuresStayMasked(t *testing.T) {
+	refusal := fmt.Errorf("the local secrets key lives outside this home; point SPARKWING_SECRETS_KEY_FILE inside it%.0w", secrets.ErrKeyRefused)
+	for _, tc := range []struct {
+		err      error
+		status   int
+		wantBody string
+	}{
+		{refusal, http.StatusConflict, "point SPARKWING_SECRETS_KEY_FILE inside it"},
+		{errors.New("disk on fire"), http.StatusInternalServerError, "internal server error"},
+	} {
+		srv, _ := newSecretsTestServer(t, failingSealCipher{err: tc.err})
+		resp := postSecretJSON(t, srv.URL+"/api/v1/secrets", map[string]string{"name": "TOKEN", "value": "v"})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != tc.status || !strings.Contains(string(body), tc.wantBody) {
+			t.Errorf("seal error %q: POST = %d %s, want %d with %q", tc.err, resp.StatusCode, body, tc.status, tc.wantBody)
+		}
+	}
+}
