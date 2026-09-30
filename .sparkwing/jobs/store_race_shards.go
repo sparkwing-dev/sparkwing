@@ -155,7 +155,7 @@ func runStoreRaceShardsAtHome(ctx context.Context, home string) (runErr error) {
 	for i, shard := range shards {
 		go func() {
 			result, runErr := storeRaceExec(shardCtx, home, binary,
-				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=55m").
+				"-test.run", storeRacePattern(shard), "-test.count=1", "-test.timeout=80m").
 				Dir("pkg/store").Env("GOMAXPROCS", "1").Capture()
 			results <- storeRaceResult{shard: i + 1, count: len(shard), output: result, err: runErr}
 		}()

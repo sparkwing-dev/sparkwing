@@ -36,7 +36,7 @@ func (p *Test) run(ctx context.Context) error {
 }
 
 func testGoCommand(h hostShape) string {
-	return boundedGoCommand(h, "test", "./...")
+	return boundedGoCommand(h, "test", "-timeout 25m ./...")
 }
 
 func init() {

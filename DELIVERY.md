@@ -110,7 +110,11 @@ file. Other syntax and workflow checks remain active.
   run handle. On exactly four logical CPUs, the gate reserves 2.5 cores and
   starts the full Go suite and touched-package race suite together after the
   build. The race command can run two package binaries while each keeps
-  `GOMAXPROCS=1`. Lint waits for both Go suites. The conditional PostgreSQL
+  `GOMAXPROCS=1`. The full Go suite uses a 25-minute per-package timeout;
+  hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
+  in `pkg/controller` or `pkg/store` while the active tests had run for 0s.
+  The 25-minute value matches the existing `store-postgres` command. Lint waits
+  for both Go suites. The conditional PostgreSQL
   suite waits for the full Go suite, then uses its released one-core slot while
   the race suite continues. Machines with one to three or more than four
   logical CPUs retain their existing dependency schedule and Go parallelism.
@@ -130,9 +134,12 @@ file. Other syntax and workflow checks remain active.
   A complete local run on 16 logical CPUs covered 1,075 top-level names in
   27m20s; its four shards took 21m45s, 23m15s, 23m40s and 27m20s. A prior
   pre-release run without this step took 13m03s, so 40m23s is a local estimate
-  for the whole release check, not a hosted measurement. Hosted four-core CPU
-  and memory use still need verification. Each shard has a 55-minute test
-  timeout, followed by later checks under the 120-minute node deadline and a
+  for the whole release check, not a hosted measurement. On hosted four-core
+  runners, pre-release reached `race-store` after about 8 minutes in one run
+  and 18 minutes in another. All four shards reached the former 55-minute
+  timeout with different active tests running for 1s to 6s. The new 80-minute
+  shard timeout is a hypothesis to verify on hosted runners, not a measured
+  passing budget. Later checks remain under the 120-minute node deadline and a
   130-minute hosted job deadline. The hosted `gate` job keeps its 45-minute
   deadline.
   A Go step's own parallelism depends on who else holds the
