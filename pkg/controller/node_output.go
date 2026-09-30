@@ -106,8 +106,8 @@ func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
 	pending := o.pendingPath(u.ID)
 	final := store.OutputPath(o.dir, u.Key)
 	// safety: the key is this upload's own, so a final file with its size and
-	// digest is one an earlier try moved there, and a retry commits it or
-	// finishes the cleanup that try left undone.
+	// digest is one an earlier try moved there, and a retry commits it. A
+	// refused commit leaves it in place, like the S3 store's copy.
 	if err := checkOutputFile(pending, u.Size, u.SHA256); err != nil {
 		if !errors.Is(err, errUploadConflict) || checkOutputFile(final, u.Size, u.SHA256) != nil {
 			return err
@@ -120,11 +120,7 @@ func (o fsOutputs) commit(ctx context.Context, u store.Upload) error {
 			return err
 		}
 	}
-	err := o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
-	if errors.Is(err, store.ErrFreeStoragePaused) {
-		return errors.Join(err, os.Remove(final))
-	}
-	return err
+	return o.s.store.CommitUpload(ctx, u.Team, u.ID, u.Principal, time.Now())
 }
 
 func (o fsOutputs) resolve(_ *http.Request, obj store.Upload) (string, time.Time, error) {

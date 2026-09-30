@@ -235,10 +235,9 @@ func TestPruneExpiredOutputs_DeletesBytesAndRowsPastRetention(t *testing.T) {
 	}
 }
 
-// A filesystem commit refused a slot removes the file it moved into place,
-// and a retry after a cleanup that failed still finds that file and removes
-// it, as the S3 store's retry deletes its earlier copy.
-func TestFsOutputCommitRefusedASlotRetriesItsCleanup(t *testing.T) {
+// A filesystem commit refused a slot leaves the file it moved into place,
+// and a retry once the team has room finds that file and commits it.
+func TestFsOutputCommitRefusedASlotCommitsOnRetry(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -267,22 +266,23 @@ func TestFsOutputCommitRefusedASlotRetriesItsCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := fsOutputs{s: New(st, nil), dir: t.TempDir()}
-	final := store.OutputPath(o.dir, key)
-	for _, try := range []struct{ name, path string }{
-		{"a first try", o.pendingPath(u.ID)},
-		{"a retry after its cleanup failed", final},
-	} {
-		if err := os.MkdirAll(filepath.Dir(try.path), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(try.path, data, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if err := o.commit(ctx, u); !errors.Is(err, store.ErrFreeStoragePaused) {
-			t.Fatalf("%s: commit without a slot = %v, want free storage paused", try.name, err)
-		}
-		if _, err := os.Stat(final); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("%s left the refused output in place: %v", try.name, err)
-		}
+	pending := o.pendingPath(u.ID)
+	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pending, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.commit(ctx, u); !errors.Is(err, store.ErrFreeStoragePaused) {
+		t.Fatalf("commit without a slot = %v, want free storage paused", err)
+	}
+	if err := st.SetFreeTeamSlots(ctx, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.commit(ctx, u); err != nil {
+		t.Fatalf("the retry once a slot opened: %v", err)
+	}
+	if _, err := st.CommittedObject(ctx, "team-a", key); err != nil {
+		t.Fatalf("the retried commit recorded nothing: %v", err)
 	}
 }

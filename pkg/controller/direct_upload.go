@@ -456,7 +456,6 @@ func (d *directUploadS3) commit(ctx context.Context, st *store.Store, u store.Up
 			"sha256": u.SHA256, "upload-id": u.ID,
 		},
 	})
-	copiedBy := u.ID
 	if err != nil {
 		var api smithy.APIError
 		if !errors.As(err, &api) || api.ErrorCode() != "PreconditionFailed" {
@@ -473,17 +472,9 @@ func (d *directUploadS3) commit(ctx context.Context, st *store.Store, u store.Up
 				(previous.Metadata["uploader"] != u.Principal || previous.Metadata["upload-id"] != u.ID)) {
 			return store.ErrObjectExists
 		}
-		recordedUploader, copiedBy = previous.Metadata["uploader"], previous.Metadata["upload-id"]
+		recordedUploader = previous.Metadata["uploader"]
 	}
 	if err := st.CommitUpload(ctx, u.Team, u.ID, recordedUploader, time.Now()); err != nil {
-		// safety: a refused commit deletes the object whenever this upload
-		// copied it, on this attempt or an earlier one, so a retry finishes a
-		// cleanup that failed; another upload's object at the key is kept.
-		if errors.Is(err, store.ErrFreeStoragePaused) && copiedBy == u.ID {
-			if _, derr := d.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(d.bucket), Key: aws.String(final)}); derr != nil {
-				logger.Warn("delete an upload refused a slot", "upload_id", u.ID, "err", derr)
-			}
-		}
 		return err
 	}
 	_, err = d.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(d.bucket), Key: aws.String(d.pendingKey(u.ID))})
