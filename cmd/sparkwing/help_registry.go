@@ -2182,7 +2182,7 @@ existed.`,
 	SubcommandOrder: []string{"show", "set"},
 	Examples: []Example{
 		{"Read the guards and what they measure", "sparkwing cluster limits show --profile prod"},
-		{"Cap the cloud runners one principal holds", "sparkwing cluster limits set --name max_concurrent_runners --value 20 --profile prod"},
+		{"Cap the cloud runners one team holds", "sparkwing cluster limits set --name max_concurrent_runners --value 20 --profile prod"},
 	},
 }
 
@@ -2209,13 +2209,10 @@ var cmdLimitsSet = Command{
 	Description: `Sets one guard to a ceiling, or to zero to remove it. The guards are
 max_concurrent_runners, max_global_runners, runner_alarm, max_run_seconds,
 max_nodes_per_run, max_runs_per_hour, max_global_nodes_per_run,
-max_global_runs_per_hour, min_cron_interval_seconds, runner_scale_base,
-runner_scale_step_credits and runner_scale_ceiling. The per-principal
-guards bind a principal holding a metered token in its team; the two max_global
-settings bind every run. The three runner_scale settings raise
-max_concurrent_runners by one runner_scale_base for every
-runner_scale_step_credits of paid credit granted to that team in the last 30
-days, held under runner_scale_ceiling. Work past a guard answers
+max_global_runs_per_hour and min_cron_interval_seconds.
+max_concurrent_runners counts a team's cloud runners across all its tokens;
+the other per-principal guards bind a principal holding a metered token in its
+team; the two max_global settings bind every run. Work past a guard answers
 429 with a Retry-After and the run records a compute_limit_blocked event.
 Requires the admin scope.`,
 	Flags: []FlagSpec{
@@ -2227,7 +2224,6 @@ Requires the admin scope.`,
 		{"Hold the fleet under fifty cloud runners", "sparkwing cluster limits set --name max_global_runners --value 50 --profile prod"},
 		{"Warn at forty", "sparkwing cluster limits set --name runner_alarm --value 40 --profile prod"},
 		{"Remove the per-run node cap", "sparkwing cluster limits set --name max_nodes_per_run --value 0 --profile prod"},
-		{"Add a hundred runners per 5000 credits loaded", "sparkwing cluster limits set --name runner_scale_step_credits --value 5000 --profile prod"},
 	},
 }
 

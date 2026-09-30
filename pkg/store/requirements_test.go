@@ -230,6 +230,7 @@ func TestRequirements_FleetMigrationsDeclareWriterSafetyGates(t *testing.T) {
 		"agent-loss-attempt-fencing-v1",
 		"assisted-execution-policy-v1",
 		"billing-trust-v1",
+		"card-billing-v1",
 		"claim-cache-scope-v1",
 		"credit-value-v1",
 		"cron-schedule-names-v1",
@@ -287,6 +288,7 @@ func TestRequirements_FleetCompositeAdvertisesAllWriterGatesFromWave2V29(t *test
 	}
 	wantListed := []string{
 		"billing-trust-v1",
+		"card-billing-v1",
 		"claim-cache-scope-v1",
 		"credit-value-v1",
 		"declared-run-repo",

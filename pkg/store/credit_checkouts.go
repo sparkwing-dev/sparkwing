@@ -87,8 +87,12 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	}
 	defer rollbackUnlessDone(tx, &err)
 	// safety: deletion takes the team row lock before it records itself, so
-	// taking it first here orders a checkout wholly before or after a
-	// deletion request; after one, the payment would outlive the team.
+	// taking it here orders a checkout wholly before or after a deletion
+	// request; after one, the payment would outlive the team. The ledger
+	// comes first, in the order lockTeamRunRowTx documents.
+	if err := lockCreditLedgerTx(ctx, tx); err != nil {
+		return "", err
+	}
 	if err := t.lockTeamTx(ctx, tx); err != nil {
 		return "", err
 	}
@@ -99,9 +103,6 @@ func (t *Tenant) OpenCreditCheckout(ctx context.Context, amountMicro int64, now 
 	}
 	if deleting > 0 {
 		return "", ErrTeamBeingDeleted
-	}
-	if err := lockCreditLedgerTx(ctx, tx); err != nil {
-		return "", err
 	}
 	nowNS := now.UnixNano()
 	// safety: an unpaid checkout outlives its hold until the processor reports

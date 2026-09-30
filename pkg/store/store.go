@@ -110,9 +110,6 @@ type Store struct {
 	csrfKey         []byte
 	prepareCursorMu sync.Mutex
 	prepareCursors  map[string]executorPrepareCursor
-	runnerCapMu     sync.Mutex
-	runnerCapCache  map[Team]runnerCapEntry
-	runnerCapEpoch  uint64
 	launchResumeMu  sync.Mutex
 	launchResume    *launchCursor
 	outputDir       string
@@ -1872,6 +1869,7 @@ var migrationRequirements = map[int][]string{
 	73: {"trigger-credit-cursor-v1"},
 	75: {creditValueRequirement},
 	80: {billingTrustRequirement},
+	87: {cardBillingRequirement},
 	88: {claimCacheScopeRequirement},
 }
 
@@ -2144,10 +2142,8 @@ func applyMigrationSQLite(ctx context.Context, tx *storeTx, version int) error {
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, false)
-	// safety: v87 belongs to the billing migration another line of work
-	// lands; a merge takes it in place of this empty step.
 	case 87:
-		return nil
+		return applyCardBillingMigration(ctx, tx, false)
 	case 88:
 		return applyCacheRefMigration(ctx, tx, false)
 	case 89:
@@ -2605,10 +2601,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return err
 	case 86:
 		return applySourceMintMigration(ctx, tx, true)
-	// safety: v87 belongs to the billing migration another line of work
-	// lands; a merge takes it in place of this empty step.
 	case 87:
-		return nil
+		return applyCardBillingMigration(ctx, tx, true)
 	case 88:
 		return applyCacheRefMigration(ctx, tx, true)
 	case 89:

@@ -50,7 +50,7 @@ func assertBusinessEventsRecordLifecycle(t *testing.T, st *store.Store) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ReversePayment(ctx, "pi_1", "re_1", "operator"); err != nil {
+	if _, err := st.ReversePayment(ctx, "pi_1", "re_1", "operator", 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tn.GrantCredits(ctx, store.CreditGrantFree, store.MicroCreditsPerCredit, "promo", "operator"); err != nil {

@@ -1161,12 +1161,19 @@ func (s *Server) routers() (authed, public *http.ServeMux) {
 
 	mux.Handle("GET /api/v1/team/billing", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleTeamBilling)))
 	mux.Handle("POST /api/v1/team/billing/checkout", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCheckout)))
+	mux.Handle("POST /api/v1/team/billing/card", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingCard)))
+	mux.Handle("POST /api/v1/team/billing/pay", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingPay)))
+	mux.Handle("PUT /api/v1/team/billing/budget", requireScope(ScopeTeamAdmin, http.HandlerFunc(s.handleTeamBillingBudget)))
 	mux.Handle("GET /api/v1/credits", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsShow)))
 	mux.Handle("GET /api/v1/credits/history", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsHistory)))
 	mux.Handle("POST /api/v1/credits/grants", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditsGrant)))
 	mux.Handle("POST /api/v1/credits/reversals", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleReversePayment)))
 	mux.Handle("POST /api/v1/credits/freezes", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditFreeze)))
 	mux.Handle("POST /api/v1/credits/checkouts/closed", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCheckoutClosed)))
+	mux.Handle("POST /api/v1/credits/cards", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleSavedCard)))
+	mux.Handle("POST /api/v1/credits/card-payments", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardPayment)))
+	mux.Handle("POST /api/v1/credits/warnings", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handlePaymentWarning)))
+	mux.Handle("POST /api/v1/credits/card-refunds", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCardRefund)))
 	mux.Handle("GET /api/v1/credits/units", requireScope(ScopeCreditsGrant, http.HandlerFunc(s.handleCreditUnits)))
 	mux.Handle("GET /api/v1/credits/teams/{team}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleTeamCreditsShow)))
 	mux.Handle("GET /api/v1/credits/settings", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleCreditsSettingsShow)))
@@ -1406,6 +1413,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	go s.runBucketCeiling(ctx)
 	go s.runStoragePass(ctx)
 	go s.runTeamDeletions(ctx, TeamDeletionInterval)
+	go s.runCardBilling(ctx, CardBillingInterval)
 
 	if s.pool != nil {
 		go s.pool.run(ctx, s.logger)

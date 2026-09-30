@@ -15,7 +15,15 @@ type creditUnitsJSON struct {
 	MicroPerCredit   int64 `json:"micro_per_credit"`
 	CreditsPerDollar int64 `json:"credits_per_dollar"`
 	MicroPerCent     int64 `json:"micro_per_cent"`
+	// safety: the checkout service refuses a card-billing write to a
+	// controller that does not name its contract here, rather than have an
+	// older controller misread it.
+	Capabilities []string `json:"capabilities"`
 }
+
+// CardBillingCapability is the contract of partial reversals, saved cards,
+// card payments and payment warnings.
+const CardBillingCapability = "card-billing-v1"
 
 // safety: Checkout and ledger must agree on the micro-credit unit before converting a payment.
 func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
@@ -23,6 +31,7 @@ func (s *Server) handleCreditUnits(w http.ResponseWriter, _ *http.Request) {
 		MicroPerCredit:   store.MicroCreditsPerCredit,
 		CreditsPerDollar: store.CreditsPerDollar,
 		MicroPerCent:     store.MicroCreditsPerCent,
+		Capabilities:     []string{CardBillingCapability},
 	})
 }
 
@@ -30,6 +39,9 @@ type reversePaymentReq struct {
 	PaymentID string `json:"payment_id"`
 	// safety: A reversal reference is its idempotency key for refunds and chargebacks.
 	Reference string `json:"reference"`
+	// safety: zero reverses what remains, which is how a lost dispute takes
+	// back the whole payment; a refund names exactly its own amount.
+	AmountMicro int64 `json:"amount_micro,omitempty"`
 }
 
 type reversePaymentJSON struct {
@@ -54,8 +66,12 @@ func (s *Server) handleReversePayment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("payment_id and reference are required"))
 		return
 	}
+	if req.AmountMicro < 0 {
+		writeError(w, http.StatusBadRequest, errors.New("amount_micro must not be negative"))
+		return
+	}
 	who := principalName(r)
-	res, err := s.store.ReversePayment(r.Context(), req.PaymentID, req.Reference, who)
+	res, err := s.store.ReversePayment(r.Context(), req.PaymentID, req.Reference, who, req.AmountMicro)
 	switch {
 	case errors.Is(err, store.ErrUnknownPayment):
 		writeError(w, http.StatusNotFound, err)

@@ -28,6 +28,9 @@ import {
   fmtUSDShort,
   getBilling,
   grantLabel,
+  limitReason,
+  openHostedPage,
+  setBudget,
   parseDollars,
   priceRows,
   purchaseProblem,
@@ -41,7 +44,15 @@ import { fmtDateTime } from "@/lib/timeFormat";
 export default function BillingPage() {
   return (
     <Suspense>
-      <TeamShell>{(_, caps) => billingEnabled(caps) ? <BillingRoute /> : <Notice>Billing is not enabled on this controller.</Notice>}</TeamShell>
+      <TeamShell>
+        {(_, caps) =>
+          billingEnabled(caps) ? (
+            <BillingRoute />
+          ) : (
+            <Notice>Billing is not enabled on this controller.</Notice>
+          )
+        }
+      </TeamShell>
     </Suspense>
   );
 }
@@ -53,7 +64,9 @@ const thClass =
 const tdClass = "px-4 py-2";
 
 function BillingRoute() {
-  const returned = checkoutReturn(useSearchParams().get("checkout"));
+  const params = useSearchParams();
+  const returned = checkoutReturn(params.get("checkout"));
+  const cardReturn = params.get("card");
   const [billing, setBilling] = useState<Billing | null>(null);
   const [loadError, setLoadError] = useState("");
 
@@ -108,8 +121,15 @@ function BillingRoute() {
               open. Contact support to resolve it.
             </div>
           ) : null}
+          {cardReturn === "added" ? (
+            <Notice>Card added. It is saved once Stripe confirms it.</Notice>
+          ) : null}
           <BalancePanel billing={billing} />
-          {billing.checkout_enabled ? <BuyPanel billing={billing} /> : null}
+          <CardPanel billing={billing} />
+          <LimitsPanel billing={billing} reload={load} />
+          {billing.checkout_enabled && !billing.card_billed ? (
+            <BuyPanel billing={billing} />
+          ) : null}
           <PricesPanel billing={billing} />
           <UsagePanel billing={billing} />
           <HistoryPanel billing={billing} />
@@ -121,6 +141,23 @@ function BillingRoute() {
 
 function BalancePanel({ billing }: { billing: Billing }) {
   const credits = balanceCredits(billing.balance_micro, billing);
+  if (billing.card_billed) {
+    const usd = balanceUSD(billing.balance_micro, billing);
+    return (
+      <Panel title="Balance">
+        <div className="p-4">
+          <div className="text-2xl font-bold">
+            {usd < 0 ? `${fmtUSD(-usd)} owed` : `${fmtUSD(usd)} prepaid`}
+          </div>
+          <div className="text-sm text-[var(--muted)] mt-1">
+            Usage is charged to the card at{" "}
+            {fmtCents(billing.limits.rung_cents)} owed, or on the 1st of the
+            month.
+          </div>
+        </div>
+      </Panel>
+    );
+  }
   return (
     <Panel title="Balance">
       <div className="p-4">
@@ -410,6 +447,162 @@ function HistoryPanel({ billing }: { billing: Billing }) {
           </tbody>
         </table>
       )}
+    </Panel>
+  );
+}
+
+function CardPanel({ billing }: { billing: Billing }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!billing.card && !billing.can_add_card && !billing.open_charge)
+    return null;
+
+  async function go(
+    path: "/api/v1/team/billing/card" | "/api/v1/team/billing/pay",
+  ) {
+    setBusy(true);
+    setError("");
+    try {
+      window.location.assign(await openHostedPage(path));
+    } catch (err) {
+      setError(errorText(err));
+      setBusy(false);
+    }
+  }
+
+  const charge = billing.open_charge;
+  return (
+    <Panel title="Card on file">
+      <div className="p-4 space-y-2 text-sm">
+        {billing.card ? (
+          <p>
+            {billing.card.brand} ending {billing.card.last4}
+          </p>
+        ) : (
+          <p className="text-[var(--muted)]">
+            This team is trusted. Add a card and usage is charged to it
+            automatically, instead of buying credits in advance.
+          </p>
+        )}
+        {charge && charge.failures > 0 ? (
+          <p role="alert" className="text-red-300">
+            A charge of {fmtCents(charge.amount_cents)} failed
+            {charge.decline_code ? ` (${charge.decline_code})` : ""}. New Cloud
+            work waits until it is paid.
+            {charge.next_attempt_at
+              ? ` It is retried ${fmtDateTime(unixSecondsISO(charge.next_attempt_at))}.`
+              : ""}
+          </p>
+        ) : charge ? (
+          <p className="text-[var(--muted)]">
+            A charge of {fmtCents(charge.amount_cents)} is in progress.
+          </p>
+        ) : null}
+        {billing.can_add_card ? (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={buttonClass}
+              disabled={busy}
+              onClick={() => go("/api/v1/team/billing/card")}
+            >
+              {billing.card ? "Replace card" : "Add a card"}
+            </button>
+            {charge ? (
+              <button
+                type="button"
+                className={buttonClass}
+                disabled={busy}
+                onClick={() => go("/api/v1/team/billing/pay")}
+              >
+                Pay {fmtCents(charge.amount_cents)} now
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {error ? (
+          <p role="alert" className="text-red-300">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function LimitsPanel({
+  billing,
+  reload,
+}: {
+  billing: Billing;
+  reload: () => Promise<void>;
+}) {
+  const l = billing.limits;
+  const [budget, setBudgetText] = useState(() => String(l.budget_cents / 100));
+  const [error, setError] = useState("");
+  const owner = billing.can_purchase || billing.can_add_card;
+  const waiting = l.headroom_cents <= 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const cents = parseDollars(budget);
+    if (cents === null) {
+      setError("Enter a dollar amount.");
+      return;
+    }
+    try {
+      await setBudget(cents);
+      setError("");
+      await reload();
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }
+
+  return (
+    <Panel
+      title="Spend limits"
+      hint="Limits stop new Cloud work; running jobs finish within about a minute."
+    >
+      <div className="p-4 space-y-2 text-sm">
+        {waiting ? (
+          <p role="alert" className="text-red-300">
+            {limitReason(l.binding)}
+          </p>
+        ) : null}
+        <p>
+          Last 30 days: {fmtCents(l.spent_30d_cents)} of{" "}
+          {fmtCents(l.ceiling_cents)}. Today: {fmtCents(l.spent_today_cents)} of{" "}
+          {fmtCents(l.daily_cap_cents)}.
+        </p>
+        <form onSubmit={save} className="flex flex-wrap items-center gap-2">
+          <label htmlFor="budget" className={labelClass}>
+            Budget per 30 days ($)
+          </label>
+          <input
+            id="budget"
+            inputMode="decimal"
+            className={`${inputClass} w-28`}
+            value={budget}
+            disabled={!owner}
+            onChange={(e) => setBudgetText(e.target.value)}
+          />
+          {owner ? (
+            <button type="submit" className={buttonClass}>
+              Save
+            </button>
+          ) : null}
+        </form>
+        <p className="text-xs text-[var(--muted)]">
+          Owners are emailed at 50, 80 and 100% of the budget. Zero sets it to
+          the 30-day limit.
+        </p>
+        {error ? (
+          <p role="alert" className="text-red-300">
+            {error}
+          </p>
+        ) : null}
+      </div>
     </Panel>
   );
 }

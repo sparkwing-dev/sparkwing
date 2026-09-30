@@ -53,6 +53,47 @@ export interface Billing {
   usage: UsageRow[];
   storage_charged_micro: number;
   grants: GrantRow[];
+  // A trusted team with a card on file is card_billed: its usage is charged
+  // to the card and it buys no prepaid credit.
+  card?: { brand: string; last4: string; added_at: number };
+  card_billed: boolean;
+  can_add_card: boolean;
+  open_charge?: {
+    id: string;
+    amount_cents: number;
+    failures: number;
+    decline_code?: string;
+    next_attempt_at?: number;
+  };
+  limits: SpendLimits;
+}
+
+export interface SpendLimits {
+  ceiling_cents: number;
+  daily_cap_cents: number;
+  budget_cents: number;
+  rung_cents: number;
+  credit_limit_cents: number;
+  spent_30d_cents: number;
+  spent_today_cents: number;
+  headroom_cents: number;
+  binding: string;
+}
+
+// Why new Cloud work waits, by the limit the controller says binds first.
+export function limitReason(binding: string): string {
+  switch (binding) {
+    case "ceiling":
+      return "The team reached its 30-day spend limit.";
+    case "daily_cap":
+      return "The team reached its daily spend limit; it resets at 00:00 UTC.";
+    case "budget":
+      return "The team reached its budget.";
+    case "charge_failed":
+      return "The last card charge failed. Pay it now or update the card.";
+    default:
+      return "The balance is spent.";
+  }
 }
 
 // Units carries only the conversion factors, so the pure helpers can be fed a
@@ -457,3 +498,43 @@ export function checkoutReturn(param: string | null): CheckoutReturn {
 // After Stripe sends the owner back, the webhook that grants the credits may
 // land a few seconds later; the page reloads billing at these offsets (ms).
 export const checkoutRefreshDelays = [2_000, 5_000, 10_000, 15_000, 20_000];
+
+// openHostedPage asks the controller for a Stripe page (card setup or "pay
+// now") and returns its link.
+export async function openHostedPage(
+  path: "/api/v1/team/billing/card" | "/api/v1/team/billing/pay",
+): Promise<string> {
+  const res = await authFetch(path, { method: "POST" });
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw new BillingApiError(
+      res.status,
+      body.error || `Request failed (${res.status}).`,
+      body.code,
+    );
+  }
+  const body = (await res.json()) as { url?: unknown };
+  if (typeof body.url !== "string" || !/^https:\/\//.test(body.url)) {
+    throw new BillingApiError(
+      res.status,
+      "The controller did not return a payment link.",
+    );
+  }
+  return body.url;
+}
+
+export async function setBudget(cents: number): Promise<void> {
+  const res = await authFetch("/api/v1/team/billing/budget", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ budget_cents: cents }),
+  });
+  if (!res.ok) {
+    const body = await readErrorBody(res);
+    throw new BillingApiError(
+      res.status,
+      body.error || `Request failed (${res.status}).`,
+      body.code,
+    );
+  }
+}
