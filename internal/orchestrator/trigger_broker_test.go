@@ -205,6 +205,10 @@ func TestTriggerBrokerFollowsRefsAndRetryChildrenOnly(t *testing.T) {
 		{"/api/v1/runs/run-prev", http.StatusOK},
 		{"/api/v1/runs/run-prev/nodes/build", http.StatusOK},
 		{"/api/v1/runs/run-prev/nodes/build/output", http.StatusOK},
+		{"/api/v1/runs/run-prev/nodes", http.StatusOK},
+		{"/api/v1/triggers/run-prev", http.StatusForbidden},
+		{"/api/v1/runs/run-prev/events", http.StatusForbidden},
+		{"/api/v1/runs/run-prev/nodes/build/logs", http.StatusForbidden},
 	}
 	for _, step := range steps {
 		if got := get(step.path); got != step.want {

@@ -181,15 +181,23 @@ func (b *TriggerBroker) allowController(r *http.Request) bool {
 			return parent == b.runID || (b.retryOf != "" && parent == b.retryOf)
 		case latestRunLookup(path):
 			return true
-		// safety: a retry copies its source attempt's finished nodes, and the
-		// controller named that source on the trigger, never the pipeline.
-		case b.retryOf != "" && b.underRun(path, b.retryOf):
+		case b.retryOf != "" && (path == "/api/v1/runs/"+url.PathEscape(b.retryOf) ||
+			path == "/api/v1/runs/"+url.PathEscape(b.retryOf)+"/nodes"):
 			return true
 		case b.refOutput(path):
 			return true
 		}
 		if b.child(path) {
 			return true
+		}
+		// safety: a retry reads only the nodes and outputs it copies from
+		// the source attempt, not its trigger or unrelated run routes.
+		if b.retryOf != "" {
+			rest, ok := strings.CutPrefix(path, "/api/v1/runs/"+url.PathEscape(b.retryOf)+"/nodes/")
+			if ok {
+				parts := strings.Split(rest, "/")
+				return parts[0] != "" && (len(parts) == 1 || len(parts) == 2 && parts[1] == "output")
+			}
 		}
 	}
 	// safety: a pipeline route answers about every run of the pipeline, so only
