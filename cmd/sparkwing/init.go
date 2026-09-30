@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -198,12 +199,12 @@ pipelines:
 `
 }
 
-func ensureGitignoreEntry(sparkwingDir, entry string) error {
+func ensureGitignoreEntry(sparkwingDir, entry string) (err error) {
 	root, err := os.OpenRoot(sparkwingDir)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = root.Close() }()
+	defer func() { err = errors.Join(err, root.Close()) }()
 	f, err := root.OpenFile(".gitignore", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
