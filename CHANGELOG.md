@@ -1311,6 +1311,9 @@ unlock.
 
 ### Fixed
 
+- **cli:** The `sparkwing secrets set --help` example for scoping a secret uses
+  `--pipeline` instead of a `--repo` flag the command does not have.
+
 - **cli + controller:** `sparkwing secrets set` shows why the local secrets key
   was refused -- a key file outside the `SPARKWING_HOME` in use, a process that
   may not create the key, or values sealed under a key this process lacks --
