@@ -1,10 +1,13 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,5 +97,35 @@ func TestRecordRunProfile_RejectsOverflow(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestRecordRunProfile_WarnsOnlyForOutOfRangeReadings(t *testing.T) {
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	start := time.Unix(1700000000, 0)
+	end := start.Add(200 * time.Millisecond)
+	key := store.JoinProfileKey("repo", "feat")
+	record := func(samples []store.MetricSample) string {
+		logged.Reset()
+		node := &store.Node{NodeID: "n", Status: "done", Outcome: "success", StartedAt: &start, FinishedAt: &end}
+		st := &profileCapture{
+			nodes:        []*store.Node{node},
+			samples:      map[string][]store.MetricSample{"n": samples},
+			observations: map[string]store.ProfileObservation{},
+		}
+		recordRunProfile(t.Context(), st, key, "run", &capacity.Pin{}, "shape", runCharge{}, false, start, end)
+		return logged.String()
+	}
+
+	if out := record(nil); strings.Contains(out, "measurements") {
+		t.Errorf("a sub-second run with no samples warned:\n%s", out)
+	}
+	out := record([]store.MetricSample{{Kind: store.MetricInterval, TS: start, CPUMillicores: -1}})
+	if !strings.Contains(out, "exceed the supported range") || !strings.Contains(out, "pipeline=repo/feat") {
+		t.Errorf("an out-of-range reading logged %q, want a warning naming repo/feat", out)
 	}
 }

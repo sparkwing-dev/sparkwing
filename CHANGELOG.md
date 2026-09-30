@@ -1311,6 +1311,12 @@ unlock.
 
 ### Fixed
 
+- **orchestrator:** A sub-second, failed or retried local run no longer prints
+  `run resource measurements are incomplete or exceed the supported range` to
+  stderr. The warning now fires only for a reading outside the supported range,
+  and it names the pipeline as `repo/pipeline` rather than the internal
+  length-prefixed key (`4:repofeat`).
+
 - **cli:** The `sparkwing secrets set --help` example for scoping a secret uses
   `--pipeline` instead of a `--repo` flag the command does not have.
 
