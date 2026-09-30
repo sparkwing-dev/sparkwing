@@ -203,19 +203,34 @@ func preparePrivateSQLite(path string) error {
 // its owner before the store reads run data from it.
 func tightenExistingSQLite(path string) error {
 	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
-		info, err := os.Stat(name)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
+		if err := tightenSQLiteFile(name); err != nil {
+			return err
 		}
-		if err != nil {
-			return fmt.Errorf("inspect sqlite file %s: %w", name, err)
-		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
-			continue
-		}
-		if err := os.Chmod(name, info.Mode().Perm()&0o700); err != nil {
-			return fmt.Errorf("secure sqlite file %s: %w", name, err)
-		}
+	}
+	return nil
+}
+
+// safety: the mode is read and changed through one open descriptor, so a
+// file swapped in at the path between the check and the change is never
+// the one narrowed or skipped.
+func tightenSQLiteFile(name string) error {
+	f, err := os.OpenFile(name, os.O_RDONLY|sqliteTightenFlags, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open sqlite file %s: %w", name, err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect sqlite file %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 == 0 {
+		return nil
+	}
+	if err := f.Chmod(info.Mode().Perm() & 0o700); err != nil {
+		return fmt.Errorf("secure sqlite file %s: %w", name, err)
 	}
 	return nil
 }
