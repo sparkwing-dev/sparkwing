@@ -1764,17 +1764,19 @@ func (s *Store) migrateSQLite(ctx context.Context) error {
 		if err := bridgeMainLineageMetricKind(ctx, tx, current, listed, false); err != nil {
 			return fmt.Errorf("complete main-lineage schema v%d: %w", current, err)
 		}
+		// safety: a bridged database that commits without these names reads as one an older binary
+		// still accepts, so they are stamped in the transaction that bridges it, as Postgres does.
+		if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
+			if err := insertRequirements(ctx, tx, backfill); err != nil {
+				return fmt.Errorf("record schema requirements: %w", err)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration inspection: %w", err)
 	}
 	if current > expectedSchemaVersion {
 		return nil
-	}
-	if backfill := requirementsToBackfill(listed, current); len(backfill) > 0 {
-		if err := s.backfillRequirementsSQLite(ctx, backfill); err != nil {
-			return err
-		}
 	}
 	for v := current + 1; v <= expectedSchemaVersion; v++ {
 		if err := s.applyVersionSQLite(ctx, v); err != nil {
@@ -1814,21 +1816,6 @@ func (s *Store) backupBeforeUpgrade(ctx context.Context) error {
 	fmt.Fprintf(os.Stderr, "sparkwing: upgrading the state database from schema v%d to v%d; a copy of it is at %s\n",
 		current, expectedSchemaVersion, target)
 	s.backupDir = ""
-	return nil
-}
-
-func (s *Store) backfillRequirementsSQLite(ctx context.Context, names []string) error {
-	tx, err := s.beginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("begin schema requirement backfill: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := insertRequirements(ctx, tx, names); err != nil {
-		return fmt.Errorf("record schema requirements: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema requirement backfill: %w", err)
-	}
 	return nil
 }
 

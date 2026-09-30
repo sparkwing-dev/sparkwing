@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"slices"
 	"testing"
 
@@ -58,4 +59,26 @@ func TestSchemaV51MainLineagePostgresRunsTheSkippedTenantMigrations(t *testing.T
 	assertV49MainRowsCarried(t, upgraded)
 	assertV49MainCreditRestated(t, upgraded)
 	assertV51MainCompleted(t, upgraded)
+}
+
+// A v0.65.1 database whose requirement stamp fails must keep its v0.65.1
+// shape: a bridge committed without team-scoped-user-keys is one v0.65.1
+// still opens, and its upserts no longer match the team-leading keys.
+func TestSchemaV51MainLineageSQLiteBridgesAndStampsTogether(t *testing.T) {
+	path := sqliteV49Main(t, append(append([]string{v49MainScaleStepSQL}, v51MainSteps...),
+		`CREATE TRIGGER refuse_user_keys_stamp BEFORE INSERT ON sparkwing_requirements
+		 WHEN NEW.name = 'team-scoped-user-keys'
+		 BEGIN SELECT RAISE(ABORT, 'injected stamp failure'); END`)...)
+	if st, err := store.Open(path); err == nil {
+		_ = st.Close()
+		t.Fatal("open succeeded with the requirement stamp refused")
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if got := v49Count(t, db, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'teams'`); got != 0 {
+		t.Error("the tenant bridge committed although its requirement stamp failed")
+	}
 }
