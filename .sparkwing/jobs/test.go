@@ -35,8 +35,10 @@ func (p *Test) run(ctx context.Context) error {
 	})
 }
 
+const productGoTestTimeout = "25m"
+
 func testGoCommand(h hostShape) string {
-	return boundedGoCommand(h, "test", "-timeout 25m ./...")
+	return boundedGoCommand(h, "test", "-timeout "+productGoTestTimeout+" ./...")
 }
 
 func init() {
