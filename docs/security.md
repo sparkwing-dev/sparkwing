@@ -27,8 +27,11 @@ with execution start, finish, and logs additionally bound to its acknowledged
 attempt ordinal. The child does not inherit arbitrary agent service credentials,
 and its capability cannot claim or renew work, manage the fleet, or call
 administrative routes. A claimed trigger's pipeline binary, which plans the
-run, gets the same kind of loopback capability, limited to its own run, from
-a runner using the in-process node runner. A runner using the Kubernetes or
+run, gets the same kind of loopback capability, limited to its own run and
+the child runs it spawns, from a runner using the in-process node runner.
+The broker names the run on every route it forwards, so a runner holding two
+runs never lets one read the other; a cross-pipeline `Ref` of another
+pipeline's latest run is refused there. A runner using the Kubernetes or
 warm node runner still hands its token to the trigger's binary, because the
 Jobs that binary creates need it.
 

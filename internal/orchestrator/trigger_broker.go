@@ -174,16 +174,15 @@ func (b *TriggerBroker) allowController(r *http.Request) bool {
 			return r.URL.Query().Get("run") == b.runID
 		case path == "/api/v1/triggers/spawned-child":
 			return r.URL.Query().Get("parent_run_id") == b.runID
-		case strings.HasPrefix(path, "/api/v1/pipelines/") && strings.HasSuffix(path, "/latest"):
-			return true
-		case strings.HasPrefix(path, "/api/v1/runs/") && strings.Contains(path, "/nodes/") && strings.HasSuffix(path, "/output"):
-			return true
 		}
 		if b.child(path) {
 			return true
 		}
 	}
-	if strings.HasPrefix(path, "/api/v1/pipelines/"+url.PathEscape(b.pipeline)+"/") {
+	// safety: a pipeline route answers about every run of the pipeline, so only
+	// the profile the planner reads and pins passes, never a latest-run lookup.
+	if path == "/api/v1/pipelines/"+url.PathEscape(b.pipeline)+"/profile" ||
+		path == "/api/v1/pipelines/"+url.PathEscape(b.pipeline)+"/profile/pin" {
 		return true
 	}
 	if strings.HasPrefix(path, "/api/v1/concurrency/") {

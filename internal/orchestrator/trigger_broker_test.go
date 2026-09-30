@@ -118,6 +118,10 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 		{"GET", "/api/v1/runs/run-a", "", "", http.StatusUnauthorized},
 		{"GET", "/api/v1/runs/run-a", "runner-token", "", http.StatusUnauthorized},
 		{"GET", "/api/v1/runs/run-b", capability, "", http.StatusForbidden},
+		{"GET", "/api/v1/runs/run-b/nodes/build/output", capability, "", http.StatusForbidden},
+		{"GET", "/api/v1/pipelines/build/latest", capability, "", http.StatusForbidden},
+		{"GET", "/api/v1/pipelines/other/profile", capability, "", http.StatusForbidden},
+		{"GET", "/api/v1/triggers/spawned-child?parent_run_id=run-b", capability, "", http.StatusForbidden},
 		{"POST", "/api/v1/runs/run-b/cancel", capability, "", http.StatusForbidden},
 		{"POST", "/api/v1/nodes/claim", capability, `{}`, http.StatusForbidden},
 		{"POST", "/api/v1/triggers/claim", capability, `{}`, http.StatusForbidden},
@@ -131,6 +135,8 @@ func TestTriggerBrokerAdmitsOnlyItsRunWithTheRunnerToken(t *testing.T) {
 		{"POST", "/api/v1/concurrency/deploy/release", capability, `{"holder_id":"run-a/n1"}`, http.StatusOK},
 		{"POST", "/api/v1/triggers", capability, `{"pipeline":"x","parent_run_id":"run-a"}`, http.StatusOK},
 		{"GET", "/api/v1/runs/child-run", capability, "", http.StatusOK},
+		{"GET", "/api/v1/runs/child-run/nodes/build/output", capability, "", http.StatusOK},
+		{"GET", "/api/v1/pipelines/build/profile", capability, "", http.StatusOK},
 	} {
 		if got := send(tc.method, tc.path, tc.auth, tc.body); got != tc.want {
 			t.Errorf("%s %s with %q = %d, want %d", tc.method, tc.path, tc.auth, got, tc.want)
