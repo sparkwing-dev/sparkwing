@@ -703,6 +703,8 @@ func (t *Tenant) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequ
 			return AcquireSlotResponse{}, err
 		} else if queued {
 			arrivedNS = queuedArrivedNS
+		} else if arrivedNS, err = txNextQueueArrival(ctx, tx, t.team, req.Key, nowNS); err != nil {
+			return AcquireSlotResponse{}, err
 		}
 		if err := txPark(ctx, tx, t.team, ConcurrencyWaiter{
 			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
@@ -865,6 +867,25 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 		}
 	}
 	return false, nil
+}
+
+// safety: promotion orders waiters by arrived_at, and a wall clock that
+// steps backwards (WSL2 time sync, NTP, another replica's skew) would stamp
+// a new arrival ahead of older ones. The caller holds the entries row lock,
+// so the key's newest stamp cannot move under this read.
+func txNextQueueArrival(ctx context.Context, tx *storeTx, team Team, key string, nowNS int64) (int64, error) {
+	var newest sql.NullInt64
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT MAX(arrived_at) FROM concurrency_waiters WHERE team = ? AND key = ?`,
+		string(team), key,
+	).Scan(&newest); err != nil {
+		return 0, err
+	}
+	if newest.Valid && newest.Int64 >= nowNS {
+		return newest.Int64 + 1, nil
+	}
+	return nowNS, nil
 }
 
 func txQueueWaiterArrivedAt(ctx context.Context, tx *storeTx, team Team, key, runID, nodeID string) (int64, bool, error) {

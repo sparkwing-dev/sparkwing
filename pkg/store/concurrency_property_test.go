@@ -84,6 +84,43 @@ func TestConcurrency_ReacquireKeepsQueuedArrivalOrder(t *testing.T) {
 	}
 }
 
+// A host whose wall clock steps backwards between two arrivals, as WSL2's
+// time sync does by about 750 ms every 30 s, must not let the later
+// arrival jump the queue.
+func TestConcurrency_QueueKeepsArrivalOrderWhenClockStepsBack(t *testing.T) {
+	s := storetest.Open(t)
+	acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "holder/n", RunID: "holder", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	})
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "first/n", RunID: "first", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("first: want Queued got %s", r.Kind)
+	}
+	// hack: the store reads time.Now(), so moving the stored stamp an hour
+	// ahead stands in for the clock stepping back an hour after "first" parked.
+	if _, err := s.DB().ExecContext(ctxT(t), storetest.Rebind(s,
+		`UPDATE concurrency_waiters SET arrived_at = arrived_at + ? WHERE run_id = ?`),
+		int64(time.Hour), "first"); err != nil {
+		t.Fatalf("step the clock back: %v", err)
+	}
+	if r := acquireT(t, s, store.AcquireSlotRequest{
+		Key: "k", HolderID: "second/n", RunID: "second", NodeID: "n",
+		Capacity: 1, Policy: store.OnLimitQueue,
+	}); r.Kind != store.AcquireQueued {
+		t.Fatalf("second: want Queued got %s", r.Kind)
+	}
+	_, _, promoted, err := s.ReleaseAndNotify(ctxT(t), "k", "holder/n", "success", "", "", 0, 0)
+	if err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].RunID != "first" {
+		t.Fatalf("promoted %+v, want only first", promoted)
+	}
+}
+
 func fuzzSeeds(t *testing.T) []int64 {
 	t.Helper()
 	if env := os.Getenv("SPARKWING_CONC_FUZZ_SEED"); env != "" {

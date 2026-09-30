@@ -1322,6 +1322,11 @@ unlock.
 
 ### Fixed
 
+- **store:** A queued concurrency group promotes its waiters in arrival order
+  even when the host's wall clock steps backwards between two arrivals. Before,
+  a node queued just after the step jumped ahead of every waiter stamped in the
+  stepped-over window; WSL2 steps its clock back about 750ms every 30 seconds.
+
 - **runner + controller:** A runner, agent, worker or launcher whose token is
   revoked or expired no longer polls the controller twice a second forever. The
   controller's `401` for such a token carries `token_state: revoked|expired`
