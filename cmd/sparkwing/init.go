@@ -203,7 +203,7 @@ func ensureGitignoreEntry(sparkwingDir, entry string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	f, err := root.OpenFile(".gitignore", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
