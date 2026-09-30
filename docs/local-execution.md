@@ -541,6 +541,11 @@ SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
 
 #### What a laptop runner trusts
 
+**Run a runner as a dedicated OS user, or in a container or VM.** Pipeline
+code runs as the runner's user and reads everything that user can, the runner
+token in the agent's `config.yaml` included; no Sparkwing setting stops a
+process from reading its own user's files.
+
 A runner compiles the pipeline code it fetches and runs it as the user who
 started the runner. The pipeline process reaches the controller through a
 loopback broker in the runner that admits only its own run's routes, so the

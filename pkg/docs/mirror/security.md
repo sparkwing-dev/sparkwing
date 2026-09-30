@@ -18,6 +18,14 @@ Scopes narrow what a token may do; they do not partition the deployment by
 repository, team, or environment. Two projects that must not read each
 other's runs need two controllers, not two tokens in one.
 
+**A self-hosted runner runs pipeline code as its own OS user; give it a
+dedicated one.** Pipeline code on a runner or agent can read every file that
+user can: the agent's `config.yaml` and the runner token in it, ssh keys,
+cloud profiles and other repositories' secrets. No Sparkwing setting changes
+that, the same as GitHub's self-hosted runners. Run each runner as a
+dedicated OS user that holds nothing else, or in a container or VM, and list
+only repositories whose every committer may act as that user.
+
 **Pipeline authors run code on runners.** A pipeline is Go that the runner
 compiles and executes. Enrolling a workstation or gateway authorizes that
 code to execute as the agent service's OS user. Assisted execution keeps the
@@ -33,7 +41,9 @@ The broker names the run on every route it forwards, so a runner holding two
 runs never lets one read the other; a cross-pipeline `Ref` of another
 pipeline's latest run is refused there. A runner using the Kubernetes or
 warm node runner still hands its token to the trigger's binary, because the
-Jobs that binary creates need it.
+Jobs that binary creates need it; controller dispatch (`sparkwing-runner
+launch`), which gives each Job its own claim token as its only credential,
+replaces that path.
 
 This is not an OS sandbox: the pipeline keeps every file, network, and
 process permission of the agent OS user. It can read the agent's
