@@ -35,7 +35,3 @@ func socketBaseFault(info fs.FileInfo) string {
 	}
 	return ""
 }
-
-func socketDirReapable(info fs.FileInfo) bool {
-	return socketDirFault(info) == ""
-}

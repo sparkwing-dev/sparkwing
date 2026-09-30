@@ -281,7 +281,7 @@ func TestPeerSockets_SkipsAForeignSocketDirectory(t *testing.T) {
 	}
 }
 
-func TestPeerSockets_PrunesADayOldEmptyDirectory(t *testing.T) {
+func TestPeerSockets_LeavesOldEmptySocketDirectoriesForStartingDaemons(t *testing.T) {
 	base := socketBaseDir()
 	// safety: the base directory is shared by every test binary running as this
 	// user, so a fixed name makes two concurrent runs race on the same mkdir.
@@ -302,8 +302,8 @@ func TestPeerSockets_PrunesADayOldEmptyDirectory(t *testing.T) {
 	if _, err := PeerSockets(t.TempDir()); err != nil {
 		t.Fatalf("peer sockets: %v", err)
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("a day-old empty socket directory survived the sweep: %v", err)
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("a day-old empty socket directory was removed during discovery: %v", err)
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Errorf("a directory a starting daemon may still fill was removed: %v", err)

@@ -60,8 +60,6 @@ const (
 	DefaultStallCPUFraction = 0.02
 
 	DefaultStallProbeTimeout = 10 * time.Second
-
-	staleSocketDirAge = 24 * time.Hour
 )
 
 type Config struct {
@@ -373,20 +371,8 @@ func PeerSockets(home string) ([]string, error) {
 		if sock != own && socketAlive(sock) {
 			peers = append(peers, sock)
 		}
-		pruneEmptySocketDir(dir)
 	}
 	return peers, nil
-}
-
-// pruneEmptySocketDir removes a socket directory nothing has touched for a
-// day. Remove refuses a directory that still holds a socket, and a daemon
-// that loses a fresh bind to this removal fails its listen loudly.
-func pruneEmptySocketDir(dir string) {
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || !socketDirReapable(info) || time.Since(info.ModTime()) < staleSocketDirAge {
-		return
-	}
-	_ = os.Remove(dir)
 }
 
 func socketAlive(sock string) bool {

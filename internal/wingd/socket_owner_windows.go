@@ -9,7 +9,3 @@ func socketDirFault(fs.FileInfo) string {
 func socketBaseFault(fs.FileInfo) string {
 	return ""
 }
-
-func socketDirReapable(fs.FileInfo) bool {
-	return false
-}
